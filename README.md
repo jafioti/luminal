@@ -1,5 +1,5 @@
 # luminal
 ![image](https://raw.githubusercontent.com/jafioti/luminal/main/dag.jpeg)
-**Graph-based deep learning at the speed of light.**
+**Deep learning at lightspeed.**
 
 Docs in progress.
