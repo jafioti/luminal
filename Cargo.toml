@@ -8,3 +8,8 @@ license = "MIT OR Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+itertools = "0.11.0"
+petgraph = "0.6.3"
+strum = { version = "0.25.0", features = ["derive"] }
+urlencoding = "2.1.2"
+webbrowser = "0.8.10"
