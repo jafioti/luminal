@@ -57,15 +57,13 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(new_id, self.graph_ref)
     }
 
-    pub fn permute<const D: usize, N: Shape, Dst, Ax: Axes<Array = [isize; D]>>(
-        self,
-    ) -> GraphTensor<N>
+    pub fn permute<N: Shape, Dst, Ax: Axes>(self) -> GraphTensor<N>
     where
         N: PermuteShapeTo<Dst, Ax>,
     {
         let graph = unsafe { &mut self.graph_ref.as_mut().unwrap().graph };
         let new_id = graph.add_node(Box::new(op::Permute(
-            Ax::as_array().iter().map(|i| *i as usize).collect_vec(),
+            Ax::as_array().into_iter().map(|i| i as usize).collect_vec(),
         )));
         graph.add_edge(self.id, new_id, 0);
         GraphTensor::from_id(new_id, self.graph_ref)

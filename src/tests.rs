@@ -1,4 +1,6 @@
-use crate::{graph::Graph, optimizer::GeneralOptimizer, shape::R1, tensor::Tensor};
+use crate::{
+    graph::Graph, graph_tensor::GraphTensor, optimizer::GeneralOptimizer, shape::*, tensor::Tensor,
+};
 
 #[test]
 fn main() {
@@ -35,12 +37,44 @@ fn main() {
     assert_close(&unoptimized_d, &d.retrieve().unwrap());
 }
 
+#[test]
+fn test_shapes() {
+    let mut cx = Graph::new();
+    let a = cx.new_tensor::<R1<4>>();
+
+    let b: GraphTensor<R2<2, 2>> = a.reshape::<R2<2, 2>>().permute::<_, _, Axes2<1, 0>>();
+
+    a.set(vec![1., 2., 3., 4.]);
+
+    cx.execute();
+
+    let b = b.retrieve().unwrap();
+
+    assert_close_data(&extract_real_data(&b), &[1., 3., 2., 4.]);
+}
+
 /// Ensure two tensors are nearly equal
 fn assert_close(a: &Tensor, b: &Tensor) {
     assert_eq!(a.shape.shape(), b.shape.shape(), "Shapes don't match");
-    for (a, b) in a.data.iter().zip(b.data.iter()) {
+    assert_close_data(&a.data, &b.data);
+}
+
+/// Ensure two tensor data arrays are nearly equal
+fn assert_close_data(a: &[f32], b: &[f32]) {
+    assert_eq!(a.len(), b.len(), "Number of elements doesn't match");
+    for (a, b) in a.iter().zip(b.iter()) {
         if (a - b).abs() > 0.01 {
             panic!("{a} is not close to {b}");
         }
     }
+}
+
+/// Get the real data as layed out by the shape tracker
+fn extract_real_data(tensor: &Tensor) -> Vec<f32> {
+    let idx_fn = tensor.shape.index_fn();
+    let mut real_data = vec![];
+    for i in 0..tensor.data.len() {
+        real_data.push(tensor.data[(idx_fn)(i)]);
+    }
+    real_data
 }

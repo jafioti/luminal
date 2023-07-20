@@ -137,36 +137,55 @@ impl ShapeTracker {
         for view in self.views.iter().rev() {
             idx = expr_node(idx, &view.shape, &view.strides);
         }
+        println!("Idx: {:?}", idx.to_string());
 
         // Turn expression into function by unwrapping it into a series of function chains
-        let mut ops_and_nums = vec![];
-        let mut node = &idx;
-        loop {
-            match &node.node_type {
-                NodeType::OpNode(op, a) => {
-                    ops_and_nums.push((
-                        match op {
-                            Op::Div => std::ops::Div::<i32>::div,
-                            Op::Mul => std::ops::Mul::<i32>::mul,
-                            Op::Mod => std::ops::Rem::<i32>::rem,
-                        },
-                        node.b,
-                    ));
-                    node = a.as_ref();
-                }
-                NodeType::Variable(_) => break,
-                NodeType::Num => panic!("Num node encountered"),
-                NodeType::RedNode(_, _) => panic!("Rednode encountered"),
+        let node = &idx;
+        let mut all_ops_and_nums = vec![];
+        if let NodeType::RedNode(RedOp::Sum, nodes) = &node.node_type {
+            for node in nodes {
+                all_ops_and_nums.push(get_ops_and_nums(node));
             }
+        } else {
+            all_ops_and_nums.push(get_ops_and_nums(node));
         }
-        ops_and_nums.reverse();
 
         move |i| {
-            let mut i = i as i32;
-            for (op, num) in &ops_and_nums {
-                i = (op)(i, *num);
+            let orig = i as i32;
+            let mut result = 0;
+            for ops_and_nums in &all_ops_and_nums {
+                let mut i = orig;
+                for (op, num) in ops_and_nums {
+                    i = (op)(i, *num);
+                }
+                result += i as usize
             }
-            i as usize
+            result
         }
     }
+}
+
+#[allow(clippy::type_complexity)]
+fn get_ops_and_nums(mut node: &Node) -> Vec<(fn(i32, i32) -> i32, i32)> {
+    let mut ops_and_nums = vec![];
+    loop {
+        match &node.node_type {
+            NodeType::OpNode(op, a) => {
+                ops_and_nums.push((
+                    match op {
+                        Op::Div => std::ops::Div::<i32>::div,
+                        Op::Mul => std::ops::Mul::<i32>::mul,
+                        Op::Mod => std::ops::Rem::<i32>::rem,
+                    },
+                    node.b,
+                ));
+                node = a.as_ref();
+            }
+            NodeType::Variable(_) => break,
+            NodeType::Num => panic!("Num node encountered"),
+            NodeType::RedNode(_, _) => panic!("Rednode encountered"),
+        }
+    }
+    ops_and_nums.reverse();
+    ops_and_nums
 }

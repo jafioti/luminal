@@ -36,7 +36,9 @@ impl Graph {
 
     pub fn new_tensor<S: Shape>(&mut self) -> GraphTensor<S> {
         let tensor = GraphTensor {
-            id: self.graph.add_node(Box::new(op::Input)),
+            id: self
+                .graph
+                .add_node(Box::new(op::Input(S::realized_shape()))),
             graph_ref: self,
             _phantom: Default::default(),
         };
@@ -71,6 +73,7 @@ impl Graph {
                     if self.tensors.contains_key(&n) {
                         return None;
                     }
+
                     let mut data = vec![];
                     for e in self
                         .graph

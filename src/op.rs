@@ -8,7 +8,7 @@ pub trait Operator: Debug {
 }
 
 #[derive(Debug, Clone)]
-pub struct Input;
+pub struct Input(pub Vec<usize>);
 impl Operator for Input {
     fn name(&self) -> &'static str {
         "Input"
