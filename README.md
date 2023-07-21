@@ -50,6 +50,9 @@ Accellerators are free to implement their own custom weird ops, and their own op
 ## Compile-time Shape Checks
 All operations are shape checked at compile time, so no more shape mismatches! All credit for this goes to [dfdx](https://github.com/coreylowman/dfdx).
 
+## View the Graph
+Once you've written all your computation code, run `cx.display_graph()` to see the entire computation graph in all it's glory. Pretty messy looking! Now run `cx.optimize(GeneralOptimizer::default())` and display the graph again. Much better.
+
 ## Where are we?
 Currently luminal is extremely alpha. Please don't use this in prod.
 

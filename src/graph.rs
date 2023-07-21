@@ -148,6 +148,10 @@ impl Graph {
         new_graph
     }
 
+    pub fn display_graph(&self) {
+        display_graph(&self.debug_graph());
+    }
+
     /// Transfer all external references from one node to another (this may happen because one node is about to be removed / merged into another)
     pub fn move_references(
         id_remap: &mut HashMap<NodeIndex, NodeIndex>,
