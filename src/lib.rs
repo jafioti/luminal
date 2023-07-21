@@ -8,6 +8,14 @@ pub mod tensor;
 #[cfg(test)]
 mod tests;
 
+pub mod prelude {
+    pub use crate::graph::*;
+    pub use crate::graph_tensor::*;
+    pub use crate::optimizer::*;
+    pub use crate::shape::*;
+    pub use crate::tensor::*;
+}
+
 // struct Linear<const I: usize, const O: usize> {
 //     weight: Tensor<(Const<I>, Const<O>)>,
 // }

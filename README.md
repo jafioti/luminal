@@ -3,20 +3,27 @@
 **Deep learning at the speed of light.**
 
 ```rust
+use luminal::prelude::*;
+
+// Setup graph and tensors
 let mut cx = Graph::new();
-let b = cx.new_tensor::<R2<3, 1>>();
-let c = cx.new_tensor::<R2<1, 4>>();
+let a = cx.new_tensor::<R2<3, 1>>();
+let b = cx.new_tensor::<R2<1, 4>>();
 
-let a = b.matmul(c);
+// Do match
+let c = a.matmul(b);
 
-a.mark();
-b.set(vec![1.0, 2.0, 3.0]);
-c.set(vec![1.0, 2.0, 3.0, 3.0]);
+// Set inputs and mark outputs
+a.set(vec![1.0, 2.0, 3.0]);
+b.set(vec![1.0, 2.0, 3.0, 3.0]);
+c.mark();
 
+// Optimize and run graph
 cx.optimize(GeneralOptimizer::default());
 cx.execute();
 
-println!("Result: {:?}", a.retrieve().unwrap().data);
+// Get result
+println!("Result: {:?}", c.retrieve().unwrap().data);
 ```
 
 ## Why does this look so different from other DL libraries?
