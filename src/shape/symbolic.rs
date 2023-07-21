@@ -5,6 +5,8 @@ use std::{
 
 use itertools::Itertools;
 
+// This is a tiny symbolic algebra library based off of https://github.com/tinygrad/tinygrad/blob/master/tinygrad/shape/symbolic.py
+
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
 pub enum Op {
     Mul,

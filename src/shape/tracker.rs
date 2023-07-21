@@ -2,6 +2,8 @@ use itertools::Itertools;
 
 use super::symbolic::*;
 
+// This is a shape tracker allowing for zero-copy movement ops based off of https://github.com/tinygrad/tinygrad/blob/master/tinygrad/shape/shapetracker.py
+
 fn expr_node(idx: Node, shape: &[usize], strides: &[usize]) -> Node {
     let mut acc = 1;
     let mut ret = vec![];

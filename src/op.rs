@@ -1,9 +1,6 @@
 use std::fmt::Debug;
 
-use crate::{
-    shape::{default_strides, ShapeTracker},
-    tensor::Tensor,
-};
+use crate::{shape::ShapeTracker, tensor::Tensor};
 
 pub trait Operator: Debug {
     fn name(&self) -> &'static str;
@@ -304,10 +301,8 @@ impl Operator for ReduceSum {
             }
         }
 
-        // Not sure if this works
         let mut prev_shape = shape_tracker.shape().clone();
         prev_shape.remove(self.0);
-        println!("New Shape: {:?}", prev_shape);
         shape_tracker.reshape(prev_shape);
 
         Tensor {
@@ -325,19 +320,27 @@ impl Operator for ReduceMax {
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let mut shape_tracker = tensors[0].shape.clone();
-        let dim_shape = shape_tracker.shape()[self.0];
-        let dim_stride = default_strides(shape_tracker.shape())[self.0];
         let a_idx = shape_tracker.index_fn();
+        let before_dim_shape: usize = shape_tracker.shape().iter().take(self.0).product();
+        let dim_size = shape_tracker.shape()[self.0];
 
-        let mut result: Vec<f32> = vec![0.0; tensors[0].data.len() / dim_shape];
+        let mut result: Vec<f32> = vec![
+            0.0;
+            shape_tracker
+                .shape()
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != self.0)
+                .map(|(_, sh)| sh)
+                .product()
+        ];
 
-        for i in 0..tensors[0].data.len() {
-            let j = i / dim_stride % dim_shape; // map the index to 'shape' and 'stride'
-            result[(a_idx)(i - j * dim_stride)] =
-                result[(a_idx)(i - j * dim_stride)].max(tensors[0].data[(a_idx)(i)]);
+        for (i, result) in result.iter_mut().enumerate() {
+            for j in 0..dim_size {
+                *result = result.max(tensors[0].data[(a_idx)(i + before_dim_shape * j)]);
+            }
         }
 
-        // Not sure if this works
         let mut prev_shape = shape_tracker.shape().clone();
         prev_shape.remove(self.0);
         shape_tracker.reshape(prev_shape);
