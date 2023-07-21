@@ -15,8 +15,8 @@ fn expr_node(idx: Node, shape: &[usize], strides: &[usize]) -> Node {
 
 #[derive(Debug, Clone)]
 pub struct View {
-    shape: Vec<usize>,
-    strides: Vec<usize>,
+    pub shape: Vec<usize>,
+    pub strides: Vec<usize>,
 }
 
 fn merge_views(v2: &View, v1: &View) -> Option<View> {
@@ -77,7 +77,7 @@ pub fn default_strides(shape: &[usize]) -> Vec<usize> {
 
 #[derive(Debug, Clone)]
 pub struct ShapeTracker {
-    views: Vec<View>,
+    pub views: Vec<View>,
 }
 
 impl ShapeTracker {

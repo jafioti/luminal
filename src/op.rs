@@ -1,6 +1,9 @@
 use std::fmt::Debug;
 
-use crate::{shape::default_strides, tensor::Tensor};
+use crate::{
+    shape::{default_strides, ShapeTracker},
+    tensor::Tensor,
+};
 
 pub trait Operator: Debug {
     fn name(&self) -> &'static str;
@@ -58,6 +61,7 @@ impl Operator for Expand {
         // We don't need to clone here! We should switch to a more view oriented system
         let mut t = inp[0].clone();
         t.shape.expand(self.0, self.1);
+        t.shape.views.last_mut().unwrap().strides.insert(self.0, 0);
         t
     }
 }
@@ -153,13 +157,16 @@ impl Operator for Add {
         "Add"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let mut t = tensors[0].clone();
-        let t_idx = t.shape.index_fn();
-        let o_idx = tensors[0].shape.index_fn();
-        for i in 0..tensors[0].data.len() {
-            t.data[(t_idx)(i)] += tensors[1].data[(o_idx)(i)];
+        let mut t = Tensor {
+            data: vec![0.; tensors[0].shape.shape().iter().product()],
+            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+        };
+        let r_idx = t.shape.index_fn();
+        let a_idx = tensors[0].shape.index_fn();
+        let b_idx = tensors[1].shape.index_fn();
+        for i in 0..t.data.len() {
+            t.data[(r_idx)(i)] = tensors[0].data[(a_idx)(i)] + tensors[1].data[(b_idx)(i)];
         }
-
         t
     }
 }
@@ -171,13 +178,16 @@ impl Operator for Sub {
         "Subtract"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let mut t = tensors[0].clone();
-        let t_idx = t.shape.index_fn();
-        let o_idx = tensors[0].shape.index_fn();
-        for i in 0..tensors[0].data.len() {
-            t.data[(t_idx)(i)] -= tensors[1].data[(o_idx)(i)];
+        let mut t = Tensor {
+            data: vec![0.; tensors[0].shape.shape().iter().product()],
+            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+        };
+        let r_idx = t.shape.index_fn();
+        let a_idx = tensors[0].shape.index_fn();
+        let b_idx = tensors[1].shape.index_fn();
+        for i in 0..t.data.len() {
+            t.data[(r_idx)(i)] = tensors[0].data[(a_idx)(i)] - tensors[1].data[(b_idx)(i)];
         }
-
         t
     }
 }
@@ -189,13 +199,16 @@ impl Operator for Mul {
         "Mul"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let mut t = tensors[0].clone();
-        let t_idx = t.shape.index_fn();
-        let o_idx = tensors[0].shape.index_fn();
-        for i in 0..tensors[0].data.len() {
-            t.data[(t_idx)(i)] *= tensors[1].data[(o_idx)(i)];
+        let mut t = Tensor {
+            data: vec![0.; tensors[0].shape.shape().iter().product()],
+            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+        };
+        let r_idx = t.shape.index_fn();
+        let a_idx = tensors[0].shape.index_fn();
+        let b_idx = tensors[1].shape.index_fn();
+        for i in 0..t.data.len() {
+            t.data[(r_idx)(i)] = tensors[0].data[(a_idx)(i)] * tensors[1].data[(b_idx)(i)];
         }
-
         t
     }
 }
@@ -225,13 +238,16 @@ impl Operator for Max {
         "Max"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let mut t = tensors[0].clone();
-        let t_idx = t.shape.index_fn();
-        let o_idx = tensors[0].shape.index_fn();
-        for i in 0..tensors[0].data.len() {
-            t.data[(t_idx)(i)] = t.data[(t_idx)(i)].max(tensors[1].data[(o_idx)(i)]);
+        let mut t = Tensor {
+            data: vec![0.; tensors[0].shape.shape().iter().product()],
+            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+        };
+        let r_idx = t.shape.index_fn();
+        let a_idx = tensors[0].shape.index_fn();
+        let b_idx = tensors[1].shape.index_fn();
+        for i in 0..t.data.len() {
+            t.data[(r_idx)(i)] = tensors[0].data[(a_idx)(i)].max(tensors[1].data[(b_idx)(i)]);
         }
-
         t
     }
 }
@@ -243,13 +259,16 @@ impl Operator for Mod {
         "Mod"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let mut t = tensors[0].clone();
-        let t_idx = t.shape.index_fn();
-        let o_idx = tensors[0].shape.index_fn();
-        for i in 0..tensors[0].shape.shape().iter().product() {
-            t.data[(t_idx)(i)] %= tensors[1].data[(o_idx)(i)];
+        let mut t = Tensor {
+            data: vec![0.; tensors[0].shape.shape().iter().product()],
+            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+        };
+        let r_idx = t.shape.index_fn();
+        let a_idx = tensors[0].shape.index_fn();
+        let b_idx = tensors[1].shape.index_fn();
+        for i in 0..t.data.len() {
+            t.data[(r_idx)(i)] = tensors[0].data[(a_idx)(i)] % tensors[1].data[(b_idx)(i)];
         }
-
         t
     }
 }
@@ -264,18 +283,25 @@ impl Operator for ReduceSum {
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let mut shape_tracker = tensors[0].shape.clone();
-        println!("Shape: {:?}", shape_tracker.shape());
-        let dim_shape = shape_tracker.shape()[self.0];
-        let dim_stride = default_strides(shape_tracker.shape())[self.0];
         let a_idx = shape_tracker.index_fn();
+        let before_dim_shape: usize = shape_tracker.shape().iter().take(self.0).product();
+        let dim_size = shape_tracker.shape()[self.0];
 
-        println!("Initial Len: {}", tensors[0].data.len());
-        println!("New Len: {}", tensors[0].data.len() / dim_shape);
-        let mut result = vec![0.0; tensors[0].data.len() / dim_shape];
+        let mut result = vec![
+            0.0;
+            shape_tracker
+                .shape()
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != self.0)
+                .map(|(_, sh)| sh)
+                .product()
+        ];
 
-        for i in 0..tensors[0].data.len() {
-            let j = i / dim_stride % dim_shape; // map the index to 'shape' and 'stride'
-            result[(a_idx)(i - j * dim_stride)] += tensors[0].data[(a_idx)(i)]; // perform sum at the 'j'th position
+        for (i, result) in result.iter_mut().enumerate() {
+            for j in 0..dim_size {
+                *result += tensors[0].data[(a_idx)(i + before_dim_shape * j)];
+            }
         }
 
         // Not sure if this works

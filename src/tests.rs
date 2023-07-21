@@ -40,27 +40,23 @@ fn main() {
 #[test]
 fn test_matmul() {
     let mut cx = Graph::new();
-    let b = cx.new_tensor::<R2<3, 2>>();
-    let c = cx.new_tensor::<R2<2, 4>>();
+    let b = cx.new_tensor::<R2<3, 1>>();
+    let c = cx.new_tensor::<R2<1, 4>>();
 
     let a = b.matmul(c);
 
-    b.set(vec![1.0, 2.0, 3.0, 3.0, 2.0, 1.0]);
-    c.set(vec![1.0, 2.0, 3.0, 3.0, 2.0, 1.0, 2.0, 3.0]);
-
     a.mark();
+    b.set(vec![1.0, 2.0, 3.0]);
+    c.set(vec![1.0, 2.0, 3.0, 3.0]);
 
     cx.execute();
 
     let unoptimized_a = a.retrieve().unwrap();
-    println!("A: {:?}", unoptimized_a);
-    panic!()
 
-    // cx.optimize(GeneralOptimizer::default());
+    cx.optimize(GeneralOptimizer::default());
+    cx.execute();
 
-    // cx.execute();
-    // assert_close(&unoptimized_a, &a.retrieve().unwrap());
-    // assert_close(&unoptimized_d, &d.retrieve().unwrap());
+    assert_close(&unoptimized_a, &a.retrieve().unwrap());
 }
 
 #[test]
