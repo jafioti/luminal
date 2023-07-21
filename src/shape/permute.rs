@@ -1,44 +1,5 @@
 use crate::shape::*;
 
-/// Represents indices into the dimensions of shapes
-pub trait Axes: 'static + Default + Copy + Clone {
-    type Array: IntoIterator<Item = isize>;
-    fn as_array() -> Self::Array;
-}
-
-/// A singular axis, e.g. `Axis<0>` or `Axis<1>`
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Axis<const I: isize>;
-impl<const I: isize> Axes for Axis<I> {
-    type Array = [isize; 1];
-    #[inline(always)]
-    fn as_array() -> Self::Array {
-        [I]
-    }
-}
-
-/// A set of 2 axes, e.g. `Axes2<0, 1>`, or `Axes2<1, 3>`.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Axes2<const I: isize, const J: isize>;
-impl<const I: isize, const J: isize> Axes for Axes2<I, J> {
-    type Array = [isize; 2];
-    #[inline(always)]
-    fn as_array() -> Self::Array {
-        [I, J]
-    }
-}
-
-/// A set of 3 axes, e.g. `Axes3<1, 3, 4>`
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Axes3<const I: isize, const J: isize, const K: isize>;
-impl<const I: isize, const J: isize, const K: isize> Axes for Axes3<I, J, K> {
-    type Array = [isize; 3];
-    #[inline(always)]
-    fn as_array() -> Self::Array {
-        [I, J, K]
-    }
-}
-
 pub trait PermuteShapeTo<Dst, Ax> {}
 
 #[rustfmt::skip]

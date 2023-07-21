@@ -68,7 +68,7 @@ pub fn default_strides(shape: &[usize]) -> Vec<usize> {
     let mut strides = shape.to_vec();
     for i in strides.iter_mut().rev() {
         let tmp = *i;
-        *i = acc;
+        *i = if *i == 0 { 0 } else { acc };
         acc *= tmp;
     }
 
@@ -104,6 +104,12 @@ impl ShapeTracker {
         self.simplify();
     }
 
+    pub fn expand(&mut self, dimension: usize, new_size: usize) {
+        let mut new_shape = self.shape().to_vec();
+        new_shape.insert(dimension, new_size);
+        self.views.last_mut().unwrap().shape = new_shape;
+    }
+
     fn simplify(&mut self) {
         while self.views.len() > 1 {
             if let Some(merged) = merge_views(
@@ -137,7 +143,6 @@ impl ShapeTracker {
         for view in self.views.iter().rev() {
             idx = expr_node(idx, &view.shape, &view.strides);
         }
-        println!("Idx: {:?}", idx.to_string());
 
         // Turn expression into function by unwrapping it into a series of function chains
         let node = &idx;

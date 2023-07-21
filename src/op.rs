@@ -48,6 +48,20 @@ impl Operator for Reshape {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Expand(pub usize, pub usize);
+impl Operator for Expand {
+    fn name(&self) -> &'static str {
+        "Expand"
+    }
+    fn process(&self, inp: Vec<&Tensor>) -> Tensor {
+        // We don't need to clone here! We should switch to a more view oriented system
+        let mut t = inp[0].clone();
+        t.shape.expand(self.0, self.1);
+        t
+    }
+}
+
 // Unary Op (A -> A)
 
 #[derive(Debug, Clone)]
@@ -250,10 +264,13 @@ impl Operator for ReduceSum {
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let mut shape_tracker = tensors[0].shape.clone();
+        println!("Shape: {:?}", shape_tracker.shape());
         let dim_shape = shape_tracker.shape()[self.0];
         let dim_stride = default_strides(shape_tracker.shape())[self.0];
         let a_idx = shape_tracker.index_fn();
 
+        println!("Initial Len: {}", tensors[0].data.len());
+        println!("New Len: {}", tensors[0].data.len() / dim_shape);
         let mut result = vec![0.0; tensors[0].data.len() / dim_shape];
 
         for i in 0..tensors[0].data.len() {
@@ -264,6 +281,7 @@ impl Operator for ReduceSum {
         // Not sure if this works
         let mut prev_shape = shape_tracker.shape().clone();
         prev_shape.remove(self.0);
+        println!("New Shape: {:?}", prev_shape);
         shape_tracker.reshape(prev_shape);
 
         Tensor {

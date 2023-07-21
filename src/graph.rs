@@ -34,7 +34,7 @@ impl Graph {
         self.tensors.remove(&id)
     }
 
-    pub fn new_tensor<S: Shape>(&mut self) -> GraphTensor<S> {
+    pub fn new_tensor<S: ConstShape>(&mut self) -> GraphTensor<S> {
         let tensor = GraphTensor {
             id: self
                 .graph
@@ -46,7 +46,7 @@ impl Graph {
         tensor
     }
 
-    pub fn set_tensor<S: Shape>(&mut self, graph_tensor: GraphTensor<S>, data: Vec<f32>) {
+    pub fn set_tensor<S: ConstShape>(&mut self, graph_tensor: GraphTensor<S>, data: Vec<f32>) {
         self.tensors.insert(
             graph_tensor.id,
             Tensor {
