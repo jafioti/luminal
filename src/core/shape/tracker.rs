@@ -101,7 +101,6 @@ impl ShapeTracker {
             strides: default_strides(&new_shape),
             shape: new_shape,
         };
-
         self.views.push(new_view);
         self.simplify();
     }

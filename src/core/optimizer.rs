@@ -29,11 +29,11 @@ impl GraphOptimizer for UnarySequentialOpt {
                 .map(|i| i.target())
                 .collect_vec()
             {
-                let op = graph.graph.node_weight(id).unwrap();
+                let (op, _) = graph.graph.node_weight(id).unwrap();
                 if (op.name() == "Exp2"
-                    && graph.graph.node_weight(outgoing_target).unwrap().name() == "Log2")
+                    && graph.graph.node_weight(outgoing_target).unwrap().0.name() == "Log2")
                     || (op.name() == "Log2"
-                        && graph.graph.node_weight(outgoing_target).unwrap().name() == "Exp2")
+                        && graph.graph.node_weight(outgoing_target).unwrap().0.name() == "Exp2")
                 {
                     // Remove current node and next node
                     let pre_node = graph
@@ -86,7 +86,7 @@ impl GraphOptimizer for CSE {
                     .map(|e| e.source())
                     .collect_vec();
 
-                if srcs.is_empty() || graph.graph.node_weight(node).unwrap().name() == "Input" {
+                if srcs.is_empty() || graph.graph.node_weight(node).unwrap().0.name() == "Input" {
                     continue;
                 }
 
@@ -94,8 +94,8 @@ impl GraphOptimizer for CSE {
                 srcs.sort();
 
                 if let Some(other_node) = srcs_set.get(&srcs) {
-                    if graph.graph.node_weight(node).unwrap().name()
-                        == graph.graph.node_weight(*other_node).unwrap().name()
+                    if graph.graph.node_weight(node).unwrap().0.name()
+                        == graph.graph.node_weight(*other_node).unwrap().0.name()
                     {
                         // Carry over outgoing edges from node to other_node
                         for (weight, target) in graph

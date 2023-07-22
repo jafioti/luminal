@@ -8,7 +8,7 @@ pub trait Operator: Debug {
 }
 
 #[derive(Debug, Clone)]
-pub struct Input(pub Vec<usize>);
+pub struct Input;
 impl Operator for Input {
     fn name(&self) -> &'static str {
         "Input"
@@ -223,7 +223,6 @@ impl Operator for Div {
         for i in 0..tensors[0].data.len() {
             t.data[(t_idx)(i)] /= tensors[1].data[(o_idx)(i)];
         }
-
         t
     }
 }
@@ -304,7 +303,6 @@ impl Operator for ReduceSum {
         let mut prev_shape = shape_tracker.shape().clone();
         prev_shape.remove(self.0);
         shape_tracker.reshape(prev_shape);
-
         Tensor {
             data: result,
             shape: shape_tracker,

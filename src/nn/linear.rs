@@ -20,6 +20,16 @@ impl<const A: usize, const B: usize> InitModule for Linear<A, B> {
     }
 }
 
+// Single
+impl<const A: usize, const B: usize> Module<GraphTensor<R1<A>>> for Linear<A, B> {
+    type Output = GraphTensor<R1<B>>;
+
+    fn forward(&self, input: GraphTensor<R1<A>>) -> Self::Output {
+        input.matmul(self.weight)
+    }
+}
+
+// Batched
 impl<const A: usize, const B: usize, const C: usize> Module<GraphTensor<R2<C, A>>>
     for Linear<A, B>
 {

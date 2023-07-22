@@ -195,7 +195,7 @@ impl Node {
     }
 }
 
-pub fn flat_rednode_components(node: &Node) -> Vec<&Node> {
+fn flat_rednode_components(node: &Node) -> Vec<&Node> {
     if let NodeType::RedNode(_, nodes) = &node.node_type {
         nodes
             .iter()
@@ -254,7 +254,7 @@ impl Sub<Node> for Node {
 
 impl Div<i32> for Node {
     type Output = Node;
-    fn div(self, rhs: i32) -> Self::Output {
+    fn div(mut self, rhs: i32) -> Self::Output {
         if rhs < 0 {
             return (self / -rhs) * -1;
         }
@@ -283,6 +283,7 @@ impl Div<i32> for Node {
             let mut _gcd = rhs;
             let mut divisor = 1;
             for node in flat_rednode_components(&self) {
+                // Distribute the divide
                 if matches!(node.node_type, NodeType::OpNode(Op::Mul, _) | NodeType::Num) {
                     if node.b % rhs == 0 {
                         fully_divided.push(node.clone() / rhs);
@@ -307,7 +308,21 @@ impl Div<i32> for Node {
             } else if divisor > 1 {
                 return Node::sum(fully_divided) + Node::sum(rest) / divisor / (rhs / divisor);
             } else {
-                return Node::sum(fully_divided) + Node::sum(rest) / rhs;
+                self = Node::sum(rest);
+                self = if self.min < 0 {
+                    let offset = self.min / rhs;
+                    (self + -offset * rhs) / rhs + offset
+                } else if self.min / rhs == self.max / rhs {
+                    Node::num(self.min / rhs)
+                } else {
+                    Node {
+                        b: rhs,
+                        min: self.min / rhs,
+                        max: self.max / rhs,
+                        node_type: NodeType::OpNode(Op::Div, Box::new(self)),
+                    }
+                };
+                return Node::sum(fully_divided) + self;
             }
         }
 

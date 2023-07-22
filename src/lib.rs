@@ -1,7 +1,6 @@
 mod core;
 pub use crate::core::*;
 pub mod nn;
-pub mod shape;
 
 #[cfg(test)]
 mod tests;

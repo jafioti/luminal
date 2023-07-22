@@ -16,13 +16,22 @@ use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Dire
 pub struct Graph {
     pub(crate) tensors: HashMap<NodeIndex, Tensor>,
     pub(crate) id_remap: HashMap<NodeIndex, NodeIndex>,
-    pub(crate) graph: StableGraph<Box<dyn Operator>, u8, Directed, u32>,
+    #[allow(clippy::type_complexity)]
+    pub(crate) graph: StableGraph<(Box<dyn Operator>, Vec<Vec<usize>>), u8, Directed, u32>,
     pub(crate) no_delete: HashSet<NodeIndex>,
 }
 
 impl Graph {
     pub fn new() -> Graph {
         Graph::default()
+    }
+
+    pub(crate) fn add_op<O: Operator + 'static>(&mut self, op: O) -> NewOp {
+        NewOp {
+            new_op_id: self.graph.add_node((Box::new(op), vec![])),
+            graph_ref: self,
+            num_srcs: 0,
+        }
     }
 
     pub fn get_tensor(&mut self, mut id: NodeIndex) -> Option<Tensor> {
@@ -38,7 +47,7 @@ impl Graph {
         let tensor = GraphTensor {
             id: self
                 .graph
-                .add_node(Box::new(op::Input(S::realized_shape()))),
+                .add_node((Box::new(op::Input), vec![S::realized_shape()])),
             graph_ref: self,
             _phantom: Default::default(),
         };
@@ -63,61 +72,39 @@ impl Graph {
 
     /// Execute the graph.
     pub fn execute(&mut self) {
-        loop {
-            let mut new_tensors = vec![];
-            // Find all executable ops
-            for (node, srcs) in self
-                .graph
-                .node_indices()
-                .filter_map(|n| {
-                    if self.tensors.contains_key(&n) {
-                        return None;
-                    }
-
-                    let mut data = vec![];
-                    for e in self
-                        .graph
-                        .edges_directed(n, petgraph::Direction::Incoming)
-                        .sorted_by_key(|e| e.weight())
-                    {
-                        if let Some(e) = self.tensors.get(&e.source()) {
-                            data.push(e);
-                        } else {
-                            return None;
-                        }
-                    }
-                    Some((n, data))
-                })
-                .collect_vec()
-            {
-                // All sources are ready, execute
-                let f = self.graph.node_weight(node).unwrap().process(srcs);
-                new_tensors.push((node, f));
+        let mut dependencies: HashMap<NodeIndex, usize> = self
+            .graph
+            .node_indices()
+            .map(|n| (n, self.graph.edges_directed(n, Direction::Outgoing).count()))
+            .collect();
+        for node in petgraph::algo::toposort(&self.graph, None).unwrap() {
+            if self.tensors.contains_key(&node) {
+                continue;
             }
+            let srcs = self
+                .graph
+                .edges_directed(node, Direction::Incoming)
+                .sorted_by_key(|e| e.weight())
+                .map(|i| self.tensors.get(&i.source()).unwrap())
+                .collect_vec();
+            // All sources are ready, execute
+            let f = self.graph.node_weight(node).unwrap().0.process(srcs);
+            self.tensors.insert(node, f);
 
             // Check if we can delete the source tensors now
-            for node in new_tensors.iter().map(|(t, _)| t) {
-                // Check we have incoming edges (don't want to remove the sources)
-                for source in self
-                    .graph
-                    .edges_directed(*node, Direction::Incoming)
-                    .map(|e| e.source())
-                    .filter(|e| self.graph.edges_directed(*e, Direction::Outgoing).count() == 1)
-                    .collect_vec()
-                {
-                    if !self.no_delete.contains(&source) {
-                        // Delete tensor and node
-                        self.tensors.remove(&source);
-                    }
+            for source in self
+                .graph
+                .edges_directed(node, Direction::Incoming)
+                .map(|e| e.source())
+                .filter(|n| !self.no_delete.contains(n))
+                .collect_vec()
+            {
+                let deps = dependencies.get_mut(&source).unwrap();
+                *deps -= 1;
+                if *deps == 0 {
+                    // No more dependencies for this node, let's remove it's data
+                    self.tensors.remove(&source);
                 }
-            }
-
-            if new_tensors.is_empty() {
-                break;
-            }
-
-            for (k, v) in new_tensors {
-                self.tensors.insert(k, v);
             }
         }
     }
@@ -125,11 +112,19 @@ impl Graph {
     /// Convert to debug-viewable graph
     pub fn debug_graph(
         &self,
+        show_shapes: bool,
     ) -> petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32> {
         let mut new_graph = petgraph::stable_graph::StableGraph::default();
         let mut id_map = HashMap::new();
         for (id, node) in self.graph.node_indices().zip(self.graph.node_weights()) {
-            id_map.insert(id, new_graph.add_node(format!("{node:?}")));
+            id_map.insert(
+                id,
+                new_graph.add_node(if show_shapes {
+                    format!("{node:?}")
+                } else {
+                    format!("{:?}", node.0)
+                }),
+            );
         }
 
         for node in self.graph.node_indices() {
@@ -149,7 +144,7 @@ impl Graph {
     }
 
     pub fn display_graph(&self) {
-        display_graph(&self.debug_graph());
+        display_graph(&self.debug_graph(false));
     }
 
     /// Transfer all external references from one node to another (this may happen because one node is about to be removed / merged into another)
@@ -212,6 +207,32 @@ impl JoinGraph for petgraph::stable_graph::StableGraph<String, u8, petgraph::Dir
             }
         }
 
+        self
+    }
+}
+
+pub struct NewOp<'a> {
+    new_op_id: NodeIndex,
+    graph_ref: &'a mut Graph,
+    num_srcs: u8,
+}
+
+impl<'a> NewOp<'a> {
+    pub fn finish(self) -> NodeIndex {
+        self.new_op_id
+    }
+
+    pub fn input(mut self, id: NodeIndex, shape: Vec<usize>) -> Self {
+        self.graph_ref
+            .graph
+            .add_edge(id, self.new_op_id, self.num_srcs);
+        self.graph_ref
+            .graph
+            .node_weight_mut(self.new_op_id)
+            .unwrap()
+            .1
+            .push(shape);
+        self.num_srcs += 1;
         self
     }
 }
