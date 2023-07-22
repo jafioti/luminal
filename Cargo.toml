@@ -11,6 +11,7 @@ license = "MIT OR Apache-2.0"
 itertools = "0.11.0"
 num-traits = "0.2.16"
 petgraph = "0.6.3"
+rand = "0.8.5"
 strum = { version = "0.25.0", features = ["derive"] }
 urlencoding = "2.1.2"
 webbrowser = "0.8.10"

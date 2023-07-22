@@ -14,7 +14,7 @@ impl Operator for Input {
         "Input"
     }
     fn process(&self, _: Vec<&Tensor>) -> Tensor {
-        panic!("You Fool.")
+        panic!("The graph was run without an input set!");
     }
 }
 

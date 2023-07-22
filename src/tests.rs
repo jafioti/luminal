@@ -1,5 +1,11 @@
 use crate::{
-    graph::Graph, graph_tensor::GraphTensor, optimizer::GeneralOptimizer, shape::*, tensor::Tensor,
+    graph::Graph,
+    graph_tensor::GraphTensor,
+    nn::linear::Linear,
+    optimizer::GeneralOptimizer,
+    prelude::{InitModule, Module},
+    shape::*,
+    tensor::Tensor,
 };
 
 #[test]
@@ -57,6 +63,27 @@ fn test_matmul() {
     cx.execute();
 
     assert_close(&unoptimized_a, &a.retrieve().unwrap());
+}
+
+#[test]
+fn test_linear() {
+    let mut cx = Graph::new();
+    let a = cx.new_tensor::<R2<1, 3>>();
+
+    let model: Linear<3, 4> = Linear::initialize(&mut cx);
+    let b = model.forward(a);
+
+    b.mark();
+    a.set(vec![1.0, 2.0, 3.0]);
+
+    cx.execute();
+
+    let unoptimized_b = b.retrieve().unwrap();
+
+    cx.optimize(GeneralOptimizer::default());
+    cx.execute();
+
+    assert_close(&unoptimized_b, &b.retrieve().unwrap());
 }
 
 #[test]
