@@ -5,8 +5,7 @@ use petgraph::{visit::EdgeRef, Direction};
 
 use crate::prelude::*;
 
-// Platform agnostic optimizations
-
+/// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
 pub type GeneralOpt = (UnarySequentialOpt, CSE);
 
 /// Eliminate complementary unary sequential operations like `x.log().exp()`
@@ -65,7 +64,7 @@ impl GraphOptimizer for UnarySequentialOpt {
     }
 }
 
-/// Common subexpression elimination (https://en.wikipedia.org/wiki/Common_subexpression_elimination)
+/// [Common subexpression elimination](https://en.wikipedia.org/wiki/Common_subexpression_elimination)
 #[derive(Default)]
 pub struct CSE;
 

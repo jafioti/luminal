@@ -61,6 +61,16 @@ impl<S: ConstShape> GraphTensor<S> {
         GraphTensor::from_id(new_id, self.graph_ref)
     }
 
+    pub fn max(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
+        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        let new_id = graph
+            .add_op(op::Max)
+            .input(self.id, S::realized_shape())
+            .input(rhs.id, S::realized_shape())
+            .finish();
+        GraphTensor::from_id(new_id, self.graph_ref)
+    }
+
     pub fn permute<N: ConstShape, Dst, Ax: Axes>(self) -> GraphTensor<N>
     where
         N: PermuteShapeTo<Dst, Ax>,
