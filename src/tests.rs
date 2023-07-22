@@ -96,31 +96,21 @@ fn test_shapes() {
 
     let b = b.retrieve().unwrap();
 
-    assert_close_data(&extract_real_data(&b), &[1., 3., 2., 4.]);
+    assert_close_data(&b.real_data(), &[1., 3., 2., 4.]);
 }
 
 /// Ensure two tensors are nearly equal
-fn assert_close(a: &Tensor, b: &Tensor) {
+pub fn assert_close(a: &Tensor, b: &Tensor) {
     assert_eq!(a.shape.shape(), b.shape.shape(), "Shapes don't match");
     assert_close_data(&a.data, &b.data);
 }
 
 /// Ensure two tensor data arrays are nearly equal
-fn assert_close_data(a: &[f32], b: &[f32]) {
+pub fn assert_close_data(a: &[f32], b: &[f32]) {
     assert_eq!(a.len(), b.len(), "Number of elements doesn't match");
     for (a, b) in a.iter().zip(b.iter()) {
         if (a - b).abs() > 0.01 {
             panic!("{a} is not close to {b}");
         }
     }
-}
-
-/// Get the real data as layed out by the shape tracker
-fn extract_real_data(tensor: &Tensor) -> Vec<f32> {
-    let idx_fn = tensor.shape.index_fn();
-    let mut real_data = vec![];
-    for i in 0..tensor.data.len() {
-        real_data.push(tensor.data[(idx_fn)(i)]);
-    }
-    real_data
 }

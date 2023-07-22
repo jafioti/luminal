@@ -1,6 +1,5 @@
-use crate::prelude::View;
-
 use super::ShapeTracker;
+use crate::prelude::View;
 
 #[test]
 fn test_reshape() {

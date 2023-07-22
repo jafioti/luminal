@@ -6,7 +6,7 @@ use crate::{
 };
 use std::{
     marker::PhantomData,
-    ops::{Add, Div, Mul, Sub},
+    ops::{Add, Div, Mul, Rem, Sub},
 };
 
 use itertools::Itertools;
@@ -56,6 +56,33 @@ impl<S: ConstShape> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
             .add_op(op::Exp2)
+            .input(self.id, S::realized_shape())
+            .finish();
+        GraphTensor::from_id(new_id, self.graph_ref)
+    }
+
+    pub fn recip(self) -> GraphTensor<S> {
+        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        let new_id = graph
+            .add_op(op::Recip)
+            .input(self.id, S::realized_shape())
+            .finish();
+        GraphTensor::from_id(new_id, self.graph_ref)
+    }
+
+    pub fn sin(self) -> GraphTensor<S> {
+        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        let new_id = graph
+            .add_op(op::Sin)
+            .input(self.id, S::realized_shape())
+            .finish();
+        GraphTensor::from_id(new_id, self.graph_ref)
+    }
+
+    pub fn sqrt(self) -> GraphTensor<S> {
+        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        let new_id = graph
+            .add_op(op::Sqrt)
             .input(self.id, S::realized_shape())
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
@@ -115,7 +142,7 @@ impl<S: ConstShape> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let dim = Ax::as_array().into_iter().next().unwrap() as usize;
         let new_id = graph
-            .add_op(op::ReduceSum(dim))
+            .add_op(op::SumReduce(dim))
             .input(self.id, S::realized_shape())
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
@@ -128,7 +155,7 @@ impl<S: ConstShape> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let dim = Ax::as_array().into_iter().next().unwrap() as usize;
         let new_id = graph
-            .add_op(op::ReduceMax(dim))
+            .add_op(op::MaxReduce(dim))
             .input(self.id, S::realized_shape())
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
@@ -211,6 +238,20 @@ impl<S: ConstShape> Div<GraphTensor<S>> for GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
             .add_op(op::Div)
+            .input(self.id, S::realized_shape())
+            .input(rhs.id, S::realized_shape())
+            .finish();
+        GraphTensor::from_id(new_id, self.graph_ref)
+    }
+}
+
+impl<S: ConstShape> Rem<GraphTensor<S>> for GraphTensor<S> {
+    type Output = GraphTensor<S>;
+
+    fn rem(self, rhs: GraphTensor<S>) -> Self::Output {
+        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        let new_id = graph
+            .add_op(op::Mod)
             .input(self.id, S::realized_shape())
             .input(rhs.id, S::realized_shape())
             .finish();

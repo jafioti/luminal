@@ -272,10 +272,10 @@ impl Operator for Mod {
 // Reduce Ops (A -> B (different shape))
 
 #[derive(Debug, Clone)]
-pub struct ReduceSum(pub usize);
-impl Operator for ReduceSum {
+pub struct SumReduce(pub usize);
+impl Operator for SumReduce {
     fn name(&self) -> &'static str {
-        "ReduceSum"
+        "SumReduce"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let mut shape_tracker = tensors[0].shape.clone();
@@ -311,10 +311,10 @@ impl Operator for ReduceSum {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReduceMax(pub usize);
-impl Operator for ReduceMax {
+pub struct MaxReduce(pub usize);
+impl Operator for MaxReduce {
     fn name(&self) -> &'static str {
-        "ReduceMax"
+        "MaxReduce"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let mut shape_tracker = tensors[0].shape.clone();
@@ -347,5 +347,229 @@ impl Operator for ReduceMax {
             data: result,
             shape: shape_tracker,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{prelude::*, tests::assert_close_data};
+    use dfdx::prelude::*;
+
+    // Movement op tests
+
+    #[test]
+    fn test_reshape() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<2, 3>>();
+        a.set(vec![1., 2., 3., 1., 2., 3.]);
+        let b = a.reshape::<R1<6>>();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
+        let d_b: dfdx::tensor::Tensor<Rank1<6>, f32, Cpu> = d_a.reshape();
+
+        assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_permute() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<2, 3>>();
+        a.set(vec![1., 2., 3., 1., 2., 3.]);
+        let b: GraphTensor<R2<3, 2>> = a.permute();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
+        let d_b: dfdx::tensor::Tensor<Rank2<3, 2>, f32, Cpu> = d_a.permute();
+
+        assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_expand() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b: GraphTensor<R2<3, 2>> = a.expand();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1., 2., 3.]);
+        let d_b: dfdx::tensor::Tensor<Rank2<3, 2>, f32, Cpu> = d_a.broadcast();
+
+        assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
+    }
+
+    // Unary op tests
+
+    #[test]
+    fn test_recip() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = a.recip();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1., 2., 3.]);
+        let d_b = d_a.recip();
+
+        assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_sin() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = a.sin();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1., 2., 3.]);
+        let d_b = d_a.sin();
+
+        assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_sqrt() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = a.sqrt();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1., 2., 3.]);
+        let d_b = d_a.sqrt();
+
+        assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
+    }
+
+    // Binary op tests
+
+    #[test]
+    fn test_add() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = cx.new_tensor::<R1<3>>();
+        b.set(vec![1., 2., 3.]);
+        let c = a + b;
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1., 2., 3.]);
+        let d_b = d_dev.tensor([1., 2., 3.]);
+        let d_c = d_a + d_b;
+
+        assert_close_data(&c.retrieve().unwrap().real_data(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_sub() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = cx.new_tensor::<R1<3>>();
+        b.set(vec![1., 2., 3.]);
+        let c = a - b;
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1., 2., 3.]);
+        let d_b = d_dev.tensor([1., 2., 3.]);
+        let d_c = d_a - d_b;
+
+        assert_close_data(&c.retrieve().unwrap().real_data(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_mul() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = cx.new_tensor::<R1<3>>();
+        b.set(vec![1., 2., 3.]);
+        let c = a * b;
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1., 2., 3.]);
+        let d_b = d_dev.tensor([1., 2., 3.]);
+        let d_c = d_a * d_b;
+
+        assert_close_data(&c.retrieve().unwrap().real_data(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_div() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = cx.new_tensor::<R1<3>>();
+        b.set(vec![1., 2., 3.]);
+        let c = a / b;
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1., 2., 3.]);
+        let d_b = d_dev.tensor([1., 2., 3.]);
+        let d_c = d_a / d_b;
+
+        assert_close_data(&c.retrieve().unwrap().real_data(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_max() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = cx.new_tensor::<R1<3>>();
+        b.set(vec![1., 2., 3.]);
+        let c = a.max(b);
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1., 2., 3.]);
+        let d_b = d_dev.tensor([1., 2., 3.]);
+        let d_c = d_a.maximum(d_b);
+
+        assert_close_data(&c.retrieve().unwrap().real_data(), &d_c.as_vec());
+    }
+
+    // Reduction op tests
+
+    #[test]
+    fn test_sum_reduce() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<2, 3>>();
+        a.set(vec![1., 2., 3., 1., 2., 3.]);
+        let b = a.sum_reduce::<_, crate::prelude::Axis<1>>();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
+        let d_b = d_a.sum::<_, dfdx::shapes::Axis<1>>();
+
+        assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_max_reduce() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<2, 3>>();
+        a.set(vec![1., 2., 3., 1., 2., 3.]);
+        let b = a.max_reduce::<_, crate::prelude::Axis<1>>();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
+        let d_b = d_a.max::<_, dfdx::shapes::Axis<1>>();
+
+        assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
     }
 }
