@@ -24,7 +24,7 @@ fn main() {
     let unoptimized_a = a.retrieve().unwrap();
     let unoptimized_d = d.retrieve().unwrap();
 
-    cx.optimize(GeneralOptimizer::default());
+    cx.optimize(GeneralOpt::default());
 
     cx.execute();
     let a = a.retrieve().unwrap();
@@ -49,7 +49,7 @@ fn test_matmul() {
 
     let unoptimized_a = a.retrieve().unwrap();
 
-    cx.optimize(GeneralOptimizer::default());
+    cx.optimize(GeneralOpt::default());
     cx.execute();
 
     assert_close(&unoptimized_a, &a.retrieve().unwrap());
@@ -76,7 +76,7 @@ fn test_linear() {
     let unoptimized_b = b.retrieve().unwrap();
     let unoptimized_batch_out = batch_out.retrieve().unwrap();
 
-    cx.optimize(GeneralOptimizer::default());
+    cx.optimize(GeneralOpt::default());
     cx.execute();
 
     assert_close(&unoptimized_b, &b.retrieve().unwrap());
