@@ -63,6 +63,8 @@ impl Operator for Expand {
     }
 }
 
+// Below are the primitive operators currently supported
+
 // Unary Op (A -> A)
 
 #[derive(Debug, Clone)]
@@ -403,6 +405,42 @@ mod tests {
     }
 
     // Unary op tests
+
+    #[test]
+    fn test_log2() {
+        // We can't use dfdx because it doesn't implement this op
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = a.recip();
+        cx.execute();
+
+        assert_close_data(
+            &b.retrieve().unwrap().real_data(),
+            &vec![1., 2., 3.]
+                .into_iter()
+                .map(|i: f32| i.log2())
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn test_exp2() {
+        // We can't use dfdx because it doesn't implement this op
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = a.recip();
+        cx.execute();
+
+        assert_close_data(
+            &b.retrieve().unwrap().real_data(),
+            &vec![1., 2., 3.]
+                .into_iter()
+                .map(|i: f32| i.exp2())
+                .collect::<Vec<_>>(),
+        );
+    }
 
     #[test]
     fn test_recip() {
