@@ -1,8 +1,3 @@
-use std::collections::HashMap;
-
-use itertools::Itertools;
-use petgraph::{visit::EdgeRef, Direction};
-
 use crate::graph::Graph;
 
 pub trait GraphOptimizer {

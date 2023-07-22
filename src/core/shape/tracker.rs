@@ -15,10 +15,20 @@ fn expr_node(idx: Node, shape: &[usize], strides: &[usize]) -> Node {
     Node::sum(ret)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct View {
     pub shape: Vec<usize>,
     pub strides: Vec<usize>,
+}
+
+impl View {
+    fn is_contiguous(&self) -> bool {
+        self.shape
+            .iter()
+            .zip(self.strides.iter())
+            .zip(default_strides(&self.shape))
+            .all(|((&sh, &st), def_st)| st == def_st || sh == 1)
+    }
 }
 
 fn merge_views(v2: &View, v1: &View) -> Option<View> {
@@ -101,8 +111,12 @@ impl ShapeTracker {
             strides: default_strides(&new_shape),
             shape: new_shape,
         };
-        self.views.push(new_view);
-        self.simplify();
+        if self.views.last().unwrap().is_contiguous() {
+            *self.views.last_mut().unwrap() = new_view;
+        } else {
+            self.views.push(new_view);
+            self.simplify();
+        }
     }
 
     pub fn expand(&mut self, dimension: usize, new_size: usize) {
