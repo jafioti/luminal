@@ -185,7 +185,8 @@ impl Operator for Add {
         "Add"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let r_idx = tensors[0].shape.index_fn();
+        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
+        let r_idx = tracker.index_fn();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
         let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
@@ -196,7 +197,7 @@ impl Operator for Add {
         }
         Tensor {
             data: Box::new(data),
-            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+            shape: tracker,
         }
     }
 }
@@ -208,7 +209,8 @@ impl Operator for Sub {
         "Subtract"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let r_idx = tensors[0].shape.index_fn();
+        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
+        let r_idx = tracker.index_fn();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
         let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
@@ -219,7 +221,7 @@ impl Operator for Sub {
         }
         Tensor {
             data: Box::new(data),
-            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+            shape: tracker,
         }
     }
 }
@@ -231,7 +233,8 @@ impl Operator for Mul {
         "Mul"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let r_idx = tensors[0].shape.index_fn();
+        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
+        let r_idx = tracker.index_fn();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
         let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
@@ -242,7 +245,7 @@ impl Operator for Mul {
         }
         Tensor {
             data: Box::new(data),
-            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+            shape: tracker,
         }
     }
 }
@@ -254,7 +257,8 @@ impl Operator for Div {
         "Div"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let r_idx = tensors[0].shape.index_fn();
+        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
+        let r_idx = tracker.index_fn();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
         let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
@@ -265,7 +269,7 @@ impl Operator for Div {
         }
         Tensor {
             data: Box::new(data),
-            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+            shape: tracker,
         }
     }
 }
@@ -277,7 +281,8 @@ impl Operator for Max {
         "Max"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let r_idx = tensors[0].shape.index_fn();
+        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
+        let r_idx = tracker.index_fn();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
         let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
@@ -288,7 +293,7 @@ impl Operator for Max {
         }
         Tensor {
             data: Box::new(data),
-            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+            shape: tracker,
         }
     }
 }
@@ -300,7 +305,8 @@ impl Operator for Mod {
         "Mod"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let r_idx = tensors[0].shape.index_fn();
+        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
+        let r_idx = tracker.index_fn();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
         let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
@@ -311,7 +317,7 @@ impl Operator for Mod {
         }
         Tensor {
             data: Box::new(data),
-            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+            shape: tracker,
         }
     }
 }
