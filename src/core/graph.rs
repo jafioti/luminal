@@ -10,14 +10,14 @@ use crate::{
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Directed, Direction};
+use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Direction};
 
 #[derive(Debug, Default)]
 pub struct Graph {
     pub(crate) tensors: HashMap<NodeIndex, Tensor>,
     pub(crate) id_remap: HashMap<NodeIndex, NodeIndex>,
     #[allow(clippy::type_complexity)]
-    pub(crate) graph: StableGraph<(Box<dyn Operator>, Vec<Vec<usize>>), u8, Directed, u32>,
+    pub(crate) graph: StableGraph<(Box<dyn Operator>, Vec<Vec<usize>>), u8>,
     pub(crate) no_delete: HashSet<NodeIndex>,
 }
 
@@ -27,6 +27,7 @@ impl Graph {
     }
 
     pub(crate) fn add_op<O: Operator + 'static>(&mut self, op: O) -> NewOp {
+        self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
         NewOp {
             new_op_id: self.graph.add_node((Box::new(op), vec![])),
             graph_ref: self,
@@ -44,6 +45,7 @@ impl Graph {
     }
 
     pub fn new_tensor<S: ConstShape>(&mut self) -> GraphTensor<S> {
+        self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
         let tensor = GraphTensor {
             id: self
                 .graph
@@ -160,6 +162,32 @@ impl Graph {
         if no_delete.remove(&src) {
             no_delete.insert(trg);
         }
+    }
+
+    /// Get the sources of a node given it's id
+    #[allow(clippy::type_complexity)]
+    pub fn get_sources(
+        &self,
+        node_id: NodeIndex,
+    ) -> Vec<(NodeIndex, &(Box<dyn Operator>, Vec<Vec<usize>>))> {
+        self.graph
+            .edges_directed(node_id, Direction::Incoming)
+            .map(|e| e.source())
+            .map(|n| (n, self.graph.node_weight(n).unwrap()))
+            .collect()
+    }
+
+    /// Get the dests of a node given it's id
+    #[allow(clippy::type_complexity)]
+    pub fn get_dests(
+        &self,
+        node_id: NodeIndex,
+    ) -> Vec<(NodeIndex, &(Box<dyn Operator>, Vec<Vec<usize>>))> {
+        self.graph
+            .edges_directed(node_id, Direction::Outgoing)
+            .map(|e| e.target())
+            .map(|n| (n, self.graph.node_weight(n).unwrap()))
+            .collect()
     }
 }
 

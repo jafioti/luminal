@@ -356,6 +356,7 @@ impl Operator for MaxReduce {
 
 #[cfg(test)]
 mod tests {
+
     use crate::{prelude::*, tests::assert_close_data};
     use dfdx::prelude::*;
 
@@ -656,17 +657,20 @@ mod tests {
     #[test]
     fn test_batch_matmul() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R3<2, 3, 1>>();
-        a.set(vec![1., 2., 3., 1., 2., 3.]);
-        let b = cx.new_tensor::<R2<1, 4>>();
-        b.set(vec![1., 2., 3., 1.]);
+        let a = cx.new_tensor::<R3<2, 3, 2>>();
+        a.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
+        let b = cx.new_tensor::<R2<2, 4>>();
+        b.set(vec![1., 2., 3., 1., 1., 2., 3., 1.]);
         let c = a.matmul(b);
 
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor([[[1.], [2.], [3.]], [[1.], [2.], [3.]]]);
-        let d_b = d_dev.tensor([[1., 2., 3., 1.]]);
+        let d_a = d_dev.tensor([
+            [[1., 2.], [3., 1.], [2., 3.]],
+            [[1., 2.], [3., 1.], [2., 3.]],
+        ]);
+        let d_b = d_dev.tensor([[1., 2., 3., 1.], [1., 2., 3., 1.]]);
         let d_c = d_a.matmul(d_b);
 
         let r = c.retrieve().unwrap();

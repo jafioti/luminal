@@ -169,6 +169,13 @@ impl<S: ConstShape> GraphTensor<S> {
     }
 }
 
+impl<const A: usize> GraphTensor<R1<A>> {
+    /// Simple dot product of two vectors
+    pub fn dot(self, rhs: GraphTensor<R1<A>>) -> GraphTensor<R0> {
+        (self * rhs).sum_reduce()
+    }
+}
+
 // Matmul 2x2, 2x3 (broadcast 2 across batch), 2x4 (broadcast 2 across 2 batch dims), 3x3 (make sure shape matches up, multiply each consituent matrix)
 
 // ABxBC -> AC
