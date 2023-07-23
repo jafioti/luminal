@@ -5,6 +5,10 @@ pub trait GraphOptimizer {
     fn optimize(&self, graph: &mut Graph);
 }
 
+impl GraphOptimizer for () {
+    fn optimize(&self, _: &mut Graph) {}
+}
+
 macro_rules! tuple_impls {
     ([$($name:ident),+] , [$($idx:tt),+]) => {
         impl<

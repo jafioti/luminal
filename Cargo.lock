@@ -140,6 +140,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dyn-clone"
+version = "1.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "304e6508efa593091e97a9abbc10f90aa7ca635b6d2784feff3c89d41dd12272"
+
+[[package]]
 name = "dyn-stack"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -439,6 +445,7 @@ name = "luminal"
 version = "0.1.0"
 dependencies = [
  "dfdx",
+ "dyn-clone",
  "itertools",
  "matrixmultiply",
  "num-traits",

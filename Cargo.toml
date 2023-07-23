@@ -16,6 +16,7 @@ rand = "0.8.5"
 strum = { version = "0.25.0", features = ["derive"] }
 urlencoding = "2.1.2"
 webbrowser = "0.8.10"
+dyn-clone = "1.0.12"
 
 [dev-dependencies]
 dfdx = "0.12.1"

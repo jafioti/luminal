@@ -4,10 +4,13 @@ use petgraph::visit::EdgeRef;
 use crate::{op::Operator, prelude::*};
 
 // Ops and optimizers specific to CPU execution
-#[derive(Debug, Default)]
-pub struct CPUOptimizer;
 
-impl GraphOptimizer for CPUOptimizer {
+pub type CPUOptimizer = CPUMatMulOptimizer;
+
+#[derive(Debug, Default)]
+pub struct CPUMatMulOptimizer;
+
+impl GraphOptimizer for CPUMatMulOptimizer {
     fn optimize(&self, graph: &mut Graph) {
         // Look for the matmul pattern
         for node in graph.graph.node_indices().collect_vec() {
@@ -114,6 +117,8 @@ impl Operator for CPUMatMul2D {
         let b_shape = inp[1].shape.shape();
         let a_strides = &inp[0].shape.views.last().unwrap().strides;
         let b_strides = &inp[1].shape.views.last().unwrap().strides;
+        let a_data = inp[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let b_data = inp[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut c = vec![0.; a_shape[0] * b_shape[1]];
         unsafe {
             matrixmultiply::sgemm(
@@ -121,10 +126,10 @@ impl Operator for CPUMatMul2D {
                 a_shape[1],
                 b_shape[1],
                 1.0,
-                &inp[0].data[0],
+                &a_data[0],
                 a_strides[0] as isize,
                 a_strides[1] as isize,
-                &inp[1].data[0],
+                &b_data[0],
                 b_strides[0] as isize,
                 b_strides[1] as isize,
                 0.0,
@@ -135,7 +140,7 @@ impl Operator for CPUMatMul2D {
         }
 
         Tensor {
-            data: c,
+            data: Box::new(c),
             shape: ShapeTracker::new(vec![a_shape[0], b_shape[1]]),
         }
     }
@@ -156,10 +161,12 @@ mod tests {
 
         let unoptimized_c = c.retrieve().unwrap();
 
-        cx.optimize((CPUOptimizer, GeneralOpt::default()));
+        cx.optimize(<(CPUOptimizer, GeneralOpt)>::default());
         cx.execute();
 
-        let r = c.retrieve().unwrap();
-        assert_close_data(&r.real_data(), &unoptimized_c.real_data());
+        assert_close_data(
+            &c.retrieve().unwrap().real_data().unwrap(),
+            &unoptimized_c.real_data().unwrap(),
+        );
     }
 }

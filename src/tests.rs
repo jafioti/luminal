@@ -68,15 +68,19 @@ fn test_shapes() {
 
     cx.execute();
 
-    let b = b.retrieve().unwrap();
-
-    assert_close_data(&b.real_data(), &[1., 3., 2., 4.]);
+    assert_close_data(
+        &b.retrieve().unwrap().real_data().unwrap(),
+        &[1., 3., 2., 4.],
+    );
 }
 
-/// Ensure two tensors are nearly equal
+/// Ensure two tensors are nearly equal (only works with Vec<f32> data)
 pub fn assert_close(a: &Tensor, b: &Tensor) {
     assert_eq!(a.shape.shape(), b.shape.shape(), "Shapes don't match");
-    assert_close_data(&a.data, &b.data);
+    assert_close_data(
+        a.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+        b.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+    );
 }
 
 /// Ensure two tensor data arrays are nearly equal

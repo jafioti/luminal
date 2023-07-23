@@ -61,7 +61,7 @@ impl Graph {
         self.tensors.insert(
             graph_tensor.id,
             Tensor {
-                data,
+                data: Box::new(data),
                 shape: ShapeTracker::new(S::realized_shape()),
             },
         );

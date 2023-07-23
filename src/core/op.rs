@@ -74,7 +74,13 @@ impl Operator for Log2 {
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let mut t = tensors[0].clone();
-        for a in t.data.iter_mut() {
+        for a in t
+            .data
+            .as_any_mut()
+            .downcast_mut::<Vec<f32>>()
+            .unwrap()
+            .iter_mut()
+        {
             *a = a.log2();
         }
 
@@ -90,7 +96,13 @@ impl Operator for Exp2 {
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let mut t = tensors[0].clone();
-        for a in t.data.iter_mut() {
+        for a in t
+            .data
+            .as_any_mut()
+            .downcast_mut::<Vec<f32>>()
+            .unwrap()
+            .iter_mut()
+        {
             *a = a.exp2();
         }
 
@@ -106,7 +118,13 @@ impl Operator for Sin {
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let mut t = tensors[0].clone();
-        for a in t.data.iter_mut() {
+        for a in t
+            .data
+            .as_any_mut()
+            .downcast_mut::<Vec<f32>>()
+            .unwrap()
+            .iter_mut()
+        {
             *a = a.sin();
         }
 
@@ -122,7 +140,13 @@ impl Operator for Sqrt {
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let mut t = tensors[0].clone();
-        for a in t.data.iter_mut() {
+        for a in t
+            .data
+            .as_any_mut()
+            .downcast_mut::<Vec<f32>>()
+            .unwrap()
+            .iter_mut()
+        {
             *a = a.sqrt();
         }
 
@@ -138,7 +162,13 @@ impl Operator for Recip {
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let mut t = tensors[0].clone();
-        for a in t.data.iter_mut() {
+        for a in t
+            .data
+            .as_any_mut()
+            .downcast_mut::<Vec<f32>>()
+            .unwrap()
+            .iter_mut()
+        {
             *a = a.recip();
         }
 
@@ -155,17 +185,19 @@ impl Operator for Add {
         "Add"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let mut t = Tensor {
-            data: vec![0.; tensors[0].shape.shape().iter().product()],
-            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
-        };
-        let r_idx = t.shape.index_fn();
+        let r_idx = tensors[0].shape.index_fn();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
-        for i in 0..t.data.len() {
-            t.data[(r_idx)(i)] = tensors[0].data[(a_idx)(i)] + tensors[1].data[(b_idx)(i)];
+        let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
+        let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        for i in 0..data.len() {
+            data[(r_idx)(i)] = a_data[(a_idx)(i)] + b_data[(b_idx)(i)];
         }
-        t
+        Tensor {
+            data: Box::new(data),
+            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+        }
     }
 }
 
@@ -176,17 +208,19 @@ impl Operator for Sub {
         "Subtract"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let mut t = Tensor {
-            data: vec![0.; tensors[0].shape.shape().iter().product()],
-            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
-        };
-        let r_idx = t.shape.index_fn();
+        let r_idx = tensors[0].shape.index_fn();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
-        for i in 0..t.data.len() {
-            t.data[(r_idx)(i)] = tensors[0].data[(a_idx)(i)] - tensors[1].data[(b_idx)(i)];
+        let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
+        let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        for i in 0..data.len() {
+            data[(r_idx)(i)] = a_data[(a_idx)(i)] - b_data[(b_idx)(i)];
         }
-        t
+        Tensor {
+            data: Box::new(data),
+            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+        }
     }
 }
 
@@ -197,17 +231,19 @@ impl Operator for Mul {
         "Mul"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let mut t = Tensor {
-            data: vec![0.; tensors[0].shape.shape().iter().product()],
-            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
-        };
-        let r_idx = t.shape.index_fn();
+        let r_idx = tensors[0].shape.index_fn();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
-        for i in 0..t.data.len() {
-            t.data[(r_idx)(i)] = tensors[0].data[(a_idx)(i)] * tensors[1].data[(b_idx)(i)];
+        let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
+        let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        for i in 0..data.len() {
+            data[(r_idx)(i)] = a_data[(a_idx)(i)] * b_data[(b_idx)(i)];
         }
-        t
+        Tensor {
+            data: Box::new(data),
+            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+        }
     }
 }
 
@@ -218,13 +254,19 @@ impl Operator for Div {
         "Div"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let mut t = tensors[0].clone();
-        let t_idx = t.shape.index_fn();
-        let o_idx = tensors[0].shape.index_fn();
-        for i in 0..tensors[0].data.len() {
-            t.data[(t_idx)(i)] /= tensors[1].data[(o_idx)(i)];
+        let r_idx = tensors[0].shape.index_fn();
+        let a_idx = tensors[0].shape.index_fn();
+        let b_idx = tensors[1].shape.index_fn();
+        let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
+        let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        for i in 0..data.len() {
+            data[(r_idx)(i)] = a_data[(a_idx)(i)] / b_data[(b_idx)(i)];
         }
-        t
+        Tensor {
+            data: Box::new(data),
+            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+        }
     }
 }
 
@@ -235,17 +277,19 @@ impl Operator for Max {
         "Max"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let mut t = Tensor {
-            data: vec![0.; tensors[0].shape.shape().iter().product()],
-            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
-        };
-        let r_idx = t.shape.index_fn();
+        let r_idx = tensors[0].shape.index_fn();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
-        for i in 0..t.data.len() {
-            t.data[(r_idx)(i)] = tensors[0].data[(a_idx)(i)].max(tensors[1].data[(b_idx)(i)]);
+        let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
+        let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        for i in 0..data.len() {
+            data[(r_idx)(i)] = a_data[(a_idx)(i)].max(b_data[(b_idx)(i)]);
         }
-        t
+        Tensor {
+            data: Box::new(data),
+            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+        }
     }
 }
 
@@ -256,17 +300,19 @@ impl Operator for Mod {
         "Mod"
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let mut t = Tensor {
-            data: vec![0.; tensors[0].shape.shape().iter().product()],
-            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
-        };
-        let r_idx = t.shape.index_fn();
+        let r_idx = tensors[0].shape.index_fn();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
-        for i in 0..t.data.len() {
-            t.data[(r_idx)(i)] = tensors[0].data[(a_idx)(i)] % tensors[1].data[(b_idx)(i)];
+        let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
+        let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        for i in 0..data.len() {
+            data[(r_idx)(i)] = a_data[(a_idx)(i)] % b_data[(b_idx)(i)];
         }
-        t
+        Tensor {
+            data: Box::new(data),
+            shape: ShapeTracker::new(tensors[0].shape.shape().clone()),
+        }
     }
 }
 
@@ -294,11 +340,12 @@ impl Operator for SumReduce {
                 .map(|(_, sh)| sh)
                 .product()
         ];
+        let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
 
         for (i, result) in result.iter_mut().enumerate() {
             let i = (a_idx)(i * dim_size);
             for j in 0..dim_size {
-                *result += tensors[0].data[i + dim_stride * j];
+                *result += a_data[i + dim_stride * j];
             }
         }
 
@@ -307,7 +354,7 @@ impl Operator for SumReduce {
         shape_tracker.reshape(prev_shape);
 
         Tensor {
-            data: result,
+            data: Box::new(result),
             shape: shape_tracker,
         }
     }
@@ -335,11 +382,12 @@ impl Operator for MaxReduce {
                 .map(|(_, sh)| sh)
                 .product()
         ];
+        let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
 
         for (i, result) in result.iter_mut().enumerate() {
             let i = (a_idx)(i * dim_size);
             for j in 0..dim_size {
-                *result = (*result).max(tensors[0].data[i + dim_stride * j]);
+                *result = (*result).max(a_data[i + dim_stride * j]);
             }
         }
 
@@ -348,7 +396,7 @@ impl Operator for MaxReduce {
         shape_tracker.reshape(prev_shape);
 
         Tensor {
-            data: result,
+            data: Box::new(result),
             shape: shape_tracker,
         }
     }
@@ -374,7 +422,7 @@ mod tests {
         let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
         let d_b: dfdx::tensor::Tensor<Rank1<6>, f32, Cpu> = d_a.reshape();
 
-        assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
+        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
     }
 
     #[test]
@@ -389,7 +437,7 @@ mod tests {
         let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
         let d_b: dfdx::tensor::Tensor<Rank2<3, 2>, f32, Cpu> = d_a.permute();
 
-        assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
+        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
     }
 
     #[test]
@@ -404,8 +452,7 @@ mod tests {
         let d_a = d_dev.tensor([1., 2., 3.]);
         let d_b: dfdx::tensor::Tensor<Rank2<3, 2>, f32, Cpu> = d_a.broadcast();
 
-        let r = b.retrieve().unwrap().real_data();
-        assert_close_data(&r, &d_b.as_vec());
+        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
     }
 
     // Unary op tests
@@ -420,7 +467,7 @@ mod tests {
         cx.execute();
 
         assert_close_data(
-            &b.retrieve().unwrap().real_data(),
+            &b.retrieve().unwrap().real_data().unwrap(),
             &vec![1., 2., 3.]
                 .into_iter()
                 .map(|i: f32| i.log2())
@@ -438,7 +485,7 @@ mod tests {
         cx.execute();
 
         assert_close_data(
-            &b.retrieve().unwrap().real_data(),
+            &b.retrieve().unwrap().real_data().unwrap(),
             &vec![1., 2., 3.]
                 .into_iter()
                 .map(|i: f32| i.exp2())
@@ -458,7 +505,7 @@ mod tests {
         let d_a = d_dev.tensor([1., 2., 3.]);
         let d_b = d_a.recip();
 
-        assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
+        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
     }
 
     #[test]
@@ -473,7 +520,7 @@ mod tests {
         let d_a = d_dev.tensor([1., 2., 3.]);
         let d_b = d_a.sin();
 
-        assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
+        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
     }
 
     #[test]
@@ -488,7 +535,7 @@ mod tests {
         let d_a = d_dev.tensor([1., 2., 3.]);
         let d_b = d_a.sqrt();
 
-        assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
+        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
     }
 
     // Binary op tests
@@ -508,7 +555,7 @@ mod tests {
         let d_b = d_dev.tensor([1., 2., 3.]);
         let d_c = d_a + d_b;
 
-        assert_close_data(&c.retrieve().unwrap().real_data(), &d_c.as_vec());
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
     }
 
     #[test]
@@ -526,7 +573,7 @@ mod tests {
         let d_b = d_dev.tensor([1., 2., 3.]);
         let d_c = d_a - d_b;
 
-        assert_close_data(&c.retrieve().unwrap().real_data(), &d_c.as_vec());
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
     }
 
     #[test]
@@ -544,7 +591,7 @@ mod tests {
         let d_b = d_dev.tensor([1., 2., 3.]);
         let d_c = d_a * d_b;
 
-        assert_close_data(&c.retrieve().unwrap().real_data(), &d_c.as_vec());
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
     }
 
     #[test]
@@ -562,7 +609,7 @@ mod tests {
         let d_b = d_dev.tensor([1., 2., 3.]);
         let d_c = d_a / d_b;
 
-        assert_close_data(&c.retrieve().unwrap().real_data(), &d_c.as_vec());
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
     }
 
     #[test]
@@ -580,7 +627,7 @@ mod tests {
         let d_b = d_dev.tensor([1., 2., 3.]);
         let d_c = d_a.maximum(d_b);
 
-        assert_close_data(&c.retrieve().unwrap().real_data(), &d_c.as_vec());
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
     }
 
     // Reduction op tests
@@ -597,7 +644,7 @@ mod tests {
         let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
         let d_b = d_a.sum::<_, dfdx::shapes::Axis<1>>();
 
-        assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
+        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
     }
 
     #[test]
@@ -612,7 +659,7 @@ mod tests {
         let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
         let d_b = d_a.max::<_, dfdx::shapes::Axis<1>>();
 
-        assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
+        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
     }
 
     // Other tests (matmul, batch matmul, etc.)
@@ -631,8 +678,7 @@ mod tests {
         let d_b = d_dev.tensor([[1., 2.], [3., 1.], [2., 3.]]);
         let d_c = d_a.matmul(d_b);
 
-        let r = c.retrieve().unwrap();
-        assert_close_data(&r.real_data(), &d_c.as_vec());
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
     }
 
     #[test]
@@ -650,8 +696,7 @@ mod tests {
         let d_b = d_dev.tensor([[1., 2., 3.], [1., 2., 3.], [1., 2., 3.]]);
         let d_c = d_a.matmul(d_b);
 
-        let r = c.retrieve().unwrap();
-        assert_close_data(&r.real_data(), &d_c.as_vec());
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
     }
 
     #[test]
@@ -673,7 +718,6 @@ mod tests {
         let d_b = d_dev.tensor([[1., 2., 3., 1.], [1., 2., 3., 1.]]);
         let d_c = d_a.matmul(d_b);
 
-        let r = c.retrieve().unwrap();
-        assert_close_data(&r.real_data(), &d_c.as_vec());
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
     }
 }

@@ -3,3 +3,5 @@ mod general;
 pub use general::*;
 mod cpu;
 pub use cpu::*;
+mod cuda;
+pub use cuda::*;
