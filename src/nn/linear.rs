@@ -45,3 +45,35 @@ impl<const A: usize, const B: usize> LoadModule for Linear<A, B> {
         self.weight.set(state_dict.data.remove("weight").unwrap().0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Linear;
+    use crate::{prelude::*, tests::assert_close};
+    #[test]
+    fn test_linear() {
+        let mut cx = Graph::new();
+        let batch = cx.new_tensor::<R2<2, 3>>();
+        let a = cx.new_tensor::<R1<3>>();
+
+        let model: Linear<3, 4> = Linear::initialize(&mut cx);
+        let b = model.forward(a);
+        let batch_out = model.forward(batch);
+
+        b.mark();
+        a.mark();
+        batch_out.mark();
+        a.set(vec![1.0, 2.0, 3.0]);
+        batch.set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+        cx.execute();
+
+        let unoptimized_b = b.retrieve().unwrap();
+        let unoptimized_batch_out = batch_out.retrieve().unwrap();
+
+        cx.optimize(GeneralOpt::default());
+        cx.execute();
+
+        assert_close(&unoptimized_b, &b.retrieve().unwrap());
+        assert_close(&unoptimized_batch_out, &batch_out.retrieve().unwrap());
+    }
+}

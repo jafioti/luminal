@@ -80,7 +80,7 @@ pub fn default_strides(shape: &[usize]) -> Vec<usize> {
     let mut strides = shape.to_vec();
     for i in strides.iter_mut().rev() {
         let tmp = *i;
-        *i = if *i == 0 { 0 } else { acc };
+        *i = if *i == 1 { 0 } else { acc };
         acc *= tmp;
     }
 
@@ -120,9 +120,12 @@ impl ShapeTracker {
     }
 
     pub fn expand(&mut self, dimension: usize, new_size: usize) {
-        let mut new_shape = self.shape().to_vec();
-        new_shape.insert(dimension, new_size);
-        self.views.last_mut().unwrap().shape = new_shape;
+        self.views
+            .last_mut()
+            .unwrap()
+            .shape
+            .insert(dimension, new_size);
+        self.views.last_mut().unwrap().strides.insert(dimension, 0);
     }
 
     fn simplify(&mut self) {
@@ -174,6 +177,9 @@ impl ShapeTracker {
             let orig = i as i32;
             let mut result = 0;
             for ops_and_nums in &all_ops_and_nums {
+                if ops_and_nums.is_empty() {
+                    continue;
+                }
                 let mut i = orig;
                 for (op, num) in ops_and_nums {
                     i = (op)(i, *num);
@@ -202,7 +208,7 @@ fn get_ops_and_nums(mut node: &Node) -> Vec<(fn(i32, i32) -> i32, i32)> {
                 node = a.as_ref();
             }
             NodeType::Variable(_) => break,
-            NodeType::Num => panic!("Num node encountered"),
+            NodeType::Num => break,
             NodeType::RedNode(_, _) => panic!("Rednode encountered"),
         }
     }

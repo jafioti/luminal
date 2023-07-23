@@ -49,7 +49,7 @@ impl Operator for Reshape {
 }
 
 #[derive(Debug, Clone)]
-pub struct Expand(pub usize, pub usize);
+pub struct Expand(pub Vec<(usize, usize)>);
 impl Operator for Expand {
     fn name(&self) -> &'static str {
         "Expand"
@@ -57,8 +57,9 @@ impl Operator for Expand {
     fn process(&self, inp: Vec<&Tensor>) -> Tensor {
         // We don't need to clone here! We should switch to a more view oriented system
         let mut t = inp[0].clone();
-        t.shape.expand(self.0, self.1);
-        t.shape.views.last_mut().unwrap().strides.insert(self.0, 0);
+        for (dim, size) in &self.0 {
+            t.shape.expand(*dim, *size);
+        }
         t
     }
 }
@@ -282,7 +283,7 @@ impl Operator for SumReduce {
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let mut shape_tracker = tensors[0].shape.clone();
         let a_idx = shape_tracker.index_fn();
-        let before_dim_shape: usize = shape_tracker.shape().iter().take(self.0).product();
+        let dim_stride = shape_tracker.views.last().unwrap().strides[self.0]; // This is probably wrong
         let dim_size = shape_tracker.shape()[self.0];
 
         let mut result = vec![
@@ -297,14 +298,16 @@ impl Operator for SumReduce {
         ];
 
         for (i, result) in result.iter_mut().enumerate() {
+            let i = (a_idx)(i * dim_size);
             for j in 0..dim_size {
-                *result += tensors[0].data[(a_idx)(i + before_dim_shape * j)];
+                *result += tensors[0].data[i + dim_stride * j];
             }
         }
 
         let mut prev_shape = shape_tracker.shape().clone();
         prev_shape.remove(self.0);
         shape_tracker.reshape(prev_shape);
+
         Tensor {
             data: result,
             shape: shape_tracker,
@@ -321,7 +324,7 @@ impl Operator for MaxReduce {
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let mut shape_tracker = tensors[0].shape.clone();
         let a_idx = shape_tracker.index_fn();
-        let before_dim_shape: usize = shape_tracker.shape().iter().take(self.0).product();
+        let dim_stride = shape_tracker.views.last().unwrap().strides[self.0]; // This is probably wrong
         let dim_size = shape_tracker.shape()[self.0];
 
         let mut result: Vec<f32> = vec![
@@ -336,8 +339,9 @@ impl Operator for MaxReduce {
         ];
 
         for (i, result) in result.iter_mut().enumerate() {
+            let i = (a_idx)(i * dim_size);
             for j in 0..dim_size {
-                *result = result.max(tensors[0].data[(a_idx)(i + before_dim_shape * j)]);
+                *result = (*result).max(tensors[0].data[i + dim_stride * j]);
             }
         }
 
@@ -401,7 +405,8 @@ mod tests {
         let d_a = d_dev.tensor([1., 2., 3.]);
         let d_b: dfdx::tensor::Tensor<Rank2<3, 2>, f32, Cpu> = d_a.broadcast();
 
-        assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
+        let r = b.retrieve().unwrap().real_data();
+        assert_close_data(&r, &d_b.as_vec());
     }
 
     // Unary op tests
@@ -412,7 +417,7 @@ mod tests {
         let mut cx = Graph::new();
         let a = cx.new_tensor::<R1<3>>();
         a.set(vec![1., 2., 3.]);
-        let b = a.recip();
+        let b = a.log_2();
         cx.execute();
 
         assert_close_data(
@@ -430,7 +435,7 @@ mod tests {
         let mut cx = Graph::new();
         let a = cx.new_tensor::<R1<3>>();
         a.set(vec![1., 2., 3.]);
-        let b = a.recip();
+        let b = a.exp_2();
         cx.execute();
 
         assert_close_data(
@@ -609,5 +614,64 @@ mod tests {
         let d_b = d_a.max::<_, dfdx::shapes::Axis<1>>();
 
         assert_close_data(&b.retrieve().unwrap().real_data(), &d_b.as_vec());
+    }
+
+    // Other tests (matmul, batch matmul, etc.)
+    #[test]
+    fn test_matrix_vector() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = cx.new_tensor::<R2<3, 2>>();
+        b.set(vec![1., 2., 3., 1., 2., 3.]);
+        let c = a.matmul(b);
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1., 2., 3.]);
+        let d_b = d_dev.tensor([[1., 2.], [3., 1.], [2., 3.]]);
+        let d_c = d_a.matmul(d_b);
+
+        let r = c.retrieve().unwrap();
+        assert_close_data(&r.real_data(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_matmul() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<2, 3>>();
+        a.set(vec![1., 2., 3., 1., 2., 3.]);
+        let b = cx.new_tensor::<R2<3, 3>>();
+        b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
+        let c = a.matmul(b);
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
+        let d_b = d_dev.tensor([[1., 2., 3.], [1., 2., 3.], [1., 2., 3.]]);
+        let d_c = d_a.matmul(d_b);
+
+        let r = c.retrieve().unwrap();
+        assert_close_data(&r.real_data(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_batch_matmul() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R3<2, 3, 1>>();
+        a.set(vec![1., 2., 3., 1., 2., 3.]);
+        let b = cx.new_tensor::<R2<1, 4>>();
+        b.set(vec![1., 2., 3., 1.]);
+        let c = a.matmul(b);
+
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([[[1.], [2.], [3.]], [[1.], [2.], [3.]]]);
+        let d_b = d_dev.tensor([[1., 2., 3., 1.]]);
+        let d_c = d_a.matmul(d_b);
+
+        let r = c.retrieve().unwrap();
+        assert_close_data(&r.real_data(), &d_c.as_vec());
     }
 }

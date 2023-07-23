@@ -117,9 +117,14 @@ impl<S: ConstShape> GraphTensor<S> {
         S: BroadcastShapeTo<Dst, Ax>,
     {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let dim = Ax::as_array().into_iter().next().unwrap() as usize;
+        let new_shape = Dst::realized_shape();
         let new_id = graph
-            .add_op(op::Expand(dim, Dst::realized_shape()[dim]))
+            .add_op(op::Expand(
+                Ax::as_array()
+                    .into_iter()
+                    .map(|i| (i as usize, new_shape[i as usize]))
+                    .collect(),
+            ))
             .input(self.id, S::realized_shape())
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
@@ -181,11 +186,27 @@ impl<const A: usize, const B: usize> GraphTensor<R2<A, B>> {
 // AxAB -> B (Don't know if this is correct)
 impl<const A: usize> GraphTensor<R1<A>> {
     pub fn matmul<const B: usize>(self, rhs: GraphTensor<R2<A, B>>) -> GraphTensor<R1<B>> {
-        // Broadcasted Multiply
-        let mul = self.expand::<R3<A, 1, B>, _>() * rhs.expand::<R3<A, 1, B>, _>();
+        let s: GraphTensor<R2<1, A>> = self.expand();
+
+        // Run normal matmul
+        let r = s.matmul(rhs);
 
         // Sum Reduce
-        mul.sum_reduce::<_, Axis<0>>().sum_reduce::<_, Axis<0>>()
+        r.sum_reduce::<_, Axis<0>>()
+    }
+}
+
+// ABCxCD -> ABD
+impl<const A: usize, const B: usize, const C: usize> GraphTensor<R3<A, B, C>> {
+    pub fn matmul<const D: usize>(self, rhs: GraphTensor<R2<C, D>>) -> GraphTensor<R3<A, B, D>> {
+        // Reshape
+        let w: GraphTensor<R2<D, C>> = rhs.permute::<_, _, Axes2<1, 0>>();
+
+        // Broadcasted Multiply
+        let mul = self.expand::<R4<A, B, D, C>, _>() * w.expand::<R4<A, B, D, C>, _>();
+
+        // Sum Reduce
+        mul.sum_reduce::<_, Axis<3>>()
     }
 }
 

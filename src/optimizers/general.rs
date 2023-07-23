@@ -90,8 +90,8 @@ impl GraphOptimizer for CSE {
                 srcs.sort();
 
                 if let Some(other_node) = srcs_set.get(&srcs) {
-                    if graph.graph.node_weight(node).unwrap().0.name()
-                        == graph.graph.node_weight(*other_node).unwrap().0.name()
+                    if format!("{:?}", graph.graph.node_weight(node).unwrap())
+                        == format!("{:?}", graph.graph.node_weight(*other_node).unwrap())
                     {
                         // Carry over outgoing edges from node to other_node
                         for (weight, target) in graph
