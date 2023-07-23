@@ -203,7 +203,7 @@ pub fn display_graph(
         )
     );
     if let Err(e) = webbrowser::open(&url) {
-        println!("Error displaying graph: {:?}", e);
+        panic!("Error displaying graph: {:?}", e);
     }
 }
 

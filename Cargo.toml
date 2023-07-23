@@ -11,12 +11,13 @@ license = "MIT OR Apache-2.0"
 itertools = "0.11.0"
 matrixmultiply = "0.3.7"
 num-traits = "0.2.16"
-petgraph = {path="./petgraph"}
+petgraph = {path="./resources/petgraph"}
 rand = "0.8.5"
 strum = { version = "0.25.0", features = ["derive"] }
 urlencoding = "2.1.2"
 webbrowser = "0.8.10"
 dyn-clone = "1.0.12"
+cudarc = "0.9.12"
 
 [dev-dependencies]
 dfdx = "0.12.1"
