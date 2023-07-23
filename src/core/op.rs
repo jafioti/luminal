@@ -49,7 +49,7 @@ impl Operator for Reshape {
 }
 
 #[derive(Debug, Clone)]
-pub struct Expand(pub Vec<(usize, usize)>);
+pub struct Expand(pub usize, pub usize);
 impl Operator for Expand {
     fn name(&self) -> &'static str {
         "Expand"
@@ -57,9 +57,7 @@ impl Operator for Expand {
     fn process(&self, inp: Vec<&Tensor>) -> Tensor {
         // We don't need to clone here! We should switch to a more view oriented system
         let mut t = inp[0].clone();
-        for (dim, size) in &self.0 {
-            t.shape.expand(*dim, *size);
-        }
+        t.shape.expand(self.0, self.1);
         t
     }
 }

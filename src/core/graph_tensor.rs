@@ -118,15 +118,17 @@ impl<S: ConstShape> GraphTensor<S> {
     {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_shape = Dst::realized_shape();
-        let new_id = graph
-            .add_op(op::Expand(
-                Ax::as_array()
-                    .into_iter()
-                    .map(|i| (i as usize, new_shape[i as usize]))
-                    .collect(),
-            ))
-            .input(self.id, S::realized_shape())
-            .finish();
+
+        let mut new_id = self.id;
+        for (dim, size) in Ax::as_array()
+            .into_iter()
+            .map(|i| (i as usize, new_shape[i as usize]))
+        {
+            new_id = graph
+                .add_op(op::Expand(dim, size))
+                .input(new_id, S::realized_shape())
+                .finish();
+        }
         GraphTensor::from_id(new_id, self.graph_ref)
     }
 
