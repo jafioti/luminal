@@ -7,6 +7,10 @@ license = "MIT OR Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = []
+cuda = ["dep:cudarc"]
+
 [dependencies]
 itertools = "0.11.0"
 matrixmultiply = "0.3.7"
@@ -17,7 +21,7 @@ strum = { version = "0.25.0", features = ["derive"] }
 urlencoding = "2.1.2"
 webbrowser = "0.8.10"
 dyn-clone = "1.0.12"
-cudarc = "0.9.12"
+cudarc = {version="0.9.12", optional=true}
 
 [dev-dependencies]
 dfdx = "0.12.1"

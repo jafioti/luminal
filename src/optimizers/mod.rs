@@ -3,5 +3,8 @@ mod general;
 pub use general::*;
 mod cpu;
 pub use cpu::*;
+
+#[cfg(feature = "cuda")]
 mod cuda;
+#[cfg(feature = "cuda")]
 pub use cuda::*;
