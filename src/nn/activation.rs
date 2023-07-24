@@ -57,7 +57,7 @@ mod tests {
         let unoptimized_b = b.retrieve().unwrap();
         let unoptimized_batch_out = batch_out.retrieve().unwrap();
 
-        cx.optimize(<(CPUOptimizer, GeneralOpt)>::default());
+        cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
         cx.execute();
 
         assert_close(&unoptimized_b, &b.retrieve().unwrap());

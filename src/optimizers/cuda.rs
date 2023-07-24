@@ -952,7 +952,7 @@ mod tests {
         let b = a.exp_2().log_2();
         b.mark();
 
-        cx.optimize(<(GeneralOpt, CudaOptimizer)>::default());
+        cx.optimize(<(GenericOptimizer, CudaOptimizer)>::default());
         cx.execute();
 
         assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &[1., 2., 3.]);
@@ -1202,7 +1202,7 @@ mod tests {
         let unoptimized_b = b.retrieve().unwrap();
         let unoptimized_batch_out = batch_out.retrieve().unwrap();
 
-        cx.optimize(<(CudaOptimizer, GeneralOpt)>::default());
+        cx.optimize(<(CudaOptimizer, GenericOptimizer)>::default());
         cx.display_graph();
         cx.execute();
 

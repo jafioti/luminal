@@ -166,7 +166,7 @@ mod tests {
 
         let unoptimized_c = c.retrieve().unwrap();
 
-        cx.optimize(<(CPUOptimizer, GeneralOpt)>::default());
+        cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
         cx.execute();
 
         assert_close_data(

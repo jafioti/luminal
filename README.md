@@ -19,7 +19,7 @@ b.set(vec![1.0, 2.0, 3.0, 3.0]);
 c.mark();
 
 // Optimize and run graph
-cx.optimize(GeneralOptimizer::default());
+cx.optimize(GenericOptimizer::default());
 cx.execute();
 
 // Get result

@@ -6,7 +6,7 @@ use petgraph::{visit::EdgeRef, Direction};
 use crate::prelude::*;
 
 /// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
-pub type GeneralOpt = (UnarySequentialOpt, CSE);
+pub type GenericOptimizer = (UnarySequentialOpt, CSE);
 
 /// Eliminate complementary unary sequential operations like `x.log().exp()`
 #[derive(Default)]
