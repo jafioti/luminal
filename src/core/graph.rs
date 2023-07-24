@@ -53,7 +53,7 @@ impl Graph {
             graph_ref: self,
             _phantom: Default::default(),
         };
-        self.no_delete.insert(tensor.id);
+        self.no_delete.insert(tensor.id); // This gets set because we want to keep inputs around to run the graph multiple times
         tensor
     }
 

@@ -45,8 +45,6 @@ fn test_matmul() {
     b.set(vec![1.0, 2.0, 3.0]);
     c.set(vec![1.0, 2.0, 3.0, 3.0]);
 
-    // cx.display_graph();
-
     cx.execute();
 
     let unoptimized_a = a.retrieve().unwrap();

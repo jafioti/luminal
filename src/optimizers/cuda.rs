@@ -60,9 +60,11 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
             }
 
             // This isn't a great way to do this since we don't actually want to save the output of the copy node, just mark it to get a copy back node right below
-            if graph.no_delete.contains(&input_node) {
-                graph.no_delete.insert(copy_node);
-            }
+            // This is an issue with no_delete marking tensors to not be deleted, but also marking the ones we want to retreive. In the input case, we almost definitely don't want to retrieve them but we don't want them deleted.
+            // The solution is to have another hashset for marking nodes to be retrieved, seperate from no_delete
+            // if graph.no_delete.contains(&input_node) {
+            //     graph.no_delete.insert(copy_node);
+            // }
         }
 
         // Copy from device
@@ -889,11 +891,15 @@ extern \"C\" __global__ void maxreduce_kernel(float *out, const float *inp, cons
 
 #[cfg(test)]
 mod tests {
-    use dfdx::prelude::*;
+    use dfdx::prelude::{Module as DfdxModule, *};
     use itertools::Itertools;
 
     use super::CudaOptimizer;
-    use crate::{prelude::*, tests::assert_close_data};
+    use crate::{
+        nn::{activation::ReLU, linear::Linear},
+        prelude::{Module, *},
+        tests::{assert_close, assert_close_data},
+    };
 
     #[test]
     fn test_log2() {
@@ -1169,5 +1175,63 @@ mod tests {
         let d_b = d_a.max::<_, dfdx::shapes::Axis<1>>();
 
         assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_relu_and_linear() {
+        // Test single and batch, unoptimized and optimized
+        let mut cx = Graph::new();
+        let batch = cx.new_tensor::<R2<2, 3>>();
+        let a = cx.new_tensor::<R1<3>>();
+
+        let model: (Linear<3, 4>, ReLU, Linear<4, 2>) = InitModule::initialize(&mut cx);
+        model
+            .0
+            .weight
+            .set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
+        model.2.weight.set(vec![1., 2., 3., 1., 2., 3., 1., 2.]);
+        let b = model.forward(a);
+        let batch_out = model.forward(batch);
+
+        a.set(vec![1.0, 2.0, 3.0]);
+        batch.set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+        b.mark();
+        batch_out.mark();
+        cx.execute();
+
+        let unoptimized_b = b.retrieve().unwrap();
+        let unoptimized_batch_out = batch_out.retrieve().unwrap();
+
+        cx.optimize(<(CudaOptimizer, GeneralOpt)>::default());
+        cx.display_graph();
+        cx.execute();
+
+        assert_close(&unoptimized_b, &b.retrieve().unwrap());
+        assert_close(&unoptimized_batch_out, &batch_out.retrieve().unwrap());
+
+        // Test against dfdx
+        let dev = Cpu::default();
+        let mut model = <(
+            dfdx::nn::modules::builders::UnbiasedLinear<3, 4>,
+            dfdx::nn::modules::builders::ReLU,
+            dfdx::nn::modules::builders::UnbiasedLinear<4, 2>,
+        )>::build_on_device(&dev);
+        // Set weights
+        model.0.weight = dev
+            .tensor_from_vec(
+                vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.],
+                (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<4>),
+            )
+            .permute();
+        model.2.weight = dev
+            .tensor_from_vec(
+                vec![1., 2., 3., 1., 2., 3., 1., 2.],
+                (dfdx::shapes::Const::<4>, dfdx::shapes::Const::<2>),
+            )
+            .permute();
+        let a = dev.tensor_from_vec(vec![1.0, 2.0, 3.0], (dfdx::shapes::Const::<3>,));
+        let out = model.forward(a);
+
+        assert_close_data(&unoptimized_b.real_data().unwrap(), &out.as_vec());
     }
 }
