@@ -30,7 +30,10 @@ impl<S: ConstShape> GraphTensor<S> {
 
     /// Mark this tensor to be retrieved later
     pub fn mark(&self) {
-        unsafe { self.graph_ref.as_mut().unwrap().no_delete.insert(self.id) };
+        unsafe {
+            self.graph_ref.as_mut().unwrap().no_delete.insert(self.id);
+            self.graph_ref.as_mut().unwrap().to_retrieve.insert(self.id);
+        }
     }
 
     /// Get the value of the tensor (if the graph was executed)

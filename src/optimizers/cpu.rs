@@ -92,6 +92,7 @@ impl GraphOptimizer for CPUMatMulOptimizer {
             Graph::move_references(
                 &mut graph.id_remap,
                 &mut graph.no_delete,
+                &mut graph.to_retrieve,
                 sum_reduce,
                 new_op,
             );

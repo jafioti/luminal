@@ -53,6 +53,7 @@ impl GraphOptimizer for UnarySequentialOpt {
                     Graph::move_references(
                         &mut graph.id_remap,
                         &mut graph.no_delete,
+                        &mut graph.to_retrieve,
                         outgoing_target,
                         pre_node,
                     );
@@ -106,6 +107,7 @@ impl GraphOptimizer for CSE {
                         Graph::move_references(
                             &mut graph.id_remap,
                             &mut graph.no_delete,
+                            &mut graph.to_retrieve,
                             node,
                             *other_node,
                         );

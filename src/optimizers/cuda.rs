@@ -59,17 +59,14 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
                 graph.graph.remove_edge(edge_id);
             }
 
-            // This isn't a great way to do this since we don't actually want to save the output of the copy node, just mark it to get a copy back node right below
-            // This is an issue with no_delete marking tensors to not be deleted, but also marking the ones we want to retreive. In the input case, we almost definitely don't want to retrieve them but we don't want them deleted.
-            // The solution is to have another hashset for marking nodes to be retrieved, seperate from no_delete
-            // if graph.no_delete.contains(&input_node) {
-            //     graph.no_delete.insert(copy_node);
-            // }
+            if graph.to_retrieve.contains(&input_node) {
+                graph.to_retrieve.insert(copy_node);
+            }
         }
 
         // Copy from device
         for (output_node, output_shape) in graph
-            .no_delete
+            .to_retrieve
             .iter()
             .filter(|n| graph.graph.node_weight(**n).unwrap().0.name() != "Input")
             .map(|n| (*n, graph.graph.node_weight(*n).unwrap().1[0].clone()))
@@ -84,6 +81,7 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
             Graph::move_references(
                 &mut graph.id_remap,
                 &mut graph.no_delete,
+                &mut graph.to_retrieve,
                 output_node,
                 copy_node,
             );
@@ -1203,7 +1201,6 @@ mod tests {
         let unoptimized_batch_out = batch_out.retrieve().unwrap();
 
         cx.optimize(<(CudaOptimizer, GenericOptimizer)>::default());
-        cx.display_graph();
         cx.execute();
 
         assert_close(&unoptimized_b, &b.retrieve().unwrap());

@@ -19,6 +19,7 @@ pub struct Graph {
     #[allow(clippy::type_complexity)]
     pub(crate) graph: StableGraph<(Box<dyn Operator>, Vec<Vec<usize>>), u8>,
     pub(crate) no_delete: HashSet<NodeIndex>,
+    pub(crate) to_retrieve: HashSet<NodeIndex>,
 }
 
 impl Graph {
@@ -153,6 +154,7 @@ impl Graph {
     pub fn move_references(
         id_remap: &mut HashMap<NodeIndex, NodeIndex>,
         no_delete: &mut HashSet<NodeIndex<u32>>,
+        to_retrieve: &mut HashSet<NodeIndex<u32>>,
         src: NodeIndex,
         trg: NodeIndex,
     ) {
@@ -161,6 +163,10 @@ impl Graph {
         // Transfer no_delete
         if no_delete.remove(&src) {
             no_delete.insert(trg);
+        }
+        // Transfer to_retrieve
+        if to_retrieve.remove(&src) {
+            to_retrieve.insert(trg);
         }
     }
 
