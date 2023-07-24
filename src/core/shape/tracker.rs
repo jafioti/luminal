@@ -151,7 +151,7 @@ impl ShapeTracker {
         }
     }
 
-    pub fn index_fn(&self) -> impl Fn(usize) -> usize {
+    pub fn index_fn_node(&self) -> Node {
         // Get expression
         let mut idx = Node::variable(
             "idx".to_string(),
@@ -161,7 +161,11 @@ impl ShapeTracker {
         for view in self.views.iter().rev() {
             idx = expr_node(idx, &view.shape, &view.strides);
         }
+        idx
+    }
 
+    pub fn index_fn(&self) -> impl Fn(usize) -> usize {
+        let idx = self.index_fn_node();
         // Turn expression into function by unwrapping it into a series of function chains
         let node = &idx;
         let mut all_ops_and_nums = vec![];

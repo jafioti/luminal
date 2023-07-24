@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use cudarc::{
     driver::{CudaDevice, CudaSlice, LaunchAsync, LaunchConfig},
     nvrtc::compile_ptx_with_opts,
@@ -5,7 +7,10 @@ use cudarc::{
 use itertools::Itertools;
 use petgraph::visit::EdgeRef;
 
-use crate::{op::Operator, prelude::*};
+use crate::{
+    op::{MaxReduce, Operator, SumReduce},
+    prelude::*,
+};
 
 // Ops and optimizers specific to CUDA execution
 
@@ -95,6 +100,36 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
                 "Sin" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaSin),
                 "Sqrt" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaSqrt),
                 "Recip" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaRecip),
+                "Add" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaAdd),
+                "Sub" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaSub),
+                "Mul" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMul),
+                "Div" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaDiv),
+                "Max" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMax),
+                "Mod" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMod),
+                "SumReduce" => {
+                    let dim = graph
+                        .graph
+                        .node_weight(id)
+                        .unwrap()
+                        .0
+                        .as_any()
+                        .downcast_ref::<SumReduce>()
+                        .unwrap()
+                        .0;
+                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaSumReduce(dim));
+                }
+                "MaxReduce" => {
+                    let dim = graph
+                        .graph
+                        .node_weight(id)
+                        .unwrap()
+                        .0
+                        .as_any()
+                        .downcast_ref::<MaxReduce>()
+                        .unwrap()
+                        .0;
+                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMaxReduce(dim));
+                }
                 _ => {}
             };
         }
@@ -109,7 +144,9 @@ impl Operator for CudaCopyToDevice {
     fn name(&self) -> &'static str {
         "CudaCopyToDevice"
     }
-
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     fn process(&self, inp: Vec<&Tensor>) -> Tensor {
         let dev = CudaDevice::new(0).unwrap();
         let cpu_data = inp[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
@@ -130,7 +167,9 @@ impl Operator for CudaCopyFromDevice {
     fn name(&self) -> &'static str {
         "CudaCopyFromDevice"
     }
-
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     fn process(&self, inp: Vec<&Tensor>) -> Tensor {
         let dev = CudaDevice::new(0).unwrap();
         let cuda_data = inp[0]
@@ -153,6 +192,9 @@ pub struct CudaLog2;
 impl Operator for CudaLog2 {
     fn name(&self) -> &'static str {
         "CudaLog2"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let inp = tensors[0]
@@ -193,6 +235,9 @@ impl Operator for CudaExp2 {
     fn name(&self) -> &'static str {
         "CudaExp2"
     }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let inp = tensors[0]
             .data
@@ -231,6 +276,9 @@ pub struct CudaSin;
 impl Operator for CudaSin {
     fn name(&self) -> &'static str {
         "CudaSin"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let inp = tensors[0]
@@ -271,6 +319,9 @@ impl Operator for CudaSqrt {
     fn name(&self) -> &'static str {
         "CudaSqrt"
     }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let inp = tensors[0]
             .data
@@ -310,6 +361,9 @@ impl Operator for CudaRecip {
     fn name(&self) -> &'static str {
         "CudaRecip"
     }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let inp = tensors[0]
             .data
@@ -343,9 +397,500 @@ extern \"C\" __global__ void recip_kernel(float *out, const float *inp, int nume
     }
 }
 
+// Binary Ops
+
+#[derive(Debug, Clone)]
+pub struct CudaAdd;
+impl Operator for CudaAdd {
+    fn name(&self) -> &'static str {
+        "CudaAdd"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
+        let a = tensors[0]
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let b = tensors[1]
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let inp_size: usize = tensors[0].shape.shape().iter().product();
+        let a_index_fn_exp = tensors[0].shape.index_fn_node().to_string_no_range();
+        let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
+        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
+        let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
+        let ptx = compile_ptx_with_opts(
+            format!(
+                "
+extern \"C\" __global__ void add_kernel(float *out, const float *a, const float *b, int numel) {{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int a_idx = {a_index_fn_exp};
+    int b_idx = {b_index_fn_exp};
+    int o_idx = {o_index_fn_exp};
+    if (idx < numel) {{
+        out[o_idx] = a[a_idx] + b[b_idx];
+    }}
+}}"
+            ),
+            Default::default(),
+        )
+        .unwrap();
+        let dev = CudaDevice::new(0).unwrap();
+        dev.load_ptx(ptx, "add", &["add_kernel"]).unwrap();
+        let f = dev.get_func("add", "add_kernel").unwrap();
+
+        let mut out = unsafe { dev.alloc::<f32>(inp_size) }.unwrap();
+        let cfg = LaunchConfig::for_num_elems(inp_size as u32);
+        unsafe { f.launch(cfg, (&mut out, a, b, inp_size as i32)) }.unwrap();
+
+        Tensor {
+            data: Box::new(out),
+            shape: tracker,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CudaSub;
+impl Operator for CudaSub {
+    fn name(&self) -> &'static str {
+        "CudaSub"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
+        let a = tensors[0]
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let b = tensors[1]
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let inp_size: usize = tensors[0].shape.shape().iter().product();
+        let a_index_fn_exp = tensors[0].shape.index_fn_node().to_string_no_range();
+        let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
+        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
+        let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
+        let ptx = compile_ptx_with_opts(
+            format!(
+                "
+extern \"C\" __global__ void sub_kernel(float *out, const float *a, const float *b, int numel) {{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int a_idx = {a_index_fn_exp};
+    int b_idx = {b_index_fn_exp};
+    int o_idx = {o_index_fn_exp};
+    if (idx < numel) {{
+        out[o_idx] = a[a_idx] - b[b_idx];
+    }}
+}}"
+            ),
+            Default::default(),
+        )
+        .unwrap();
+        let dev = CudaDevice::new(0).unwrap();
+        dev.load_ptx(ptx, "sub", &["sub_kernel"]).unwrap();
+        let f = dev.get_func("sub", "sub_kernel").unwrap();
+
+        let mut out = unsafe { dev.alloc::<f32>(inp_size) }.unwrap();
+        let cfg = LaunchConfig::for_num_elems(inp_size as u32);
+        unsafe { f.launch(cfg, (&mut out, a, b, inp_size as i32)) }.unwrap();
+
+        Tensor {
+            data: Box::new(out),
+            shape: tracker,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CudaMul;
+impl Operator for CudaMul {
+    fn name(&self) -> &'static str {
+        "CudaMul"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
+        let a = tensors[0]
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let b = tensors[1]
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let inp_size: usize = tensors[0].shape.shape().iter().product();
+        let a_index_fn_exp = tensors[0].shape.index_fn_node().to_string_no_range();
+        let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
+        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
+        let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
+        let ptx = compile_ptx_with_opts(
+            format!(
+                "
+extern \"C\" __global__ void mul_kernel(float *out, const float *a, const float *b, int numel) {{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int a_idx = {a_index_fn_exp};
+    int b_idx = {b_index_fn_exp};
+    int o_idx = {o_index_fn_exp};
+    if (idx < numel) {{
+        out[o_idx] = a[a_idx] * b[b_idx];
+    }}
+}}"
+            ),
+            Default::default(),
+        )
+        .unwrap();
+        let dev = CudaDevice::new(0).unwrap();
+        dev.load_ptx(ptx, "mul", &["mul_kernel"]).unwrap();
+        let f = dev.get_func("mul", "mul_kernel").unwrap();
+
+        let mut out = unsafe { dev.alloc::<f32>(inp_size) }.unwrap();
+        let cfg = LaunchConfig::for_num_elems(inp_size as u32);
+        unsafe { f.launch(cfg, (&mut out, a, b, inp_size as i32)) }.unwrap();
+
+        Tensor {
+            data: Box::new(out),
+            shape: tracker,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CudaDiv;
+impl Operator for CudaDiv {
+    fn name(&self) -> &'static str {
+        "CudaDiv"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
+        let a = tensors[0]
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let b = tensors[1]
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let inp_size: usize = tensors[0].shape.shape().iter().product();
+        let a_index_fn_exp = tensors[0].shape.index_fn_node().to_string_no_range();
+        let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
+        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
+        let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
+        let ptx = compile_ptx_with_opts(
+            format!(
+                "
+extern \"C\" __global__ void div_kernel(float *out, const float *a, const float *b, int numel) {{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int a_idx = {a_index_fn_exp};
+    int b_idx = {b_index_fn_exp};
+    int o_idx = {o_index_fn_exp};
+    if (idx < numel) {{
+        out[o_idx] = a[a_idx] / b[b_idx];
+    }}
+}}"
+            ),
+            Default::default(),
+        )
+        .unwrap();
+        let dev = CudaDevice::new(0).unwrap();
+        dev.load_ptx(ptx, "div", &["div_kernel"]).unwrap();
+        let f = dev.get_func("div", "div_kernel").unwrap();
+
+        let mut out = unsafe { dev.alloc::<f32>(inp_size) }.unwrap();
+        let cfg = LaunchConfig::for_num_elems(inp_size as u32);
+        unsafe { f.launch(cfg, (&mut out, a, b, inp_size as i32)) }.unwrap();
+
+        Tensor {
+            data: Box::new(out),
+            shape: tracker,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CudaMax;
+impl Operator for CudaMax {
+    fn name(&self) -> &'static str {
+        "CudaMax"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
+        let a = tensors[0]
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let b = tensors[1]
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let inp_size: usize = tensors[0].shape.shape().iter().product();
+        let a_index_fn_exp = tensors[0].shape.index_fn_node().to_string_no_range();
+        let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
+        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
+        let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
+        let ptx = compile_ptx_with_opts(
+            format!(
+                "
+extern \"C\" __global__ void max_kernel(float *out, const float *a, const float *b, int numel) {{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int a_idx = {a_index_fn_exp};
+    int b_idx = {b_index_fn_exp};
+    int o_idx = {o_index_fn_exp};
+    if (idx < numel) {{
+        out[o_idx] = max(a[a_idx], b[b_idx]);
+    }}
+}}"
+            ),
+            Default::default(),
+        )
+        .unwrap();
+        let dev = CudaDevice::new(0).unwrap();
+        dev.load_ptx(ptx, "max", &["max_kernel"]).unwrap();
+        let f = dev.get_func("max", "max_kernel").unwrap();
+
+        let mut out = unsafe { dev.alloc::<f32>(inp_size) }.unwrap();
+        let cfg = LaunchConfig::for_num_elems(inp_size as u32);
+        unsafe { f.launch(cfg, (&mut out, a, b, inp_size as i32)) }.unwrap();
+
+        Tensor {
+            data: Box::new(out),
+            shape: tracker,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CudaMod;
+impl Operator for CudaMod {
+    fn name(&self) -> &'static str {
+        "CudaMod"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
+        let a = tensors[0]
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let b = tensors[1]
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let inp_size: usize = tensors[0].shape.shape().iter().product();
+        let a_index_fn_exp = tensors[0].shape.index_fn_node().to_string_no_range();
+        let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
+        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
+        let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
+        let ptx = compile_ptx_with_opts(
+            format!(
+                "
+extern \"C\" __global__ void mod_kernel(float *out, const float *a, const float *b, int numel) {{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int a_idx = {a_index_fn_exp};
+    int b_idx = {b_index_fn_exp};
+    int o_idx = {o_index_fn_exp};
+    if (idx < numel) {{
+        out[o_idx] = fmod(a[a_idx], b[b_idx]);
+    }}
+}}"
+            ),
+            Default::default(),
+        )
+        .unwrap();
+        let dev = CudaDevice::new(0).unwrap();
+        dev.load_ptx(ptx, "mod", &["mod_kernel"]).unwrap();
+        let f = dev.get_func("mod", "mod_kernel").unwrap();
+
+        let mut out = unsafe { dev.alloc::<f32>(inp_size) }.unwrap();
+        let cfg = LaunchConfig::for_num_elems(inp_size as u32);
+        unsafe { f.launch(cfg, (&mut out, a, b, inp_size as i32)) }.unwrap();
+
+        Tensor {
+            data: Box::new(out),
+            shape: tracker,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CudaSumReduce(pub usize);
+impl Operator for CudaSumReduce {
+    fn name(&self) -> &'static str {
+        "CudaSumReduce"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
+        let inp = tensors[0]
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let mut shape_tracker = tensors[0].shape.clone();
+        let inp_size: usize = tensors[0].shape.shape().iter().product();
+        let inp_idx_exp = tensors[0].shape.index_fn_node().to_string_no_range();
+        let dim_stride = shape_tracker.views.last().unwrap().strides[self.0]; // This is probably wrong
+        let dim_size = shape_tracker.shape()[self.0];
+
+        let ptx = compile_ptx_with_opts(
+            format!("
+extern \"C\" __global__ void sumreduce_kernel(float *out, const float *inp, const int dim_size, const int dim_stride, int numel) {{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    if (i < numel) {{
+        int idx = i * dim_size;
+        int a_idx = {inp_idx_exp};
+        for (int j = 0; j < dim_size; j++) {{
+            out[i] += inp[a_idx + (dim_stride * j)];
+        }}
+    }}
+}}"),
+            Default::default(),
+        )
+        .unwrap();
+        let dev = CudaDevice::new(0).unwrap();
+        dev.load_ptx(ptx, "sumreduce", &["sumreduce_kernel"])
+            .unwrap();
+        let f = dev.get_func("sumreduce", "sumreduce_kernel").unwrap();
+
+        let num_result_elem = shape_tracker
+            .shape()
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != self.0)
+            .map(|(_, sh)| sh)
+            .product();
+        let mut out = dev.alloc_zeros::<f32>(num_result_elem).unwrap();
+        let cfg = LaunchConfig::for_num_elems(num_result_elem as u32);
+        unsafe {
+            f.launch(
+                cfg,
+                (
+                    &mut out,
+                    inp,
+                    dim_size as i32,
+                    dim_stride as i32,
+                    inp_size as i32,
+                ),
+            )
+        }
+        .unwrap();
+
+        let mut prev_shape = shape_tracker.shape().clone();
+        prev_shape.remove(self.0);
+        shape_tracker.reshape(prev_shape);
+
+        Tensor {
+            data: Box::new(out),
+            shape: shape_tracker,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CudaMaxReduce(pub usize);
+impl Operator for CudaMaxReduce {
+    fn name(&self) -> &'static str {
+        "CudaMaxReduce"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
+        let inp = tensors[0]
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let mut shape_tracker = tensors[0].shape.clone();
+        let inp_size: usize = tensors[0].shape.shape().iter().product();
+        let inp_idx_exp = tensors[0].shape.index_fn_node().to_string_no_range();
+        let dim_stride = shape_tracker.views.last().unwrap().strides[self.0]; // This is probably wrong
+        let dim_size = shape_tracker.shape()[self.0];
+
+        let ptx = compile_ptx_with_opts(
+            format!("
+extern \"C\" __global__ void maxreduce_kernel(float *out, const float *inp, const int dim_size, const int dim_stride, int numel) {{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    if (i < numel) {{
+        int idx = i * dim_size;
+        int a_idx = {inp_idx_exp};
+        for (int j = 0; j < dim_size; j++) {{
+            out[i] = max(out[i], inp[a_idx + (dim_stride * j)]);
+        }}
+    }}
+}}"),
+            Default::default(),
+        )
+        .unwrap();
+        let dev = CudaDevice::new(0).unwrap();
+        dev.load_ptx(ptx, "maxreduce", &["maxreduce_kernel"])
+            .unwrap();
+        let f = dev.get_func("maxreduce", "maxreduce_kernel").unwrap();
+
+        let num_result_elem = shape_tracker
+            .shape()
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != self.0)
+            .map(|(_, sh)| sh)
+            .product();
+        let mut out = dev.alloc_zeros::<f32>(num_result_elem).unwrap();
+        let cfg = LaunchConfig::for_num_elems(num_result_elem as u32);
+        unsafe {
+            f.launch(
+                cfg,
+                (
+                    &mut out,
+                    inp,
+                    dim_size as i32,
+                    dim_stride as i32,
+                    inp_size as i32,
+                ),
+            )
+        }
+        .unwrap();
+
+        let mut prev_shape = shape_tracker.shape().clone();
+        prev_shape.remove(self.0);
+        shape_tracker.reshape(prev_shape);
+
+        Tensor {
+            data: Box::new(out),
+            shape: shape_tracker,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use dfdx::prelude::*;
+    use itertools::Itertools;
 
     use super::CudaOptimizer;
     use crate::{prelude::*, tests::assert_close_data};
@@ -454,6 +999,174 @@ mod tests {
         let d_dev = Cpu::default();
         let d_a = d_dev.tensor([1., 2., 3.]);
         let d_b = d_a.sqrt();
+
+        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_add() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = cx.new_tensor::<R1<3>>();
+        b.set(vec![1., 2., 3.]);
+        let c = a + b;
+        c.mark();
+
+        cx.optimize(CudaOptimizer::default());
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1., 2., 3.]);
+        let d_b = d_dev.tensor([1., 2., 3.]);
+        let d_c = d_a + d_b;
+
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_sub() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = cx.new_tensor::<R1<3>>();
+        b.set(vec![1., 2., 3.]);
+        let c = a - b;
+        c.mark();
+
+        cx.optimize(CudaOptimizer::default());
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1., 2., 3.]);
+        let d_b = d_dev.tensor([1., 2., 3.]);
+        let d_c = d_a - d_b;
+
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_mul() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = cx.new_tensor::<R1<3>>();
+        b.set(vec![1., 2., 3.]);
+        let c = a * b;
+        c.mark();
+
+        cx.optimize(CudaOptimizer::default());
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1., 2., 3.]);
+        let d_b = d_dev.tensor([1., 2., 3.]);
+        let d_c = d_a * d_b;
+
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_div() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = cx.new_tensor::<R1<3>>();
+        b.set(vec![1., 2., 3.]);
+        let c = a / b;
+        c.mark();
+
+        cx.optimize(CudaOptimizer::default());
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1., 2., 3.]);
+        let d_b = d_dev.tensor([1., 2., 3.]);
+        let d_c = d_a / d_b;
+
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_max() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = cx.new_tensor::<R1<3>>();
+        b.set(vec![1., 2., 3.]);
+        let c = a.max(b);
+        c.mark();
+
+        cx.optimize(CudaOptimizer::default());
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1., 2., 3.]);
+        let d_b = d_dev.tensor([1., 2., 3.]);
+        let d_c = d_a.maximum(d_b);
+
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_mod() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = cx.new_tensor::<R1<3>>();
+        b.set(vec![1., 2., 3.]);
+        let c = a % b;
+        c.mark();
+
+        cx.optimize(CudaOptimizer::default());
+        cx.execute();
+
+        // No dfdx equivalent
+
+        assert_close_data(
+            &c.retrieve().unwrap().real_data().unwrap(),
+            &[1., 2., 3.]
+                .into_iter()
+                .zip([1., 2., 3.].into_iter())
+                .map(|(a, b)| a % b)
+                .collect_vec(),
+        );
+    }
+
+    // Reduction op tests
+
+    #[test]
+    fn test_sum_reduce() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<2, 3>>();
+        a.set(vec![1., 2., 3., 1., 2., 3.]);
+        let b = a.sum_reduce::<_, crate::prelude::Axis<1>>();
+        b.mark();
+
+        cx.optimize(CudaOptimizer::default());
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
+        let d_b = d_a.sum::<_, dfdx::shapes::Axis<1>>();
+
+        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_max_reduce() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<2, 3>>();
+        a.set(vec![1., 2., 3., 1., 2., 3.]);
+        let b = a.max_reduce::<_, crate::prelude::Axis<1>>();
+        b.mark();
+
+        cx.optimize(CudaOptimizer::default());
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
+        let d_b = d_a.max::<_, dfdx::shapes::Axis<1>>();
 
         assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
     }

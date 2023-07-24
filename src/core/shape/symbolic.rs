@@ -65,6 +65,33 @@ pub struct Node {
 }
 
 impl Node {
+    pub fn to_string_no_range(&self) -> String {
+        match &self.node_type {
+            NodeType::Num => self.b.to_string(),
+            NodeType::Variable(n) => n.to_string(),
+            NodeType::OpNode(o, a) => format!(
+                "({} {} {})",
+                a.to_string_no_range(),
+                match o {
+                    Op::Div => "/",
+                    Op::Mod => "%",
+                    Op::Mul => "*",
+                },
+                self.b
+            ),
+            NodeType::RedNode(o, n) => format!(
+                "({})",
+                n.iter()
+                    .map(|i| i.to_string_no_range())
+                    .sorted()
+                    .collect::<Vec<_>>()
+                    .join(match o {
+                        RedOp::Sum => " + ",
+                    })
+            ),
+        }
+    }
+
     pub fn variable(name: String, min: i32, max: i32) -> Self {
         Node {
             b: min,

@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use itertools::Itertools;
 use petgraph::visit::EdgeRef;
 
@@ -110,6 +112,9 @@ pub struct CPUMatMul2D;
 impl Operator for CPUMatMul2D {
     fn name(&self) -> &'static str {
         "CPUMatMul2D"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 
     fn process(&self, inp: Vec<&Tensor>) -> Tensor {
