@@ -57,10 +57,7 @@ Once you've written all your computation code, run `cx.display_graph()` to see t
 Currently luminal is extremely alpha. Please don't use this in prod.
 
 Some things on the roadmap:
-- Establish comprehensive test suite against PyTorch
-- Create NN Module API
-- Write CUDA primitive op kernels
-- Write CUDA optimizer
+- Write common sense cuda ops and optimizer (matmuls, mul-add, etc.)
 - Create reasonable library of NN modules
 - Build benchmarking suite to test against other libs
 - Write specialized CUDA kernels for full transformer architecture (FlashAttention, etc.)
