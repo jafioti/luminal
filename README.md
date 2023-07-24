@@ -10,7 +10,7 @@ let mut cx = Graph::new();
 let a = cx.new_tensor::<R2<3, 1>>();
 let b = cx.new_tensor::<R2<1, 4>>();
 
-// Do match
+// Do stuff...
 let c = a.matmul(b);
 
 // Set inputs and mark outputs
