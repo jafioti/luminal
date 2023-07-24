@@ -6,7 +6,7 @@ use petgraph::{visit::EdgeRef, Direction};
 use crate::prelude::*;
 
 /// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
-pub type GenericOptimizer = (UnarySequentialOpt, CSE);
+pub type GenericOptimizer = (UnarySequentialOpt, CSE, RemoveUnusedNodes);
 
 /// Eliminate complementary unary sequential operations like `x.log().exp()`
 #[derive(Default)]
@@ -122,6 +122,32 @@ impl GraphOptimizer for CSE {
 
             if !eliminated {
                 break;
+            }
+        }
+    }
+}
+
+/// Remove unused nodes
+#[derive(Default)]
+pub struct RemoveUnusedNodes;
+
+impl GraphOptimizer for RemoveUnusedNodes {
+    fn optimize(&self, graph: &mut Graph) {
+        // Reverse topo sort
+        for node in petgraph::algo::toposort(&graph.graph, None)
+            .unwrap()
+            .into_iter()
+            .rev()
+        {
+            if graph
+                .graph
+                .edges_directed(node, petgraph::Direction::Outgoing)
+                .count()
+                == 0
+                && !graph.to_retrieve.contains(&node)
+            {
+                // No dependencies and not marked for retrieval, so remove
+                graph.graph.remove_node(node);
             }
         }
     }
