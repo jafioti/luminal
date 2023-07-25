@@ -25,7 +25,7 @@ impl GraphOptimizer for UnarySequentialOpt {
                 .map(|i| i.target())
                 .collect_vec()
             {
-                let (op, _) = graph.graph.node_weight(id).unwrap();
+                let (op, _, _) = graph.graph.node_weight(id).unwrap();
                 if (op.name() == "Exp2"
                     && graph.graph.node_weight(outgoing_target).unwrap().0.name() == "Log2")
                     || (op.name() == "Log2"

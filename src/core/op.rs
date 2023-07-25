@@ -679,6 +679,7 @@ mod tests {
         let b = cx.new_tensor::<R1<3>>();
         b.set(vec![1., 2., 3.]);
         let c = a.max(b);
+
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -734,6 +735,7 @@ mod tests {
         let a = cx.new_tensor::<R2<2, 3>>();
         a.set(vec![1., 2., 3., 1., 2., 3.]);
         let b = a.max_reduce::<_, crate::prelude::Axis<1>>();
+        b.mark();
         cx.execute();
 
         let d_dev = Cpu::default();

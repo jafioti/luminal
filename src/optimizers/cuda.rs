@@ -2,7 +2,7 @@ use std::any::Any;
 
 use cudarc::{
     driver::{CudaDevice, CudaSlice, LaunchAsync, LaunchConfig},
-    nvrtc::compile_ptx_with_opts,
+    nvrtc::compile_ptx,
 };
 use itertools::Itertools;
 use petgraph::visit::EdgeRef;
@@ -38,12 +38,12 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
             .graph
             .node_indices()
             .filter(|n| graph.graph.node_weight(*n).unwrap().0.name() == "Input")
-            .map(|n| (n, graph.graph.node_weight(n).unwrap().1[0].clone()))
+            .map(|n| (n, graph.graph.node_weight(n).unwrap().2.clone()))
             .collect_vec()
         {
             // Create copy node
             let copy_node = graph
-                .add_op(CudaCopyToDevice)
+                .add_op(CudaCopyToDevice, input_shape.clone())
                 .input(input_node, input_shape)
                 .finish();
 
@@ -69,12 +69,12 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
             .to_retrieve
             .iter()
             .filter(|n| graph.graph.node_weight(**n).unwrap().0.name() != "Input")
-            .map(|n| (*n, graph.graph.node_weight(*n).unwrap().1[0].clone()))
+            .map(|n| (*n, graph.graph.node_weight(*n).unwrap().2.clone()))
             .collect_vec()
         {
             // Create copy node
             let copy_node = graph
-                .add_op(CudaCopyFromDevice)
+                .add_op(CudaCopyFromDevice, output_shape.clone())
                 .input(output_node, output_shape)
                 .finish();
 
@@ -203,7 +203,7 @@ impl Operator for CudaLog2 {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size: usize = tensors[0].shape.shape().iter().product();
-        let ptx = compile_ptx_with_opts(
+        let ptx = compile_ptx(
             "
 extern \"C\" __global__ void log2_kernel(float *out, const float *inp, int numel) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -211,7 +211,6 @@ extern \"C\" __global__ void log2_kernel(float *out, const float *inp, int numel
         out[i] = log2(inp[i]);
     }
 }",
-            Default::default(),
         )
         .unwrap();
         let dev = CudaDevice::new(0).unwrap();
@@ -245,7 +244,7 @@ impl Operator for CudaExp2 {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size: usize = tensors[0].shape.shape().iter().product();
-        let ptx = compile_ptx_with_opts(
+        let ptx = compile_ptx(
             "
 extern \"C\" __global__ void exp2_kernel(float *out, const float *inp, int numel) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -253,7 +252,6 @@ extern \"C\" __global__ void exp2_kernel(float *out, const float *inp, int numel
         out[i] = exp2(inp[i]);
     }
 }",
-            Default::default(),
         )
         .unwrap();
         let dev = CudaDevice::new(0).unwrap();
@@ -287,7 +285,7 @@ impl Operator for CudaSin {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size: usize = tensors[0].shape.shape().iter().product();
-        let ptx = compile_ptx_with_opts(
+        let ptx = compile_ptx(
             "
 extern \"C\" __global__ void sin_kernel(float *out, const float *inp, int numel) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -295,7 +293,6 @@ extern \"C\" __global__ void sin_kernel(float *out, const float *inp, int numel)
         out[i] = sin(inp[i]);
     }
 }",
-            Default::default(),
         )
         .unwrap();
         let dev = CudaDevice::new(0).unwrap();
@@ -329,7 +326,7 @@ impl Operator for CudaSqrt {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size: usize = tensors[0].shape.shape().iter().product();
-        let ptx = compile_ptx_with_opts(
+        let ptx = compile_ptx(
             "
 extern \"C\" __global__ void sqrt_kernel(float *out, const float *inp, int numel) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -337,7 +334,6 @@ extern \"C\" __global__ void sqrt_kernel(float *out, const float *inp, int numel
         out[i] = sqrt(inp[i]);
     }
 }",
-            Default::default(),
         )
         .unwrap();
         let dev = CudaDevice::new(0).unwrap();
@@ -371,7 +367,7 @@ impl Operator for CudaRecip {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size: usize = tensors[0].shape.shape().iter().product();
-        let ptx = compile_ptx_with_opts(
+        let ptx = compile_ptx(
             "
 extern \"C\" __global__ void recip_kernel(float *out, const float *inp, int numel) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -379,7 +375,6 @@ extern \"C\" __global__ void recip_kernel(float *out, const float *inp, int nume
         out[i] = 1.0 / inp[i];
     }
 }",
-            Default::default(),
         )
         .unwrap();
         let dev = CudaDevice::new(0).unwrap();
@@ -424,9 +419,8 @@ impl Operator for CudaAdd {
         let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
         let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
         let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
-        let ptx = compile_ptx_with_opts(
-            format!(
-                "
+        let ptx = compile_ptx(format!(
+            "
 extern \"C\" __global__ void add_kernel(float *out, const float *a, const float *b, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int a_idx = {a_index_fn_exp};
@@ -436,9 +430,7 @@ extern \"C\" __global__ void add_kernel(float *out, const float *a, const float 
         out[o_idx] = a[a_idx] + b[b_idx];
     }}
 }}"
-            ),
-            Default::default(),
-        )
+        ))
         .unwrap();
         let dev = CudaDevice::new(0).unwrap();
         dev.load_ptx(ptx, "add", &["add_kernel"]).unwrap();
@@ -480,9 +472,8 @@ impl Operator for CudaSub {
         let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
         let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
         let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
-        let ptx = compile_ptx_with_opts(
-            format!(
-                "
+        let ptx = compile_ptx(format!(
+            "
 extern \"C\" __global__ void sub_kernel(float *out, const float *a, const float *b, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int a_idx = {a_index_fn_exp};
@@ -492,9 +483,7 @@ extern \"C\" __global__ void sub_kernel(float *out, const float *a, const float 
         out[o_idx] = a[a_idx] - b[b_idx];
     }}
 }}"
-            ),
-            Default::default(),
-        )
+        ))
         .unwrap();
         let dev = CudaDevice::new(0).unwrap();
         dev.load_ptx(ptx, "sub", &["sub_kernel"]).unwrap();
@@ -536,9 +525,8 @@ impl Operator for CudaMul {
         let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
         let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
         let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
-        let ptx = compile_ptx_with_opts(
-            format!(
-                "
+        let ptx = compile_ptx(format!(
+            "
 extern \"C\" __global__ void mul_kernel(float *out, const float *a, const float *b, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int a_idx = {a_index_fn_exp};
@@ -548,9 +536,7 @@ extern \"C\" __global__ void mul_kernel(float *out, const float *a, const float 
         out[o_idx] = a[a_idx] * b[b_idx];
     }}
 }}"
-            ),
-            Default::default(),
-        )
+        ))
         .unwrap();
         let dev = CudaDevice::new(0).unwrap();
         dev.load_ptx(ptx, "mul", &["mul_kernel"]).unwrap();
@@ -592,9 +578,8 @@ impl Operator for CudaDiv {
         let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
         let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
         let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
-        let ptx = compile_ptx_with_opts(
-            format!(
-                "
+        let ptx = compile_ptx(format!(
+            "
 extern \"C\" __global__ void div_kernel(float *out, const float *a, const float *b, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int a_idx = {a_index_fn_exp};
@@ -604,9 +589,7 @@ extern \"C\" __global__ void div_kernel(float *out, const float *a, const float 
         out[o_idx] = a[a_idx] / b[b_idx];
     }}
 }}"
-            ),
-            Default::default(),
-        )
+        ))
         .unwrap();
         let dev = CudaDevice::new(0).unwrap();
         dev.load_ptx(ptx, "div", &["div_kernel"]).unwrap();
@@ -648,9 +631,8 @@ impl Operator for CudaMax {
         let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
         let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
         let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
-        let ptx = compile_ptx_with_opts(
-            format!(
-                "
+        let ptx = compile_ptx(format!(
+            "
 extern \"C\" __global__ void max_kernel(float *out, const float *a, const float *b, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int a_idx = {a_index_fn_exp};
@@ -660,9 +642,7 @@ extern \"C\" __global__ void max_kernel(float *out, const float *a, const float 
         out[o_idx] = max(a[a_idx], b[b_idx]);
     }}
 }}"
-            ),
-            Default::default(),
-        )
+        ))
         .unwrap();
         let dev = CudaDevice::new(0).unwrap();
         dev.load_ptx(ptx, "max", &["max_kernel"]).unwrap();
@@ -704,9 +684,8 @@ impl Operator for CudaMod {
         let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
         let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
         let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
-        let ptx = compile_ptx_with_opts(
-            format!(
-                "
+        let ptx = compile_ptx(format!(
+            "
 extern \"C\" __global__ void mod_kernel(float *out, const float *a, const float *b, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int a_idx = {a_index_fn_exp};
@@ -716,9 +695,7 @@ extern \"C\" __global__ void mod_kernel(float *out, const float *a, const float 
         out[o_idx] = fmod(a[a_idx], b[b_idx]);
     }}
 }}"
-            ),
-            Default::default(),
-        )
+        ))
         .unwrap();
         let dev = CudaDevice::new(0).unwrap();
         dev.load_ptx(ptx, "mod", &["mod_kernel"]).unwrap();
@@ -756,7 +733,7 @@ impl Operator for CudaSumReduce {
         let dim_stride = shape_tracker.views.last().unwrap().strides[self.0]; // This is probably wrong
         let dim_size = shape_tracker.shape()[self.0];
 
-        let ptx = compile_ptx_with_opts(
+        let ptx = compile_ptx(
             format!("
 extern \"C\" __global__ void sumreduce_kernel(float *out, const float *inp, const int dim_size, const int dim_stride, int numel) {{
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -769,7 +746,6 @@ extern \"C\" __global__ void sumreduce_kernel(float *out, const float *inp, cons
         }}
     }}
 }}"),
-            Default::default(),
         )
         .unwrap();
         let dev = CudaDevice::new(0).unwrap();
@@ -832,7 +808,7 @@ impl Operator for CudaMaxReduce {
         let dim_stride = shape_tracker.views.last().unwrap().strides[self.0]; // This is probably wrong
         let dim_size = shape_tracker.shape()[self.0];
 
-        let ptx = compile_ptx_with_opts(
+        let ptx = compile_ptx(
             format!("
 extern \"C\" __global__ void maxreduce_kernel(float *out, const float *inp, const int dim_size, const int dim_stride, int numel) {{
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -845,7 +821,6 @@ extern \"C\" __global__ void maxreduce_kernel(float *out, const float *inp, cons
         }}
     }}
 }}"),
-            Default::default(),
         )
         .unwrap();
         let dev = CudaDevice::new(0).unwrap();
