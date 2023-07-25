@@ -17,6 +17,57 @@ impl<S: ConstShape> Module<GraphTensor<S>> for ReLU {
     }
 }
 
+/// Sigmoid activation function
+pub struct Sigmoid;
+
+impl InitModule for Sigmoid {
+    fn initialize(_: &mut Graph) -> Self {
+        Self
+    }
+}
+
+impl<S: ConstShape> Module<GraphTensor<S>> for Sigmoid {
+    type Output = GraphTensor<S>;
+
+    fn forward(&self, input: GraphTensor<S>) -> Self::Output {
+        input.sigmoid()
+    }
+}
+
+/// Swish activation function
+pub struct Swish;
+
+impl InitModule for Swish {
+    fn initialize(_: &mut Graph) -> Self {
+        Self
+    }
+}
+
+impl<S: ConstShape> Module<GraphTensor<S>> for Swish {
+    type Output = GraphTensor<S>;
+
+    fn forward(&self, input: GraphTensor<S>) -> Self::Output {
+        input.swish()
+    }
+}
+
+/// Tanh activation function
+pub struct Tanh;
+
+impl InitModule for Tanh {
+    fn initialize(_: &mut Graph) -> Self {
+        Self
+    }
+}
+
+impl<S: ConstShape> Module<GraphTensor<S>> for Tanh {
+    type Output = GraphTensor<S>;
+
+    fn forward(&self, input: GraphTensor<S>) -> Self::Output {
+        input.tanh()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ReLU;

@@ -38,13 +38,13 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
             .graph
             .node_indices()
             .filter(|n| graph.graph.node_weight(*n).unwrap().0.name() == "Input")
-            .map(|n| (n, graph.graph.node_weight(n).unwrap().2.clone()))
+            .map(|n| (n, graph.graph.node_weight(n).unwrap().1.clone()))
             .collect_vec()
         {
             // Create copy node
             let copy_node = graph
-                .add_op(CudaCopyToDevice, input_shape.clone())
-                .input(input_node, input_shape)
+                .add_op(CudaCopyToDevice, input_shape)
+                .input(input_node)
                 .finish();
 
             // Switch outgoing edges from input to copy_node
@@ -69,13 +69,13 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
             .to_retrieve
             .iter()
             .filter(|n| graph.graph.node_weight(**n).unwrap().0.name() != "Input")
-            .map(|n| (*n, graph.graph.node_weight(*n).unwrap().2.clone()))
+            .map(|n| (*n, graph.graph.node_weight(*n).unwrap().1.clone()))
             .collect_vec()
         {
             // Create copy node
             let copy_node = graph
-                .add_op(CudaCopyFromDevice, output_shape.clone())
-                .input(output_node, output_shape)
+                .add_op(CudaCopyFromDevice, output_shape)
+                .input(output_node)
                 .finish();
 
             Graph::move_references(

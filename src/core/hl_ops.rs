@@ -113,9 +113,7 @@ impl<S: ConstShape> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let one = graph.new_tensor::<R0>();
         one.set(vec![1.]);
-        let neg = graph.new_tensor::<R0>();
-        neg.set(vec![-1. / 2_f32.ln()]);
-        one.expand() / (one.expand() + (self * neg.expand()).exp_2())
+        one.expand() / (one.expand() + (self * (-1. / 2_f32.ln())).exp_2())
     }
 
     /// The swish activation function
@@ -219,8 +217,7 @@ impl<S: ConstShape> GraphTensor<S> {
     pub fn reshape<N: ConstShape>(self) -> GraphTensor<N> {
         <S as AssertSameNumel<N>>::assert_same_numel();
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let pre_shape = self.shape_tracker().clone();
-        let mut shape = pre_shape.clone();
+        let mut shape = self.shape_tracker().clone();
         shape.reshape(N::realized_shape());
         let new_id = graph
             .add_op(op::Reshape(N::realized_shape()), shape)
