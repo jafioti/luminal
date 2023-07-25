@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use petgraph::{visit::EdgeRef, Direction};
 
-use crate::prelude::*;
+use crate::{
+    op::{Exp2, Log2, Operator},
+    prelude::*,
+};
 
 /// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
 pub type GenericOptimizer = (UnarySequentialOpt, CSE, RemoveUnusedNodes);
@@ -26,10 +29,10 @@ impl GraphOptimizer for UnarySequentialOpt {
                 .collect_vec()
             {
                 let (op, _, _) = graph.graph.node_weight(id).unwrap();
-                if (op.name() == "Exp2"
-                    && graph.graph.node_weight(outgoing_target).unwrap().0.name() == "Log2")
-                    || (op.name() == "Log2"
-                        && graph.graph.node_weight(outgoing_target).unwrap().0.name() == "Exp2")
+                if (check_op::<Exp2>(op)
+                    && check_op::<Log2>(&graph.graph.node_weight(outgoing_target).unwrap().0))
+                    || (check_op::<Log2>(op)
+                        && check_op::<Exp2>(&graph.graph.node_weight(outgoing_target).unwrap().0))
                 {
                     // Remove current node and next node
                     let pre_node = graph
@@ -151,4 +154,9 @@ impl GraphOptimizer for RemoveUnusedNodes {
             }
         }
     }
+}
+
+#[allow(clippy::borrowed_box)]
+fn check_op<T: 'static>(op: &Box<dyn Operator>) -> bool {
+    op.as_any().downcast_ref::<T>().is_some()
 }

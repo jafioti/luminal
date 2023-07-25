@@ -8,6 +8,8 @@ pub trait Operator: Debug {
     fn process(&self, inp: Vec<&Tensor>) -> Tensor;
 }
 
+pub trait ImplEq: PartialEq {}
+
 #[derive(Debug, Clone)]
 pub struct Input;
 impl Operator for Input {

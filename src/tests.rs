@@ -26,6 +26,8 @@ fn main() {
 
     cx.optimize(GenericOptimizer::default());
 
+    cx.display_graph();
+
     cx.execute();
     let a = a.retrieve().unwrap();
     let d = d.retrieve().unwrap();
