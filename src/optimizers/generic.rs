@@ -4,7 +4,7 @@ use itertools::Itertools;
 use petgraph::{visit::EdgeRef, Direction};
 
 use crate::{
-    op::{Exp2, Log2, Operator},
+    op::{Exp2, Log2},
     prelude::*,
 };
 
@@ -28,11 +28,10 @@ impl GraphOptimizer for UnarySequentialOpt {
                 .map(|i| i.target())
                 .collect_vec()
             {
-                let (op, _, _) = graph.graph.node_weight(id).unwrap();
-                if (check_op::<Exp2>(op)
-                    && check_op::<Log2>(&graph.graph.node_weight(outgoing_target).unwrap().0))
-                    || (check_op::<Log2>(op)
-                        && check_op::<Exp2>(&graph.graph.node_weight(outgoing_target).unwrap().0))
+                let op = graph.get_op(id).unwrap();
+                let other = graph.get_op(outgoing_target).unwrap();
+                if (op.as_any().is::<Exp2>() && other.as_any().is::<Log2>())
+                    || (op.as_any().is::<Log2>() && other.as_any().is::<Exp2>())
                 {
                     // Remove current node and next node
                     let pre_node = graph
@@ -94,8 +93,10 @@ impl GraphOptimizer for CSE {
                 srcs.sort();
 
                 if let Some(other_node) = srcs_set.get(&srcs) {
-                    if format!("{:?}", graph.graph.node_weight(node).unwrap())
-                        == format!("{:?}", graph.graph.node_weight(*other_node).unwrap())
+                    let a = graph.graph.node_weight(node).unwrap();
+                    let b = graph.graph.node_weight(*other_node).unwrap();
+                    if a.0.as_any().type_id() == b.0.as_any().type_id() && a.1 == b.1 && a.2 == b.2
+                    // If the op, input shapes, and output shape is the same, we can combine them (UNCLEAR IF THIS IS TRUE, NEED PROPER PartialEq)
                     {
                         // Carry over outgoing edges from node to other_node
                         for (weight, target) in graph
@@ -154,9 +155,4 @@ impl GraphOptimizer for RemoveUnusedNodes {
             }
         }
     }
-}
-
-#[allow(clippy::borrowed_box)]
-fn check_op<T: 'static>(op: &Box<dyn Operator>) -> bool {
-    op.as_any().downcast_ref::<T>().is_some()
 }

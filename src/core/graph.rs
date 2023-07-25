@@ -40,6 +40,10 @@ impl Graph {
         }
     }
 
+    pub(crate) fn get_op(&self, id: NodeIndex) -> Option<&dyn Operator> {
+        self.graph.node_weight(id).map(|n| n.0.as_ref())
+    }
+
     pub fn get_tensor(&mut self, mut id: NodeIndex) -> Option<Tensor> {
         // Walk through remaps
         while let Some(new_id) = self.id_remap.get(&id) {

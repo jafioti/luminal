@@ -87,7 +87,7 @@ pub fn default_strides(shape: &[usize]) -> Vec<usize> {
     strides
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShapeTracker {
     pub views: Vec<View>,
 }
