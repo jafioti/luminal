@@ -30,7 +30,7 @@ impl<S: ConstShape> GraphTensor<S> {
 
     pub fn shape_tracker(&self) -> &ShapeTracker {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        &graph.graph.node_weight(self.id).unwrap().2
+        &graph.graph.node_weight(self.id).unwrap().1
     }
 
     /// Mark this tensor to be retrieved later
@@ -56,7 +56,7 @@ impl<S: ConstShape> GraphTensor<S> {
         let shape = self.shape_tracker();
         let new_id = graph
             .add_op(op::Log2, shape.clone())
-            .input(self.id, shape.clone())
+            .input(self.id)
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }
@@ -66,7 +66,7 @@ impl<S: ConstShape> GraphTensor<S> {
         let shape = self.shape_tracker();
         let new_id = graph
             .add_op(op::Exp2, shape.clone())
-            .input(self.id, shape.clone())
+            .input(self.id)
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }
@@ -76,7 +76,7 @@ impl<S: ConstShape> GraphTensor<S> {
         let shape = self.shape_tracker();
         let new_id = graph
             .add_op(op::Recip, shape.clone())
-            .input(self.id, shape.clone())
+            .input(self.id)
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }
@@ -84,10 +84,7 @@ impl<S: ConstShape> GraphTensor<S> {
     pub fn sin(self) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let shape = self.shape_tracker();
-        let new_id = graph
-            .add_op(op::Sin, shape.clone())
-            .input(self.id, shape.clone())
-            .finish();
+        let new_id = graph.add_op(op::Sin, shape.clone()).input(self.id).finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }
 
@@ -96,7 +93,7 @@ impl<S: ConstShape> GraphTensor<S> {
         let shape = self.shape_tracker();
         let new_id = graph
             .add_op(op::Sqrt, shape.clone())
-            .input(self.id, shape.clone())
+            .input(self.id)
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }
@@ -108,8 +105,8 @@ impl<S: ConstShape> GraphTensor<S> {
                 op::Max,
                 ShapeTracker::new(self.shape_tracker().shape().clone()),
             )
-            .input(self.id, self.shape_tracker().clone())
-            .input(rhs.id, rhs.shape_tracker().clone())
+            .input(self.id)
+            .input(rhs.id)
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }
@@ -127,7 +124,7 @@ impl<S: ConstShape> GraphTensor<S> {
                 op::Permute(Ax::as_array().into_iter().map(|i| i as usize).collect_vec()),
                 orig_shape,
             )
-            .input(self.id, shape)
+            .input(self.id)
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }
@@ -145,11 +142,10 @@ impl<S: ConstShape> GraphTensor<S> {
             .into_iter()
             .map(|i| (i as usize, new_shape[i as usize]))
         {
-            let pre_shape = shape.clone();
             shape.expand(dim, size);
             new_id = graph
                 .add_op(op::Expand(dim, size), shape.clone())
-                .input(new_id, pre_shape)
+                .input(new_id)
                 .finish();
         }
         GraphTensor::from_id(new_id, self.graph_ref)
@@ -163,7 +159,7 @@ impl<S: ConstShape> GraphTensor<S> {
         shape.reshape(N::realized_shape());
         let new_id = graph
             .add_op(op::Reshape(N::realized_shape()), shape)
-            .input(self.id, pre_shape)
+            .input(self.id)
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }
@@ -177,13 +173,12 @@ impl<S: ConstShape> GraphTensor<S> {
 
         let mut new_id = self.id;
         for dim in Ax::as_array() {
-            let pre_shape = shape.clone();
             let mut s = shape.shape().clone();
             s.remove(dim as usize);
             shape.reshape(s);
             new_id = graph
                 .add_op(op::SumReduce(dim as usize), shape.clone())
-                .input(new_id, pre_shape)
+                .input(new_id)
                 .finish();
         }
         GraphTensor::from_id(new_id, self.graph_ref)
@@ -198,13 +193,12 @@ impl<S: ConstShape> GraphTensor<S> {
 
         let mut new_id = self.id;
         for dim in Ax::as_array() {
-            let pre_shape = shape.clone();
             let mut s = shape.shape().clone();
             s.remove(dim as usize);
             shape.reshape(s);
             new_id = graph
                 .add_op(op::MaxReduce(dim as usize), shape.clone())
-                .input(new_id, pre_shape)
+                .input(new_id)
                 .finish();
         }
         GraphTensor::from_id(new_id, self.graph_ref)
@@ -271,8 +265,8 @@ impl<S: ConstShape> Add<GraphTensor<S>> for GraphTensor<S> {
                 op::Add,
                 ShapeTracker::new(self.shape_tracker().shape().clone()),
             )
-            .input(self.id, self.shape_tracker().clone())
-            .input(rhs.id, rhs.shape_tracker().clone())
+            .input(self.id)
+            .input(rhs.id)
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }
@@ -288,8 +282,8 @@ impl<S: ConstShape> Sub<GraphTensor<S>> for GraphTensor<S> {
                 op::Sub,
                 ShapeTracker::new(self.shape_tracker().shape().clone()),
             )
-            .input(self.id, self.shape_tracker().clone())
-            .input(rhs.id, rhs.shape_tracker().clone())
+            .input(self.id)
+            .input(rhs.id)
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }
@@ -305,8 +299,8 @@ impl<S: ConstShape> Mul<GraphTensor<S>> for GraphTensor<S> {
                 op::Mul,
                 ShapeTracker::new(self.shape_tracker().shape().clone()),
             )
-            .input(self.id, self.shape_tracker().clone())
-            .input(rhs.id, rhs.shape_tracker().clone())
+            .input(self.id)
+            .input(rhs.id)
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }
@@ -322,8 +316,8 @@ impl<S: ConstShape> Div<GraphTensor<S>> for GraphTensor<S> {
                 op::Div,
                 ShapeTracker::new(self.shape_tracker().shape().clone()),
             )
-            .input(self.id, self.shape_tracker().clone())
-            .input(rhs.id, rhs.shape_tracker().clone())
+            .input(self.id)
+            .input(rhs.id)
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }
@@ -339,8 +333,8 @@ impl<S: ConstShape> Rem<GraphTensor<S>> for GraphTensor<S> {
                 op::Mod,
                 ShapeTracker::new(self.shape_tracker().shape().clone()),
             )
-            .input(self.id, self.shape_tracker().clone())
-            .input(rhs.id, rhs.shape_tracker().clone())
+            .input(self.id)
+            .input(rhs.id)
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }

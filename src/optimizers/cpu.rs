@@ -17,18 +17,17 @@ impl GraphOptimizer for CPUMatMulOptimizer {
         // Look for the matmul pattern
         for node in graph.graph.node_indices().collect_vec() {
             // Permute
-            let Some((permute, _, permute_shape)) = graph.graph.node_weight(node) else {
+            let Some((permute, permute_shape)) = graph.graph.node_weight(node) else {
                 continue;
             };
             if permute.name() != "Permute" || permute_shape.shape().len() != 2 {
                 continue;
             }
-            let permute_shape = permute_shape.clone();
             // Expand 1
             let mut dests = graph.get_dests(node);
             if dests.len() != 1
                 || dests[0].1 .0.name() != "Expand"
-                || dests[0].1 .2.shape().len() != 2
+                || dests[0].1 .1.shape().len() != 2
             {
                 continue;
             }
@@ -36,7 +35,7 @@ impl GraphOptimizer for CPUMatMulOptimizer {
 
             // Mul
             let mut dests = graph.get_dests(expand_1);
-            if dests.len() != 1 || dests[0].1 .0.name() != "Mul" || dests[0].1 .2.shape().len() != 3
+            if dests.len() != 1 || dests[0].1 .0.name() != "Mul" || dests[0].1 .1.shape().len() != 3
             {
                 continue;
             }
@@ -48,17 +47,16 @@ impl GraphOptimizer for CPUMatMulOptimizer {
                 .into_iter()
                 .filter(|(i, _)| *i != expand_1)
                 .collect_vec();
-            if srcs.len() != 1 || srcs[0].1 .0.name() != "Expand" || srcs[0].1 .2.shape().len() != 2
+            if srcs.len() != 1 || srcs[0].1 .0.name() != "Expand" || srcs[0].1 .1.shape().len() != 2
             {
                 continue;
             }
-            let (expand_2, (_, _, s)) = srcs.pop().unwrap();
-            let expand_2_shape = s.clone();
+            let (expand_2, (_, _)) = srcs.pop().unwrap();
 
             let mut dests = graph.get_dests(mul);
             if dests.len() != 1
                 || dests[0].1 .0.name() != "SumReduce"
-                || dests[0].1 .2.shape().len() != 3
+                || dests[0].1 .1.shape().len() != 3
             {
                 continue;
             }
@@ -75,8 +73,8 @@ impl GraphOptimizer for CPUMatMulOptimizer {
                 continue;
             }
 
-            let (input_0, (_, _, input_0_shape)) = graph.get_sources(expand_2).pop().unwrap();
-            let (input_1, (_, _, input_1_shape)) = graph.get_sources(node).pop().unwrap();
+            let (input_0, (_, input_0_shape)) = graph.get_sources(expand_2).pop().unwrap();
+            let (input_1, (_, input_1_shape)) = graph.get_sources(node).pop().unwrap();
 
             // Now we have a verified matmul, let's replace it with the CPUMatMul2D op
             let new_op = graph
@@ -84,8 +82,8 @@ impl GraphOptimizer for CPUMatMulOptimizer {
                     CPUMatMul2D,
                     ShapeTracker::new(vec![input_0_shape.shape()[0], input_1_shape.shape()[1]]),
                 )
-                .input(input_0, expand_2_shape)
-                .input(input_1, permute_shape)
+                .input(input_0)
+                .input(input_1)
                 .finish();
 
             // Create edges to dests

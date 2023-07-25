@@ -95,7 +95,19 @@ impl GraphOptimizer for CSE {
                 if let Some(other_node) = srcs_set.get(&srcs) {
                     let a = graph.graph.node_weight(node).unwrap();
                     let b = graph.graph.node_weight(*other_node).unwrap();
-                    if a.0.as_any().type_id() == b.0.as_any().type_id() && a.1 == b.1 && a.2 == b.2
+                    let a_src_shapes = graph
+                        .get_sources(node)
+                        .into_iter()
+                        .map(|(_, (_, a))| a)
+                        .collect_vec();
+                    let b_src_shapes = graph
+                        .get_sources(*other_node)
+                        .into_iter()
+                        .map(|(_, (_, a))| a)
+                        .collect_vec();
+                    if a.0.as_any().type_id() == b.0.as_any().type_id()
+                        && a.1 == b.1
+                        && a_src_shapes == b_src_shapes
                     // If the op, input shapes, and output shape is the same, we can combine them (UNCLEAR IF THIS IS TRUE, NEED PROPER PartialEq)
                     {
                         // Carry over outgoing edges from node to other_node
