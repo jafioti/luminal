@@ -67,7 +67,7 @@ impl<S: ConstShape> GraphTensor<S> {
         let mut shape = self.shape_tracker().clone();
 
         let mut new_id = self.id;
-        for dim in Ax::as_array() {
+        for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
             let mut s = shape.shape().clone();
             s.remove(dim as usize);
             shape.reshape(s);
@@ -87,7 +87,7 @@ impl<S: ConstShape> GraphTensor<S> {
         let mut shape = self.shape_tracker().clone();
 
         let mut new_id = self.id;
-        for dim in Ax::as_array() {
+        for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
             let mut s = shape.shape().clone();
             s.remove(dim as usize);
             shape.reshape(s);
@@ -97,6 +97,47 @@ impl<S: ConstShape> GraphTensor<S> {
                 .finish();
         }
         GraphTensor::from_id(new_id, self.graph_ref)
+    }
+
+    pub fn mean_reduce<Dst: ConstShape, Ax: Axes>(self) -> GraphTensor<Dst>
+    where
+        S: HasAxes<Ax> + ReduceShapeTo<Dst, Ax>,
+    {
+        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        let mut shape = self.shape_tracker().clone();
+
+        let mut node_id = self.id;
+        for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
+            // Reduce shape
+            let mut sh = shape.shape().clone();
+            let size = sh.remove(dim as usize);
+            shape.reshape(sh);
+            // Sum reduce
+            node_id = graph
+                .add_op(op::SumReduce(dim as usize), shape.clone())
+                .input(node_id)
+                .finish();
+            // Create div tensor
+            let size_t = graph.new_tensor::<R0>();
+            size_t.set(vec![size as f32]);
+            let mut size_t = size_t.id;
+            let mut size_t_shape = ShapeTracker::new(vec![]);
+            // Expand div tensor
+            for (dim, size) in shape.shape().iter().enumerate() {
+                size_t_shape.expand(dim, *size);
+                size_t = graph
+                    .add_op(op::Expand(dim, *size), size_t_shape.clone())
+                    .input(size_t)
+                    .finish();
+            }
+            // Divide by div tensor
+            node_id = graph
+                .add_op(op::Div, shape.clone())
+                .input(node_id)
+                .input(size_t)
+                .finish();
+        }
+        GraphTensor::from_id(node_id, self.graph_ref)
     }
 }
 
