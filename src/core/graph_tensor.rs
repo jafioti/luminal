@@ -173,15 +173,19 @@ impl<S: ConstShape> GraphTensor<S> {
         S: HasAxes<Ax> + ReduceShapeTo<Dst, Ax>,
     {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let dim = Ax::as_array().into_iter().next().unwrap() as usize;
-        let mut tracker = self.shape_tracker().clone();
-        let mut shape = tracker.shape().clone();
-        shape.remove(dim);
-        tracker.reshape(shape);
-        let new_id = graph
-            .add_op(op::SumReduce(dim), tracker)
-            .input(self.id, self.shape_tracker().clone())
-            .finish();
+        let mut shape = self.shape_tracker().clone();
+
+        let mut new_id = self.id;
+        for dim in Ax::as_array() {
+            let pre_shape = shape.clone();
+            let mut s = shape.shape().clone();
+            s.remove(dim as usize);
+            shape.reshape(s);
+            new_id = graph
+                .add_op(op::SumReduce(dim as usize), shape.clone())
+                .input(new_id, pre_shape)
+                .finish();
+        }
         GraphTensor::from_id(new_id, self.graph_ref)
     }
 
@@ -190,15 +194,19 @@ impl<S: ConstShape> GraphTensor<S> {
         S: HasAxes<Ax> + ReduceShapeTo<Dst, Ax>,
     {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let dim = Ax::as_array().into_iter().next().unwrap() as usize;
-        let mut tracker = self.shape_tracker().clone();
-        let mut shape = tracker.shape().clone();
-        shape.remove(dim);
-        tracker.reshape(shape);
-        let new_id = graph
-            .add_op(op::MaxReduce(dim), tracker)
-            .input(self.id, self.shape_tracker().clone())
-            .finish();
+        let mut shape = self.shape_tracker().clone();
+
+        let mut new_id = self.id;
+        for dim in Ax::as_array() {
+            let pre_shape = shape.clone();
+            let mut s = shape.shape().clone();
+            s.remove(dim as usize);
+            shape.reshape(s);
+            new_id = graph
+                .add_op(op::MaxReduce(dim as usize), shape.clone())
+                .input(new_id, pre_shape)
+                .finish();
+        }
         GraphTensor::from_id(new_id, self.graph_ref)
     }
 }
