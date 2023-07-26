@@ -2,6 +2,7 @@ use crate::prelude::*;
 
 pub mod activation;
 pub mod linear;
+pub mod norm;
 
 impl<X> Module<X> for () {
     type Output = X;
