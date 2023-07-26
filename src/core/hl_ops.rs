@@ -76,7 +76,7 @@ impl<S: ConstShape> GraphTensor<S> {
 }
 
 // Reduction ops
-impl<S: ConstShape> GraphTensor<S> {
+impl<S: Shape> GraphTensor<S> {
     pub fn sum_reduce<Dst: ConstShape, Ax: Axes>(self) -> GraphTensor<Dst>
     where
         S: HasAxes<Ax> + ReduceShapeTo<Dst, Ax>,
@@ -86,9 +86,7 @@ impl<S: ConstShape> GraphTensor<S> {
 
         let mut new_id = self.id;
         for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
-            let mut s = shape.shape().clone();
-            s.remove(dim as usize);
-            shape.reshape(s);
+            shape.remove(dim as usize);
             new_id = graph
                 .add_op(op::SumReduce(dim as usize), shape.clone())
                 .input(new_id)
@@ -106,9 +104,7 @@ impl<S: ConstShape> GraphTensor<S> {
 
         let mut new_id = self.id;
         for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
-            let mut s = shape.shape().clone();
-            s.remove(dim as usize);
-            shape.reshape(s);
+            shape.remove(dim as usize);
             new_id = graph
                 .add_op(op::MaxReduce(dim as usize), shape.clone())
                 .input(new_id)
@@ -116,41 +112,47 @@ impl<S: ConstShape> GraphTensor<S> {
         }
         GraphTensor::from_id(new_id, self.graph_ref)
     }
+}
 
+impl<S: ConstShape> GraphTensor<S> {
     pub fn mean_reduce<Dst: ConstShape, Ax: Axes>(self) -> GraphTensor<Dst>
     where
         S: HasAxes<Ax> + ReduceShapeTo<Dst, Ax>,
     {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let mut shape = self.shape_tracker().clone();
+        let mut shape = <S as ConstShape>::realized_shape();
 
         let mut node_id = self.id;
         for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
             // Reduce shape
-            let mut sh = shape.shape().clone();
-            let size = sh.remove(dim as usize);
-            shape.reshape(sh);
+            let size = shape.remove(dim as usize);
             // Sum reduce
             node_id = graph
-                .add_op(op::SumReduce(dim as usize), shape.clone())
+                .add_op(
+                    op::SumReduce(dim as usize),
+                    shape.iter().map(|i| RealDim::Const(*i)).collect(),
+                )
                 .input(node_id)
                 .finish();
             // Create div tensor
             let size_t = graph.new_tensor::<R0>();
             size_t.set(vec![size as f32]);
             let mut size_t = size_t.id;
-            let mut size_t_shape = ShapeTracker::new(vec![]);
+            let mut size_t_shape = vec![];
             // Expand div tensor
-            for (dim, size) in shape.shape().iter().enumerate() {
-                size_t_shape.expand(dim, *size);
+            for (dim, size) in shape.iter().enumerate() {
+                size_t_shape.insert(dim, *size);
                 size_t = graph
-                    .add_op(op::Expand(dim, *size), size_t_shape.clone())
+                    .add_op(
+                        op::Expand(dim, *size),
+                        size_t_shape.iter().map(|i| RealDim::Const(*i)).collect(),
+                    )
                     .input(size_t)
                     .finish();
             }
             // Divide by div tensor
             node_id = graph
-                .add_op(op::Div, shape.clone())
+                .add_op(op::Div, shape.iter().map(|i| RealDim::Const(*i)).collect())
                 .input(node_id)
                 .input(size_t)
                 .finish();
@@ -197,10 +199,7 @@ impl<S: ConstShape> GraphTensor<S> {
     pub fn max(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(
-                op::Max,
-                ShapeTracker::new(self.shape_tracker().shape().clone()),
-            )
+            .add_op(op::Max, self.shape_tracker().clone())
             .input(self.id)
             .input(rhs.id)
             .finish();
@@ -232,19 +231,16 @@ impl<S: ConstShape> GraphTensor<S> {
 }
 
 // Movement ops
-impl<S: ConstShape> GraphTensor<S> {
+impl<S: Shape> GraphTensor<S> {
     pub fn permute<N: ConstShape, Dst: ConstShape, Ax: Axes>(self) -> GraphTensor<N>
     where
         N: PermuteShapeTo<Dst, Ax>,
     {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let orig_shape = self.shape_tracker().clone();
-        let mut shape = self.shape_tracker().clone();
-        shape.reshape(Dst::realized_shape());
         let new_id = graph
             .add_op(
                 op::Permute(Ax::as_array().into_iter().map(|i| i as usize).collect_vec()),
-                orig_shape,
+                <Dst as Shape>::realized_shape(),
             )
             .input(self.id)
             .finish();
@@ -256,7 +252,7 @@ impl<S: ConstShape> GraphTensor<S> {
         S: BroadcastShapeTo<Dst, Ax>,
     {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let new_shape = Dst::realized_shape();
+        let new_shape = <Dst as ConstShape>::realized_shape();
         let mut shape = self.shape_tracker().clone();
 
         let mut new_id = self.id;
@@ -264,7 +260,7 @@ impl<S: ConstShape> GraphTensor<S> {
             .into_iter()
             .map(|i| (i as usize, new_shape[i as usize]))
         {
-            shape.expand(dim, size);
+            shape.insert(dim, RealDim::Const(size));
             new_id = graph
                 .add_op(op::Expand(dim, size), shape.clone())
                 .input(new_id)
@@ -272,14 +268,16 @@ impl<S: ConstShape> GraphTensor<S> {
         }
         GraphTensor::from_id(new_id, self.graph_ref)
     }
-
+}
+impl<S: ConstShape> GraphTensor<S> {
     pub fn reshape<N: ConstShape>(self) -> GraphTensor<N> {
         <S as AssertSameNumel<N>>::assert_same_numel();
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let mut shape = self.shape_tracker().clone();
-        shape.reshape(N::realized_shape());
         let new_id = graph
-            .add_op(op::Reshape(N::realized_shape()), shape)
+            .add_op(
+                op::Reshape(<N as ConstShape>::realized_shape()),
+                <N as Shape>::realized_shape(),
+            )
             .input(self.id)
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
@@ -336,16 +334,13 @@ impl<const A: usize> GraphTensor<R1<A>> {
     }
 }
 
-impl<S: ConstShape> Add<GraphTensor<S>> for GraphTensor<S> {
+impl<S: Shape> Add<GraphTensor<S>> for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
     fn add(self, rhs: GraphTensor<S>) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(
-                op::Add,
-                ShapeTracker::new(self.shape_tracker().shape().clone()),
-            )
+            .add_op(op::Add, self.shape_tracker().clone())
             .input(self.id)
             .input(rhs.id)
             .finish();
@@ -353,16 +348,13 @@ impl<S: ConstShape> Add<GraphTensor<S>> for GraphTensor<S> {
     }
 }
 
-impl<S: ConstShape> Sub<GraphTensor<S>> for GraphTensor<S> {
+impl<S: Shape> Sub<GraphTensor<S>> for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
     fn sub(self, rhs: GraphTensor<S>) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(
-                op::Sub,
-                ShapeTracker::new(self.shape_tracker().shape().clone()),
-            )
+            .add_op(op::Sub, self.shape_tracker().clone())
             .input(self.id)
             .input(rhs.id)
             .finish();
@@ -370,16 +362,13 @@ impl<S: ConstShape> Sub<GraphTensor<S>> for GraphTensor<S> {
     }
 }
 
-impl<S: ConstShape> Mul<GraphTensor<S>> for GraphTensor<S> {
+impl<S: Shape> Mul<GraphTensor<S>> for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
     fn mul(self, rhs: GraphTensor<S>) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(
-                op::Mul,
-                ShapeTracker::new(self.shape_tracker().shape().clone()),
-            )
+            .add_op(op::Mul, self.shape_tracker().clone())
             .input(self.id)
             .input(rhs.id)
             .finish();
@@ -387,16 +376,13 @@ impl<S: ConstShape> Mul<GraphTensor<S>> for GraphTensor<S> {
     }
 }
 
-impl<S: ConstShape> Div<GraphTensor<S>> for GraphTensor<S> {
+impl<S: Shape> Div<GraphTensor<S>> for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
     fn div(self, rhs: GraphTensor<S>) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(
-                op::Div,
-                ShapeTracker::new(self.shape_tracker().shape().clone()),
-            )
+            .add_op(op::Div, self.shape_tracker().clone())
             .input(self.id)
             .input(rhs.id)
             .finish();
@@ -404,16 +390,13 @@ impl<S: ConstShape> Div<GraphTensor<S>> for GraphTensor<S> {
     }
 }
 
-impl<S: ConstShape> Rem<GraphTensor<S>> for GraphTensor<S> {
+impl<S: Shape> Rem<GraphTensor<S>> for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
     fn rem(self, rhs: GraphTensor<S>) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(
-                op::Mod,
-                ShapeTracker::new(self.shape_tracker().shape().clone()),
-            )
+            .add_op(op::Mod, self.shape_tracker().clone())
             .input(self.id)
             .input(rhs.id)
             .finish();

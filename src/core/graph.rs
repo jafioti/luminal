@@ -17,7 +17,7 @@ pub struct Graph {
     pub(crate) tensors: HashMap<NodeIndex, Tensor>,
     pub(crate) id_remap: HashMap<NodeIndex, NodeIndex>,
     #[allow(clippy::type_complexity)]
-    pub(crate) graph: StableGraph<(Box<dyn Operator>, ShapeTracker), u8>,
+    pub(crate) graph: StableGraph<(Box<dyn Operator>, Vec<RealDim>), u8>,
     pub(crate) no_delete: HashSet<NodeIndex>,
     pub(crate) to_retrieve: HashSet<NodeIndex>,
 }
@@ -30,7 +30,7 @@ impl Graph {
     pub(crate) fn add_op<O: Operator + 'static>(
         &mut self,
         op: O,
-        output_shape: ShapeTracker,
+        output_shape: Vec<RealDim>,
     ) -> NewOp {
         self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
         NewOp {
@@ -53,12 +53,12 @@ impl Graph {
         self.tensors.remove(&id)
     }
 
-    pub fn new_tensor<S: ConstShape>(&mut self) -> GraphTensor<S> {
+    pub fn new_tensor<S: Shape>(&mut self) -> GraphTensor<S> {
         self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
         let tensor = GraphTensor {
             id: self
                 .graph
-                .add_node((Box::new(op::Input), ShapeTracker::new(S::realized_shape()))),
+                .add_node((Box::new(op::Input), S::realized_shape())),
             graph_ref: self,
             _phantom: Default::default(),
         };
@@ -66,12 +66,17 @@ impl Graph {
         tensor
     }
 
-    pub fn set_tensor<S: ConstShape>(&mut self, graph_tensor: GraphTensor<S>, data: Vec<f32>) {
+    pub fn set_tensor<S: Shape>(
+        &mut self,
+        graph_tensor: GraphTensor<S>,
+        data: Vec<f32>,
+        shape: Vec<usize>,
+    ) {
         self.tensors.insert(
             graph_tensor.id,
             Tensor {
                 data: Box::new(data),
-                shape: ShapeTracker::new(S::realized_shape()),
+                shape: ShapeTracker::new(shape),
             },
         );
     }
@@ -183,7 +188,7 @@ impl Graph {
     pub fn get_sources(
         &self,
         node_id: NodeIndex,
-    ) -> Vec<(NodeIndex, &(Box<dyn Operator>, ShapeTracker))> {
+    ) -> Vec<(NodeIndex, &(Box<dyn Operator>, Vec<RealDim>))> {
         self.graph
             .edges_directed(node_id, Direction::Incoming)
             .map(|e| e.source())
@@ -196,7 +201,7 @@ impl Graph {
     pub fn get_dests(
         &self,
         node_id: NodeIndex,
-    ) -> Vec<(NodeIndex, &(Box<dyn Operator>, ShapeTracker))> {
+    ) -> Vec<(NodeIndex, &(Box<dyn Operator>, Vec<RealDim>))> {
         self.graph
             .edges_directed(node_id, Direction::Outgoing)
             .map(|e| e.target())

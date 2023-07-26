@@ -20,23 +20,19 @@ impl GraphOptimizer for CPUMatMulOptimizer {
             let Some((permute, permute_shape)) = graph.graph.node_weight(node) else {
                 continue;
             };
-            if permute.name() != "Permute" || permute_shape.shape().len() != 2 {
+            if permute.name() != "Permute" || permute_shape.len() != 2 {
                 continue;
             }
             // Expand 1
             let mut dests = graph.get_dests(node);
-            if dests.len() != 1
-                || dests[0].1 .0.name() != "Expand"
-                || dests[0].1 .1.shape().len() != 2
-            {
+            if dests.len() != 1 || dests[0].1 .0.name() != "Expand" || dests[0].1 .1.len() != 2 {
                 continue;
             }
             let (expand_1, _) = dests.pop().unwrap();
 
             // Mul
             let mut dests = graph.get_dests(expand_1);
-            if dests.len() != 1 || dests[0].1 .0.name() != "Mul" || dests[0].1 .1.shape().len() != 3
-            {
+            if dests.len() != 1 || dests[0].1 .0.name() != "Mul" || dests[0].1 .1.len() != 3 {
                 continue;
             }
             let (mul, _) = dests.pop().unwrap();
@@ -47,17 +43,13 @@ impl GraphOptimizer for CPUMatMulOptimizer {
                 .into_iter()
                 .filter(|(i, _)| *i != expand_1)
                 .collect_vec();
-            if srcs.len() != 1 || srcs[0].1 .0.name() != "Expand" || srcs[0].1 .1.shape().len() != 2
-            {
+            if srcs.len() != 1 || srcs[0].1 .0.name() != "Expand" || srcs[0].1 .1.len() != 2 {
                 continue;
             }
             let (expand_2, (_, _)) = srcs.pop().unwrap();
 
             let mut dests = graph.get_dests(mul);
-            if dests.len() != 1
-                || dests[0].1 .0.name() != "SumReduce"
-                || dests[0].1 .1.shape().len() != 3
-            {
+            if dests.len() != 1 || dests[0].1 .0.name() != "SumReduce" || dests[0].1 .1.len() != 3 {
                 continue;
             }
             let (sum_reduce, _) = dests.pop().unwrap();
@@ -78,10 +70,7 @@ impl GraphOptimizer for CPUMatMulOptimizer {
 
             // Now we have a verified matmul, let's replace it with the CPUMatMul2D op
             let new_op = graph
-                .add_op(
-                    CPUMatMul2D,
-                    ShapeTracker::new(vec![input_0_shape.shape()[0], input_1_shape.shape()[1]]),
-                )
+                .add_op(CPUMatMul2D, vec![input_0_shape[0], input_1_shape[1]])
                 .input(input_0)
                 .input(input_1)
                 .finish();

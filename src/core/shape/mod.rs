@@ -19,6 +19,7 @@ pub use tracker::*;
 /// Represents a single dimension of a multi dimensional [Shape]
 pub trait Dim: 'static + Copy + Clone + std::fmt::Debug + Send + Sync + Eq + PartialEq {
     fn size(&self) -> usize;
+    fn const_size() -> RealDim;
     fn from_size(size: usize) -> Option<Self>;
 }
 
@@ -33,6 +34,9 @@ impl Dim for usize {
     fn size(&self) -> usize {
         *self
     }
+    fn const_size() -> RealDim {
+        RealDim::Dyn
+    }
     #[inline(always)]
     fn from_size(size: usize) -> Option<Self> {
         Some(size)
@@ -46,6 +50,9 @@ impl<const M: usize> Dim for Const<M> {
     #[inline(always)]
     fn size(&self) -> usize {
         M
+    }
+    fn const_size() -> RealDim {
+        RealDim::Const(M)
     }
     #[inline(always)]
     fn from_size(size: usize) -> Option<Self> {
@@ -178,6 +185,8 @@ pub trait Shape:
         }
         strides
     }
+
+    fn realized_shape() -> Vec<RealDim>;
 }
 
 /// Represents a [Shape] that has all [ConstDim]s
@@ -235,6 +244,10 @@ macro_rules! shape {
             fn from_concrete(concrete: &Self::Concrete) -> Option<Self> {
                 Some(($(Dim::from_size(concrete[$Idx])?, )*))
             }
+
+            fn realized_shape() -> Vec<RealDim> {
+                vec![$($D::const_size(), )*]
+            }
         }
         impl<$($D: ConstDim, )*> ConstShape for ($($D, )*) {
             const NUMEL: usize = $($D::SIZE * )* 1;
@@ -254,6 +267,10 @@ macro_rules! shape {
                 *self
             }
 
+            fn realized_shape() -> Vec<RealDim> {
+                vec![RealDim::Dyn; $Num]
+            }
+
             fn from_concrete(concrete: &Self::Concrete) -> Option<Self> {
                 Some(*concrete)
             }
@@ -269,6 +286,9 @@ impl Shape for () {
     #[inline(always)]
     fn concrete(&self) -> Self::Concrete {
         []
+    }
+    fn realized_shape() -> Vec<RealDim> {
+        vec![]
     }
     #[inline(always)]
     fn strides(&self) -> Self::Concrete {
@@ -305,4 +325,10 @@ pub trait AssertSameNumel<Dst: ConstShape>: ConstShape {
 
 impl<Src: ConstShape, Dst: ConstShape> AssertSameNumel<Dst> for Src {
     const TYPE_CHECK: () = assert!(Src::NUMEL == Dst::NUMEL);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RealDim {
+    Const(usize),
+    Dyn,
 }
