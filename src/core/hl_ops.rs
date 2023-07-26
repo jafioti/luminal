@@ -55,6 +55,24 @@ impl<S: ConstShape> GraphTensor<S> {
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }
+
+    pub fn layer_norm<const DIM: isize>(self) -> GraphTensor<S>
+    where
+        <S as ReduceShape<Axis<DIM>>>::Reduced: ConstShape,
+        S: ReduceShape<Axis<DIM>>,
+    {
+        let mean = self
+            .mean_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
+            .expand();
+        let centered = self - mean;
+        let std = centered
+            .mul(centered)
+            .mean_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
+            .expand()
+            .add(1e-5)
+            .sqrt();
+        centered / std
+    }
 }
 
 // Reduction ops
@@ -466,5 +484,105 @@ impl<S: ConstShape> Rem<f32> for GraphTensor<S> {
         let rhs_t = graph.new_tensor::<R0>();
         rhs_t.set(vec![rhs]);
         self % rhs_t.expand()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{prelude::*, tests::assert_close_data};
+    use dfdx::prelude::*;
+
+    #[test]
+    fn test_layer_norm() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<2, 3>>();
+        a.set(vec![1., 2., 3., 3., 1., 3.]);
+        let b = a.layer_norm::<0>();
+        let c = a.layer_norm::<1>();
+        b.mark();
+        c.mark();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([[1., 2., 3.], [3., 1., 3.]]);
+        let d_b = d_a.clone().normalize::<dfdx::shapes::Axis<0>>(1e-5);
+        let d_c = d_a.normalize::<dfdx::shapes::Axis<1>>(1e-5);
+
+        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_matrix_vector() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1., 2., 3.]);
+        let b = cx.new_tensor::<R2<3, 2>>();
+        b.set(vec![1., 2., 3., 1., 2., 3.]);
+        let c = a.matmul(b);
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1., 2., 3.]);
+        let d_b = d_dev.tensor([[1., 2.], [3., 1.], [2., 3.]]);
+        let d_c = d_a.matmul(d_b);
+
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_matmul() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<2, 3>>();
+        a.set(vec![1., 2., 3., 1., 2., 3.]);
+        let b = cx.new_tensor::<R2<3, 3>>();
+        b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
+        let c = a.matmul(b);
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
+        let d_b = d_dev.tensor([[1., 2., 3.], [1., 2., 3.], [1., 2., 3.]]);
+        let d_c = d_a.matmul(d_b);
+
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_batch_matmul() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R3<2, 3, 2>>();
+        a.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
+        let b = cx.new_tensor::<R2<2, 4>>();
+        b.set(vec![1., 2., 3., 1., 1., 2., 3., 1.]);
+        let c = a.matmul(b);
+
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([
+            [[1., 2.], [3., 1.], [2., 3.]],
+            [[1., 2.], [3., 1.], [2., 3.]],
+        ]);
+        let d_b = d_dev.tensor([[1., 2., 3., 1.], [1., 2., 3., 1.]]);
+        let d_c = d_a.matmul(d_b);
+
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_mean_reduce() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<2, 3>>();
+        a.set(vec![1., 2., 3., 1., 2., 3.]);
+        let b = a.mean_reduce::<_, crate::prelude::Axis<1>>();
+        b.mark();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
+        let d_b = d_a.mean::<_, dfdx::shapes::Axis<1>>();
+
+        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
     }
 }

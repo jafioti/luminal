@@ -1151,6 +1151,24 @@ mod tests {
     }
 
     #[test]
+    fn test_mean_reduce() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<2, 3>>();
+        a.set(vec![1., 2., 3., 1., 2., 3.]);
+        let b = a.mean_reduce::<_, crate::prelude::Axis<1>>();
+        b.mark();
+
+        cx.optimize(CudaOptimizer::default());
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
+        let d_b = d_a.mean::<_, dfdx::shapes::Axis<1>>();
+
+        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+    }
+
+    #[test]
     fn test_relu_and_linear() {
         // Test single and batch, unoptimized and optimized
         let mut cx = Graph::new();

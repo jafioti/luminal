@@ -4,10 +4,10 @@ use super::symbolic::*;
 
 // This is a shape tracker allowing for zero-copy movement ops based off of https://github.com/tinygrad/tinygrad/blob/master/tinygrad/shape/shapetracker.py
 
-fn expr_node(idx: Node, shape: &[usize], strides: &[usize]) -> Node {
+fn expr_node(idx: Node, shape_strides: &[(usize, usize)]) -> Node {
     let mut acc = 1;
     let mut ret = vec![];
-    for (d, s) in shape.iter().zip(strides.iter()).rev() {
+    for (d, s) in shape_strides.iter().rev() {
         ret.push(((idx.clone() / (acc as i32)) % (*d as i32)) * (*s as i32));
         acc *= d;
     }
@@ -19,6 +19,7 @@ fn expr_node(idx: Node, shape: &[usize], strides: &[usize]) -> Node {
 pub struct View {
     pub shape: Vec<usize>,
     pub strides: Vec<usize>,
+    pub shape_strides: Vec<(usize, usize)>,
 }
 
 impl View {
@@ -48,7 +49,7 @@ fn merge_views(v2: &View, v1: &View) -> Option<View> {
             .collect_vec(),
     );
 
-    let idx = expr_node(idx, &v2.shape, &v2.strides);
+    let idx = expr_node(idx, &v2.shape_strides);
     let mut ret = vec![0; idxs.len()];
     for node in if let NodeType::RedNode(RedOp::Sum, n) = idx.node_type {
         n
@@ -70,6 +71,7 @@ fn merge_views(v2: &View, v1: &View) -> Option<View> {
     } else {
         Some(View {
             shape: v1.shape.clone(),
+            shape_strides: to_shapes_strides(&v1.shape, &ret),
             strides: ret,
         })
     }
@@ -94,9 +96,11 @@ pub struct ShapeTracker {
 
 impl ShapeTracker {
     pub fn new(shape: Vec<usize>) -> Self {
+        let strides = default_strides(&shape);
         Self {
             views: vec![View {
-                strides: default_strides(&shape),
+                shape_strides: to_shapes_strides(&shape, &strides),
+                strides,
                 shape,
             }],
         }
@@ -107,8 +111,10 @@ impl ShapeTracker {
     }
 
     pub fn reshape(&mut self, new_shape: Vec<usize>) {
+        let strides = default_strides(&new_shape);
         let new_view = View {
-            strides: default_strides(&new_shape),
+            shape_strides: to_shapes_strides(&new_shape, &strides),
+            strides,
             shape: new_shape,
         };
         if self.views.last().unwrap().is_contiguous() {
@@ -126,6 +132,10 @@ impl ShapeTracker {
             .shape
             .insert(dimension, new_size);
         self.views.last_mut().unwrap().strides.insert(dimension, 0);
+        self.views.last_mut().unwrap().shape_strides = to_shapes_strides(
+            &self.views.last().unwrap().shape,
+            &self.views.last().unwrap().strides,
+        );
     }
 
     fn simplify(&mut self) {
@@ -149,6 +159,7 @@ impl ShapeTracker {
             view.shape[i] = old_shape[*j];
             view.strides[i] = old_strides[*j];
         }
+        view.shape_strides = to_shapes_strides(&view.shape, &view.strides);
     }
 
     pub fn index_fn_node(&self) -> Node {
@@ -159,7 +170,7 @@ impl ShapeTracker {
             self.shape().iter().product::<usize>() as i32,
         );
         for view in self.views.iter().rev() {
-            idx = expr_node(idx, &view.shape, &view.strides);
+            idx = expr_node(idx, &view.shape_strides);
         }
         idx
     }
@@ -218,4 +229,28 @@ fn get_ops_and_nums(mut node: &Node) -> Vec<(fn(i32, i32) -> i32, i32)> {
     }
     ops_and_nums.reverse();
     ops_and_nums
+}
+
+fn to_shapes_strides(shape: &[usize], strides: &[usize]) -> Vec<(usize, usize)> {
+    let mut ret = if !shape.is_empty() {
+        vec![(shape[0], strides[0])]
+    } else {
+        vec![]
+    };
+
+    for i in 1..shape.len() {
+        if (strides[i] != 0
+            && ret
+                .last()
+                .map(|(_, x)| *x == shape[i] * strides[i])
+                .unwrap_or_default())
+            || ret.last().map(|(i, _)| *i == 1).unwrap_or_default()
+            || (strides[i] == 0 && ret.last().map(|(_, i)| *i == 0).unwrap_or_default())
+        {
+            *ret.last_mut().unwrap() = (ret.last().unwrap().0 * shape[i], strides[i]);
+        } else {
+            ret.push((shape[i], strides[i]));
+        }
+    }
+    ret
 }
