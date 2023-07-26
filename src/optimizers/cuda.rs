@@ -727,23 +727,26 @@ impl Operator for CudaSumReduce {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let mut shape_tracker = tensors[0].shape.clone();
-        let inp_size: usize = tensors[0].shape.shape().iter().product();
+        let front_size: usize = tensors[0].shape.shape().iter().take(self.0).product();
+        let back_size: usize = tensors[0].shape.shape().iter().skip(self.0 + 1).product();
+        let dim_size = tensors[0].shape.shape()[self.0];
         let inp_idx_exp = tensors[0].shape.index_fn_node().to_string_no_range();
-        let dim_stride = shape_tracker.views.last().unwrap().strides[self.0]; // This is probably wrong
-        let dim_size = shape_tracker.shape()[self.0];
 
         let ptx = compile_ptx(
             format!("
-extern \"C\" __global__ void sumreduce_kernel(float *out, const float *inp, const int dim_size, const int dim_stride, int numel) {{
+extern \"C\" __global__ void sumreduce_kernel(float *out, const float *inp, const int front_size, const int back_size, const int dim_size, int numel) {{
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     
     if (i < numel) {{
-        int idx = i * dim_size;
-        int a_idx = {inp_idx_exp};
-        for (int j = 0; j < dim_size; j++) {{
-            out[i] += inp[a_idx + (dim_stride * j)];
+        int a = i / back_size;
+        int b = i % back_size;
+        float reduce_value = 0.0;
+        for (int c = 0; c < dim_size; c++) {{
+            int idx = a * dim_size * back_size + c * back_size + b;
+            int a_idx = {inp_idx_exp};
+            reduce_value += inp[a_idx];
         }}
+        out[i] = reduce_value;
     }}
 }}"),
         )
@@ -753,33 +756,28 @@ extern \"C\" __global__ void sumreduce_kernel(float *out, const float *inp, cons
             .unwrap();
         let f = dev.get_func("sumreduce", "sumreduce_kernel").unwrap();
 
-        let num_result_elem = shape_tracker
-            .shape()
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i != self.0)
-            .map(|(_, sh)| sh)
-            .product();
-        let mut out = dev.alloc_zeros::<f32>(num_result_elem).unwrap();
-        let cfg = LaunchConfig::for_num_elems(num_result_elem as u32);
+        let mut shape_tracker = tensors[0].shape.clone();
+        let mut prev_shape = shape_tracker.shape().clone();
+        prev_shape.remove(self.0);
+        let result_size = prev_shape.iter().product();
+        let mut out = dev.alloc_zeros::<f32>(result_size).unwrap();
+        let cfg = LaunchConfig::for_num_elems(result_size as u32);
         unsafe {
             f.launch(
                 cfg,
                 (
                     &mut out,
                     inp,
+                    front_size as i32,
+                    back_size as i32,
                     dim_size as i32,
-                    dim_stride as i32,
-                    inp_size as i32,
+                    result_size as i32,
                 ),
             )
         }
         .unwrap();
 
-        let mut prev_shape = shape_tracker.shape().clone();
-        prev_shape.remove(self.0);
         shape_tracker.reshape(prev_shape);
-
         Tensor {
             data: Box::new(out),
             shape: shape_tracker,
@@ -802,23 +800,26 @@ impl Operator for CudaMaxReduce {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let mut shape_tracker = tensors[0].shape.clone();
-        let inp_size: usize = tensors[0].shape.shape().iter().product();
+        let front_size: usize = tensors[0].shape.shape().iter().take(self.0).product();
+        let back_size: usize = tensors[0].shape.shape().iter().skip(self.0 + 1).product();
+        let dim_size = tensors[0].shape.shape()[self.0];
         let inp_idx_exp = tensors[0].shape.index_fn_node().to_string_no_range();
-        let dim_stride = shape_tracker.views.last().unwrap().strides[self.0]; // This is probably wrong
-        let dim_size = shape_tracker.shape()[self.0];
 
         let ptx = compile_ptx(
             format!("
-extern \"C\" __global__ void maxreduce_kernel(float *out, const float *inp, const int dim_size, const int dim_stride, int numel) {{
+extern \"C\" __global__ void maxreduce_kernel(float *out, const float *inp, const int front_size, const int back_size, const int dim_size, int numel) {{
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     
     if (i < numel) {{
-        int idx = i * dim_size;
-        int a_idx = {inp_idx_exp};
-        for (int j = 0; j < dim_size; j++) {{
-            out[i] = max(out[i], inp[a_idx + (dim_stride * j)]);
+        int a = i / back_size;
+        int b = i % back_size;
+        float reduce_value = -__int_as_float(0x7f800000);
+        for (int c = 0; c < dim_size; c++) {{
+            int idx = a * dim_size * back_size + c * back_size + b;
+            int a_idx = {inp_idx_exp};
+            reduce_value = max(reduce_value, inp[a_idx]);
         }}
+        out[i] = reduce_value;
     }}
 }}"),
         )
@@ -828,33 +829,28 @@ extern \"C\" __global__ void maxreduce_kernel(float *out, const float *inp, cons
             .unwrap();
         let f = dev.get_func("maxreduce", "maxreduce_kernel").unwrap();
 
-        let num_result_elem = shape_tracker
-            .shape()
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i != self.0)
-            .map(|(_, sh)| sh)
-            .product();
-        let mut out = dev.alloc_zeros::<f32>(num_result_elem).unwrap();
-        let cfg = LaunchConfig::for_num_elems(num_result_elem as u32);
+        let mut shape_tracker = tensors[0].shape.clone();
+        let mut prev_shape = shape_tracker.shape().clone();
+        prev_shape.remove(self.0);
+        let result_size = prev_shape.iter().product();
+        let mut out = dev.alloc_zeros::<f32>(result_size).unwrap();
+        let cfg = LaunchConfig::for_num_elems(result_size as u32);
         unsafe {
             f.launch(
                 cfg,
                 (
                     &mut out,
                     inp,
+                    front_size as i32,
+                    back_size as i32,
                     dim_size as i32,
-                    dim_stride as i32,
-                    inp_size as i32,
+                    result_size as i32,
                 ),
             )
         }
         .unwrap();
 
-        let mut prev_shape = shape_tracker.shape().clone();
-        prev_shape.remove(self.0);
         shape_tracker.reshape(prev_shape);
-
         Tensor {
             data: Box::new(out),
             shape: shape_tracker,
@@ -1117,37 +1113,53 @@ mod tests {
     #[test]
     fn test_sum_reduce() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<2, 3>>();
-        a.set(vec![1., 2., 3., 1., 2., 3.]);
+        let a = cx.new_tensor::<R3<2, 2, 3>>();
+        a.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
         let b = a.sum_reduce::<_, crate::prelude::Axis<1>>();
+        let c = a.sum_reduce::<_, crate::prelude::Axis<0>>();
+        let d = a.sum_reduce::<_, crate::prelude::Axis<2>>();
         b.mark();
+        c.mark();
+        d.mark();
 
         cx.optimize(CudaOptimizer::default());
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
-        let d_b = d_a.sum::<_, dfdx::shapes::Axis<1>>();
+        let d_a = d_dev.tensor([[[1., 2., 3.], [1., 2., 3.]], [[1., 2., 3.], [1., 2., 3.]]]);
+        let d_b = d_a.clone().sum::<_, dfdx::shapes::Axis<1>>();
+        let d_c = d_a.clone().sum::<_, dfdx::shapes::Axis<0>>();
+        let d_d = d_a.sum::<_, dfdx::shapes::Axis<2>>();
 
         assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+        assert_close_data(&d.retrieve().unwrap().real_data().unwrap(), &d_d.as_vec());
     }
 
     #[test]
     fn test_max_reduce() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<2, 3>>();
-        a.set(vec![1., 2., 3., 1., 2., 3.]);
+        let a = cx.new_tensor::<R3<2, 2, 3>>();
+        a.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
         let b = a.max_reduce::<_, crate::prelude::Axis<1>>();
+        let c = a.max_reduce::<_, crate::prelude::Axis<0>>();
+        let d = a.max_reduce::<_, crate::prelude::Axis<2>>();
         b.mark();
+        c.mark();
+        d.mark();
 
         cx.optimize(CudaOptimizer::default());
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
-        let d_b = d_a.max::<_, dfdx::shapes::Axis<1>>();
+        let d_a = d_dev.tensor([[[1., 2., 3.], [1., 2., 3.]], [[1., 2., 3.], [1., 2., 3.]]]);
+        let d_b = d_a.clone().max::<_, dfdx::shapes::Axis<1>>();
+        let d_c = d_a.clone().max::<_, dfdx::shapes::Axis<0>>();
+        let d_d = d_a.max::<_, dfdx::shapes::Axis<2>>();
 
         assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+        assert_close_data(&d.retrieve().unwrap().real_data().unwrap(), &d_d.as_vec());
     }
 
     #[test]
