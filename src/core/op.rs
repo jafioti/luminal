@@ -1,6 +1,6 @@
 use std::{any::Any, fmt::Debug};
 
-use crate::{shape::ShapeTracker, tensor::Tensor};
+use crate::{prelude::RealDim, shape::ShapeTracker, tensor::Tensor};
 
 pub trait Operator: Debug {
     fn name(&self) -> &'static str;
@@ -12,6 +12,7 @@ pub trait Operator: Debug {
 pub trait ImplEq: PartialEq {}
 
 /// An opaque function running on CPU that takes in tensor references and outputs a new tensor
+#[allow(clippy::type_complexity)]
 pub struct Function(pub Box<dyn Fn(Vec<&Tensor>) -> Tensor>);
 impl Operator for Function {
     fn name(&self) -> &'static str {
@@ -57,7 +58,7 @@ impl Operator for Permute {
 }
 
 #[derive(Debug, Clone)]
-pub struct Reshape(pub Vec<usize>);
+pub struct Reshape(pub Vec<RealDim>);
 impl Operator for Reshape {
     fn name(&self) -> &'static str {
         "Reshape"
@@ -71,13 +72,41 @@ impl Operator for Reshape {
     fn process(&self, inp: Vec<&Tensor>) -> Tensor {
         // We don't need to clone here! We should switch to a more view oriented system
         let mut t = inp[0].clone();
-        t.shape.reshape(self.0.clone());
+        // Figure out the proper shapes
+        let inp_elements: usize = t.shape.shape().iter().sum();
+        let known_elements: usize = self
+            .0
+            .iter()
+            .filter_map(|i| {
+                if let RealDim::Const(n) = i {
+                    Some(n)
+                } else {
+                    None
+                }
+            })
+            .sum();
+        let mut encountered_dyn = false;
+        let real_shape = self
+            .0
+            .iter()
+            .map(|i| match i {
+                RealDim::Const(n) => *n,
+                RealDim::Dyn => {
+                    if encountered_dyn {
+                        panic!("Encountered two dyn dims in a reshape!");
+                    }
+                    encountered_dyn = true;
+                    inp_elements - known_elements
+                }
+            })
+            .collect();
+        t.shape.reshape(real_shape);
         t
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Expand(pub usize, pub usize);
+pub struct Expand(pub usize, pub RealDim);
 impl Operator for Expand {
     fn name(&self) -> &'static str {
         "Expand"
@@ -285,7 +314,6 @@ impl Operator for Sub {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        println!("Sub B: {:?}", tensors[1].data);
         let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
         let r_idx = tracker.index_fn();
         let a_idx = tensors[0].shape.index_fn();

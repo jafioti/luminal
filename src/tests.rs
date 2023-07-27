@@ -60,7 +60,7 @@ fn test_shapes() {
     let mut cx = Graph::new();
     let a = cx.new_tensor::<R1<4>>();
 
-    let b: GraphTensor<R2<2, 2>> = a.reshape::<R2<2, 2>>().permute::<_, _, Axes2<1, 0>>();
+    let b: GraphTensor<R2<2, 2>> = a.reshape::<R2<2, 2>>().permute::<_, Axes2<1, 0>>();
 
     a.set(vec![1., 2., 3., 4.]);
 

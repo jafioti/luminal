@@ -81,7 +81,7 @@ fn test_permute() {
 fn test_expand() {
     let mut s = ShapeTracker::new(vec![2, 5]);
 
-    s.expand(2, 3);
+    s.expand(2, crate::prelude::RealDim::Const(3));
 
     assert_eq!(
         s.views,

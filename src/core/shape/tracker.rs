@@ -1,6 +1,6 @@
 use itertools::Itertools;
 
-use super::symbolic::*;
+use super::{symbolic::*, RealDim};
 
 // This is a shape tracker allowing for zero-copy movement ops based off of https://github.com/tinygrad/tinygrad/blob/master/tinygrad/shape/shapetracker.py
 
@@ -125,12 +125,14 @@ impl ShapeTracker {
         }
     }
 
-    pub fn expand(&mut self, dimension: usize, new_size: usize) {
-        self.views
-            .last_mut()
-            .unwrap()
-            .shape
-            .insert(dimension, new_size);
+    pub fn expand(&mut self, dimension: usize, new_size: RealDim) {
+        self.views.last_mut().unwrap().shape.insert(
+            dimension,
+            match new_size {
+                RealDim::Const(i) => i,
+                RealDim::Dyn => 0,
+            },
+        );
         self.views.last_mut().unwrap().strides.insert(dimension, 0);
         self.views.last_mut().unwrap().shape_strides = to_shapes_strides(
             &self.views.last().unwrap().shape,

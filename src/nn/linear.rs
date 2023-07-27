@@ -65,6 +65,7 @@ mod tests {
         batch_out.mark();
         a.set(vec![1.0, 2.0, 3.0]);
         batch.set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+
         cx.execute();
 
         let unoptimized_b = b.retrieve().unwrap();
