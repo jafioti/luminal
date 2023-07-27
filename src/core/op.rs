@@ -5,22 +5,32 @@ use crate::{shape::ShapeTracker, tensor::Tensor};
 pub trait Operator: Debug {
     fn name(&self) -> &'static str;
     fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
     fn process(&self, inp: Vec<&Tensor>) -> Tensor;
 }
 
 pub trait ImplEq: PartialEq {}
 
-#[derive(Debug, Clone)]
-pub struct Input;
-impl Operator for Input {
+/// An opaque function running on CPU that takes in tensor references and outputs a new tensor
+pub struct Function(pub Box<dyn Fn(Vec<&Tensor>) -> Tensor>);
+impl Operator for Function {
     fn name(&self) -> &'static str {
-        "Input"
+        "Function"
     }
     fn as_any(&self) -> &dyn Any {
         self
     }
-    fn process(&self, _: Vec<&Tensor>) -> Tensor {
-        panic!("The graph was run without an input set!");
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn process(&self, input: Vec<&Tensor>) -> Tensor {
+        (self.0)(input)
+    }
+}
+
+impl Debug for Function {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Function")
     }
 }
 
@@ -33,6 +43,9 @@ impl Operator for Permute {
         "Permute"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, inp: Vec<&Tensor>) -> Tensor {
@@ -52,6 +65,9 @@ impl Operator for Reshape {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
     fn process(&self, inp: Vec<&Tensor>) -> Tensor {
         // We don't need to clone here! We should switch to a more view oriented system
         let mut t = inp[0].clone();
@@ -67,6 +83,9 @@ impl Operator for Expand {
         "Expand"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, inp: Vec<&Tensor>) -> Tensor {
@@ -88,6 +107,9 @@ impl Operator for Log2 {
         "Log2"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
@@ -115,6 +137,9 @@ impl Operator for Exp2 {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let mut t = tensors[0].clone();
         for a in t
@@ -138,6 +163,9 @@ impl Operator for Sin {
         "Sin"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
@@ -165,6 +193,9 @@ impl Operator for Sqrt {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let mut t = tensors[0].clone();
         for a in t
@@ -188,6 +219,9 @@ impl Operator for Recip {
         "Recip"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
@@ -217,6 +251,9 @@ impl Operator for Add {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
         let r_idx = tracker.index_fn();
@@ -242,6 +279,9 @@ impl Operator for Sub {
         "Sub"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
@@ -272,6 +312,9 @@ impl Operator for Mul {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
         let r_idx = tracker.index_fn();
@@ -297,6 +340,9 @@ impl Operator for Div {
         "Div"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
@@ -326,6 +372,9 @@ impl Operator for Max {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
         let r_idx = tracker.index_fn();
@@ -351,6 +400,9 @@ impl Operator for Mod {
         "Mod"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
@@ -380,6 +432,9 @@ impl Operator for SumReduce {
         "SumReduce"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
@@ -415,6 +470,9 @@ impl Operator for MaxReduce {
         "MaxReduce"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {

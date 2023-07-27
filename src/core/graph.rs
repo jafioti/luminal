@@ -56,9 +56,12 @@ impl Graph {
     pub fn new_tensor<S: Shape>(&mut self) -> GraphTensor<S> {
         self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
         let tensor = GraphTensor {
-            id: self
-                .graph
-                .add_node((Box::new(op::Input), S::realized_shape())),
+            id: self.graph.add_node((
+                Box::new(op::Function(Box::new(|_| {
+                    panic!("You must set a value for this tensor!")
+                }))),
+                S::realized_shape(),
+            )),
             graph_ref: self,
             _phantom: Default::default(),
         };
@@ -66,20 +69,20 @@ impl Graph {
         tensor
     }
 
-    pub fn set_tensor<S: Shape>(
-        &mut self,
-        graph_tensor: GraphTensor<S>,
-        data: Vec<f32>,
-        shape: Vec<usize>,
-    ) {
-        self.tensors.insert(
-            graph_tensor.id,
-            Tensor {
-                data: Box::new(data),
-                shape: ShapeTracker::new(shape),
-            },
-        );
-    }
+    // pub fn set_tensor<S: Shape>(
+    //     &mut self,
+    //     graph_tensor: GraphTensor<S>,
+    //     data: Vec<f32>,
+    //     shape: Vec<usize>,
+    // ) {
+    //     self.tensors.insert(
+    //         graph_tensor.id,
+    //         Tensor {
+    //             data: Box::new(data),
+    //             shape: ShapeTracker::new(shape),
+    //         },
+    //     );
+    // }
 
     /// Run the full suite of optimizations
     pub fn optimize<O: GraphOptimizer>(&mut self, optimizer: O) {

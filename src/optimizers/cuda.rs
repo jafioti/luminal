@@ -37,7 +37,7 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
         for (input_node, input_shape) in graph
             .graph
             .node_indices()
-            .filter(|n| graph.graph.node_weight(*n).unwrap().0.name() == "Input")
+            .filter(|n| graph.graph.node_weight(*n).unwrap().0.name() == "Function")
             .map(|n| (n, graph.graph.node_weight(n).unwrap().1.clone()))
             .collect_vec()
         {
@@ -68,7 +68,7 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
         for (output_node, output_shape) in graph
             .to_retrieve
             .iter()
-            .filter(|n| graph.graph.node_weight(**n).unwrap().0.name() != "Input")
+            .filter(|n| graph.graph.node_weight(**n).unwrap().0.name() != "Function")
             .map(|n| (*n, graph.graph.node_weight(*n).unwrap().1.clone()))
             .collect_vec()
         {
@@ -147,6 +147,9 @@ impl Operator for CudaCopyToDevice {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
     fn process(&self, inp: Vec<&Tensor>) -> Tensor {
         let dev = CudaDevice::new(0).unwrap();
         let cpu_data = inp[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
@@ -168,6 +171,9 @@ impl Operator for CudaCopyFromDevice {
         "CudaCopyFromDevice"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, inp: Vec<&Tensor>) -> Tensor {
@@ -194,6 +200,9 @@ impl Operator for CudaLog2 {
         "CudaLog2"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
@@ -237,6 +246,9 @@ impl Operator for CudaExp2 {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let inp = tensors[0]
             .data
@@ -276,6 +288,9 @@ impl Operator for CudaSin {
         "CudaSin"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
@@ -319,6 +334,9 @@ impl Operator for CudaSqrt {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let inp = tensors[0]
             .data
@@ -358,6 +376,9 @@ impl Operator for CudaRecip {
         "CudaRecip"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
@@ -401,6 +422,9 @@ impl Operator for CudaAdd {
         "CudaAdd"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
@@ -456,6 +480,9 @@ impl Operator for CudaSub {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let a = tensors[0]
             .data
@@ -507,6 +534,9 @@ impl Operator for CudaMul {
         "CudaMul"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
@@ -562,6 +592,9 @@ impl Operator for CudaDiv {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let a = tensors[0]
             .data
@@ -613,6 +646,9 @@ impl Operator for CudaMax {
         "CudaMax"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
@@ -668,6 +704,9 @@ impl Operator for CudaMod {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
         let a = tensors[0]
             .data
@@ -719,6 +758,9 @@ impl Operator for CudaSumReduce {
         "CudaSumReduce"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
@@ -792,6 +834,9 @@ impl Operator for CudaMaxReduce {
         "CudaMaxReduce"
     }
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {

@@ -1,4 +1,4 @@
-use crate::{graph::Graph, shape::*, tensor::Tensor};
+use crate::{graph::Graph, op::Function, shape::*, tensor::Tensor};
 use std::marker::PhantomData;
 
 use petgraph::graph::NodeIndex;
@@ -40,24 +40,39 @@ impl<S: Shape> GraphTensor<S> {
 
     /// Set the value of the tensor, with dynamic dimensions.
     pub fn set_dyn(&self, data: Vec<f32>, shape: Vec<usize>) {
-        unsafe {
-            self.graph_ref
-                .as_mut()
-                .unwrap()
-                .set_tensor(*self, data, shape)
-        }
+        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        let node = graph
+            .graph
+            .node_weight_mut(self.id)
+            .unwrap()
+            .0
+            .as_any_mut()
+            .downcast_mut::<Function>()
+            .unwrap();
+        // We shouldn't do cloning here!
+        node.0 = Box::new(move |_| Tensor {
+            data: Box::new(data.clone()),
+            shape: ShapeTracker::new(shape.clone()),
+        });
     }
 }
 
 impl<S: ConstShape> GraphTensor<S> {
     /// Set the value of the tensor matching the constant shape
     pub fn set(&self, data: Vec<f32>) {
-        unsafe {
-            self.graph_ref.as_mut().unwrap().set_tensor(
-                *self,
-                data,
-                <S as ConstShape>::realized_shape(),
-            )
-        }
+        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        let node = graph
+            .graph
+            .node_weight_mut(self.id)
+            .unwrap()
+            .0
+            .as_any_mut()
+            .downcast_mut::<Function>()
+            .unwrap();
+        // We shouldn't do cloning here!
+        node.0 = Box::new(move |_| Tensor {
+            data: Box::new(data.clone()),
+            shape: ShapeTracker::new(<S as ConstShape>::realized_shape()),
+        });
     }
 }
