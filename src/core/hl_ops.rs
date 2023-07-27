@@ -287,25 +287,25 @@ impl<S: Shape> GraphTensor<S> {
     }
 }
 
-// Matmul 2x2, 2x3 (broadcast 2 across batch), 2x4 (broadcast 2 across 2 batch dims), 3x3 (make sure shape matches up, multiply each consituent matrix)
+// Matmuls
 
 // ABxBC -> AC
-impl<const A: usize, const B: usize> GraphTensor<R2<A, B>> {
-    pub fn matmul<const C: usize>(self, rhs: GraphTensor<R2<B, C>>) -> GraphTensor<R2<A, C>> {
+impl<const B: usize, A: Dim> GraphTensor<(A, Const<B>)> {
+    pub fn matmul<C: Dim>(self, rhs: GraphTensor<(Const<B>, C)>) -> GraphTensor<(A, C)> {
         // Reshape
-        let w: GraphTensor<R2<C, B>> = rhs.permute::<_, Axes2<1, 0>>();
+        let w: GraphTensor<(C, Const<B>)> = rhs.permute::<_, Axes2<1, 0>>();
 
         // Broadcasted Multiply
-        let mul = self.expand::<R3<A, C, B>, _>() * w.expand::<R3<A, C, B>, _>();
+        let mul = self.expand::<(A, C, Const<B>), _>() * w.expand::<(A, C, Const<B>), _>();
 
         // Sum Reduce
         mul.sum_reduce::<_, Axis<2>>()
     }
 }
 
-// AxAB -> B (Don't know if this is correct)
+// AxAB -> B
 impl<const A: usize> GraphTensor<R1<A>> {
-    pub fn matmul<const B: usize>(self, rhs: GraphTensor<R2<A, B>>) -> GraphTensor<R1<B>> {
+    pub fn matmul<B: Dim>(self, rhs: GraphTensor<(Const<A>, B)>) -> GraphTensor<(B,)> {
         let s: GraphTensor<R2<1, A>> = self.expand();
 
         // Run normal matmul
@@ -317,22 +317,22 @@ impl<const A: usize> GraphTensor<R1<A>> {
 }
 
 // ABCxCD -> ABD
-impl<const A: usize, const B: usize, const C: usize> GraphTensor<R3<A, B, C>> {
-    pub fn matmul<const D: usize>(self, rhs: GraphTensor<R2<C, D>>) -> GraphTensor<R3<A, B, D>> {
+impl<const C: usize, A: Dim, B: Dim> GraphTensor<(A, B, Const<C>)> {
+    pub fn matmul<D: Dim>(self, rhs: GraphTensor<(Const<C>, D)>) -> GraphTensor<(A, B, D)> {
         // Reshape
-        let w: GraphTensor<R2<D, C>> = rhs.permute::<_, Axes2<1, 0>>();
+        let w: GraphTensor<(D, Const<C>)> = rhs.permute::<_, Axes2<1, 0>>();
 
         // Broadcasted Multiply
-        let mul = self.expand::<R4<A, B, D, C>, _>() * w.expand::<R4<A, B, D, C>, _>();
+        let mul = self.expand::<(A, B, D, Const<C>), _>() * w.expand::<(A, B, D, Const<C>), _>();
 
         // Sum Reduce
         mul.sum_reduce::<_, Axis<3>>()
     }
 }
 
-impl<const A: usize> GraphTensor<R1<A>> {
+impl<A: Dim> GraphTensor<(A,)> {
     /// Simple dot product of two vectors
-    pub fn dot(self, rhs: GraphTensor<R1<A>>) -> GraphTensor<R0> {
+    pub fn dot(self, rhs: GraphTensor<(A,)>) -> GraphTensor<R0> {
         (self * rhs).sum_reduce()
     }
 }
@@ -411,10 +411,7 @@ impl<S: Shape> Neg for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
     fn neg(self) -> Self::Output {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let neg_one = graph.new_tensor::<R0>();
-        neg_one.set(vec![-1.0]);
-        self * neg_one.expand()
+        self * -1.0
     }
 }
 

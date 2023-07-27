@@ -30,12 +30,10 @@ impl<const A: usize, const B: usize> Module<GraphTensor<R1<A>>> for Linear<A, B>
 }
 
 // Batched
-impl<const A: usize, const B: usize, const C: usize> Module<GraphTensor<R2<C, A>>>
-    for Linear<A, B>
-{
-    type Output = GraphTensor<R2<C, B>>;
+impl<const A: usize, const B: usize, C: Dim> Module<GraphTensor<(C, Const<A>)>> for Linear<A, B> {
+    type Output = GraphTensor<(C, Const<B>)>;
 
-    fn forward(&self, input: GraphTensor<R2<C, A>>) -> Self::Output {
+    fn forward(&self, input: GraphTensor<(C, Const<A>)>) -> Self::Output {
         input.matmul(self.weight)
     }
 }

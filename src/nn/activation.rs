@@ -9,7 +9,7 @@ impl InitModule for ReLU {
     }
 }
 
-impl<S: ConstShape> Module<GraphTensor<S>> for ReLU {
+impl<S: Shape> Module<GraphTensor<S>> for ReLU {
     type Output = GraphTensor<S>;
 
     fn forward(&self, input: GraphTensor<S>) -> Self::Output {
@@ -130,8 +130,17 @@ mod tests {
             )
             .permute();
         let a = dev.tensor_from_vec(vec![1.0, 2.0, 3.0], (dfdx::shapes::Const::<3>,));
+        let d_batch = dev.tensor_from_vec(
+            vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0],
+            (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<3>),
+        );
         let out = model.forward(a);
+        let d_batch_out = model.forward(d_batch);
 
         assert_close_data(&unoptimized_b.real_data().unwrap(), &out.as_vec());
+        assert_close_data(
+            &unoptimized_batch_out.real_data().unwrap(),
+            &d_batch_out.as_vec(),
+        );
     }
 }

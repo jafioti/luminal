@@ -106,6 +106,32 @@ impl ShapeTracker {
         }
     }
 
+    pub fn get_real_shape<const N: usize>(&self, other: [&ShapeTracker; N]) -> Option<Vec<usize>> {
+        let mut our = self.views.last().unwrap().shape.clone();
+        if !our.iter().any(|i| *i == 0) {
+            return Some(our);
+        }
+
+        // Fill in holes
+        for other in other {
+            let mut has_zero = false;
+            for (i, o) in our.iter_mut().enumerate() {
+                if *o == 0 {
+                    has_zero = true;
+                    *o = other.shape()[i];
+                }
+            }
+            if !has_zero {
+                break;
+            }
+        }
+        if !our.iter().any(|i| *i == 0) {
+            Some(our)
+        } else {
+            None
+        }
+    }
+
     pub fn shape(&self) -> &Vec<usize> {
         &self.views.last().unwrap().shape
     }
@@ -130,7 +156,7 @@ impl ShapeTracker {
             dimension,
             match new_size {
                 RealDim::Const(i) => i,
-                RealDim::Dyn => 0,
+                RealDim::Dyn => 100, // A bit sloppy, this just needs to be a substantial number that the symbolic library can't get rid of. This needs to change!
             },
         );
         self.views.last_mut().unwrap().strides.insert(dimension, 0);

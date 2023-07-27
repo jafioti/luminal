@@ -73,7 +73,7 @@ impl Operator for Reshape {
         // We don't need to clone here! We should switch to a more view oriented system
         let mut t = inp[0].clone();
         // Figure out the proper shapes
-        let inp_elements: usize = t.shape.shape().iter().sum();
+        let inp_elements: usize = t.shape.shape().iter().product();
         let known_elements: usize = self
             .0
             .iter()
@@ -84,7 +84,7 @@ impl Operator for Reshape {
                     None
                 }
             })
-            .sum();
+            .product();
         let mut encountered_dyn = false;
         let real_shape = self
             .0
@@ -96,7 +96,7 @@ impl Operator for Reshape {
                         panic!("Encountered two dyn dims in a reshape!");
                     }
                     encountered_dyn = true;
-                    inp_elements - known_elements
+                    inp_elements / known_elements
                 }
             })
             .collect();
@@ -284,19 +284,21 @@ impl Operator for Add {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
-        let r_idx = tracker.index_fn();
+        let res_shape = tensors[0]
+            .shape
+            .get_real_shape([&tensors[1].shape])
+            .unwrap();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
-        let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
         let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let mut data = vec![0.; res_shape.iter().product()];
         for i in 0..data.len() {
-            data[(r_idx)(i)] = a_data[(a_idx)(i)] + b_data[(b_idx)(i)];
+            data[i] = a_data[(a_idx)(i)] + b_data[(b_idx)(i)];
         }
         Tensor {
             data: Box::new(data),
-            shape: tracker,
+            shape: ShapeTracker::new(res_shape),
         }
     }
 }
@@ -314,19 +316,21 @@ impl Operator for Sub {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
-        let r_idx = tracker.index_fn();
+        let res_shape = tensors[0]
+            .shape
+            .get_real_shape([&tensors[1].shape])
+            .unwrap();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
-        let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
         let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let mut data = vec![0.; res_shape.iter().product()];
         for i in 0..data.len() {
-            data[(r_idx)(i)] = a_data[(a_idx)(i)] - b_data[(b_idx)(i)];
+            data[i] = a_data[(a_idx)(i)] - b_data[(b_idx)(i)];
         }
         Tensor {
             data: Box::new(data),
-            shape: tracker,
+            shape: ShapeTracker::new(res_shape),
         }
     }
 }
@@ -344,19 +348,21 @@ impl Operator for Mul {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
-        let r_idx = tracker.index_fn();
+        let res_shape = tensors[0]
+            .shape
+            .get_real_shape([&tensors[1].shape])
+            .unwrap();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
-        let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
         let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let mut data = vec![0.; res_shape.iter().product()];
         for i in 0..data.len() {
-            data[(r_idx)(i)] = a_data[(a_idx)(i)] * b_data[(b_idx)(i)];
+            data[i] = a_data[(a_idx)(i)] * b_data[(b_idx)(i)];
         }
         Tensor {
             data: Box::new(data),
-            shape: tracker,
+            shape: ShapeTracker::new(res_shape),
         }
     }
 }
@@ -374,19 +380,21 @@ impl Operator for Div {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
-        let r_idx = tracker.index_fn();
+        let res_shape = tensors[0]
+            .shape
+            .get_real_shape([&tensors[1].shape])
+            .unwrap();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
-        let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
         let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let mut data = vec![0.; res_shape.iter().product()];
         for i in 0..data.len() {
-            data[(r_idx)(i)] = a_data[(a_idx)(i)] / b_data[(b_idx)(i)];
+            data[i] = a_data[(a_idx)(i)] / b_data[(b_idx)(i)];
         }
         Tensor {
             data: Box::new(data),
-            shape: tracker,
+            shape: ShapeTracker::new(res_shape),
         }
     }
 }
@@ -404,19 +412,21 @@ impl Operator for Max {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
-        let r_idx = tracker.index_fn();
+        let res_shape = tensors[0]
+            .shape
+            .get_real_shape([&tensors[1].shape])
+            .unwrap();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
-        let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
         let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let mut data = vec![0.; res_shape.iter().product()];
         for i in 0..data.len() {
-            data[(r_idx)(i)] = a_data[(a_idx)(i)].max(b_data[(b_idx)(i)]);
+            data[i] = a_data[(a_idx)(i)].max(b_data[(b_idx)(i)]);
         }
         Tensor {
             data: Box::new(data),
-            shape: tracker,
+            shape: ShapeTracker::new(res_shape),
         }
     }
 }
@@ -434,19 +444,21 @@ impl Operator for Mod {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
-        let r_idx = tracker.index_fn();
+        let res_shape = tensors[0]
+            .shape
+            .get_real_shape([&tensors[1].shape])
+            .unwrap();
         let a_idx = tensors[0].shape.index_fn();
         let b_idx = tensors[1].shape.index_fn();
-        let mut data = vec![0.; tensors[0].shape.shape().iter().product()];
         let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let mut data = vec![0.; res_shape.iter().product()];
         for i in 0..data.len() {
-            data[(r_idx)(i)] = a_data[(a_idx)(i)] % b_data[(b_idx)(i)];
+            data[i] = a_data[(a_idx)(i)] % b_data[(b_idx)(i)];
         }
         Tensor {
             data: Box::new(data),
-            shape: tracker,
+            shape: ShapeTracker::new(res_shape),
         }
     }
 }

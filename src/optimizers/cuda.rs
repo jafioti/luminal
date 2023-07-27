@@ -428,6 +428,10 @@ impl Operator for CudaAdd {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
+        let res_shape = tensors[0]
+            .shape
+            .get_real_shape([&tensors[1].shape])
+            .unwrap();
         let a = tensors[0]
             .data
             .as_any()
@@ -438,20 +442,17 @@ impl Operator for CudaAdd {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let inp_size: usize = tensors[0].shape.shape().iter().product();
+        let inp_size: usize = res_shape.iter().product();
         let a_index_fn_exp = tensors[0].shape.index_fn_node().to_string_no_range();
         let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
-        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
-        let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
         let ptx = compile_ptx(format!(
             "
 extern \"C\" __global__ void add_kernel(float *out, const float *a, const float *b, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int a_idx = {a_index_fn_exp};
     int b_idx = {b_index_fn_exp};
-    int o_idx = {o_index_fn_exp};
     if (idx < numel) {{
-        out[o_idx] = a[a_idx] + b[b_idx];
+        out[idx] = a[a_idx] + b[b_idx];
     }}
 }}"
         ))
@@ -466,7 +467,7 @@ extern \"C\" __global__ void add_kernel(float *out, const float *a, const float 
 
         Tensor {
             data: Box::new(out),
-            shape: tracker,
+            shape: ShapeTracker::new(res_shape),
         }
     }
 }
@@ -484,6 +485,10 @@ impl Operator for CudaSub {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
+        let res_shape = tensors[0]
+            .shape
+            .get_real_shape([&tensors[1].shape])
+            .unwrap();
         let a = tensors[0]
             .data
             .as_any()
@@ -494,20 +499,17 @@ impl Operator for CudaSub {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let inp_size: usize = tensors[0].shape.shape().iter().product();
+        let inp_size: usize = res_shape.iter().product();
         let a_index_fn_exp = tensors[0].shape.index_fn_node().to_string_no_range();
         let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
-        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
-        let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
         let ptx = compile_ptx(format!(
             "
 extern \"C\" __global__ void sub_kernel(float *out, const float *a, const float *b, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int a_idx = {a_index_fn_exp};
     int b_idx = {b_index_fn_exp};
-    int o_idx = {o_index_fn_exp};
     if (idx < numel) {{
-        out[o_idx] = a[a_idx] - b[b_idx];
+        out[idx] = a[a_idx] - b[b_idx];
     }}
 }}"
         ))
@@ -522,7 +524,7 @@ extern \"C\" __global__ void sub_kernel(float *out, const float *a, const float 
 
         Tensor {
             data: Box::new(out),
-            shape: tracker,
+            shape: ShapeTracker::new(res_shape),
         }
     }
 }
@@ -540,6 +542,10 @@ impl Operator for CudaMul {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
+        let res_shape = tensors[0]
+            .shape
+            .get_real_shape([&tensors[1].shape])
+            .unwrap();
         let a = tensors[0]
             .data
             .as_any()
@@ -550,20 +556,17 @@ impl Operator for CudaMul {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let inp_size: usize = tensors[0].shape.shape().iter().product();
+        let inp_size: usize = res_shape.iter().product();
         let a_index_fn_exp = tensors[0].shape.index_fn_node().to_string_no_range();
         let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
-        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
-        let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
         let ptx = compile_ptx(format!(
             "
 extern \"C\" __global__ void mul_kernel(float *out, const float *a, const float *b, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int a_idx = {a_index_fn_exp};
     int b_idx = {b_index_fn_exp};
-    int o_idx = {o_index_fn_exp};
     if (idx < numel) {{
-        out[o_idx] = a[a_idx] * b[b_idx];
+        out[idx] = a[a_idx] * b[b_idx];
     }}
 }}"
         ))
@@ -578,7 +581,7 @@ extern \"C\" __global__ void mul_kernel(float *out, const float *a, const float 
 
         Tensor {
             data: Box::new(out),
-            shape: tracker,
+            shape: ShapeTracker::new(res_shape),
         }
     }
 }
@@ -596,6 +599,10 @@ impl Operator for CudaDiv {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
+        let res_shape = tensors[0]
+            .shape
+            .get_real_shape([&tensors[1].shape])
+            .unwrap();
         let a = tensors[0]
             .data
             .as_any()
@@ -606,20 +613,17 @@ impl Operator for CudaDiv {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let inp_size: usize = tensors[0].shape.shape().iter().product();
+        let inp_size: usize = res_shape.iter().product();
         let a_index_fn_exp = tensors[0].shape.index_fn_node().to_string_no_range();
         let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
-        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
-        let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
         let ptx = compile_ptx(format!(
             "
 extern \"C\" __global__ void div_kernel(float *out, const float *a, const float *b, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int a_idx = {a_index_fn_exp};
     int b_idx = {b_index_fn_exp};
-    int o_idx = {o_index_fn_exp};
     if (idx < numel) {{
-        out[o_idx] = a[a_idx] / b[b_idx];
+        out[idx] = a[a_idx] / b[b_idx];
     }}
 }}"
         ))
@@ -634,7 +638,7 @@ extern \"C\" __global__ void div_kernel(float *out, const float *a, const float 
 
         Tensor {
             data: Box::new(out),
-            shape: tracker,
+            shape: ShapeTracker::new(res_shape),
         }
     }
 }
@@ -652,6 +656,10 @@ impl Operator for CudaMax {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
+        let res_shape = tensors[0]
+            .shape
+            .get_real_shape([&tensors[1].shape])
+            .unwrap();
         let a = tensors[0]
             .data
             .as_any()
@@ -662,20 +670,17 @@ impl Operator for CudaMax {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let inp_size: usize = tensors[0].shape.shape().iter().product();
+        let inp_size: usize = res_shape.iter().product();
         let a_index_fn_exp = tensors[0].shape.index_fn_node().to_string_no_range();
         let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
-        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
-        let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
         let ptx = compile_ptx(format!(
             "
 extern \"C\" __global__ void max_kernel(float *out, const float *a, const float *b, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int a_idx = {a_index_fn_exp};
     int b_idx = {b_index_fn_exp};
-    int o_idx = {o_index_fn_exp};
     if (idx < numel) {{
-        out[o_idx] = max(a[a_idx], b[b_idx]);
+        out[idx] = max(a[a_idx], b[b_idx]);
     }}
 }}"
         ))
@@ -690,7 +695,7 @@ extern \"C\" __global__ void max_kernel(float *out, const float *a, const float 
 
         Tensor {
             data: Box::new(out),
-            shape: tracker,
+            shape: ShapeTracker::new(res_shape),
         }
     }
 }
@@ -708,6 +713,10 @@ impl Operator for CudaMod {
         self
     }
     fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
+        let res_shape = tensors[0]
+            .shape
+            .get_real_shape([&tensors[1].shape])
+            .unwrap();
         let a = tensors[0]
             .data
             .as_any()
@@ -718,20 +727,17 @@ impl Operator for CudaMod {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let inp_size: usize = tensors[0].shape.shape().iter().product();
+        let inp_size: usize = res_shape.iter().product();
         let a_index_fn_exp = tensors[0].shape.index_fn_node().to_string_no_range();
         let b_index_fn_exp = tensors[1].shape.index_fn_node().to_string_no_range();
-        let tracker = ShapeTracker::new(tensors[0].shape.shape().clone());
-        let o_index_fn_exp = tracker.index_fn_node().to_string_no_range();
         let ptx = compile_ptx(format!(
             "
 extern \"C\" __global__ void mod_kernel(float *out, const float *a, const float *b, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int a_idx = {a_index_fn_exp};
     int b_idx = {b_index_fn_exp};
-    int o_idx = {o_index_fn_exp};
     if (idx < numel) {{
-        out[o_idx] = fmod(a[a_idx], b[b_idx]);
+        out[idx] = fmod(a[a_idx], b[b_idx]);
     }}
 }}"
         ))
@@ -746,7 +752,7 @@ extern \"C\" __global__ void mod_kernel(float *out, const float *a, const float 
 
         Tensor {
             data: Box::new(out),
-            shape: tracker,
+            shape: ShapeTracker::new(res_shape),
         }
     }
 }

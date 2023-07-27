@@ -7,11 +7,7 @@ macro_rules! d { (0) => { D1 }; (1) => { D2 }; (2) => { D3 }; (3) => { D4 }; (4)
 
 macro_rules! impl_permute {
     ($Ax0:tt, $Ax1:tt) => {
-        impl<const D1: usize, const D2: usize>
-            PermuteShapeTo<(Const<d!($Ax0)>, Const<d!($Ax1)>), Axes2<$Ax0, $Ax1>>
-            for (Const<D1>, Const<D2>)
-        {
-        }
+        impl<D1, D2> PermuteShapeTo<(d!($Ax0), d!($Ax1)), Axes2<$Ax0, $Ax1>> for (D1, D2) {}
     };
     ($Ax0:tt, $Ax1:tt, $Ax2:tt) => {
         impl<const D1: usize, const D2: usize, const D3: usize>
@@ -49,6 +45,9 @@ macro_rules! permutations {
         permutations!($Ax0, $Ax3, [$Ax1, $Ax2]);
     };
 }
+
+// impl<const D1: usize> PermuteShapeTo<(Const<D1>, usize), Axes2<1, 0>> for (usize, Const<D1>) {}
+// impl<const D1: usize> PermuteShapeTo<(usize, Const<D1>), Axes2<1, 0>> for (Const<D1>, usize) {}
 
 permutations!([0, 1]);
 permutations!([0, 1, 2]);
