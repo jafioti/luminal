@@ -583,6 +583,73 @@ mod tests {
     }
 
     #[test]
+    fn test_batch_batch_matmul() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R3<1, 2, 3>>();
+        a.set(vec![8.6, 8.0, 12.0, 9.9, 10.0, 15.0]);
+        let b = cx.new_tensor::<R3<1, 2, 3>>();
+        b.set(vec![4.0, -12.0, 12.0, 5.0, 70.0, 15.0]);
+        let c = a.batch_matmul(b.permute());
+
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor_from_vec(
+            vec![8.6, 8.0, 12.0, 9.9, 10.0, 15.0],
+            (
+                dfdx::shapes::Const::<1>,
+                dfdx::shapes::Const::<2>,
+                dfdx::shapes::Const::<3>,
+            ),
+        );
+        let d_b = d_dev.tensor_from_vec(
+            vec![4.0, -12.0, 12.0, 5.0, 70.0, 15.0],
+            (
+                dfdx::shapes::Const::<1>,
+                dfdx::shapes::Const::<2>,
+                dfdx::shapes::Const::<3>,
+            ),
+        );
+        let d_c = d_a.matmul(d_b.permute::<Rank3<1, 3, 2>, dfdx::shapes::Axes3<0, 2, 1>>());
+
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_batch_batch_matmul2() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<(usize, usize)>();
+        a.set_dyn(vec![0.0, 1.0, 0.0, 1.0], vec![2, 2]);
+        let a = a.expand::<(crate::shape::Const<1>, usize, usize), _>();
+        let b = cx.new_tensor::<(crate::shape::Const<1>, usize, crate::shape::Const<3>)>();
+        b.set_dyn(vec![32.0, -2.0, 0.0, -17.0, 40.0, -3.0], vec![1, 2, 3]);
+        let c = a.batch_matmul(b);
+
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor_from_vec(
+            vec![0.0, 1.0, 0.0, 1.0],
+            (
+                dfdx::shapes::Const::<1>,
+                dfdx::shapes::Const::<2>,
+                dfdx::shapes::Const::<2>,
+            ),
+        );
+        let d_b = d_dev.tensor_from_vec(
+            vec![32.0, -2.0, 0.0, -17.0, 40.0, -3.0],
+            (
+                dfdx::shapes::Const::<1>,
+                dfdx::shapes::Const::<2>,
+                dfdx::shapes::Const::<3>,
+            ),
+        );
+        let d_c = d_a.matmul(d_b);
+
+        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+    }
+
+    #[test]
     fn test_mean_reduce() {
         let mut cx = Graph::new();
         let a = cx.new_tensor::<R2<2, 3>>();

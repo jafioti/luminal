@@ -179,7 +179,6 @@ impl Operator for CudaCopyFromDevice {
     }
     fn process(&self, inp: Vec<&Tensor>) -> Tensor {
         let dev = CudaDevice::new(0).unwrap();
-        println!("Data: {:?}", inp[0].data);
         let cuda_data = inp[0]
             .data
             .as_any()

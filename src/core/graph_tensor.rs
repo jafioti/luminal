@@ -1,4 +1,9 @@
-use crate::{graph::Graph, op::Function, shape::*, tensor::Tensor};
+use crate::{
+    graph::Graph,
+    op::{self, Function},
+    shape::*,
+    tensor::Tensor,
+};
 use std::marker::PhantomData;
 
 use petgraph::graph::NodeIndex;
@@ -54,6 +59,14 @@ impl<S: Shape> GraphTensor<S> {
             data: Box::new(data.clone()),
             shape: ShapeTracker::new(shape.clone()),
         });
+    }
+
+    pub fn debug(&self, message: &str) {
+        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        graph
+            .add_op(op::Print(message.to_string()), vec![])
+            .input(self.id)
+            .finish();
     }
 }
 

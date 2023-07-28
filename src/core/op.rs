@@ -1,6 +1,10 @@
 use std::{any::Any, fmt::Debug};
 
-use crate::{prelude::RealDim, shape::ShapeTracker, tensor::Tensor};
+use crate::{
+    prelude::{to_shapes_strides, RealDim},
+    shape::ShapeTracker,
+    tensor::Tensor,
+};
 
 pub trait Operator: Debug {
     fn name(&self) -> &'static str;
@@ -32,6 +36,36 @@ impl Operator for Function {
 impl Debug for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Function")
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Print(pub String);
+impl Operator for Print {
+    fn name(&self) -> &'static str {
+        "Print"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn process(&self, input: Vec<&Tensor>) -> Tensor {
+        println!("{}", self.0);
+        for (i, tensor) in input.iter().enumerate() {
+            println!("{} Data: {:?}", i + 1, tensor.data);
+            println!("{} Shape: {:?}", i + 1, tensor.shape.shape());
+            println!(
+                "{} Idx: {}",
+                i + 1,
+                tensor.shape.index_fn_node().to_string_no_range()
+            );
+        }
+        Tensor {
+            data: Box::<Vec<f32>>::default(),
+            shape: ShapeTracker::new(vec![]),
+        }
     }
 }
 
@@ -288,8 +322,19 @@ impl Operator for Add {
             .shape
             .get_real_shape([&tensors[1].shape])
             .unwrap();
-        let a_idx = tensors[0].shape.index_fn();
-        let b_idx = tensors[1].shape.index_fn();
+        let (mut left_shape, mut right_shape) =
+            (tensors[0].shape.clone(), tensors[1].shape.clone());
+        left_shape.views.last_mut().unwrap().shape = res_shape.clone();
+        left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
+            &left_shape.views.last().unwrap().shape,
+            &left_shape.views.last().unwrap().strides,
+        );
+        right_shape.views.last_mut().unwrap().shape = res_shape.clone();
+        right_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
+            &right_shape.views.last().unwrap().shape,
+            &right_shape.views.last().unwrap().strides,
+        );
+        let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
         let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
@@ -320,8 +365,19 @@ impl Operator for Sub {
             .shape
             .get_real_shape([&tensors[1].shape])
             .unwrap();
-        let a_idx = tensors[0].shape.index_fn();
-        let b_idx = tensors[1].shape.index_fn();
+        let (mut left_shape, mut right_shape) =
+            (tensors[0].shape.clone(), tensors[1].shape.clone());
+        left_shape.views.last_mut().unwrap().shape = res_shape.clone();
+        left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
+            &left_shape.views.last().unwrap().shape,
+            &left_shape.views.last().unwrap().strides,
+        );
+        right_shape.views.last_mut().unwrap().shape = res_shape.clone();
+        right_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
+            &right_shape.views.last().unwrap().shape,
+            &right_shape.views.last().unwrap().strides,
+        );
+        let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
         let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
@@ -352,8 +408,19 @@ impl Operator for Mul {
             .shape
             .get_real_shape([&tensors[1].shape])
             .unwrap();
-        let a_idx = tensors[0].shape.index_fn();
-        let b_idx = tensors[1].shape.index_fn();
+        let (mut left_shape, mut right_shape) =
+            (tensors[0].shape.clone(), tensors[1].shape.clone());
+        left_shape.views.last_mut().unwrap().shape = res_shape.clone();
+        left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
+            &left_shape.views.last().unwrap().shape,
+            &left_shape.views.last().unwrap().strides,
+        );
+        right_shape.views.last_mut().unwrap().shape = res_shape.clone();
+        right_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
+            &right_shape.views.last().unwrap().shape,
+            &right_shape.views.last().unwrap().strides,
+        );
+        let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
         let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
@@ -384,8 +451,19 @@ impl Operator for Div {
             .shape
             .get_real_shape([&tensors[1].shape])
             .unwrap();
-        let a_idx = tensors[0].shape.index_fn();
-        let b_idx = tensors[1].shape.index_fn();
+        let (mut left_shape, mut right_shape) =
+            (tensors[0].shape.clone(), tensors[1].shape.clone());
+        left_shape.views.last_mut().unwrap().shape = res_shape.clone();
+        left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
+            &left_shape.views.last().unwrap().shape,
+            &left_shape.views.last().unwrap().strides,
+        );
+        right_shape.views.last_mut().unwrap().shape = res_shape.clone();
+        right_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
+            &right_shape.views.last().unwrap().shape,
+            &right_shape.views.last().unwrap().strides,
+        );
+        let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
         let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
@@ -416,8 +494,19 @@ impl Operator for Max {
             .shape
             .get_real_shape([&tensors[1].shape])
             .unwrap();
-        let a_idx = tensors[0].shape.index_fn();
-        let b_idx = tensors[1].shape.index_fn();
+        let (mut left_shape, mut right_shape) =
+            (tensors[0].shape.clone(), tensors[1].shape.clone());
+        left_shape.views.last_mut().unwrap().shape = res_shape.clone();
+        left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
+            &left_shape.views.last().unwrap().shape,
+            &left_shape.views.last().unwrap().strides,
+        );
+        right_shape.views.last_mut().unwrap().shape = res_shape.clone();
+        right_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
+            &right_shape.views.last().unwrap().shape,
+            &right_shape.views.last().unwrap().strides,
+        );
+        let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
         let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
@@ -448,8 +537,19 @@ impl Operator for Mod {
             .shape
             .get_real_shape([&tensors[1].shape])
             .unwrap();
-        let a_idx = tensors[0].shape.index_fn();
-        let b_idx = tensors[1].shape.index_fn();
+        let (mut left_shape, mut right_shape) =
+            (tensors[0].shape.clone(), tensors[1].shape.clone());
+        left_shape.views.last_mut().unwrap().shape = res_shape.clone();
+        left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
+            &left_shape.views.last().unwrap().shape,
+            &left_shape.views.last().unwrap().strides,
+        );
+        right_shape.views.last_mut().unwrap().shape = res_shape.clone();
+        right_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
+            &right_shape.views.last().unwrap().shape,
+            &right_shape.views.last().unwrap().strides,
+        );
+        let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
         let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
@@ -519,7 +619,7 @@ impl Operator for MaxReduce {
         let front_size: usize = tensors[0].shape.shape().iter().take(self.0).product();
         let back_size: usize = tensors[0].shape.shape().iter().skip(self.0 + 1).product();
         let dim_size = tensors[0].shape.shape()[self.0];
-        let mut result: Vec<f32> = vec![0.0; front_size * back_size];
+        let mut result: Vec<f32> = vec![-f32::INFINITY; front_size * back_size];
         let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let a_idx = tensors[0].shape.index_fn();
 
@@ -816,6 +916,34 @@ mod tests {
         assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
         assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
         assert_close_data(&d.retrieve().unwrap().real_data().unwrap(), &d_d.as_vec());
+    }
+
+    #[test]
+    fn test_sum_reduce2() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R4<1, 2, 2, 3>>();
+        a.set(vec![
+            34.4, -96.0, 144.0, 43.0, 560.0, 180.0, 39.6, -120.0, 180.0, 49.5, 700.0, 225.0,
+        ]);
+        let b = a.sum_reduce::<_, crate::prelude::Axis<3>>();
+        b.mark();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor_from_vec(
+            vec![
+                34.4, -96.0, 144.0, 43.0, 560.0, 180.0, 39.6, -120.0, 180.0, 49.5, 700.0, 225.0,
+            ],
+            (
+                dfdx::shapes::Const::<1>,
+                dfdx::shapes::Const::<2>,
+                dfdx::shapes::Const::<2>,
+                dfdx::shapes::Const::<3>,
+            ),
+        );
+        let d_b = d_a.sum::<_, dfdx::shapes::Axis<3>>();
+
+        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
     }
 
     #[test]
