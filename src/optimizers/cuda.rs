@@ -68,6 +68,7 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
         for (output_node, output_shape) in graph
             .to_retrieve
             .iter()
+            // Filter non-functions
             .filter(|n| graph.graph.node_weight(**n).unwrap().0.name() != "Function")
             .map(|n| (*n, graph.graph.node_weight(*n).unwrap().1.clone()))
             .collect_vec()
@@ -178,6 +179,7 @@ impl Operator for CudaCopyFromDevice {
     }
     fn process(&self, inp: Vec<&Tensor>) -> Tensor {
         let dev = CudaDevice::new(0).unwrap();
+        println!("Data: {:?}", inp[0].data);
         let cuda_data = inp[0]
             .data
             .as_any()

@@ -69,21 +69,6 @@ impl Graph {
         tensor
     }
 
-    // pub fn set_tensor<S: Shape>(
-    //     &mut self,
-    //     graph_tensor: GraphTensor<S>,
-    //     data: Vec<f32>,
-    //     shape: Vec<usize>,
-    // ) {
-    //     self.tensors.insert(
-    //         graph_tensor.id,
-    //         Tensor {
-    //             data: Box::new(data),
-    //             shape: ShapeTracker::new(shape),
-    //         },
-    //     );
-    // }
-
     /// Run the full suite of optimizations
     pub fn optimize<O: GraphOptimizer>(&mut self, optimizer: O) {
         optimizer.optimize(self);
@@ -91,6 +76,10 @@ impl Graph {
 
     /// Execute the graph.
     pub fn execute(&mut self) {
+        // Clear any remaining tensors that may be around from old executions (This is where we should do the tensor caching!)
+        self.tensors.clear();
+
+        // Track the number of dependencies each node has so we know when to clear
         let mut dependencies: HashMap<NodeIndex, usize> = self
             .graph
             .node_indices()
@@ -100,24 +89,23 @@ impl Graph {
             if self.tensors.contains_key(&node) {
                 continue;
             }
-            let srcs = self
+            let src_ids = self
                 .graph
                 .edges_directed(node, Direction::Incoming)
                 .sorted_by_key(|e| e.weight())
-                .map(|i| self.tensors.get(&i.source()).unwrap())
+                .map(|i| i.source())
                 .collect_vec();
+            let srcs = src_ids
+                .iter()
+                .map(|i| self.tensors.get(i).unwrap())
+                .collect_vec();
+
             // All sources are ready, execute
             let f = self.graph.node_weight(node).unwrap().0.process(srcs);
             self.tensors.insert(node, f);
 
             // Check if we can delete the source tensors now
-            for source in self
-                .graph
-                .edges_directed(node, Direction::Incoming)
-                .map(|e| e.source())
-                .filter(|n| !self.no_delete.contains(n))
-                .collect_vec()
-            {
+            for source in src_ids.into_iter().filter(|n| !self.no_delete.contains(n)) {
                 let deps = dependencies.get_mut(&source).unwrap();
                 *deps -= 1;
                 if *deps == 0 {

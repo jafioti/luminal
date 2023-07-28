@@ -57,7 +57,7 @@ mod tests {
 
     use super::TransformerEncoder;
     #[test]
-    fn test_self_attention() {
+    fn test_transformer_encoder() {
         let mut cx = Graph::new();
         let model: TransformerEncoder<3, 4, 2> = InitModule::initialize(&mut cx);
 

@@ -31,7 +31,7 @@ impl Operator for Function {
 
 impl Debug for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Function")
+        write!(f, "Function")
     }
 }
 
