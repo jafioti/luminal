@@ -3,6 +3,32 @@ use crate::prelude::*;
 pub mod activation;
 pub mod linear;
 pub mod norm;
+pub mod transformer;
+
+pub struct Repeated<T, const N: usize> {
+    pub modules: Vec<T>,
+}
+
+impl<T: InitModule, const N: usize> InitModule for Repeated<T, N> {
+    fn initialize(cx: &mut Graph) -> Self {
+        Self {
+            modules: (0..N).map(|_| InitModule::initialize(cx)).collect(),
+        }
+    }
+}
+
+impl<I, T: Module<I, Output = I>, const N: usize> Module<I> for Repeated<T, N> {
+    type Output = I;
+
+    fn forward(&self, mut input: I) -> Self::Output {
+        for m in &self.modules {
+            input = m.forward(input);
+        }
+        input
+    }
+}
+
+// Tuple impls
 
 impl<X> Module<X> for () {
     type Output = X;

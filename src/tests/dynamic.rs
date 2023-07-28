@@ -100,13 +100,11 @@ fn test_feedforward() {
     batch.set_dyn(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0], vec![2, 3]);
     batch_out.mark();
 
-    cx.display_graph();
     cx.execute();
 
     let unoptimized_batch_out = batch_out.retrieve().unwrap();
 
     cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
-    cx.display_graph();
     cx.execute();
 
     assert_close(&unoptimized_batch_out, &batch_out.retrieve().unwrap());

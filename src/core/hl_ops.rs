@@ -73,6 +73,21 @@ impl<S: Shape> GraphTensor<S> {
             .sqrt();
         centered / std
     }
+
+    pub fn softmax<const DIM: isize>(self) -> GraphTensor<S>
+    where
+        <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
+        S: ReduceShape<Axis<DIM>>,
+    {
+        let m = self
+            - self
+                .max_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
+                .expand();
+        let exp = m.exp_2();
+        exp / exp
+            .sum_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
+            .expand()
+    }
 }
 
 // Reduction ops
@@ -290,13 +305,13 @@ impl<S: Shape> GraphTensor<S> {
 // Matmuls
 
 // ABxBC -> AC
-impl<const B: usize, A: Dim> GraphTensor<(A, Const<B>)> {
-    pub fn matmul<C: Dim>(self, rhs: GraphTensor<(Const<B>, C)>) -> GraphTensor<(A, C)> {
+impl<A: Dim, B: Dim> GraphTensor<(A, B)> {
+    pub fn matmul<C: Dim>(self, rhs: GraphTensor<(B, C)>) -> GraphTensor<(A, C)> {
         // Reshape
-        let w: GraphTensor<(C, Const<B>)> = rhs.permute::<_, Axes2<1, 0>>();
+        let w: GraphTensor<(C, B)> = rhs.permute::<_, Axes2<1, 0>>();
 
         // Broadcasted Multiply
-        let mul = self.expand::<(A, C, Const<B>), _>() * w.expand::<(A, C, Const<B>), _>();
+        let mul = self.expand::<(A, C, B), _>() * w.expand::<(A, C, B), _>();
 
         // Sum Reduce
         mul.sum_reduce::<_, Axis<2>>()
@@ -304,9 +319,9 @@ impl<const B: usize, A: Dim> GraphTensor<(A, Const<B>)> {
 }
 
 // AxAB -> B
-impl<const A: usize> GraphTensor<R1<A>> {
-    pub fn matmul<B: Dim>(self, rhs: GraphTensor<(Const<A>, B)>) -> GraphTensor<(B,)> {
-        let s: GraphTensor<R2<1, A>> = self.expand();
+impl<A: Dim> GraphTensor<(A,)> {
+    pub fn matmul<B: Dim>(self, rhs: GraphTensor<(A, B)>) -> GraphTensor<(B,)> {
+        let s: GraphTensor<(Const<1>, A)> = self.expand();
 
         // Run normal matmul
         let r = s.matmul(rhs);
@@ -317,13 +332,27 @@ impl<const A: usize> GraphTensor<R1<A>> {
 }
 
 // ABCxCD -> ABD
-impl<const C: usize, A: Dim, B: Dim> GraphTensor<(A, B, Const<C>)> {
-    pub fn matmul<D: Dim>(self, rhs: GraphTensor<(Const<C>, D)>) -> GraphTensor<(A, B, D)> {
+impl<A: Dim, B: Dim, C: Dim> GraphTensor<(A, B, C)> {
+    pub fn matmul<D: Dim>(self, rhs: GraphTensor<(C, D)>) -> GraphTensor<(A, B, D)> {
         // Reshape
-        let w: GraphTensor<(D, Const<C>)> = rhs.permute::<_, Axes2<1, 0>>();
+        let w: GraphTensor<(D, C)> = rhs.permute::<_, Axes2<1, 0>>();
 
         // Broadcasted Multiply
-        let mul = self.expand::<(A, B, D, Const<C>), _>() * w.expand::<(A, B, D, Const<C>), _>();
+        let mul = self.expand::<(A, B, D, C), _>() * w.expand::<(A, B, D, C), _>();
+
+        // Sum Reduce
+        mul.sum_reduce::<_, Axis<3>>()
+    }
+}
+
+// ABCxACD -> ABD
+impl<A: Dim, B: Dim, C: Dim> GraphTensor<(A, B, C)> {
+    pub fn batch_matmul<D: Dim>(self, rhs: GraphTensor<(A, C, D)>) -> GraphTensor<(A, B, D)> {
+        // Reshape
+        let w: GraphTensor<(A, D, C)> = rhs.permute::<_, Axes3<0, 2, 1>>();
+
+        // Broadcasted Multiply
+        let mul = self.expand::<(A, B, D, C), _>() * w.expand::<(A, B, D, C), _>();
 
         // Sum Reduce
         mul.sum_reduce::<_, Axis<3>>()
