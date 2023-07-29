@@ -1,6 +1,7 @@
 use crate::prelude::*;
 
 pub mod activation;
+pub mod embedding;
 pub mod linear;
 pub mod norm;
 pub mod transformer;
