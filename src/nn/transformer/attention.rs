@@ -3,14 +3,21 @@ use std::ops::Mul;
 use crate::{nn::linear::Linear, prelude::*};
 
 // This is still single head attention because I need a runtime reshape, like the try_reshape in dfdx
-pub struct MultiHeadSelfAttention<const DIM: usize, const HEADS: usize> {
-    pub(crate) w_q: Linear<DIM, DIM>,
-    pub(crate) w_k: Linear<DIM, DIM>,
-    pub(crate) w_v: Linear<DIM, DIM>,
-    pub(crate) w_o: Linear<DIM, DIM>,
+pub struct MultiHeadSelfAttention<
+    const DIM: usize,
+    const K_DIM: usize,
+    const V_DIM: usize,
+    const HEADS: usize,
+> {
+    pub(crate) w_q: Linear<DIM, K_DIM>,
+    pub(crate) w_k: Linear<DIM, K_DIM>,
+    pub(crate) w_v: Linear<DIM, V_DIM>,
+    pub(crate) w_o: Linear<V_DIM, DIM>,
 }
 
-impl<const DIM: usize, const HEADS: usize> InitModule for MultiHeadSelfAttention<DIM, HEADS> {
+impl<const DIM: usize, const K_DIM: usize, const V_DIM: usize, const HEADS: usize> InitModule
+    for MultiHeadSelfAttention<DIM, K_DIM, V_DIM, HEADS>
+{
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             w_q: InitModule::initialize(cx),
@@ -22,8 +29,8 @@ impl<const DIM: usize, const HEADS: usize> InitModule for MultiHeadSelfAttention
 }
 
 // Single
-impl<const DIM: usize, const HEADS: usize, S: Dim> Module<GraphTensor<(S, Const<DIM>)>>
-    for MultiHeadSelfAttention<DIM, HEADS>
+impl<const DIM: usize, const K_DIM: usize, const V_DIM: usize, const HEADS: usize, S: Dim>
+    Module<GraphTensor<(S, Const<DIM>)>> for MultiHeadSelfAttention<DIM, K_DIM, V_DIM, HEADS>
 {
     type Output = GraphTensor<(S, Const<DIM>)>;
 
@@ -35,52 +42,92 @@ impl<const DIM: usize, const HEADS: usize, S: Dim> Module<GraphTensor<(S, Const<
 }
 
 // Batched
-impl<const DIM: usize, const HEADS: usize, S: Dim, B: Dim> Module<GraphTensor<(B, S, Const<DIM>)>>
-    for MultiHeadSelfAttention<DIM, HEADS>
+impl<
+        const DIM: usize,
+        const K_DIM: usize,
+        const V_DIM: usize,
+        const HEADS: usize,
+        S: Dim,
+        B: Dim,
+    > Module<GraphTensor<(B, S, Const<DIM>)>> for MultiHeadSelfAttention<DIM, K_DIM, V_DIM, HEADS>
 {
     type Output = GraphTensor<(B, S, Const<DIM>)>;
 
     fn forward(&self, input: GraphTensor<(B, S, Const<DIM>)>) -> Self::Output {
+        <Self as Module<(
+            GraphTensor<(B, S, Const<DIM>)>,
+            GraphTensor<(B, S, Const<DIM>)>,
+            GraphTensor<(B, S, Const<DIM>)>,
+        )>>::forward(self, (input, input, input))
+    }
+}
+
+// Batched different key-query-value
+impl<
+        const DIM: usize,
+        const K_DIM: usize,
+        const V_DIM: usize,
+        const HEADS: usize,
+        S1: Dim,
+        S2: Dim,
+        B: Dim,
+    >
+    Module<(
+        GraphTensor<(B, S1, Const<DIM>)>,
+        GraphTensor<(B, S2, Const<DIM>)>,
+        GraphTensor<(B, S1, Const<DIM>)>,
+    )> for MultiHeadSelfAttention<DIM, K_DIM, V_DIM, HEADS>
+{
+    type Output = GraphTensor<(B, S2, Const<DIM>)>;
+
+    fn forward(
+        &self,
+        (keys, queries, values): (
+            GraphTensor<(B, S1, Const<DIM>)>,
+            GraphTensor<(B, S2, Const<DIM>)>,
+            GraphTensor<(B, S1, Const<DIM>)>,
+        ),
+    ) -> Self::Output {
         let keys = self
             .w_k
-            .forward(input)
-            .dyn_reshape::<(B, S, usize, usize)>(vec![
+            .forward(keys)
+            .dyn_reshape::<(B, S1, usize, usize)>(vec![
                 B::const_size(),
-                S::const_size(),
+                S1::const_size(),
                 RealDim::Const(HEADS),
-                RealDim::Const(DIM / HEADS),
+                RealDim::Const(K_DIM / HEADS),
             ])
             .permute::<_, Axes4<0, 2, 3, 1>>();
         let values = self
             .w_v
-            .forward(input)
-            .dyn_reshape::<(B, S, usize, usize)>(vec![
+            .forward(values)
+            .dyn_reshape::<(B, S1, usize, usize)>(vec![
                 B::const_size(),
-                S::const_size(),
+                S1::const_size(),
                 RealDim::Const(HEADS),
-                RealDim::Const(DIM / HEADS),
+                RealDim::Const(K_DIM / HEADS),
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let queries = self
             .w_q
-            .forward(input)
-            .dyn_reshape::<(B, S, usize, usize)>(vec![
+            .forward(queries)
+            .dyn_reshape::<(B, S2, usize, usize)>(vec![
                 B::const_size(),
-                S::const_size(),
+                S2::const_size(),
                 RealDim::Const(HEADS),
-                RealDim::Const(DIM / HEADS),
+                RealDim::Const(K_DIM / HEADS),
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         let weights = queries
             .batch_matmul(keys)
-            .mul(1.0f32 / (DIM as f32).sqrt())
+            .mul(1.0f32 / ((K_DIM / HEADS) as f32).sqrt())
             .softmax::<3>();
 
-        let tokens: GraphTensor<(B, S, Const<DIM>)> = weights
+        let tokens: GraphTensor<(B, S2, Const<V_DIM>)> = weights
             .batch_matmul(values)
             .permute::<_, Axes4<0, 2, 1, 3>>()
-            .dyn_reshape(vec![B::const_size(), S::const_size(), RealDim::Const(DIM)]);
+            .dyn_reshape(vec![B::const_size(), S2::const_size(), RealDim::Const(DIM)]);
         self.w_o.forward(tokens)
     }
 }
@@ -97,7 +144,7 @@ mod tests {
     #[test]
     fn test_self_attention() {
         let mut cx = Graph::new();
-        let model: MultiHeadSelfAttention<3, 1> = InitModule::initialize(&mut cx);
+        let model: MultiHeadSelfAttention<3, 3, 3, 1> = InitModule::initialize(&mut cx);
         model
             .w_k
             .weight

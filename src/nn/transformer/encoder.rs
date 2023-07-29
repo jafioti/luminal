@@ -15,7 +15,7 @@ pub type TransformerEncoder<
 
 /// A single transformer encoder block
 pub struct TransformerEncoderBlock<const DIM: usize, const FF: usize, const HEADS: usize> {
-    pub(crate) attention: MultiHeadSelfAttention<DIM, HEADS>,
+    pub(crate) attention: MultiHeadSelfAttention<DIM, DIM, DIM, HEADS>,
     pub(crate) ff: (Linear<DIM, FF>, ReLU, Linear<FF, DIM>),
 }
 
