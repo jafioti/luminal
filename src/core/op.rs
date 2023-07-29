@@ -54,7 +54,7 @@ impl Operator for Print {
     fn process(&self, input: Vec<&Tensor>) -> Tensor {
         println!("{}", self.0);
         for (i, tensor) in input.iter().enumerate() {
-            println!("{} Data: {:?}", i + 1, tensor.data);
+            println!("{} Data: {:?}", i + 1, tensor.real_data());
             println!("{} Shape: {:?}", i + 1, tensor.shape.shape());
             println!(
                 "{} Idx: {}",

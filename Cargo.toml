@@ -21,7 +21,7 @@ strum = { version = "0.25.0", features = ["derive"] }
 urlencoding = "2.1.2"
 webbrowser = "0.8.10"
 dyn-clone = "1.0.12"
-cudarc = {version="0.9.12", optional=true}
+cudarc = {version="0.9.13", optional=true}
 
 [dev-dependencies]
 dfdx = "0.12.1"

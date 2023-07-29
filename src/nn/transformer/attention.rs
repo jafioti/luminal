@@ -41,6 +41,40 @@ impl<const DIM: usize, const K_DIM: usize, const V_DIM: usize, const HEADS: usiz
     }
 }
 
+impl<
+        const DIM: usize,
+        const K_DIM: usize,
+        const V_DIM: usize,
+        const HEADS: usize,
+        S: Dim,
+        S1: Dim,
+    >
+    Module<(
+        GraphTensor<(S, Const<DIM>)>,
+        GraphTensor<(S1, Const<DIM>)>,
+        GraphTensor<(S, Const<DIM>)>,
+    )> for MultiHeadSelfAttention<DIM, K_DIM, V_DIM, HEADS>
+{
+    type Output = GraphTensor<(S1, Const<DIM>)>;
+
+    fn forward(
+        &self,
+        (k, q, v): (
+            GraphTensor<(S, Const<DIM>)>,
+            GraphTensor<(S1, Const<DIM>)>,
+            GraphTensor<(S, Const<DIM>)>,
+        ),
+    ) -> Self::Output {
+        // Pass to batched forward
+        <Self as Module<(
+            GraphTensor<(Const<1>, S, Const<DIM>)>,
+            GraphTensor<(Const<1>, S1, Const<DIM>)>,
+            GraphTensor<(Const<1>, S, Const<DIM>)>,
+        )>>::forward(self, (k.expand(), q.expand(), v.expand()))
+        .reshape()
+    }
+}
+
 // Batched
 impl<
         const DIM: usize,
@@ -121,7 +155,7 @@ impl<
 
         let weights = queries
             .batch_matmul(keys)
-            .mul(1.0f32 / ((K_DIM / HEADS) as f32).sqrt())
+            .mul(1.0 / ((K_DIM / HEADS) as f32).sqrt())
             .softmax::<3>();
 
         let tokens: GraphTensor<(B, S2, Const<V_DIM>)> = weights
@@ -163,9 +197,19 @@ mod tests {
             .set(vec![1., 22., 3., 1., 2., 3., 1., 2., 3.]);
 
         let a = cx.new_tensor::<(usize, crate::shape::Const<3>)>();
-        let b = model.forward(a);
+        let e = cx.new_tensor::<(usize, crate::shape::Const<3>)>();
+        let b = model.forward((e, a, e));
 
-        a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![2, 3]);
+        a.set_dyn(
+            vec![
+                0.56587636, -1.4053632, 0.8394869, 0.5916256, -1.4082357, 0.8166099,
+            ],
+            vec![2, 3],
+        );
+        e.set_dyn(
+            vec![-1.0, 2.0, 3.0, 3.0, 3.0, -1.0, -1.0, 2.0, 3.0],
+            vec![3, 3],
+        );
         b.mark();
 
         cx.execute();
@@ -202,10 +246,16 @@ mod tests {
             )
             .permute();
         let d_a = d_dev.tensor_from_vec(
-            vec![-1., 2., 3., 3., 3., -1.],
+            vec![
+                0.56587636, -1.4053632, 0.8394869, 0.5916256, -1.4082357, 0.8166099,
+            ],
             (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<3>),
         );
-        let d_b = d_model.forward(d_a);
+        let d_e = d_dev.tensor_from_vec(
+            vec![-1.0, 2.0, 3.0, 3.0, 3.0, -1.0, -1.0, 2.0, 3.0],
+            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<3>),
+        );
+        let d_b = d_model.forward((d_a, d_e.clone(), d_e));
 
         assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
     }

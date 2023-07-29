@@ -148,10 +148,7 @@ mod tests {
         let d_b = d_model.forward(d_a);
         let d_batch_out = d_model.forward(d_batch);
 
-        let r = b.retrieve().unwrap().real_data().unwrap();
-        println!("R: {:?}", r);
-        println!("D: {:?}", d_b.as_vec());
-        assert_close_data(&r, &d_b.as_vec());
+        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
         assert_close_data(
             &batch_out.retrieve().unwrap().real_data().unwrap(),
             &d_batch_out.as_vec(),

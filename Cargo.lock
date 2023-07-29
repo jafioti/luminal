@@ -121,9 +121,9 @@ checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
 
 [[package]]
 name = "cudarc"
-version = "0.9.12"
+version = "0.9.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb343be4b5f288104757a87b80ef2b2fe815344a6e806eec56c5130e104dc8b4"
+checksum = "f3d03df00acea5c14967753a8c94275df7ef311fd9c5afe5984858ac8bbef0ad"
 
 [[package]]
 name = "dfdx"

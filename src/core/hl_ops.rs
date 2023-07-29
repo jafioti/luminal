@@ -29,6 +29,10 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(new_id, self.graph_ref)
     }
 
+    pub fn exp(self) -> GraphTensor<S> {
+        (self * (1.0 / f32::ln(2.))).exp_2()
+    }
+
     pub fn recip(self) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let shape = self.shape_tracker();
@@ -83,7 +87,7 @@ impl<S: Shape> GraphTensor<S> {
             - self
                 .max_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
                 .expand();
-        let exp = m.exp_2();
+        let exp = m.exp();
         exp / exp
             .sum_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
             .expand()
@@ -694,5 +698,28 @@ mod tests {
         let d_b = d_a.mean::<_, dfdx::shapes::Axis<1>>();
 
         assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_softmax() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<2, 3>>();
+        a.set(vec![
+            5.51743, 6.896794, 5.51743, 5.528703, 6.9108624, 5.528703,
+        ]);
+        let b = a.softmax::<1>();
+        b.mark();
+
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor_from_vec(
+            vec![5.51743, 6.896794, 5.51743, 5.528703, 6.9108624, 5.528703],
+            (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<3>),
+        );
+        let d_b = d_a.softmax::<dfdx::shapes::Axis<1>>();
+
+        let r = b.retrieve().unwrap().real_data().unwrap();
+        assert_close_data(&r, &d_b.as_vec());
     }
 }
