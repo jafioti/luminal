@@ -1,6 +1,7 @@
 use crate::{
     graph::Graph,
     op::{self, Function},
+    prelude::Data,
     shape::*,
     tensor::Tensor,
 };
@@ -44,7 +45,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Set the value of the tensor, with dynamic dimensions.
-    pub fn set_dyn(&self, data: Vec<f32>, shape: Vec<usize>) {
+    pub fn set_dyn<T: Data + Clone>(&self, data: T, shape: Vec<usize>) {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let node = graph
             .graph
@@ -72,7 +73,7 @@ impl<S: Shape> GraphTensor<S> {
 
 impl<S: ConstShape> GraphTensor<S> {
     /// Set the value of the tensor matching the constant shape
-    pub fn set(&self, data: Vec<f32>) {
+    pub fn set<T: Data + Clone>(&self, data: T) {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let node = graph
             .graph

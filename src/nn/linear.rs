@@ -14,8 +14,11 @@ impl<const A: usize, const B: usize> InitModule for Linear<A, B> {
         };
         // Init weight as uniform(-1, 1)
         let mut rng = thread_rng();
-        s.weight
-            .set((0..(A * B)).map(|_| rng.gen_range(-1_f32..1_f32)).collect());
+        s.weight.set(
+            (0..(A * B))
+                .map(|_| rng.gen_range(-1_f32..1_f32))
+                .collect::<Vec<_>>(),
+        );
         s
     }
 }
