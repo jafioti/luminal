@@ -1288,4 +1288,112 @@ mod tests {
 
         assert_close_data(&unoptimized_b.real_data().unwrap(), &out.as_vec());
     }
+
+    #[test]
+    fn test_transformer_encoder_block() {
+        let mut cx = Graph::new();
+        let model: crate::nn::transformer::encoder::TransformerEncoderBlock<3, 4, 1> =
+            InitModule::initialize(&mut cx);
+        model
+            .attention
+            .w_k
+            .weight
+            .set(vec![1., 22., 3., 1., 2., 3., 1., 2., 3.]);
+        model
+            .attention
+            .w_q
+            .weight
+            .set(vec![3., 2., 3., 1.3, 2., 3., 3., 2., 3.]);
+        model
+            .attention
+            .w_v
+            .weight
+            .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3.]);
+        model
+            .attention
+            .w_o
+            .weight
+            .set(vec![1., 22., 3., 1., 2., 3., 1., 2., 3.]);
+        model
+            .ff
+            .0
+            .weight
+            .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 11., 2., 3.]);
+        model
+            .ff
+            .2
+            .weight
+            .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
+
+        let a = cx.new_tensor::<(usize, crate::shape::Const<3>)>();
+        let b = model.forward(a);
+
+        a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![2, 3]);
+        b.mark();
+
+        cx.optimize(<(CudaOptimizer, GenericOptimizer)>::default());
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let mut d_model: dfdx::nn::modules::TransformerEncoderBlock<3, 1, 4, f32, Cpu> =
+            d_dev
+                .build_module::<dfdx::nn::modules::builders::TransformerEncoderBlock<3, 1, 4>, f32>(
+                );
+        d_model.self_attn.w_k.bias.copy_from(&[0.0, 0.0, 0.0]);
+        d_model.self_attn.w_v.bias.copy_from(&[0.0, 0.0, 0.0]);
+        d_model.self_attn.w_q.bias.copy_from(&[0.0, 0.0, 0.0]);
+        d_model.self_attn.w_o.bias.copy_from(&[0., 0., 0.]);
+        d_model.self_attn.w_o.weight = d_dev
+            .tensor_from_vec(
+                vec![1., 22., 3., 1., 2., 3., 1., 2., 3.],
+                (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<3>),
+            )
+            .permute();
+        d_model.self_attn.w_k.weight = d_dev
+            .tensor_from_vec(
+                vec![1., 22., 3., 1., 2., 3., 1., 2., 3.],
+                (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<3>),
+            )
+            .permute();
+        d_model.self_attn.w_q.weight = d_dev
+            .tensor_from_vec(
+                vec![3., 2., 3., 1.3, 2., 3., 3., 2., 3.],
+                (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<3>),
+            )
+            .permute();
+        d_model.self_attn.w_v.weight = d_dev
+            .tensor_from_vec(
+                vec![-1., 12., 3., -1., 2., -3., 11., 2., 3.],
+                (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<3>),
+            )
+            .permute();
+        d_model.ff.0 .0.weight = d_dev
+            .tensor_from_vec(
+                vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 11., 2., 3.],
+                (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<4>),
+            )
+            .permute();
+        d_model.ff.0 .0.bias =
+            d_dev.tensor_from_vec(vec![0., 0., 0., 0.], (dfdx::shapes::Const::<4>,));
+        d_model.ff.0 .2.weight = d_dev
+            .tensor_from_vec(
+                vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.],
+                (dfdx::shapes::Const::<4>, dfdx::shapes::Const::<3>),
+            )
+            .permute();
+        d_model.ff.0 .2.bias = d_dev.tensor_from_vec(vec![0., 0., 0.], (dfdx::shapes::Const::<3>,));
+        d_model.norm1.gamma = d_dev.tensor_from_vec(vec![1., 1., 1.], (dfdx::shapes::Const::<3>,));
+        d_model.norm2.gamma = d_dev.tensor_from_vec(vec![1., 1., 1.], (dfdx::shapes::Const::<3>,));
+        d_model.norm1.epsilon = 1e-5;
+        d_model.norm2.beta = d_dev.tensor_from_vec(vec![0., 0., 0.], (dfdx::shapes::Const::<3>,));
+        d_model.norm1.beta = d_dev.tensor_from_vec(vec![0., 0., 0.], (dfdx::shapes::Const::<3>,));
+        d_model.norm2.epsilon = 1e-5;
+        let d_a = d_dev.tensor_from_vec(
+            vec![-1., 2., 3., 3., 3., -1.],
+            (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<3>),
+        );
+        let d_b = d_model.forward(d_a);
+
+        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+    }
 }

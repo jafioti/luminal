@@ -205,58 +205,8 @@ impl ShapeTracker {
 
     pub fn index_fn(&self) -> impl Fn(usize) -> usize {
         let idx = self.index_fn_node();
-        // Turn expression into function by unwrapping it into a series of function chains
-        let node = &idx;
-        let mut all_ops_and_nums = vec![];
-        if let NodeType::RedNode(RedOp::Sum, nodes) = &node.node_type {
-            for node in nodes {
-                all_ops_and_nums.push(get_ops_and_nums(node));
-            }
-        } else {
-            all_ops_and_nums.push(get_ops_and_nums(node));
-        }
-
-        move |i| {
-            let orig = i as i32;
-            let mut result = 0;
-            for ops_and_nums in &all_ops_and_nums {
-                if ops_and_nums.is_empty() {
-                    continue;
-                }
-                let mut i = orig;
-                for (op, num) in ops_and_nums {
-                    i = (op)(i, *num);
-                }
-                result += i as usize
-            }
-            result
-        }
+        move |i| idx.solve(i as i32) as usize
     }
-}
-
-#[allow(clippy::type_complexity)]
-fn get_ops_and_nums(mut node: &Node) -> Vec<(fn(i32, i32) -> i32, i32)> {
-    let mut ops_and_nums = vec![];
-    loop {
-        match &node.node_type {
-            NodeType::OpNode(op, a) => {
-                ops_and_nums.push((
-                    match op {
-                        Op::Div => std::ops::Div::<i32>::div,
-                        Op::Mul => std::ops::Mul::<i32>::mul,
-                        Op::Mod => std::ops::Rem::<i32>::rem,
-                    },
-                    node.b,
-                ));
-                node = a.as_ref();
-            }
-            NodeType::Variable(_) => break,
-            NodeType::Num => break,
-            NodeType::RedNode(_, _) => panic!("Rednode encountered"),
-        }
-    }
-    ops_and_nums.reverse();
-    ops_and_nums
 }
 
 pub fn to_shapes_strides(shape: &[usize], strides: &[usize]) -> Vec<(usize, usize)> {

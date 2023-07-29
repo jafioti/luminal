@@ -3,14 +3,14 @@ use std::ops::Mul;
 use crate::{nn::linear::Linear, prelude::*};
 
 // This is still single head attention because I need a runtime reshape, like the try_reshape in dfdx
-pub struct MultiHeadSelfAttention<const DIM: usize> {
+pub struct MultiHeadSelfAttention<const DIM: usize, const HEADS: usize> {
     pub(crate) w_q: Linear<DIM, DIM>,
     pub(crate) w_k: Linear<DIM, DIM>,
     pub(crate) w_v: Linear<DIM, DIM>,
     pub(crate) w_o: Linear<DIM, DIM>,
 }
 
-impl<const DIM: usize> InitModule for MultiHeadSelfAttention<DIM> {
+impl<const DIM: usize, const HEADS: usize> InitModule for MultiHeadSelfAttention<DIM, HEADS> {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             w_q: InitModule::initialize(cx),
@@ -22,8 +22,8 @@ impl<const DIM: usize> InitModule for MultiHeadSelfAttention<DIM> {
 }
 
 // Single
-impl<const DIM: usize, S: Dim> Module<GraphTensor<(S, Const<DIM>)>>
-    for MultiHeadSelfAttention<DIM>
+impl<const DIM: usize, const HEADS: usize, S: Dim> Module<GraphTensor<(S, Const<DIM>)>>
+    for MultiHeadSelfAttention<DIM, HEADS>
 {
     type Output = GraphTensor<(S, Const<DIM>)>;
 
@@ -35,22 +35,53 @@ impl<const DIM: usize, S: Dim> Module<GraphTensor<(S, Const<DIM>)>>
 }
 
 // Batched
-impl<const DIM: usize, S: Dim, B: Dim> Module<GraphTensor<(B, S, Const<DIM>)>>
-    for MultiHeadSelfAttention<DIM>
+impl<const DIM: usize, const HEADS: usize, S: Dim, B: Dim> Module<GraphTensor<(B, S, Const<DIM>)>>
+    for MultiHeadSelfAttention<DIM, HEADS>
 {
     type Output = GraphTensor<(B, S, Const<DIM>)>;
 
     fn forward(&self, input: GraphTensor<(B, S, Const<DIM>)>) -> Self::Output {
-        let keys = self.w_k.forward(input);
-        let values = self.w_v.forward(input);
-        let queries = self.w_q.forward(input);
+        let keys = self
+            .w_k
+            .forward(input)
+            .dyn_reshape::<(B, S, usize, usize)>(vec![
+                B::const_size(),
+                S::const_size(),
+                RealDim::Const(HEADS),
+                RealDim::Const(DIM / HEADS),
+            ])
+            .permute::<_, Axes4<0, 2, 3, 1>>();
+        let values = self
+            .w_v
+            .forward(input)
+            .dyn_reshape::<(B, S, usize, usize)>(vec![
+                B::const_size(),
+                S::const_size(),
+                RealDim::Const(HEADS),
+                RealDim::Const(DIM / HEADS),
+            ])
+            .permute::<_, Axes4<0, 2, 1, 3>>();
+        let queries = self
+            .w_q
+            .forward(input)
+            .dyn_reshape::<(B, S, usize, usize)>(vec![
+                B::const_size(),
+                S::const_size(),
+                RealDim::Const(HEADS),
+                RealDim::Const(DIM / HEADS),
+            ])
+            .permute::<_, Axes4<0, 2, 1, 3>>();
 
         let weights = queries
-            .batch_matmul(keys.permute())
+            .batch_matmul(keys)
             .mul(1.0f32 / (DIM as f32).sqrt())
-            .softmax::<2>();
+            .softmax::<3>();
 
-        self.w_o.forward(weights.batch_matmul(values))
+        let tokens: GraphTensor<(B, S, Const<DIM>)> = weights
+            .batch_matmul(values)
+            .permute::<_, Axes4<0, 2, 1, 3>>()
+            .dyn_reshape(vec![B::const_size(), S::const_size(), RealDim::Const(DIM)]);
+        self.w_o.forward(tokens)
     }
 }
 
@@ -66,7 +97,7 @@ mod tests {
     #[test]
     fn test_self_attention() {
         let mut cx = Graph::new();
-        let model: MultiHeadSelfAttention<3> = InitModule::initialize(&mut cx);
+        let model: MultiHeadSelfAttention<3, 1> = InitModule::initialize(&mut cx);
         model
             .w_k
             .weight
@@ -98,7 +129,7 @@ mod tests {
         d_model.w_k.bias.copy_from(&[0.0, 0.0, 0.0]);
         d_model.w_v.bias.copy_from(&[0.0, 0.0, 0.0]);
         d_model.w_q.bias.copy_from(&[0.0, 0.0, 0.0]);
-        d_model.w_o.bias.copy_from(&[0., 0., 0.]);
+        d_model.w_o.bias.copy_from(&[0.0, 0.0, 0.0]);
         d_model.w_o.weight = d_dev
             .tensor_from_vec(
                 vec![1., 22., 3., 1., 2., 3., 1., 2., 3.],

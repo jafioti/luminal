@@ -6,16 +6,22 @@ use crate::{
 use super::attention::MultiHeadSelfAttention;
 
 /// A transformer encoder as layed out in *Attention Is All You Need*.
-pub type TransformerEncoder<const DIM: usize, const FF: usize, const LAYERS: usize> =
-    Repeated<TransformerEncoderBlock<DIM, FF>, LAYERS>;
+pub type TransformerEncoder<
+    const DIM: usize,
+    const FF: usize,
+    const HEADS: usize,
+    const LAYERS: usize,
+> = Repeated<TransformerEncoderBlock<DIM, FF, HEADS>, LAYERS>;
 
 /// A single transformer encoder block
-pub struct TransformerEncoderBlock<const DIM: usize, const FF: usize> {
-    pub(crate) attention: MultiHeadSelfAttention<DIM>,
+pub struct TransformerEncoderBlock<const DIM: usize, const FF: usize, const HEADS: usize> {
+    pub(crate) attention: MultiHeadSelfAttention<DIM, HEADS>,
     pub(crate) ff: (Linear<DIM, FF>, ReLU, Linear<FF, DIM>),
 }
 
-impl<const DIM: usize, const FF: usize> InitModule for TransformerEncoderBlock<DIM, FF> {
+impl<const DIM: usize, const FF: usize, const HEADS: usize> InitModule
+    for TransformerEncoderBlock<DIM, FF, HEADS>
+{
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             attention: InitModule::initialize(cx),
@@ -25,8 +31,8 @@ impl<const DIM: usize, const FF: usize> InitModule for TransformerEncoderBlock<D
 }
 
 // Single
-impl<const DIM: usize, const FF: usize, S: Dim> Module<GraphTensor<(S, Const<DIM>)>>
-    for TransformerEncoderBlock<DIM, FF>
+impl<const DIM: usize, const FF: usize, const HEADS: usize, S: Dim>
+    Module<GraphTensor<(S, Const<DIM>)>> for TransformerEncoderBlock<DIM, FF, HEADS>
 {
     type Output = GraphTensor<(S, Const<DIM>)>;
 
@@ -38,8 +44,8 @@ impl<const DIM: usize, const FF: usize, S: Dim> Module<GraphTensor<(S, Const<DIM
 }
 
 // Batched
-impl<const DIM: usize, const FF: usize, S: Dim, B: Dim> Module<GraphTensor<(B, S, Const<DIM>)>>
-    for TransformerEncoderBlock<DIM, FF>
+impl<const DIM: usize, const FF: usize, const HEADS: usize, S: Dim, B: Dim>
+    Module<GraphTensor<(B, S, Const<DIM>)>> for TransformerEncoderBlock<DIM, FF, HEADS>
 {
     type Output = GraphTensor<(B, S, Const<DIM>)>;
 
@@ -68,7 +74,7 @@ mod tests {
     #[test]
     fn test_transformer_encoder_block() {
         let mut cx = Graph::new();
-        let model: TransformerEncoderBlock<3, 4> = InitModule::initialize(&mut cx);
+        let model: TransformerEncoderBlock<3, 4, 1> = InitModule::initialize(&mut cx);
         model
             .attention
             .w_k

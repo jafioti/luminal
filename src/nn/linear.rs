@@ -49,6 +49,17 @@ impl<const A: usize, const B: usize, C: Dim, D: Dim> Module<GraphTensor<(C, D, C
     }
 }
 
+// 3x Batched
+impl<const A: usize, const B: usize, C: Dim, D: Dim, E: Dim>
+    Module<GraphTensor<(C, D, E, Const<A>)>> for Linear<A, B>
+{
+    type Output = GraphTensor<(C, D, E, Const<B>)>;
+
+    fn forward(&self, input: GraphTensor<(C, D, E, Const<A>)>) -> Self::Output {
+        input.batch_matmul(self.weight.expand())
+    }
+}
+
 impl<const A: usize, const B: usize> LoadModule for Linear<A, B> {
     fn load(&mut self, state_dict: &mut StateDict) {
         self.weight.set(state_dict.data.remove("weight").unwrap().0)

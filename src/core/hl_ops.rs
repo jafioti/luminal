@@ -300,6 +300,22 @@ impl<S: Shape> GraphTensor<S> {
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }
+
+    /// Dynamically reshape. Panics if destination shape doesn't match given shape.
+    pub fn dyn_reshape<N: Shape>(self, shape: Vec<RealDim>) -> GraphTensor<N> {
+        for (a, b) in N::realized_shape().iter().zip(shape.iter()) {
+            match a {
+                RealDim::Const(n) => assert_eq!(RealDim::Const(*n), *b),
+                RealDim::Dyn => {}
+            }
+        }
+        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        let new_id = graph
+            .add_op(op::Reshape(shape.clone()), shape)
+            .input(self.id)
+            .finish();
+        GraphTensor::from_id(new_id, self.graph_ref)
+    }
 }
 
 // Matmuls
@@ -356,6 +372,20 @@ impl<A: Dim, B: Dim, C: Dim> GraphTensor<(A, B, C)> {
 
         // Sum Reduce
         mul.sum_reduce::<_, Axis<3>>()
+    }
+}
+
+// ABCDxABDE -> ABCE
+impl<A: Dim, B: Dim, C: Dim, D: Dim> GraphTensor<(A, B, C, D)> {
+    pub fn batch_matmul<E: Dim>(self, rhs: GraphTensor<(A, B, D, E)>) -> GraphTensor<(A, B, C, E)> {
+        // Reshape
+        let w: GraphTensor<(A, B, E, D)> = rhs.permute::<_, Axes4<0, 1, 3, 2>>();
+
+        // Broadcasted Multiply
+        let mul = self.expand::<(A, B, C, E, D), _>() * w.expand::<(A, B, C, E, D), _>();
+
+        // Sum Reduce
+        mul.sum_reduce::<_, Axis<4>>()
     }
 }
 

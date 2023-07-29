@@ -220,6 +220,21 @@ impl Node {
             })
             .collect()
     }
+
+    pub fn solve(&self, i: i32) -> i32 {
+        match &self.node_type {
+            NodeType::Num => self.b,
+            NodeType::Variable(_) => i,
+            NodeType::OpNode(op, a) => match op {
+                Op::Div => a.solve(i) / self.b,
+                Op::Mod => a.solve(i) % self.b,
+                Op::Mul => a.solve(i) * self.b,
+            },
+            NodeType::RedNode(op, nodes) => match op {
+                RedOp::Sum => nodes.iter().map(|n| n.solve(i)).sum(),
+            },
+        }
+    }
 }
 
 fn flat_rednode_components(node: &Node) -> Vec<&Node> {
