@@ -63,5 +63,6 @@ Some things on the roadmap:
 - Create reasonable library of NN modules
 - Build benchmarking suite to test against other libs
 - Write specialized CUDA kernels for full transformer architecture (FlashAttention, etc.)
+- Automatic differentiation of graphs
 - Match PT 2.0 perf on LLM training
 - Build dyson swarm
