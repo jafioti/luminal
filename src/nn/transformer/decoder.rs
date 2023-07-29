@@ -36,7 +36,7 @@ impl<
             GraphTensor<(Const<1>, S1, Const<DIM>)>,
             GraphTensor<(Const<1>, S2, Const<DIM>)>,
         )>>::forward(self, (input.expand(), from_enc.expand()))
-        .max_reduce::<_, Axis<0>>()
+        .reshape()
     }
 }
 
@@ -106,7 +106,7 @@ impl<const DIM: usize, const FF: usize, const HEADS: usize, S1: Dim, S2: Dim>
             GraphTensor<(Const<1>, S1, Const<DIM>)>,
             GraphTensor<(Const<1>, S2, Const<DIM>)>,
         )>>::forward(self, (input.expand(), from_enc.expand()))
-        .max_reduce::<_, Axis<0>>()
+        .reshape()
     }
 }
 

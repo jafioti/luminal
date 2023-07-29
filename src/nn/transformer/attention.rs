@@ -37,7 +37,7 @@ impl<const DIM: usize, const K_DIM: usize, const V_DIM: usize, const HEADS: usiz
     fn forward(&self, input: GraphTensor<(S, Const<DIM>)>) -> Self::Output {
         // Pass to batched forward
         <Self as Module<GraphTensor<(Const<1>, S, Const<DIM>)>>>::forward(self, input.expand())
-            .max_reduce::<_, Axis<0>>()
+            .reshape()
     }
 }
 
