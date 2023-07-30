@@ -12,8 +12,8 @@ pub struct Transformer<
     const ENC_LAYERS: usize,
     const DEC_LAYERS: usize,
 > {
-    encoder: encoder::TransformerEncoder<DIM, FF, ENC_HEADS, ENC_LAYERS>,
-    decoder: decoder::TransformerDecoder<DIM, FF, DEC_HEADS, DEC_LAYERS>,
+    pub encoder: encoder::TransformerEncoder<DIM, FF, ENC_HEADS, ENC_LAYERS>,
+    pub decoder: decoder::TransformerDecoder<DIM, FF, DEC_HEADS, DEC_LAYERS>,
 }
 
 impl<
