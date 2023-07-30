@@ -12,7 +12,17 @@ pub struct TransformerDecoder<
     const HEADS: usize,
     const LAYERS: usize,
 > {
-    layers: Vec<TransformerDecoderBlock<DIM, FF, HEADS>>,
+    pub layers: Vec<TransformerDecoderBlock<DIM, FF, HEADS>>,
+}
+
+impl<const DIM: usize, const FF: usize, const HEADS: usize, const LAYERS: usize> InitModule
+    for TransformerDecoder<DIM, FF, HEADS, LAYERS>
+{
+    fn initialize(cx: &mut Graph) -> Self {
+        Self {
+            layers: (0..LAYERS).map(|_| InitModule::initialize(cx)).collect(),
+        }
+    }
 }
 
 // Single
