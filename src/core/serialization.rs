@@ -146,7 +146,6 @@ mod tests {
         trg.set(trg_data.clone());
         out1.mark();
 
-        // cx.display_graph();
         cx.execute();
         let out1 = out1.retrieve().unwrap().real_data().unwrap();
 
@@ -167,6 +166,7 @@ mod tests {
         trg.set(trg_data);
         out2.mark();
 
+        cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
         cx.execute();
 
         let out2 = out2.retrieve().unwrap().real_data().unwrap();
