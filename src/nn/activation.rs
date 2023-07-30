@@ -68,9 +68,60 @@ impl<S: ConstShape> Module<GraphTensor<S>> for Tanh {
     }
 }
 
+/// RMSNorm activation function
+pub struct RMSNorm<const DIM: usize> {
+    weight: GraphTensor<R1<DIM>>,
+}
+
+impl<const DIM: usize> InitModule for RMSNorm<DIM> {
+    fn initialize(cx: &mut Graph) -> Self {
+        let s = Self {
+            weight: cx.new_tensor(),
+        };
+        s.weight.set(vec![1.0; DIM]);
+        s
+    }
+}
+
+impl<const DIM: usize> Module<GraphTensor<R1<DIM>>> for RMSNorm<DIM> {
+    type Output = GraphTensor<R1<DIM>>;
+
+    fn forward(&self, input: GraphTensor<R1<DIM>>) -> Self::Output {
+        (input
+            * (input.pow(2.).mean_reduce::<_, Axis<0>>().expand() + 1e-6)
+                .recip()
+                .sqrt())
+            * self.weight
+    }
+}
+
+impl<S: Dim, const DIM: usize> Module<GraphTensor<(S, Const<DIM>)>> for RMSNorm<DIM> {
+    type Output = GraphTensor<(S, Const<DIM>)>;
+
+    fn forward(&self, input: GraphTensor<(S, Const<DIM>)>) -> Self::Output {
+        (input
+            * (input.pow(2.).mean_reduce::<_, Axis<1>>().expand() + 1e-6)
+                .recip()
+                .sqrt())
+            * self.weight.expand()
+    }
+}
+
+impl<B: Dim, S: Dim, const DIM: usize> Module<GraphTensor<(B, S, Const<DIM>)>> for RMSNorm<DIM> {
+    type Output = GraphTensor<(B, S, Const<DIM>)>;
+
+    fn forward(&self, input: GraphTensor<(B, S, Const<DIM>)>) -> Self::Output {
+        (input
+            * (input.pow(2.).mean_reduce::<_, Axis<2>>().expand() + 1e-6)
+                .recip()
+                .sqrt())
+            * self.weight.expand()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::ReLU;
+    use super::{RMSNorm, ReLU};
     use crate::{
         nn::linear::Linear,
         prelude::{Module, *},

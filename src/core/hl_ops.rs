@@ -9,6 +9,7 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 // Unary ops
 impl<S: Shape> GraphTensor<S> {
+    /// Base 2 log
     pub fn log_2(self) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let shape = self.shape_tracker();
@@ -19,6 +20,7 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(new_id, self.graph_ref)
     }
 
+    /// Base 2 exp
     pub fn exp_2(self) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let shape = self.shape_tracker();
@@ -29,8 +31,14 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(new_id, self.graph_ref)
     }
 
+    /// Natural exp
     pub fn exp(self) -> GraphTensor<S> {
         (self * (1.0 / f32::ln(2.))).exp_2()
+    }
+
+    /// Natural log
+    pub fn log(self) -> GraphTensor<S> {
+        self.log_2() * f32::ln(2.)
     }
 
     pub fn recip(self) -> GraphTensor<S> {
@@ -91,6 +99,19 @@ impl<S: Shape> GraphTensor<S> {
         exp / exp
             .sum_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
             .expand()
+    }
+
+    pub fn abs(self) -> GraphTensor<S> {
+        self.relu() + (-self).relu()
+    }
+
+    pub fn sign(self) -> GraphTensor<S> {
+        self / (self.abs() + 1e-10)
+    }
+
+    // Approxamate, see full impl here: https://github.com/tinygrad/tinygrad/blob/a32c67760140dd26b60d7932268f2e62e96a66e0/tinygrad/tensor.py#L568
+    pub fn pow(self, e: f32) -> GraphTensor<S> {
+        self.abs().log().mul(e).exp()
     }
 }
 
