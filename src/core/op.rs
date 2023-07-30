@@ -29,6 +29,7 @@ impl Operator for Function {
         self
     }
     fn process(&self, input: Vec<&Tensor>) -> Tensor {
+        println!("RUNNING FUNCTION WITH {} INPUTS", input.len());
         (self.0)(input)
     }
 }

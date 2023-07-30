@@ -108,7 +108,7 @@ impl ShapeTracker {
 
     pub fn get_real_shape<const N: usize>(&self, other: [&ShapeTracker; N]) -> Option<Vec<usize>> {
         let mut our = self.views.last().unwrap().shape.clone();
-        if !our.iter().any(|i| *i == 0 || *i == 100) {
+        if !our.iter().any(|i| *i == 100) {
             return Some(our);
         }
 
@@ -116,7 +116,7 @@ impl ShapeTracker {
         for other in other {
             let mut has_zero = false;
             for (i, o) in our.iter_mut().enumerate() {
-                if *o == 0 || *o == 100 {
+                if *o == 100 {
                     has_zero = true;
                     *o = other.shape()[i];
                 }
@@ -125,7 +125,7 @@ impl ShapeTracker {
                 break;
             }
         }
-        if !our.iter().any(|i| *i == 0 || *i == 100) {
+        if !our.iter().any(|i| *i == 100) {
             Some(our)
         } else {
             None

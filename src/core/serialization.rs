@@ -20,7 +20,7 @@ pub trait SaveLoadModule: SerializeModule {
     /// Get the state dict of the module
     fn state_dict<'a>(&'a self, cx: &'a Graph) -> HashMap<String, &'a Tensor> {
         let mut serializer = Serializer {
-            current_path: "".to_string(),
+            current_path: ".".to_string(),
             state: HashMap::default(),
         };
         self.serialize(&mut serializer);
@@ -32,15 +32,15 @@ pub trait SaveLoadModule: SerializeModule {
             .collect()
     }
     /// Load module from state dict
-    fn load_from_state_dict(&mut self, cx: &mut Graph, state_dict: HashMap<String, Tensor>) {
+    fn load_from_state_dict(&mut self, cx: &mut Graph, mut state_dict: HashMap<String, Tensor>) {
         let mut serializer = Serializer {
-            current_path: "".to_string(),
+            current_path: ".".to_string(),
             state: HashMap::default(),
         };
         self.serialize(&mut serializer);
 
         for (s, n) in serializer.state {
-            cx.tensors.insert(n, (*state_dict.get(&s).unwrap()).clone());
+            cx.tensors.insert(n, state_dict.remove(&s).unwrap());
         }
     }
     /// Load a module from a SafeTensors file
@@ -119,5 +119,57 @@ impl<'a> std::convert::From<safetensors::tensor::TensorView<'a>> for Tensor {
             ),
             shape: ShapeTracker::new(value.shape().to_vec()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rand::{thread_rng, Rng};
+    use std::collections::HashMap;
+
+    use crate::{nn::transformer::Transformer, prelude::*, tests::assert_close_data};
+
+    use super::SaveLoadModule;
+
+    #[test]
+    fn test_serialization() {
+        let mut cx = Graph::new();
+        let model: Transformer<32, 200, 5, 5, 3, 2> = InitModule::initialize(&mut cx);
+        let enc = cx.new_tensor::<R2<24, 32>>();
+        let trg = cx.new_tensor::<R2<20, 32>>();
+        let out1 = model.forward((trg, enc));
+
+        let mut rng = thread_rng();
+        let enc_data = (0..(24 * 32)).map(|_| rng.gen()).collect::<Vec<f32>>();
+        let trg_data = (0..(20 * 32)).map(|_| rng.gen()).collect::<Vec<f32>>();
+        enc.set(enc_data.clone());
+        trg.set(trg_data.clone());
+        out1.mark();
+
+        // cx.display_graph();
+        cx.execute();
+        let out1 = out1.retrieve().unwrap().real_data().unwrap();
+
+        let state_dict = model.state_dict(&cx);
+        let state_dict: HashMap<_, _> = state_dict
+            .into_iter()
+            .map(|(k, v)| (k, v.clone()))
+            .collect();
+
+        let mut cx = Graph::new();
+        let mut model: Transformer<32, 200, 5, 5, 3, 2> = InitModule::initialize(&mut cx);
+        model.load_from_state_dict(&mut cx, state_dict);
+        let enc = cx.new_tensor::<R2<24, 32>>();
+        let trg = cx.new_tensor::<R2<20, 32>>();
+        let out2 = model.forward((trg, enc));
+
+        enc.set(enc_data);
+        trg.set(trg_data);
+        out2.mark();
+
+        cx.execute();
+
+        let out2 = out2.retrieve().unwrap().real_data().unwrap();
+        assert_close_data(&out1, &out2);
     }
 }

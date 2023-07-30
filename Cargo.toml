@@ -25,4 +25,4 @@ cudarc = {version="0.9.13", optional=true}
 safetensors = "0.3.1"
 
 [dev-dependencies]
-dfdx = "0.12.1"
+dfdx = "0.13"

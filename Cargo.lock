@@ -127,12 +127,13 @@ checksum = "f3d03df00acea5c14967753a8c94275df7ef311fd9c5afe5984858ac8bbef0ad"
 
 [[package]]
 name = "dfdx"
-version = "0.12.1"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbf8334366f2e29ccceaae392b5c18aab9d639e58705d88f9f3a826dee857e42"
+checksum = "c6dbcb8a7363d8b434ca20bd3808ab9f6ee77e6916ca1d511f8e3c725d0b340e"
 dependencies = [
  "cudarc",
  "gemm",
+ "libm",
  "num-traits",
  "rand",
  "rand_distr",

@@ -83,11 +83,14 @@ impl Graph {
         optimizer.optimize(self);
     }
 
+    /// Clear any remaining tensors that may be around from old executions
+    pub fn reset(&mut self) {
+        // (This is where we should do the tensor caching!)
+        self.tensors.clear();
+    }
+
     /// Execute the graph.
     pub fn execute(&mut self) {
-        // Clear any remaining tensors that may be around from old executions (This is where we should do the tensor caching!)
-        self.tensors.clear();
-
         // Track the number of dependencies each node has so we know when to clear
         let mut dependencies: HashMap<NodeIndex, usize> = self
             .graph
