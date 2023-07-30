@@ -1,3 +1,5 @@
+use std::ops::{Add, Mul};
+
 use crate::prelude::*;
 
 /// Rectified Linear Unit activation function
@@ -87,11 +89,14 @@ impl<const DIM: usize> Module<GraphTensor<R1<DIM>>> for RMSNorm<DIM> {
     type Output = GraphTensor<R1<DIM>>;
 
     fn forward(&self, input: GraphTensor<R1<DIM>>) -> Self::Output {
-        (input
-            * (input.pow(2.).mean_reduce::<_, Axis<0>>().expand() + 1e-6)
-                .recip()
-                .sqrt())
-            * self.weight
+        (input * input)
+            .mean_reduce::<_, Axis<0>>()
+            .add(1e-6)
+            .sqrt()
+            .recip()
+            .expand()
+            .mul(input)
+            .mul(self.weight)
     }
 }
 
@@ -99,11 +104,14 @@ impl<S: Dim, const DIM: usize> Module<GraphTensor<(S, Const<DIM>)>> for RMSNorm<
     type Output = GraphTensor<(S, Const<DIM>)>;
 
     fn forward(&self, input: GraphTensor<(S, Const<DIM>)>) -> Self::Output {
-        (input
-            * (input.pow(2.).mean_reduce::<_, Axis<1>>().expand() + 1e-6)
-                .recip()
-                .sqrt())
-            * self.weight.expand()
+        (input * input)
+            .mean_reduce::<_, Axis<0>>()
+            .add(1e-6)
+            .sqrt()
+            .recip()
+            .expand()
+            .mul(input)
+            .mul(self.weight.expand())
     }
 }
 
@@ -111,17 +119,20 @@ impl<B: Dim, S: Dim, const DIM: usize> Module<GraphTensor<(B, S, Const<DIM>)>> f
     type Output = GraphTensor<(B, S, Const<DIM>)>;
 
     fn forward(&self, input: GraphTensor<(B, S, Const<DIM>)>) -> Self::Output {
-        (input
-            * (input.pow(2.).mean_reduce::<_, Axis<2>>().expand() + 1e-6)
-                .recip()
-                .sqrt())
-            * self.weight.expand()
+        (input * input)
+            .mean_reduce::<_, Axis<0>>()
+            .add(1e-6)
+            .sqrt()
+            .recip()
+            .expand()
+            .mul(input)
+            .mul(self.weight.expand())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{RMSNorm, ReLU};
+    use super::ReLU;
     use crate::{
         nn::linear::Linear,
         prelude::{Module, *},
