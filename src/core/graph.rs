@@ -53,6 +53,15 @@ impl Graph {
         self.tensors.remove(&id)
     }
 
+    pub fn get_tensor_ref(&self, mut id: NodeIndex) -> Option<&Tensor> {
+        // Walk through remaps
+        while let Some(new_id) = self.id_remap.get(&id) {
+            id = *new_id;
+        }
+
+        self.tensors.get(&id)
+    }
+
     pub fn new_tensor<S: Shape>(&mut self) -> GraphTensor<S> {
         self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
         let tensor = GraphTensor {

@@ -4,5 +4,6 @@ pub mod hl_ops;
 pub mod module;
 pub mod op;
 pub mod optimizer;
+pub mod serialization;
 pub mod shape;
 pub mod tensor;

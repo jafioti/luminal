@@ -25,6 +25,16 @@ impl<const DIM: usize, const FF: usize, const HEADS: usize, const LAYERS: usize>
     }
 }
 
+impl<const DIM: usize, const FF: usize, const HEADS: usize, const LAYERS: usize> SerializeModule
+    for TransformerDecoder<DIM, FF, HEADS, LAYERS>
+{
+    fn serialize(&self, s: &mut Serializer) {
+        for (i, l) in self.layers.iter().enumerate() {
+            s.module(&format!("layer{i}"), l);
+        }
+    }
+}
+
 // Single
 impl<
         const DIM: usize,
@@ -97,6 +107,16 @@ impl<const DIM: usize, const FF: usize, const HEADS: usize> InitModule
             self_attention: InitModule::initialize(cx),
             ff: InitModule::initialize(cx),
         }
+    }
+}
+
+impl<const DIM: usize, const FF: usize, const HEADS: usize> SerializeModule
+    for TransformerDecoderBlock<DIM, FF, HEADS>
+{
+    fn serialize(&self, s: &mut Serializer) {
+        s.module("self_attn", &self.self_attention);
+        s.module("cross_attn", &self.cross_attention);
+        s.module("ff", &self.ff);
     }
 }
 

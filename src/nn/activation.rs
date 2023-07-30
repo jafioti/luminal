@@ -11,6 +11,10 @@ impl InitModule for ReLU {
     }
 }
 
+impl SerializeModule for ReLU {
+    fn serialize(&self, _: &mut Serializer) {}
+}
+
 impl<S: Shape> Module<GraphTensor<S>> for ReLU {
     type Output = GraphTensor<S>;
 
@@ -26,6 +30,10 @@ impl InitModule for Sigmoid {
     fn initialize(_: &mut Graph) -> Self {
         Self
     }
+}
+
+impl SerializeModule for Sigmoid {
+    fn serialize(&self, _: &mut Serializer) {}
 }
 
 impl<S: ConstShape> Module<GraphTensor<S>> for Sigmoid {
@@ -45,6 +53,10 @@ impl InitModule for Swish {
     }
 }
 
+impl SerializeModule for Swish {
+    fn serialize(&self, _: &mut Serializer) {}
+}
+
 impl<S: ConstShape> Module<GraphTensor<S>> for Swish {
     type Output = GraphTensor<S>;
 
@@ -60,6 +72,10 @@ impl InitModule for Tanh {
     fn initialize(_: &mut Graph) -> Self {
         Self
     }
+}
+
+impl SerializeModule for Tanh {
+    fn serialize(&self, _: &mut Serializer) {}
 }
 
 impl<S: ConstShape> Module<GraphTensor<S>> for Tanh {
@@ -82,6 +98,12 @@ impl<const DIM: usize> InitModule for RMSNorm<DIM> {
         };
         s.weight.set(vec![1.0; DIM]);
         s
+    }
+}
+
+impl<const DIM: usize> SerializeModule for RMSNorm<DIM> {
+    fn serialize(&self, s: &mut Serializer) {
+        s.tensor("weight", self.weight);
     }
 }
 

@@ -2,7 +2,7 @@ use std::any::Any;
 
 use rand::{thread_rng, Rng};
 
-use crate::{op, prelude::*};
+use crate::{op, prelude::*, serialization::SerializeModule};
 
 // This is a really shoddy way to do gathers TODO: Do something else
 
@@ -74,6 +74,12 @@ impl<const A: usize, const B: usize> InitModule for Embedding<A, B> {
                 .collect::<Vec<_>>(),
         );
         s
+    }
+}
+
+impl<const A: usize, const B: usize> SerializeModule for Embedding<A, B> {
+    fn serialize(&self, s: &mut crate::serialization::Serializer) {
+        s.tensor("weight", self.weight);
     }
 }
 

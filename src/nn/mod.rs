@@ -18,6 +18,14 @@ impl<T: InitModule, const N: usize> InitModule for Repeated<T, N> {
     }
 }
 
+impl<T: SerializeModule, const N: usize> SerializeModule for Repeated<T, N> {
+    fn serialize(&self, s: &mut Serializer) {
+        for (i, l) in self.modules.iter().enumerate() {
+            s.module(&format!("layer{i}"), l);
+        }
+    }
+}
+
 impl<I, T: Module<I, Output = I>, const N: usize> Module<I> for Repeated<T, N> {
     type Output = I;
 
@@ -40,31 +48,6 @@ impl<X> Module<X> for () {
 
 macro_rules! tuple_impls {
     ([$($name:ident),+] [$($idx:tt),+], $last:ident, [$($rev_tail:ident),*]) => {
-        /*This macro expands like this for a 4-tuple:
-
-        impl<
-            Input: Tensor,
-
-            // `$last:`
-            D:
-
-            // `$(Module::<$rev_tail ::Output>, $rev_tail: )+`
-            Module<C ::Output>, C:
-            Module<B ::Output>, B:
-            Module<A ::Output>, A:
-
-            Module<Input>
-        > Module<Input> for (A, B, C, D) {
-            type Output = D::Output;
-            fn forward(&self, x: Input) -> Self::Output {
-                let x = self.0.forward(x);
-                let x = self.1.forward(x);
-                let x = self.2.forward(x);
-                let x = self.3.forward(x);
-                x
-            }
-        }
-        */
         impl<
             Input,
             $last:
@@ -85,6 +68,12 @@ macro_rules! tuple_impls {
                 (
                 $($name::initialize(cx),)+
                 )
+            }
+        }
+
+        impl<$($name: SerializeModule,)+> SerializeModule for ($($name,)+) {
+            fn serialize(&self, s: &mut Serializer) {
+                $(s.module(&format!("layer{}", $idx), &self.$idx);)+
             }
         }
     };

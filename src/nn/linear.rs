@@ -1,6 +1,6 @@
 use rand::{thread_rng, Rng};
 
-use crate::prelude::*;
+use crate::{prelude::*, serialization::SerializeModule};
 
 /// A simple linear layer
 pub struct Linear<const A: usize, const B: usize> {
@@ -20,6 +20,12 @@ impl<const A: usize, const B: usize> InitModule for Linear<A, B> {
                 .collect::<Vec<_>>(),
         );
         s
+    }
+}
+
+impl<const A: usize, const B: usize> SerializeModule for Linear<A, B> {
+    fn serialize(&self, s: &mut crate::serialization::Serializer) {
+        s.tensor("weight", self.weight);
     }
 }
 

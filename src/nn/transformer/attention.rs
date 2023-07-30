@@ -28,6 +28,17 @@ impl<const DIM: usize, const K_DIM: usize, const V_DIM: usize, const HEADS: usiz
     }
 }
 
+impl<const DIM: usize, const K_DIM: usize, const V_DIM: usize, const HEADS: usize> SerializeModule
+    for MultiHeadSelfAttention<DIM, K_DIM, V_DIM, HEADS>
+{
+    fn serialize(&self, s: &mut Serializer) {
+        s.module("w_q", &self.w_q);
+        s.module("w_k", &self.w_k);
+        s.module("w_v", &self.w_v);
+        s.module("w_o", &self.w_o);
+    }
+}
+
 // Single
 impl<const DIM: usize, const K_DIM: usize, const V_DIM: usize, const HEADS: usize, S: Dim>
     Module<GraphTensor<(S, Const<DIM>)>> for MultiHeadSelfAttention<DIM, K_DIM, V_DIM, HEADS>
