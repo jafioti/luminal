@@ -69,12 +69,6 @@ impl<const A: usize, const B: usize, C: Dim, D: Dim, E: Dim>
     }
 }
 
-impl<const A: usize, const B: usize> LoadModule for Linear<A, B> {
-    fn load(&mut self, state_dict: &mut StateDict) {
-        self.weight.set(state_dict.data.remove("weight").unwrap().0)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::Linear;
