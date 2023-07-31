@@ -19,6 +19,7 @@ fn expr_node(idx: Node, shape_strides: &[(usize, usize)]) -> Node {
 pub struct View {
     pub shape: Vec<usize>,
     pub strides: Vec<usize>,
+    pub offset: usize,
     pub shape_strides: Vec<(usize, usize)>,
 }
 
@@ -69,10 +70,12 @@ fn merge_views(v2: &View, v1: &View) -> Option<View> {
     if ret.iter().any(|i| *i == 0) {
         None
     } else {
+        let shape_strides = to_shapes_strides(&v1.shape, &ret);
         Some(View {
             shape: v1.shape.clone(),
-            shape_strides: to_shapes_strides(&v1.shape, &ret),
             strides: ret,
+            offset: expr_node(Node::variable("idx".to_string(), 0, 0), &shape_strides).b as usize,
+            shape_strides,
         })
     }
 }
@@ -102,6 +105,7 @@ impl ShapeTracker {
                 shape_strides: to_shapes_strides(&shape, &strides),
                 strides,
                 shape,
+                offset: 0,
             }],
         }
     }
@@ -142,6 +146,7 @@ impl ShapeTracker {
             shape_strides: to_shapes_strides(&new_shape, &strides),
             strides,
             shape: new_shape,
+            offset: self.views.last().unwrap().offset,
         };
         if self.views.last().unwrap().is_contiguous() {
             *self.views.last_mut().unwrap() = new_view;
