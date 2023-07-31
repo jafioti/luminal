@@ -1,7 +1,9 @@
 use std::{any::Any, fmt::Debug};
 
+use petgraph::stable_graph::NodeIndex;
+
 use crate::{
-    prelude::{to_shapes_strides, RealDim},
+    prelude::{to_shapes_strides, RealDim, TensorView},
     shape::ShapeTracker,
     tensor::Tensor,
 };
@@ -10,14 +12,18 @@ pub trait Operator: Debug {
     fn name(&self) -> &'static str;
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
-    fn process(&self, inp: Vec<&Tensor>) -> Tensor;
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView);
 }
-
-pub trait ImplEq: PartialEq {}
 
 /// An opaque function running on CPU that takes in tensor references and outputs a new tensor
 #[allow(clippy::type_complexity)]
-pub struct Function(pub Box<dyn Fn(Vec<&Tensor>) -> Tensor>);
+pub struct Function(
+    pub Box<dyn Fn(Vec<(&Tensor, TensorView)>, NodeIndex) -> (Option<Tensor>, TensorView)>,
+);
 impl Operator for Function {
     fn name(&self) -> &'static str {
         "Function"
@@ -28,8 +34,12 @@ impl Operator for Function {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, input: Vec<&Tensor>) -> Tensor {
-        (self.0)(input)
+    fn process(
+        &self,
+        input: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        (self.0)(input, nid)
     }
 }
 
@@ -51,21 +61,28 @@ impl Operator for Print {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, input: Vec<&Tensor>) -> Tensor {
+    fn process(
+        &self,
+        input: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
         println!("{}", self.0);
-        for (i, tensor) in input.iter().enumerate() {
-            println!("{} Data: {:?}", i + 1, tensor.real_data());
-            println!("{} Shape: {:?}", i + 1, tensor.shape.shape());
+        for (i, (tensor, view)) in input.iter().enumerate() {
+            println!("{} Data: {:?}", i + 1, tensor.real_data(view));
+            println!("{} Shape: {:?}", i + 1, view.shape.shape());
             println!(
                 "{} Idx: {}",
                 i + 1,
-                tensor.shape.index_fn_node().to_string_no_range()
+                view.shape.index_fn_node().to_string_no_range()
             );
         }
-        Tensor {
-            data: Box::<Vec<f32>>::default(),
-            shape: ShapeTracker::new(vec![]),
-        }
+        (
+            None,
+            TensorView {
+                tensor_id: nid,
+                shape: ShapeTracker::new(vec![]),
+            },
+        )
     }
 }
 
@@ -83,11 +100,14 @@ impl Operator for Permute {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, inp: Vec<&Tensor>) -> Tensor {
-        // We don't need to clone here! We should switch to a more view oriented system
-        let mut t = inp[0].clone();
-        t.shape.permute(&self.0);
-        t
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        _: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let mut view = inp[0].1.clone();
+        view.shape.permute(&self.0);
+        (None, view)
     }
 }
 
@@ -103,11 +123,14 @@ impl Operator for Reshape {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, inp: Vec<&Tensor>) -> Tensor {
-        // We don't need to clone here! We should switch to a more view oriented system
-        let mut t = inp[0].clone();
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        _: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let mut view = inp[0].1.clone();
         // Figure out the proper shapes
-        let inp_elements: usize = t.shape.shape().iter().product();
+        let inp_elements: usize = view.shape.shape().iter().product();
         let known_elements: usize = self
             .0
             .iter()
@@ -134,8 +157,8 @@ impl Operator for Reshape {
                 }
             })
             .collect();
-        t.shape.reshape(real_shape);
-        t
+        view.shape.reshape(real_shape);
+        (None, view)
     }
 }
 
@@ -151,11 +174,14 @@ impl Operator for Expand {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, inp: Vec<&Tensor>) -> Tensor {
-        // We don't need to clone here! We should switch to a more view oriented system
-        let mut t = inp[0].clone();
-        t.shape.expand(self.0, self.1);
-        t
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        _: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let mut view = inp[0].1.clone();
+        view.shape.expand(self.0, self.1);
+        (None, view)
     }
 }
 
@@ -175,8 +201,12 @@ impl Operator for Log2 {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let mut t = tensors[0].clone();
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let (mut t, mut view) = (inp[0].0.clone(), inp[0].1.clone());
         for a in t
             .data
             .as_any_mut()
@@ -187,7 +217,8 @@ impl Operator for Log2 {
             *a = a.log2();
         }
 
-        t
+        view.tensor_id = nid;
+        (Some(t), view)
     }
 }
 
@@ -203,8 +234,12 @@ impl Operator for Exp2 {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let mut t = tensors[0].clone();
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let (mut t, mut view) = (inp[0].0.clone(), inp[0].1.clone());
         for a in t
             .data
             .as_any_mut()
@@ -215,7 +250,8 @@ impl Operator for Exp2 {
             *a = a.exp2();
         }
 
-        t
+        view.tensor_id = nid;
+        (Some(t), view)
     }
 }
 
@@ -231,8 +267,12 @@ impl Operator for Sin {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let mut t = tensors[0].clone();
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let (mut t, mut view) = (inp[0].0.clone(), inp[0].1.clone());
         for a in t
             .data
             .as_any_mut()
@@ -243,7 +283,8 @@ impl Operator for Sin {
             *a = a.sin();
         }
 
-        t
+        view.tensor_id = nid;
+        (Some(t), view)
     }
 }
 
@@ -259,8 +300,12 @@ impl Operator for Sqrt {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let mut t = tensors[0].clone();
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let (mut t, mut view) = (inp[0].0.clone(), inp[0].1.clone());
         for a in t
             .data
             .as_any_mut()
@@ -271,7 +316,8 @@ impl Operator for Sqrt {
             *a = a.sqrt();
         }
 
-        t
+        view.tensor_id = nid;
+        (Some(t), view)
     }
 }
 
@@ -287,8 +333,12 @@ impl Operator for Recip {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let mut t = tensors[0].clone();
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let (mut t, mut view) = (inp[0].0.clone(), inp[0].1.clone());
         for a in t
             .data
             .as_any_mut()
@@ -299,7 +349,8 @@ impl Operator for Recip {
             *a = a.recip();
         }
 
-        t
+        view.tensor_id = nid;
+        (Some(t), view)
     }
 }
 
@@ -317,13 +368,13 @@ impl Operator for Add {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let res_shape = tensors[0]
-            .shape
-            .get_real_shape([&tensors[1].shape])
-            .unwrap();
-        let (mut left_shape, mut right_shape) =
-            (tensors[0].shape.clone(), tensors[1].shape.clone());
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]).unwrap();
+        let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
         left_shape.views.last_mut().unwrap().shape = res_shape.clone();
         left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
             &left_shape.views.last().unwrap().shape,
@@ -335,16 +386,21 @@ impl Operator for Add {
             &right_shape.views.last().unwrap().strides,
         );
         let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
-        let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
         for i in 0..data.len() {
             data[i] = a_data[(a_idx)(i)] + b_data[(b_idx)(i)];
         }
-        Tensor {
-            data: Box::new(data),
-            shape: ShapeTracker::new(res_shape),
-        }
+        (
+            Some(Tensor {
+                data: Box::new(data),
+            }),
+            TensorView {
+                tensor_id: nid,
+                shape: ShapeTracker::new(res_shape),
+            },
+        )
     }
 }
 
@@ -360,13 +416,13 @@ impl Operator for Sub {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let res_shape = tensors[0]
-            .shape
-            .get_real_shape([&tensors[1].shape])
-            .unwrap();
-        let (mut left_shape, mut right_shape) =
-            (tensors[0].shape.clone(), tensors[1].shape.clone());
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]).unwrap();
+        let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
         left_shape.views.last_mut().unwrap().shape = res_shape.clone();
         left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
             &left_shape.views.last().unwrap().shape,
@@ -378,16 +434,21 @@ impl Operator for Sub {
             &right_shape.views.last().unwrap().strides,
         );
         let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
-        let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
         for i in 0..data.len() {
             data[i] = a_data[(a_idx)(i)] - b_data[(b_idx)(i)];
         }
-        Tensor {
-            data: Box::new(data),
-            shape: ShapeTracker::new(res_shape),
-        }
+        (
+            Some(Tensor {
+                data: Box::new(data),
+            }),
+            TensorView {
+                tensor_id: nid,
+                shape: ShapeTracker::new(res_shape),
+            },
+        )
     }
 }
 
@@ -403,13 +464,13 @@ impl Operator for Mul {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let res_shape = tensors[0]
-            .shape
-            .get_real_shape([&tensors[1].shape])
-            .unwrap();
-        let (mut left_shape, mut right_shape) =
-            (tensors[0].shape.clone(), tensors[1].shape.clone());
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]).unwrap();
+        let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
         left_shape.views.last_mut().unwrap().shape = res_shape.clone();
         left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
             &left_shape.views.last().unwrap().shape,
@@ -421,16 +482,21 @@ impl Operator for Mul {
             &right_shape.views.last().unwrap().strides,
         );
         let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
-        let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
         for i in 0..data.len() {
             data[i] = a_data[(a_idx)(i)] * b_data[(b_idx)(i)];
         }
-        Tensor {
-            data: Box::new(data),
-            shape: ShapeTracker::new(res_shape),
-        }
+        (
+            Some(Tensor {
+                data: Box::new(data),
+            }),
+            TensorView {
+                tensor_id: nid,
+                shape: ShapeTracker::new(res_shape),
+            },
+        )
     }
 }
 
@@ -446,13 +512,13 @@ impl Operator for Div {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let res_shape = tensors[0]
-            .shape
-            .get_real_shape([&tensors[1].shape])
-            .unwrap();
-        let (mut left_shape, mut right_shape) =
-            (tensors[0].shape.clone(), tensors[1].shape.clone());
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]).unwrap();
+        let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
         left_shape.views.last_mut().unwrap().shape = res_shape.clone();
         left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
             &left_shape.views.last().unwrap().shape,
@@ -464,16 +530,21 @@ impl Operator for Div {
             &right_shape.views.last().unwrap().strides,
         );
         let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
-        let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
         for i in 0..data.len() {
             data[i] = a_data[(a_idx)(i)] / b_data[(b_idx)(i)];
         }
-        Tensor {
-            data: Box::new(data),
-            shape: ShapeTracker::new(res_shape),
-        }
+        (
+            Some(Tensor {
+                data: Box::new(data),
+            }),
+            TensorView {
+                tensor_id: nid,
+                shape: ShapeTracker::new(res_shape),
+            },
+        )
     }
 }
 
@@ -489,13 +560,13 @@ impl Operator for Max {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let res_shape = tensors[0]
-            .shape
-            .get_real_shape([&tensors[1].shape])
-            .unwrap();
-        let (mut left_shape, mut right_shape) =
-            (tensors[0].shape.clone(), tensors[1].shape.clone());
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]).unwrap();
+        let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
         left_shape.views.last_mut().unwrap().shape = res_shape.clone();
         left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
             &left_shape.views.last().unwrap().shape,
@@ -507,16 +578,21 @@ impl Operator for Max {
             &right_shape.views.last().unwrap().strides,
         );
         let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
-        let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
         for i in 0..data.len() {
             data[i] = a_data[(a_idx)(i)].max(b_data[(b_idx)(i)]);
         }
-        Tensor {
-            data: Box::new(data),
-            shape: ShapeTracker::new(res_shape),
-        }
+        (
+            Some(Tensor {
+                data: Box::new(data),
+            }),
+            TensorView {
+                tensor_id: nid,
+                shape: ShapeTracker::new(res_shape),
+            },
+        )
     }
 }
 
@@ -532,13 +608,13 @@ impl Operator for Mod {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let res_shape = tensors[0]
-            .shape
-            .get_real_shape([&tensors[1].shape])
-            .unwrap();
-        let (mut left_shape, mut right_shape) =
-            (tensors[0].shape.clone(), tensors[1].shape.clone());
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]).unwrap();
+        let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
         left_shape.views.last_mut().unwrap().shape = res_shape.clone();
         left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
             &left_shape.views.last().unwrap().shape,
@@ -550,16 +626,21 @@ impl Operator for Mod {
             &right_shape.views.last().unwrap().strides,
         );
         let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
-        let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let b_data = tensors[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
         for i in 0..data.len() {
             data[i] = a_data[(a_idx)(i)] % b_data[(b_idx)(i)];
         }
-        Tensor {
-            data: Box::new(data),
-            shape: ShapeTracker::new(res_shape),
-        }
+        (
+            Some(Tensor {
+                data: Box::new(data),
+            }),
+            TensorView {
+                tensor_id: nid,
+                shape: ShapeTracker::new(res_shape),
+            },
+        )
     }
 }
 
@@ -577,13 +658,17 @@ impl Operator for SumReduce {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let front_size: usize = tensors[0].shape.shape().iter().take(self.0).product();
-        let back_size: usize = tensors[0].shape.shape().iter().skip(self.0 + 1).product();
-        let dim_size = tensors[0].shape.shape()[self.0];
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let front_size: usize = inp[0].1.shape.shape().iter().take(self.0).product();
+        let back_size: usize = inp[0].1.shape.shape().iter().skip(self.0 + 1).product();
+        let dim_size = inp[0].1.shape.shape()[self.0];
         let mut result: Vec<f32> = vec![0.0; front_size * back_size];
-        let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let a_idx = tensors[0].shape.index_fn();
+        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let a_idx = inp[0].1.shape.index_fn();
 
         for i in 0..front_size {
             for j in 0..back_size {
@@ -594,12 +679,17 @@ impl Operator for SumReduce {
                 }
             }
         }
-        let mut shape = tensors[0].shape.shape().clone();
+        let mut shape = inp[0].1.shape.shape().clone();
         shape.remove(self.0);
-        Tensor {
-            data: Box::new(result),
-            shape: ShapeTracker::new(shape),
-        }
+        (
+            Some(Tensor {
+                data: Box::new(result),
+            }),
+            TensorView {
+                tensor_id: nid,
+                shape: ShapeTracker::new(shape),
+            },
+        )
     }
 }
 
@@ -615,13 +705,17 @@ impl Operator for MaxReduce {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn process(&self, tensors: Vec<&Tensor>) -> Tensor {
-        let front_size: usize = tensors[0].shape.shape().iter().take(self.0).product();
-        let back_size: usize = tensors[0].shape.shape().iter().skip(self.0 + 1).product();
-        let dim_size = tensors[0].shape.shape()[self.0];
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let front_size: usize = inp[0].1.shape.shape().iter().take(self.0).product();
+        let back_size: usize = inp[0].1.shape.shape().iter().skip(self.0 + 1).product();
+        let dim_size = inp[0].1.shape.shape()[self.0];
         let mut result: Vec<f32> = vec![-f32::INFINITY; front_size * back_size];
-        let a_data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let a_idx = tensors[0].shape.index_fn();
+        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let a_idx = inp[0].1.shape.index_fn();
 
         for i in 0..front_size {
             for j in 0..back_size {
@@ -632,12 +726,17 @@ impl Operator for MaxReduce {
                 }
             }
         }
-        let mut shape = tensors[0].shape.shape().clone();
+        let mut shape = inp[0].1.shape.shape().clone();
         shape.remove(self.0);
-        Tensor {
-            data: Box::new(result),
-            shape: ShapeTracker::new(shape),
-        }
+        (
+            Some(Tensor {
+                data: Box::new(result),
+            }),
+            TensorView {
+                tensor_id: nid,
+                shape: ShapeTracker::new(shape),
+            },
+        )
     }
 }
 
@@ -661,7 +760,10 @@ mod tests {
         let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
         let d_b: dfdx::tensor::Tensor<Rank1<6>, f32, Cpu> = d_a.reshape();
 
-        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+        assert_close_data(
+            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+            &d_b.as_vec(),
+        );
     }
 
     #[test]
@@ -676,7 +778,10 @@ mod tests {
         let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
         let d_b: dfdx::tensor::Tensor<Rank2<3, 2>, f32, Cpu> = d_a.permute();
 
-        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+        assert_close_data(
+            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+            &d_b.as_vec(),
+        );
     }
 
     #[test]
@@ -691,7 +796,10 @@ mod tests {
         let d_a = d_dev.tensor([1., 2., 3.]);
         let d_b: dfdx::tensor::Tensor<Rank2<3, 2>, f32, Cpu> = d_a.broadcast();
 
-        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+        assert_close_data(
+            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+            &d_b.as_vec(),
+        );
     }
 
     // Unary op tests
@@ -706,7 +814,7 @@ mod tests {
         cx.execute();
 
         assert_close_data(
-            &b.retrieve().unwrap().real_data().unwrap(),
+            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
             &vec![1., 2., 3.]
                 .into_iter()
                 .map(|i: f32| i.log2())
@@ -724,7 +832,7 @@ mod tests {
         cx.execute();
 
         assert_close_data(
-            &b.retrieve().unwrap().real_data().unwrap(),
+            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
             &vec![1., 2., 3.]
                 .into_iter()
                 .map(|i: f32| i.exp2())
@@ -744,7 +852,10 @@ mod tests {
         let d_a = d_dev.tensor([1., 2., 3.]);
         let d_b = d_a.recip();
 
-        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+        assert_close_data(
+            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+            &d_b.as_vec(),
+        );
     }
 
     #[test]
@@ -759,7 +870,10 @@ mod tests {
         let d_a = d_dev.tensor([1., 2., 3.]);
         let d_b = d_a.sin();
 
-        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+        assert_close_data(
+            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+            &d_b.as_vec(),
+        );
     }
 
     #[test]
@@ -774,7 +888,10 @@ mod tests {
         let d_a = d_dev.tensor([1., 2., 3.]);
         let d_b = d_a.sqrt();
 
-        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+        assert_close_data(
+            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+            &d_b.as_vec(),
+        );
     }
 
     // Binary op tests
@@ -794,7 +911,10 @@ mod tests {
         let d_b = d_dev.tensor([1., 2., 3.]);
         let d_c = d_a + d_b;
 
-        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+        assert_close_data(
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &d_c.as_vec(),
+        );
     }
 
     #[test]
@@ -812,7 +932,10 @@ mod tests {
         let d_b = d_dev.tensor([1., 2., 3.]);
         let d_c = d_a - d_b;
 
-        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+        assert_close_data(
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &d_c.as_vec(),
+        );
     }
 
     #[test]
@@ -830,7 +953,10 @@ mod tests {
         let d_b = d_dev.tensor([1., 2., 3.]);
         let d_c = d_a * d_b;
 
-        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+        assert_close_data(
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &d_c.as_vec(),
+        );
     }
 
     #[test]
@@ -848,7 +974,10 @@ mod tests {
         let d_b = d_dev.tensor([1., 2., 3.]);
         let d_c = d_a / d_b;
 
-        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+        assert_close_data(
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &d_c.as_vec(),
+        );
     }
 
     #[test]
@@ -867,7 +996,10 @@ mod tests {
         let d_b = d_dev.tensor([1., 2., 3.]);
         let d_c = d_a.maximum(d_b);
 
-        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+        assert_close_data(
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &d_c.as_vec(),
+        );
     }
 
     #[test]
@@ -883,7 +1015,7 @@ mod tests {
         // No dfdx equivalent
 
         assert_close_data(
-            &c.retrieve().unwrap().real_data().unwrap(),
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
             &[1., 2., 3.]
                 .into_iter()
                 .zip([1., 2., 3.].into_iter())
@@ -913,9 +1045,18 @@ mod tests {
         let d_c = d_a.clone().sum::<_, dfdx::shapes::Axis<0>>();
         let d_d = d_a.sum::<_, dfdx::shapes::Axis<2>>();
 
-        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
-        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
-        assert_close_data(&d.retrieve().unwrap().real_data().unwrap(), &d_d.as_vec());
+        assert_close_data(
+            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+            &d_b.as_vec(),
+        );
+        assert_close_data(
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &d_c.as_vec(),
+        );
+        assert_close_data(
+            &d.retrieve().unwrap().real_data(d.view().unwrap()).unwrap(),
+            &d_d.as_vec(),
+        );
     }
 
     #[test]
@@ -943,7 +1084,10 @@ mod tests {
         );
         let d_b = d_a.sum::<_, dfdx::shapes::Axis<3>>();
 
-        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+        assert_close_data(
+            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+            &d_b.as_vec(),
+        );
     }
 
     #[test]
@@ -966,8 +1110,17 @@ mod tests {
         let d_c = d_a.clone().max::<_, dfdx::shapes::Axis<0>>();
         let d_d = d_a.max::<_, dfdx::shapes::Axis<2>>();
 
-        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
-        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
-        assert_close_data(&d.retrieve().unwrap().real_data().unwrap(), &d_d.as_vec());
+        assert_close_data(
+            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+            &d_b.as_vec(),
+        );
+        assert_close_data(
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &d_c.as_vec(),
+        );
+        assert_close_data(
+            &d.retrieve().unwrap().real_data(d.view().unwrap()).unwrap(),
+            &d_d.as_vec(),
+        );
     }
 }

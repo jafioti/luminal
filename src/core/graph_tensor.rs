@@ -1,7 +1,7 @@
 use crate::{
     graph::Graph,
     op::{self, Function},
-    prelude::Data,
+    prelude::{Data, TensorView},
     shape::*,
     tensor::Tensor,
 };
@@ -56,9 +56,16 @@ impl<S: Shape> GraphTensor<S> {
             .downcast_mut::<Function>()
             .unwrap();
         // We shouldn't do cloning here!
-        node.0 = Box::new(move |_| Tensor {
-            data: Box::new(data.clone()),
-            shape: ShapeTracker::new(shape.clone()),
+        node.0 = Box::new(move |_, i| {
+            (
+                Some(Tensor {
+                    data: Box::new(data.clone()),
+                }),
+                TensorView {
+                    tensor_id: i,
+                    shape: ShapeTracker::new(shape.clone()),
+                },
+            )
         });
     }
 
@@ -68,6 +75,10 @@ impl<S: Shape> GraphTensor<S> {
             .add_op(op::Print(message.to_string()), vec![])
             .input(self.id)
             .finish();
+    }
+
+    pub fn view(&self) -> Option<&TensorView> {
+        unsafe { self.graph_ref.as_mut().unwrap().get_view(self.id) }
     }
 }
 
@@ -84,9 +95,16 @@ impl<S: ConstShape> GraphTensor<S> {
             .downcast_mut::<Function>()
             .unwrap();
         // We shouldn't do cloning here!
-        node.0 = Box::new(move |_| Tensor {
-            data: Box::new(data.clone()),
-            shape: ShapeTracker::new(<S as ConstShape>::realized_shape()),
+        node.0 = Box::new(move |_, i| {
+            (
+                Some(Tensor {
+                    data: Box::new(data.clone()),
+                }),
+                TensorView {
+                    tensor_id: i,
+                    shape: ShapeTracker::new(<S as ConstShape>::realized_shape()),
+                },
+            )
         });
     }
 }

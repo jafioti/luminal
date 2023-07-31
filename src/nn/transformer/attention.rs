@@ -268,6 +268,9 @@ mod tests {
         );
         let d_b = d_model.forward((d_a, d_e.clone(), d_e));
 
-        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+        assert_close_data(
+            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+            &d_b.as_vec(),
+        );
     }
 }

@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::prelude::Graph;
 
 /// A module that can initialize it's variables on the graph

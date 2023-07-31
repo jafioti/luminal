@@ -184,9 +184,11 @@ mod tests {
         batch_out.mark();
         cx.execute();
 
-        let unoptimized_b = b.retrieve().unwrap();
-        let unoptimized_batch_out = batch_out.retrieve().unwrap();
+        let (unoptimized_b, unoptimized_b_view) = (b.retrieve().unwrap(), b.view().unwrap());
+        let (unoptimized_batch_out, unoptimized_batch_out_view) =
+            (batch_out.retrieve().unwrap(), batch_out.view().unwrap());
 
+        cx.reset();
         cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
         cx.execute();
 
@@ -221,9 +223,14 @@ mod tests {
         let out = model.forward(a);
         let d_batch_out = model.forward(d_batch);
 
-        assert_close_data(&unoptimized_b.real_data().unwrap(), &out.as_vec());
         assert_close_data(
-            &unoptimized_batch_out.real_data().unwrap(),
+            &unoptimized_b.real_data(unoptimized_b_view).unwrap(),
+            &out.as_vec(),
+        );
+        assert_close_data(
+            &unoptimized_batch_out
+                .real_data(unoptimized_batch_out_view)
+                .unwrap(),
             &d_batch_out.as_vec(),
         );
     }

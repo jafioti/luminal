@@ -172,12 +172,17 @@ impl<S: Shape> GraphTensor<S> {
             // Create div tensor
             let size_t = graph
                 .add_op(
-                    op::Function(Box::new(move |inp| {
-                        let s = inp[0].shape.shape()[dim as usize];
-                        Tensor {
-                            data: Box::new(vec![s as f32]),
-                            shape: ShapeTracker::new(vec![]),
-                        }
+                    op::Function(Box::new(move |inp, i| {
+                        let s = inp[0].1.shape.shape()[dim as usize];
+                        (
+                            Some(Tensor {
+                                data: Box::new(vec![s as f32]),
+                            }),
+                            TensorView {
+                                tensor_id: i,
+                                shape: ShapeTracker::new(vec![]),
+                            },
+                        )
                     })),
                     vec![],
                 )
@@ -575,8 +580,14 @@ mod tests {
         let d_b = d_a.clone().normalize::<dfdx::shapes::Axis<0>>(1e-5);
         let d_c = d_a.normalize::<dfdx::shapes::Axis<1>>(1e-5);
 
-        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
-        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+        assert_close_data(
+            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+            &d_b.as_vec(),
+        );
+        assert_close_data(
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &d_c.as_vec(),
+        );
     }
 
     #[test]
@@ -594,7 +605,10 @@ mod tests {
         let d_b = d_dev.tensor([[1., 2.], [3., 1.], [2., 3.]]);
         let d_c = d_a.matmul(d_b);
 
-        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+        assert_close_data(
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &d_c.as_vec(),
+        );
     }
 
     #[test]
@@ -605,6 +619,7 @@ mod tests {
         let b = cx.new_tensor::<R2<3, 3>>();
         b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
         let c = a.matmul(b);
+
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -612,7 +627,10 @@ mod tests {
         let d_b = d_dev.tensor([[1., 2., 3.], [1., 2., 3.], [1., 2., 3.]]);
         let d_c = d_a.matmul(d_b);
 
-        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+        assert_close_data(
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &d_c.as_vec(),
+        );
     }
 
     #[test]
@@ -634,7 +652,10 @@ mod tests {
         let d_b = d_dev.tensor([[1., 2., 3., 1.], [1., 2., 3., 1.]]);
         let d_c = d_a.matmul(d_b);
 
-        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+        assert_close_data(
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &d_c.as_vec(),
+        );
     }
 
     #[test]
@@ -667,7 +688,10 @@ mod tests {
         );
         let d_c = d_a.matmul(d_b.permute::<Rank3<1, 3, 2>, dfdx::shapes::Axes3<0, 2, 1>>());
 
-        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+        assert_close_data(
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &d_c.as_vec(),
+        );
     }
 
     #[test]
@@ -701,7 +725,10 @@ mod tests {
         );
         let d_c = d_a.matmul(d_b);
 
-        assert_close_data(&c.retrieve().unwrap().real_data().unwrap(), &d_c.as_vec());
+        assert_close_data(
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &d_c.as_vec(),
+        );
     }
 
     #[test]
@@ -718,7 +745,10 @@ mod tests {
         let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
         let d_b = d_a.mean::<_, dfdx::shapes::Axis<1>>();
 
-        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
+        assert_close_data(
+            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+            &d_b.as_vec(),
+        );
     }
 
     #[test]
@@ -740,7 +770,7 @@ mod tests {
         );
         let d_b = d_a.softmax::<dfdx::shapes::Axis<1>>();
 
-        let r = b.retrieve().unwrap().real_data().unwrap();
+        let r = b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap();
         assert_close_data(&r, &d_b.as_vec());
     }
 }

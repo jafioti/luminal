@@ -1,4 +1,4 @@
-use crate::prelude::{Graph, GraphTensor, Shape, ShapeTracker, Tensor};
+use crate::prelude::{Graph, GraphTensor, Shape, ShapeTracker, Tensor, TensorView};
 use itertools::Itertools;
 use petgraph::stable_graph::NodeIndex;
 use safetensors::tensor::{Dtype, View};
@@ -18,7 +18,7 @@ pub trait SaveLoadModule: SerializeModule {
         safetensors::serialize_to_file(tensors, &None, filename.as_ref()).unwrap();
     }
     /// Get the state dict of the module
-    fn state_dict<'a>(&'a self, cx: &'a Graph) -> HashMap<String, &'a Tensor> {
+    fn state_dict<'a>(&'a self, cx: &'a Graph) -> HashMap<String, SaveTensorRef<'a>> {
         let mut serializer = Serializer {
             current_path: ".".to_string(),
             state: HashMap::default(),
@@ -28,11 +28,20 @@ pub trait SaveLoadModule: SerializeModule {
         serializer
             .state
             .into_iter()
-            .map(|(k, v)| (k, cx.get_tensor_ref(v).unwrap()))
+            .map(|(k, v)| {
+                (
+                    k,
+                    SaveTensorRef(cx.get_tensor_ref(v).unwrap(), cx.views.get(&v).unwrap()),
+                )
+            })
             .collect()
     }
     /// Load module from state dict
-    fn load_from_state_dict(&mut self, cx: &mut Graph, mut state_dict: HashMap<String, Tensor>) {
+    fn load_from_state_dict(
+        &mut self,
+        cx: &mut Graph,
+        mut state_dict: HashMap<String, (Tensor, TensorView)>,
+    ) {
         let mut serializer = Serializer {
             current_path: ".".to_string(),
             state: HashMap::default(),
@@ -40,7 +49,9 @@ pub trait SaveLoadModule: SerializeModule {
         self.serialize(&mut serializer);
 
         for (s, n) in serializer.state {
-            cx.tensors.insert(n, state_dict.remove(&s).unwrap());
+            let (t, v) = state_dict.remove(&s).unwrap();
+            cx.tensors.insert(n, t);
+            cx.views.insert(n, v);
         }
     }
     /// Load a module from a SafeTensors file
@@ -50,7 +61,10 @@ pub trait SaveLoadModule: SerializeModule {
         let state_dict = st
             .tensors()
             .into_iter()
-            .map(|(k, v)| (k, v.into()))
+            .map(|(k, v)| {
+                let t: SaveTensor = v.into();
+                (k, (t.0, t.1))
+            })
             .collect();
         self.load_from_state_dict(cx, state_dict);
     }
@@ -81,15 +95,21 @@ impl Serializer {
     }
 }
 
-impl<'data> View for &'data Tensor {
+#[derive(Clone, Debug)]
+pub struct SaveTensorRef<'a>(&'a Tensor, &'a TensorView);
+#[derive(Clone, Debug)]
+pub struct SaveTensor(Tensor, TensorView);
+
+impl<'data> View for SaveTensorRef<'data> {
     fn dtype(&self) -> Dtype {
         Dtype::F32 // For now just assume float, this should change in the future
     }
     fn shape(&self) -> &[usize] {
-        self.shape.shape()
+        self.1.shape.shape()
     }
     fn data(&self) -> Cow<[u8]> {
-        self.data
+        self.0
+            .data
             .as_any()
             .downcast_ref::<Vec<f32>>()
             .unwrap()
@@ -99,26 +119,36 @@ impl<'data> View for &'data Tensor {
             .into()
     }
     fn data_len(&self) -> usize {
-        self.data.as_any().downcast_ref::<Vec<f32>>().unwrap().len()
+        self.0
+            .data
+            .as_any()
+            .downcast_ref::<Vec<f32>>()
+            .unwrap()
+            .len()
     }
 }
 
-impl<'a> std::convert::From<safetensors::tensor::TensorView<'a>> for Tensor {
+impl<'a> std::convert::From<safetensors::tensor::TensorView<'a>> for SaveTensor {
     fn from(value: safetensors::tensor::TensorView<'a>) -> Self {
         let chunked = value.data().chunks_exact(std::mem::size_of::<f32>());
 
-        Tensor {
-            data: Box::new(
-                chunked
-                    .map(|chunk| unsafe {
-                        std::mem::transmute::<[u8; 4], f32>([
-                            chunk[0], chunk[1], chunk[2], chunk[3],
-                        ])
-                    })
-                    .collect::<Vec<f32>>(),
-            ),
-            shape: ShapeTracker::new(value.shape().to_vec()),
-        }
+        SaveTensor(
+            Tensor {
+                data: Box::new(
+                    chunked
+                        .map(|chunk| unsafe {
+                            std::mem::transmute::<[u8; 4], f32>([
+                                chunk[0], chunk[1], chunk[2], chunk[3],
+                            ])
+                        })
+                        .collect::<Vec<f32>>(),
+                ),
+            },
+            TensorView {
+                tensor_id: NodeIndex::default(),
+                shape: ShapeTracker::new(value.shape().to_vec()),
+            },
+        )
     }
 }
 
@@ -129,7 +159,7 @@ mod tests {
 
     use crate::{nn::transformer::Transformer, prelude::*, tests::assert_close_data};
 
-    use super::SaveLoadModule;
+    use super::{SaveLoadModule, SaveTensorRef};
 
     #[test]
     fn test_serialization() {
@@ -147,12 +177,16 @@ mod tests {
         out1.mark();
 
         cx.execute();
-        let out1 = out1.retrieve().unwrap().real_data().unwrap();
+        let out1 = out1
+            .retrieve()
+            .unwrap()
+            .real_data(out1.view().unwrap())
+            .unwrap();
 
         let state_dict = model.state_dict(&cx);
         let state_dict: HashMap<_, _> = state_dict
             .into_iter()
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, SaveTensorRef(a, b))| (k, (a.clone(), b.clone())))
             .collect();
 
         let mut cx = Graph::new();
@@ -169,7 +203,11 @@ mod tests {
         cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
         cx.execute();
 
-        let out2 = out2.retrieve().unwrap().real_data().unwrap();
+        let out2 = out2
+            .retrieve()
+            .unwrap()
+            .real_data(out2.view().unwrap())
+            .unwrap();
         assert_close_data(&out1, &out2);
     }
 }

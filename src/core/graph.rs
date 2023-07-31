@@ -4,6 +4,7 @@ use crate::{
     graph_tensor::GraphTensor,
     op::{self, Operator},
     optimizer::GraphOptimizer,
+    prelude::TensorView,
     shape::*,
     tensor::Tensor,
 };
@@ -15,6 +16,7 @@ use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Dire
 #[derive(Debug, Default)]
 pub struct Graph {
     pub(crate) tensors: HashMap<NodeIndex, Tensor>,
+    pub(crate) views: HashMap<NodeIndex, TensorView>,
     pub(crate) id_remap: HashMap<NodeIndex, NodeIndex>,
     #[allow(clippy::type_complexity)]
     pub(crate) graph: StableGraph<(Box<dyn Operator>, Vec<RealDim>), u8>,
@@ -44,29 +46,30 @@ impl Graph {
         self.graph.node_weight(id).map(|n| n.0.as_ref())
     }
 
-    pub fn get_tensor(&mut self, mut id: NodeIndex) -> Option<Tensor> {
-        // Walk through remaps
-        while let Some(new_id) = self.id_remap.get(&id) {
-            id = *new_id;
-        }
-
+    pub fn get_tensor(&mut self, id: NodeIndex) -> Option<Tensor> {
+        let id = self.get_view(id)?.tensor_id;
         self.tensors.remove(&id)
     }
 
-    pub fn get_tensor_ref(&self, mut id: NodeIndex) -> Option<&Tensor> {
+    pub fn get_tensor_ref(&self, id: NodeIndex) -> Option<&Tensor> {
+        let view = self.get_view(id)?;
+        self.tensors.get(&view.tensor_id)
+    }
+
+    pub fn get_view(&self, mut id: NodeIndex) -> Option<&TensorView> {
         // Walk through remaps
         while let Some(new_id) = self.id_remap.get(&id) {
             id = *new_id;
         }
 
-        self.tensors.get(&id)
+        self.views.get(&id)
     }
 
     pub fn new_tensor<S: Shape>(&mut self) -> GraphTensor<S> {
         self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
         let tensor = GraphTensor {
             id: self.graph.add_node((
-                Box::new(op::Function(Box::new(|_| {
+                Box::new(op::Function(Box::new(|_, _| {
                     panic!("You must set a value for this tensor!")
                 }))),
                 S::realized_shape(),
@@ -87,6 +90,7 @@ impl Graph {
     pub fn reset(&mut self) {
         // (This is where we should do the tensor caching!)
         self.tensors.clear();
+        self.views.clear();
     }
 
     /// Execute the graph.
@@ -97,8 +101,15 @@ impl Graph {
             .node_indices()
             .map(|n| (n, self.graph.edges_directed(n, Direction::Outgoing).count()))
             .collect();
+        let mut views_pointing: HashMap<NodeIndex, usize> = self
+            .views
+            .iter()
+            .group_by(|(_, v)| v.tensor_id)
+            .into_iter()
+            .map(|(v, i)| (v, i.count()))
+            .collect();
         for node in petgraph::algo::toposort(&self.graph, None).unwrap() {
-            if self.tensors.contains_key(&node) {
+            if self.views.contains_key(&node) {
                 continue;
             }
             let src_ids = self
@@ -109,20 +120,38 @@ impl Graph {
                 .collect_vec();
             let srcs = src_ids
                 .iter()
-                .map(|i| self.tensors.get(i).unwrap())
+                .map(|i| {
+                    let view = self.views.get(i).unwrap().clone();
+                    (self.tensors.get(&view.tensor_id).unwrap(), view)
+                })
                 .collect_vec();
 
             // All sources are ready, execute
-            let f = self.graph.node_weight(node).unwrap().0.process(srcs);
-            self.tensors.insert(node, f);
+            let (t, v) = self.graph.node_weight(node).unwrap().0.process(srcs, node);
+            if let Some(tensor) = t {
+                self.tensors.insert(node, tensor);
+            }
+            if let Some(vp) = views_pointing.get_mut(&v.tensor_id) {
+                *vp += 1;
+            } else {
+                views_pointing.insert(v.tensor_id, 1);
+            }
+            self.views.insert(node, v);
 
             // Check if we can delete the source tensors now
             for source in src_ids.into_iter().filter(|n| !self.no_delete.contains(n)) {
                 let deps = dependencies.get_mut(&source).unwrap();
                 *deps -= 1;
                 if *deps == 0 {
-                    // No more dependencies for this node, let's remove it's data
-                    self.tensors.remove(&source);
+                    // No more dependencies for this view, let's remove it
+                    if let Some(view) = self.views.remove(&source) {
+                        let vp = views_pointing.get_mut(&view.tensor_id).unwrap();
+                        *vp -= 1;
+                        if *vp == 0 {
+                            // No views pointing at this tensor, remove it
+                            self.tensors.remove(&view.tensor_id);
+                        }
+                    }
                 }
             }
         }

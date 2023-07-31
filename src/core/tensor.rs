@@ -1,6 +1,7 @@
 use std::{any::Any, fmt::Debug};
 
 use dyn_clone::{clone_trait_object, DynClone};
+use petgraph::stable_graph::NodeIndex;
 
 use crate::shape::ShapeTracker;
 
@@ -8,6 +9,11 @@ use crate::shape::ShapeTracker;
 #[derive(Debug, Clone)]
 pub struct Tensor {
     pub data: Box<dyn Data>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TensorView {
+    pub tensor_id: NodeIndex,
     pub shape: ShapeTracker,
 }
 
@@ -30,12 +36,12 @@ impl Data for Vec<f32> {
 
 impl Tensor {
     /// Get the real data as layed out by the shape tracker
-    pub fn real_data(&self) -> Option<Vec<f32>> {
+    pub fn real_data(&self, view: &TensorView) -> Option<Vec<f32>> {
         let Some(self_data) = self.data.as_any().downcast_ref::<Vec<f32>>() else {
             return None;
         };
-        let mut data = vec![0.; self.shape.shape().iter().product()];
-        let idx = self.shape.index_fn();
+        let mut data = vec![0.; view.shape.shape().iter().product()];
+        let idx = view.shape.index_fn();
         for (i, r) in data.iter_mut().enumerate() {
             *r = self_data[(idx)(i)];
         }

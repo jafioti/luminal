@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use itertools::Itertools;
-use petgraph::visit::EdgeRef;
+use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
 use crate::{op::Operator, prelude::*};
 
@@ -116,13 +116,17 @@ impl Operator for CPUMatMul2D {
         self
     }
 
-    fn process(&self, inp: Vec<&Tensor>) -> Tensor {
-        let a_shape = inp[0].shape.shape();
-        let b_shape = inp[1].shape.shape();
-        let a_strides = &inp[0].shape.views.last().unwrap().strides;
-        let b_strides = &inp[1].shape.views.last().unwrap().strides;
-        let a_data = inp[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let b_data = inp[1].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        i: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let a_shape = inp[0].1.shape.shape();
+        let b_shape = inp[1].1.shape.shape();
+        let a_strides = &inp[0].1.shape.views.last().unwrap().strides;
+        let b_strides = &inp[1].1.shape.views.last().unwrap().strides;
+        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut c = vec![0.; a_shape[0] * b_shape[1]];
         unsafe {
             matrixmultiply::sgemm(
@@ -143,10 +147,13 @@ impl Operator for CPUMatMul2D {
             );
         }
 
-        Tensor {
-            data: Box::new(c),
-            shape: ShapeTracker::new(vec![a_shape[0], b_shape[1]]),
-        }
+        (
+            Some(Tensor { data: Box::new(c) }),
+            TensorView {
+                tensor_id: i,
+                shape: ShapeTracker::new(vec![a_shape[0], b_shape[1]]),
+            },
+        )
     }
 }
 
@@ -165,14 +172,15 @@ mod tests {
 
         cx.execute();
 
-        let unoptimized_c = c.retrieve().unwrap();
+        let (unoptimized_c, unoptimized_c_view) = (c.retrieve().unwrap(), c.view().unwrap());
 
+        cx.reset();
         cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
         cx.execute();
 
         assert_close_data(
-            &c.retrieve().unwrap().real_data().unwrap(),
-            &unoptimized_c.real_data().unwrap(),
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &unoptimized_c.real_data(unoptimized_c_view).unwrap(),
         );
     }
 }

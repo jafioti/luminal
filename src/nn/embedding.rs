@@ -24,15 +24,21 @@ impl<S: Dim, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let res = graph
             .add_op(
-                op::Function(Box::new(|tensors| {
-                    let data = tensors[0].data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-                    let data_idx_fn = tensors[0].shape.index_fn();
+                op::Function(Box::new(|tensors, i| {
+                    let data = tensors[0]
+                        .0
+                        .data
+                        .as_any()
+                        .downcast_ref::<Vec<f32>>()
+                        .unwrap();
+                    let data_idx_fn = tensors[0].1.shape.index_fn();
                     let indexes = tensors[1]
+                        .0
                         .data
                         .as_any()
                         .downcast_ref::<Vec<usize>>()
                         .unwrap();
-                    let index_idx_fn = tensors[1].shape.index_fn();
+                    let index_idx_fn = tensors[1].1.shape.index_fn();
                     let mut res = Vec::with_capacity(indexes.len() * DIM);
                     for i in 0..indexes.len() {
                         let start = indexes[(index_idx_fn)(i)] * DIM;
@@ -40,12 +46,17 @@ impl<S: Dim, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
                             res.push(data[(data_idx_fn)(start + n)]);
                         }
                     }
-                    let mut shape = tensors[1].shape.shape().clone();
+                    let mut shape = tensors[1].1.shape.shape().clone();
                     shape.push(DIM);
-                    Tensor {
-                        data: Box::new(res),
-                        shape: ShapeTracker::new(shape),
-                    }
+                    (
+                        Some(Tensor {
+                            data: Box::new(res),
+                        }),
+                        TensorView {
+                            tensor_id: i,
+                            shape: ShapeTracker::new(shape),
+                        },
+                    )
                 })),
                 vec![S1::const_size(), RealDim::Const(DIM)],
             )
@@ -154,9 +165,16 @@ mod tests {
         let d_b = d_model.forward(d_a);
         let d_batch_out = d_model.forward(d_batch);
 
-        assert_close_data(&b.retrieve().unwrap().real_data().unwrap(), &d_b.as_vec());
         assert_close_data(
-            &batch_out.retrieve().unwrap().real_data().unwrap(),
+            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+            &d_b.as_vec(),
+        );
+        assert_close_data(
+            &batch_out
+                .retrieve()
+                .unwrap()
+                .real_data(batch_out.view().unwrap())
+                .unwrap(),
             &d_batch_out.as_vec(),
         );
     }
