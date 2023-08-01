@@ -132,6 +132,22 @@ pub fn default_strides(shape: &[usize]) -> Vec<usize> {
     strides
 }
 
+#[allow(clippy::type_complexity)]
+pub fn get_pad_args(shape: &[i32], arg: &[(i32, i32)]) -> (Vec<(i32, i32)>, Vec<(usize, usize)>) {
+    (
+        shape
+            .iter()
+            .zip(arg.iter())
+            .map(|(s, (b, e))| (-b, s + e))
+            .collect(),
+        shape
+            .iter()
+            .zip(arg.iter())
+            .map(|(s, (b, _))| (*b as usize, (s + b) as usize))
+            .collect(),
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShapeTracker {
     pub views: Vec<View>,
@@ -213,16 +229,16 @@ impl ShapeTracker {
         );
     }
 
-    fn unsafe_resize(&mut self, arg: &[(usize, usize)], mut mask: Option<Vec<(usize, usize)>>) {
-        let new_offset: usize = self
+    fn unsafe_resize(&mut self, arg: &[(i32, i32)], mut mask: Option<Vec<(usize, usize)>>) {
+        let new_offset = self
             .views
             .last()
             .unwrap()
             .strides
             .iter()
             .zip(arg.iter())
-            .map(|(a, b)| a * b.0)
-            .sum();
+            .map(|(a, b)| *a as i32 * b.0)
+            .sum::<i32>() as usize;
         if self.views.last().unwrap().mask.is_some() {
             let n_mask: Vec<(usize, usize)> = self
                 .views
@@ -235,8 +251,8 @@ impl ShapeTracker {
                 .zip(arg.iter())
                 .map(|((mx, my), (ax, ay))| {
                     (
-                        0_i32.max(*mx as i32 - *ax as i32) as usize,
-                        (*my as i32 - *ax as i32).min(*ay as i32 - *ax as i32) as usize,
+                        0_i32.max(*mx as i32 - *ax) as usize,
+                        (*my as i32 - *ax).min(*ay - *ax) as usize,
                     )
                 })
                 .collect();
@@ -252,7 +268,10 @@ impl ShapeTracker {
                 mask = Some(n_mask);
             }
         }
-        let shape = arg.iter().map(|(a, b)| b - a).collect::<Vec<_>>();
+        let shape = arg
+            .iter()
+            .map(|(a, b)| (b - a) as usize)
+            .collect::<Vec<_>>();
         *self.views.last_mut().unwrap() = View {
             strides: self.views.last().unwrap().strides.clone(),
             offset: self.views.last().unwrap().offset + new_offset,
@@ -263,7 +282,13 @@ impl ShapeTracker {
     }
 
     pub fn slice(&mut self, ranges: &[(usize, usize)]) {
-        self.unsafe_resize(ranges, None);
+        self.unsafe_resize(
+            &ranges
+                .iter()
+                .map(|(a, b)| (*a as i32, *b as i32))
+                .collect_vec(),
+            None,
+        );
     }
 
     fn simplify(&mut self) {
@@ -306,6 +331,14 @@ impl ShapeTracker {
     pub fn index_fn(&self) -> impl Fn(usize) -> usize {
         let idx = self.index_fn_node();
         move |i| idx.solve(i as i32) as usize
+    }
+
+    pub fn pad(&mut self, arg: &[(i32, i32)]) {
+        if arg.iter().any(|(a, b)| *a != 0 || *b != 0) {
+            let (zvarg, mask) =
+                get_pad_args(&self.shape().iter().map(|i| *i as i32).collect_vec(), arg);
+            self.unsafe_resize(&zvarg, Some(mask))
+        }
     }
 }
 
