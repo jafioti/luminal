@@ -1,8 +1,10 @@
 mod axes;
 mod broadcast;
 mod permute;
+mod slice;
 mod symbolic;
 mod tracker;
+pub use slice::*;
 
 #[cfg(test)]
 mod test;

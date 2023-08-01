@@ -113,6 +113,15 @@ impl<S: Shape> GraphTensor<S> {
     pub fn pow(self, e: f32) -> GraphTensor<S> {
         self.abs().log().mul(e).exp()
     }
+
+    pub fn slice<Slice>(self, slice: Slice) -> GraphTensor<S::Sliced>
+    where
+        S: SliceShape<Slice>,
+        Slice: 'static,
+        S::Sliced: Shape,
+    {
+        todo!();
+    }
 }
 
 // Reduction ops
