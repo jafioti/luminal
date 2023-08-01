@@ -1,5 +1,5 @@
 use super::*;
-use std::ops::{Bound, RangeBounds};
+use std::ops::{Bound, Range, RangeBounds, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 
 fn get_start_bound(bound: Bound<&usize>) -> usize {
     match bound {
@@ -17,106 +17,102 @@ fn get_end_bound(bound: Bound<&usize>, size: usize) -> usize {
     }
 }
 
-pub trait SliceDim<R: RangeBounds<usize>>: Dim {
-    type Sliced: Dim;
-
-    fn slice(&self, range: &R) -> Option<Self::Sliced> {
-        let size = self.size();
-
-        let start_bound = get_start_bound(range.start_bound());
-        let end_bound = get_end_bound(range.end_bound(), size);
-
-        (end_bound <= size && start_bound <= end_bound)
-            .then_some(end_bound - start_bound)
-            .and_then(Self::Sliced::from_size)
+fn real_dim_to_size(r: RealDim) -> usize {
+    if let RealDim::Const(n) = r {
+        n
+    } else {
+        usize::MAX
     }
 }
 
-macro_rules! slice_dim_to_usize {
-    ($range:ty) => {
-        impl<D: Dim> SliceDim<$range> for D {
-            type Sliced = usize;
-        }
-    };
+pub trait RangeToDim<D: Dim> {
+    type Dim: Dim;
 }
 
-slice_dim_to_usize!(std::ops::Range<usize>);
-slice_dim_to_usize!(std::ops::RangeTo<usize>);
-slice_dim_to_usize!(std::ops::RangeFrom<usize>);
-slice_dim_to_usize!(std::ops::RangeInclusive<usize>);
-slice_dim_to_usize!(std::ops::RangeToInclusive<usize>);
+impl<D: Dim> RangeToDim<D> for RangeFrom<usize> {
+    type Dim = usize;
+}
+impl<D: Dim> RangeToDim<D> for RangeTo<usize> {
+    type Dim = usize;
+}
+impl<D: Dim> RangeToDim<D> for RangeToInclusive<usize> {
+    type Dim = usize;
+}
+impl<D: Dim> RangeToDim<D> for Range<usize> {
+    type Dim = usize;
+}
+impl<D: Dim> RangeToDim<D> for RangeFull {
+    type Dim = D;
+}
 
-impl<D: Dim> SliceDim<std::ops::RangeFull> for D {
-    type Sliced = D;
+pub trait SliceOfShape<S: Shape> {
+    type OutputShape: Shape;
+    fn to_range_vec(&self) -> Vec<(usize, usize)>;
+}
 
-    fn slice(&self, _: &std::ops::RangeFull) -> Option<D> {
-        Some(*self)
+impl SliceOfShape<R0> for () {
+    type OutputShape = R0;
+    fn to_range_vec(&self) -> Vec<(usize, usize)> {
+        vec![]
     }
 }
 
-pub trait SliceShape<R>: Shape {
-    type Sliced: Shape<Concrete = Self::Concrete>;
-
-    fn slice(&self, range: &R) -> Option<Self::Sliced>;
-    fn first_idx_in_slice(&self, range: &R) -> usize;
-}
-
-impl SliceShape<()> for () {
-    type Sliced = Self;
-
-    fn slice(&self, _range: &()) -> Option<Self> {
-        Some(())
-    }
-
-    fn first_idx_in_slice(&self, _range: &()) -> usize {
-        0
+impl<A: Dim, R: RangeBounds<usize> + RangeToDim<A>> SliceOfShape<(A,)> for (R,) {
+    type OutputShape = (R::Dim,);
+    fn to_range_vec(&self) -> Vec<(usize, usize)> {
+        vec![(
+            get_start_bound(self.0.start_bound()),
+            get_end_bound(self.0.end_bound(), real_dim_to_size(A::const_size())),
+        )]
     }
 }
 
-macro_rules! length {
-    () => {0};
-    ($x:tt $($xs:tt)*) => {1 + length!($($xs)*)};
-}
-
-macro_rules! slice_shape {
-    ([$($dim:ident)*] [$($range:ident)*] [$($idx:tt)*]) => {
-        impl<$($dim: Dim),*, $($range: RangeBounds<usize>),*> SliceShape<($($range,)*)> for ($($dim,)*)
-        where
-            $($dim: SliceDim<$range>),*
-        {
-            type Sliced = ($($dim::Sliced,)*);
-
-            fn slice(&self, range: &($($range,)*)) -> Option<Self::Sliced> {
-                Some(($(self.$idx.slice(&range.$idx)?,)*))
-            }
-
-            fn first_idx_in_slice(&self, range: &($($range,)*)) -> usize {
-                let strides = self.strides();
-                $(get_start_bound(range.$idx.start_bound()) * strides[$idx] + )* 0
-            }
-        }
-
-        impl<$($range: RangeBounds<usize>),*> SliceShape<($($range,)*)> for [usize; {length!($($range)*)}]
-        where
-            $(usize: SliceDim<$range>),*
-        {
-            type Sliced = ($(<usize as SliceDim<$range>>::Sliced,)*);
-
-            fn slice(&self, range: &($($range,)*)) -> Option<Self::Sliced> {
-                Some(($(self[$idx].slice(&range.$idx)?,)*))
-            }
-
-            fn first_idx_in_slice(&self, range: &($($range,)*)) -> usize {
-                let strides = self.strides();
-                $(get_start_bound(range.$idx.start_bound()) * strides[$idx] + )* 0
-            }
-        }
+impl<
+        A: Dim,
+        B: Dim,
+        R1: RangeBounds<usize> + RangeToDim<A>,
+        R2: RangeBounds<usize> + RangeToDim<B>,
+    > SliceOfShape<(A, B)> for (R1, R2)
+{
+    type OutputShape = (R1::Dim, R2::Dim);
+    fn to_range_vec(&self) -> Vec<(usize, usize)> {
+        vec![
+            (
+                get_start_bound(self.0.start_bound()),
+                get_end_bound(self.0.end_bound(), real_dim_to_size(A::const_size())),
+            ),
+            (
+                get_start_bound(self.1.start_bound()),
+                get_end_bound(self.1.end_bound(), real_dim_to_size(B::const_size())),
+            ),
+        ]
     }
 }
 
-slice_shape!([D1][R1][0]);
-slice_shape!([D1 D2] [R1 R2] [0 1]);
-slice_shape!([D1 D2 D3] [R1 R2 R3] [0 1 2]);
-slice_shape!([D1 D2 D3 D4] [R1 R2 R3 R4] [0 1 2 3]);
-slice_shape!([D1 D2 D3 D4 D5] [R1 R2 R3 R4 R5] [0 1 2 3 4]);
-slice_shape!([D1 D2 D3 D4 D5 D6] [R1 R2 R3 R4 R5 R6] [0 1 2 3 4 5]);
+impl<
+        A: Dim,
+        B: Dim,
+        C: Dim,
+        R1: RangeBounds<usize> + RangeToDim<A>,
+        R2: RangeBounds<usize> + RangeToDim<B>,
+        R3: RangeBounds<usize> + RangeToDim<C>,
+    > SliceOfShape<(A, B, C)> for (R1, R2, R3)
+{
+    type OutputShape = (R1::Dim, R2::Dim, R3::Dim);
+    fn to_range_vec(&self) -> Vec<(usize, usize)> {
+        vec![
+            (
+                get_start_bound(self.0.start_bound()),
+                get_end_bound(self.0.end_bound(), real_dim_to_size(A::const_size())),
+            ),
+            (
+                get_start_bound(self.1.start_bound()),
+                get_end_bound(self.1.end_bound(), real_dim_to_size(B::const_size())),
+            ),
+            (
+                get_start_bound(self.2.start_bound()),
+                get_end_bound(self.2.end_bound(), real_dim_to_size(C::const_size())),
+            ),
+        ]
+    }
+}

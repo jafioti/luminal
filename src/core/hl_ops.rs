@@ -114,13 +114,14 @@ impl<S: Shape> GraphTensor<S> {
         self.abs().log().mul(e).exp()
     }
 
-    pub fn slice<Slice>(self, slice: Slice) -> GraphTensor<S::Sliced>
-    where
-        S: SliceShape<Slice>,
-        Slice: 'static,
-        S::Sliced: Shape,
-    {
-        todo!();
+    pub fn slice<Slice: SliceOfShape<S>>(self, slice: Slice) -> GraphTensor<Slice::OutputShape> {
+        let slice = slice.to_range_vec();
+        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        let new_id = graph
+            .add_op(op::Slice(slice), Slice::OutputShape::realized_shape())
+            .input(self.id)
+            .finish();
+        GraphTensor::from_id(new_id, self.graph_ref)
     }
 }
 

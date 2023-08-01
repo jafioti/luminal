@@ -180,6 +180,21 @@ impl ShapeTracker {
         );
     }
 
+    pub fn slice(&mut self, ranges: &[(usize, usize)]) {
+        let new_shape = ranges.iter().map(|(a, b)| b - a).collect_vec();
+        let new_offset: usize = self
+            .views
+            .last()
+            .unwrap()
+            .strides
+            .iter()
+            .zip(ranges.iter())
+            .map(|(a, b)| a * b.0)
+            .sum();
+        self.views.last_mut().unwrap().shape = new_shape;
+        self.views.last_mut().unwrap().offset += new_offset;
+    }
+
     fn simplify(&mut self) {
         while self.views.len() > 1 {
             if let Some(merged) = merge_views(

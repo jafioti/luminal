@@ -185,6 +185,29 @@ impl Operator for Expand {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Slice(pub Vec<(usize, usize)>);
+impl Operator for Slice {
+    fn name(&self) -> &'static str {
+        "Slice"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        _: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let mut view = inp[0].1.clone();
+        view.shape.slice(&self.0);
+        (None, view)
+    }
+}
+
 // Below are the primitive operators currently supported
 
 // Unary Op (A -> A)
@@ -795,6 +818,24 @@ mod tests {
         let d_dev = Cpu::default();
         let d_a = d_dev.tensor([1., 2., 3.]);
         let d_b: dfdx::tensor::Tensor<Rank2<3, 2>, f32, Cpu> = d_a.broadcast();
+
+        assert_close_data(
+            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+            &d_b.as_vec(),
+        );
+    }
+
+    #[test]
+    fn test_slice() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<2, 3>>();
+        a.set(vec![1., 2., 3., 1., 2., 3.]);
+        let b = a.slice((1.., ..));
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
+        let d_b = d_a.slice((1.., ..));
 
         assert_close_data(
             &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
