@@ -25,7 +25,7 @@ impl GraphOptimizer for CPUMatMulOptimizer {
             }
             // Expand 1
             let mut dests = graph.get_dests(node);
-            if dests.len() != 1 || dests[0].1 .0.name() != "Expand" || dests[0].1 .1.len() != 2 {
+            if dests.len() != 1 || dests[0].1 .0.name() != "Expand" || dests[0].1 .1.len() != 3 {
                 continue;
             }
             let (expand_1, _) = dests.pop().unwrap();
@@ -43,18 +43,16 @@ impl GraphOptimizer for CPUMatMulOptimizer {
                 .into_iter()
                 .filter(|(i, _)| *i != expand_1)
                 .collect_vec();
-            if srcs.len() != 1 || srcs[0].1 .0.name() != "Expand" || srcs[0].1 .1.len() != 2 {
+            if srcs.len() != 1 || srcs[0].1 .0.name() != "Expand" || srcs[0].1 .1.len() != 3 {
                 continue;
             }
             let (expand_2, (_, _)) = srcs.pop().unwrap();
 
             let mut dests = graph.get_dests(mul);
-            if dests.len() != 1 || dests[0].1 .0.name() != "SumReduce" || dests[0].1 .1.len() != 3 {
+            if dests.len() != 1 || dests[0].1 .0.name() != "SumReduce" || dests[0].1 .1.len() != 2 {
                 continue;
             }
             let (sum_reduce, _) = dests.pop().unwrap();
-
-            // We should check the dim of the sum reduce to make sure it's 2
 
             if graph.no_delete.contains(&node)
                 || graph.no_delete.contains(&expand_1)
@@ -172,7 +170,8 @@ mod tests {
 
         cx.execute();
 
-        let (unoptimized_c, unoptimized_c_view) = (c.retrieve().unwrap(), c.view().unwrap());
+        let (unoptimized_c, unoptimized_c_view) =
+            (c.retrieve().unwrap(), c.view().unwrap().clone());
 
         cx.reset();
         cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
@@ -180,7 +179,7 @@ mod tests {
 
         assert_close_data(
             &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &unoptimized_c.real_data(unoptimized_c_view).unwrap(),
+            &unoptimized_c.real_data(&unoptimized_c_view).unwrap(),
         );
     }
 }

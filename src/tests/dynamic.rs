@@ -108,8 +108,10 @@ fn test_feedforward() {
 
     cx.execute();
 
-    let (unoptimized_batch_out, unoptimized_batch_out_view) =
-        (batch_out.retrieve().unwrap(), batch_out.view().unwrap());
+    let (unoptimized_batch_out, unoptimized_batch_out_view) = (
+        batch_out.retrieve().unwrap(),
+        batch_out.view().unwrap().clone(),
+    );
 
     cx.reset();
     cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
@@ -144,7 +146,7 @@ fn test_feedforward() {
     let out = model.forward(a);
 
     let r = unoptimized_batch_out
-        .real_data(unoptimized_batch_out_view)
+        .real_data(&unoptimized_batch_out_view)
         .unwrap();
     assert_close_data(&r, &out.as_vec());
 }

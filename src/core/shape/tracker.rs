@@ -4,9 +4,13 @@ use super::{symbolic::*, RealDim};
 
 // This is a shape tracker allowing for zero-copy movement ops based off of https://github.com/tinygrad/tinygrad/blob/master/tinygrad/shape/shapetracker.py
 
-fn expr_node(idx: Node, shape_strides: &[(usize, usize)]) -> Node {
+fn expr_node(idx: Node, offset: usize, shape_strides: &[(usize, usize)]) -> Node {
     let mut acc = 1;
-    let mut ret = vec![];
+    let mut ret = if offset != 0 {
+        vec![Node::num(offset as i32)]
+    } else {
+        vec![]
+    };
     for (d, s) in shape_strides.iter().rev() {
         ret.push(((idx.clone() / (acc as i32)) % (*d as i32)) * (*s as i32));
         acc *= d;
@@ -50,7 +54,7 @@ fn merge_views(v2: &View, v1: &View) -> Option<View> {
             .collect_vec(),
     );
 
-    let idx = expr_node(idx, &v2.shape_strides);
+    let idx = expr_node(idx, v2.offset, &v2.shape_strides);
     let mut ret = vec![0; idxs.len()];
     for node in if let NodeType::RedNode(RedOp::Sum, n) = idx.node_type {
         n
@@ -74,7 +78,12 @@ fn merge_views(v2: &View, v1: &View) -> Option<View> {
         Some(View {
             shape: v1.shape.clone(),
             strides: ret,
-            offset: expr_node(Node::variable("idx".to_string(), 0, 0), &shape_strides).b as usize,
+            offset: expr_node(
+                Node::variable("idx".to_string(), 0, 0),
+                v1.offset,
+                &shape_strides,
+            )
+            .b as usize,
             shape_strides,
         })
     }
@@ -203,7 +212,7 @@ impl ShapeTracker {
             self.shape().iter().product::<usize>() as i32,
         );
         for view in self.views.iter().rev() {
-            idx = expr_node(idx, &view.shape_strides);
+            idx = expr_node(idx, view.offset, &view.shape_strides);
         }
         idx
     }
