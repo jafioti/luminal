@@ -114,6 +114,7 @@ impl<S: Shape> GraphTensor<S> {
         self.abs().log().mul(e).exp()
     }
 
+    /// Take a slice of the original tensor. Any dimension with bounds becomes a dynamic dimension
     pub fn slice<Slice: SliceOfShape<S>>(self, slice: Slice) -> GraphTensor<Slice::OutputShape> {
         let slice = slice.to_range_vec();
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };

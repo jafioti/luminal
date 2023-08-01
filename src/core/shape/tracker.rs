@@ -24,6 +24,7 @@ pub struct View {
     pub shape: Vec<usize>,
     pub strides: Vec<usize>,
     pub offset: usize,
+    pub mask: Option<Vec<(usize, usize)>>,
     pub shape_strides: Vec<(usize, usize)>,
 }
 
@@ -78,6 +79,7 @@ fn merge_views(v2: &View, v1: &View) -> Option<View> {
         Some(View {
             shape: v1.shape.clone(),
             strides: ret,
+            mask: v1.mask,
             offset: expr_node(
                 Node::variable("idx".to_string(), 0, 0),
                 v1.offset,
@@ -114,6 +116,7 @@ impl ShapeTracker {
                 shape_strides: to_shapes_strides(&shape, &strides),
                 strides,
                 shape,
+                mask: None,
                 offset: 0,
             }],
         }

@@ -17,6 +17,7 @@ pub enum Op {
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
 pub enum RedOp {
     Sum,
+    And,
 }
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
@@ -50,6 +51,7 @@ impl ToString for Node {
                     .collect::<Vec<_>>()
                     .join(match o {
                         RedOp::Sum => " + ",
+                        RedOp::And => " & ",
                     })
             ),
         }
@@ -87,6 +89,7 @@ impl Node {
                     .collect::<Vec<_>>()
                     .join(match o {
                         RedOp::Sum => " + ",
+                        RedOp::And => " & ",
                     })
             ),
         }
@@ -184,6 +187,38 @@ impl Node {
         }
     }
 
+    pub fn ands(mut nodes: Vec<Node>) -> Node {
+        if nodes.is_empty() {
+            return Node::num(1);
+        }
+        if nodes.len() == 1 {
+            return nodes.pop().unwrap();
+        }
+        if nodes.iter().any(|n| n.min == n.max && n.min == 0) {
+            return Node::num(0);
+        }
+
+        nodes = nodes.into_iter().filter(|n| n.min != n.max).collect();
+        if nodes.is_empty() {
+            return Node::num(1);
+        }
+        if nodes.len() == 1 {
+            return nodes.pop().unwrap();
+        }
+        let min = nodes.iter().map(|n| n.min).min().unwrap();
+        let max = nodes.iter().map(|n| n.max).max().unwrap();
+        if min == max {
+            Node::num(min)
+        } else {
+            Node {
+                b: 0,
+                min,
+                max,
+                node_type: NodeType::RedNode(RedOp::And, nodes),
+            }
+        }
+    }
+
     pub fn factorize(nodes: Vec<Node>) -> Vec<Node> {
         let mut mul_groups = HashMap::new();
         for x in nodes {
@@ -232,6 +267,7 @@ impl Node {
             },
             NodeType::RedNode(op, nodes) => match op {
                 RedOp::Sum => nodes.iter().map(|n| n.solve(i)).sum(),
+                RedOp::And => nodes.iter().map(|n| n.solve(i)).all(|i| i != 0) as i32,
             },
         }
     }
@@ -318,6 +354,9 @@ impl Div<i32> for Node {
             if self.b % rhs == 0 {
                 return (*a.clone() / self.b) % (self.b / rhs); // Put the div inside mod
             }
+        }
+        if let NodeType::RedNode(RedOp::And, n) = self.node_type {
+            return Node::ands(n.into_iter().map(|n| n / rhs).collect()); // Distribute div into and
         }
         if matches!(self.node_type, NodeType::RedNode(RedOp::Sum, _)) {
             let mut fully_divided = vec![];
@@ -442,6 +481,8 @@ impl Mul<i32> for Node {
             *a * (self.b * rhs)
         } else if let NodeType::RedNode(RedOp::Sum, n) = self.node_type {
             Node::sum(n.into_iter().map(|n| n * rhs).collect()) // Distribute mul into sum
+        } else if let NodeType::RedNode(RedOp::And, n) = self.node_type {
+            Node::ands(n.into_iter().map(|n| n * rhs).collect()) // Distribute mul into and
         } else {
             let (min, max) = if rhs >= 0 {
                 (self.min * rhs, self.max * rhs)

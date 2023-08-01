@@ -1,9 +1,11 @@
 mod axes;
 mod broadcast;
+mod pad;
 mod permute;
 mod slice;
 mod symbolic;
 mod tracker;
+pub use pad::*;
 pub use slice::*;
 
 #[cfg(test)]
