@@ -124,6 +124,16 @@ impl<S: Shape> GraphTensor<S> {
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }
+
+    // pub fn pad<Slice: SliceOfShape<S>>(self, slice: Slice) -> GraphTensor<Slice::OutputShape> {
+    //     let slice = slice.to_range_vec();
+    //     let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+    //     let new_id = graph
+    //         .add_op(op::Slice(slice), Slice::OutputShape::realized_shape())
+    //         .input(self.id)
+    //         .finish();
+    //     GraphTensor::from_id(new_id, self.graph_ref)
+    // }
 }
 
 // Reduction ops

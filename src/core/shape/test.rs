@@ -35,6 +35,7 @@ fn test_reshape() {
             shape: vec![10, 3],
             strides: vec![3, 1],
             shape_strides: vec![(30, 1)],
+            mask: None,
             offset: 0,
         }]
     );
@@ -47,6 +48,7 @@ fn test_reshape() {
             shape: vec![30],
             strides: vec![1],
             shape_strides: vec![(30, 1)],
+            mask: None,
             offset: 0,
         }]
     );
@@ -64,6 +66,7 @@ fn test_permute() {
             shape: vec![5, 2, 3],
             strides: vec![3, 15, 1],
             shape_strides: vec![(5, 3), (2, 15), (3, 1)],
+            mask: None,
             offset: 0,
         }]
     );
@@ -76,6 +79,7 @@ fn test_permute() {
             shape: vec![5, 3, 2],
             strides: vec![3, 1, 15],
             shape_strides: vec![(15, 1), (2, 15)],
+            mask: None,
             offset: 0,
         }]
     );
@@ -93,6 +97,7 @@ fn test_expand() {
             shape: vec![2, 5, 3],
             strides: vec![5, 1, 0],
             shape_strides: vec![(10, 1), (3, 0)],
+            mask: None,
             offset: 0,
         }]
     );

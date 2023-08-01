@@ -3,6 +3,8 @@ use itertools::Itertools;
 use super::{symbolic::*, RealDim};
 
 // This is a shape tracker allowing for zero-copy movement ops based off of https://github.com/tinygrad/tinygrad/blob/master/tinygrad/shape/shapetracker.py
+// This is more or less directly translated from python and so it is very ugly. Needs refactor!
+// Uses enums as substitute for python inheritance
 
 fn expr_node(idx: Node, offset: usize, shape_strides: &[(usize, usize)]) -> Node {
     let mut acc = 1;
@@ -17,6 +19,30 @@ fn expr_node(idx: Node, offset: usize, shape_strides: &[(usize, usize)]) -> Node
     }
 
     Node::sum(ret)
+}
+
+#[allow(unused)]
+fn expr_node_mask(
+    idx: Node,
+    mask: &Option<Vec<(usize, usize)>>,
+    shape: &[usize],
+    valid: Option<Node>,
+) -> Node {
+    let mut expr = if let Some(valid) = valid {
+        vec![valid]
+    } else {
+        vec![]
+    };
+    if let Some(mask) = mask {
+        let mut acc = 1;
+        for (ns, (x, y)) in shape.iter().zip(mask.iter()).rev() {
+            let base = (idx.clone() / acc) % *ns as i32;
+            expr.push(base.clone().ge(*x as i32));
+            expr.push(base.lt(*y as i32));
+            acc *= *ns as i32;
+        }
+    }
+    Node::ands(expr)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +65,9 @@ impl View {
 }
 
 fn merge_views(v2: &View, v1: &View) -> Option<View> {
+    if v2.mask.is_some() {
+        return None; // This is in tinygrad
+    }
     let idxs = v1
         .shape
         .iter()
@@ -79,7 +108,7 @@ fn merge_views(v2: &View, v1: &View) -> Option<View> {
         Some(View {
             shape: v1.shape.clone(),
             strides: ret,
-            mask: v1.mask,
+            mask: v1.mask.clone(),
             offset: expr_node(
                 Node::variable("idx".to_string(), 0, 0),
                 v1.offset,
@@ -158,6 +187,7 @@ impl ShapeTracker {
             shape_strides: to_shapes_strides(&new_shape, &strides),
             strides,
             shape: new_shape,
+            mask: None,
             offset: self.views.last().unwrap().offset,
         };
         if self.views.last().unwrap().is_contiguous() {
@@ -183,19 +213,57 @@ impl ShapeTracker {
         );
     }
 
-    pub fn slice(&mut self, ranges: &[(usize, usize)]) {
-        let new_shape = ranges.iter().map(|(a, b)| b - a).collect_vec();
+    fn unsafe_resize(&mut self, arg: &[(usize, usize)], mut mask: Option<Vec<(usize, usize)>>) {
         let new_offset: usize = self
             .views
             .last()
             .unwrap()
             .strides
             .iter()
-            .zip(ranges.iter())
+            .zip(arg.iter())
             .map(|(a, b)| a * b.0)
             .sum();
-        self.views.last_mut().unwrap().shape = new_shape;
-        self.views.last_mut().unwrap().offset += new_offset;
+        if self.views.last().unwrap().mask.is_some() {
+            let n_mask: Vec<(usize, usize)> = self
+                .views
+                .last()
+                .unwrap()
+                .mask
+                .as_ref()
+                .unwrap()
+                .iter()
+                .zip(arg.iter())
+                .map(|((mx, my), (ax, ay))| {
+                    (
+                        0_i32.max(*mx as i32 - *ax as i32) as usize,
+                        (*my as i32 - *ax as i32).min(*ay as i32 - *ax as i32) as usize,
+                    )
+                })
+                .collect();
+            if let Some(m) = mask {
+                mask = Some(
+                    n_mask
+                        .into_iter()
+                        .zip(m.into_iter())
+                        .map(|((mx1, my1), (mx2, my2))| (mx1.max(mx2), my1.min(my2)))
+                        .collect(),
+                )
+            } else {
+                mask = Some(n_mask);
+            }
+        }
+        let shape = arg.iter().map(|(a, b)| b - a).collect::<Vec<_>>();
+        *self.views.last_mut().unwrap() = View {
+            strides: self.views.last().unwrap().strides.clone(),
+            offset: self.views.last().unwrap().offset + new_offset,
+            mask,
+            shape_strides: to_shapes_strides(&shape, &self.views.last().unwrap().strides),
+            shape,
+        };
+    }
+
+    pub fn slice(&mut self, ranges: &[(usize, usize)]) {
+        self.unsafe_resize(ranges, None);
     }
 
     fn simplify(&mut self) {

@@ -12,6 +12,7 @@ pub enum Op {
     Mul,
     Div,
     Mod,
+    LessThan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
@@ -40,6 +41,7 @@ impl ToString for Node {
                     Op::Div => "/",
                     Op::Mod => "%",
                     Op::Mul => "*",
+                    Op::LessThan => "<",
                 },
                 self.b
             ),
@@ -78,6 +80,7 @@ impl Node {
                     Op::Div => "/",
                     Op::Mod => "%",
                     Op::Mul => "*",
+                    Op::LessThan => "<",
                 },
                 self.b
             ),
@@ -198,7 +201,7 @@ impl Node {
             return Node::num(0);
         }
 
-        nodes = nodes.into_iter().filter(|n| n.min != n.max).collect();
+        nodes.retain(|n| n.min != n.max);
         if nodes.is_empty() {
             return Node::num(1);
         }
@@ -264,11 +267,56 @@ impl Node {
                 Op::Div => a.solve(i) / self.b,
                 Op::Mod => a.solve(i) % self.b,
                 Op::Mul => a.solve(i) * self.b,
+                Op::LessThan => (a.solve(i) < self.b) as i32,
             },
             NodeType::RedNode(op, nodes) => match op {
                 RedOp::Sum => nodes.iter().map(|n| n.solve(i)).sum(),
                 RedOp::And => nodes.iter().map(|n| n.solve(i)).all(|i| i != 0) as i32,
             },
+        }
+    }
+
+    /// Greater than or equals
+    pub fn ge(self, rhs: i32) -> Node {
+        (-self).lt(-rhs + 1)
+    }
+
+    /// Less than
+    pub fn lt(self, rhs: i32) -> Node {
+        let mut lhs = self;
+        if let NodeType::RedNode(RedOp::Sum, nodes) = &lhs.node_type {
+            let muls = nodes
+                .iter()
+                .filter(|n| {
+                    matches!(n.node_type, NodeType::OpNode(Op::Mul, _)) && n.b > 0 && n.max >= rhs
+                })
+                .collect_vec();
+            let others = nodes
+                .iter()
+                .filter(|n| {
+                    !(matches!(n.node_type, NodeType::OpNode(Op::Mul, _))
+                        && n.b > 0
+                        && n.max >= rhs)
+                })
+                .collect_vec();
+            if !muls.is_empty() {
+                let mut mul_gcd = muls[0].b;
+                for x in muls.iter().skip(1) {
+                    mul_gcd = gcd(mul_gcd, x.b);
+                }
+                if rhs % mul_gcd == 0 {
+                    let all_others = Node::sum(others.into_iter().cloned().collect());
+                    if all_others.min >= 0 && all_others.max < mul_gcd {
+                        lhs = Node::sum(muls.into_iter().cloned().collect());
+                    }
+                }
+            }
+        }
+        Node {
+            b: rhs,
+            min: (lhs.max < rhs) as i32,
+            max: (lhs.min < rhs) as i32,
+            node_type: NodeType::OpNode(Op::LessThan, Box::new(lhs)),
         }
     }
 }
