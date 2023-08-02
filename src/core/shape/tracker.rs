@@ -359,11 +359,6 @@ impl ShapeTracker {
         idx
     }
 
-    pub fn index_fn(&self) -> impl Fn(usize) -> usize {
-        let idx = self.index_fn_node();
-        move |i| idx.solve(i as i32) as usize
-    }
-
     pub fn pad(&mut self, arg: &[(i32, i32)]) {
         if arg.iter().any(|(a, b)| *a != 0 || *b != 0) {
             let (zvarg, mask) =

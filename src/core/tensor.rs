@@ -41,9 +41,11 @@ impl Tensor {
             return None;
         };
         let mut data = vec![0.; view.shape.shape().iter().product()];
-        let idx = view.shape.index_fn();
+        let (idx, val) = view.shape.index_node();
         for (i, r) in data.iter_mut().enumerate() {
-            *r = self_data[(idx)(i)];
+            if val.solve(i as i32) != 0 {
+                *r = self_data[idx.solve(i as i32) as usize];
+            }
         }
 
         Some(data)
