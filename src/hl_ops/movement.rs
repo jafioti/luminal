@@ -115,7 +115,7 @@ impl<S: Shape> GraphTensor<S> {
 
 pub trait TryConcatAlong<Ax>: Sized {
     type Output;
-    fn concat_along(self) -> Self::Output;
+    fn concat_along(self, ax: Ax) -> Self::Output;
 }
 
 impl<A, B, Ax> TryConcatAlong<Ax> for (GraphTensor<A>, GraphTensor<B>)
@@ -127,18 +127,20 @@ where
     <(A, B) as TryConcatAlong<Ax>>::Output: Shape,
 {
     type Output = GraphTensor<<(A, B) as TryConcatAlong<Ax>>::Output>;
-    fn concat_along(self) -> Self::Output {
+    fn concat_along(self, _: Ax) -> Self::Output {
         let (left, right) = self;
         let graph = unsafe { left.graph_ref.as_mut().unwrap() };
         let dim = Ax::as_array()[0] as usize;
+        println!("Dim: {dim}");
         let pad_a = graph
             .add_op(
                 op::Function(Box::new(move |inps, _| {
                     let mut pad_shape = vec![(0, 0); A::NUM_DIMS];
                     pad_shape[dim] = (0, inps[0].1.shape.shape()[dim] as i32);
                     let (id, mut st) = (inps[0].1.tensor_id, inps[0].1.shape.clone());
+                    println!("Pad Shape 1: {:?}", pad_shape);
                     st.pad(&pad_shape);
-                    println!("ST A: {:?}", st);
+                    println!("St1: {:?}", st);
                     (
                         None,
                         TensorView {
@@ -159,8 +161,8 @@ where
                     pad_shape[dim] = (inps[0].1.shape.shape()[dim] as i32, 0);
                     let (id, mut st) = (inps[0].1.tensor_id, inps[0].1.shape.clone());
                     st.pad(&pad_shape);
-                    println!("ST B: {:?}", st);
-                    println!("ST B: {:?}", st.index_fn_node().to_string());
+                    println!("St2: {:?}", st);
+                    println!("Expr: {:?}", st.index_fn_node().to_string());
                     (
                         None,
                         TensorView {
@@ -194,7 +196,7 @@ macro_rules! impl_concat {
                     <A as std::ops::Add<B>>::Output,
                     $($Tail, )*
                 );
-                fn concat_along(self) -> Self::Output {
+                fn concat_along(self, _: Axis<$Ax>) -> Self::Output {
                     let (lhs, rhs) = self;
                     let lhs_dims = lhs.concrete();
                     let rhs_dims = rhs.concrete();
@@ -241,7 +243,7 @@ impl_concat!(5, 6, [D0, D1, D2, D3, D4], []);
 #[cfg(test)]
 mod tests {
     use dfdx::{
-        tensor::{Cpu, TensorFrom},
+        tensor::{Cpu, TensorFrom, TensorFromVec},
         tensor_ops::{RealizeTo, TryConcatAlong as DfdxTryConcatAlong},
     };
 
@@ -250,13 +252,13 @@ mod tests {
     use super::TryConcatAlong;
 
     #[test]
-    fn test_concat() {
+    fn test_concat_1d() {
         let mut cx = Graph::new();
         let a = cx.new_tensor::<R1<3>>();
         a.set(vec![1.4325, 2.492428, 3.127365]);
         let b = cx.new_tensor::<R1<3>>();
         b.set(vec![2.30434, 2.2343113, 1.4393]);
-        let c = (a.realize::<(usize,)>(), b.realize::<(usize,)>()).concat_along();
+        let c = (a.realize::<(usize,)>(), b.realize::<(usize,)>()).concat_along(Axis::<0>);
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -268,6 +270,55 @@ mod tests {
         assert_close_data(
             &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
             &d_c.as_vec(),
+        );
+    }
+
+    #[test]
+    fn test_concat_2d() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<3, 2>>();
+        a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
+        let b = cx.new_tensor::<R2<3, 2>>();
+        b.set(vec![2.30434, 2.2343113, 1.4393, 482.4312, 8.1234, 54.2054]);
+        let c = (
+            a.realize::<(Const<3>, usize)>(),
+            b.realize::<(Const<3>, usize)>(),
+        )
+            .concat_along(Axis::<1>);
+        let d = (
+            a.realize::<(usize, Const<2>)>(),
+            b.realize::<(usize, Const<2>)>(),
+        )
+            .concat_along(Axis::<0>);
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor_from_vec(
+            vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854],
+            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<2>),
+        );
+        let d_b = d_dev.tensor_from_vec(
+            vec![2.30434, 2.2343113, 1.4393, 482.4312, 8.1234, 54.2054],
+            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<2>),
+        );
+        let d_c = (
+            d_a.clone().realize::<(dfdx::shapes::Const<3>, usize)>(),
+            d_b.clone().realize::<(dfdx::shapes::Const<3>, usize)>(),
+        )
+            .concat_along(dfdx::shapes::Axis::<1>);
+        let d_d = (
+            d_a.realize::<(usize, dfdx::shapes::Const<2>)>(),
+            d_b.realize::<(usize, dfdx::shapes::Const<2>)>(),
+        )
+            .concat_along(dfdx::shapes::Axis::<0>);
+
+        assert_close_data(
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &d_c.as_vec(),
+        );
+        assert_close_data(
+            &d.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &d_d.as_vec(),
         );
     }
 }

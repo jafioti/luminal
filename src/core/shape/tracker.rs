@@ -17,35 +17,18 @@ fn expr_node(idx: Node, offset: i32, shape_strides: &[(usize, usize)]) -> Node {
         ret.push(((idx.clone() / (acc as i32)) % (*d as i32)) * (*s as i32));
         acc *= d;
     }
-    println!("REt: {:?}", ret);
 
-    let r = Node::sum(ret);
-    println!("Summed: {:?}", r);
-    r
+    Node::sum(ret)
 }
 
-#[allow(unused)]
-fn expr_node_mask(
-    idx: Node,
-    mask: &Option<Vec<(usize, usize)>>,
-    shape: &[usize],
-    valid: Option<Node>,
-) -> Node {
-    let mut expr = if let Some(valid) = valid {
-        vec![valid]
-    } else {
-        vec![]
-    };
-    if let Some(mask) = mask {
-        let mut acc = 1;
-        for (ns, (x, y)) in shape.iter().zip(mask.iter()).rev() {
-            let base = (idx.clone() / acc) % *ns as i32;
-            expr.push(base.clone().ge(*x as i32));
-            expr.push(base.lt(*y as i32));
-            acc *= *ns as i32;
-        }
+fn idxs_to_idx(shape: &[usize], indexes: Vec<Node>) -> Node {
+    let mut acc = 1;
+    let mut ret = Vec::with_capacity(shape.len());
+    for (tidx, d) in indexes.into_iter().zip(shape.iter()).rev() {
+        ret.push(tidx * acc);
+        acc *= *d as i32;
     }
-    Node::ands(expr)
+    Node::sum(ret)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +47,51 @@ impl View {
             .zip(self.strides.iter())
             .zip(default_strides(&self.shape))
             .all(|((&sh, &st), def_st)| st == def_st || sh == 1)
+    }
+
+    fn expr_idxs(&self, idxs: Vec<Node>) -> Node {
+        let mut nodes = idxs
+            .into_iter()
+            .zip(self.shape.iter())
+            .zip(self.strides.iter())
+            .filter(|((_, sh), st)| **sh != 1 && **st != 0)
+            .map(|((idx, _), st)| idx * *st as i32)
+            .collect_vec();
+        nodes.insert(0, Node::num(self.offset));
+        Node::sum(nodes)
+    }
+
+    fn expr_node(&self, idx: Node) -> Node {
+        let mut acc = 1;
+        let mut ret = if self.offset != 0 {
+            vec![Node::num(self.offset)]
+        } else {
+            vec![]
+        };
+        for (d, s) in self.shape_strides.iter().rev() {
+            ret.push(((idx.clone() / (acc as i32)) % (*d as i32)) * (*s as i32));
+            acc *= d;
+        }
+
+        Node::sum(ret)
+    }
+
+    fn expr_node_mask(&self, idx: Node, valid: Option<Node>) -> Node {
+        let mut expr = if let Some(valid) = valid {
+            vec![valid]
+        } else {
+            vec![]
+        };
+        if let Some(mask) = &self.mask {
+            let mut acc = 1;
+            for (ns, (x, y)) in self.shape.iter().zip(mask.iter()).rev() {
+                let base = (idx.clone() / acc) % *ns as i32;
+                expr.push(base.clone().ge(*x as i32));
+                expr.push(base.lt(*y as i32));
+                acc *= *ns as i32;
+            }
+        }
+        Node::ands(expr)
     }
 }
 
@@ -323,10 +351,7 @@ impl ShapeTracker {
         let mut idx = Node::variable(
             "idx".to_string(),
             0,
-            self.shape()
-                .iter()
-                .map(|i| if *i > 0 { i - 1 } else { *i })
-                .product::<usize>() as i32,
+            self.shape().iter().product::<usize>() as i32,
         );
         for view in self.views.iter().rev() {
             idx = expr_node(idx, view.offset, &view.shape_strides);
@@ -345,6 +370,37 @@ impl ShapeTracker {
                 get_pad_args(&self.shape().iter().map(|i| *i as i32).collect_vec(), arg);
             self.unsafe_resize(&zvarg, Some(mask))
         }
+    }
+
+    fn _expr_idxs(&self, mut idx: Node, mut valid: Node) -> (Node, Node) {
+        for v in self.views.iter().rev().skip(1) {
+            valid = v.expr_node_mask(idx.clone(), Some(valid));
+            idx = v.expr_node(idx);
+        }
+        (idx, valid)
+    }
+
+    pub fn expr_idxs(&self, indexes: Vec<Node>) -> (Node, Node) {
+        let idx = self.views.last().unwrap().expr_idxs(indexes.clone());
+        let valid = self.views.last().unwrap().expr_node_mask(
+            idxs_to_idx(&self.views.last().unwrap().shape, indexes),
+            None,
+        );
+        self._expr_idxs(idx, valid)
+    }
+
+    pub fn index_node(&self) -> (Node, Node) {
+        let idx = Node::variable(
+            "idx".to_string(),
+            0,
+            self.shape().iter().product::<usize>() as i32,
+        );
+        let (idx, valid) = self._expr_idxs(
+            self.views.last().unwrap().expr_node(idx.clone()),
+            self.views.last().unwrap().expr_node_mask(idx, None),
+        );
+
+        (idx, valid)
     }
 }
 

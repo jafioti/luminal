@@ -1,3 +1,5 @@
+#![allow(clippy::needless_range_loop)]
+
 use std::{any::Any, fmt::Debug};
 
 use petgraph::stable_graph::NodeIndex;
@@ -396,8 +398,6 @@ impl Operator for Add {
         inp: Vec<(&Tensor, TensorView)>,
         nid: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        println!("A: {:?}", inp[0]);
-        println!("B: {:?}", inp[1]);
         let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]).unwrap();
         let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
         left_shape.views.last_mut().unwrap().shape = res_shape.clone();
@@ -410,12 +410,21 @@ impl Operator for Add {
             &right_shape.views.last().unwrap().shape,
             &right_shape.views.last().unwrap().strides,
         );
-        let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
+        let ((a_idx, a_valid), (b_idx, b_valid)) =
+            (left_shape.index_node(), right_shape.index_node());
         let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
-        for i in 0..data.len() {
-            data[i] = a_data[(a_idx)(i)] + b_data[(b_idx)(i)];
+        for i in 0..data.len() as i32 {
+            data[i as usize] = if a_valid.solve(i) != 0 {
+                a_data[a_idx.solve(i) as usize]
+            } else {
+                0.
+            } + if b_valid.solve(i) != 0 {
+                b_data[b_idx.solve(i) as usize]
+            } else {
+                0.
+            };
         }
         (
             Some(Tensor {
@@ -458,12 +467,21 @@ impl Operator for Sub {
             &right_shape.views.last().unwrap().shape,
             &right_shape.views.last().unwrap().strides,
         );
-        let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
+        let ((a_idx, a_valid), (b_idx, b_valid)) =
+            (left_shape.index_node(), right_shape.index_node());
         let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
-        for i in 0..data.len() {
-            data[i] = a_data[(a_idx)(i)] - b_data[(b_idx)(i)];
+        for i in 0..data.len() as i32 {
+            data[i as usize] = if a_valid.solve(i) != 0 {
+                a_data[a_idx.solve(i) as usize]
+            } else {
+                0.
+            } - if b_valid.solve(i) != 0 {
+                b_data[b_idx.solve(i) as usize]
+            } else {
+                0.
+            };
         }
         (
             Some(Tensor {
@@ -506,12 +524,21 @@ impl Operator for Mul {
             &right_shape.views.last().unwrap().shape,
             &right_shape.views.last().unwrap().strides,
         );
-        let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
+        let ((a_idx, a_valid), (b_idx, b_valid)) =
+            (left_shape.index_node(), right_shape.index_node());
         let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
-        for i in 0..data.len() {
-            data[i] = a_data[(a_idx)(i)] * b_data[(b_idx)(i)];
+        for i in 0..data.len() as i32 {
+            data[i as usize] = if a_valid.solve(i) != 0 {
+                a_data[a_idx.solve(i) as usize]
+            } else {
+                0.
+            } * if b_valid.solve(i) != 0 {
+                b_data[b_idx.solve(i) as usize]
+            } else {
+                0.
+            };
         }
         (
             Some(Tensor {
@@ -554,12 +581,21 @@ impl Operator for Div {
             &right_shape.views.last().unwrap().shape,
             &right_shape.views.last().unwrap().strides,
         );
-        let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
+        let ((a_idx, a_valid), (b_idx, b_valid)) =
+            (left_shape.index_node(), right_shape.index_node());
         let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
-        for i in 0..data.len() {
-            data[i] = a_data[(a_idx)(i)] / b_data[(b_idx)(i)];
+        for i in 0..data.len() as i32 {
+            data[i as usize] = if a_valid.solve(i) != 0 {
+                a_data[a_idx.solve(i) as usize]
+            } else {
+                0.
+            } / if b_valid.solve(i) != 0 {
+                b_data[b_idx.solve(i) as usize]
+            } else {
+                0.
+            };
         }
         (
             Some(Tensor {
@@ -602,12 +638,22 @@ impl Operator for Max {
             &right_shape.views.last().unwrap().shape,
             &right_shape.views.last().unwrap().strides,
         );
-        let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
+        let ((a_idx, a_valid), (b_idx, b_valid)) =
+            (left_shape.index_node(), right_shape.index_node());
         let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
-        for i in 0..data.len() {
-            data[i] = a_data[(a_idx)(i)].max(b_data[(b_idx)(i)]);
+        for i in 0..data.len() as i32 {
+            data[i as usize] = if a_valid.solve(i) != 0 {
+                a_data[a_idx.solve(i) as usize]
+            } else {
+                0.
+            }
+            .max(if b_valid.solve(i) != 0 {
+                b_data[b_idx.solve(i) as usize]
+            } else {
+                0.
+            });
         }
         (
             Some(Tensor {
@@ -650,12 +696,21 @@ impl Operator for Mod {
             &right_shape.views.last().unwrap().shape,
             &right_shape.views.last().unwrap().strides,
         );
-        let (a_idx, b_idx) = (left_shape.index_fn(), right_shape.index_fn());
+        let ((a_idx, a_valid), (b_idx, b_valid)) =
+            (left_shape.index_node(), right_shape.index_node());
         let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; res_shape.iter().product()];
-        for i in 0..data.len() {
-            data[i] = a_data[(a_idx)(i)] % b_data[(b_idx)(i)];
+        for i in 0..data.len() as i32 {
+            data[i as usize] = if a_valid.solve(i) != 0 {
+                a_data[a_idx.solve(i) as usize]
+            } else {
+                0.
+            } % if b_valid.solve(i) != 0 {
+                b_data[b_idx.solve(i) as usize]
+            } else {
+                0.
+            };
         }
         (
             Some(Tensor {
@@ -693,14 +748,16 @@ impl Operator for SumReduce {
         let dim_size = inp[0].1.shape.shape()[self.0];
         let mut result: Vec<f32> = vec![0.0; front_size * back_size];
         let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let a_idx = inp[0].1.shape.index_fn();
+        let (a_idx, a_valid) = inp[0].1.shape.index_node();
 
         for i in 0..front_size {
             for j in 0..back_size {
                 for k in 0..dim_size {
                     let original_index = i * dim_size * back_size + k * back_size + j;
                     let new_index = i * back_size + j;
-                    result[new_index] += a_data[(a_idx)(original_index)];
+                    if a_valid.solve(original_index as i32) != 0 {
+                        result[new_index] += a_data[a_idx.solve(original_index as i32) as usize];
+                    }
                 }
             }
         }
@@ -740,14 +797,17 @@ impl Operator for MaxReduce {
         let dim_size = inp[0].1.shape.shape()[self.0];
         let mut result: Vec<f32> = vec![-f32::INFINITY; front_size * back_size];
         let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let a_idx = inp[0].1.shape.index_fn();
+        let (a_idx, a_valid) = inp[0].1.shape.index_node();
 
         for i in 0..front_size {
             for j in 0..back_size {
                 for k in 0..dim_size {
                     let original_index = i * dim_size * back_size + k * back_size + j;
                     let new_index = i * back_size + j;
-                    result[new_index] = result[new_index].max(a_data[(a_idx)(original_index)]);
+                    if a_valid.solve(original_index as i32) != 0 {
+                        result[new_index] = result[new_index]
+                            .max(a_data[a_idx.solve(original_index as i32) as usize]);
+                    }
                 }
             }
         }
