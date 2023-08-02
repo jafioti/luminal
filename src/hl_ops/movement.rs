@@ -138,6 +138,7 @@ where
                     pad_shape[dim] = (0, inps[0].1.shape.shape()[dim] as i32);
                     let (id, mut st) = (inps[0].1.tensor_id, inps[0].1.shape.clone());
                     st.pad(&pad_shape);
+                    println!("ST A: {:?}", st);
                     (
                         None,
                         TensorView {
@@ -155,9 +156,11 @@ where
             .add_op(
                 op::Function(Box::new(move |inps, _| {
                     let mut pad_shape = vec![(0, 0); A::NUM_DIMS];
-                    pad_shape[dim] = (-(inps[0].1.shape.shape()[dim] as i32), 0);
+                    pad_shape[dim] = (inps[0].1.shape.shape()[dim] as i32, 0);
                     let (id, mut st) = (inps[0].1.tensor_id, inps[0].1.shape.clone());
                     st.pad(&pad_shape);
+                    println!("ST B: {:?}", st);
+                    println!("ST B: {:?}", st.index_fn_node().to_string());
                     (
                         None,
                         TensorView {

@@ -6,10 +6,10 @@ use super::{symbolic::*, RealDim};
 // This is more or less directly translated from python and so it is very ugly. Needs refactor!
 // Uses enums as substitute for python inheritance
 
-fn expr_node(idx: Node, offset: usize, shape_strides: &[(usize, usize)]) -> Node {
+fn expr_node(idx: Node, offset: i32, shape_strides: &[(usize, usize)]) -> Node {
     let mut acc = 1;
     let mut ret = if offset != 0 {
-        vec![Node::num(offset as i32)]
+        vec![Node::num(offset)]
     } else {
         vec![]
     };
@@ -17,8 +17,11 @@ fn expr_node(idx: Node, offset: usize, shape_strides: &[(usize, usize)]) -> Node
         ret.push(((idx.clone() / (acc as i32)) % (*d as i32)) * (*s as i32));
         acc *= d;
     }
+    println!("REt: {:?}", ret);
 
-    Node::sum(ret)
+    let r = Node::sum(ret);
+    println!("Summed: {:?}", r);
+    r
 }
 
 #[allow(unused)]
@@ -49,7 +52,7 @@ fn expr_node_mask(
 pub struct View {
     pub shape: Vec<usize>,
     pub strides: Vec<usize>,
-    pub offset: usize,
+    pub offset: i32,
     pub mask: Option<Vec<(usize, usize)>>,
     pub shape_strides: Vec<(usize, usize)>,
 }
@@ -114,7 +117,7 @@ fn merge_views(v2: &View, v1: &View) -> Option<View> {
                 v1.offset,
                 &shape_strides,
             )
-            .b as usize,
+            .b,
             shape_strides,
         })
     }
@@ -238,7 +241,7 @@ impl ShapeTracker {
             .iter()
             .zip(arg.iter())
             .map(|(a, b)| *a as i32 * b.0)
-            .sum::<i32>() as usize;
+            .sum::<i32>();
         if self.views.last().unwrap().mask.is_some() {
             let n_mask: Vec<(usize, usize)> = self
                 .views
@@ -320,7 +323,10 @@ impl ShapeTracker {
         let mut idx = Node::variable(
             "idx".to_string(),
             0,
-            self.shape().iter().product::<usize>() as i32,
+            self.shape()
+                .iter()
+                .map(|i| if *i > 0 { i - 1 } else { *i })
+                .product::<usize>() as i32,
         );
         for view in self.views.iter().rev() {
             idx = expr_node(idx, view.offset, &view.shape_strides);

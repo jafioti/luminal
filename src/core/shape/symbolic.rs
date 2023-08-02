@@ -142,6 +142,7 @@ impl Node {
             ) {
                 new_nodes.push(node);
             } else if matches!(node.node_type, NodeType::Num) {
+                println!("Adding");
                 num_node_sum += node.b;
             } else if matches!(node.node_type, NodeType::RedNode(RedOp::Sum, _)) {
                 for sub_node in flat_rednode_components(&node) {
@@ -172,7 +173,7 @@ impl Node {
             new_nodes = Self::factorize(new_nodes);
         }
 
-        if num_node_sum > 0 {
+        if num_node_sum != 0 {
             new_nodes.push(Node::num(num_node_sum));
         }
 
