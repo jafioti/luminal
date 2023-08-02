@@ -69,6 +69,16 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(new_id, self.graph_ref)
     }
 
+    pub fn realize<Dst: Shape<Concrete = <<S as HasShape>::Shape as Shape>::Concrete>>(
+        self,
+    ) -> GraphTensor<Dst>
+    where
+        S: RealizeShapeTo<Dst>,
+    {
+        let GraphTensor { id, graph_ref, .. } = self;
+        GraphTensor::from_id(id, graph_ref)
+    }
+
     /// Take a slice of the original tensor. Any dimension with bounds becomes a dynamic dimension
     pub fn slice<Slice: SliceOfShape<S>>(self, slice: Slice) -> GraphTensor<Slice::OutputShape> {
         let slice = slice.to_range_vec();
@@ -101,15 +111,160 @@ impl<S: Shape> GraphTensor<S> {
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
     }
+}
 
-    //     pub fn concat<B, Ax: Axes>(
-    //         self,
-    //         rhs: GraphTensor<B>,
-    //     ) -> GraphTensor<<(A, B) as TryConcatAlong<Ax>>::Output>
-    //     where
-    //         Dst: Shape<Concrete = S::Concrete> + HasAxes<Ax>,
-    //         <(A, B) as TryConcatAlong<Ax>>::Output: Shape,
-    //     {
-    //     }
-    // }
+pub trait TryConcatAlong<Ax>: Sized {
+    type Output;
+    fn concat_along(self) -> Self::Output;
+}
+
+impl<A, B, Ax> TryConcatAlong<Ax> for (GraphTensor<A>, GraphTensor<B>)
+where
+    Ax: Axes<Array = [isize; 1]>,
+    A: Shape + HasAxes<Ax>,
+    B: Shape<Concrete = A::Concrete> + HasAxes<Ax>,
+    (A, B): TryConcatAlong<Ax>,
+    <(A, B) as TryConcatAlong<Ax>>::Output: Shape,
+{
+    type Output = GraphTensor<<(A, B) as TryConcatAlong<Ax>>::Output>;
+    fn concat_along(self) -> Self::Output {
+        let (left, right) = self;
+        let graph = unsafe { left.graph_ref.as_mut().unwrap() };
+        let dim = Ax::as_array()[0] as usize;
+        let pad_a = graph
+            .add_op(
+                op::Function(Box::new(move |inps, _| {
+                    let mut pad_shape = vec![(0, 0); A::NUM_DIMS];
+                    pad_shape[dim] = (0, inps[0].1.shape.shape()[dim] as i32);
+                    let (id, mut st) = (inps[0].1.tensor_id, inps[0].1.shape.clone());
+                    st.pad(&pad_shape);
+                    (
+                        None,
+                        TensorView {
+                            tensor_id: id,
+                            shape: st,
+                        },
+                    )
+                })),
+                <(A, B) as TryConcatAlong<Ax>>::Output::realized_shape(),
+            )
+            .input(left.id)
+            .finish();
+        let left = GraphTensor::from_id(pad_a, left.graph_ref);
+        let pad_b = graph
+            .add_op(
+                op::Function(Box::new(move |inps, _| {
+                    let mut pad_shape = vec![(0, 0); A::NUM_DIMS];
+                    pad_shape[dim] = (-(inps[0].1.shape.shape()[dim] as i32), 0);
+                    let (id, mut st) = (inps[0].1.tensor_id, inps[0].1.shape.clone());
+                    st.pad(&pad_shape);
+                    (
+                        None,
+                        TensorView {
+                            tensor_id: id,
+                            shape: st,
+                        },
+                    )
+                })),
+                <(A, B) as TryConcatAlong<Ax>>::Output::realized_shape(),
+            )
+            .input(right.id)
+            .finish();
+        let right = GraphTensor::from_id(pad_b, right.graph_ref);
+        left + right
+    }
+}
+
+macro_rules! impl_concat {
+    ($Ax:expr, $NumDims:expr, [$($Head:tt),*], [$($Tail:tt),*]) => {
+        impl<A: Dim, B: Dim, $($Head: Dim, )* $($Tail: Dim, )*> TryConcatAlong<Axis<$Ax>>
+            for (
+                ($($Head, )* A, $($Tail, )*),
+                ($($Head, )* B, $($Tail, )*),
+            )
+        where
+            A: std::ops::Add<B>,
+            <A as std::ops::Add<B>>::Output: Dim,
+            {
+                type Output = (
+                    $($Head, )*
+                    <A as std::ops::Add<B>>::Output,
+                    $($Tail, )*
+                );
+                fn concat_along(self) -> Self::Output {
+                    let (lhs, rhs) = self;
+                    let lhs_dims = lhs.concrete();
+                    let rhs_dims = rhs.concrete();
+                    for i in 0..$NumDims {
+                        if i != $Ax {
+                            assert_eq!(lhs_dims[i], rhs_dims[i]);
+                        }
+                    }
+                    let mut out_dims = lhs_dims;
+                    out_dims[$Ax] += rhs_dims[$Ax];
+                    Self::Output::from_concrete(&out_dims).unwrap()
+                }
+            }
+    };
+}
+
+impl_concat!(0, 1, [], []);
+impl_concat!(0, 2, [], [D1]);
+impl_concat!(0, 3, [], [D1, D2]);
+impl_concat!(0, 4, [], [D1, D2, D3]);
+impl_concat!(0, 5, [], [D1, D2, D3, D4]);
+impl_concat!(0, 6, [], [D1, D2, D3, D4, D5]);
+
+impl_concat!(1, 2, [D0], []);
+impl_concat!(1, 3, [D0], [D2]);
+impl_concat!(1, 4, [D0], [D2, D3]);
+impl_concat!(1, 5, [D0], [D2, D3, D4]);
+impl_concat!(1, 6, [D0], [D2, D3, D4, D5]);
+
+impl_concat!(2, 3, [D0, D1], []);
+impl_concat!(2, 4, [D0, D1], [D3]);
+impl_concat!(2, 5, [D0, D1], [D3, D4]);
+impl_concat!(2, 6, [D0, D1], [D3, D4, D5]);
+
+impl_concat!(3, 4, [D0, D1, D2], []);
+impl_concat!(3, 5, [D0, D1, D2], [D4]);
+impl_concat!(3, 6, [D0, D1, D2], [D4, D5]);
+
+impl_concat!(4, 5, [D0, D1, D2, D3], []);
+impl_concat!(4, 6, [D0, D1, D2, D3], [D5]);
+
+impl_concat!(5, 6, [D0, D1, D2, D3, D4], []);
+
+#[cfg(test)]
+mod tests {
+    use dfdx::{
+        tensor::{Cpu, TensorFrom},
+        tensor_ops::{RealizeTo, TryConcatAlong as DfdxTryConcatAlong},
+    };
+
+    use crate::{prelude::*, tests::assert_close_data};
+
+    use super::TryConcatAlong;
+
+    #[test]
+    fn test_concat() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R1<3>>();
+        a.set(vec![1.4325, 2.492428, 3.127365]);
+        let b = cx.new_tensor::<R1<3>>();
+        b.set(vec![2.30434, 2.2343113, 1.4393]);
+        let c = (a.realize::<(usize,)>(), b.realize::<(usize,)>()).concat_along();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1.4325, 2.492428, 3.127365]);
+        let d_b = d_dev.tensor([2.30434, 2.2343113, 1.4393]);
+        let d_c = (d_a.realize::<(usize,)>(), d_b.realize::<(usize,)>())
+            .concat_along(dfdx::shapes::Axis::<0>);
+
+        assert_close_data(
+            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &d_c.as_vec(),
+        );
+    }
 }

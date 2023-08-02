@@ -2,10 +2,12 @@ mod axes;
 mod broadcast;
 mod pad;
 mod permute;
+mod realize;
 mod slice;
 mod symbolic;
 mod tracker;
 pub use pad::*;
+pub use realize::*;
 pub use slice::*;
 
 #[cfg(test)]

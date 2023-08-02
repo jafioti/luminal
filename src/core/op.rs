@@ -396,6 +396,8 @@ impl Operator for Add {
         inp: Vec<(&Tensor, TensorView)>,
         nid: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
+        println!("A: {:?}", inp[0]);
+        println!("B: {:?}", inp[1]);
         let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]).unwrap();
         let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
         left_shape.views.last_mut().unwrap().shape = res_shape.clone();
