@@ -1,5 +1,5 @@
 # luminal
-![image](https://raw.githubusercontent.com/jafioti/luminal/main/dag.jpeg)
+![image](https://raw.githubusercontent.com/jafioti/luminal/main/resources/dag.jpeg)
 **Deep learning at the speed of light.**
 
 ```rust
