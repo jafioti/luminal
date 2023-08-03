@@ -9,10 +9,7 @@ impl<S: Shape> GraphTensor<S> {
     /// The sigmoid activation function
     pub fn sigmoid(self) -> GraphTensor<S> {
         // Based on https://github.com/tinygrad/tinygrad/blob/9d142430cbe61121c864c0015f1de83c94a7d2c0/tinygrad/mlops.py#L70
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let one = graph.new_tensor::<R0>();
-        one.set(vec![1.]);
-        one.expand() / (one.expand() + (self * (-1. / 2_f32.ln())).exp_2())
+        ((self * (-1. / 2_f32.ln())).exp() + 1.).recip()
     }
 
     /// The swish activation function
