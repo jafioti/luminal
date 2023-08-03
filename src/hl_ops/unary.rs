@@ -52,6 +52,10 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(new_id, self.graph_ref)
     }
 
+    pub fn cos(self) -> GraphTensor<S> {
+        (-self + (std::f32::consts::PI / 2.)).sin()
+    }
+
     pub fn sqrt(self) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let shape = self.shape_tracker();

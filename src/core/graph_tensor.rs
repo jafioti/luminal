@@ -17,7 +17,7 @@ pub struct GraphTensor<S: Shape> {
 }
 
 impl<S: Shape> GraphTensor<S> {
-    pub(crate) fn from_id(id: NodeIndex, graph_ref: *mut Graph) -> Self {
+    pub fn from_id(id: NodeIndex, graph_ref: *mut Graph) -> Self {
         Self {
             id,
             graph_ref,

@@ -29,11 +29,7 @@ impl Graph {
         Graph::default()
     }
 
-    pub(crate) fn add_op<O: Operator + 'static>(
-        &mut self,
-        op: O,
-        output_shape: Vec<RealDim>,
-    ) -> NewOp {
+    pub fn add_op<O: Operator + 'static>(&mut self, op: O, output_shape: Vec<RealDim>) -> NewOp {
         self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
         NewOp {
             new_op_id: self.graph.add_node((Box::new(op), output_shape)),

@@ -116,3 +116,77 @@ impl<
         ]
     }
 }
+
+impl<
+        A: Dim,
+        B: Dim,
+        C: Dim,
+        D: Dim,
+        R1: RangeBounds<usize> + RangeToDim<A>,
+        R2: RangeBounds<usize> + RangeToDim<B>,
+        R3: RangeBounds<usize> + RangeToDim<C>,
+        R4: RangeBounds<usize> + RangeToDim<C>,
+    > SliceOfShape<(A, B, C, D)> for (R1, R2, R3, R4)
+{
+    type OutputShape = (R1::Dim, R2::Dim, R3::Dim, R4::Dim);
+    fn to_range_vec(&self) -> Vec<(usize, usize)> {
+        vec![
+            (
+                get_start_bound(self.0.start_bound()),
+                get_end_bound(self.0.end_bound(), real_dim_to_size(A::const_size())),
+            ),
+            (
+                get_start_bound(self.1.start_bound()),
+                get_end_bound(self.1.end_bound(), real_dim_to_size(B::const_size())),
+            ),
+            (
+                get_start_bound(self.2.start_bound()),
+                get_end_bound(self.2.end_bound(), real_dim_to_size(C::const_size())),
+            ),
+            (
+                get_start_bound(self.3.start_bound()),
+                get_end_bound(self.3.end_bound(), real_dim_to_size(D::const_size())),
+            ),
+        ]
+    }
+}
+
+impl<
+        A: Dim,
+        B: Dim,
+        C: Dim,
+        D: Dim,
+        E: Dim,
+        R1: RangeBounds<usize> + RangeToDim<A>,
+        R2: RangeBounds<usize> + RangeToDim<B>,
+        R3: RangeBounds<usize> + RangeToDim<C>,
+        R4: RangeBounds<usize> + RangeToDim<C>,
+        R5: RangeBounds<usize> + RangeToDim<C>,
+    > SliceOfShape<(A, B, C, D, E)> for (R1, R2, R3, R4, R5)
+{
+    type OutputShape = (R1::Dim, R2::Dim, R3::Dim, R4::Dim, R5::Dim);
+    fn to_range_vec(&self) -> Vec<(usize, usize)> {
+        vec![
+            (
+                get_start_bound(self.0.start_bound()),
+                get_end_bound(self.0.end_bound(), real_dim_to_size(A::const_size())),
+            ),
+            (
+                get_start_bound(self.1.start_bound()),
+                get_end_bound(self.1.end_bound(), real_dim_to_size(B::const_size())),
+            ),
+            (
+                get_start_bound(self.2.start_bound()),
+                get_end_bound(self.2.end_bound(), real_dim_to_size(C::const_size())),
+            ),
+            (
+                get_start_bound(self.3.start_bound()),
+                get_end_bound(self.3.end_bound(), real_dim_to_size(D::const_size())),
+            ),
+            (
+                get_start_bound(self.4.start_bound()),
+                get_end_bound(self.4.end_bound(), real_dim_to_size(E::const_size())),
+            ),
+        ]
+    }
+}
