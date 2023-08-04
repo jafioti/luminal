@@ -61,13 +61,14 @@ impl Graph {
         self.views.get(&id)
     }
 
-    pub fn new_tensor<S: Shape>(&mut self) -> GraphTensor<S> {
+    pub fn new_tensor<S: Shape>(&mut self, name: &str) -> GraphTensor<S> {
         self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
         let tensor = GraphTensor {
             id: self.graph.add_node((
-                Box::new(op::Function(Box::new(|_, _| {
-                    panic!("You must set a value for this tensor!")
-                }))),
+                Box::new(op::Function(
+                    name.to_string(),
+                    Box::new(|_, _| panic!("You must set a value for this tensor!")),
+                )),
                 S::realized_shape(),
             )),
             graph_ref: self,

@@ -1,6 +1,9 @@
 use itertools::Itertools;
 
-use crate::{op, prelude::*};
+use crate::{
+    op::{self, ReshapeDim},
+    prelude::*,
+};
 
 impl<S: Shape> GraphTensor<S> {
     pub fn permute<Dst: Shape, Ax: Axes>(self) -> GraphTensor<Dst>
@@ -40,12 +43,17 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(new_id, self.graph_ref)
     }
 
-    pub fn reshape<N: Shape>(self) -> GraphTensor<N> {
+    pub fn reshape<N: ConstShape>(self) -> GraphTensor<N> {
         // <S as AssertSameNumel<N>>::assert_same_numel();
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
             .add_op(
-                op::Reshape(<N as Shape>::realized_shape()),
+                op::Reshape(
+                    <N as ConstShape>::realized_shape()
+                        .into_iter()
+                        .map(ReshapeDim::Const)
+                        .collect(),
+                ),
                 <N as Shape>::realized_shape(),
             )
             .input(self.id)
@@ -54,16 +62,25 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Dynamically reshape. Panics if destination shape doesn't match given shape.
-    pub fn dyn_reshape<N: Shape>(self, shape: Vec<RealDim>) -> GraphTensor<N> {
+    pub fn dyn_reshape<N: Shape>(self, shape: Vec<ReshapeDim>) -> GraphTensor<N> {
         for (a, b) in N::realized_shape().iter().zip(shape.iter()) {
             match a {
-                RealDim::Const(n) => assert_eq!(RealDim::Const(*n), *b),
+                RealDim::Const(n) => assert_eq!(ReshapeDim::Const(*n), *b),
                 RealDim::Dyn => {}
             }
         }
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(op::Reshape(shape.clone()), shape)
+            .add_op(
+                op::Reshape(shape.clone()),
+                shape
+                    .iter()
+                    .map(|i| match i {
+                        ReshapeDim::Const(n) => RealDim::Const(*n),
+                        ReshapeDim::PrevDim(_) => RealDim::Dyn,
+                    })
+                    .collect(),
+            )
             .input(self.id)
             .finish();
         GraphTensor::from_id(new_id, self.graph_ref)
@@ -94,17 +111,20 @@ impl<S: Shape> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
             .add_op(
-                op::Function(Box::new(move |inps, _| {
-                    let (id, mut st) = (inps[0].1.tensor_id, inps[0].1.shape.clone());
-                    st.pad(&ranges);
-                    (
-                        None,
-                        TensorView {
-                            tensor_id: id,
-                            shape: st,
-                        },
-                    )
-                })),
+                op::Function(
+                    "Pad".to_string(),
+                    Box::new(move |inps, _| {
+                        let (id, mut st) = (inps[0].1.tensor_id, inps[0].1.shape.clone());
+                        st.pad(&ranges);
+                        (
+                            None,
+                            TensorView {
+                                tensor_id: id,
+                                shape: st,
+                            },
+                        )
+                    }),
+                ),
                 Dst::realized_shape(),
             )
             .input(self.id)
@@ -133,19 +153,22 @@ where
         let dim = Ax::as_array()[0] as usize;
         let pad_a = graph
             .add_op(
-                op::Function(Box::new(move |inps, _| {
-                    let mut pad_shape = vec![(0, 0); A::NUM_DIMS];
-                    pad_shape[dim] = (0, inps[0].1.shape.shape()[dim] as i32);
-                    let (id, mut st) = (inps[0].1.tensor_id, inps[0].1.shape.clone());
-                    st.pad(&pad_shape);
-                    (
-                        None,
-                        TensorView {
-                            tensor_id: id,
-                            shape: st,
-                        },
-                    )
-                })),
+                op::Function(
+                    "ConcatPad".to_string(),
+                    Box::new(move |inps, _| {
+                        let mut pad_shape = vec![(0, 0); A::NUM_DIMS];
+                        pad_shape[dim] = (0, inps[0].1.shape.shape()[dim] as i32);
+                        let (id, mut st) = (inps[0].1.tensor_id, inps[0].1.shape.clone());
+                        st.pad(&pad_shape);
+                        (
+                            None,
+                            TensorView {
+                                tensor_id: id,
+                                shape: st,
+                            },
+                        )
+                    }),
+                ),
                 <(A, B) as TryConcatAlong<Ax>>::Output::realized_shape(),
             )
             .input(left.id)
@@ -153,19 +176,22 @@ where
         let left = GraphTensor::from_id(pad_a, left.graph_ref);
         let pad_b = graph
             .add_op(
-                op::Function(Box::new(move |inps, _| {
-                    let mut pad_shape = vec![(0, 0); A::NUM_DIMS];
-                    pad_shape[dim] = (inps[0].1.shape.shape()[dim] as i32, 0);
-                    let (id, mut st) = (inps[0].1.tensor_id, inps[0].1.shape.clone());
-                    st.pad(&pad_shape);
-                    (
-                        None,
-                        TensorView {
-                            tensor_id: id,
-                            shape: st,
-                        },
-                    )
-                })),
+                op::Function(
+                    "ConcatPad".to_string(),
+                    Box::new(move |inps, _| {
+                        let mut pad_shape = vec![(0, 0); A::NUM_DIMS];
+                        pad_shape[dim] = (inps[0].1.shape.shape()[dim] as i32, 0);
+                        let (id, mut st) = (inps[0].1.tensor_id, inps[0].1.shape.clone());
+                        st.pad(&pad_shape);
+                        (
+                            None,
+                            TensorView {
+                                tensor_id: id,
+                                shape: st,
+                            },
+                        )
+                    }),
+                ),
                 <(A, B) as TryConcatAlong<Ax>>::Output::realized_shape(),
             )
             .input(right.id)
@@ -249,9 +275,9 @@ mod tests {
     #[test]
     fn test_concat_1d() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R1<3>>();
+        let a = cx.new_tensor::<R1<3>>("Input");
         a.set(vec![1.4325, 2.492428, 3.127365]);
-        let b = cx.new_tensor::<R1<3>>();
+        let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![2.30434, 2.2343113, 1.4393]);
         let c = (a.realize::<(usize,)>(), b.realize::<(usize,)>()).concat_along(Axis::<0>);
         cx.execute();
@@ -271,9 +297,9 @@ mod tests {
     #[test]
     fn test_concat_2d() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<3, 2>>();
+        let a = cx.new_tensor::<R2<3, 2>>("Input");
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
-        let b = cx.new_tensor::<R2<3, 2>>();
+        let b = cx.new_tensor::<R2<3, 2>>("Input");
         b.set(vec![2.30434, 2.2343113, 1.4393, 482.4312, 8.1234, 54.2054]);
         let c = (
             a.realize::<(Const<3>, usize)>(),

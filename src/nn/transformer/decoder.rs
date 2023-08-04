@@ -56,7 +56,7 @@ impl<
             GraphTensor<(Const<1>, S1, Const<DIM>)>,
             GraphTensor<(Const<1>, S2, Const<DIM>)>,
         )>>::forward(self, (input.expand(), from_enc.expand()))
-        .reshape()
+        .max_reduce()
     }
 }
 
@@ -136,7 +136,7 @@ impl<const DIM: usize, const FF: usize, const HEADS: usize, S1: Dim, S2: Dim>
             GraphTensor<(Const<1>, S1, Const<DIM>)>,
             GraphTensor<(Const<1>, S2, Const<DIM>)>,
         )>>::forward(self, (input.expand(), from_enc.expand()))
-        .reshape()
+        .max_reduce()
     }
 }
 
@@ -234,8 +234,8 @@ mod tests {
             .weight
             .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
-        let a = cx.new_tensor::<(usize, crate::shape::Const<3>)>();
-        let e = cx.new_tensor::<(usize, crate::shape::Const<3>)>();
+        let a = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
+        let e = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
         let b = model.forward((a, e));
 
         a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![2, 3]);

@@ -7,10 +7,10 @@ use crate::prelude::*;
 #[test]
 fn main() {
     let mut cx = Graph::new();
-    let b = cx.new_tensor::<R1<3>>();
-    let c = cx.new_tensor::<R1<3>>();
-    let g = cx.new_tensor::<R1<3>>();
-    let e = cx.new_tensor::<R1<3>>();
+    let b = cx.new_tensor::<R1<3>>("Input");
+    let c = cx.new_tensor::<R1<3>>("Input");
+    let g = cx.new_tensor::<R1<3>>("Input");
+    let e = cx.new_tensor::<R1<3>>("Input");
 
     let a = b * c + g;
     let d = (b * c / e).exp_2().log_2();
@@ -42,8 +42,8 @@ fn main() {
 #[test]
 fn test_matmul() {
     let mut cx = Graph::new();
-    let b = cx.new_tensor::<R2<3, 1>>();
-    let c = cx.new_tensor::<R2<1, 4>>();
+    let b = cx.new_tensor::<R2<3, 1>>("Input");
+    let c = cx.new_tensor::<R2<1, 4>>("Input");
 
     let a = b.matmul(c);
 
@@ -65,7 +65,7 @@ fn test_matmul() {
 #[test]
 fn test_shapes() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<4>>();
+    let a = cx.new_tensor::<R1<4>>("Input");
 
     let b: GraphTensor<R2<2, 2>> = a.reshape::<R2<2, 2>>().permute::<_, Axes2<1, 0>>();
 

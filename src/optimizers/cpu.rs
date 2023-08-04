@@ -161,9 +161,9 @@ mod tests {
     #[test]
     fn test_cpu_matmul_2_d() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<2, 3>>();
+        let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(vec![1., 2., 3., 1., 2., 3.]);
-        let b = cx.new_tensor::<R2<3, 3>>();
+        let b = cx.new_tensor::<R2<3, 3>>("Input");
         b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
         let c = a.matmul(b);
         c.mark();

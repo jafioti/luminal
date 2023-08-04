@@ -15,10 +15,11 @@ fn main() {
         { config::HEAD_DIM_OVER_2 },
         { config::LAYERS },
     > = InitModule::initialize(&mut cx);
-    let inp = cx.new_tensor::<(usize, Const<64>)>();
+    let inp = cx.new_tensor::<(usize, usize)>("Input");
     let out = model.forward((inp, 0));
-    inp.set_dyn(vec![0; 2 * 64], vec![2, 64]);
+    inp.set_dyn(vec![0; 5], vec![1, 5]);
     out.mark();
+    cx.display_graph();
     cx.execute();
     model.save_to_file(&cx, "model.st");
 

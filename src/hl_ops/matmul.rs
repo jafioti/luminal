@@ -84,9 +84,9 @@ mod tests {
     #[test]
     fn test_matrix_vector() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R1<3>>();
+        let a = cx.new_tensor::<R1<3>>("Input");
         a.set(vec![1., 2., 3.]);
-        let b = cx.new_tensor::<R2<3, 2>>();
+        let b = cx.new_tensor::<R2<3, 2>>("Input");
         b.set(vec![1., 2., 3., 1., 2., 3.]);
         let c = a.matmul(b);
         cx.execute();
@@ -105,9 +105,9 @@ mod tests {
     #[test]
     fn test_matmul() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<2, 3>>();
+        let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(vec![1., 2., 3., 1., 2., 3.]);
-        let b = cx.new_tensor::<R2<3, 3>>();
+        let b = cx.new_tensor::<R2<3, 3>>("Input");
         b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
         let c = a.matmul(b);
 
@@ -127,9 +127,9 @@ mod tests {
     #[test]
     fn test_batch_matmul() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R3<2, 3, 2>>();
+        let a = cx.new_tensor::<R3<2, 3, 2>>("Input");
         a.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
-        let b = cx.new_tensor::<R2<2, 4>>();
+        let b = cx.new_tensor::<R2<2, 4>>("Input");
         b.set(vec![1., 2., 3., 1., 1., 2., 3., 1.]);
         let c = a.matmul(b);
 
@@ -152,9 +152,9 @@ mod tests {
     #[test]
     fn test_batch_batch_matmul() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R3<1, 2, 3>>();
+        let a = cx.new_tensor::<R3<1, 2, 3>>("Input");
         a.set(vec![8.6, 8.0, 12.0, 9.9, 10.0, 15.0]);
-        let b = cx.new_tensor::<R3<1, 2, 3>>();
+        let b = cx.new_tensor::<R3<1, 2, 3>>("Input");
         b.set(vec![4.0, -12.0, 12.0, 5.0, 70.0, 15.0]);
         let c = a.batch_matmul(b.permute());
 
@@ -188,10 +188,10 @@ mod tests {
     #[test]
     fn test_batch_batch_matmul2() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<(usize, usize)>();
+        let a = cx.new_tensor::<(usize, usize)>("Input");
         a.set_dyn(vec![0.0, 1.0, 0.0, 1.0], vec![2, 2]);
         let a = a.expand::<(crate::shape::Const<1>, usize, usize), _>();
-        let b = cx.new_tensor::<(crate::shape::Const<1>, usize, crate::shape::Const<3>)>();
+        let b = cx.new_tensor::<(crate::shape::Const<1>, usize, crate::shape::Const<3>)>("Input");
         b.set_dyn(vec![32.0, -2.0, 0.0, -17.0, 40.0, -3.0], vec![1, 2, 3]);
         let c = a.batch_matmul(b);
 

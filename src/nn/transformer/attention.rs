@@ -1,6 +1,6 @@
 use std::ops::Mul;
 
-use crate::{nn::linear::Linear, prelude::*};
+use crate::{nn::linear::Linear, op::ReshapeDim, prelude::*};
 
 // This is still single head attention because I need a runtime reshape, like the try_reshape in dfdx
 pub struct MultiHeadSelfAttention<
@@ -48,7 +48,7 @@ impl<const DIM: usize, const K_DIM: usize, const V_DIM: usize, const HEADS: usiz
     fn forward(&self, input: GraphTensor<(S, Const<DIM>)>) -> Self::Output {
         // Pass to batched forward
         <Self as Module<GraphTensor<(Const<1>, S, Const<DIM>)>>>::forward(self, input.expand())
-            .reshape()
+            .max_reduce()
     }
 }
 
@@ -82,7 +82,7 @@ impl<
             GraphTensor<(Const<1>, S1, Const<DIM>)>,
             GraphTensor<(Const<1>, S, Const<DIM>)>,
         )>>::forward(self, (k.expand(), q.expand(), v.expand()))
-        .reshape()
+        .max_reduce()
     }
 }
 
@@ -137,30 +137,48 @@ impl<
             .w_k
             .forward(keys)
             .dyn_reshape::<(B, S1, usize, usize)>(vec![
-                B::const_size(),
-                S1::const_size(),
-                RealDim::Const(HEADS),
-                RealDim::Const(K_DIM / HEADS),
+                match B::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(0),
+                },
+                match S1::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(1),
+                },
+                ReshapeDim::Const(HEADS),
+                ReshapeDim::Const(K_DIM / HEADS),
             ])
             .permute::<_, Axes4<0, 2, 3, 1>>();
         let values = self
             .w_v
             .forward(values)
             .dyn_reshape::<(B, S1, usize, usize)>(vec![
-                B::const_size(),
-                S1::const_size(),
-                RealDim::Const(HEADS),
-                RealDim::Const(K_DIM / HEADS),
+                match B::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(0),
+                },
+                match S1::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(1),
+                },
+                ReshapeDim::Const(HEADS),
+                ReshapeDim::Const(K_DIM / HEADS),
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let queries = self
             .w_q
             .forward(queries)
             .dyn_reshape::<(B, S2, usize, usize)>(vec![
-                B::const_size(),
-                S2::const_size(),
-                RealDim::Const(HEADS),
-                RealDim::Const(K_DIM / HEADS),
+                match B::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(0),
+                },
+                match S2::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(1),
+                },
+                ReshapeDim::Const(HEADS),
+                ReshapeDim::Const(K_DIM / HEADS),
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
@@ -172,7 +190,17 @@ impl<
         let tokens: GraphTensor<(B, S2, Const<V_DIM>)> = weights
             .batch_matmul(values)
             .permute::<_, Axes4<0, 2, 1, 3>>()
-            .dyn_reshape(vec![B::const_size(), S2::const_size(), RealDim::Const(DIM)]);
+            .dyn_reshape(vec![
+                match B::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(0),
+                },
+                match S2::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(1),
+                },
+                ReshapeDim::Const(V_DIM),
+            ]);
         self.w_o.forward(tokens)
     }
 }
@@ -207,8 +235,8 @@ mod tests {
             .weight
             .set(vec![1., 22., 3., 1., 2., 3., 1., 2., 3.]);
 
-        let a = cx.new_tensor::<(usize, crate::shape::Const<3>)>();
-        let e = cx.new_tensor::<(usize, crate::shape::Const<3>)>();
+        let a = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
+        let e = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
         let b = model.forward((e, a, e));
 
         a.set_dyn(

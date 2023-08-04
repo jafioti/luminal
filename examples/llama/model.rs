@@ -1,7 +1,7 @@
 #![allow(clippy::type_complexity)]
 use luminal::{
     nn::{activation::RMSNorm, embedding::Embedding, linear::Linear},
-    op,
+    op::{self, ReshapeDim},
     prelude::{movement::TryConcatAlong, *},
 };
 use rand::{thread_rng, Rng};
@@ -98,21 +98,24 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
         let t: GraphTensor<(Seq,)> = GraphTensor::from_id(
             graph
                 .add_op(
-                    op::Function(Box::new(move |inp, i| {
-                        (
-                            Some(Tensor {
-                                data: Box::new(
-                                    (0..inp[0].1.shape.shape()[0])
-                                        .map(|i| i as f32)
-                                        .collect::<Vec<_>>(),
-                                ),
-                            }),
-                            TensorView {
-                                tensor_id: i,
-                                shape: ShapeTracker::new(vec![inp[0].1.shape.shape()[0]]),
-                            },
-                        )
-                    })),
+                    op::Function(
+                        "ARange".to_string(),
+                        Box::new(move |inp, i| {
+                            (
+                                Some(Tensor {
+                                    data: Box::new(
+                                        (0..inp[0].1.shape.shape()[0])
+                                            .map(|i| i as f32)
+                                            .collect::<Vec<_>>(),
+                                    ),
+                                }),
+                                TensorView {
+                                    tensor_id: i,
+                                    shape: ShapeTracker::new(vec![inp[0].1.shape.shape()[0]]),
+                                },
+                            )
+                        }),
+                    ),
                     vec![Seq::const_size()],
                 )
                 .input(seq_tensor.id)
@@ -141,7 +144,7 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> InitModule
 {
     fn initialize(cx: &mut Graph) -> Self {
         let s = Self {
-            inv_freq: cx.new_tensor(),
+            inv_freq: cx.new_tensor("Inv Freq"),
         };
         // Init weight as uniform(-1, 1)
         let mut rng = thread_rng();
@@ -203,10 +206,16 @@ impl<
             .q_proj
             .forward(x)
             .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-                Batch::const_size(),
-                CurSeq::const_size(),
-                RealDim::Const(NUM_HEADS),
-                RealDim::Const(HEAD_DIM),
+                match Batch::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(0),
+                },
+                match CurSeq::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(1),
+                },
+                ReshapeDim::Const(NUM_HEADS),
+                ReshapeDim::Const(HEAD_DIM),
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
@@ -214,10 +223,16 @@ impl<
             .k_proj
             .forward(x)
             .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-                Batch::const_size(),
-                CurSeq::const_size(),
-                RealDim::Const(NUM_HEADS),
-                RealDim::Const(HEAD_DIM),
+                match Batch::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(0),
+                },
+                match CurSeq::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(1),
+                },
+                ReshapeDim::Const(NUM_HEADS),
+                ReshapeDim::Const(HEAD_DIM),
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
@@ -225,13 +240,18 @@ impl<
             .v_proj
             .forward(x)
             .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-                Batch::const_size(),
-                CurSeq::const_size(),
-                RealDim::Const(NUM_HEADS),
-                RealDim::Const(HEAD_DIM),
+                match Batch::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(0),
+                },
+                match CurSeq::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(1),
+                },
+                ReshapeDim::Const(NUM_HEADS),
+                ReshapeDim::Const(HEAD_DIM),
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
-        v.debug("Values");
 
         let (q, k) = self.rotary_embed.forward((
             q.realize::<(Batch, Const<NUM_HEADS>, CurSeq, Const<HEAD_DIM>)>(),
@@ -239,14 +259,25 @@ impl<
             past_seq,
         ));
         let inv_head_scale = (HEAD_DIM as f64).sqrt().recip() as f32;
-        let w = q.batch_matmul(k.permute()) * inv_head_scale;
+        let w = q.batch_matmul(k.permute());
+        let w = w * inv_head_scale;
         let w = w + attn_mask.expand();
         let w = w.softmax::<3>();
 
         let o = w.batch_matmul(v);
         let o = o
             .permute::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>), _>()
-            .reshape::<(Batch, CurSeq, Const<HIDDEN>)>();
+            .dyn_reshape::<(Batch, CurSeq, Const<HIDDEN>)>(vec![
+                match Batch::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(0),
+                },
+                match CurSeq::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(1),
+                },
+                ReshapeDim::Const(HIDDEN),
+            ]);
 
         self.o_proj.forward(o)
     }
@@ -403,27 +434,30 @@ impl<
         let attn_mask: GraphTensor<(CurSeq, CurSeq)> = GraphTensor::from_id(
             graph
                 .add_op(
-                    op::Function(Box::new(|inp, i| {
-                        let seq_len = inp[0].1.shape.shape()[1];
-                        let mut data = vec![0.; seq_len * seq_len];
-                        for i in 0..seq_len {
-                            for j in 0..i {
-                                data[i * seq_len + j] = f32::NEG_INFINITY;
+                    op::Function(
+                        "AttentionMask".to_string(),
+                        Box::new(|inp, i| {
+                            let seq_len = inp[0].1.shape.shape()[1];
+                            let mut data = vec![0.; seq_len * seq_len];
+                            for i in 0..seq_len {
+                                for j in 0..i {
+                                    data[i * seq_len + j] = f32::NEG_INFINITY;
+                                }
                             }
-                        }
-                        (
-                            Some(Tensor {
-                                data: Box::new(data),
-                            }),
-                            TensorView {
-                                tensor_id: i,
-                                shape: ShapeTracker::new(vec![
-                                    inp[0].1.shape.shape()[1],
-                                    inp[0].1.shape.shape()[1],
-                                ]),
-                            },
-                        )
-                    })),
+                            (
+                                Some(Tensor {
+                                    data: Box::new(data),
+                                }),
+                                TensorView {
+                                    tensor_id: i,
+                                    shape: ShapeTracker::new(vec![
+                                        inp[0].1.shape.shape()[1],
+                                        inp[0].1.shape.shape()[1],
+                                    ]),
+                                },
+                            )
+                        }),
+                    ),
                     vec![CurSeq::const_size(), CurSeq::const_size()],
                 )
                 .input(input.id)

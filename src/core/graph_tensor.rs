@@ -56,7 +56,7 @@ impl<S: Shape> GraphTensor<S> {
             .downcast_mut::<Function>()
             .unwrap();
         // We shouldn't do cloning here!
-        node.0 = Box::new(move |_, i| {
+        node.1 = Box::new(move |_, i| {
             (
                 Some(Tensor {
                     data: Box::new(data.clone()),
@@ -67,6 +67,20 @@ impl<S: Shape> GraphTensor<S> {
                 },
             )
         });
+    }
+
+    /// Set the name of a tensor
+    pub fn set_name(&self, name: &str) {
+        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        let node = graph
+            .graph
+            .node_weight_mut(self.id)
+            .unwrap()
+            .0
+            .as_any_mut()
+            .downcast_mut::<Function>()
+            .unwrap();
+        node.0 = name.to_string();
     }
 
     pub fn debug(&self, message: &str) {
@@ -95,7 +109,7 @@ impl<S: ConstShape> GraphTensor<S> {
             .downcast_mut::<Function>()
             .unwrap();
         // We shouldn't do cloning here!
-        node.0 = Box::new(move |_, i| {
+        node.1 = Box::new(move |_, i| {
             (
                 Some(Tensor {
                     data: Box::new(data.clone()),

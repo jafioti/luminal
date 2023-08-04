@@ -24,48 +24,51 @@ impl<S: Dim, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let res = graph
             .add_op(
-                op::Function(Box::new(|tensors, i| {
-                    let data = tensors[0]
-                        .0
-                        .data
-                        .as_any()
-                        .downcast_ref::<Vec<f32>>()
-                        .unwrap();
-                    let (data_idx, data_val) = tensors[0].1.shape.index_node();
-                    let indexes = tensors[1]
-                        .0
-                        .data
-                        .as_any()
-                        .downcast_ref::<Vec<usize>>()
-                        .unwrap();
-                    let (index_idx, index_val) = tensors[1].1.shape.index_node();
-                    let mut res = Vec::with_capacity(indexes.len() * DIM);
-                    for i in 0..indexes.len() {
-                        if index_val.solve(i as i32) == 0 {
-                            res.extend(std::iter::once(0.).cycle().take(DIM));
-                            continue;
+                op::Function(
+                    "Gather".to_string(),
+                    Box::new(|tensors, i| {
+                        let data = tensors[0]
+                            .0
+                            .data
+                            .as_any()
+                            .downcast_ref::<Vec<f32>>()
+                            .unwrap();
+                        let (data_idx, data_val) = tensors[0].1.shape.index_node();
+                        let indexes = tensors[1]
+                            .0
+                            .data
+                            .as_any()
+                            .downcast_ref::<Vec<usize>>()
+                            .unwrap();
+                        let (index_idx, index_val) = tensors[1].1.shape.index_node();
+                        let mut res = Vec::with_capacity(indexes.len() * DIM);
+                        for i in 0..indexes.len() {
+                            if index_val.solve(i as i32) == 0 {
+                                res.extend(std::iter::once(0.).cycle().take(DIM));
+                                continue;
+                            }
+                            let start = indexes[index_idx.solve(i as i32) as usize] * DIM;
+                            for n in 0..DIM {
+                                res.push(if data_val.solve((start + n) as i32) != 0 {
+                                    data[data_idx.solve((start + n) as i32) as usize]
+                                } else {
+                                    0.
+                                });
+                            }
                         }
-                        let start = indexes[index_idx.solve(i as i32) as usize] * DIM;
-                        for n in 0..DIM {
-                            res.push(if data_val.solve((start + n) as i32) != 0 {
-                                data[data_idx.solve((start + n) as i32) as usize]
-                            } else {
-                                0.
-                            });
-                        }
-                    }
-                    let mut shape = tensors[1].1.shape.shape().clone();
-                    shape.push(DIM);
-                    (
-                        Some(Tensor {
-                            data: Box::new(res),
-                        }),
-                        TensorView {
-                            tensor_id: i,
-                            shape: ShapeTracker::new(shape),
-                        },
-                    )
-                })),
+                        let mut shape = tensors[1].1.shape.shape().clone();
+                        shape.push(DIM);
+                        (
+                            Some(Tensor {
+                                data: Box::new(res),
+                            }),
+                            TensorView {
+                                tensor_id: i,
+                                shape: ShapeTracker::new(shape),
+                            },
+                        )
+                    }),
+                ),
                 vec![S1::const_size(), RealDim::Const(DIM)],
             )
             .input(self.id)
@@ -83,7 +86,7 @@ pub struct Embedding<const N: usize, const DIM: usize> {
 impl<const A: usize, const B: usize> InitModule for Embedding<A, B> {
     fn initialize(cx: &mut Graph) -> Self {
         let s = Self {
-            weight: cx.new_tensor(),
+            weight: cx.new_tensor("Embedding Weight"),
         };
         // Init weight as uniform(-1, 1)
         let mut rng = thread_rng();
@@ -107,7 +110,7 @@ impl<S: Dim, const N: usize, const DIM: usize> Module<GraphTensor<(S,)>> for Emb
     type Output = GraphTensor<(S, Const<DIM>)>;
 
     fn forward(&self, input: GraphTensor<(S,)>) -> Self::Output {
-        <Self as Module<GraphTensor<(Const<1>, S)>>>::forward(self, input.expand()).reshape()
+        <Self as Module<GraphTensor<(Const<1>, S)>>>::forward(self, input.expand()).max_reduce()
     }
 }
 
@@ -140,8 +143,8 @@ mod tests {
     #[test]
     fn test_embedding() {
         let mut cx = Graph::new();
-        let batch = cx.new_tensor::<R2<2, 3>>();
-        let a = cx.new_tensor::<R1<3>>();
+        let batch = cx.new_tensor::<R2<2, 3>>("BatchInput");
+        let a = cx.new_tensor::<R1<3>>("Input");
 
         let model: Embedding<3, 4> = InitModule::initialize(&mut cx);
         model

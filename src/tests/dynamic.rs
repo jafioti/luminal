@@ -10,6 +10,7 @@ use dfdx::{
 
 use crate::{
     nn::{activation::ReLU, linear::Linear},
+    op::ReshapeDim,
     prelude::{Module, *},
 };
 
@@ -18,8 +19,10 @@ use super::{assert_close, assert_close_data};
 #[test]
 fn test_movement() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<(Const<3>, usize, Const<2>)>();
-    let b = a.reshape::<(Const<6>, usize)>().permute::<_, Axes2<1, 0>>();
+    let a = cx.new_tensor::<(Const<3>, usize, Const<2>)>("Input");
+    let b = a
+        .dyn_reshape::<(Const<6>, usize)>(vec![ReshapeDim::Const(6), ReshapeDim::PrevDim(1)])
+        .permute::<_, Axes2<1, 0>>();
 
     a.set_dyn(
         vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.],
@@ -46,9 +49,9 @@ fn test_movement() {
 #[test]
 fn test_matmul() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<(usize, Const<3>)>();
+    let a = cx.new_tensor::<(usize, Const<3>)>("Input");
     a.set_dyn(vec![1., 2., 3., 1., 2., 3.], vec![2, 3]);
-    let b = cx.new_tensor::<R2<3, 3>>();
+    let b = cx.new_tensor::<R2<3, 3>>("Input");
     b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
     let c = a.matmul(b);
     cx.execute();
@@ -65,12 +68,12 @@ fn test_matmul() {
 #[test]
 fn test_batch_matmul() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<(usize, usize, Const<2>)>();
+    let a = cx.new_tensor::<(usize, usize, Const<2>)>("Input");
     a.set_dyn(
         vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.],
         vec![2, 3, 2],
     );
-    let b = cx.new_tensor::<R2<2, 4>>();
+    let b = cx.new_tensor::<R2<2, 4>>("Input");
     b.set(vec![1., 2., 3., 1., 1., 2., 3., 1.]);
     let c = a.matmul(b);
 
@@ -94,7 +97,7 @@ fn test_batch_matmul() {
 fn test_feedforward() {
     // Test single and batch, unoptimized and optimized
     let mut cx = Graph::new();
-    let batch = cx.new_tensor::<(usize, Const<3>)>();
+    let batch = cx.new_tensor::<(usize, Const<3>)>("Input");
     let model: (Linear<3, 4>, ReLU, Linear<4, 2>) = InitModule::initialize(&mut cx);
     model
         .0

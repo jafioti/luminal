@@ -85,7 +85,7 @@ impl<S: Shape> Add<f32> for GraphTensor<S> {
 
     fn add(self, rhs: f32) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let rhs_t = graph.new_tensor::<R0>();
+        let rhs_t = graph.new_tensor::<R0>("Const");
         rhs_t.set(vec![rhs]);
         self + rhs_t.expand()
     }
@@ -96,7 +96,7 @@ impl<S: Shape> Sub<f32> for GraphTensor<S> {
 
     fn sub(self, rhs: f32) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let rhs_t = graph.new_tensor::<R0>();
+        let rhs_t = graph.new_tensor::<R0>("Const");
         rhs_t.set(vec![rhs]);
         self - rhs_t.expand()
     }
@@ -107,7 +107,7 @@ impl<S: Shape> Mul<f32> for GraphTensor<S> {
 
     fn mul(self, rhs: f32) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let rhs_t = graph.new_tensor::<R0>();
+        let rhs_t = graph.new_tensor::<R0>("Const");
         rhs_t.set(vec![rhs]);
         self * rhs_t.expand()
     }
@@ -118,7 +118,7 @@ impl<S: Shape> Div<f32> for GraphTensor<S> {
 
     fn div(self, rhs: f32) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let rhs_t = graph.new_tensor::<R0>();
+        let rhs_t = graph.new_tensor::<R0>("Const");
         rhs_t.set(vec![rhs]);
         self / rhs_t.expand()
     }
@@ -129,7 +129,7 @@ impl<S: Shape> Rem<f32> for GraphTensor<S> {
 
     fn rem(self, rhs: f32) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let rhs_t = graph.new_tensor::<R0>();
+        let rhs_t = graph.new_tensor::<R0>("Const");
         rhs_t.set(vec![rhs]);
         self % rhs_t.expand()
     }
@@ -151,7 +151,7 @@ impl<S: Shape> GraphTensor<S> {
     /// Take the elementwise maximum of a tensor and a float
     pub fn max_f32(self, rhs: f32) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let rhs_t = graph.new_tensor::<R0>();
+        let rhs_t = graph.new_tensor::<R0>("Const");
         rhs_t.set(vec![rhs]);
         self.max(rhs_t.expand())
     }

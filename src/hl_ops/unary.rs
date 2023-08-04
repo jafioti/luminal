@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn test_layer_norm() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<2, 3>>();
+        let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(vec![1., 2., 3., 3., 1., 3.]);
         let b = a.layer_norm::<0>();
         let c = a.layer_norm::<1>();
@@ -147,7 +147,7 @@ mod tests {
     #[test]
     fn test_softmax() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<2, 3>>();
+        let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(vec![
             5.51743, 6.896794, 5.51743, 5.528703, 6.9108624, 5.528703,
         ]);

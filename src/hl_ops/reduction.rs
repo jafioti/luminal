@@ -45,7 +45,6 @@ impl<S: Shape> GraphTensor<S> {
     {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let mut shape = <S as Shape>::realized_shape();
-
         let mut node_id = self.id;
         for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
             // Reduce shape
@@ -58,18 +57,21 @@ impl<S: Shape> GraphTensor<S> {
             // Create div tensor
             let size_t = graph
                 .add_op(
-                    op::Function(Box::new(move |inp, i| {
-                        let s = inp[0].1.shape.shape()[dim as usize];
-                        (
-                            Some(Tensor {
-                                data: Box::new(vec![s as f32]),
-                            }),
-                            TensorView {
-                                tensor_id: i,
-                                shape: ShapeTracker::new(vec![]),
-                            },
-                        )
-                    })),
+                    op::Function(
+                        "MeanDivTerm".to_string(),
+                        Box::new(move |inp, i| {
+                            let s = inp[0].1.shape.shape()[dim as usize];
+                            (
+                                Some(Tensor {
+                                    data: Box::new(vec![s as f32]),
+                                }),
+                                TensorView {
+                                    tensor_id: i,
+                                    shape: ShapeTracker::new(vec![]),
+                                },
+                            )
+                        }),
+                    ),
                     vec![],
                 )
                 .input(self.id)
@@ -104,7 +106,7 @@ mod tests {
     #[test]
     fn test_mean_reduce() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<2, 3>>();
+        let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(vec![1., 2., 3., 1., 2., 3.]);
         let b = a.mean_reduce::<_, crate::prelude::Axis<1>>();
         b.mark();
