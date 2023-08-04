@@ -19,15 +19,23 @@ fn main() {
     let out = model.forward((inp, 0));
     inp.set_dyn(vec![0; 5], vec![1, 5]);
     out.mark();
-    cx.display_graph();
     cx.execute();
-    model.save_to_file(&cx, "model.st");
 
-    println!(
-        "Out: {:?}",
+    let o1 = out
+        .retrieve()
+        .unwrap()
+        .real_data(out.view().unwrap())
+        .unwrap();
+
+    cx.reset();
+    cx.optimize(GenericOptimizer::default());
+    cx.execute();
+
+    assert_eq!(
         out.retrieve()
             .unwrap()
             .real_data(out.view().unwrap())
-            .unwrap()
+            .unwrap(),
+        o1
     );
 }

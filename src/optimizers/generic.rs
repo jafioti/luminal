@@ -4,12 +4,12 @@ use itertools::Itertools;
 use petgraph::{visit::EdgeRef, Direction};
 
 use crate::{
-    op::{Exp2, Log2},
+    op::{Exp2, Log2, Permute},
     prelude::*,
 };
 
 /// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
-pub type GenericOptimizer = (UnarySequentialOpt, CSE, RemoveUnusedNodes);
+pub type GenericOptimizer = (UnarySequentialOpt, CSE, RemoveUnusedNodes, CombinePermutes);
 
 /// Eliminate complementary unary sequential operations like `x.log().exp()`
 #[derive(Default)]
@@ -60,6 +60,70 @@ impl GraphOptimizer for UnarySequentialOpt {
                         pre_node,
                     );
                     graph.graph.remove_node(id);
+                    graph.graph.remove_node(outgoing_target);
+                }
+            }
+        }
+    }
+}
+
+/// Combine sequential permutes
+#[derive(Default)]
+pub struct CombinePermutes;
+
+impl GraphOptimizer for CombinePermutes {
+    fn optimize(&self, graph: &mut Graph) {
+        // Scan through nodes
+        for id in graph.graph.node_indices().collect_vec() {
+            if graph.no_delete.contains(&id) {
+                continue;
+            }
+            let mut outgoing = graph
+                .graph
+                .edges_directed(id, petgraph::Direction::Outgoing)
+                .map(|i| i.target())
+                .collect_vec();
+            if outgoing.len() != 1 {
+                continue;
+            }
+            let outgoing_target = outgoing.pop().unwrap();
+            if let Some(permute_node) = graph.get_op(id).unwrap().as_any().downcast_ref::<Permute>()
+            {
+                if let Some(other_permute) = graph
+                    .get_op(outgoing_target)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<Permute>()
+                {
+                    // Compute new permute indicies
+                    let permute_indicies =
+                        other_permute.0.iter().map(|i| permute_node.0[*i]).collect();
+                    graph
+                        .graph
+                        .node_weight_mut(id)
+                        .unwrap()
+                        .0
+                        .as_any_mut()
+                        .downcast_mut::<Permute>()
+                        .unwrap()
+                        .0 = permute_indicies;
+                    // Remove other node
+                    for (edge_weight, outgoing_edge_target) in graph
+                        .graph
+                        .edges_directed(outgoing_target, Direction::Outgoing)
+                        .map(|e| (*e.weight(), e.target()))
+                        .collect_vec()
+                    {
+                        graph.graph.add_edge(id, outgoing_edge_target, edge_weight);
+                    }
+
+                    Graph::move_references(
+                        &mut graph.id_remap,
+                        &mut graph.no_delete,
+                        &mut graph.to_retrieve,
+                        outgoing_target,
+                        id,
+                    );
                     graph.graph.remove_node(outgoing_target);
                 }
             }
