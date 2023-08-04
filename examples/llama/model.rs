@@ -1,16 +1,17 @@
 #![allow(clippy::type_complexity)]
 use luminal::{
-    nn::{activation::RMSNorm, embedding::Embedding},
+    nn::{activation::RMSNorm, embedding::Embedding, linear::Linear},
     op,
     prelude::{movement::TryConcatAlong, *},
 };
+use rand::{thread_rng, Rng};
 
 // Full LLaMa model implementation, heavily based off of https://github.com/coreylowman/llama-dfdx/blob/main/src/modeling.rs
 
 pub struct Mlp<const I: usize, const H: usize> {
-    pub gate_proj: GraphTensor<R2<I, H>>,
-    pub down_proj: GraphTensor<R2<H, I>>,
-    pub up_proj: GraphTensor<R2<I, H>>,
+    pub gate_proj: Linear<H, I>,
+    pub down_proj: Linear<I, H>,
+    pub up_proj: Linear<H, I>,
 }
 
 impl<const I: usize, const H: usize, B: Dim, S: Dim> Module<GraphTensor<(B, S, Const<H>)>>
@@ -20,14 +21,24 @@ impl<const I: usize, const H: usize, B: Dim, S: Dim> Module<GraphTensor<(B, S, C
 
     fn forward(&self, input: GraphTensor<(B, S, Const<H>)>) -> Self::Output {
         let gate = {
-            let gate = input.matmul(self.gate_proj.permute());
+            let gate = self.gate_proj.forward(input);
             gate.sigmoid() * gate
         };
         let up = {
-            let up = input.matmul(self.up_proj.permute());
+            let up = self.up_proj.forward(input);
             up * gate
         };
-        up.matmul(self.down_proj.permute())
+        self.down_proj.forward(up)
+    }
+}
+
+impl<const I: usize, const H: usize> InitModule for Mlp<I, H> {
+    fn initialize(cx: &mut Graph) -> Self {
+        Self {
+            gate_proj: InitModule::initialize(cx),
+            up_proj: InitModule::initialize(cx),
+            down_proj: InitModule::initialize(cx),
+        }
     }
 }
 
@@ -117,16 +128,34 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
     }
 }
 
+impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> InitModule
+    for RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
+{
+    fn initialize(cx: &mut Graph) -> Self {
+        let s = Self {
+            inv_freq: cx.new_tensor(),
+        };
+        // Init weight as uniform(-1, 1)
+        let mut rng = thread_rng();
+        s.inv_freq.set(
+            (0..HEAD_DIM_OVER_2)
+                .map(|_| rng.gen_range(-1_f32..1_f32))
+                .collect::<Vec<_>>(),
+        );
+        s
+    }
+}
+
 pub struct Attention<
     const NUM_HEADS: usize,
     const HIDDEN: usize,
     const HEAD_DIM: usize,
     const HEAD_DIM_OVER_2: usize,
 > {
-    pub q_proj: GraphTensor<R2<HIDDEN, HIDDEN>>,
-    pub k_proj: GraphTensor<R2<HIDDEN, HIDDEN>>,
-    pub v_proj: GraphTensor<R2<HIDDEN, HIDDEN>>,
-    pub o_proj: GraphTensor<R2<HIDDEN, HIDDEN>>,
+    pub q_proj: Linear<HIDDEN, HIDDEN>,
+    pub k_proj: Linear<HIDDEN, HIDDEN>,
+    pub v_proj: Linear<HIDDEN, HIDDEN>,
+    pub o_proj: Linear<HIDDEN, HIDDEN>,
     pub rotary_embed: RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>,
 }
 
@@ -154,8 +183,9 @@ impl<
             usize,
         ),
     ) -> Self::Output {
-        let q = x
-            .matmul(self.q_proj.permute())
+        let q = self
+            .q_proj
+            .forward(x)
             .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
                 Batch::const_size(),
                 CurSeq::const_size(),
@@ -164,8 +194,9 @@ impl<
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        let k = x
-            .matmul(self.k_proj.permute())
+        let k = self
+            .k_proj
+            .forward(x)
             .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
                 Batch::const_size(),
                 CurSeq::const_size(),
@@ -174,8 +205,9 @@ impl<
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        let v = x
-            .matmul(self.v_proj.permute())
+        let v = self
+            .v_proj
+            .forward(x)
             .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
                 Batch::const_size(),
                 CurSeq::const_size(),
@@ -199,7 +231,25 @@ impl<
             .permute::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>), _>()
             .reshape::<(Batch, CurSeq, Const<HIDDEN>)>();
 
-        o.matmul(self.o_proj.permute())
+        self.o_proj.forward(o)
+    }
+}
+
+impl<
+        const NUM_HEADS: usize,
+        const HIDDEN: usize,
+        const HEAD_DIM: usize,
+        const HEAD_DIM_OVER_2: usize,
+    > InitModule for Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
+{
+    fn initialize(cx: &mut Graph) -> Self {
+        Self {
+            q_proj: InitModule::initialize(cx),
+            k_proj: InitModule::initialize(cx),
+            v_proj: InitModule::initialize(cx),
+            o_proj: InitModule::initialize(cx),
+            rotary_embed: InitModule::initialize(cx),
+        }
     }
 }
 
@@ -249,6 +299,24 @@ impl<
     }
 }
 
+impl<
+        const NUM_HEADS: usize,
+        const HIDDEN: usize,
+        const INTERMEDIATE: usize,
+        const HEAD_DIM: usize,
+        const HEAD_DIM_OVER_2: usize,
+    > InitModule for DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>
+{
+    fn initialize(cx: &mut Graph) -> Self {
+        Self {
+            self_attn: InitModule::initialize(cx),
+            mlp: InitModule::initialize(cx),
+            input_layer_norm: InitModule::initialize(cx),
+            post_attention_layer_norm: InitModule::initialize(cx),
+        }
+    }
+}
+
 pub struct Llama<
     const VOCAB: usize,
     const NUM_HEADS: usize,
@@ -256,10 +324,12 @@ pub struct Llama<
     const INTERMEDIATE: usize,
     const HEAD_DIM: usize,
     const HEAD_DIM_OVER_2: usize,
+    const LAYERS: usize,
 > {
     pub embed_tokens: Embedding<VOCAB, HIDDEN>,
     pub layers: Vec<DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>>,
     pub norm: RMSNorm<HIDDEN>,
+    pub graph_ref: *mut Graph,
 }
 
 impl<
@@ -269,17 +339,18 @@ impl<
         const INTERMEDIATE: usize,
         const HEAD_DIM: usize,
         const HEAD_DIM_OVER_2: usize,
+        const LAYERS: usize,
         Batch: Dim,
         CurSeq: Dim,
     > Module<(GraphTensor<(Batch, CurSeq)>, usize)>
-    for Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>
+    for Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
 {
     type Output = GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>;
     fn forward(
         &self,
         (input, past_seq_len): (GraphTensor<(Batch, CurSeq)>, usize),
     ) -> Self::Output {
-        let graph = unsafe { self.layers[0].self_attn.k_proj.graph_ref.as_mut().unwrap() };
+        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let attn_mask: GraphTensor<(CurSeq, CurSeq)> = GraphTensor::from_id(
             graph
                 .add_op(
@@ -319,6 +390,27 @@ impl<
     }
 }
 
+impl<
+        const VOCAB: usize,
+        const NUM_HEADS: usize,
+        const HIDDEN: usize,
+        const INTERMEDIATE: usize,
+        const HEAD_DIM: usize,
+        const HEAD_DIM_OVER_2: usize,
+        const LAYERS: usize,
+    > InitModule
+    for Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
+{
+    fn initialize(cx: &mut Graph) -> Self {
+        Self {
+            norm: InitModule::initialize(cx),
+            embed_tokens: InitModule::initialize(cx),
+            layers: (0..LAYERS).map(|_| InitModule::initialize(cx)).collect(),
+            graph_ref: cx,
+        }
+    }
+}
+
 pub struct LlamaForCausalLM<
     const VOCAB: usize,
     const NUM_HEADS: usize,
@@ -326,9 +418,10 @@ pub struct LlamaForCausalLM<
     const INTERMEDIATE: usize,
     const HEAD_DIM: usize,
     const HEAD_DIM_OVER_2: usize,
+    const LAYERS: usize,
 > {
-    pub llama: Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>,
-    pub lm_head: GraphTensor<R2<VOCAB, HIDDEN>>,
+    pub llama: Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>,
+    pub lm_head: Linear<HIDDEN, VOCAB>,
 }
 
 impl<
@@ -338,10 +431,11 @@ impl<
         const INTERMEDIATE: usize,
         const HEAD_DIM: usize,
         const HEAD_DIM_OVER_2: usize,
+        const LAYERS: usize,
         Batch: Dim,
         CurSeq: Dim,
     > Module<(GraphTensor<(Batch, CurSeq)>, usize)>
-    for LlamaForCausalLM<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>
+    for LlamaForCausalLM<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
 {
     type Output = GraphTensor<(Batch, CurSeq, Const<VOCAB>)>;
     fn forward(
@@ -349,6 +443,25 @@ impl<
         (input, past_seq_len): (GraphTensor<(Batch, CurSeq)>, usize),
     ) -> Self::Output {
         let hidden_states = self.llama.forward((input, past_seq_len));
-        hidden_states.matmul(self.lm_head.permute())
+        self.lm_head.forward(hidden_states)
+    }
+}
+
+impl<
+        const VOCAB: usize,
+        const NUM_HEADS: usize,
+        const HIDDEN: usize,
+        const INTERMEDIATE: usize,
+        const HEAD_DIM: usize,
+        const HEAD_DIM_OVER_2: usize,
+        const LAYERS: usize,
+    > InitModule
+    for LlamaForCausalLM<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
+{
+    fn initialize(cx: &mut Graph) -> Self {
+        Self {
+            llama: InitModule::initialize(cx),
+            lm_head: InitModule::initialize(cx),
+        }
     }
 }
