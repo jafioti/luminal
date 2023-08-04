@@ -22,8 +22,9 @@ pub struct Graph {
     pub(crate) graph: StableGraph<(Box<dyn Operator>, Vec<RealDim>), u8>,
     pub(crate) no_delete: HashSet<NodeIndex>,
     pub(crate) to_retrieve: HashSet<NodeIndex>,
-    /// A list of current node to run, source nodes.
-    pub(crate) linearized_graph: Option<Vec<(NodeIndex, Vec<NodeIndex>)>>,
+    /// A list of current node to run, source nodes, and view nodes to delete after execution.
+    #[allow(clippy::type_complexity)]
+    pub(crate) linearized_graph: Option<Vec<(NodeIndex, Vec<NodeIndex>, Vec<NodeIndex>)>>,
 }
 
 impl Graph {
@@ -91,6 +92,11 @@ impl Graph {
         // Depth-first toposort
         let nodes = petgraph::algo::toposort(&self.graph, None).unwrap();
         let mut v = Vec::with_capacity(nodes.len());
+        let mut dependencies: HashMap<NodeIndex, usize> = self
+            .graph
+            .node_indices()
+            .map(|n| (n, self.graph.edges_directed(n, Direction::Outgoing).count()))
+            .collect();
         for node in nodes {
             let src_ids = self
                 .graph
@@ -98,7 +104,16 @@ impl Graph {
                 .sorted_by_key(|e| e.weight())
                 .map(|i| i.source())
                 .collect_vec();
-            v.push((node, src_ids));
+            let mut srcs_to_remove = vec![];
+            for source in src_ids.iter().filter(|n| !self.no_delete.contains(n)) {
+                let deps = dependencies.get_mut(source).unwrap();
+                *deps -= 1;
+                if *deps == 0 {
+                    // No more dependencies for this view, let's remove it
+                    srcs_to_remove.push(*source);
+                }
+            }
+            v.push((node, src_ids, srcs_to_remove));
         }
         self.linearized_graph = Some(v);
     }
@@ -112,12 +127,7 @@ impl Graph {
 
     /// Execute the graph.
     pub fn execute(&mut self) {
-        // Track the number of dependencies each node has so we know when to clear
-        let mut dependencies: HashMap<NodeIndex, usize> = self
-            .graph
-            .node_indices()
-            .map(|n| (n, self.graph.edges_directed(n, Direction::Outgoing).count()))
-            .collect();
+        // Track the number of views pointing to each tensor so we know when to clear;
         let mut views_pointing: HashMap<NodeIndex, usize> = self
             .views
             .iter()
@@ -128,7 +138,7 @@ impl Graph {
         if self.linearized_graph.is_none() {
             self.toposort();
         }
-        for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
+        for (node, src_ids, srcs_to_remove) in self.linearized_graph.as_ref().unwrap().iter() {
             if self.views.contains_key(node) {
                 continue;
             }
@@ -158,18 +168,14 @@ impl Graph {
             self.views.insert(*node, v);
 
             // Check if we can delete the source tensors now
-            for source in src_ids.iter().filter(|n| !self.no_delete.contains(n)) {
-                let deps = dependencies.get_mut(source).unwrap();
-                *deps -= 1;
-                if *deps == 0 {
-                    // No more dependencies for this view, let's remove it
-                    if let Some(view) = self.views.remove(source) {
-                        let vp = views_pointing.get_mut(&view.tensor_id).unwrap();
-                        *vp -= 1;
-                        if *vp == 0 {
-                            // No views pointing at this tensor, remove it
-                            self.tensors.remove(&view.tensor_id);
-                        }
+            for source in srcs_to_remove {
+                // No more dependencies for this view, let's remove it
+                if let Some(view) = self.views.remove(source) {
+                    let vp = views_pointing.get_mut(&view.tensor_id).unwrap();
+                    *vp -= 1;
+                    if *vp == 0 {
+                        // No views pointing at this tensor, remove it
+                        self.tensors.remove(&view.tensor_id);
                     }
                 }
             }
