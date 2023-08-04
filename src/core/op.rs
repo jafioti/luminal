@@ -526,8 +526,13 @@ impl Operator for Mul {
         );
         let ((a_idx, a_valid), (b_idx, b_valid)) =
             (left_shape.index_node(), right_shape.index_node());
+        println!(
+            "Left Shape: {:?} Right Shape: {:?}",
+            left_shape, right_shape
+        );
         let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        println!("A Data: {} B Data: {}", a_data.len(), b_data.len());
         let mut data = vec![0.; res_shape.iter().product()];
         for i in 0..data.len() as i32 {
             data[i as usize] = if a_valid.solve(i) != 0 {

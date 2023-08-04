@@ -1,8 +1,8 @@
 use luminal::shape::ConstDim;
 
-pub const VOCAB: usize = 32_000;
-pub const HEAD_DIM: usize = 128;
-pub const HEAD_DIM_OVER_2: usize = 64;
+// pub const VOCAB: usize = 32_000;
+// pub const HEAD_DIM: usize = 128;
+// pub const HEAD_DIM_OVER_2: usize = 64;
 
 pub trait LlamaConfig: Clone {
     type Hidden: ConstDim;
@@ -11,11 +11,20 @@ pub trait LlamaConfig: Clone {
     const NUM_LAYERS: usize;
 }
 
+// Dev
+pub const HIDDEN: usize = 64;
+pub const INTERMEDIATE: usize = 128;
+pub const HEADS: usize = 1;
+pub const LAYERS: usize = 1;
+pub const VOCAB: usize = 32;
+pub const HEAD_DIM: usize = 64;
+pub const HEAD_DIM_OVER_2: usize = 32;
+
 // 7B
-pub const HIDDEN: usize = 4096;
-pub const INTERMEDIATE: usize = 11008;
-pub const HEADS: usize = 32;
-pub const LAYERS: usize = 32;
+// pub const HIDDEN: usize = 4096;
+// pub const INTERMEDIATE: usize = 11008;
+// pub const HEADS: usize = 32;
+// pub const LAYERS: usize = 32;
 
 // 13B
 // pub const HIDDEN: usize = 5120;

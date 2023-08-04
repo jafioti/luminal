@@ -42,6 +42,14 @@ impl<const I: usize, const H: usize> InitModule for Mlp<I, H> {
     }
 }
 
+impl<const I: usize, const H: usize> SerializeModule for Mlp<I, H> {
+    fn serialize(&self, s: &mut Serializer) {
+        s.module("gate", &self.gate_proj);
+        s.module("up", &self.up_proj);
+        s.module("down", &self.down_proj);
+    }
+}
+
 pub struct RotaryEmbedding<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> {
     pub inv_freq: GraphTensor<R1<HEAD_DIM_OVER_2>>,
 }
@@ -146,6 +154,14 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> InitModule
     }
 }
 
+impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> SerializeModule
+    for RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
+{
+    fn serialize(&self, s: &mut Serializer) {
+        s.tensor("inv_freq", self.inv_freq);
+    }
+}
+
 pub struct Attention<
     const NUM_HEADS: usize,
     const HIDDEN: usize,
@@ -215,6 +231,7 @@ impl<
                 RealDim::Const(HEAD_DIM),
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
+        v.debug("Values");
 
         let (q, k) = self.rotary_embed.forward((
             q.realize::<(Batch, Const<NUM_HEADS>, CurSeq, Const<HEAD_DIM>)>(),
@@ -250,6 +267,22 @@ impl<
             o_proj: InitModule::initialize(cx),
             rotary_embed: InitModule::initialize(cx),
         }
+    }
+}
+
+impl<
+        const NUM_HEADS: usize,
+        const HIDDEN: usize,
+        const HEAD_DIM: usize,
+        const HEAD_DIM_OVER_2: usize,
+    > SerializeModule for Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
+{
+    fn serialize(&self, s: &mut Serializer) {
+        s.module("q_proj", &self.q_proj);
+        s.module("k_proj", &self.k_proj);
+        s.module("v_proj", &self.v_proj);
+        s.module("o_proj", &self.o_proj);
+        s.module("rotary", &self.rotary_embed);
     }
 }
 
@@ -317,6 +350,22 @@ impl<
     }
 }
 
+impl<
+        const NUM_HEADS: usize,
+        const HIDDEN: usize,
+        const INTERMEDIATE: usize,
+        const HEAD_DIM: usize,
+        const HEAD_DIM_OVER_2: usize,
+    > SerializeModule for DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>
+{
+    fn serialize(&self, s: &mut Serializer) {
+        s.module("self_attn", &self.self_attn);
+        s.module("mlp", &self.mlp);
+        s.module("input_layer_norm", &self.input_layer_norm);
+        s.module("post_attention_layer_norm", &self.post_attention_layer_norm);
+    }
+}
+
 pub struct Llama<
     const VOCAB: usize,
     const NUM_HEADS: usize,
@@ -356,7 +405,7 @@ impl<
                 .add_op(
                     op::Function(Box::new(|inp, i| {
                         let seq_len = inp[0].1.shape.shape()[1];
-                        let mut data = vec![0.; seq_len];
+                        let mut data = vec![0.; seq_len * seq_len];
                         for i in 0..seq_len {
                             for j in 0..i {
                                 data[i * seq_len + j] = f32::NEG_INFINITY;
@@ -407,6 +456,26 @@ impl<
             embed_tokens: InitModule::initialize(cx),
             layers: (0..LAYERS).map(|_| InitModule::initialize(cx)).collect(),
             graph_ref: cx,
+        }
+    }
+}
+
+impl<
+        const VOCAB: usize,
+        const NUM_HEADS: usize,
+        const HIDDEN: usize,
+        const INTERMEDIATE: usize,
+        const HEAD_DIM: usize,
+        const HEAD_DIM_OVER_2: usize,
+        const LAYERS: usize,
+    > SerializeModule
+    for Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
+{
+    fn serialize(&self, s: &mut Serializer) {
+        s.module("norm", &self.norm);
+        s.module("embed", &self.embed_tokens);
+        for (i, l) in self.layers.iter().enumerate() {
+            s.module(&format!("layer{i}"), l);
         }
     }
 }
@@ -463,5 +532,22 @@ impl<
             llama: InitModule::initialize(cx),
             lm_head: InitModule::initialize(cx),
         }
+    }
+}
+
+impl<
+        const VOCAB: usize,
+        const NUM_HEADS: usize,
+        const HIDDEN: usize,
+        const INTERMEDIATE: usize,
+        const HEAD_DIM: usize,
+        const HEAD_DIM_OVER_2: usize,
+        const LAYERS: usize,
+    > SerializeModule
+    for LlamaForCausalLM<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
+{
+    fn serialize(&self, s: &mut Serializer) {
+        s.module("llama", &self.llama);
+        s.module("lm_head", &self.lm_head);
     }
 }

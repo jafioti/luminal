@@ -131,16 +131,13 @@ where
         let (left, right) = self;
         let graph = unsafe { left.graph_ref.as_mut().unwrap() };
         let dim = Ax::as_array()[0] as usize;
-        println!("Dim: {dim}");
         let pad_a = graph
             .add_op(
                 op::Function(Box::new(move |inps, _| {
                     let mut pad_shape = vec![(0, 0); A::NUM_DIMS];
                     pad_shape[dim] = (0, inps[0].1.shape.shape()[dim] as i32);
                     let (id, mut st) = (inps[0].1.tensor_id, inps[0].1.shape.clone());
-                    println!("Pad Shape 1: {:?}", pad_shape);
                     st.pad(&pad_shape);
-                    println!("St1: {:?}", st);
                     (
                         None,
                         TensorView {
@@ -161,8 +158,6 @@ where
                     pad_shape[dim] = (inps[0].1.shape.shape()[dim] as i32, 0);
                     let (id, mut st) = (inps[0].1.tensor_id, inps[0].1.shape.clone());
                     st.pad(&pad_shape);
-                    println!("St2: {:?}", st);
-                    println!("Expr: {:?}", st.index_fn_node().to_string());
                     (
                         None,
                         TensorView {

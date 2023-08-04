@@ -135,6 +135,7 @@ fn merge_views(v2: &View, v1: &View) -> Option<View> {
     if ret.iter().any(|i| *i == 0) {
         None
     } else {
+        println!("Merging..");
         let shape_strides = to_shapes_strides(&v1.shape, &ret);
         Some(View {
             shape: v1.shape.clone(),
@@ -187,6 +188,7 @@ pub struct ShapeTracker {
 impl ShapeTracker {
     pub fn new(shape: Vec<usize>) -> Self {
         let strides = default_strides(&shape);
+        println!("New");
         Self {
             views: vec![View {
                 shape_strides: to_shapes_strides(&shape, &strides),
@@ -230,6 +232,7 @@ impl ShapeTracker {
 
     pub fn reshape(&mut self, new_shape: Vec<usize>) {
         let strides = default_strides(&new_shape);
+        println!("Reshaping");
         let new_view = View {
             shape_strides: to_shapes_strides(&new_shape, &strides),
             strides,
@@ -250,10 +253,11 @@ impl ShapeTracker {
             dimension,
             match new_size {
                 RealDim::Const(i) => i,
-                RealDim::Dyn => 100, // A bit sloppy, this just needs to be a substantial number that the symbolic library can't get rid of. This needs to change!
+                RealDim::Dyn => 100, // Very sloppy, this just needs to be a substantial number that the symbolic library can't get rid of. This needs to change!
             },
         );
         self.views.last_mut().unwrap().strides.insert(dimension, 0);
+        println!("Expanding");
         self.views.last_mut().unwrap().shape_strides = to_shapes_strides(
             &self.views.last().unwrap().shape,
             &self.views.last().unwrap().strides,
@@ -268,7 +272,7 @@ impl ShapeTracker {
             .strides
             .iter()
             .zip(arg.iter())
-            .map(|(a, b)| *a as i32 * b.0)
+            .map(|(a, (b, _))| *a as i32 * b)
             .sum::<i32>();
         if self.views.last().unwrap().mask.is_some() {
             let n_mask: Vec<(usize, usize)> = self
@@ -299,10 +303,12 @@ impl ShapeTracker {
                 mask = Some(n_mask);
             }
         }
+        println!("Arg: {:?}", arg);
         let shape = arg
             .iter()
             .map(|(a, b)| (b - a) as usize)
             .collect::<Vec<_>>();
+        println!("Unsafe resize: {:?}", shape);
         *self.views.last_mut().unwrap() = View {
             strides: self.views.last().unwrap().strides.clone(),
             offset: self.views.last().unwrap().offset + new_offset,
@@ -313,10 +319,20 @@ impl ShapeTracker {
     }
 
     pub fn slice(&mut self, ranges: &[(usize, usize)]) {
+        println!("Orig Ranges: {:?}", ranges);
+        println!(
+            "Ranges: {:?}",
+            ranges
+                .iter()
+                .enumerate()
+                .map(|(dim, (a, b))| (*a as i32, (*b).min(self.shape()[dim]) as i32))
+                .collect_vec()
+        );
         self.unsafe_resize(
             &ranges
                 .iter()
-                .map(|(a, b)| (*a as i32, *b as i32))
+                .enumerate()
+                .map(|(dim, (a, b))| (*a as i32, (*b).min(self.shape()[dim]) as i32))
                 .collect_vec(),
             None,
         );
@@ -343,6 +359,7 @@ impl ShapeTracker {
             view.shape[i] = old_shape[*j];
             view.strides[i] = old_strides[*j];
         }
+        println!("Permuting");
         view.shape_strides = to_shapes_strides(&view.shape, &view.strides);
     }
 
@@ -363,6 +380,7 @@ impl ShapeTracker {
         if arg.iter().any(|(a, b)| *a != 0 || *b != 0) {
             let (zvarg, mask) =
                 get_pad_args(&self.shape().iter().map(|i| *i as i32).collect_vec(), arg);
+            println!("zvarg: {:?}", zvarg);
             self.unsafe_resize(&zvarg, Some(mask))
         }
     }
@@ -400,6 +418,7 @@ impl ShapeTracker {
 }
 
 pub fn to_shapes_strides(shape: &[usize], strides: &[usize]) -> Vec<(usize, usize)> {
+    println!("Shape: {shape:?} Strides: {strides:?}");
     let mut ret = if !shape.is_empty() {
         vec![(shape[0], strides[0])]
     } else {
