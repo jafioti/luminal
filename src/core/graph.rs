@@ -22,6 +22,7 @@ pub struct Graph {
     pub(crate) graph: StableGraph<(Box<dyn Operator>, Vec<RealDim>), u8>,
     pub(crate) no_delete: HashSet<NodeIndex>,
     pub(crate) to_retrieve: HashSet<NodeIndex>,
+    pub(crate) linearized_graph: Option<Vec<NodeIndex>>,
 }
 
 impl Graph {
@@ -81,6 +82,13 @@ impl Graph {
     /// Run the full suite of optimizations
     pub fn optimize<O: GraphOptimizer>(&mut self, optimizer: O) {
         optimizer.optimize(self);
+        self.toposort();
+    }
+
+    /// Refresh the internally sorted graph
+    fn toposort(&mut self) {
+        // Depth-first toposort
+        self.linearized_graph = Some(petgraph::algo::toposort(&self.graph, None).unwrap());
     }
 
     /// Clear any remaining tensors that may be around from old executions
@@ -105,7 +113,10 @@ impl Graph {
             .into_iter()
             .map(|(v, i)| (v, i.count()))
             .collect();
-        for node in petgraph::algo::toposort(&self.graph, None).unwrap() {
+        if self.linearized_graph.is_none() {
+            self.toposort();
+        }
+        for node in self.linearized_graph.as_ref().unwrap().iter().copied() {
             if self.views.contains_key(&node) {
                 continue;
             }
