@@ -22,7 +22,8 @@ pub struct Graph {
     pub(crate) graph: StableGraph<(Box<dyn Operator>, Vec<RealDim>), u8>,
     pub(crate) no_delete: HashSet<NodeIndex>,
     pub(crate) to_retrieve: HashSet<NodeIndex>,
-    pub(crate) linearized_graph: Option<Vec<NodeIndex>>,
+    /// A list of current node to run, source nodes.
+    pub(crate) linearized_graph: Option<Vec<(NodeIndex, Vec<NodeIndex>)>>,
 }
 
 impl Graph {
@@ -88,7 +89,18 @@ impl Graph {
     /// Refresh the internally sorted graph
     fn toposort(&mut self) {
         // Depth-first toposort
-        self.linearized_graph = Some(petgraph::algo::toposort(&self.graph, None).unwrap());
+        let nodes = petgraph::algo::toposort(&self.graph, None).unwrap();
+        let mut v = Vec::with_capacity(nodes.len());
+        for node in nodes {
+            let src_ids = self
+                .graph
+                .edges_directed(node, Direction::Incoming)
+                .sorted_by_key(|e| e.weight())
+                .map(|i| i.source())
+                .collect_vec();
+            v.push((node, src_ids));
+        }
+        self.linearized_graph = Some(v);
     }
 
     /// Clear any remaining tensors that may be around from old executions
@@ -116,16 +128,10 @@ impl Graph {
         if self.linearized_graph.is_none() {
             self.toposort();
         }
-        for node in self.linearized_graph.as_ref().unwrap().iter().copied() {
-            if self.views.contains_key(&node) {
+        for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
+            if self.views.contains_key(node) {
                 continue;
             }
-            let src_ids = self
-                .graph
-                .edges_directed(node, Direction::Incoming)
-                .sorted_by_key(|e| e.weight())
-                .map(|i| i.source())
-                .collect_vec();
             let srcs = src_ids
                 .iter()
                 .map(|i| {
@@ -135,24 +141,29 @@ impl Graph {
                 .collect_vec();
 
             // All sources are ready, execute
-            let (t, v) = self.graph.node_weight(node).unwrap().0.process(srcs, node);
+            let (t, v) = self
+                .graph
+                .node_weight(*node)
+                .unwrap()
+                .0
+                .process(srcs, *node);
             if let Some(tensor) = t {
-                self.tensors.insert(node, tensor);
+                self.tensors.insert(*node, tensor);
             }
             if let Some(vp) = views_pointing.get_mut(&v.tensor_id) {
                 *vp += 1;
             } else {
                 views_pointing.insert(v.tensor_id, 1);
             }
-            self.views.insert(node, v);
+            self.views.insert(*node, v);
 
             // Check if we can delete the source tensors now
-            for source in src_ids.into_iter().filter(|n| !self.no_delete.contains(n)) {
-                let deps = dependencies.get_mut(&source).unwrap();
+            for source in src_ids.iter().filter(|n| !self.no_delete.contains(n)) {
+                let deps = dependencies.get_mut(source).unwrap();
                 *deps -= 1;
                 if *deps == 0 {
                     // No more dependencies for this view, let's remove it
-                    if let Some(view) = self.views.remove(&source) {
+                    if let Some(view) = self.views.remove(source) {
                         let vp = views_pointing.get_mut(&view.tensor_id).unwrap();
                         *vp -= 1;
                         if *vp == 0 {
