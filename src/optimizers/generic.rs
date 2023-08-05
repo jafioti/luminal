@@ -9,7 +9,10 @@ use crate::{
 };
 
 /// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
-pub type GenericOptimizer = (UnarySequentialOpt, CSE, RemoveUnusedNodes, CombinePermutes);
+pub type GenericOptimizer = (UnarySequentialOpt, CSE, RemoveUnusedNodes, PermuteOptimizer);
+
+/// Optimizations specific to permutes
+pub type PermuteOptimizer = (CombinePermutes, NoOpPermutes);
 
 /// Eliminate complementary unary sequential operations like `x.log().exp()`
 #[derive(Default)]
@@ -125,6 +128,51 @@ impl GraphOptimizer for CombinePermutes {
                         id,
                     );
                     graph.graph.remove_node(outgoing_target);
+                }
+            }
+        }
+    }
+}
+
+/// Get rid of permutes that do nothing, ex: (0, 1, 2, 3)
+#[derive(Default)]
+pub struct NoOpPermutes;
+
+impl GraphOptimizer for NoOpPermutes {
+    fn optimize(&self, graph: &mut Graph) {
+        // Scan through nodes
+        for id in graph.graph.node_indices().collect_vec() {
+            if graph.no_delete.contains(&id) {
+                continue;
+            }
+            if let Some(permute_node) = graph.get_op(id).unwrap().as_any().downcast_ref::<Permute>()
+            {
+                if permute_node.0.iter().enumerate().all(|(a, b)| a == *b) {
+                    // Remove permute
+                    if let Some(src) = graph
+                        .graph
+                        .edges_directed(id, Direction::Incoming)
+                        .map(|e| e.source())
+                        .next()
+                    {
+                        for (edge_weight, outgoing_edge_target) in graph
+                            .graph
+                            .edges_directed(id, Direction::Outgoing)
+                            .map(|e| (*e.weight(), e.target()))
+                            .collect_vec()
+                        {
+                            graph.graph.add_edge(src, outgoing_edge_target, edge_weight);
+                        }
+
+                        Graph::move_references(
+                            &mut graph.id_remap,
+                            &mut graph.no_delete,
+                            &mut graph.to_retrieve,
+                            id,
+                            src,
+                        );
+                        graph.graph.remove_node(id);
+                    }
                 }
             }
         }
