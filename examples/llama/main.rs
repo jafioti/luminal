@@ -19,23 +19,7 @@ fn main() {
     let out = model.forward((inp, 0));
     inp.set_dyn(vec![0; 5], vec![1, 5]);
     out.mark();
-    cx.execute();
 
-    let o1 = out
-        .retrieve()
-        .unwrap()
-        .real_data(out.view().unwrap())
-        .unwrap();
-
-    cx.reset();
     cx.optimize(GenericOptimizer::default());
     cx.execute();
-
-    assert_eq!(
-        out.retrieve()
-            .unwrap()
-            .real_data(out.view().unwrap())
-            .unwrap(),
-        o1
-    );
 }

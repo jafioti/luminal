@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
-pub type GenericOptimizer = (UnarySequentialOpt, CSE, RemoveUnusedNodes, PermuteOptimizer);
+pub type GenericOptimizer = (UnarySequentialOpt, RemoveUnusedNodes, PermuteOptimizer, CSE);
 
 /// Optimizations specific to permutes
 pub type PermuteOptimizer = (CombinePermutes, NoOpPermutes);
