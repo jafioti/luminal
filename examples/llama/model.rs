@@ -1,4 +1,6 @@
 #![allow(clippy::type_complexity)]
+use std::ops::{Add, Mul};
+
 use luminal::{
     nn::{activation::RMSNorm, embedding::Embedding, linear::Linear},
     op::{self, ReshapeDim},
@@ -20,14 +22,9 @@ impl<const I: usize, const H: usize, B: Dim, S: Dim> Module<GraphTensor<(B, S, C
     type Output = GraphTensor<(B, S, Const<H>)>;
 
     fn forward(&self, input: GraphTensor<(B, S, Const<H>)>) -> Self::Output {
-        let gate = {
-            let gate = self.gate_proj.forward(input);
-            gate.sigmoid() * gate
-        };
-        let up = {
-            let up = self.up_proj.forward(input);
-            up * gate
-        };
+        let gate = self.gate_proj.forward(input);
+        let gate = gate.sigmoid() * gate;
+        let up = self.up_proj.forward(input) * gate;
         self.down_proj.forward(up)
     }
 }
@@ -259,13 +256,14 @@ impl<
             past_seq,
         ));
         let inv_head_scale = (HEAD_DIM as f64).sqrt().recip() as f32;
-        let w = q.batch_matmul(k.permute());
-        let w = w * inv_head_scale;
-        let w = w + attn_mask.expand();
-        let w = w.softmax::<3>();
+        let w = q
+            .batch_matmul(k.permute())
+            .mul(inv_head_scale)
+            .add(attn_mask.expand())
+            .softmax::<3>();
 
-        let o = w.batch_matmul(v);
-        let o = o
+        let o = w
+            .batch_matmul(v)
             .permute::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>), _>()
             .dyn_reshape::<(Batch, CurSeq, Const<HIDDEN>)>(vec![
                 match Batch::const_size() {
@@ -354,12 +352,12 @@ impl<
             usize,
         ),
     ) -> Self::Output {
-        let x = x + self.self_attn.forward((
-            self.input_layer_norm.forward(x),
-            attn_mask,
-            past_seq_size,
-        ));
-        x + self.mlp.forward(self.post_attention_layer_norm.forward(x))
+        let y =
+            self.self_attn
+                .forward((self.input_layer_norm.forward(x), attn_mask, past_seq_size));
+        let x = x + y;
+        let y = self.mlp.forward(self.post_attention_layer_norm.forward(x));
+        x + y
     }
 }
 
@@ -440,7 +438,7 @@ impl<
                             let seq_len = inp[0].1.shape.shape()[1];
                             let mut data = vec![0.; seq_len * seq_len];
                             for i in 0..seq_len {
-                                for j in 0..i {
+                                for j in (i + 1)..seq_len {
                                     data[i * seq_len + j] = f32::NEG_INFINITY;
                                 }
                             }

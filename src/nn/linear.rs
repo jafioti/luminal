@@ -4,7 +4,7 @@ use crate::{prelude::*, serialization::SerializeModule};
 
 /// A simple linear layer
 pub struct Linear<const A: usize, const B: usize> {
-    pub(crate) weight: GraphTensor<R2<A, B>>,
+    pub weight: GraphTensor<R2<A, B>>,
 }
 
 impl<const A: usize, const B: usize> InitModule for Linear<A, B> {

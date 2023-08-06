@@ -88,7 +88,7 @@ impl<S: ConstShape> Module<GraphTensor<S>> for Tanh {
 
 /// RMSNorm activation function
 pub struct RMSNorm<const DIM: usize> {
-    weight: GraphTensor<R1<DIM>>,
+    pub weight: GraphTensor<R1<DIM>>,
 }
 
 impl<const DIM: usize> InitModule for RMSNorm<DIM> {
@@ -127,7 +127,7 @@ impl<S: Dim, const DIM: usize> Module<GraphTensor<(S, Const<DIM>)>> for RMSNorm<
 
     fn forward(&self, input: GraphTensor<(S, Const<DIM>)>) -> Self::Output {
         (input * input)
-            .mean_reduce::<_, Axis<0>>()
+            .mean_reduce::<_, Axis<1>>()
             .add(1e-6)
             .sqrt()
             .recip()
@@ -142,7 +142,7 @@ impl<B: Dim, S: Dim, const DIM: usize> Module<GraphTensor<(B, S, Const<DIM>)>> f
 
     fn forward(&self, input: GraphTensor<(B, S, Const<DIM>)>) -> Self::Output {
         (input * input)
-            .mean_reduce::<_, Axis<0>>()
+            .mean_reduce::<_, Axis<2>>()
             .add(1e-6)
             .sqrt()
             .recip()

@@ -80,7 +80,7 @@ impl<S: Dim, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
 }
 
 pub struct Embedding<const N: usize, const DIM: usize> {
-    weight: GraphTensor<R2<N, DIM>>,
+    pub weight: GraphTensor<R2<N, DIM>>,
 }
 
 impl<const A: usize, const B: usize> InitModule for Embedding<A, B> {
@@ -149,7 +149,7 @@ mod tests {
         let model: Embedding<3, 4> = InitModule::initialize(&mut cx);
         model
             .weight
-            .set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
+            .set(vec![1.1, 2., 3., 1., 2., 3., 14., 2., 33., 1., 2., 3.]);
         let b = model.forward(a);
         let batch_out = model.forward(batch);
 
@@ -157,19 +157,19 @@ mod tests {
         a.mark();
         batch_out.mark();
         a.set(vec![1, 0, 1]);
-        batch.set(vec![1, 0, 1, 1, 0, 1]);
+        batch.set(vec![1, 0, 2, 1, 0, 1]);
 
         cx.execute();
 
         let d_dev = Cpu::default();
         let mut d_model = <dfdx::nn::modules::builders::Embedding<3, 4>>::build_on_device(&d_dev);
         d_model.weight = d_dev.tensor_from_vec(
-            vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.],
+            vec![1.1, 2., 3., 1., 2., 3., 14., 2., 33., 1., 2., 3.],
             (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<4>),
         );
         let d_a = d_dev.tensor_from_vec(vec![1, 0, 1], (dfdx::shapes::Const::<3>,));
         let d_batch = d_dev.tensor_from_vec(
-            vec![1, 0, 1, 1, 0, 1],
+            vec![1, 0, 2, 1, 0, 1],
             (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<3>),
         );
 
