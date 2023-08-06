@@ -1,5 +1,7 @@
+use crate::op::Function;
 use crate::prelude::{Graph, GraphTensor, Shape, ShapeTracker, Tensor, TensorView};
 use itertools::Itertools;
+use memmap2::MmapOptions;
 use petgraph::stable_graph::NodeIndex;
 use safetensors::tensor::{Dtype, View};
 use safetensors::SafeTensorError;
@@ -156,9 +158,56 @@ impl Loader for SafeTensorLoader {
     }
 }
 
+/// Load the entire model from a safetensor file, loading each tensor as needed
+pub struct SafeTensorDeferredLoader {
+    /// The path to the safetensor file
+    path: String,
+}
+
+impl SafeTensorDeferredLoader {
+    pub fn new(path: &str) -> Self {
+        Self {
+            path: path.to_string(),
+        }
+    }
+}
+
+impl Loader for SafeTensorDeferredLoader {
+    fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) {
+        let mut serializer = Serializer {
+            current_path: ".".to_string(),
+            state: HashMap::default(),
+        };
+        model.serialize(&mut serializer);
+
+        for (s, n) in serializer.state {
+            if let Some(inp_func) = graph
+                .graph
+                .node_weight_mut(n)
+                .unwrap()
+                .0
+                .as_any_mut()
+                .downcast_mut::<Function>()
+            {
+                let path = self.path.clone();
+                inp_func.1 = Box::new(move |_, i| {
+                    // Get memmapped tensor
+                    let file = std::fs::File::open(path.clone()).unwrap();
+                    let buffer = unsafe { MmapOptions::new().map(&file).unwrap() };
+                    let st = safetensors::SafeTensors::deserialize(&buffer).unwrap();
+                    let SaveTensor(tensor, mut view) = st.tensor(&s).unwrap().into();
+
+                    view.tensor_id = i;
+                    (Some(tensor), view)
+                });
+            };
+        }
+    }
+}
+
 pub struct Serializer {
     current_path: String,
-    state: HashMap<String, NodeIndex>,
+    pub state: HashMap<String, NodeIndex>,
 }
 
 impl Serializer {

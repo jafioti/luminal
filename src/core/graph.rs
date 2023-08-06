@@ -19,7 +19,7 @@ pub struct Graph {
     pub(crate) views: HashMap<NodeIndex, TensorView>,
     pub(crate) id_remap: HashMap<NodeIndex, NodeIndex>,
     #[allow(clippy::type_complexity)]
-    pub(crate) graph: StableGraph<(Box<dyn Operator>, Vec<RealDim>), u8>,
+    pub graph: StableGraph<(Box<dyn Operator>, Vec<RealDim>), u8>,
     pub(crate) no_delete: HashSet<NodeIndex>,
     pub(crate) to_retrieve: HashSet<NodeIndex>,
     /// A list of current node to run, source nodes, and view nodes to delete after execution.

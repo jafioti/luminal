@@ -11,9 +11,9 @@ use rand::{thread_rng, Rng};
 // Full LLaMa model implementation, heavily based off of https://github.com/coreylowman/llama-dfdx/blob/main/src/modeling.rs
 
 pub struct Mlp<const I: usize, const H: usize> {
-    pub gate_proj: Linear<H, I>,
-    pub down_proj: Linear<I, H>,
-    pub up_proj: Linear<H, I>,
+    pub gate_proj: GraphTensor<(Const<I>, Const<H>)>,
+    pub down_proj: GraphTensor<(Const<H>, Const<I>)>,
+    pub up_proj: GraphTensor<(Const<I>, Const<H>)>,
 }
 
 impl<const I: usize, const H: usize, B: Dim, S: Dim> Module<GraphTensor<(B, S, Const<H>)>>
@@ -22,28 +22,28 @@ impl<const I: usize, const H: usize, B: Dim, S: Dim> Module<GraphTensor<(B, S, C
     type Output = GraphTensor<(B, S, Const<H>)>;
 
     fn forward(&self, input: GraphTensor<(B, S, Const<H>)>) -> Self::Output {
-        let gate = self.gate_proj.forward(input);
+        let gate = input.matmul(self.gate_proj.permute());
         let gate = gate.sigmoid() * gate;
-        let up = self.up_proj.forward(input) * gate;
-        self.down_proj.forward(up)
+        let up = input.matmul(self.up_proj.permute()) * gate;
+        up.matmul(self.down_proj.permute())
     }
 }
 
 impl<const I: usize, const H: usize> InitModule for Mlp<I, H> {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
-            gate_proj: InitModule::initialize(cx),
-            up_proj: InitModule::initialize(cx),
-            down_proj: InitModule::initialize(cx),
+            gate_proj: cx.new_tensor("Weight"),
+            up_proj: cx.new_tensor("Weight"),
+            down_proj: cx.new_tensor("Weight"),
         }
     }
 }
 
 impl<const I: usize, const H: usize> SerializeModule for Mlp<I, H> {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("gate", &self.gate_proj);
-        s.module("up", &self.up_proj);
-        s.module("down", &self.down_proj);
+        s.tensor("gate", self.gate_proj);
+        s.tensor("up", self.up_proj);
+        s.tensor("down", self.down_proj);
     }
 }
 
@@ -168,10 +168,10 @@ pub struct Attention<
     const HEAD_DIM: usize,
     const HEAD_DIM_OVER_2: usize,
 > {
-    pub q_proj: Linear<HIDDEN, HIDDEN>,
-    pub k_proj: Linear<HIDDEN, HIDDEN>,
-    pub v_proj: Linear<HIDDEN, HIDDEN>,
-    pub o_proj: Linear<HIDDEN, HIDDEN>,
+    pub q_proj: GraphTensor<(Const<HIDDEN>, Const<HIDDEN>)>,
+    pub k_proj: GraphTensor<(Const<HIDDEN>, Const<HIDDEN>)>,
+    pub v_proj: GraphTensor<(Const<HIDDEN>, Const<HIDDEN>)>,
+    pub o_proj: GraphTensor<(Const<HIDDEN>, Const<HIDDEN>)>,
     pub rotary_embed: RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>,
 }
 
@@ -199,9 +199,8 @@ impl<
             usize,
         ),
     ) -> Self::Output {
-        let q = self
-            .q_proj
-            .forward(x)
+        let q = x
+            .matmul(self.q_proj.permute())
             .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
                 match Batch::const_size() {
                     RealDim::Const(n) => ReshapeDim::Const(n),
@@ -216,9 +215,8 @@ impl<
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        let k = self
-            .k_proj
-            .forward(x)
+        let k = x
+            .matmul(self.k_proj.permute())
             .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
                 match Batch::const_size() {
                     RealDim::Const(n) => ReshapeDim::Const(n),
@@ -233,9 +231,8 @@ impl<
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        let v = self
-            .v_proj
-            .forward(x)
+        let v = x
+            .matmul(self.v_proj.permute())
             .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
                 match Batch::const_size() {
                     RealDim::Const(n) => ReshapeDim::Const(n),
@@ -277,7 +274,7 @@ impl<
                 ReshapeDim::Const(HIDDEN),
             ]);
 
-        self.o_proj.forward(o)
+        o.matmul(self.o_proj.permute())
     }
 }
 
@@ -290,10 +287,10 @@ impl<
 {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
-            q_proj: InitModule::initialize(cx),
-            k_proj: InitModule::initialize(cx),
-            v_proj: InitModule::initialize(cx),
-            o_proj: InitModule::initialize(cx),
+            q_proj: cx.new_tensor("Weight"),
+            k_proj: cx.new_tensor("Weight"),
+            v_proj: cx.new_tensor("Weight"),
+            o_proj: cx.new_tensor("Weight"),
             rotary_embed: InitModule::initialize(cx),
         }
     }
@@ -307,10 +304,10 @@ impl<
     > SerializeModule for Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
 {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("q_proj", &self.q_proj);
-        s.module("k_proj", &self.k_proj);
-        s.module("v_proj", &self.v_proj);
-        s.module("o_proj", &self.o_proj);
+        s.tensor("q_proj", self.q_proj);
+        s.tensor("k_proj", self.k_proj);
+        s.tensor("v_proj", self.v_proj);
+        s.tensor("o_proj", self.o_proj);
         s.module("rotary", &self.rotary_embed);
     }
 }
