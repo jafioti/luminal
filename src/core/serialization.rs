@@ -2,28 +2,37 @@ use crate::prelude::{Graph, GraphTensor, Shape, ShapeTracker, Tensor, TensorView
 use itertools::Itertools;
 use petgraph::stable_graph::NodeIndex;
 use safetensors::tensor::{Dtype, View};
+use safetensors::SafeTensorError;
+use std::borrow::Cow;
 use std::collections::HashMap;
-use std::{borrow::Cow, path::Path};
 
-/// Tell luminal how to represent the module as a dict of (String, Tensor)'s
+/// Tell luminal how to represent the module as a dict of (String, NodeIndex)'s
 pub trait SerializeModule {
     fn serialize(&self, s: &mut Serializer);
 }
 
-/// A trait automatically derived on modules implementing SerializeModule, allowing access to `.save_to_file()`
-pub trait SaveLoadModule: SerializeModule {
-    /// Save the module to a file in the SafeTensors format
-    fn save_to_file<P: AsRef<Path>>(&self, cx: &Graph, filename: P) {
-        let tensors = self.state_dict(cx);
-        safetensors::serialize_to_file(tensors, &None, filename.as_ref()).unwrap();
-    }
-    /// Get the state dict of the module
-    fn state_dict<'a>(&'a self, cx: &'a Graph) -> HashMap<String, SaveTensorRef<'a>> {
+/// Something that can load the state of a module into the graph
+pub trait Loader {
+    fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph);
+}
+
+/// Something that can save the state of a module from the graph
+pub trait Saver {
+    type Saved;
+    fn save<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Saved;
+}
+
+/// Extract the state dict from a model
+pub struct StateDictSaver;
+
+impl Saver for StateDictSaver {
+    type Saved = HashMap<String, (Tensor, TensorView)>;
+    fn save<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Saved {
         let mut serializer = Serializer {
             current_path: ".".to_string(),
             state: HashMap::default(),
         };
-        self.serialize(&mut serializer);
+        model.serialize(&mut serializer);
         // Attempt to get all tensor data from the graph
         serializer
             .state
@@ -31,34 +40,101 @@ pub trait SaveLoadModule: SerializeModule {
             .map(|(k, v)| {
                 (
                     k,
-                    SaveTensorRef(cx.get_tensor_ref(v).unwrap(), cx.views.get(&v).unwrap()),
+                    (
+                        graph.get_tensor(v).unwrap(),
+                        graph.views.get(&v).unwrap().clone(),
+                    ),
                 )
             })
             .collect()
     }
-    /// Load module from state dict
-    fn load_from_state_dict(
-        &mut self,
-        cx: &mut Graph,
-        mut state_dict: HashMap<String, (Tensor, TensorView)>,
-    ) {
+}
+
+/// Save a model to a safetensor file
+pub struct SafeTensorSaver {
+    path: String,
+}
+
+impl SafeTensorSaver {
+    pub fn new(path: &str) -> Self {
+        Self {
+            path: path.to_string(),
+        }
+    }
+}
+
+impl Saver for SafeTensorSaver {
+    type Saved = Result<(), SafeTensorError>;
+    fn save<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Saved {
         let mut serializer = Serializer {
             current_path: ".".to_string(),
             state: HashMap::default(),
         };
-        self.serialize(&mut serializer);
+        model.serialize(&mut serializer);
+        // Attempt to get all tensor data from the graph
+        let state_dict: HashMap<_, _> = serializer
+            .state
+            .into_iter()
+            .map(|(k, v)| {
+                (
+                    k,
+                    SaveTensorRef(
+                        graph.get_tensor_ref(v).unwrap(),
+                        graph.views.get(&v).unwrap(),
+                    ),
+                )
+            })
+            .collect();
+        safetensors::serialize_to_file(state_dict, &None, self.path.as_ref())
+    }
+}
+
+/// Load the model from a state dict
+pub struct StateDictLoader {
+    state_dict: HashMap<String, (Tensor, TensorView)>,
+}
+
+impl StateDictLoader {
+    pub fn new(state_dict: HashMap<String, (Tensor, TensorView)>) -> Self {
+        Self { state_dict }
+    }
+}
+
+impl Loader for StateDictLoader {
+    fn load<M: SerializeModule>(mut self, model: &M, graph: &mut Graph) {
+        let mut serializer = Serializer {
+            current_path: ".".to_string(),
+            state: HashMap::default(),
+        };
+        model.serialize(&mut serializer);
 
         for (s, n) in serializer.state {
-            let (t, v) = state_dict.remove(&s).unwrap();
-            cx.tensors.insert(n, t);
-            cx.views.insert(n, v);
+            let (t, v) = self.state_dict.remove(&s).unwrap();
+            graph.tensors.insert(n, t);
+            graph.views.insert(n, v);
         }
     }
-    /// Load a module from a SafeTensors file
-    fn load_from_file<P: AsRef<Path>>(&mut self, cx: &mut Graph, filename: P) {
-        let data = std::fs::read(filename).unwrap();
+}
+
+/// Load the entire model from a safetensor file all at once
+pub struct SafeTensorLoader {
+    /// The path to the safetensor file
+    path: String,
+}
+
+impl SafeTensorLoader {
+    pub fn new(path: &str) -> Self {
+        Self {
+            path: path.to_string(),
+        }
+    }
+}
+
+impl Loader for SafeTensorLoader {
+    fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) {
+        let data = std::fs::read(self.path).unwrap();
         let st = safetensors::SafeTensors::deserialize(&data).unwrap();
-        let state_dict = st
+        let mut state_dict: HashMap<String, (Tensor, TensorView)> = st
             .tensors()
             .into_iter()
             .map(|(k, v)| {
@@ -66,11 +142,19 @@ pub trait SaveLoadModule: SerializeModule {
                 (k, (t.0, t.1))
             })
             .collect();
-        self.load_from_state_dict(cx, state_dict);
+        let mut serializer = Serializer {
+            current_path: ".".to_string(),
+            state: HashMap::default(),
+        };
+        model.serialize(&mut serializer);
+
+        for (s, n) in serializer.state {
+            let (t, v) = state_dict.remove(&s).unwrap();
+            graph.tensors.insert(n, t);
+            graph.views.insert(n, v);
+        }
     }
 }
-
-impl<T: SerializeModule> SaveLoadModule for T {}
 
 pub struct Serializer {
     current_path: String,
@@ -155,11 +239,10 @@ impl<'a> std::convert::From<safetensors::tensor::TensorView<'a>> for SaveTensor 
 #[cfg(test)]
 mod tests {
     use rand::{thread_rng, Rng};
-    use std::collections::HashMap;
 
     use crate::{nn::transformer::Transformer, prelude::*, tests::assert_close_data};
 
-    use super::{SaveLoadModule, SaveTensorRef};
+    use super::*;
 
     #[test]
     fn test_serialization() {
@@ -183,15 +266,11 @@ mod tests {
             .real_data(out1.view().unwrap())
             .unwrap();
 
-        let state_dict = model.state_dict(&cx);
-        let state_dict: HashMap<_, _> = state_dict
-            .into_iter()
-            .map(|(k, SaveTensorRef(a, b))| (k, (a.clone(), b.clone())))
-            .collect();
+        let state_dict = StateDictSaver.save(&model, &mut cx);
 
         let mut cx = Graph::new();
-        let mut model: Transformer<32, 200, 5, 5, 3, 2> = InitModule::initialize(&mut cx);
-        model.load_from_state_dict(&mut cx, state_dict);
+        let model: Transformer<32, 200, 5, 5, 3, 2> = InitModule::initialize(&mut cx);
+        StateDictLoader::new(state_dict).load(&model, &mut cx);
         let enc = cx.new_tensor::<R2<24, 32>>("EncInp");
         let trg = cx.new_tensor::<R2<20, 32>>("TrgInp");
         let out2 = model.forward((trg, enc));
