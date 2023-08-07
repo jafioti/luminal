@@ -528,6 +528,7 @@ impl Operator for Mul {
                 0.
             };
         }
+
         (
             Some(Tensor {
                 data: Box::new(data),

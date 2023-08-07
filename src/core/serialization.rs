@@ -1,6 +1,5 @@
 use crate::op::Function;
 use crate::prelude::{Graph, GraphTensor, Shape, ShapeTracker, Tensor, TensorView};
-use itertools::Itertools;
 use memmap2::MmapOptions;
 use petgraph::stable_graph::NodeIndex;
 use safetensors::tensor::{Dtype, View};
@@ -30,10 +29,7 @@ pub struct StateDictSaver;
 impl Saver for StateDictSaver {
     type Saved = HashMap<String, (Tensor, TensorView)>;
     fn save<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Saved {
-        let mut serializer = Serializer {
-            current_path: ".".to_string(),
-            state: HashMap::default(),
-        };
+        let mut serializer = Serializer::default();
         model.serialize(&mut serializer);
         // Attempt to get all tensor data from the graph
         serializer
@@ -68,10 +64,7 @@ impl SafeTensorSaver {
 impl Saver for SafeTensorSaver {
     type Saved = Result<(), SafeTensorError>;
     fn save<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Saved {
-        let mut serializer = Serializer {
-            current_path: ".".to_string(),
-            state: HashMap::default(),
-        };
+        let mut serializer = Serializer::default();
         model.serialize(&mut serializer);
         // Attempt to get all tensor data from the graph
         let state_dict: HashMap<_, _> = serializer
@@ -104,10 +97,7 @@ impl StateDictLoader {
 
 impl Loader for StateDictLoader {
     fn load<M: SerializeModule>(mut self, model: &M, graph: &mut Graph) {
-        let mut serializer = Serializer {
-            current_path: ".".to_string(),
-            state: HashMap::default(),
-        };
+        let mut serializer = Serializer::default();
         model.serialize(&mut serializer);
 
         for (s, n) in serializer.state {
@@ -144,10 +134,7 @@ impl Loader for SafeTensorLoader {
                 (k, (t.0, t.1))
             })
             .collect();
-        let mut serializer = Serializer {
-            current_path: ".".to_string(),
-            state: HashMap::default(),
-        };
+        let mut serializer = Serializer::default();
         model.serialize(&mut serializer);
 
         for (s, n) in serializer.state {
@@ -174,10 +161,7 @@ impl SafeTensorDeferredLoader {
 
 impl Loader for SafeTensorDeferredLoader {
     fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) {
-        let mut serializer = Serializer {
-            current_path: ".".to_string(),
-            state: HashMap::default(),
-        };
+        let mut serializer = Serializer::default();
         model.serialize(&mut serializer);
 
         for (s, n) in serializer.state {
@@ -205,26 +189,26 @@ impl Loader for SafeTensorDeferredLoader {
     }
 }
 
+#[derive(Debug, Default)]
 pub struct Serializer {
-    current_path: String,
+    current_path: Vec<String>,
     pub state: HashMap<String, NodeIndex>,
 }
 
 impl Serializer {
     pub fn tensor<S: Shape>(&mut self, name: &str, tensor: GraphTensor<S>) {
-        self.state
-            .insert(format!("{}/{}", self.current_path, name), tensor.id);
+        self.state.insert(
+            format!("{}/{}", self.current_path.join("/"), name),
+            tensor.id,
+        );
     }
     pub fn module<T: SerializeModule>(&mut self, name: &str, module: &T) {
         // Add new path component
-        self.current_path.push('/');
-        self.current_path.push_str(name);
+        self.current_path.push(name.to_string());
         // Serialize
         module.serialize(self);
         // Remove new path component
-        let mut components = self.current_path.split('/').collect_vec();
-        components.pop();
-        self.current_path = components.join("/");
+        self.current_path.pop();
     }
 }
 

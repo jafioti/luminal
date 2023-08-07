@@ -91,7 +91,7 @@ pub fn assert_close(a: &Tensor, b: &Tensor) {
 pub fn assert_close_data(a: &[f32], b: &[f32]) {
     assert_eq!(a.len(), b.len(), "Number of elements doesn't match");
     for (a, b) in a.iter().zip(b.iter()) {
-        if (a - b).abs() > 0.01 {
+        if (a - b).abs() > 1e-3 {
             panic!("{a} is not close to {b}");
         }
     }

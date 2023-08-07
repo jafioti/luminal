@@ -166,4 +166,50 @@ mod tests {
         let r = b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap();
         assert_close_data(&r, &d_b.as_vec());
     }
+
+    #[test]
+    fn test_sin() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<2, 3>>("Input");
+        a.set(vec![
+            5.51743, 6.896794, 5.51743, 5.528703, 6.9108624, 5.528703,
+        ]);
+        let b = a.sin();
+        b.mark();
+
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor_from_vec(
+            vec![5.51743, 6.896794, 5.51743, 5.528703, 6.9108624, 5.528703],
+            (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<3>),
+        );
+        let d_b = d_a.sin();
+
+        let r = b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap();
+        assert_close_data(&r, &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_cos() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<2, 3>>("Input");
+        a.set(vec![
+            5.51743, 6.896794, 5.51743, 5.528703, 6.9108624, 5.528703,
+        ]);
+        let b = a.cos();
+        b.mark();
+
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor_from_vec(
+            vec![5.51743, 6.896794, 5.51743, 5.528703, 6.9108624, 5.528703],
+            (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<3>),
+        );
+        let d_b = d_a.cos();
+
+        let r = b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap();
+        assert_close_data(&r, &d_b.as_vec());
+    }
 }

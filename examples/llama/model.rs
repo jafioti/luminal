@@ -41,9 +41,9 @@ impl<const I: usize, const H: usize> InitModule for Mlp<I, H> {
 
 impl<const I: usize, const H: usize> SerializeModule for Mlp<I, H> {
     fn serialize(&self, s: &mut Serializer) {
-        s.tensor("gate", self.gate_proj);
-        s.tensor("up", self.up_proj);
-        s.tensor("down", self.down_proj);
+        s.tensor("gate_proj/weight", self.gate_proj);
+        s.tensor("up_proj/weight", self.up_proj);
+        s.tensor("down_proj/weight", self.down_proj);
     }
 }
 
@@ -72,10 +72,12 @@ impl<Batch: Dim, NumHeads: Dim, Seq: Dim, const HEAD_DIM: usize, const HEAD_DIM_
         ),
     ) -> Self::Output {
         let (sin, cos) = self.get_sincos(offset, q);
+        // cos.debug("Cos");
         let sin = sin.expand();
         let cos = cos.expand();
         let q_embed = (Self::rotate_half(q) * sin) + (q * cos);
         let k_embed = (Self::rotate_half(k) * sin) + (k * cos);
+        // k_embed.debug("K Embed");
         (q_embed, k_embed)
     }
 }
@@ -101,14 +103,14 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
                             (
                                 Some(Tensor {
                                     data: Box::new(
-                                        (0..inp[0].1.shape.shape()[0])
+                                        (0..inp[0].1.shape.shape()[2])
                                             .map(|i| i as f32)
                                             .collect::<Vec<_>>(),
                                     ),
                                 }),
                                 TensorView {
                                     tensor_id: i,
-                                    shape: ShapeTracker::new(vec![inp[0].1.shape.shape()[0]]),
+                                    shape: ShapeTracker::new(vec![inp[0].1.shape.shape()[2]]),
                                 },
                             )
                         }),
@@ -120,8 +122,11 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
             graph,
         ) + offset as f32;
         let freqs = t
-            .expand::<(Seq, Const<HEAD_DIM>), _>()
-            .matmul(self.inv_freq.expand())
+            .expand::<(Seq, Const<1>), _>()
+            .matmul(
+                self.inv_freq
+                    .expand::<(Const<1>, Const<HEAD_DIM_OVER_2>), _>(),
+            )
             .realize::<(Seq, usize)>();
         let emb = (freqs, freqs).concat_along(Axis::<1>);
         (emb.sin().realize(), emb.cos().realize())
@@ -230,7 +235,6 @@ impl<
                 ReshapeDim::Const(HEAD_DIM),
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
-
         let v = x
             .matmul(self.v_proj.permute())
             .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
@@ -246,12 +250,12 @@ impl<
                 ReshapeDim::Const(HEAD_DIM),
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
-
         let (q, k) = self.rotary_embed.forward((
             q.realize::<(Batch, Const<NUM_HEADS>, CurSeq, Const<HEAD_DIM>)>(),
             k.realize(),
             past_seq,
         ));
+
         let inv_head_scale = (HEAD_DIM as f64).sqrt().recip() as f32;
         let w = q
             .batch_matmul(k.permute())
@@ -304,11 +308,11 @@ impl<
     > SerializeModule for Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
 {
     fn serialize(&self, s: &mut Serializer) {
-        s.tensor("q_proj", self.q_proj);
-        s.tensor("k_proj", self.k_proj);
-        s.tensor("v_proj", self.v_proj);
-        s.tensor("o_proj", self.o_proj);
-        s.module("rotary", &self.rotary_embed);
+        s.tensor("q_proj/weight", self.q_proj);
+        s.tensor("k_proj/weight", self.k_proj);
+        s.tensor("v_proj/weight", self.v_proj);
+        s.tensor("o_proj/weight", self.o_proj);
+        s.module("rotary_emb", &self.rotary_embed);
     }
 }
 
@@ -387,8 +391,8 @@ impl<
     fn serialize(&self, s: &mut Serializer) {
         s.module("self_attn", &self.self_attn);
         s.module("mlp", &self.mlp);
-        s.module("input_layer_norm", &self.input_layer_norm);
-        s.module("post_attention_layer_norm", &self.post_attention_layer_norm);
+        s.module("input_layernorm", &self.input_layer_norm);
+        s.module("post_attention_layernorm", &self.post_attention_layer_norm);
     }
 }
 
@@ -502,9 +506,9 @@ impl<
 {
     fn serialize(&self, s: &mut Serializer) {
         s.module("norm", &self.norm);
-        s.module("embed", &self.embed_tokens);
+        s.module("embed_tokens", &self.embed_tokens);
         for (i, l) in self.layers.iter().enumerate() {
-            s.module(&format!("layer{i}"), l);
+            s.module(&format!("layers/{i}"), l);
         }
     }
 }

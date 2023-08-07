@@ -133,22 +133,6 @@ impl<
             GraphTensor<(B, S1, Const<DIM>)>,
         ),
     ) -> Self::Output {
-        let keys = self
-            .w_k
-            .forward(keys)
-            .dyn_reshape::<(B, S1, usize, usize)>(vec![
-                match B::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(0),
-                },
-                match S1::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(1),
-                },
-                ReshapeDim::Const(HEADS),
-                ReshapeDim::Const(K_DIM / HEADS),
-            ])
-            .permute::<_, Axes4<0, 2, 3, 1>>();
         let values = self
             .w_v
             .forward(values)
@@ -165,6 +149,22 @@ impl<
                 ReshapeDim::Const(K_DIM / HEADS),
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
+        let keys = self
+            .w_k
+            .forward(keys)
+            .dyn_reshape::<(B, S1, usize, usize)>(vec![
+                match B::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(0),
+                },
+                match S1::const_size() {
+                    RealDim::Const(n) => ReshapeDim::Const(n),
+                    RealDim::Dyn => ReshapeDim::PrevDim(1),
+                },
+                ReshapeDim::Const(HEADS),
+                ReshapeDim::Const(K_DIM / HEADS),
+            ])
+            .permute::<_, Axes4<0, 2, 3, 1>>();
         let queries = self
             .w_q
             .forward(queries)
@@ -184,7 +184,7 @@ impl<
 
         let weights = queries
             .batch_matmul(keys)
-            .mul(1.0 / ((K_DIM / HEADS) as f32).sqrt())
+            .mul((1.0 / ((K_DIM / HEADS) as f64).sqrt()) as f32)
             .softmax::<3>();
 
         let tokens: GraphTensor<(B, S2, Const<V_DIM>)> = weights
