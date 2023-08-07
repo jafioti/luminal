@@ -66,7 +66,7 @@ impl Graph {
 
     pub fn new_tensor<S: Shape>(&mut self, name: &str) -> GraphTensor<S> {
         self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
-        let tensor = GraphTensor {
+        GraphTensor {
             id: self.graph.add_node((
                 Box::new(op::Function(
                     name.to_string(),
@@ -76,9 +76,8 @@ impl Graph {
             )),
             graph_ref: self,
             _phantom: Default::default(),
-        };
-        self.no_delete.insert(tensor.id); // This gets set because we want to keep inputs around to run the graph multiple times
-        tensor
+        }
+        // self.no_delete.insert(tensor.id); // This gets set because we want to keep inputs around to run the graph multiple times
     }
 
     /// Run the full suite of optimizations

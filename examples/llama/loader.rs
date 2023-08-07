@@ -74,7 +74,7 @@ impl Loader for DfdxDeferredLoader {
                             s
                         )
                     };
-                    println!("Len: {}", data.len());
+                    println!("ID: {:?}", i);
                     (
                         Some(Tensor {
                             data: Box::new(data),
