@@ -18,7 +18,7 @@ fn main() {
         { config::LAYERS },
     > = InitModule::initialize(&mut cx);
     let inp = cx.new_tensor::<(usize, usize)>("Input");
-    let out = model.forward((inp, 0));
+    let (out, caches) = model.forward((inp, 0));
     inp.set_dyn(vec![1, 2, 3], vec![1, 3]);
     out.mark();
 
