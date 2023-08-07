@@ -181,6 +181,38 @@ impl Graph {
         }
     }
 
+    /// Execute the graph without deleting intermediate tensors
+    pub fn execute_no_delete(&mut self) {
+        // Track the number of views pointing to each tensor so we know when to clear;
+        if self.linearized_graph.is_none() {
+            self.toposort();
+        }
+        for (node, src_ids, _) in self.linearized_graph.as_ref().unwrap().iter() {
+            if self.views.contains_key(node) {
+                continue;
+            }
+            let srcs = src_ids
+                .iter()
+                .map(|i| {
+                    let view = self.views.get(i).unwrap().clone();
+                    (self.tensors.get(&view.tensor_id).unwrap(), view)
+                })
+                .collect_vec();
+
+            // All sources are ready, execute
+            let (t, v) = self
+                .graph
+                .node_weight(*node)
+                .unwrap()
+                .0
+                .process(srcs, *node);
+            if let Some(tensor) = t {
+                self.tensors.insert(*node, tensor);
+            }
+            self.views.insert(*node, v);
+        }
+    }
+
     /// Convert to debug-viewable graph
     pub fn debug_graph(
         &self,
