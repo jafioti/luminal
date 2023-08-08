@@ -27,7 +27,7 @@ impl<S: Shape> GraphTensor<S> {
     {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_shape = <Dst as Shape>::realized_shape();
-        let mut shape = self.shape_tracker().clone();
+        let mut shape = self.shape().clone();
 
         let mut new_id = self.id;
         for (dim, size) in Ax::as_array()

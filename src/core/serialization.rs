@@ -294,14 +294,14 @@ mod tests {
         trg.set(trg_data.clone());
         out1.mark();
 
-        cx.execute();
+        cx.execute_no_delete();
+
+        let state_dict = StateDictSaver.save(&model, &mut cx);
         let out1 = out1
             .retrieve()
             .unwrap()
             .real_data(out1.view().unwrap())
             .unwrap();
-
-        let state_dict = StateDictSaver.save(&model, &mut cx);
 
         let mut cx = Graph::new();
         let model: Transformer<32, 200, 5, 5, 3, 2> = InitModule::initialize(&mut cx);

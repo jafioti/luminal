@@ -10,6 +10,11 @@ use rand::{thread_rng, Rng};
 
 // Full LLaMa model implementation, heavily based off of https://github.com/coreylowman/llama-dfdx/blob/main/src/modeling.rs
 
+pub type KVCache<Batch, Seq, const NUM_HEADS: usize, const HEAD_DIM: usize> = (
+    GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
+    GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
+);
+
 pub struct Mlp<const I: usize, const H: usize> {
     pub gate_proj: GraphTensor<(Const<I>, Const<H>)>,
     pub down_proj: GraphTensor<(Const<H>, Const<I>)>,
@@ -194,7 +199,10 @@ impl<
         usize,
     )> for Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
 {
-    type Output = GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>;
+    type Output = (
+        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
+        KVCache<Batch, CurSeq, NUM_HEADS, HEAD_DIM>,
+    );
 
     fn forward(
         &self,
@@ -278,7 +286,7 @@ impl<
                 ReshapeDim::Const(HIDDEN),
             ]);
 
-        o.matmul(self.o_proj.permute())
+        (o.matmul(self.o_proj.permute()), (k, v))
     }
 }
 
@@ -344,7 +352,10 @@ impl<
         usize,
     )> for DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>
 {
-    type Output = GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>;
+    type Output = (
+        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
+        KVCache<Batch, CurSeq, NUM_HEADS, HEAD_DIM>,
+    );
     fn forward(
         &self,
         (x, attn_mask, past_seq_size): (
@@ -353,12 +364,12 @@ impl<
             usize,
         ),
     ) -> Self::Output {
-        let y =
+        let (y, kv_cache) =
             self.self_attn
                 .forward((self.input_layer_norm.forward(x), attn_mask, past_seq_size));
         let x = x + y;
         let y = self.mlp.forward(self.post_attention_layer_norm.forward(x));
-        x + y
+        (x + y, kv_cache)
     }
 }
 
@@ -424,7 +435,10 @@ impl<
     > Module<(GraphTensor<(Batch, CurSeq)>, usize)>
     for Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
 {
-    type Output = GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>;
+    type Output = (
+        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
+        Vec<KVCache<Batch, CurSeq, NUM_HEADS, HEAD_DIM>>,
+    );
     fn forward(
         &self,
         (input, past_seq_len): (GraphTensor<(Batch, CurSeq)>, usize),
@@ -465,10 +479,14 @@ impl<
         );
 
         let mut hidden_states = self.embed_tokens.forward(input);
+        let mut caches = vec![];
         for layer_i in &self.layers {
-            hidden_states = layer_i.forward((hidden_states, attn_mask, past_seq_len));
+            let (new_hidden_states, kv_cache) =
+                layer_i.forward((hidden_states, attn_mask, past_seq_len));
+            hidden_states = new_hidden_states;
+            caches.push(kv_cache);
         }
-        self.norm.forward(hidden_states)
+        (self.norm.forward(hidden_states), caches)
     }
 }
 
@@ -539,13 +557,16 @@ impl<
     > Module<(GraphTensor<(Batch, CurSeq)>, usize)>
     for LlamaForCausalLM<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
 {
-    type Output = GraphTensor<(Batch, CurSeq, Const<VOCAB>)>;
+    type Output = (
+        GraphTensor<(Batch, CurSeq, Const<VOCAB>)>,
+        Vec<KVCache<Batch, CurSeq, NUM_HEADS, HEAD_DIM>>,
+    );
     fn forward(
         &self,
         (input, past_seq_len): (GraphTensor<(Batch, CurSeq)>, usize),
     ) -> Self::Output {
-        let hidden_states = self.llama.forward((input, past_seq_len));
-        hidden_states.matmul(self.lm_head.permute())
+        let (hidden_states, caches) = self.llama.forward((input, past_seq_len));
+        (hidden_states.matmul(self.lm_head.permute()), caches)
     }
 }
 

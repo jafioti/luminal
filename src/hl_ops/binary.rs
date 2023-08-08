@@ -8,7 +8,7 @@ impl<S: Shape> Add<GraphTensor<S>> for GraphTensor<S> {
     fn add(self, rhs: GraphTensor<S>) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(op::Add, self.shape_tracker().clone())
+            .add_op(op::Add, self.shape().clone())
             .input(self.id)
             .input(rhs.id)
             .finish();
@@ -22,7 +22,7 @@ impl<S: Shape> Sub<GraphTensor<S>> for GraphTensor<S> {
     fn sub(self, rhs: GraphTensor<S>) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(op::Sub, self.shape_tracker().clone())
+            .add_op(op::Sub, self.shape().clone())
             .input(self.id)
             .input(rhs.id)
             .finish();
@@ -36,7 +36,7 @@ impl<S: Shape> Mul<GraphTensor<S>> for GraphTensor<S> {
     fn mul(self, rhs: GraphTensor<S>) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(op::Mul, self.shape_tracker().clone())
+            .add_op(op::Mul, self.shape().clone())
             .input(self.id)
             .input(rhs.id)
             .finish();
@@ -50,7 +50,7 @@ impl<S: Shape> Div<GraphTensor<S>> for GraphTensor<S> {
     fn div(self, rhs: GraphTensor<S>) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(op::Div, self.shape_tracker().clone())
+            .add_op(op::Div, self.shape().clone())
             .input(self.id)
             .input(rhs.id)
             .finish();
@@ -64,7 +64,7 @@ impl<S: Shape> Rem<GraphTensor<S>> for GraphTensor<S> {
     fn rem(self, rhs: GraphTensor<S>) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(op::Mod, self.shape_tracker().clone())
+            .add_op(op::Mod, self.shape().clone())
             .input(self.id)
             .input(rhs.id)
             .finish();
@@ -141,7 +141,7 @@ impl<S: Shape> GraphTensor<S> {
     pub fn max(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(op::Max, self.shape_tracker().clone())
+            .add_op(op::Max, self.shape().clone())
             .input(self.id)
             .input(rhs.id)
             .finish();
