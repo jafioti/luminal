@@ -29,8 +29,8 @@ fn main() {
     let (out, caches) = model.forward(inp);
     out.mark();
     for (k, v) in &caches {
-        k.mark();
-        v.mark();
+        k.mark_no_delete();
+        v.mark_no_delete();
     }
 
     println!("Loading...");
@@ -47,9 +47,8 @@ fn main() {
 
     // Build KV cache forward graph
     let (out, cache): (_, Vec<KVCache<_, usize, {config::HEADS}, {config::HEAD_DIM}>>) = model.forward_kv((inp, caches));
-    let mut output_ids = cache.iter().flat_map(|c| [c.0.id, c.1.id].into_iter()).collect_vec();
-    output_ids.push(out.id);
-    cx.prune(output_ids);
+    let cache_ids = cache.iter().flat_map(|c| [c.0.id, c.1.id].into_iter()).collect_vec();
+    cx.prune(vec![out.id], cache_ids);
 
     loop {
         inp.set_dyn(input.clone(), vec![1, input.len()]);

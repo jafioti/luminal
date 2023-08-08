@@ -39,6 +39,13 @@ impl<S: Shape> GraphTensor<S> {
         }
     }
 
+    /// Mark this tensor to not be deleted, but not retrieved either
+    pub fn mark_no_delete(&self) {
+        unsafe {
+            self.graph_ref.as_mut().unwrap().no_delete.insert(self.id);
+        }
+    }
+
     /// Get the value of the tensor (if the graph was executed)
     pub fn retrieve(self) -> Option<Tensor> {
         unsafe { self.graph_ref.as_mut().unwrap().get_tensor(self.id) }

@@ -136,11 +136,12 @@ impl Graph {
         self.views.clear();
     }
 
-    // Clear all nodes not required to produce output nodes
-    pub fn prune(&mut self, output_nodes: Vec<NodeIndex>) {
+    // Clear all nodes not required to produce output nodes, stop looking past inputs
+    pub fn prune(&mut self, outputs: Vec<NodeIndex>, inputs: Vec<NodeIndex>) {
         let mut keep_nodes = HashSet::default();
-        for n in output_nodes {
-            reverse_dfs_mark(n, self, &mut keep_nodes);
+        let input_nodes: HashSet<NodeIndex> = inputs.into_iter().collect();
+        for n in outputs {
+            reverse_dfs_mark(n, self, &mut keep_nodes, &input_nodes);
         }
         for node in self.graph.node_indices().collect_vec() {
             if !keep_nodes.contains(&node) {
@@ -419,14 +420,21 @@ fn toposort(
     (final_stack, num_stacks, complete)
 }
 
-fn reverse_dfs_mark(curr_node: NodeIndex, cx: &Graph, marked: &mut HashSet<NodeIndex>) {
+fn reverse_dfs_mark(
+    curr_node: NodeIndex,
+    cx: &Graph,
+    marked: &mut HashSet<NodeIndex>,
+    input_nodes: &HashSet<NodeIndex>,
+) {
     marked.insert(curr_node);
-    for i in cx
-        .graph
-        .edges_directed(curr_node, Direction::Incoming)
-        .map(|e| e.source())
-        .collect_vec()
-    {
-        reverse_dfs_mark(i, cx, marked);
+    if !input_nodes.contains(&curr_node) {
+        for i in cx
+            .graph
+            .edges_directed(curr_node, Direction::Incoming)
+            .map(|e| e.source())
+            .collect_vec()
+        {
+            reverse_dfs_mark(i, cx, marked, input_nodes);
+        }
     }
 }
