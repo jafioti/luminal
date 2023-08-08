@@ -136,6 +136,19 @@ impl Graph {
         self.views.clear();
     }
 
+    // Clear all nodes not required to produce output nodes
+    pub fn prune(&mut self, output_nodes: Vec<NodeIndex>) {
+        let mut keep_nodes = HashSet::default();
+        for n in output_nodes {
+            reverse_dfs_mark(n, self, &mut keep_nodes);
+        }
+        for node in self.graph.node_indices().collect_vec() {
+            if !keep_nodes.contains(&node) {
+                self.graph.remove_node(node);
+            }
+        }
+    }
+
     /// Execute the graph.
     pub fn execute(&mut self) {
         // Track the number of views pointing to each tensor so we know when to clear;
@@ -404,4 +417,16 @@ fn toposort(
     visited.insert(id);
 
     (final_stack, num_stacks, complete)
+}
+
+fn reverse_dfs_mark(curr_node: NodeIndex, cx: &Graph, marked: &mut HashSet<NodeIndex>) {
+    marked.insert(curr_node);
+    for i in cx
+        .graph
+        .edges_directed(curr_node, Direction::Incoming)
+        .map(|e| e.source())
+        .collect_vec()
+    {
+        reverse_dfs_mark(i, cx, marked);
+    }
 }

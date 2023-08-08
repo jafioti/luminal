@@ -2,8 +2,11 @@ mod config;
 mod loader;
 mod model;
 
+use itertools::Itertools;
 use luminal::prelude::*;
 use model::LlamaForCausalLM;
+
+use crate::model::KVCache;
 
 #[rustfmt::skip]
 fn main() {
@@ -23,14 +26,31 @@ fn main() {
         { config::LAYERS },
     > = InitModule::initialize(&mut cx);
     let inp = cx.new_tensor::<(usize, usize)>("Input");
-    let (out, _caches) = model.forward((inp, 0));
-    inp.set_dyn(vec![1, 2, 3], vec![1, 3]);
+    let (out, caches) = model.forward(inp);
     out.mark();
+    for (k, v) in &caches {
+        k.mark();
+        v.mark();
+    }
 
     println!("Loading...");
     loader::DfdxDeferredLoader::new("../../Desktop/llama-dfdx-main/llama-7b-hf").load(&model, &mut cx);
 
     println!("Inferencing...");
+    // First pass
+    inp.set_dyn(input.clone(), vec![1, input.len()]);
+    cx.execute();
+    let out = out.retrieve().unwrap().real_data(out.view().unwrap()).unwrap();
+    let (out_ind, _) = out[(input.len() - 1) * 32_000..].iter().enumerate().max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap();
+    input.push(out_ind);
+    cx.reset();
+
+    // Build KV cache forward graph
+    let (out, cache): (_, Vec<KVCache<_, usize, {config::HEADS}, {config::HEAD_DIM}>>) = model.forward_kv((inp, caches));
+    let mut output_ids = cache.iter().flat_map(|c| [c.0.id, c.1.id].into_iter()).collect_vec();
+    output_ids.push(out.id);
+    cx.prune(output_ids);
+
     loop {
         inp.set_dyn(input.clone(), vec![1, input.len()]);
         let now = std::time::Instant::now();
