@@ -26,7 +26,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Get the shape tracker for this tensor
-    pub fn shape_tracker(&self) -> &Vec<RealDim> {
+    pub fn shape(&self) -> &Vec<RealDim> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         &graph.graph.node_weight(self.id).unwrap().1
     }

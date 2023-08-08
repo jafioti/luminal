@@ -8,7 +8,7 @@ impl<S: Shape> GraphTensor<S> {
         S: HasAxes<Ax> + ReduceShapeTo<Dst, Ax>,
     {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let mut shape = self.shape_tracker().clone();
+        let mut shape = self.shape().clone();
 
         let mut new_id = self.id;
         for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
@@ -26,7 +26,7 @@ impl<S: Shape> GraphTensor<S> {
         S: HasAxes<Ax> + ReduceShapeTo<Dst, Ax>,
     {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let mut shape = self.shape_tracker().clone();
+        let mut shape = self.shape().clone();
 
         let mut new_id = self.id;
         for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
