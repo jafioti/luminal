@@ -2,7 +2,7 @@
 use std::ops::{Add, Mul};
 
 use luminal::{
-    nn::{activation::RMSNorm, embedding::Embedding, linear::Linear},
+    nn::{activation::RMSNorm, embedding::Embedding},
     op::{self, ReshapeDim},
     prelude::{movement::TryConcatAlong, *},
 };
@@ -523,7 +523,7 @@ pub struct LlamaForCausalLM<
     const LAYERS: usize,
 > {
     pub llama: Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>,
-    pub lm_head: Linear<HIDDEN, VOCAB>,
+    pub lm_head: GraphTensor<(Const<VOCAB>, Const<HIDDEN>)>,
 }
 
 impl<
@@ -545,7 +545,7 @@ impl<
         (input, past_seq_len): (GraphTensor<(Batch, CurSeq)>, usize),
     ) -> Self::Output {
         let hidden_states = self.llama.forward((input, past_seq_len));
-        self.lm_head.forward(hidden_states)
+        hidden_states.matmul(self.lm_head.permute())
     }
 }
 
@@ -563,7 +563,7 @@ impl<
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             llama: InitModule::initialize(cx),
-            lm_head: InitModule::initialize(cx),
+            lm_head: cx.new_tensor("Weight"),
         }
     }
 }
@@ -580,7 +580,7 @@ impl<
     for LlamaForCausalLM<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
 {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("llama", &self.llama);
-        s.module("lm_head", &self.lm_head);
+        s.module("model", &self.llama);
+        s.tensor("lm_head/weight", self.lm_head);
     }
 }

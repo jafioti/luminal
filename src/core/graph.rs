@@ -89,7 +89,19 @@ impl Graph {
     /// Refresh the internally sorted graph
     fn toposort(&mut self) {
         // Depth-first toposort
-        let nodes = petgraph::algo::toposort(&self.graph, None).unwrap();
+        let mut visited = HashSet::default();
+        let mut pre_sorted = petgraph::algo::toposort(&self.graph, None).unwrap();
+        pre_sorted.reverse();
+        let mut stacks = vec![];
+        for node in pre_sorted {
+            if !visited.contains(&node) {
+                stacks.push(toposort(node, &self.graph, &mut visited));
+            }
+        }
+        let mut nodes = vec![];
+        for (mut stack, _, _) in stacks.into_iter().sorted_by_key(|(_, _, b)| *b) {
+            nodes.append(&mut stack);
+        }
         let mut v = Vec::with_capacity(nodes.len());
         let mut dependencies: HashMap<NodeIndex, usize> = self
             .graph
@@ -332,4 +344,32 @@ impl<'a> NewOp<'a> {
         self.num_srcs += 1;
         self
     }
+}
+
+fn toposort(
+    id: NodeIndex,
+    graph: &StableGraph<(Box<dyn Operator>, Vec<RealDim>), u8>,
+    visited: &mut HashSet<NodeIndex>,
+) -> (Vec<NodeIndex>, usize, bool) {
+    if visited.contains(&id) {
+        return (vec![], 0, false);
+    }
+    // Loop through node sources
+    let stacks = graph
+        .edges_directed(id, Direction::Incoming)
+        .sorted_by_key(|e| e.source())
+        .map(|e| toposort(e.source(), graph, visited))
+        .collect::<Vec<_>>();
+    let num_stacks = stacks.len();
+
+    let mut final_stack = vec![];
+    let mut complete = true;
+    for (mut stack, _, c) in stacks.into_iter().sorted_by_key(|(_, _, b)| !*b) {
+        final_stack.append(&mut stack);
+        complete &= c;
+    }
+    final_stack.push(id);
+    visited.insert(id);
+
+    (final_stack, num_stacks, complete)
 }

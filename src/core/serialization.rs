@@ -197,10 +197,12 @@ pub struct Serializer {
 
 impl Serializer {
     pub fn tensor<S: Shape>(&mut self, name: &str, tensor: GraphTensor<S>) {
-        self.state.insert(
-            format!("{}/{}", self.current_path.join("/"), name),
-            tensor.id,
-        );
+        // Add new path component
+        self.current_path.push(name.to_string());
+        // Insert tensor id
+        self.state.insert(self.current_path.join("/"), tensor.id);
+        // Remove new path component
+        self.current_path.pop();
     }
     pub fn module<T: SerializeModule>(&mut self, name: &str, module: &T) {
         // Add new path component

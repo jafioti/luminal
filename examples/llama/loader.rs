@@ -43,7 +43,6 @@ impl Loader for DfdxDeferredLoader {
                 let path = self.path.clone();
                 inp_func.1 = Box::new(move |_, i| {
                     // Get memmapped tensor
-                    println!("Loading {path}/{s}");
                     let bytes = std::fs::read(format!("{path}/{s}")).unwrap();
                     let num_params: usize = shape.iter().product();
                     let data: Vec<f32> = if bytes.len() == num_params * 2 {
@@ -74,7 +73,6 @@ impl Loader for DfdxDeferredLoader {
                             s
                         )
                     };
-                    println!("ID: {:?}", i);
                     (
                         Some(Tensor {
                             data: Box::new(data),
