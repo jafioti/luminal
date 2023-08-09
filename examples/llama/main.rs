@@ -41,16 +41,15 @@ fn main() {
     let now = std::time::Instant::now();
     cx.execute();
     println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
-    cx.no_delete.remove(&out.id);
-    let out = out.retrieve().unwrap().real_data(out.view().unwrap()).unwrap();
     cx.reset();
-    let (out_ind, _) = out[(input.len() - 1) * 32_000..].iter().enumerate().max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap();
-    input.push(out_ind);
+
+    let out = out.retrieve().unwrap().real_data(out.view().unwrap()).unwrap();
+    input.push(sample_index(&out[(input.len() - 1) * 32_000..]));
     println!("{}", tokenizer.decode(input.iter().map(|i| *i as u32).collect(), false).unwrap());
 
 
     // Build KV cache forward graph
-    let inp = cx.new_tensor::<(usize, usize)>("NewInput");
+    // let inp = cx.new_tensor::<(usize, usize)>("NewInput");
     let (out, cache_dest): (_, Vec<KVCache<_, usize, {config::HEADS}, {config::HEAD_DIM}>>) = model.forward_kv((inp, cache_src.clone()));
     out.mark();
     for (k, v) in &cache_dest {
@@ -61,6 +60,7 @@ fn main() {
 
     loop {
         inp.set_dyn(vec![*input.last().unwrap()], vec![1, 1]);
+
         let now = std::time::Instant::now();
         cx.execute();
         println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
@@ -69,8 +69,7 @@ fn main() {
         let o = out.retrieve().unwrap().real_data(out.view().unwrap()).unwrap();
         cx.tensors.remove(&cx.views.remove(&out.id).unwrap().tensor_id);
         // Sample tokens
-        let (out_ind, _) = o.iter().enumerate().max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap();
-        input.push(out_ind);
+        input.push(sample_index(&o));
         println!("{}", tokenizer.decode(input.iter().map(|i| *i as u32).collect(), false).unwrap());
 
         // Swap caches
@@ -82,4 +81,13 @@ fn main() {
             cx.tensors.remove(&cx.views.remove(&b_v.id).unwrap().tensor_id);
         }
     }
+}
+
+// Currently just an argmax, do actual sampling here
+fn sample_index(dist: &[f32]) -> usize {
+    dist.iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap()
+        .0
 }

@@ -1,15 +1,7 @@
+// Common
 pub const VOCAB: usize = 32_000;
 pub const HEAD_DIM: usize = 128;
 pub const HEAD_DIM_OVER_2: usize = 64;
-
-// Dev
-// pub const HIDDEN: usize = 24;
-// pub const INTERMEDIATE: usize = 48;
-// pub const HEADS: usize = 1;
-// pub const LAYERS: usize = 1;
-// pub const VOCAB: usize = 4;
-// pub const HEAD_DIM: usize = 24;
-// pub const HEAD_DIM_OVER_2: usize = 12;
 
 // 7B
 pub const HIDDEN: usize = 4096;
