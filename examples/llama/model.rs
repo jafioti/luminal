@@ -3,7 +3,7 @@ use std::ops::{Add, Mul};
 
 use luminal::{
     nn::{activation::RMSNorm, embedding::Embedding},
-    op::{self, ReshapeDim},
+    op,
     prelude::{movement::TryConcatAlong, *},
 };
 use rand::{thread_rng, Rng};
@@ -37,9 +37,9 @@ impl<const I: usize, const H: usize, B: Dim, S: Dim> Module<GraphTensor<(B, S, C
 impl<const I: usize, const H: usize> InitModule for Mlp<I, H> {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
-            gate_proj: cx.new_tensor("Weight"),
-            up_proj: cx.new_tensor("Weight"),
-            down_proj: cx.new_tensor("Weight"),
+            gate_proj: cx.new_tensor("Gate Weight"),
+            up_proj: cx.new_tensor("Up Weight"),
+            down_proj: cx.new_tensor("Down Weight"),
         }
     }
 }
@@ -104,62 +104,39 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
         GraphTensor<(Seq, Const<HEAD_DIM>)>,
     ) {
         let graph = unsafe { self.inv_freq.graph_ref.as_mut().unwrap() };
-        let t: GraphTensor<(Seq,)> = GraphTensor::from_id(
-            if let Some(cache) = cache {
-                graph
-                    .add_op(
-                        op::Function(
-                            "ARange".to_string(),
-                            Box::new(move |inp, i| {
-                                let offset = inp[1].1.shape.shape()[2];
-                                (
-                                    Some(Tensor {
-                                        data: Box::new(
-                                            (0..inp[0].1.shape.shape()[2])
-                                                .map(|i| (i + offset) as f32)
-                                                .collect::<Vec<_>>(),
-                                        ),
-                                    }),
-                                    TensorView {
-                                        tensor_id: i,
-                                        shape: ShapeTracker::new(vec![inp[0].1.shape.shape()[2]]),
-                                    },
-                                )
+        let has_cache = cache.is_some();
+        let mut op = graph
+            .add_op(
+                op::Function(
+                    "ARange".to_string(),
+                    Box::new(move |inp, i| {
+                        let offset = if has_cache {
+                            inp[1].1.shape.shape()[2]
+                        } else {
+                            0
+                        };
+                        (
+                            Some(Tensor {
+                                data: Box::new(
+                                    (0..inp[0].1.shape.shape()[2])
+                                        .map(|i| (i + offset) as f32)
+                                        .collect::<Vec<_>>(),
+                                ),
                             }),
-                        ),
-                        vec![Seq::const_size()],
-                    )
-                    .input(seq_tensor.id)
-                    .input(cache.0.id)
-                    .finish()
-            } else {
-                graph
-                    .add_op(
-                        op::Function(
-                            "ARange".to_string(),
-                            Box::new(move |inp, i| {
-                                (
-                                    Some(Tensor {
-                                        data: Box::new(
-                                            (0..inp[0].1.shape.shape()[2])
-                                                .map(|i| i as f32)
-                                                .collect::<Vec<_>>(),
-                                        ),
-                                    }),
-                                    TensorView {
-                                        tensor_id: i,
-                                        shape: ShapeTracker::new(vec![inp[0].1.shape.shape()[2]]),
-                                    },
-                                )
-                            }),
-                        ),
-                        vec![Seq::const_size()],
-                    )
-                    .input(seq_tensor.id)
-                    .finish()
-            },
-            graph,
-        );
+                            TensorView {
+                                tensor_id: i,
+                                shape: ShapeTracker::new(vec![inp[0].1.shape.shape()[2]]),
+                            },
+                        )
+                    }),
+                ),
+                vec![Seq::const_size()],
+            )
+            .input(seq_tensor.id);
+        if has_cache {
+            op = op.input(cache.unwrap().0.id);
+        }
+        let t: GraphTensor<(Seq,)> = GraphTensor::from_id(op.finish(), graph);
         let freqs = t
             .expand::<(Seq, Const<1>), _>()
             .matmul(
@@ -219,6 +196,60 @@ pub struct Attention<
     pub rotary_embed: RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>,
 }
 
+fn attn_forward<
+    const NUM_HEADS: usize,
+    const HIDDEN: usize,
+    const HEAD_DIM: usize,
+    const HEAD_DIM_OVER_2: usize,
+    Batch: Dim,
+    Seq: Dim,
+    PrevSeq: Dim,
+>(
+    attn: &Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>,
+    x: GraphTensor<(Batch, Seq, Const<HIDDEN>)>,
+    cache: Option<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
+) -> (
+    GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
+    GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
+    GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
+) {
+    let q = x
+        .matmul(attn.q_proj.permute())
+        .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
+            Batch::const_size().to_reshape(0),
+            Seq::const_size().to_reshape(1),
+            ReshapeDim::Const(NUM_HEADS),
+            ReshapeDim::Const(HEAD_DIM),
+        ])
+        .permute::<_, Axes4<0, 2, 1, 3>>();
+
+    let k = x
+        .matmul(attn.k_proj.permute())
+        .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
+            Batch::const_size().to_reshape(0),
+            Seq::const_size().to_reshape(1),
+            ReshapeDim::Const(NUM_HEADS),
+            ReshapeDim::Const(HEAD_DIM),
+        ])
+        .permute::<_, Axes4<0, 2, 1, 3>>();
+    let v = x
+        .matmul(attn.v_proj.permute())
+        .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
+            Batch::const_size().to_reshape(0),
+            Seq::const_size().to_reshape(1),
+            ReshapeDim::Const(NUM_HEADS),
+            ReshapeDim::Const(HEAD_DIM),
+        ])
+        .permute::<_, Axes4<0, 2, 1, 3>>();
+    let (q, k) = attn.rotary_embed.forward((
+        q.realize::<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>(),
+        k.realize(),
+        cache,
+    ));
+
+    (q, k, v)
+}
+
 impl<
         const NUM_HEADS: usize,
         const HIDDEN: usize,
@@ -244,58 +275,11 @@ impl<
             GraphTensor<(CurSeq, CurSeq)>,
         ),
     ) -> Self::Output {
-        let q = x
-            .matmul(self.q_proj.permute())
-            .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-                match Batch::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(0),
-                },
-                match CurSeq::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(1),
-                },
-                ReshapeDim::Const(NUM_HEADS),
-                ReshapeDim::Const(HEAD_DIM),
-            ])
-            .permute::<_, Axes4<0, 2, 1, 3>>();
-
-        let k = x
-            .matmul(self.k_proj.permute())
-            .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-                match Batch::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(0),
-                },
-                match CurSeq::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(1),
-                },
-                ReshapeDim::Const(NUM_HEADS),
-                ReshapeDim::Const(HEAD_DIM),
-            ])
-            .permute::<_, Axes4<0, 2, 1, 3>>();
-        let v = x
-            .matmul(self.v_proj.permute())
-            .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-                match Batch::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(0),
-                },
-                match CurSeq::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(1),
-                },
-                ReshapeDim::Const(NUM_HEADS),
-                ReshapeDim::Const(HEAD_DIM),
-            ])
-            .permute::<_, Axes4<0, 2, 1, 3>>();
-        let (q, k) = self.rotary_embed.forward((
-            q.realize::<(Batch, Const<NUM_HEADS>, CurSeq, Const<HEAD_DIM>)>(),
-            k.realize(),
-            Option::<KVCache<Batch, usize, NUM_HEADS, HEAD_DIM>>::None,
-        ));
-
+        let (q, k, v) = attn_forward(
+            self,
+            x,
+            Option::<KVCache<_, usize, NUM_HEADS, HEAD_DIM>>::None,
+        );
         let inv_head_scale = (HEAD_DIM as f64).sqrt().recip() as f32;
         let w = q
             .batch_matmul(k.permute())
@@ -307,14 +291,8 @@ impl<
             .batch_matmul(v)
             .permute::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>), _>()
             .dyn_reshape::<(Batch, CurSeq, Const<HIDDEN>)>(vec![
-                match Batch::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(0),
-                },
-                match CurSeq::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(1),
-                },
+                Batch::const_size().to_reshape(0),
+                CurSeq::const_size().to_reshape(1),
                 ReshapeDim::Const(HIDDEN),
             ]);
 
@@ -340,57 +318,7 @@ impl<
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
         KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>,
     ) {
-        let q = x
-            .matmul(self.q_proj.permute())
-            .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-                match Batch::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(0),
-                },
-                match CurSeq::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(1),
-                },
-                ReshapeDim::Const(NUM_HEADS),
-                ReshapeDim::Const(HEAD_DIM),
-            ])
-            .permute::<_, Axes4<0, 2, 1, 3>>();
-
-        let k = x
-            .matmul(self.k_proj.permute())
-            .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-                match Batch::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(0),
-                },
-                match CurSeq::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(1),
-                },
-                ReshapeDim::Const(NUM_HEADS),
-                ReshapeDim::Const(HEAD_DIM),
-            ])
-            .permute::<_, Axes4<0, 2, 1, 3>>();
-        let v = x
-            .matmul(self.v_proj.permute())
-            .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-                match Batch::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(0),
-                },
-                match CurSeq::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(1),
-                },
-                ReshapeDim::Const(NUM_HEADS),
-                ReshapeDim::Const(HEAD_DIM),
-            ])
-            .permute::<_, Axes4<0, 2, 1, 3>>();
-        let (q, k) = self.rotary_embed.forward((
-            q.realize::<(Batch, Const<NUM_HEADS>, CurSeq, Const<HEAD_DIM>)>(),
-            k.realize(),
-            Some(cache),
-        ));
+        let (q, k, v) = attn_forward(self, x, Some(cache));
 
         // Add KV cache
         let k = (
@@ -410,24 +338,17 @@ impl<
             .concat_along(Axis::<2>)
             .realize::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>)>();
 
-        let inv_head_scale = (HEAD_DIM as f64).sqrt().recip() as f32;
         let w = q
             .batch_matmul(k.permute())
-            .mul(inv_head_scale)
+            .mul((HEAD_DIM as f64).sqrt().recip() as f32) // Inv head scale
             .softmax::<3>();
 
         let o = w
             .batch_matmul(v)
             .permute::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>), _>()
             .dyn_reshape::<(Batch, CurSeq, Const<HIDDEN>)>(vec![
-                match Batch::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(0),
-                },
-                match CurSeq::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(1),
-                },
+                Batch::const_size().to_reshape(0),
+                CurSeq::const_size().to_reshape(1),
                 ReshapeDim::Const(HIDDEN),
             ]);
 
@@ -805,7 +726,7 @@ impl<
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             llama: InitModule::initialize(cx),
-            lm_head: cx.new_tensor("Weight"),
+            lm_head: cx.new_tensor("LM Head"),
         }
     }
 }

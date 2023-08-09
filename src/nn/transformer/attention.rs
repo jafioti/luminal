@@ -1,6 +1,6 @@
 use std::ops::Mul;
 
-use crate::{nn::linear::Linear, op::ReshapeDim, prelude::*};
+use crate::{nn::linear::Linear, prelude::*};
 
 // This is still single head attention because I need a runtime reshape, like the try_reshape in dfdx
 pub struct MultiHeadSelfAttention<

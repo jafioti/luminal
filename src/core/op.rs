@@ -5,7 +5,7 @@ use std::{any::Any, fmt::Debug};
 use petgraph::stable_graph::NodeIndex;
 
 use crate::{
-    prelude::{to_shapes_strides, RealDim, TensorView},
+    prelude::{to_shapes_strides, RealDim, ReshapeDim, TensorView},
     shape::ShapeTracker,
     tensor::Tensor,
 };
@@ -112,12 +112,6 @@ impl Operator for Permute {
         view.shape.permute(&self.0);
         (None, view)
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReshapeDim {
-    Const(usize),   // A known size for the dim
-    PrevDim(usize), // A reference to the size of a dim of the previous shape
 }
 
 #[derive(Debug, Clone)]

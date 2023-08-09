@@ -10,8 +10,7 @@ use dfdx::{
 
 use crate::{
     nn::{activation::ReLU, linear::Linear},
-    op::ReshapeDim,
-    prelude::{Module, *},
+    prelude::*,
 };
 
 use super::{assert_close, assert_close_data};

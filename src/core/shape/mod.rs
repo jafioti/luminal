@@ -338,3 +338,18 @@ pub enum RealDim {
     Const(usize),
     Dyn,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReshapeDim {
+    Const(usize),   // A known size for the dim
+    PrevDim(usize), // A reference to the size of a dim of the previous shape
+}
+
+impl RealDim {
+    pub fn to_reshape(self, prev_dim: usize) -> ReshapeDim {
+        match self {
+            RealDim::Const(n) => ReshapeDim::Const(n),
+            RealDim::Dyn => ReshapeDim::PrevDim(prev_dim),
+        }
+    }
+}

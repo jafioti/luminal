@@ -1,9 +1,6 @@
 use itertools::Itertools;
 
-use crate::{
-    op::{self, ReshapeDim},
-    prelude::*,
-};
+use crate::{op, prelude::*};
 
 impl<S: Shape> GraphTensor<S> {
     pub fn permute<Dst: Shape, Ax: Axes>(self) -> GraphTensor<Dst>

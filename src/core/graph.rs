@@ -18,11 +18,9 @@ pub struct Graph {
     pub tensors: HashMap<NodeIndex, Tensor>,
     pub views: HashMap<NodeIndex, TensorView>,
     pub(crate) id_remap: HashMap<NodeIndex, NodeIndex>,
-    #[allow(clippy::type_complexity)]
     pub graph: StableGraph<(Box<dyn Operator>, Vec<RealDim>), u8>,
     pub no_delete: HashSet<NodeIndex>,
     pub(crate) to_retrieve: HashSet<NodeIndex>,
-    // pub(crate) t_cache: HashSet<NodeIndex>, // Don't delete tensors or views
     /// A list of current node to run, source nodes, and view nodes to delete after execution.
     #[allow(clippy::type_complexity)]
     pub(crate) linearized_graph: Option<Vec<(NodeIndex, Vec<NodeIndex>, Vec<NodeIndex>)>>,
