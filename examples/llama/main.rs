@@ -41,7 +41,6 @@ fn main() {
     let now = std::time::Instant::now();
     cx.execute();
     println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
-    cx.reset();
 
     let out = out.retrieve().unwrap().real_data(out.view().unwrap()).unwrap();
     input.push(sample_index(&out[(input.len() - 1) * 32_000..]));
@@ -49,7 +48,6 @@ fn main() {
 
 
     // Build KV cache forward graph
-    // let inp = cx.new_tensor::<(usize, usize)>("NewInput");
     let (out, cache_dest): (_, Vec<KVCache<_, usize, {config::HEADS}, {config::HEAD_DIM}>>) = model.forward_kv((inp, cache_src.clone()));
     out.mark();
     for (k, v) in &cache_dest {
@@ -64,21 +62,20 @@ fn main() {
         let now = std::time::Instant::now();
         cx.execute();
         println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
-        cx.reset();
         
         let o = out.retrieve().unwrap().real_data(out.view().unwrap()).unwrap();
-        cx.tensors.remove(&cx.views.remove(&out.id).unwrap().tensor_id);
         // Sample tokens
         input.push(sample_index(&o));
         println!("{}", tokenizer.decode(input.iter().map(|i| *i as u32).collect(), false).unwrap());
 
         // Swap caches
-        for ((a_k, a_v), (b_k, b_v)) in cache_src.iter().copied().zip(cache_dest.iter().copied()) {
-            // Remove source caches
-            cx.swap_tensors(a_k, b_k);
-            cx.swap_tensors(a_v, b_v);
-            cx.tensors.remove(&cx.views.remove(&b_k.id).unwrap().tensor_id);
-            cx.tensors.remove(&cx.views.remove(&b_v.id).unwrap().tensor_id);
+        for ((src_k, src_v), (dest_k, dest_v)) in cache_src.iter().copied().zip(cache_dest.iter().copied()) {
+            // Move dest caches to src
+            cx.swap_tensors(src_k, dest_k);
+            cx.swap_tensors(src_v, dest_v);
+            // Drop dest caches
+            dest_k.drop();
+            dest_v.drop();
         }
     }
 }

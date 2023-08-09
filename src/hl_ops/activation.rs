@@ -43,6 +43,7 @@ mod tests {
         let a = cx.new_tensor::<(usize, usize)>("Input");
         a.set_dyn(vec![0.0, 1.0, 0.0, 1.0], vec![2, 2]);
         let b = a.relu();
+        b.mark();
 
         cx.execute();
 
@@ -64,6 +65,7 @@ mod tests {
         let a = cx.new_tensor::<(usize, usize)>("Input");
         a.set_dyn(vec![0.0, 1.0, 0.0, 1.0], vec![2, 2]);
         let b = a.sigmoid();
+        b.mark();
 
         cx.execute();
 
@@ -85,6 +87,7 @@ mod tests {
         let a = cx.new_tensor::<(usize, usize)>("Input");
         a.set_dyn(vec![0.0, 1.0, 0.0, 1.0], vec![2, 2]);
         let b = a.tanh();
+        b.mark();
 
         cx.execute();
 

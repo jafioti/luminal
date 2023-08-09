@@ -20,6 +20,7 @@ pub struct Graph {
     pub(crate) id_remap: HashMap<NodeIndex, NodeIndex>,
     pub graph: StableGraph<(Box<dyn Operator>, Vec<RealDim>), u8>,
     pub no_delete: HashSet<NodeIndex>,
+    /// Mark tensors that need to be retrieved later (mostly for optimizers to insert copy back calls, the graph itself doesn't treat these differently)
     pub(crate) to_retrieve: HashSet<NodeIndex>,
     /// A list of current node to run, source nodes, and view nodes to delete after execution.
     #[allow(clippy::type_complexity)]
@@ -76,7 +77,6 @@ impl Graph {
             graph_ref: self,
             _phantom: Default::default(),
         }
-        // self.no_delete.insert(tensor.id); // This gets set because we want to keep inputs around to run the graph multiple times
     }
 
     /// Run the full suite of optimizations
@@ -123,6 +123,12 @@ impl Graph {
                     srcs_to_remove.push(*source);
                 }
             }
+            if !self.no_delete.contains(&node)
+                && dependencies.get(&node).copied().unwrap_or_default() == 0
+            {
+                // Delete current node now (really this shouldn't be ran in the first place)
+                srcs_to_remove.push(node);
+            }
             v.push((node, src_ids, srcs_to_remove));
         }
         self.linearized_graph = Some(v);
@@ -151,7 +157,9 @@ impl Graph {
         }
     }
 
-    // Clear all nodes not required to produce output nodes, stop looking past inputs
+    /// Clear all nodes not required to produce output nodes, stop looking past inputs.
+    ///
+    /// Pruning doesn't respect nodes marked as no_delete.
     pub fn prune<O: IntoIterator<Item = NodeIndex>, I: IntoIterator<Item = NodeIndex>>(
         &mut self,
         outputs: O,
@@ -172,13 +180,14 @@ impl Graph {
         self.linearized_graph = None;
     }
 
-    // Swap the tensors with these ids
+    /// Swap the tensors with these ids
     pub fn swap_tensors<A: Shape, B: Shape>(&mut self, a: GraphTensor<A>, b: GraphTensor<B>) {
         let a_id = self.views.get(&a.id).unwrap().tensor_id;
         let b_id = self.views.get(&b.id).unwrap().tensor_id;
+
+        // Swap tensors
         let a_t = self.tensors.remove(&a_id);
         let b_t = self.tensors.remove(&b_id);
-
         if let Some(a_t) = a_t {
             self.tensors.insert(b_id, a_t);
         }
@@ -186,13 +195,15 @@ impl Graph {
             self.tensors.insert(a_id, b_t);
         }
 
-        let tmp_st = self.views.get(&a.id).unwrap().shape.clone();
-        self.views.get_mut(&a.id).unwrap().shape = self.views.get(&b.id).unwrap().shape.clone();
-        self.views.get_mut(&b.id).unwrap().shape = tmp_st;
+        // Swap views
+        let b_view = self.views.get(&b.id).unwrap().shape.clone();
+        self.views.get_mut(&b.id).unwrap().shape =
+            std::mem::replace(&mut self.views.get_mut(&a.id).unwrap().shape, b_view);
     }
 
     /// Execute the graph.
     pub fn execute(&mut self) {
+        self.reset();
         // Track the number of views pointing to each tensor so we know when to clear;
         let mut views_pointing: HashMap<NodeIndex, usize> = self
             .views
@@ -257,8 +268,10 @@ impl Graph {
             self.toposort();
         }
         for (node, src_ids, _) in self.linearized_graph.as_ref().unwrap().iter() {
-            if self.views.contains_key(node) {
-                continue;
+            if let Some(v) = self.views.get(node) {
+                if self.tensors.contains_key(&v.tensor_id) {
+                    continue;
+                }
             }
             let srcs = src_ids
                 .iter()
@@ -292,15 +305,10 @@ impl Graph {
         for (id, node) in self.graph.node_indices().zip(self.graph.node_weights()) {
             id_map.insert(
                 id,
-                // new_graph.add_node(if show_shapes {
-                //     format!("{node:?}")
-                // } else {
-                //     format!("{:?}", node.0)
-                // }),
                 new_graph.add_node(if show_shapes {
                     format!("{node:?}")
                 } else {
-                    format!("{:?} | {id:?}", node.0)
+                    format!("{:?}", node.0)
                 }),
             );
         }

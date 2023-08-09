@@ -53,6 +53,7 @@ fn test_matmul() {
     let b = cx.new_tensor::<R2<3, 3>>("Input");
     b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
     let c = a.matmul(b);
+    c.mark();
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -75,6 +76,7 @@ fn test_batch_matmul() {
     let b = cx.new_tensor::<R2<2, 4>>("Input");
     b.set(vec![1., 2., 3., 1., 1., 2., 3., 1.]);
     let c = a.matmul(b);
+    c.mark();
 
     cx.execute();
 

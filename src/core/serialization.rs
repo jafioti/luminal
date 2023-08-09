@@ -102,6 +102,7 @@ impl Loader for StateDictLoader {
 
         for (s, n) in serializer.state {
             let (t, v) = self.state_dict.remove(&s).unwrap();
+            graph.no_delete.insert(n);
             graph.tensors.insert(n, t);
             graph.views.insert(n, v);
         }

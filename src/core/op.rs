@@ -822,6 +822,7 @@ mod tests {
         let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(vec![1., 2., 3., 1., 2., 3.]);
         let b = a.reshape::<R1<6>>();
+        b.mark();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -840,6 +841,7 @@ mod tests {
         let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(vec![1., 2., 3., 1., 2., 3.]);
         let b: GraphTensor<R2<3, 2>> = a.permute();
+        b.mark();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -858,6 +860,7 @@ mod tests {
         let a = cx.new_tensor::<R1<3>>("Input");
         a.set(vec![1., 2., 3.]);
         let b: GraphTensor<R2<3, 2>> = a.expand();
+        b.mark();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -876,6 +879,7 @@ mod tests {
         let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(vec![1., 2., 3., 1., 2., 3.]);
         let b = a.slice((1.., ..));
+        b.mark();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -897,6 +901,7 @@ mod tests {
         let a = cx.new_tensor::<R1<3>>("Input");
         a.set(vec![1., 2., 3.]);
         let b = a.log_2();
+        b.mark();
         cx.execute();
 
         assert_close_data(
@@ -915,6 +920,7 @@ mod tests {
         let a = cx.new_tensor::<R1<3>>("Input");
         a.set(vec![1., 2., 3.]);
         let b = a.exp_2();
+        b.mark();
         cx.execute();
 
         assert_close_data(
@@ -932,6 +938,7 @@ mod tests {
         let a = cx.new_tensor::<R1<3>>("Input");
         a.set(vec![1., 2., 3.]);
         let b = a.recip();
+        b.mark();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -950,6 +957,7 @@ mod tests {
         let a = cx.new_tensor::<R1<3>>("Input");
         a.set(vec![1., 2., 3.]);
         let b = a.sin();
+        b.mark();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -968,6 +976,7 @@ mod tests {
         let a = cx.new_tensor::<R1<3>>("Input");
         a.set(vec![1., 2., 3.]);
         let b = a.sqrt();
+        b.mark();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -990,6 +999,7 @@ mod tests {
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![1., 2., 3.]);
         let c = a + b;
+        c.mark();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -1011,6 +1021,7 @@ mod tests {
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![1., 2., 3.]);
         let c = a - b;
+        c.mark();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -1032,6 +1043,7 @@ mod tests {
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![1., 2., 3.]);
         let c = a * b;
+        c.mark();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -1053,6 +1065,7 @@ mod tests {
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![1., 2., 3.]);
         let c = a / b;
+        c.mark();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -1074,6 +1087,7 @@ mod tests {
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![1., 2., 3.]);
         let c = a.max(b);
+        c.mark();
 
         cx.execute();
 
@@ -1096,6 +1110,7 @@ mod tests {
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![1., 2., 3.]);
         let c = a % b;
+        c.mark();
         cx.execute();
 
         // No dfdx equivalent

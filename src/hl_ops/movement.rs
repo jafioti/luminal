@@ -279,6 +279,7 @@ mod tests {
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![2.30434, 2.2343113, 1.4393]);
         let c = (a.realize::<(usize,)>(), b.realize::<(usize,)>()).concat_along(Axis::<0>);
+        c.mark();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -310,6 +311,8 @@ mod tests {
             b.realize::<(usize, Const<2>)>(),
         )
             .concat_along(Axis::<0>);
+        c.mark();
+        d.mark();
         cx.execute();
 
         let d_dev = Cpu::default();

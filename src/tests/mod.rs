@@ -68,7 +68,7 @@ fn test_shapes() {
     let a = cx.new_tensor::<R1<4>>("Input");
 
     let b: GraphTensor<R2<2, 2>> = a.reshape::<R2<2, 2>>().permute::<_, Axes2<1, 0>>();
-
+    b.mark();
     a.set(vec![1., 2., 3., 4.]);
 
     cx.execute();

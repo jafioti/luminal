@@ -39,6 +39,14 @@ impl<S: Shape> GraphTensor<S> {
         }
     }
 
+    /// Remove this tensor's data from the graph. All other views pointing to the same tensor become invalidated.
+    pub fn drop(&self) {
+        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        graph
+            .tensors
+            .remove(&graph.views.remove(&self.id).unwrap().tensor_id);
+    }
+
     /// Mark this tensor to not be deleted, but not retrieved either
     pub fn mark_no_delete(&self) {
         unsafe {

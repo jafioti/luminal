@@ -89,6 +89,7 @@ mod tests {
         let b = cx.new_tensor::<R2<3, 2>>("Input");
         b.set(vec![1., 2., 3., 1., 2., 3.]);
         let c = a.matmul(b);
+        c.mark();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -110,6 +111,7 @@ mod tests {
         let b = cx.new_tensor::<R2<3, 3>>("Input");
         b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
         let c = a.matmul(b);
+        c.mark();
 
         cx.execute();
 
@@ -132,6 +134,7 @@ mod tests {
         let b = cx.new_tensor::<R2<2, 4>>("Input");
         b.set(vec![1., 2., 3., 1., 1., 2., 3., 1.]);
         let c = a.matmul(b);
+        c.mark();
 
         cx.execute();
 
@@ -157,6 +160,7 @@ mod tests {
         let b = cx.new_tensor::<R3<1, 2, 3>>("Input");
         b.set(vec![4.0, -12.0, 12.0, 5.0, 70.0, 15.0]);
         let c = a.batch_matmul(b.permute());
+        c.mark();
 
         cx.execute();
 
@@ -194,6 +198,7 @@ mod tests {
         let b = cx.new_tensor::<(crate::shape::Const<1>, usize, crate::shape::Const<3>)>("Input");
         b.set_dyn(vec![32.0, -2.0, 0.0, -17.0, 40.0, -3.0], vec![1, 2, 3]);
         let c = a.batch_matmul(b);
+        c.mark();
 
         cx.execute();
 
