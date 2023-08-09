@@ -2,6 +2,8 @@ use itertools::Itertools;
 
 use super::{symbolic::*, RealDim};
 
+pub use super::symbolic::Node;
+
 // This is a shape tracker allowing for zero-copy movement ops based off of https://github.com/tinygrad/tinygrad/blob/master/tinygrad/shape/shapetracker.py
 // This is more or less directly translated from python and so it is very ugly. Needs refactor!
 // Uses enums as substitute for python inheritance
@@ -258,6 +260,13 @@ impl ShapeTracker {
         );
         self.views.last_mut().unwrap().strides.insert(dimension, 0);
 
+        self.views.last_mut().unwrap().shape_strides = to_shapes_strides(
+            &self.views.last().unwrap().shape,
+            &self.views.last().unwrap().strides,
+        );
+    }
+
+    pub fn reset_shape_strides(&mut self) {
         self.views.last_mut().unwrap().shape_strides = to_shapes_strides(
             &self.views.last().unwrap().shape,
             &self.views.last().unwrap().strides,

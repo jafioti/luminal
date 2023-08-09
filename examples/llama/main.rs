@@ -39,6 +39,10 @@ fn main() {
     // First pass
     inp.set_dyn(input.clone(), vec![1, input.len()]);
     let now = std::time::Instant::now();
+
+    cx.display_graph();
+    cx.optimize(GenericOptimizer::default());
+    cx.display_graph();
     cx.execute();
     println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
 

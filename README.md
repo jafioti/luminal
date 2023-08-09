@@ -7,8 +7,8 @@ use luminal::prelude::*;
 
 // Setup graph and tensors
 let mut cx = Graph::new();
-let a = cx.new_tensor::<R2<3, 1>>();
-let b = cx.new_tensor::<R2<1, 4>>();
+let a = cx.new_tensor::<R2<3, 1>>("A");
+let b = cx.new_tensor::<R2<1, 4>>("B");
 
 // Do stuff...
 let c = a.matmul(b);
@@ -45,7 +45,7 @@ Some huge benefits are now unlocked:
 - Networks can be written in generic code, but compiled and ran fast on hyper-specific architectures (try writing a PyTorch network that works with both TF32 dtypes and TPUs; get ready for if statement hell...)
 
 ## RISC-style architecture
-Luminal can be ran on new accelerators by implementing 13 primitive ops.
+Luminal can be ran on new accelerators by implementing 11 primitive ops. Take a look at `src/optimizers/cuda/prim.rs` to see 1-to-1 CUDA translations of the primops.
 
 Accellerators are free to implement their own custom ops, and their own optimizers to convert luminal primitive ops to their bespoke ops.
 
@@ -58,11 +58,17 @@ Once you've written all your computation code, run `cx.display_graph()` to see t
 ## Where are we?
 Currently luminal is extremely alpha. Please don't use this in prod.
 
+- Llama 1 is implemented in `examples/llama`. You'll need to follow the instructions in [llama-dfdx](https://github.com/coreylowman/llama-dfdx) to download and convert the llama weights, and point this example loading path at them.
+- The llama example shows how to implement a loader for a custom format. Safetensors loaders are already implemented, and are the recommended way to load a model.
+- We have a small library of NN modules in `nn`, including transformers.
+- A signifigant amount of high-level ops are implemented in `hl_ops`. We are aiming to match the tinygrad ops set.
+- Currently there are very few optimizers, so primops are mostly used to run these models, which are very slow.
+- Next release will bring a signifigant amount of optimizers which should fuse primops into much faster ops. The aim for 0.2 is to be usably fast, not SOTA yet.
+
 Some things on the roadmap:
 - Write common sense cuda ops and optimizer (matmuls, mul-add, etc.)
-- Create reasonable library of NN modules
 - Build benchmarking suite to test against other libs
 - Write specialized CUDA kernels for full transformer architecture (FlashAttention, etc.)
 - Automatic differentiation of graphs
-- Match PT 2.0 perf on LLM training
+- Beat PT 2.0 perf on LLM training
 - Build dyson swarm

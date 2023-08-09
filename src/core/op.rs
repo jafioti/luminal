@@ -5,7 +5,7 @@ use std::{any::Any, fmt::Debug};
 use petgraph::stable_graph::NodeIndex;
 
 use crate::{
-    prelude::{to_shapes_strides, RealDim, ReshapeDim, TensorView},
+    prelude::{Node, RealDim, ReshapeDim, TensorView},
     shape::ShapeTracker,
     tensor::Tensor,
 };
@@ -363,6 +363,33 @@ impl Operator for Recip {
 
 // Binary Ops (A x A -> A)
 
+#[allow(clippy::type_complexity)]
+fn binary_op_setup(
+    inp: Vec<(&Tensor, TensorView)>,
+) -> (
+    (Node, Node),
+    (Node, Node),
+    &Vec<f32>,
+    &Vec<f32>,
+    Vec<f32>,
+    Vec<usize>,
+) {
+    let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]);
+    let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
+    left_shape.views.last_mut().unwrap().shape = res_shape.clone();
+    left_shape.reset_shape_strides();
+    right_shape.views.last_mut().unwrap().shape = res_shape.clone();
+    right_shape.reset_shape_strides();
+    (
+        left_shape.index_node(),
+        right_shape.index_node(),
+        inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+        inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+        vec![0.; res_shape.iter().product()],
+        res_shape,
+    )
+}
+
 #[derive(Debug, Clone)]
 pub struct Add;
 impl Operator for Add {
@@ -380,23 +407,8 @@ impl Operator for Add {
         inp: Vec<(&Tensor, TensorView)>,
         nid: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]);
-        let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
-        left_shape.views.last_mut().unwrap().shape = res_shape.clone();
-        left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
-            &left_shape.views.last().unwrap().shape,
-            &left_shape.views.last().unwrap().strides,
-        );
-        right_shape.views.last_mut().unwrap().shape = res_shape.clone();
-        right_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
-            &right_shape.views.last().unwrap().shape,
-            &right_shape.views.last().unwrap().strides,
-        );
-        let ((a_idx, a_valid), (b_idx, b_valid)) =
-            (left_shape.index_node(), right_shape.index_node());
-        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let mut data = vec![0.; res_shape.iter().product()];
+        let ((a_idx, a_valid), (b_idx, b_valid), a_data, b_data, mut data, res_shape) =
+            binary_op_setup(inp);
         for i in 0..data.len() as i32 {
             data[i as usize] = if a_valid.solve(i) != 0 {
                 a_data[a_idx.solve(i) as usize]
@@ -437,23 +449,8 @@ impl Operator for Mul {
         inp: Vec<(&Tensor, TensorView)>,
         nid: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]);
-        let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
-        left_shape.views.last_mut().unwrap().shape = res_shape.clone();
-        left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
-            &left_shape.views.last().unwrap().shape,
-            &left_shape.views.last().unwrap().strides,
-        );
-        right_shape.views.last_mut().unwrap().shape = res_shape.clone();
-        right_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
-            &right_shape.views.last().unwrap().shape,
-            &right_shape.views.last().unwrap().strides,
-        );
-        let ((a_idx, a_valid), (b_idx, b_valid)) =
-            (left_shape.index_node(), right_shape.index_node());
-        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let mut data = vec![0.; res_shape.iter().product()];
+        let ((a_idx, a_valid), (b_idx, b_valid), a_data, b_data, mut data, res_shape) =
+            binary_op_setup(inp);
         for i in 0..data.len() as i32 {
             data[i as usize] = if a_valid.solve(i) != 0 {
                 a_data[a_idx.solve(i) as usize]
@@ -495,23 +492,8 @@ impl Operator for Max {
         inp: Vec<(&Tensor, TensorView)>,
         nid: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]);
-        let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
-        left_shape.views.last_mut().unwrap().shape = res_shape.clone();
-        left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
-            &left_shape.views.last().unwrap().shape,
-            &left_shape.views.last().unwrap().strides,
-        );
-        right_shape.views.last_mut().unwrap().shape = res_shape.clone();
-        right_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
-            &right_shape.views.last().unwrap().shape,
-            &right_shape.views.last().unwrap().strides,
-        );
-        let ((a_idx, a_valid), (b_idx, b_valid)) =
-            (left_shape.index_node(), right_shape.index_node());
-        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let mut data = vec![0.; res_shape.iter().product()];
+        let ((a_idx, a_valid), (b_idx, b_valid), a_data, b_data, mut data, res_shape) =
+            binary_op_setup(inp);
         for i in 0..data.len() as i32 {
             data[i as usize] = if a_valid.solve(i) != 0 {
                 a_data[a_idx.solve(i) as usize]
@@ -553,23 +535,8 @@ impl Operator for Mod {
         inp: Vec<(&Tensor, TensorView)>,
         nid: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]);
-        let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
-        left_shape.views.last_mut().unwrap().shape = res_shape.clone();
-        left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
-            &left_shape.views.last().unwrap().shape,
-            &left_shape.views.last().unwrap().strides,
-        );
-        right_shape.views.last_mut().unwrap().shape = res_shape.clone();
-        right_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
-            &right_shape.views.last().unwrap().shape,
-            &right_shape.views.last().unwrap().strides,
-        );
-        let ((a_idx, a_valid), (b_idx, b_valid)) =
-            (left_shape.index_node(), right_shape.index_node());
-        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let mut data = vec![0.; res_shape.iter().product()];
+        let ((a_idx, a_valid), (b_idx, b_valid), a_data, b_data, mut data, res_shape) =
+            binary_op_setup(inp);
         for i in 0..data.len() as i32 {
             data[i as usize] = if a_valid.solve(i) != 0 {
                 a_data[a_idx.solve(i) as usize]
