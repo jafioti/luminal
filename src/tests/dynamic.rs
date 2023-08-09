@@ -117,7 +117,6 @@ fn test_feedforward() {
         batch_out.view().unwrap().clone(),
     );
 
-    cx.reset();
     cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
     cx.execute();
 

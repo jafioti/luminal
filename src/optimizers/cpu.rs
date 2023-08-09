@@ -173,7 +173,6 @@ mod tests {
         let (unoptimized_c, unoptimized_c_view) =
             (c.retrieve().unwrap(), c.view().unwrap().clone());
 
-        cx.reset();
         cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
         cx.execute();
 

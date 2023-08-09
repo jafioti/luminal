@@ -94,7 +94,6 @@ mod tests {
         let unoptimized_b = b.retrieve().unwrap();
         let unoptimized_batch_out = batch_out.retrieve().unwrap();
 
-        cx.reset();
         cx.optimize(GenericOptimizer::default());
         cx.execute();
 

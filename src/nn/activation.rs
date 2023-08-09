@@ -191,8 +191,7 @@ mod tests {
             batch_out.view().unwrap().clone(),
         );
 
-        cx.reset();
-        // cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
+        cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
         cx.execute();
 
         assert_close(&unoptimized_b, &b.retrieve().unwrap());

@@ -263,6 +263,7 @@ impl Graph {
 
     /// Execute the graph without deleting intermediate tensors
     pub fn execute_no_delete(&mut self) {
+        self.reset();
         // Track the number of views pointing to each tensor so we know when to clear;
         if self.linearized_graph.is_none() {
             self.toposort();

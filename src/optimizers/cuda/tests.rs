@@ -391,7 +391,6 @@ fn test_relu_and_linear() {
     let (unoptimized_b, unoptimized_b_view) = (b.retrieve().unwrap(), b.view().unwrap().clone());
     let unoptimized_batch_out = batch_out.retrieve().unwrap();
 
-    cx.reset();
     cx.optimize(<(CudaOptimizer, GenericOptimizer)>::default());
     cx.execute();
 
