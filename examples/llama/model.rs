@@ -84,12 +84,10 @@ impl<
         ),
     ) -> Self::Output {
         let (sin, cos) = self.get_sincos(q, cache);
-        // cos.debug("Cos");
         let sin = sin.expand();
         let cos = cos.expand();
         let q_embed = (Self::rotate_half(q) * sin) + (q * cos);
         let k_embed = (Self::rotate_half(k) * sin) + (k * cos);
-        // k_embed.debug("K Embed");
         (q_embed, k_embed)
     }
 }
@@ -330,30 +328,18 @@ impl<
         const HIDDEN: usize,
         const HEAD_DIM: usize,
         const HEAD_DIM_OVER_2: usize,
-        Batch: Dim,
-        CurSeq: Dim,
-        PrevSeq: Dim,
-        TotSeq: Dim,
-    >
-    Module<(
-        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        GraphTensor<(CurSeq, TotSeq)>,
-        KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>,
-    )> for Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
+    > Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
 {
-    type Output = (
-        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>,
-    );
-
-    fn forward(
+    fn forward_kv<Batch: Dim, CurSeq: Dim, PrevSeq: Dim, TotSeq: Dim>(
         &self,
-        (x, attn_mask, cache): (
+        (x, cache): (
             GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-            GraphTensor<(CurSeq, TotSeq)>,
             KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>,
         ),
-    ) -> Self::Output {
+    ) -> (
+        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
+        KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>,
+    ) {
         let q = x
             .matmul(self.q_proj.permute())
             .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
@@ -428,7 +414,6 @@ impl<
         let w = q
             .batch_matmul(k.permute())
             .mul(inv_head_scale)
-            .add(attn_mask.expand())
             .softmax::<3>();
 
         let o = w
@@ -459,10 +444,10 @@ impl<
 {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
-            q_proj: cx.new_tensor("Weight"),
-            k_proj: cx.new_tensor("Weight"),
-            v_proj: cx.new_tensor("Weight"),
-            o_proj: cx.new_tensor("Weight"),
+            q_proj: cx.new_tensor("Query Weight"),
+            k_proj: cx.new_tensor("Key Weight"),
+            v_proj: cx.new_tensor("Value Weight"),
+            o_proj: cx.new_tensor("Output Weight"),
             rotary_embed: InitModule::initialize(cx),
         }
     }
@@ -538,32 +523,21 @@ impl<
         const INTERMEDIATE: usize,
         const HEAD_DIM: usize,
         const HEAD_DIM_OVER_2: usize,
-        Batch: Dim,
-        CurSeq: Dim,
-        PrevSeq: Dim,
-        TotSeq: Dim,
-    >
-    Module<(
-        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        GraphTensor<(CurSeq, TotSeq)>,
-        KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>,
-    )> for DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>
+    > DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>
 {
-    type Output = (
-        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>,
-    );
-    fn forward(
+    fn forward_kv<Batch: Dim, CurSeq: Dim, PrevSeq: Dim, TotSeq: Dim>(
         &self,
-        (x, attn_mask, cache): (
+        (x, cache): (
             GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-            GraphTensor<(CurSeq, TotSeq)>,
             KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>,
         ),
-    ) -> Self::Output {
-        let (y, kv_cache) =
-            self.self_attn
-                .forward((self.input_layer_norm.forward(x), attn_mask, cache));
+    ) -> (
+        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
+        KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>,
+    ) {
+        let (y, kv_cache) = self
+            .self_attn
+            .forward_kv((self.input_layer_norm.forward(x), cache));
         let x = x + y;
         let y = self.mlp.forward(self.post_attention_layer_norm.forward(x));
         (x + y, kv_cache)
@@ -703,44 +677,10 @@ impl<
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
         Vec<KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>>,
     ) {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let attn_mask: GraphTensor<(CurSeq, TotSeq)> = GraphTensor::from_id(
-            graph
-                .add_op(
-                    op::Function(
-                        "AttentionMask".to_string(),
-                        Box::new(|inp, i| {
-                            let cur_seq = inp[0].1.shape.shape()[2];
-                            let tot_seq = inp[1].1.shape.shape()[1] + cur_seq;
-                            let mut data = vec![f32::NEG_INFINITY; tot_seq * cur_seq];
-                            for r in 0..cur_seq {
-                                for c in 0..((r as isize + 1).max(0) as usize).min(tot_seq) {
-                                    data[r * tot_seq + c] = 0.;
-                                }
-                            }
-                            (
-                                Some(Tensor {
-                                    data: Box::new(data),
-                                }),
-                                TensorView {
-                                    tensor_id: i,
-                                    shape: ShapeTracker::new(vec![cur_seq, tot_seq]),
-                                },
-                            )
-                        }),
-                    ),
-                    vec![CurSeq::const_size(), TotSeq::const_size()],
-                )
-                .input(input.id)
-                .input(caches[0].0.id)
-                .finish(),
-            graph,
-        );
-
         let mut hidden_states = self.embed_tokens.forward(input);
         let mut new_caches = vec![];
         for (layer_i, cache) in self.layers.iter().zip(caches.into_iter()) {
-            let (new_hidden_states, kv_cache) = layer_i.forward((hidden_states, attn_mask, cache));
+            let (new_hidden_states, kv_cache) = layer_i.forward_kv((hidden_states, cache));
             hidden_states = new_hidden_states;
             new_caches.push(kv_cache);
         }

@@ -148,8 +148,8 @@ where
 {
     type Output = GraphTensor<<(A, B) as TryConcatAlong<Ax>>::Output>;
     fn concat_along(self, _: Ax) -> Self::Output {
-        let (left, right) = self;
-        let graph = unsafe { left.graph_ref.as_mut().unwrap() };
+        let (orig_left, orig_right) = self;
+        let graph = unsafe { orig_left.graph_ref.as_mut().unwrap() };
         let dim = Ax::as_array()[0] as usize;
         let pad_a = graph
             .add_op(
@@ -157,7 +157,7 @@ where
                     "ConcatPad".to_string(),
                     Box::new(move |inps, _| {
                         let mut pad_shape = vec![(0, 0); A::NUM_DIMS];
-                        pad_shape[dim] = (0, inps[0].1.shape.shape()[dim] as i32);
+                        pad_shape[dim] = (0, inps[1].1.shape.shape()[dim] as i32);
                         let (id, mut st) = (inps[0].1.tensor_id, inps[0].1.shape.clone());
                         st.pad(&pad_shape);
                         (
@@ -171,16 +171,17 @@ where
                 ),
                 <(A, B) as TryConcatAlong<Ax>>::Output::realized_shape(),
             )
-            .input(left.id)
+            .input(orig_left.id)
+            .input(orig_right.id)
             .finish();
-        let left = GraphTensor::from_id(pad_a, left.graph_ref);
+        let left = GraphTensor::from_id(pad_a, orig_left.graph_ref);
         let pad_b = graph
             .add_op(
                 op::Function(
                     "ConcatPad".to_string(),
                     Box::new(move |inps, _| {
                         let mut pad_shape = vec![(0, 0); A::NUM_DIMS];
-                        pad_shape[dim] = (inps[0].1.shape.shape()[dim] as i32, 0);
+                        pad_shape[dim] = (inps[1].1.shape.shape()[dim] as i32, 0);
                         let (id, mut st) = (inps[0].1.tensor_id, inps[0].1.shape.clone());
                         st.pad(&pad_shape);
                         (
@@ -194,9 +195,10 @@ where
                 ),
                 <(A, B) as TryConcatAlong<Ax>>::Output::realized_shape(),
             )
-            .input(right.id)
+            .input(orig_right.id)
+            .input(orig_left.id)
             .finish();
-        let right = GraphTensor::from_id(pad_b, right.graph_ref);
+        let right = GraphTensor::from_id(pad_b, orig_right.graph_ref);
         left + right
     }
 }
@@ -275,15 +277,15 @@ mod tests {
     #[test]
     fn test_concat_1d() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R1<3>>("Input");
-        a.set(vec![1.4325, 2.492428, 3.127365]);
+        let a = cx.new_tensor::<R1<4>>("Input");
+        a.set(vec![1.4325, 2.492428, 3.127365, 3.54865]);
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![2.30434, 2.2343113, 1.4393]);
         let c = (a.realize::<(usize,)>(), b.realize::<(usize,)>()).concat_along(Axis::<0>);
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor([1.4325, 2.492428, 3.127365]);
+        let d_a = d_dev.tensor([1.4325, 2.492428, 3.127365, 3.54865]);
         let d_b = d_dev.tensor([2.30434, 2.2343113, 1.4393]);
         let d_c = (d_a.realize::<(usize,)>(), d_b.realize::<(usize,)>())
             .concat_along(dfdx::shapes::Axis::<0>);

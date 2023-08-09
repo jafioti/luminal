@@ -47,7 +47,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Get the value of the tensor (if the graph was executed)
-    pub fn retrieve(self) -> Option<Tensor> {
+    pub fn retrieve(&self) -> Option<Tensor> {
         unsafe { self.graph_ref.as_mut().unwrap().get_tensor(self.id) }
     }
 

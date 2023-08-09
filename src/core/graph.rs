@@ -15,13 +15,14 @@ use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Dire
 
 #[derive(Debug, Default)]
 pub struct Graph {
-    pub(crate) tensors: HashMap<NodeIndex, Tensor>,
-    pub(crate) views: HashMap<NodeIndex, TensorView>,
+    pub tensors: HashMap<NodeIndex, Tensor>,
+    pub views: HashMap<NodeIndex, TensorView>,
     pub(crate) id_remap: HashMap<NodeIndex, NodeIndex>,
     #[allow(clippy::type_complexity)]
     pub graph: StableGraph<(Box<dyn Operator>, Vec<RealDim>), u8>,
-    pub(crate) no_delete: HashSet<NodeIndex>,
+    pub no_delete: HashSet<NodeIndex>,
     pub(crate) to_retrieve: HashSet<NodeIndex>,
+    // pub(crate) t_cache: HashSet<NodeIndex>, // Don't delete tensors or views
     /// A list of current node to run, source nodes, and view nodes to delete after execution.
     #[allow(clippy::type_complexity)]
     pub(crate) linearized_graph: Option<Vec<(NodeIndex, Vec<NodeIndex>, Vec<NodeIndex>)>>,
@@ -46,8 +47,8 @@ impl Graph {
     }
 
     pub fn get_tensor(&mut self, id: NodeIndex) -> Option<Tensor> {
-        let id = self.get_view(id)?.tensor_id;
-        self.tensors.remove(&id)
+        let v_id = self.get_view(id)?.tensor_id;
+        self.tensors.remove(&v_id)
     }
 
     pub fn get_tensor_ref(&self, id: NodeIndex) -> Option<&Tensor> {
@@ -132,12 +133,32 @@ impl Graph {
     /// Clear any remaining tensors that may be around from old executions
     pub fn reset(&mut self) {
         // (This is where we should do the tensor caching!)
-        self.tensors.clear();
-        self.views.clear();
+        let mut views_pointing: HashMap<NodeIndex, usize> = self
+            .views
+            .iter()
+            .group_by(|(_, v)| v.tensor_id)
+            .into_iter()
+            .map(|(v, i)| (v, i.count()))
+            .collect();
+        for t in self.views.keys().copied().collect_vec() {
+            if !self.no_delete.contains(&t) {
+                self.views.remove(&t);
+                if let Some(c) = views_pointing.get_mut(&t) {
+                    *c -= 1;
+                    if *c == 0 {
+                        self.tensors.remove(&t);
+                    }
+                }
+            }
+        }
     }
 
     // Clear all nodes not required to produce output nodes, stop looking past inputs
-    pub fn prune(&mut self, outputs: Vec<NodeIndex>, inputs: Vec<NodeIndex>) {
+    pub fn prune<O: IntoIterator<Item = NodeIndex>, I: IntoIterator<Item = NodeIndex>>(
+        &mut self,
+        outputs: O,
+        inputs: I,
+    ) {
         let mut keep_nodes = HashSet::default();
         let input_nodes: HashSet<NodeIndex> = inputs.into_iter().collect();
         for n in outputs {
@@ -146,8 +167,30 @@ impl Graph {
         for node in self.graph.node_indices().collect_vec() {
             if !keep_nodes.contains(&node) {
                 self.graph.remove_node(node);
+                self.no_delete.remove(&node);
+                self.to_retrieve.remove(&node);
             }
         }
+        self.linearized_graph = None;
+    }
+
+    // Swap the tensors with these ids
+    pub fn swap_tensors<A: Shape, B: Shape>(&mut self, a: GraphTensor<A>, b: GraphTensor<B>) {
+        let a_id = self.views.get(&a.id).unwrap().tensor_id;
+        let b_id = self.views.get(&b.id).unwrap().tensor_id;
+        let a_t = self.tensors.remove(&a_id);
+        let b_t = self.tensors.remove(&b_id);
+
+        if let Some(a_t) = a_t {
+            self.tensors.insert(b_id, a_t);
+        }
+        if let Some(b_t) = b_t {
+            self.tensors.insert(a_id, b_t);
+        }
+
+        let tmp_st = self.views.get(&a.id).unwrap().shape.clone();
+        self.views.get_mut(&a.id).unwrap().shape = self.views.get(&b.id).unwrap().shape.clone();
+        self.views.get_mut(&b.id).unwrap().shape = tmp_st;
     }
 
     /// Execute the graph.
@@ -164,8 +207,10 @@ impl Graph {
             self.toposort();
         }
         for (node, src_ids, srcs_to_remove) in self.linearized_graph.as_ref().unwrap().iter() {
-            if self.views.contains_key(node) {
-                continue;
+            if let Some(v) = self.views.get(node) {
+                if self.tensors.contains_key(&v.tensor_id) {
+                    continue;
+                }
             }
             let srcs = src_ids
                 .iter()
@@ -198,7 +243,7 @@ impl Graph {
                 if let Some(view) = self.views.remove(source) {
                     let vp = views_pointing.get_mut(&view.tensor_id).unwrap();
                     *vp -= 1;
-                    if *vp == 0 {
+                    if *vp == 0 && !self.no_delete.contains(&view.tensor_id) {
                         // No views pointing at this tensor, remove it
                         self.tensors.remove(&view.tensor_id);
                     }
@@ -249,10 +294,15 @@ impl Graph {
         for (id, node) in self.graph.node_indices().zip(self.graph.node_weights()) {
             id_map.insert(
                 id,
+                // new_graph.add_node(if show_shapes {
+                //     format!("{node:?}")
+                // } else {
+                //     format!("{:?}", node.0)
+                // }),
                 new_graph.add_node(if show_shapes {
                     format!("{node:?}")
                 } else {
-                    format!("{:?}", node.0)
+                    format!("{:?} | {id:?}", node.0)
                 }),
             );
         }
@@ -432,6 +482,7 @@ fn reverse_dfs_mark(
             .graph
             .edges_directed(curr_node, Direction::Incoming)
             .map(|e| e.source())
+            .filter(|i| !marked.contains(i))
             .collect_vec()
         {
             reverse_dfs_mark(i, cx, marked, input_nodes);
