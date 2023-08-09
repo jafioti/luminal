@@ -63,7 +63,7 @@ impl<S: Shape> GraphTensor<S> {
                             let s = inp[0].1.shape.shape()[dim as usize];
                             (
                                 Some(Tensor {
-                                    data: Box::new(vec![s as f32]),
+                                    data: Box::new(vec![1. / s as f32]),
                                 }),
                                 TensorView {
                                     tensor_id: i,
@@ -89,7 +89,7 @@ impl<S: Shape> GraphTensor<S> {
             }
             // Divide by div tensor
             node_id = graph
-                .add_op(op::Div, shape.clone())
+                .add_op(op::Mul, shape.clone())
                 .input(node_id)
                 .input(size_t)
                 .finish();

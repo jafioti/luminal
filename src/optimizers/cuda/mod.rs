@@ -105,9 +105,7 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
                 "Sqrt" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaSqrt),
                 "Recip" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaRecip),
                 "Add" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaAdd),
-                "Sub" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaSub),
                 "Mul" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMul),
-                "Div" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaDiv),
                 "Max" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMax),
                 "Mod" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMod),
                 "SumReduce" => {
@@ -501,11 +499,7 @@ impl Operator for CudaAdd {
         tensors: Vec<(&Tensor, TensorView)>,
         i: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let res_shape = tensors[0]
-            .1
-            .shape
-            .get_real_shape([&tensors[1].1.shape])
-            .unwrap();
+        let res_shape = tensors[0].1.shape.get_real_shape([&tensors[1].1.shape]);
         let a = tensors[0]
             .0
             .data
@@ -554,75 +548,6 @@ extern \"C\" __global__ void add_kernel(float *out, const float *a, const float 
 }
 
 #[derive(Debug, Clone)]
-pub struct CudaSub;
-impl Operator for CudaSub {
-    fn name(&self) -> &'static str {
-        "CudaSub"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-    fn process(
-        &self,
-        tensors: Vec<(&Tensor, TensorView)>,
-        i: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        let res_shape = tensors[0]
-            .1
-            .shape
-            .get_real_shape([&tensors[1].1.shape])
-            .unwrap();
-        let a = tensors[0]
-            .0
-            .data
-            .as_any()
-            .downcast_ref::<CudaSlice<f32>>()
-            .unwrap();
-        let b = tensors[1]
-            .0
-            .data
-            .as_any()
-            .downcast_ref::<CudaSlice<f32>>()
-            .unwrap();
-        let inp_size: usize = res_shape.iter().product();
-        let a_index_fn_exp = tensors[0].1.shape.index_fn_node().to_string_no_range();
-        let b_index_fn_exp = tensors[1].1.shape.index_fn_node().to_string_no_range();
-        let ptx = compile_ptx(format!(
-            "
-extern \"C\" __global__ void sub_kernel(float *out, const float *a, const float *b, int numel) {{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int a_idx = {a_index_fn_exp};
-    int b_idx = {b_index_fn_exp};
-    if (idx < numel) {{
-        out[idx] = a[a_idx] - b[b_idx];
-    }}
-}}"
-        ))
-        .unwrap();
-        let dev = CudaDevice::new(0).unwrap();
-        dev.load_ptx(ptx, "sub", &["sub_kernel"]).unwrap();
-        let f = dev.get_func("sub", "sub_kernel").unwrap();
-
-        let mut out = unsafe { dev.alloc::<f32>(inp_size) }.unwrap();
-        let cfg = LaunchConfig::for_num_elems(inp_size as u32);
-        unsafe { f.launch(cfg, (&mut out, a, b, inp_size as i32)) }.unwrap();
-
-        (
-            Some(Tensor {
-                data: Box::new(out),
-            }),
-            TensorView {
-                tensor_id: i,
-                shape: ShapeTracker::new(res_shape),
-            },
-        )
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct CudaMul;
 impl Operator for CudaMul {
     fn name(&self) -> &'static str {
@@ -639,11 +564,7 @@ impl Operator for CudaMul {
         tensors: Vec<(&Tensor, TensorView)>,
         i: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let res_shape = tensors[0]
-            .1
-            .shape
-            .get_real_shape([&tensors[1].1.shape])
-            .unwrap();
+        let res_shape = tensors[0].1.shape.get_real_shape([&tensors[1].1.shape]);
         let a = tensors[0]
             .0
             .data
@@ -692,75 +613,6 @@ extern \"C\" __global__ void mul_kernel(float *out, const float *a, const float 
 }
 
 #[derive(Debug, Clone)]
-pub struct CudaDiv;
-impl Operator for CudaDiv {
-    fn name(&self) -> &'static str {
-        "CudaDiv"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-    fn process(
-        &self,
-        tensors: Vec<(&Tensor, TensorView)>,
-        i: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        let res_shape = tensors[0]
-            .1
-            .shape
-            .get_real_shape([&tensors[1].1.shape])
-            .unwrap();
-        let a = tensors[0]
-            .0
-            .data
-            .as_any()
-            .downcast_ref::<CudaSlice<f32>>()
-            .unwrap();
-        let b = tensors[1]
-            .0
-            .data
-            .as_any()
-            .downcast_ref::<CudaSlice<f32>>()
-            .unwrap();
-        let inp_size: usize = res_shape.iter().product();
-        let a_index_fn_exp = tensors[0].1.shape.index_fn_node().to_string_no_range();
-        let b_index_fn_exp = tensors[1].1.shape.index_fn_node().to_string_no_range();
-        let ptx = compile_ptx(format!(
-            "
-extern \"C\" __global__ void div_kernel(float *out, const float *a, const float *b, int numel) {{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int a_idx = {a_index_fn_exp};
-    int b_idx = {b_index_fn_exp};
-    if (idx < numel) {{
-        out[idx] = a[a_idx] / b[b_idx];
-    }}
-}}"
-        ))
-        .unwrap();
-        let dev = CudaDevice::new(0).unwrap();
-        dev.load_ptx(ptx, "div", &["div_kernel"]).unwrap();
-        let f = dev.get_func("div", "div_kernel").unwrap();
-
-        let mut out = unsafe { dev.alloc::<f32>(inp_size) }.unwrap();
-        let cfg = LaunchConfig::for_num_elems(inp_size as u32);
-        unsafe { f.launch(cfg, (&mut out, a, b, inp_size as i32)) }.unwrap();
-
-        (
-            Some(Tensor {
-                data: Box::new(out),
-            }),
-            TensorView {
-                tensor_id: i,
-                shape: ShapeTracker::new(res_shape),
-            },
-        )
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct CudaMax;
 impl Operator for CudaMax {
     fn name(&self) -> &'static str {
@@ -777,11 +629,7 @@ impl Operator for CudaMax {
         tensors: Vec<(&Tensor, TensorView)>,
         i: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let res_shape = tensors[0]
-            .1
-            .shape
-            .get_real_shape([&tensors[1].1.shape])
-            .unwrap();
+        let res_shape = tensors[0].1.shape.get_real_shape([&tensors[1].1.shape]);
         let a = tensors[0]
             .0
             .data
@@ -846,11 +694,7 @@ impl Operator for CudaMod {
         tensors: Vec<(&Tensor, TensorView)>,
         i: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let res_shape = tensors[0]
-            .1
-            .shape
-            .get_real_shape([&tensors[1].1.shape])
-            .unwrap();
+        let res_shape = tensors[0].1.shape.get_real_shape([&tensors[1].1.shape]);
         let a = tensors[0]
             .0
             .data

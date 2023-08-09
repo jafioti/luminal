@@ -12,7 +12,7 @@ use crate::{
 fn test_log2() {
     // We can't use dfdx because it doesn't implement this op
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>();
+    let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 3.]);
     let b = a.log_2();
     b.mark();
@@ -33,7 +33,7 @@ fn test_log2() {
 fn test_exp2() {
     // We can't use dfdx because it doesn't implement this op
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>();
+    let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 3.]);
     let b = a.exp_2();
     b.mark();
@@ -54,7 +54,7 @@ fn test_exp2() {
 fn test_log2exp2() {
     // We can't use dfdx because it doesn't implement this op
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>();
+    let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 3.]);
     let b = a.exp_2().log_2();
     b.mark();
@@ -71,7 +71,7 @@ fn test_log2exp2() {
 #[test]
 fn test_recip() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>();
+    let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 3.]);
     let b = a.recip();
     b.mark();
@@ -91,7 +91,7 @@ fn test_recip() {
 #[test]
 fn test_sin() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>();
+    let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 3.]);
     let b = a.sin();
     b.mark();
@@ -111,7 +111,7 @@ fn test_sin() {
 #[test]
 fn test_sqrt() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>();
+    let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 3.]);
     let b = a.sqrt();
     b.mark();
@@ -131,9 +131,9 @@ fn test_sqrt() {
 #[test]
 fn test_add() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>();
+    let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 3.]);
-    let b = cx.new_tensor::<R1<3>>();
+    let b = cx.new_tensor::<R1<3>>("Input");
     b.set(vec![1., 2., 3.]);
     let c = a + b;
     c.mark();
@@ -155,9 +155,9 @@ fn test_add() {
 #[test]
 fn test_sub() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>();
+    let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 3.]);
-    let b = cx.new_tensor::<R1<3>>();
+    let b = cx.new_tensor::<R1<3>>("Input");
     b.set(vec![1., 2., 3.]);
     let c = a - b;
     c.mark();
@@ -179,9 +179,9 @@ fn test_sub() {
 #[test]
 fn test_mul() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>();
+    let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 3.]);
-    let b = cx.new_tensor::<R1<3>>();
+    let b = cx.new_tensor::<R1<3>>("Input");
     b.set(vec![1., 2., 3.]);
     let c = a * b;
     c.mark();
@@ -203,9 +203,9 @@ fn test_mul() {
 #[test]
 fn test_div() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>();
+    let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 3.]);
-    let b = cx.new_tensor::<R1<3>>();
+    let b = cx.new_tensor::<R1<3>>("Input");
     b.set(vec![1., 2., 3.]);
     let c = a / b;
     c.mark();
@@ -227,9 +227,9 @@ fn test_div() {
 #[test]
 fn test_max() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>();
+    let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 3.]);
-    let b = cx.new_tensor::<R1<3>>();
+    let b = cx.new_tensor::<R1<3>>("Input");
     b.set(vec![1., 2., 3.]);
     let c = a.max(b);
     c.mark();
@@ -251,9 +251,9 @@ fn test_max() {
 #[test]
 fn test_mod() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>();
+    let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 3.]);
-    let b = cx.new_tensor::<R1<3>>();
+    let b = cx.new_tensor::<R1<3>>("Input");
     b.set(vec![1., 2., 3.]);
     let c = a % b;
     c.mark();
@@ -278,7 +278,7 @@ fn test_mod() {
 #[test]
 fn test_sum_reduce() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R3<2, 2, 3>>();
+    let a = cx.new_tensor::<R3<2, 2, 3>>("Input");
     a.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
     let b = a.sum_reduce::<_, crate::prelude::Axis<1>>();
     let c = a.sum_reduce::<_, crate::prelude::Axis<0>>();
@@ -313,7 +313,7 @@ fn test_sum_reduce() {
 #[test]
 fn test_max_reduce() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R3<2, 2, 3>>();
+    let a = cx.new_tensor::<R3<2, 2, 3>>("Input");
     a.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
     let b = a.max_reduce::<_, crate::prelude::Axis<1>>();
     let c = a.max_reduce::<_, crate::prelude::Axis<0>>();
@@ -348,7 +348,7 @@ fn test_max_reduce() {
 #[test]
 fn test_mean_reduce() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R2<2, 3>>();
+    let a = cx.new_tensor::<R2<2, 3>>("Input");
     a.set(vec![1., 2., 3., 1., 2., 3.]);
     let b = a.mean_reduce::<_, crate::prelude::Axis<1>>();
     b.mark();
@@ -370,8 +370,8 @@ fn test_mean_reduce() {
 fn test_relu_and_linear() {
     // Test single and batch, unoptimized and optimized
     let mut cx = Graph::new();
-    let batch = cx.new_tensor::<R2<2, 3>>();
-    let a = cx.new_tensor::<R1<3>>();
+    let batch = cx.new_tensor::<R2<2, 3>>("Input");
+    let a = cx.new_tensor::<R1<3>>("Input");
 
     let model: (Linear<3, 4>, ReLU, Linear<4, 2>) = InitModule::initialize(&mut cx);
     model
@@ -461,7 +461,7 @@ fn test_transformer_encoder_block() {
         .weight
         .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
-    let a = cx.new_tensor::<(usize, crate::shape::Const<3>)>();
+    let a = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
     let b = model.forward(a);
 
     a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![2, 3]);

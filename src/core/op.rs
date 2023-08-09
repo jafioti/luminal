@@ -380,7 +380,7 @@ impl Operator for Add {
         inp: Vec<(&Tensor, TensorView)>,
         nid: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]).unwrap();
+        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]);
         let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
         left_shape.views.last_mut().unwrap().shape = res_shape.clone();
         left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
@@ -421,63 +421,6 @@ impl Operator for Add {
 }
 
 #[derive(Debug, Clone)]
-pub struct Sub;
-impl Operator for Sub {
-    fn name(&self) -> &'static str {
-        "Sub"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]).unwrap();
-        let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
-        left_shape.views.last_mut().unwrap().shape = res_shape.clone();
-        left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
-            &left_shape.views.last().unwrap().shape,
-            &left_shape.views.last().unwrap().strides,
-        );
-        right_shape.views.last_mut().unwrap().shape = res_shape.clone();
-        right_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
-            &right_shape.views.last().unwrap().shape,
-            &right_shape.views.last().unwrap().strides,
-        );
-        let ((a_idx, a_valid), (b_idx, b_valid)) =
-            (left_shape.index_node(), right_shape.index_node());
-        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let mut data = vec![0.; res_shape.iter().product()];
-        for i in 0..data.len() as i32 {
-            data[i as usize] = if a_valid.solve(i) != 0 {
-                a_data[a_idx.solve(i) as usize]
-            } else {
-                0.
-            } - if b_valid.solve(i) != 0 {
-                b_data[b_idx.solve(i) as usize]
-            } else {
-                0.
-            };
-        }
-        (
-            Some(Tensor {
-                data: Box::new(data),
-            }),
-            TensorView {
-                tensor_id: nid,
-                shape: ShapeTracker::new(res_shape),
-            },
-        )
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct Mul;
 impl Operator for Mul {
     fn name(&self) -> &'static str {
@@ -494,7 +437,7 @@ impl Operator for Mul {
         inp: Vec<(&Tensor, TensorView)>,
         nid: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]).unwrap();
+        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]);
         let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
         left_shape.views.last_mut().unwrap().shape = res_shape.clone();
         left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
@@ -536,63 +479,6 @@ impl Operator for Mul {
 }
 
 #[derive(Debug, Clone)]
-pub struct Div;
-impl Operator for Div {
-    fn name(&self) -> &'static str {
-        "Div"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]).unwrap();
-        let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
-        left_shape.views.last_mut().unwrap().shape = res_shape.clone();
-        left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
-            &left_shape.views.last().unwrap().shape,
-            &left_shape.views.last().unwrap().strides,
-        );
-        right_shape.views.last_mut().unwrap().shape = res_shape.clone();
-        right_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
-            &right_shape.views.last().unwrap().shape,
-            &right_shape.views.last().unwrap().strides,
-        );
-        let ((a_idx, a_valid), (b_idx, b_valid)) =
-            (left_shape.index_node(), right_shape.index_node());
-        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let b_data = inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let mut data = vec![0.; res_shape.iter().product()];
-        for i in 0..data.len() as i32 {
-            data[i as usize] = if a_valid.solve(i) != 0 {
-                a_data[a_idx.solve(i) as usize]
-            } else {
-                0.
-            } / if b_valid.solve(i) != 0 {
-                b_data[b_idx.solve(i) as usize]
-            } else {
-                0.
-            };
-        }
-        (
-            Some(Tensor {
-                data: Box::new(data),
-            }),
-            TensorView {
-                tensor_id: nid,
-                shape: ShapeTracker::new(res_shape),
-            },
-        )
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct Max;
 impl Operator for Max {
     fn name(&self) -> &'static str {
@@ -609,7 +495,7 @@ impl Operator for Max {
         inp: Vec<(&Tensor, TensorView)>,
         nid: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]).unwrap();
+        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]);
         let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
         left_shape.views.last_mut().unwrap().shape = res_shape.clone();
         left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(
@@ -667,7 +553,7 @@ impl Operator for Mod {
         inp: Vec<(&Tensor, TensorView)>,
         nid: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]).unwrap();
+        let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]);
         let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
         left_shape.views.last_mut().unwrap().shape = res_shape.clone();
         left_shape.views.last_mut().unwrap().shape_strides = to_shapes_strides(

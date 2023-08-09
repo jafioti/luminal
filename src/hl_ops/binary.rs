@@ -20,13 +20,7 @@ impl<S: Shape> Sub<GraphTensor<S>> for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
     fn sub(self, rhs: GraphTensor<S>) -> Self::Output {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let new_id = graph
-            .add_op(op::Sub, self.shape().clone())
-            .input(self.id)
-            .input(rhs.id)
-            .finish();
-        GraphTensor::from_id(new_id, self.graph_ref)
+        self + -rhs
     }
 }
 
@@ -44,17 +38,12 @@ impl<S: Shape> Mul<GraphTensor<S>> for GraphTensor<S> {
     }
 }
 
+#[allow(clippy::suspicious_arithmetic_impl)]
 impl<S: Shape> Div<GraphTensor<S>> for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
     fn div(self, rhs: GraphTensor<S>) -> Self::Output {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let new_id = graph
-            .add_op(op::Div, self.shape().clone())
-            .input(self.id)
-            .input(rhs.id)
-            .finish();
-        GraphTensor::from_id(new_id, self.graph_ref)
+        self * rhs.recip()
     }
 }
 

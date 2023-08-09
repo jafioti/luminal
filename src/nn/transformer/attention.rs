@@ -137,14 +137,8 @@ impl<
             .w_v
             .forward(values)
             .dyn_reshape::<(B, S1, usize, usize)>(vec![
-                match B::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(0),
-                },
-                match S1::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(1),
-                },
+                B::const_size().to_reshape(0),
+                S1::const_size().to_reshape(1),
                 ReshapeDim::Const(HEADS),
                 ReshapeDim::Const(K_DIM / HEADS),
             ])
@@ -153,14 +147,8 @@ impl<
             .w_k
             .forward(keys)
             .dyn_reshape::<(B, S1, usize, usize)>(vec![
-                match B::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(0),
-                },
-                match S1::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(1),
-                },
+                B::const_size().to_reshape(0),
+                S1::const_size().to_reshape(1),
                 ReshapeDim::Const(HEADS),
                 ReshapeDim::Const(K_DIM / HEADS),
             ])
@@ -169,14 +157,8 @@ impl<
             .w_q
             .forward(queries)
             .dyn_reshape::<(B, S2, usize, usize)>(vec![
-                match B::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(0),
-                },
-                match S2::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(1),
-                },
+                B::const_size().to_reshape(0),
+                S2::const_size().to_reshape(1),
                 ReshapeDim::Const(HEADS),
                 ReshapeDim::Const(K_DIM / HEADS),
             ])
@@ -191,14 +173,8 @@ impl<
             .batch_matmul(values)
             .permute::<_, Axes4<0, 2, 1, 3>>()
             .dyn_reshape(vec![
-                match B::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(0),
-                },
-                match S2::const_size() {
-                    RealDim::Const(n) => ReshapeDim::Const(n),
-                    RealDim::Dyn => ReshapeDim::PrevDim(1),
-                },
+                B::const_size().to_reshape(0),
+                S2::const_size().to_reshape(1),
                 ReshapeDim::Const(V_DIM),
             ]);
         self.w_o.forward(tokens)

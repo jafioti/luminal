@@ -198,10 +198,10 @@ impl ShapeTracker {
         }
     }
 
-    pub fn get_real_shape<const N: usize>(&self, other: [&ShapeTracker; N]) -> Option<Vec<usize>> {
+    pub fn get_real_shape<const N: usize>(&self, other: [&ShapeTracker; N]) -> Vec<usize> {
         let mut our = self.views.last().unwrap().shape.clone();
         if !our.iter().any(|i| *i == 100) {
-            return Some(our);
+            return our;
         }
 
         // Fill in holes
@@ -217,11 +217,14 @@ impl ShapeTracker {
                 break;
             }
         }
-        if !our.iter().any(|i| *i == 100) {
-            Some(our)
-        } else {
-            None
+
+        // Turn remaining 100s into 1s
+        for i in &mut our {
+            if *i == 100 {
+                *i = 1;
+            }
         }
+        our
     }
 
     pub fn shape(&self) -> &Vec<usize> {
