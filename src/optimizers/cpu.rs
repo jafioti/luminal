@@ -1,18 +1,21 @@
 use std::any::Any;
 
 use itertools::Itertools;
-use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
+use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
 
-use crate::{op::Operator, prelude::*};
+use crate::{
+    op::{Exp2, Log2, Operator, Recip, Sin, Sqrt},
+    prelude::*,
+};
 
 // Ops and optimizers specific to CPU execution
 
-pub type CPUOptimizer = CPUMatMulOptimizer;
+pub type CPUOptimizer = (MatMulOptimizer, UnaryFusionOptimizer);
 
 #[derive(Debug, Default)]
-pub struct CPUMatMulOptimizer;
+pub struct MatMulOptimizer;
 
-impl GraphOptimizer for CPUMatMulOptimizer {
+impl GraphOptimizer for MatMulOptimizer {
     fn optimize(&self, graph: &mut Graph) {
         // Look for the matmul pattern
         for node in graph.graph.node_indices().collect_vec() {
@@ -66,9 +69,9 @@ impl GraphOptimizer for CPUMatMulOptimizer {
             let (input_0, (_, input_0_shape)) = graph.get_sources(expand_2).pop().unwrap();
             let (input_1, (_, input_1_shape)) = graph.get_sources(node).pop().unwrap();
 
-            // Now we have a verified matmul, let's replace it with the CPUMatMul2D op
+            // Now we have a verified matmul, let's replace it with the MatMul2D op
             let new_op = graph
-                .add_op(CPUMatMul2D, vec![input_0_shape[0], input_1_shape[1]])
+                .add_op(MatMul2D, vec![input_0_shape[0], input_1_shape[1]])
                 .input(input_0)
                 .input(input_1)
                 .finish();
@@ -101,11 +104,11 @@ impl GraphOptimizer for CPUMatMulOptimizer {
 }
 
 #[derive(Debug)]
-pub struct CPUMatMul2D;
+pub struct MatMul2D;
 
-impl Operator for CPUMatMul2D {
+impl Operator for MatMul2D {
     fn name(&self) -> &'static str {
-        "CPUMatMul2D"
+        "MatMul2D"
     }
     fn as_any(&self) -> &dyn Any {
         self
@@ -152,6 +155,135 @@ impl Operator for CPUMatMul2D {
                 shape: ShapeTracker::new(vec![a_shape[0], b_shape[1]]),
             },
         )
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct UnaryFusionOptimizer;
+
+impl GraphOptimizer for UnaryFusionOptimizer {
+    fn optimize(&self, graph: &mut Graph) {
+        fn is_unary(op: &dyn Any) -> Option<fn(f32) -> f32> {
+            if op.is::<Exp2>() {
+                Some(|i| i.exp2())
+            } else if op.is::<Log2>() {
+                Some(|i| i.log2())
+            } else if op.is::<Recip>() {
+                Some(|i| i.recip())
+            } else if op.is::<Sqrt>() {
+                Some(|i| i.sqrt())
+            } else if op.is::<Sin>() {
+                Some(|i| i.sin())
+            } else {
+                None
+            }
+        }
+
+        // Scan through unary sequential eliminations
+        for id in graph.graph.node_indices().collect_vec() {
+            if graph.no_delete.contains(&id) {
+                continue;
+            }
+            let outgoing = graph
+                .graph
+                .edges_directed(id, petgraph::Direction::Outgoing)
+                .map(|i| i.target())
+                .collect_vec();
+            if outgoing.len() != 1 {
+                continue;
+            }
+            for outgoing_target in outgoing {
+                let op = graph.get_op(id).unwrap();
+                let other = graph.get_op(outgoing_target).unwrap();
+                let mut replaced = false;
+                if let Some(f) = is_unary(op.as_any()) {
+                    if let Some(of) = is_unary(other.as_any()) {
+                        // Unary -> Unary
+                        graph.graph.node_weight_mut(id).unwrap().0 =
+                            Box::new(FusedUnary(vec![f, of]));
+                        replaced = true;
+                    } else if let Some(mut fused) =
+                        other.as_any().downcast_ref::<FusedUnary>().cloned()
+                    {
+                        // Unary -> Fused
+                        fused.0.insert(0, f);
+                        graph.graph.node_weight_mut(id).unwrap().0 = Box::new(fused);
+                        replaced = true;
+                    }
+                } else if let Some(mut fused) = op.as_any().downcast_ref::<FusedUnary>().cloned() {
+                    if let Some(of) = is_unary(other.as_any()) {
+                        // Fused -> Unary
+                        fused.0.push(of);
+                        graph.graph.node_weight_mut(id).unwrap().0 = Box::new(fused);
+                        replaced = true;
+                    } else if let Some(mut other_fused) =
+                        other.as_any().downcast_ref::<FusedUnary>().cloned()
+                    {
+                        // Fused -> Fused
+                        fused.0.append(&mut other_fused.0);
+                        graph.graph.node_weight_mut(id).unwrap().0 = Box::new(fused);
+                        replaced = true;
+                    }
+                }
+                if replaced {
+                    // Remove other node
+                    for (edge_weight, outgoing_edge_target) in graph
+                        .graph
+                        .edges_directed(outgoing_target, Direction::Outgoing)
+                        .map(|e| (*e.weight(), e.target()))
+                        .collect_vec()
+                    {
+                        graph.graph.add_edge(id, outgoing_edge_target, edge_weight);
+                    }
+
+                    Graph::move_references(
+                        &mut graph.id_remap,
+                        &mut graph.no_delete,
+                        &mut graph.to_retrieve,
+                        outgoing_target,
+                        id,
+                    );
+                    graph.graph.remove_node(outgoing_target);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FusedUnary(Vec<fn(f32) -> f32>);
+
+impl Operator for FusedUnary {
+    fn name(&self) -> &'static str {
+        "FusedUnary"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        i: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let (mut t, mut view) = (inp[0].0.clone(), inp[0].1.clone());
+        for a in t
+            .data
+            .as_any_mut()
+            .downcast_mut::<Vec<f32>>()
+            .unwrap()
+            .iter_mut()
+        {
+            for f in &self.0 {
+                *a = (f)(*a);
+            }
+        }
+
+        view.tensor_id = i;
+        (Some(t), view)
     }
 }
 
