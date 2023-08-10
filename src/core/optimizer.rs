@@ -1,3 +1,5 @@
+use petgraph::stable_graph::NodeIndex;
+
 use crate::graph::Graph;
 
 pub trait GraphOptimizer {
@@ -39,4 +41,28 @@ tuple_impls!(
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 );
 
-// Helper functions
+// Graph Selector
+pub trait GraphSelector {
+    fn is_valid(&self, node: NodeIndex, graph: &Graph);
+}
+
+pub trait GraphSelectorInterface {
+    fn or<S: GraphSelector + 'static>(self, other: S) -> OrSelector;
+}
+
+impl<T: GraphSelector + 'static> GraphSelectorInterface for T {
+    fn or<S: GraphSelector + 'static>(self, other: S) -> OrSelector {
+        OrSelector {
+            or: vec![Box::new(self), Box::new(other)],
+        }
+    }
+}
+
+pub struct PutSelector<T, S: GraphSelector> {
+    reference: *mut T,
+    selector: S,
+}
+
+pub struct OrSelector {
+    or: Vec<Box<dyn GraphSelector>>,
+}
