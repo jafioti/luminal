@@ -196,7 +196,7 @@ impl Operator for Slice {
 
 // Unary Op (A -> A)
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Log2;
 impl Operator for Log2 {
     fn name(&self) -> &'static str {
@@ -229,7 +229,7 @@ impl Operator for Log2 {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Exp2;
 impl Operator for Exp2 {
     fn name(&self) -> &'static str {
@@ -262,7 +262,7 @@ impl Operator for Exp2 {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Sin;
 impl Operator for Sin {
     fn name(&self) -> &'static str {
@@ -295,7 +295,7 @@ impl Operator for Sin {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Sqrt;
 impl Operator for Sqrt {
     fn name(&self) -> &'static str {
@@ -328,7 +328,7 @@ impl Operator for Sqrt {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Recip;
 impl Operator for Recip {
     fn name(&self) -> &'static str {
@@ -390,7 +390,7 @@ fn binary_op_setup(
     )
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Add;
 impl Operator for Add {
     fn name(&self) -> &'static str {
@@ -432,7 +432,7 @@ impl Operator for Add {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Mul;
 impl Operator for Mul {
     fn name(&self) -> &'static str {
@@ -475,7 +475,7 @@ impl Operator for Mul {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Max;
 impl Operator for Max {
     fn name(&self) -> &'static str {
@@ -518,7 +518,7 @@ impl Operator for Max {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Mod;
 impl Operator for Mod {
     fn name(&self) -> &'static str {
@@ -562,7 +562,7 @@ impl Operator for Mod {
 
 // Reduce Ops (A -> B (different shape))
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SumReduce(pub usize);
 impl Operator for SumReduce {
     fn name(&self) -> &'static str {
@@ -611,7 +611,7 @@ impl Operator for SumReduce {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MaxReduce(pub usize);
 impl Operator for MaxReduce {
     fn name(&self) -> &'static str {

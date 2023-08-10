@@ -158,6 +158,7 @@ impl Operator for MatMul2D {
     }
 }
 
+/// Apply multiple unary ops in sequence, without having to reindex / rewrite to memory between each
 #[derive(Debug, Default)]
 pub struct UnaryFusionOptimizer;
 
@@ -250,6 +251,7 @@ impl GraphOptimizer for UnaryFusionOptimizer {
     }
 }
 
+/// Multiple unary ops applied in sequence
 #[derive(Debug, Clone)]
 pub struct FusedUnary(Vec<fn(f32) -> f32>);
 

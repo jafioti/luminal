@@ -21,6 +21,8 @@ pub struct UnarySequentialOpt;
 impl GraphOptimizer for UnarySequentialOpt {
     fn optimize(&self, graph: &mut Graph) {
         // Scan through unary sequential eliminations
+        // let (exp, log) = (Exp2::default(), Log2::default());
+        // let selector = (Exp2.put(exp), Log2.put(log)).or((Log2.put(log), Exp2.put(exp)));
         for id in graph.graph.node_indices().collect_vec() {
             if graph.no_delete.contains(&id) {
                 continue;
