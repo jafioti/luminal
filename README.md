@@ -2,6 +2,8 @@
 ![image](https://raw.githubusercontent.com/jafioti/luminal/main/resources/dag.jpeg)
 **Deep learning at the speed of light.**
 
+Luminal is a deep learning library that prioritizes **static computation** and **operator fusion** to achieve high performance.
+
 ```rust
 use luminal::prelude::*;
 
