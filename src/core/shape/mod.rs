@@ -6,6 +6,8 @@ mod realize;
 mod slice;
 mod symbolic;
 mod tracker;
+use std::fmt::Display;
+
 pub use pad::*;
 pub use realize::*;
 pub use slice::*;
@@ -350,6 +352,15 @@ impl RealDim {
         match self {
             RealDim::Const(n) => ReshapeDim::Const(n),
             RealDim::Dyn => ReshapeDim::PrevDim(prev_dim),
+        }
+    }
+}
+
+impl Display for RealDim {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RealDim::Dyn => write!(f, "Dyn"),
+            RealDim::Const(n) => write!(f, "Const({n})"),
         }
     }
 }

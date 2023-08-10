@@ -307,7 +307,11 @@ impl Graph {
             id_map.insert(
                 id,
                 new_graph.add_node(if show_shapes {
-                    format!("{node:?}")
+                    format!(
+                        "{:?} | [{}]",
+                        node.0,
+                        node.1.iter().map(|i| i.to_string()).join(", ")
+                    )
                 } else {
                     format!("{:?}", node.0)
                 }),
@@ -330,8 +334,12 @@ impl Graph {
         new_graph
     }
 
-    pub fn display_graph(&self) {
+    pub fn display(&self) {
         display_graph(&self.debug_graph(false));
+    }
+
+    pub fn display_shapes(&self) {
+        display_graph(&self.debug_graph(true));
     }
 
     /// Transfer all external references from one node to another (this may happen because one node is about to be removed / merged into another)
