@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use itertools::Itertools;
-use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
+use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
 use crate::{
     op::{Exp2, Expand, Log2, Mul, Operator, Permute, Recip, Sin, Sqrt, SumReduce},
@@ -60,14 +60,7 @@ impl GraphOptimizer for MatMulOptimizer {
                 .finish();
 
             // Create edges to dests
-            for (weight, dest) in graph
-                .graph
-                .edges_directed(sum_reduce, petgraph::Direction::Outgoing)
-                .map(|e| (*e.weight(), e.target()))
-                .collect_vec()
-            {
-                graph.graph.add_edge(new_op, dest, weight);
-            }
+            move_outgoing_edge(sum_reduce, new_op, &mut graph.graph);
             move_references(
                 &mut graph.id_remap,
                 &mut graph.no_delete,
@@ -201,15 +194,7 @@ impl GraphOptimizer for UnaryFusionOptimizer {
                 }
                 if replaced {
                     // Remove other node
-                    for (edge_weight, outgoing_edge_target) in graph
-                        .graph
-                        .edges_directed(outgoing_target, Direction::Outgoing)
-                        .map(|e| (*e.weight(), e.target()))
-                        .collect_vec()
-                    {
-                        graph.graph.add_edge(id, outgoing_edge_target, edge_weight);
-                    }
-
+                    move_outgoing_edge(outgoing_target, id, &mut graph.graph);
                     move_references(
                         &mut graph.id_remap,
                         &mut graph.no_delete,

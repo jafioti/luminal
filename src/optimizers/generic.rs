@@ -44,17 +44,7 @@ impl GraphOptimizer for UnarySequentialOpt {
                 .unwrap()
                 .source();
 
-            for (edge_weight, outgoing_edge_target) in graph
-                .graph
-                .edges_directed(last, Direction::Outgoing)
-                .map(|e| (*e.weight(), e.target()))
-                .collect_vec()
-            {
-                graph
-                    .graph
-                    .add_edge(pre_node, outgoing_edge_target, edge_weight);
-            }
-
+            move_outgoing_edge(last, pre_node, &mut graph.graph);
             move_references(
                 &mut graph.id_remap,
                 &mut graph.no_delete,
@@ -116,17 +106,7 @@ impl GraphOptimizer for CombinePermutes {
                 .unwrap()
                 .0 = other_permute.0.iter().map(|i| permute_node.0[*i]).collect();
             // Remove other node
-            for (edge_weight, outgoing_edge_target) in graph
-                .graph
-                .edges_directed(last, Direction::Outgoing)
-                .map(|e| (*e.weight(), e.target()))
-                .collect_vec()
-            {
-                graph
-                    .graph
-                    .add_edge(first, outgoing_edge_target, edge_weight);
-            }
-
+            move_outgoing_edge(last, first, &mut graph.graph);
             move_references(
                 &mut graph.id_remap,
                 &mut graph.no_delete,
@@ -160,15 +140,7 @@ impl GraphOptimizer for NoOpPermutes {
                         .map(|e| e.source())
                         .next()
                     {
-                        for (edge_weight, outgoing_edge_target) in graph
-                            .graph
-                            .edges_directed(id, Direction::Outgoing)
-                            .map(|e| (*e.weight(), e.target()))
-                            .collect_vec()
-                        {
-                            graph.graph.add_edge(src, outgoing_edge_target, edge_weight);
-                        }
-
+                        move_outgoing_edge(id, src, &mut graph.graph);
                         move_references(
                             &mut graph.id_remap,
                             &mut graph.no_delete,
@@ -236,14 +208,7 @@ impl GraphOptimizer for CSE {
                     // If the op, input shapes, and output shape is the same, we can combine them (UNCLEAR IF THIS IS TRUE, NEED PROPER PartialEq)
                     {
                         // Carry over outgoing edges from node to other_node
-                        for (weight, target) in graph
-                            .graph
-                            .edges_directed(node, petgraph::Direction::Outgoing)
-                            .map(|e| (*e.weight(), e.target()))
-                            .collect_vec()
-                        {
-                            graph.graph.add_edge(*other_node, target, weight);
-                        }
+                        move_outgoing_edge(node, *other_node, &mut graph.graph);
                         // Transfer all references to node over to other node
                         move_references(
                             &mut graph.id_remap,

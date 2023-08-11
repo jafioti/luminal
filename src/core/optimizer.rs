@@ -72,6 +72,21 @@ pub fn move_references(
     }
 }
 
+pub fn move_outgoing_edge<N, E: Clone>(
+    from: NodeIndex,
+    to: NodeIndex,
+    graph: &mut StableGraph<N, E>,
+) {
+    // Carry over outgoing edges from node to other_node
+    for (weight, target) in graph
+        .edges_directed(from, petgraph::Direction::Outgoing)
+        .map(|e| (e.weight().clone(), e.target()))
+        .collect::<Vec<_>>()
+    {
+        graph.add_edge(to, target, weight);
+    }
+}
+
 pub trait TraitObjEq {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
