@@ -33,14 +33,13 @@ fn main() {
     }
 
     println!("Loading...");
-    loader::DfdxDeferredLoader::new("../../Desktop/llama-dfdx-main/llama-7b-hf").load(&model, &mut cx);
+    loader::DfdxDeferredLoader::new("./examples/llama/setup/llama-7b-hf").load(&model, &mut cx);
 
     println!("Inferencing...");
     // First pass
     inp.set_dyn(input.clone(), vec![1, input.len()]);
     let now = std::time::Instant::now();
 
-    cx.display_shapes();
     cx.execute();
     println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
 
