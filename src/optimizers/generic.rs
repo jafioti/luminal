@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use petgraph::{visit::EdgeRef, Direction};
+use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
 
 use crate::{
     op::{Exp2, Log2, Permute},
@@ -21,53 +21,43 @@ pub struct UnarySequentialOpt;
 impl GraphOptimizer for UnarySequentialOpt {
     fn optimize(&self, graph: &mut Graph) {
         // Scan through unary sequential eliminations
-        // let (exp, log) = (Exp2::default(), Log2::default());
-        // let selector = (Exp2.put(exp), Log2.put(log)).or((Log2.put(log), Exp2.put(exp)));
-        for id in graph.graph.node_indices().collect_vec() {
-            if graph.no_delete.contains(&id) {
+        let (mut first, mut last) = (NodeIndex::default(), NodeIndex::default());
+        let a = GraphSelector::default();
+        a.edge(a.op(Log2).ptr(&mut first), a.op(Exp2).ptr(&mut last));
+        let b = GraphSelector::default();
+        b.edge(b.op(Exp2).ptr(&mut first), b.op(Log2).ptr(&mut last));
+        for _ in a.search(graph).chain(b.search(graph)) {
+            if graph.no_delete.contains(&first) || graph.no_delete.contains(&last) {
                 continue;
             }
-            for outgoing_target in graph
+            // Remove current node and next node
+            let pre_node = graph
                 .graph
-                .edges_directed(id, petgraph::Direction::Outgoing)
-                .map(|i| i.target())
+                .edges_directed(first, petgraph::Direction::Incoming)
+                .next()
+                .unwrap()
+                .source();
+
+            for (edge_weight, outgoing_edge_target) in graph
+                .graph
+                .edges_directed(last, Direction::Outgoing)
+                .map(|e| (*e.weight(), e.target()))
                 .collect_vec()
             {
-                let op = graph.get_op(id).unwrap();
-                let other = graph.get_op(outgoing_target).unwrap();
-                if (op.as_any().is::<Exp2>() && other.as_any().is::<Log2>())
-                    || (op.as_any().is::<Log2>() && other.as_any().is::<Exp2>())
-                {
-                    // Remove current node and next node
-                    let pre_node = graph
-                        .graph
-                        .edges_directed(id, petgraph::Direction::Incoming)
-                        .next()
-                        .unwrap()
-                        .source();
-
-                    for (edge_weight, outgoing_edge_target) in graph
-                        .graph
-                        .edges_directed(outgoing_target, Direction::Outgoing)
-                        .map(|e| (*e.weight(), e.target()))
-                        .collect_vec()
-                    {
-                        graph
-                            .graph
-                            .add_edge(pre_node, outgoing_edge_target, edge_weight);
-                    }
-
-                    Graph::move_references(
-                        &mut graph.id_remap,
-                        &mut graph.no_delete,
-                        &mut graph.to_retrieve,
-                        outgoing_target,
-                        pre_node,
-                    );
-                    graph.graph.remove_node(id);
-                    graph.graph.remove_node(outgoing_target);
-                }
+                graph
+                    .graph
+                    .add_edge(pre_node, outgoing_edge_target, edge_weight);
             }
+
+            move_references(
+                &mut graph.id_remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                last,
+                pre_node,
+            );
+            graph.graph.remove_node(first);
+            graph.graph.remove_node(last);
         }
     }
 }
@@ -79,59 +69,66 @@ pub struct CombinePermutes;
 impl GraphOptimizer for CombinePermutes {
     fn optimize(&self, graph: &mut Graph) {
         // Scan through nodes
-        for id in graph.graph.node_indices().collect_vec() {
-            if graph.no_delete.contains(&id) {
+        let (mut first, mut last) = (NodeIndex::default(), NodeIndex::default());
+        let s = GraphSelector::default();
+        s.edge(
+            s.op(Permute::default()).ptr(&mut first),
+            s.op(Permute::default()).ptr(&mut last),
+        );
+        for _ in s.search(graph) {
+            if graph.no_delete.contains(&first) || graph.no_delete.contains(&last) {
                 continue;
             }
-            let mut outgoing = graph
+            if graph
                 .graph
-                .edges_directed(id, petgraph::Direction::Outgoing)
-                .map(|i| i.target())
-                .collect_vec();
-            if outgoing.len() != 1 {
+                .edges_directed(first, petgraph::Direction::Outgoing)
+                .count()
+                != 1
+            {
                 continue;
             }
-            let outgoing_target = outgoing.pop().unwrap();
-            if let Some(permute_node) = graph.get_op(id).unwrap().as_any().downcast_ref::<Permute>()
+            let permute_node = graph
+                .get_op(first)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Permute>()
+                .unwrap();
+            let other_permute = graph
+                .get_op(last)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Permute>()
+                .unwrap();
+            // Compute new permute indicies
+            graph
+                .graph
+                .node_weight_mut(first)
+                .unwrap()
+                .0
+                .as_any_mut()
+                .downcast_mut::<Permute>()
+                .unwrap()
+                .0 = other_permute.0.iter().map(|i| permute_node.0[*i]).collect();
+            // Remove other node
+            for (edge_weight, outgoing_edge_target) in graph
+                .graph
+                .edges_directed(last, Direction::Outgoing)
+                .map(|e| (*e.weight(), e.target()))
+                .collect_vec()
             {
-                if let Some(other_permute) = graph
-                    .get_op(outgoing_target)
-                    .unwrap()
-                    .as_any()
-                    .downcast_ref::<Permute>()
-                {
-                    // Compute new permute indicies
-                    let permute_indicies =
-                        other_permute.0.iter().map(|i| permute_node.0[*i]).collect();
-                    graph
-                        .graph
-                        .node_weight_mut(id)
-                        .unwrap()
-                        .0
-                        .as_any_mut()
-                        .downcast_mut::<Permute>()
-                        .unwrap()
-                        .0 = permute_indicies;
-                    // Remove other node
-                    for (edge_weight, outgoing_edge_target) in graph
-                        .graph
-                        .edges_directed(outgoing_target, Direction::Outgoing)
-                        .map(|e| (*e.weight(), e.target()))
-                        .collect_vec()
-                    {
-                        graph.graph.add_edge(id, outgoing_edge_target, edge_weight);
-                    }
-
-                    Graph::move_references(
-                        &mut graph.id_remap,
-                        &mut graph.no_delete,
-                        &mut graph.to_retrieve,
-                        outgoing_target,
-                        id,
-                    );
-                    graph.graph.remove_node(outgoing_target);
-                }
+                graph
+                    .graph
+                    .add_edge(first, outgoing_edge_target, edge_weight);
             }
+
+            move_references(
+                &mut graph.id_remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                last,
+                first,
+            );
+            graph.graph.remove_node(last);
         }
     }
 }
@@ -166,7 +163,7 @@ impl GraphOptimizer for NoOpPermutes {
                             graph.graph.add_edge(src, outgoing_edge_target, edge_weight);
                         }
 
-                        Graph::move_references(
+                        move_references(
                             &mut graph.id_remap,
                             &mut graph.no_delete,
                             &mut graph.to_retrieve,
@@ -234,7 +231,7 @@ impl GraphOptimizer for CSE {
                             graph.graph.add_edge(*other_node, target, weight);
                         }
                         // Transfer all references to node over to other node
-                        Graph::move_references(
+                        move_references(
                             &mut graph.id_remap,
                             &mut graph.no_delete,
                             &mut graph.to_retrieve,

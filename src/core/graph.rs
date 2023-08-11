@@ -342,26 +342,6 @@ impl Graph {
         display_graph(&self.debug_graph(true));
     }
 
-    /// Transfer all external references from one node to another (this may happen because one node is about to be removed / merged into another)
-    pub fn move_references(
-        id_remap: &mut HashMap<NodeIndex, NodeIndex>,
-        no_delete: &mut HashSet<NodeIndex<u32>>,
-        to_retrieve: &mut HashSet<NodeIndex<u32>>,
-        src: NodeIndex,
-        trg: NodeIndex,
-    ) {
-        // Create remap
-        id_remap.insert(src, trg);
-        // Transfer no_delete
-        if no_delete.remove(&src) {
-            no_delete.insert(trg);
-        }
-        // Transfer to_retrieve
-        if to_retrieve.remove(&src) {
-            to_retrieve.insert(trg);
-        }
-    }
-
     /// Get the sources of a node given it's id
     #[allow(clippy::type_complexity)]
     pub fn get_sources(

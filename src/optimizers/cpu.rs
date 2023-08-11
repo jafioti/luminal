@@ -85,7 +85,7 @@ impl GraphOptimizer for MatMulOptimizer {
             {
                 graph.graph.add_edge(new_op, dest, weight);
             }
-            Graph::move_references(
+            move_references(
                 &mut graph.id_remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
@@ -237,7 +237,7 @@ impl GraphOptimizer for UnaryFusionOptimizer {
                         graph.graph.add_edge(id, outgoing_edge_target, edge_weight);
                     }
 
-                    Graph::move_references(
+                    move_references(
                         &mut graph.id_remap,
                         &mut graph.no_delete,
                         &mut graph.to_retrieve,

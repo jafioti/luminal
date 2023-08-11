@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
@@ -49,6 +49,28 @@ tuple_impls!(
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 );
 
+// Helpers
+
+/// Transfer all external references from one node to another (this may happen because one node is about to be removed / merged into another)
+pub fn move_references(
+    id_remap: &mut HashMap<NodeIndex, NodeIndex>,
+    no_delete: &mut HashSet<NodeIndex<u32>>,
+    to_retrieve: &mut HashSet<NodeIndex<u32>>,
+    src: NodeIndex,
+    trg: NodeIndex,
+) {
+    // Create remap
+    id_remap.insert(src, trg);
+    // Transfer no_delete
+    if no_delete.remove(&src) {
+        no_delete.insert(trg);
+    }
+    // Transfer to_retrieve
+    if to_retrieve.remove(&src) {
+        to_retrieve.insert(trg);
+    }
+}
+
 // Graph Selector
 #[derive(Default)]
 pub struct GraphSelector {
@@ -58,12 +80,12 @@ pub struct GraphSelector {
     >,
 }
 
-pub struct GraphSearch<'a> {
+pub struct GraphSearch {
     selector: GraphSelector,
-    graph: &'a Graph,
+    graph: *const Graph,
 }
 
-impl<'a> Iterator for GraphSearch<'a> {
+impl Iterator for GraphSearch {
     type Item = ();
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -71,12 +93,13 @@ impl<'a> Iterator for GraphSearch<'a> {
         let Some(select_start) = self.selector.graph.lock().unwrap().node_indices().next() else {
             return None;
         };
-        for node in self.graph.graph.node_indices() {
+        let graph = unsafe { self.graph.as_ref().unwrap() };
+        for node in graph.graph.node_indices() {
             if search(
                 select_start,
                 &self.selector.graph.lock().unwrap(),
                 node,
-                &self.graph.graph,
+                &graph.graph,
                 NodeIndex::default(),
             ) {
                 return Some(());
