@@ -1,4 +1,4 @@
-use std::any::Any;
+use std::any::{Any, TypeId};
 
 use cudarc::{
     driver::{CudaDevice, CudaSlice, LaunchAsync, LaunchConfig},
@@ -6,13 +6,10 @@ use cudarc::{
 };
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
-use crate::{
-    op::{MaxReduce, Operator, SumReduce},
-    prelude::*,
-};
+use crate::{op::*, prelude::*};
 
 /// Copy a tensor to the GPU
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CudaCopyToDevice;
 
 impl Operator for CudaCopyToDevice {
@@ -36,7 +33,7 @@ impl Operator for CudaCopyToDevice {
 }
 
 /// Copy a tensor from the GPU
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CudaCopyFromDevice;
 
 impl Operator for CudaCopyFromDevice {
@@ -65,7 +62,7 @@ impl Operator for CudaCopyFromDevice {
 
 // Unary Op (A -> A)
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CudaLog2;
 impl Operator for CudaLog2 {
     fn process(
@@ -110,7 +107,7 @@ extern \"C\" __global__ void log2_kernel(float *out, const float *inp, int numel
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CudaExp2;
 impl Operator for CudaExp2 {
     fn process(
@@ -155,7 +152,7 @@ extern \"C\" __global__ void exp2_kernel(float *out, const float *inp, int numel
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CudaSin;
 impl Operator for CudaSin {
     fn process(
@@ -200,7 +197,7 @@ extern \"C\" __global__ void sin_kernel(float *out, const float *inp, int numel)
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CudaSqrt;
 impl Operator for CudaSqrt {
     fn process(
@@ -245,7 +242,7 @@ extern \"C\" __global__ void sqrt_kernel(float *out, const float *inp, int numel
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CudaRecip;
 impl Operator for CudaRecip {
     fn process(
@@ -292,7 +289,7 @@ extern \"C\" __global__ void recip_kernel(float *out, const float *inp, int nume
 
 // Binary Ops
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CudaAdd;
 impl Operator for CudaAdd {
     fn process(
@@ -348,7 +345,7 @@ extern \"C\" __global__ void add_kernel(float *out, const float *a, const float 
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CudaMul;
 impl Operator for CudaMul {
     fn process(
@@ -404,7 +401,7 @@ extern \"C\" __global__ void mul_kernel(float *out, const float *a, const float 
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CudaMax;
 impl Operator for CudaMax {
     fn process(
@@ -460,7 +457,7 @@ extern \"C\" __global__ void max_kernel(float *out, const float *a, const float 
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CudaMod;
 impl Operator for CudaMod {
     fn process(
@@ -516,7 +513,7 @@ extern \"C\" __global__ void mod_kernel(float *out, const float *a, const float 
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CudaSumReduce(pub usize);
 impl Operator for CudaSumReduce {
     fn process(
@@ -593,7 +590,7 @@ extern \"C\" __global__ void sumreduce_kernel(float *out, const float *inp, cons
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CudaMaxReduce(pub usize);
 impl Operator for CudaMaxReduce {
     fn process(
@@ -722,7 +719,7 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
             .iter()
             // Filter non-functions
             .filter(|n| {
-                graph
+                !graph
                     .graph
                     .node_weight(**n)
                     .unwrap()
@@ -739,7 +736,7 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
                 .input(output_node)
                 .finish();
 
-            Graph::move_references(
+            move_references(
                 &mut graph.id_remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
@@ -749,66 +746,36 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
         }
 
         // Swap primitive ops
-        for (id, type_id) in graph
-            .graph
-            .node_indices()
-            .map(|n| (n, graph.graph.node_weight(n).unwrap().0.as_any().type_id))
-            .collect::<Vec<_>>()
-        {
-            match type_id {
-                TypeId::of::<Log2>() => {
-                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaLog2)
-                }
-                TypeId::of::<Exp2>() => {
-                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaExp2)
-                }
-                TypeId::of::<Sin>() => {
-                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaSin)
-                }
-                TypeId::of::<Sqrt>() => {
-                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaSqrt)
-                }
-                TypeId::of::<Recip>() => {
-                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaRecip)
-                }
-                TypeId::of::<Add>() => {
-                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaAdd)
-                }
-                TypeId::of::<Mul>() => {
-                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMul)
-                }
-                TypeId::of::<Max>() => {
-                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMax)
-                }
-                TypeId::of::<Mod>() => {
-                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMod)
-                }
-                TypeId::of::<SumReduce>() => {
-                    let dim = graph
-                        .graph
-                        .node_weight(id)
-                        .unwrap()
-                        .0
-                        .as_any()
-                        .downcast_ref::<SumReduce>()
-                        .unwrap()
-                        .0;
-                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaSumReduce(dim));
-                }
-                TypeId::of::<MaxReduce>() => {
-                    let dim = graph
-                        .graph
-                        .node_weight(id)
-                        .unwrap()
-                        .0
-                        .as_any()
-                        .downcast_ref::<MaxReduce>()
-                        .unwrap()
-                        .0;
-                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMaxReduce(dim));
-                }
-                _ => {}
-            };
+        for id in graph.graph.node_indices().collect::<Vec<_>>() {
+            let op = graph.graph.node_weight(id).unwrap().0.as_any().type_id();
+            let op_ref = &mut graph.graph.node_weight_mut(id).unwrap().0;
+            if is::<Log2>(op) {
+                *op_ref = Box::new(CudaLog2);
+            } else if is::<Exp2>(op) {
+                *op_ref = Box::new(CudaExp2);
+            } else if is::<Sin>(op) {
+                *op_ref = Box::new(CudaSin);
+            } else if is::<Sqrt>(op) {
+                *op_ref = Box::new(CudaSqrt);
+            } else if is::<Recip>(op) {
+                *op_ref = Box::new(CudaRecip);
+            } else if is::<Add>(op) {
+                *op_ref = Box::new(CudaAdd);
+            } else if is::<Mul>(op) {
+                *op_ref = Box::new(CudaMul);
+            } else if is::<Max>(op) {
+                *op_ref = Box::new(CudaMax);
+            } else if is::<Mod>(op) {
+                *op_ref = Box::new(CudaMod);
+            } else if let Some(SumReduce(dim)) = op_ref.as_any().downcast_ref::<SumReduce>() {
+                *op_ref = Box::new(CudaSumReduce(*dim));
+            } else if let Some(MaxReduce(dim)) = op_ref.as_any().downcast_ref::<MaxReduce>() {
+                *op_ref = Box::new(CudaMaxReduce(*dim));
+            }
         }
     }
+}
+
+fn is<T: Any>(type_id: TypeId) -> bool {
+    type_id == TypeId::of::<T>()
 }
