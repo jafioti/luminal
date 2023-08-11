@@ -4,7 +4,7 @@ use itertools::Itertools;
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
 
 use crate::{
-    op::{Exp2, Log2, Permute},
+    op::{Exp2, Function, Log2, Permute},
     prelude::*,
 };
 
@@ -202,7 +202,15 @@ impl GraphOptimizer for CSE {
                     .map(|e| e.source())
                     .collect_vec();
 
-                if srcs.is_empty() || graph.graph.node_weight(node).unwrap().0.name() == "Input" {
+                if srcs.is_empty()
+                    || graph
+                        .graph
+                        .node_weight(node)
+                        .unwrap()
+                        .0
+                        .as_any()
+                        .is::<Function>()
+                {
                     continue;
                 }
 

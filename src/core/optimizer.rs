@@ -118,6 +118,7 @@ pub struct GraphSelector {
                     Option<Box<dyn TraitObjEq>>,
                     Option<Vec<RealDim>>,
                     Vec<*mut NodeIndex>,
+                    Option<usize>,
                 ),
                 (),
             >,
@@ -170,6 +171,7 @@ fn search(
             Option<Box<dyn TraitObjEq>>,
             Option<Vec<RealDim>>,
             Vec<*mut NodeIndex>,
+            Option<usize>,
         ),
         (),
     >,
@@ -276,7 +278,7 @@ impl GraphSelector {
     /// Create a new op to select
     pub fn op(&self) -> OpSelector {
         let mut m_self = self.graph.lock().unwrap();
-        let id = m_self.add_node((None, None, None, vec![]));
+        let id = m_self.add_node((None, None, None, vec![], None));
         OpSelector { graph: self, id }
     }
 
@@ -324,6 +326,13 @@ impl OpSelector {
         let graph = unsafe { self.graph.as_ref().unwrap() };
         let mut m_graph = graph.graph.lock().unwrap();
         m_graph.node_weight_mut(self.id).unwrap().2 = Some(shape.to_vec());
+        self
+    }
+    /// Constrain the op to an output shape of a dimension
+    pub fn dim(self, dim: usize) -> Self {
+        let graph = unsafe { self.graph.as_ref().unwrap() };
+        let mut m_graph = graph.graph.lock().unwrap();
+        m_graph.node_weight_mut(self.id).unwrap().4 = Some(dim);
         self
     }
     /// Register a pointer to set if the op is matched

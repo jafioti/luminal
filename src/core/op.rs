@@ -11,7 +11,6 @@ use crate::{
 };
 
 pub trait Operator: Debug + TraitObjEq {
-    fn name(&self) -> &'static str;
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -33,9 +32,6 @@ impl PartialEq for Function {
 }
 
 impl Operator for Function {
-    fn name(&self) -> &'static str {
-        "Function"
-    }
     fn process(
         &self,
         input: Vec<(&Tensor, TensorView)>,
@@ -54,9 +50,6 @@ impl Debug for Function {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Print(pub String);
 impl Operator for Print {
-    fn name(&self) -> &'static str {
-        "Print"
-    }
     fn process(
         &self,
         input: Vec<(&Tensor, TensorView)>,
@@ -87,9 +80,6 @@ impl Operator for Print {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Permute(pub Vec<usize>);
 impl Operator for Permute {
-    fn name(&self) -> &'static str {
-        "Permute"
-    }
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -104,9 +94,6 @@ impl Operator for Permute {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Reshape(pub Vec<ReshapeDim>);
 impl Operator for Reshape {
-    fn name(&self) -> &'static str {
-        "Reshape"
-    }
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -130,10 +117,6 @@ impl Operator for Reshape {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Expand(pub usize, pub RealDim);
 impl Operator for Expand {
-    fn name(&self) -> &'static str {
-        "Expand"
-    }
-
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -148,10 +131,6 @@ impl Operator for Expand {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Slice(pub Vec<(usize, usize)>);
 impl Operator for Slice {
-    fn name(&self) -> &'static str {
-        "Slice"
-    }
-
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -170,10 +149,6 @@ impl Operator for Slice {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Log2;
 impl Operator for Log2 {
-    fn name(&self) -> &'static str {
-        "Log2"
-    }
-
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -198,10 +173,6 @@ impl Operator for Log2 {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Exp2;
 impl Operator for Exp2 {
-    fn name(&self) -> &'static str {
-        "Exp2"
-    }
-
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -226,10 +197,6 @@ impl Operator for Exp2 {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Sin;
 impl Operator for Sin {
-    fn name(&self) -> &'static str {
-        "Sin"
-    }
-
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -254,10 +221,6 @@ impl Operator for Sin {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Sqrt;
 impl Operator for Sqrt {
-    fn name(&self) -> &'static str {
-        "Sqrt"
-    }
-
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -282,10 +245,6 @@ impl Operator for Sqrt {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Recip;
 impl Operator for Recip {
-    fn name(&self) -> &'static str {
-        "Recip"
-    }
-
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -339,10 +298,6 @@ fn binary_op_setup(
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Add;
 impl Operator for Add {
-    fn name(&self) -> &'static str {
-        "Add"
-    }
-
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -376,10 +331,6 @@ impl Operator for Add {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mul;
 impl Operator for Mul {
-    fn name(&self) -> &'static str {
-        "Mul"
-    }
-
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -414,10 +365,6 @@ impl Operator for Mul {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Max;
 impl Operator for Max {
-    fn name(&self) -> &'static str {
-        "Max"
-    }
-
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -452,10 +399,6 @@ impl Operator for Max {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mod;
 impl Operator for Mod {
-    fn name(&self) -> &'static str {
-        "Mod"
-    }
-
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -491,10 +434,6 @@ impl Operator for Mod {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SumReduce(pub usize);
 impl Operator for SumReduce {
-    fn name(&self) -> &'static str {
-        "SumReduce"
-    }
-
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -535,10 +474,6 @@ impl Operator for SumReduce {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MaxReduce(pub usize);
 impl Operator for MaxReduce {
-    fn name(&self) -> &'static str {
-        "MaxReduce"
-    }
-
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,

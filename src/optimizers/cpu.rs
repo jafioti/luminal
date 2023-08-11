@@ -4,7 +4,7 @@ use itertools::Itertools;
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
 
 use crate::{
-    op::{Exp2, Log2, Operator, Recip, Sin, Sqrt},
+    op::{Exp2, Expand, Log2, Mul, Operator, Permute, Recip, Sin, Sqrt, SumReduce},
     prelude::*,
 };
 
@@ -18,46 +18,29 @@ pub struct MatMulOptimizer;
 impl GraphOptimizer for MatMulOptimizer {
     fn optimize(&self, graph: &mut Graph) {
         // Look for the matmul pattern
-        for node in graph.graph.node_indices().collect_vec() {
-            // Permute
-            let Some((permute, permute_shape)) = graph.graph.node_weight(node) else {
-                continue;
-            };
-            if permute.name() != "Permute" || permute_shape.len() != 2 {
-                continue;
-            }
-            // Expand 1
-            let mut dests = graph.get_dests(node);
-            if dests.len() != 1 || dests[0].1 .0.name() != "Expand" || dests[0].1 .1.len() != 3 {
-                continue;
-            }
-            let (expand_1, _) = dests.pop().unwrap();
-
-            // Mul
-            let mut dests = graph.get_dests(expand_1);
-            if dests.len() != 1 || dests[0].1 .0.name() != "Mul" || dests[0].1 .1.len() != 3 {
-                continue;
-            }
-            let (mul, _) = dests.pop().unwrap();
-
-            // Expand 2
-            let mut srcs = graph
-                .get_sources(mul)
-                .into_iter()
-                .filter(|(i, _)| *i != expand_1)
-                .collect_vec();
-            if srcs.len() != 1 || srcs[0].1 .0.name() != "Expand" || srcs[0].1 .1.len() != 3 {
-                continue;
-            }
-            let (expand_2, (_, _)) = srcs.pop().unwrap();
-
-            let mut dests = graph.get_dests(mul);
-            if dests.len() != 1 || dests[0].1 .0.name() != "SumReduce" || dests[0].1 .1.len() != 2 {
-                continue;
-            }
-            let (sum_reduce, _) = dests.pop().unwrap();
-
-            if graph.no_delete.contains(&node)
+        let s = GraphSelector::default();
+        let (mut expand_1, mut expand_2, mut permute, mut sum_reduce, mut mul) = (
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+        );
+        s.edge(
+            s.edge(
+                s.op().ty::<Expand>().dim(3).ptr(&mut expand_2),
+                s.edge(
+                    s.edge(
+                        s.op().ty::<Permute>().dim(2).ptr(&mut permute),
+                        s.op().ty::<Expand>().dim(3).ptr(&mut expand_1),
+                    ),
+                    s.op().ty::<Mul>().dim(3).ptr(&mut mul),
+                ),
+            ),
+            s.op().ty::<SumReduce>().dim(2).ptr(&mut sum_reduce),
+        );
+        for _ in s.search(graph) {
+            if graph.no_delete.contains(&permute)
                 || graph.no_delete.contains(&expand_1)
                 || graph.no_delete.contains(&expand_2)
                 || graph.no_delete.contains(&mul)
@@ -67,7 +50,7 @@ impl GraphOptimizer for MatMulOptimizer {
             }
 
             let (input_0, (_, input_0_shape)) = graph.get_sources(expand_2).pop().unwrap();
-            let (input_1, (_, input_1_shape)) = graph.get_sources(node).pop().unwrap();
+            let (input_1, (_, input_1_shape)) = graph.get_sources(permute).pop().unwrap();
 
             // Now we have a verified matmul, let's replace it with the MatMul2D op
             let new_op = graph
@@ -96,7 +79,7 @@ impl GraphOptimizer for MatMulOptimizer {
             // Remove the old ops
             graph.graph.remove_node(expand_1);
             graph.graph.remove_node(expand_2);
-            graph.graph.remove_node(node);
+            graph.graph.remove_node(permute);
             graph.graph.remove_node(mul);
             graph.graph.remove_node(sum_reduce);
         }
@@ -107,10 +90,6 @@ impl GraphOptimizer for MatMulOptimizer {
 pub struct MatMul2D;
 
 impl Operator for MatMul2D {
-    fn name(&self) -> &'static str {
-        "MatMul2D"
-    }
-
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -250,10 +229,6 @@ impl GraphOptimizer for UnaryFusionOptimizer {
 pub struct FusedUnary(Vec<fn(f32) -> f32>);
 
 impl Operator for FusedUnary {
-    fn name(&self) -> &'static str {
-        "FusedUnary"
-    }
-
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,

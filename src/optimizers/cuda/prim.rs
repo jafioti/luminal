@@ -16,15 +16,6 @@ use crate::{
 pub struct CudaCopyToDevice;
 
 impl Operator for CudaCopyToDevice {
-    fn name(&self) -> &'static str {
-        "CudaCopyToDevice"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -49,15 +40,6 @@ impl Operator for CudaCopyToDevice {
 pub struct CudaCopyFromDevice;
 
 impl Operator for CudaCopyFromDevice {
-    fn name(&self) -> &'static str {
-        "CudaCopyFromDevice"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn process(
         &self,
         inp: Vec<(&Tensor, TensorView)>,
@@ -86,15 +68,6 @@ impl Operator for CudaCopyFromDevice {
 #[derive(Debug, Clone)]
 pub struct CudaLog2;
 impl Operator for CudaLog2 {
-    fn name(&self) -> &'static str {
-        "CudaLog2"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn process(
         &self,
         tensors: Vec<(&Tensor, TensorView)>,
@@ -140,15 +113,6 @@ extern \"C\" __global__ void log2_kernel(float *out, const float *inp, int numel
 #[derive(Debug, Clone)]
 pub struct CudaExp2;
 impl Operator for CudaExp2 {
-    fn name(&self) -> &'static str {
-        "CudaExp2"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn process(
         &self,
         tensors: Vec<(&Tensor, TensorView)>,
@@ -194,15 +158,6 @@ extern \"C\" __global__ void exp2_kernel(float *out, const float *inp, int numel
 #[derive(Debug, Clone)]
 pub struct CudaSin;
 impl Operator for CudaSin {
-    fn name(&self) -> &'static str {
-        "CudaSin"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn process(
         &self,
         tensors: Vec<(&Tensor, TensorView)>,
@@ -248,15 +203,6 @@ extern \"C\" __global__ void sin_kernel(float *out, const float *inp, int numel)
 #[derive(Debug, Clone)]
 pub struct CudaSqrt;
 impl Operator for CudaSqrt {
-    fn name(&self) -> &'static str {
-        "CudaSqrt"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn process(
         &self,
         tensors: Vec<(&Tensor, TensorView)>,
@@ -302,15 +248,6 @@ extern \"C\" __global__ void sqrt_kernel(float *out, const float *inp, int numel
 #[derive(Debug, Clone)]
 pub struct CudaRecip;
 impl Operator for CudaRecip {
-    fn name(&self) -> &'static str {
-        "CudaRecip"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn process(
         &self,
         tensors: Vec<(&Tensor, TensorView)>,
@@ -358,15 +295,6 @@ extern \"C\" __global__ void recip_kernel(float *out, const float *inp, int nume
 #[derive(Debug, Clone)]
 pub struct CudaAdd;
 impl Operator for CudaAdd {
-    fn name(&self) -> &'static str {
-        "CudaAdd"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn process(
         &self,
         tensors: Vec<(&Tensor, TensorView)>,
@@ -423,15 +351,6 @@ extern \"C\" __global__ void add_kernel(float *out, const float *a, const float 
 #[derive(Debug, Clone)]
 pub struct CudaMul;
 impl Operator for CudaMul {
-    fn name(&self) -> &'static str {
-        "CudaMul"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn process(
         &self,
         tensors: Vec<(&Tensor, TensorView)>,
@@ -488,15 +407,6 @@ extern \"C\" __global__ void mul_kernel(float *out, const float *a, const float 
 #[derive(Debug, Clone)]
 pub struct CudaMax;
 impl Operator for CudaMax {
-    fn name(&self) -> &'static str {
-        "CudaMax"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn process(
         &self,
         tensors: Vec<(&Tensor, TensorView)>,
@@ -553,15 +463,6 @@ extern \"C\" __global__ void max_kernel(float *out, const float *a, const float 
 #[derive(Debug, Clone)]
 pub struct CudaMod;
 impl Operator for CudaMod {
-    fn name(&self) -> &'static str {
-        "CudaMod"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn process(
         &self,
         tensors: Vec<(&Tensor, TensorView)>,
@@ -618,15 +519,6 @@ extern \"C\" __global__ void mod_kernel(float *out, const float *a, const float 
 #[derive(Debug, Clone)]
 pub struct CudaSumReduce(pub usize);
 impl Operator for CudaSumReduce {
-    fn name(&self) -> &'static str {
-        "CudaSumReduce"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn process(
         &self,
         tensors: Vec<(&Tensor, TensorView)>,
@@ -704,15 +596,6 @@ extern \"C\" __global__ void sumreduce_kernel(float *out, const float *inp, cons
 #[derive(Debug, Clone)]
 pub struct CudaMaxReduce(pub usize);
 impl Operator for CudaMaxReduce {
-    fn name(&self) -> &'static str {
-        "CudaMaxReduce"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn process(
         &self,
         tensors: Vec<(&Tensor, TensorView)>,
@@ -798,7 +681,15 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
         for (input_node, input_shape) in graph
             .graph
             .node_indices()
-            .filter(|n| graph.graph.node_weight(*n).unwrap().0.name() == "Function")
+            .filter(|n| {
+                graph
+                    .graph
+                    .node_weight(*n)
+                    .unwrap()
+                    .0
+                    .as_any()
+                    .is::<Function>()
+            })
             .map(|n| (n, graph.graph.node_weight(n).unwrap().1.clone()))
             .collect::<Vec<_>>()
         {
@@ -830,7 +721,15 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
             .to_retrieve
             .iter()
             // Filter non-functions
-            .filter(|n| graph.graph.node_weight(**n).unwrap().0.name() != "Function")
+            .filter(|n| {
+                graph
+                    .graph
+                    .node_weight(**n)
+                    .unwrap()
+                    .0
+                    .as_any()
+                    .is::<Function>()
+            })
             .map(|n| (*n, graph.graph.node_weight(*n).unwrap().1.clone()))
             .collect::<Vec<_>>()
         {
@@ -850,23 +749,41 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
         }
 
         // Swap primitive ops
-        for (id, name) in graph
+        for (id, type_id) in graph
             .graph
             .node_indices()
-            .map(|n| (n, graph.graph.node_weight(n).unwrap().0.name()))
+            .map(|n| (n, graph.graph.node_weight(n).unwrap().0.as_any().type_id))
             .collect::<Vec<_>>()
         {
-            match name {
-                "Log2" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaLog2),
-                "Exp2" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaExp2),
-                "Sin" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaSin),
-                "Sqrt" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaSqrt),
-                "Recip" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaRecip),
-                "Add" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaAdd),
-                "Mul" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMul),
-                "Max" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMax),
-                "Mod" => graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMod),
-                "SumReduce" => {
+            match type_id {
+                TypeId::of::<Log2>() => {
+                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaLog2)
+                }
+                TypeId::of::<Exp2>() => {
+                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaExp2)
+                }
+                TypeId::of::<Sin>() => {
+                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaSin)
+                }
+                TypeId::of::<Sqrt>() => {
+                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaSqrt)
+                }
+                TypeId::of::<Recip>() => {
+                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaRecip)
+                }
+                TypeId::of::<Add>() => {
+                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaAdd)
+                }
+                TypeId::of::<Mul>() => {
+                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMul)
+                }
+                TypeId::of::<Max>() => {
+                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMax)
+                }
+                TypeId::of::<Mod>() => {
+                    graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaMod)
+                }
+                TypeId::of::<SumReduce>() => {
                     let dim = graph
                         .graph
                         .node_weight(id)
@@ -878,7 +795,7 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
                         .0;
                     graph.graph.node_weight_mut(id).unwrap().0 = Box::new(CudaSumReduce(dim));
                 }
-                "MaxReduce" => {
+                TypeId::of::<MaxReduce>() => {
                     let dim = graph
                         .graph
                         .node_weight(id)
