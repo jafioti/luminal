@@ -103,18 +103,12 @@ impl GraphOptimizer for MatMulOptimizer {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct MatMul2D;
 
 impl Operator for MatMul2D {
     fn name(&self) -> &'static str {
         "MatMul2D"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn process(
@@ -252,18 +246,12 @@ impl GraphOptimizer for UnaryFusionOptimizer {
 }
 
 /// Multiple unary ops applied in sequence
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FusedUnary(Vec<fn(f32) -> f32>);
 
 impl Operator for FusedUnary {
     fn name(&self) -> &'static str {
         "FusedUnary"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn process(

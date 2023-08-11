@@ -1,4 +1,5 @@
 use std::{
+    any::{Any, TypeId},
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
@@ -71,17 +72,62 @@ pub fn move_references(
     }
 }
 
+pub trait TraitObjEq {
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+    fn is_equal(&self, _: &dyn TraitObjEq) -> bool;
+}
+
+// Implement TraitObjEq for all 'static types implementing PartialEq.
+impl<S: 'static + PartialEq> TraitObjEq for S {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn is_equal(&self, other: &dyn TraitObjEq) -> bool {
+        // Do a type-safe casting. If the types are different,
+        // return false, otherwise test the values for equality.
+        other
+            .as_any()
+            .downcast_ref::<S>()
+            .map_or(false, |a| self == a)
+    }
+}
+
+// pub trait SelfPartialEq: PartialEq<Self> {
+//     fn is_eq(&self, s: &Self) -> bool {
+//         self.partial_eq(s)
+//     }
+// }
+
+// impl<P: PartialEq<Self>> SelfPartialEq for P {}
+
 // Graph Selector
 #[derive(Default)]
 pub struct GraphSelector {
     #[allow(clippy::type_complexity)]
     graph: Arc<
-        Mutex<petgraph::Graph<(Box<dyn Operator>, Option<Vec<RealDim>>, Vec<*mut NodeIndex>), ()>>,
+        Mutex<
+            petgraph::Graph<
+                (
+                    Option<TypeId>,
+                    Option<Box<dyn TraitObjEq>>,
+                    Option<Vec<RealDim>>,
+                    Vec<*mut NodeIndex>,
+                ),
+                (),
+            >,
+        >,
     >,
 }
 
 pub struct GraphSearch {
     selector: GraphSelector,
+    already_returned: HashSet<NodeIndex>,
     graph: *const Graph,
 }
 
@@ -94,14 +140,20 @@ impl Iterator for GraphSearch {
             return None;
         };
         let graph = unsafe { self.graph.as_ref().unwrap() };
+        let mut used = HashSet::new();
         for node in graph.graph.node_indices() {
+            if self.already_returned.contains(&node) {
+                continue;
+            }
             if search(
                 select_start,
                 &self.selector.graph.lock().unwrap(),
                 node,
                 &graph.graph,
                 NodeIndex::default(),
+                &mut used,
             ) {
+                self.already_returned.insert(node);
                 return Some(());
             }
         }
@@ -113,19 +165,35 @@ impl Iterator for GraphSearch {
 fn search(
     selector_node: NodeIndex,
     selector_graph: &petgraph::Graph<
-        (Box<dyn Operator>, Option<Vec<RealDim>>, Vec<*mut NodeIndex>),
+        (
+            Option<TypeId>,
+            Option<Box<dyn TraitObjEq>>,
+            Option<Vec<RealDim>>,
+            Vec<*mut NodeIndex>,
+        ),
         (),
     >,
     graph_node: petgraph::stable_graph::NodeIndex,
     graph: &StableGraph<(Box<dyn Operator>, Vec<RealDim>), u8>,
     coming_from: NodeIndex,
+    used: &mut HashSet<NodeIndex>,
 ) -> bool {
     let selector_weight = selector_graph.node_weight(selector_node).unwrap();
     let current_weight = graph.node_weight(graph_node).unwrap();
-    if current_weight.0.as_any().type_id() != selector_weight.0.as_any().type_id() {
-        return false;
+    // Test type
+    if let Some(ty) = &selector_weight.0 {
+        if current_weight.0.as_any().type_id() != *ty {
+            return false;
+        }
     }
-    if let Some(shape) = &selector_weight.1 {
+    // Test value
+    if let Some(value) = &selector_weight.1 {
+        if !current_weight.0.is_equal(value.as_ref()) {
+            return false;
+        }
+    }
+    // Test shape
+    if let Some(shape) = &selector_weight.2 {
         if shape.len() != current_weight.1.len() {
             return false;
         }
@@ -135,8 +203,9 @@ fn search(
             }
         }
     }
+    // Used is to make sure we don't use the same node from the source graph twice, which prevents cycles
+    used.insert(graph_node);
     // Match outgoing
-    let mut used = HashSet::new();
     for select_outgoing in
         selector_graph.edges_directed(selector_node, petgraph::Direction::Outgoing)
     {
@@ -147,6 +216,8 @@ fn search(
             .edges_directed(graph_node, petgraph::Direction::Outgoing)
             .map(|e| e.target())
             .filter(|i| !used.contains(i))
+            .collect::<Vec<_>>()
+            .into_iter()
             .find(|i| {
                 search(
                     select_outgoing.target(),
@@ -154,6 +225,7 @@ fn search(
                     *i,
                     graph,
                     selector_node,
+                    used,
                 )
             })
         {
@@ -163,7 +235,6 @@ fn search(
         }
     }
     // Match incoming
-    let mut used = HashSet::new();
     for select_incoming in
         selector_graph.edges_directed(selector_node, petgraph::Direction::Incoming)
     {
@@ -174,6 +245,8 @@ fn search(
             .edges_directed(graph_node, petgraph::Direction::Outgoing)
             .map(|e| e.target())
             .filter(|i| !used.contains(i))
+            .collect::<Vec<_>>()
+            .into_iter()
             .find(|i| {
                 search(
                     select_incoming.source(),
@@ -181,6 +254,7 @@ fn search(
                     *i,
                     graph,
                     selector_node,
+                    used,
                 )
             })
         {
@@ -190,7 +264,7 @@ fn search(
         }
     }
     // All checks out
-    for ptr in &selector_weight.2 {
+    for ptr in &selector_weight.3 {
         unsafe {
             **ptr = graph_node;
         }
@@ -199,21 +273,25 @@ fn search(
 }
 
 impl GraphSelector {
-    pub fn op<O: Operator + 'static>(&self, op: O) -> OpSelector {
+    /// Create a new op to select
+    pub fn op(&self) -> OpSelector {
         let mut m_self = self.graph.lock().unwrap();
-        let id = m_self.add_node((Box::new(op), None, vec![]));
+        let id = m_self.add_node((None, None, None, vec![]));
         OpSelector { graph: self, id }
     }
 
+    /// Specify an edge between ops
     pub fn edge(&self, o1: OpSelector, o2: OpSelector) -> OpSelector {
         let mut m_self = self.graph.lock().unwrap();
         m_self.add_edge(o1.id, o2.id, ());
         o2
     }
 
+    /// Start searching a graph
     pub fn search(self, graph: &Graph) -> GraphSearch {
         GraphSearch {
             selector: self,
+            already_returned: HashSet::new(),
             graph,
         }
     }
@@ -226,17 +304,33 @@ pub struct OpSelector {
 }
 
 impl OpSelector {
+    /// Constrain the op to a type
+    pub fn ty<O: Operator + 'static>(self) -> OpSelector {
+        let graph = unsafe { self.graph.as_ref().unwrap() };
+        let mut m_graph = graph.graph.lock().unwrap();
+        m_graph.node_weight_mut(self.id).unwrap().0 = Some(TypeId::of::<O>());
+        self
+    }
+    /// Constrain the op to a value
+    pub fn value<O: Operator + 'static>(self, value: O) -> Self {
+        let graph = unsafe { self.graph.as_ref().unwrap() };
+        let mut m_graph = graph.graph.lock().unwrap();
+        m_graph.node_weight_mut(self.id).unwrap().0 = Some(TypeId::of::<O>());
+        m_graph.node_weight_mut(self.id).unwrap().1 = Some(Box::new(value));
+        self
+    }
+    /// Constrain the op to an output shape
     pub fn shape(self, shape: &[RealDim]) -> Self {
         let graph = unsafe { self.graph.as_ref().unwrap() };
         let mut m_graph = graph.graph.lock().unwrap();
-        m_graph.node_weight_mut(self.id).unwrap().1 = Some(shape.to_vec());
+        m_graph.node_weight_mut(self.id).unwrap().2 = Some(shape.to_vec());
         self
     }
-
+    /// Register a pointer to set if the op is matched
     pub fn ptr(self, ptr: *mut NodeIndex) -> Self {
         let graph = unsafe { self.graph.as_ref().unwrap() };
         let mut m_graph = graph.graph.lock().unwrap();
-        m_graph.node_weight_mut(self.id).unwrap().2.push(ptr);
+        m_graph.node_weight_mut(self.id).unwrap().3.push(ptr);
         self
     }
 }
@@ -259,13 +353,13 @@ mod tests {
         let (mut exp, mut log) = (NodeIndex::default(), NodeIndex::default());
         let selector1 = GraphSelector::default();
         selector1.edge(
-            selector1.op(Log2).ptr(&mut log),
-            selector1.op(Exp2).ptr(&mut exp),
+            selector1.op().ty::<Log2>().ptr(&mut log),
+            selector1.op().ty::<Exp2>().ptr(&mut exp),
         );
         let selector2 = GraphSelector::default();
         selector2.edge(
-            selector2.op(Exp2).ptr(&mut exp),
-            selector2.op(Log2).ptr(&mut log),
+            selector2.op().ty::<Exp2>().ptr(&mut exp),
+            selector2.op().ty::<Log2>().ptr(&mut log),
         );
 
         assert_eq!(
@@ -277,13 +371,13 @@ mod tests {
         let s = GraphSelector::default();
         s.edge(
             s.edge(
-                s.op(Expand::default()),
+                s.op().ty::<Expand>(),
                 s.edge(
-                    s.edge(s.op(Permute::default()), s.op(Expand::default())),
-                    s.op(Mul),
+                    s.edge(s.op().ty::<Permute>(), s.op().ty::<Expand>()),
+                    s.op().ty::<Mul>(),
                 ),
             ),
-            s.op(SumReduce::default()),
+            s.op().ty::<SumReduce>(),
         );
 
         assert_eq!(s.search(&cx).next(), None);

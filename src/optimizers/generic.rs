@@ -23,9 +23,15 @@ impl GraphOptimizer for UnarySequentialOpt {
         // Scan through unary sequential eliminations
         let (mut first, mut last) = (NodeIndex::default(), NodeIndex::default());
         let a = GraphSelector::default();
-        a.edge(a.op(Log2).ptr(&mut first), a.op(Exp2).ptr(&mut last));
+        a.edge(
+            a.op().ty::<Log2>().ptr(&mut first),
+            a.op().ty::<Exp2>().ptr(&mut last),
+        );
         let b = GraphSelector::default();
-        b.edge(b.op(Exp2).ptr(&mut first), b.op(Log2).ptr(&mut last));
+        b.edge(
+            b.op().ty::<Exp2>().ptr(&mut first),
+            b.op().ty::<Log2>().ptr(&mut last),
+        );
         for _ in a.search(graph).chain(b.search(graph)) {
             if graph.no_delete.contains(&first) || graph.no_delete.contains(&last) {
                 continue;
@@ -72,8 +78,8 @@ impl GraphOptimizer for CombinePermutes {
         let (mut first, mut last) = (NodeIndex::default(), NodeIndex::default());
         let s = GraphSelector::default();
         s.edge(
-            s.op(Permute::default()).ptr(&mut first),
-            s.op(Permute::default()).ptr(&mut last),
+            s.op().ty::<Permute>().ptr(&mut first),
+            s.op().ty::<Permute>().ptr(&mut last),
         );
         for _ in s.search(graph) {
             if graph.no_delete.contains(&first) || graph.no_delete.contains(&last) {
