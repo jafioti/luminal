@@ -335,16 +335,19 @@ impl<Src: ConstShape, Dst: ConstShape> AssertSameNumel<Dst> for Src {
     const TYPE_CHECK: () = assert!(Src::NUMEL == Dst::NUMEL);
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RealDim {
     Const(usize),
+    #[default]
     Dyn,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReshapeDim {
-    Const(usize),   // A known size for the dim
-    PrevDim(usize), // A reference to the size of a dim of the previous shape
+    /// A known size for the dim
+    Const(usize),
+    /// A reference to the size of a dim of the previous shape
+    PrevDim(usize),
 }
 
 impl RealDim {

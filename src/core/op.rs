@@ -52,7 +52,7 @@ impl Debug for Function {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Print(pub String);
 impl Operator for Print {
     fn name(&self) -> &'static str {
@@ -91,7 +91,7 @@ impl Operator for Print {
 
 // Movement Op (A -> B)
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Permute(pub Vec<usize>);
 impl Operator for Permute {
     fn name(&self) -> &'static str {
@@ -114,7 +114,7 @@ impl Operator for Permute {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Reshape(pub Vec<ReshapeDim>);
 impl Operator for Reshape {
     fn name(&self) -> &'static str {
@@ -146,7 +146,7 @@ impl Operator for Reshape {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Expand(pub usize, pub RealDim);
 impl Operator for Expand {
     fn name(&self) -> &'static str {
