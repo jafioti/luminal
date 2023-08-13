@@ -81,14 +81,15 @@ impl Operator for CudaContiguous {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size: usize = res_shape.iter().product();
-        let a_valid_exp = tensors[0].1.shape.index_node().1.to_string_no_range();
-        let a_index_fn_exp = tensors[0].1.shape.index_fn_node().to_string_no_range();
+        let (idx, valid) = tensors[0].1.shape.index_node();
+        let valid_exp = valid.to_string_no_range();
+        let idx_exp = idx.to_string_no_range();
         let ptx = compile_ptx(format!(
             "
 extern \"C\" __global__ void contiguous_kernel(float *out, const float *a, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int a_idx = {a_index_fn_exp};
-    if (idx < numel && {a_valid_exp} != 0) {{
+    int a_idx = {idx_exp};
+    if (idx < numel && {valid_exp} != 0) {{
         out[idx] = a[a_idx];
     }}
 }}"
@@ -365,16 +366,24 @@ impl Operator for CudaAdd {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size: usize = res_shape.iter().product();
-        let a_index_fn_exp = tensors[0].1.shape.index_fn_node().to_string_no_range();
-        let b_index_fn_exp = tensors[1].1.shape.index_fn_node().to_string_no_range();
+        let (a_idx, a_valid) = tensors[0].1.shape.index_node();
+        let (a_idx_exp, a_valid_exp) = (a_idx.to_string_no_range(), a_valid.to_string_no_range());
+        let (b_idx, b_valid) = tensors[1].1.shape.index_node();
+        let (b_idx_exp, b_valid_exp) = (b_idx.to_string_no_range(), b_valid.to_string_no_range());
         let ptx = compile_ptx(format!(
             "
 extern \"C\" __global__ void add_kernel(float *out, const float *a, const float *b, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int a_idx = {a_index_fn_exp};
-    int b_idx = {b_index_fn_exp};
     if (idx < numel) {{
-        out[idx] = a[a_idx] + b[b_idx];
+        float a_t = 0.0;
+        float b_t = 0.0;
+        if ({a_valid_exp} != 0) {{
+            a_t = a[{a_idx_exp}];
+        }}
+        if ({b_valid_exp} != 0) {{
+            b_t = b[{b_idx_exp}];
+        }}
+        out[idx] = a_t + b_t;
     }}
 }}"
         ))
@@ -421,16 +430,24 @@ impl Operator for CudaMul {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size: usize = res_shape.iter().product();
-        let a_index_fn_exp = tensors[0].1.shape.index_fn_node().to_string_no_range();
-        let b_index_fn_exp = tensors[1].1.shape.index_fn_node().to_string_no_range();
+        let (a_idx, a_valid) = tensors[0].1.shape.index_node();
+        let (a_idx_exp, a_valid_exp) = (a_idx.to_string_no_range(), a_valid.to_string_no_range());
+        let (b_idx, b_valid) = tensors[1].1.shape.index_node();
+        let (b_idx_exp, b_valid_exp) = (b_idx.to_string_no_range(), b_valid.to_string_no_range());
         let ptx = compile_ptx(format!(
             "
 extern \"C\" __global__ void mul_kernel(float *out, const float *a, const float *b, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int a_idx = {a_index_fn_exp};
-    int b_idx = {b_index_fn_exp};
     if (idx < numel) {{
-        out[idx] = a[a_idx] * b[b_idx];
+        float a_t = 0.0;
+        float b_t = 0.0;
+        if ({a_valid_exp} != 0) {{
+            a_t = a[{a_idx_exp}];
+        }}
+        if ({b_valid_exp} != 0) {{
+            b_t = b[{b_idx_exp}];
+        }}
+        out[idx] = a_t * b_t;
     }}
 }}"
         ))
@@ -477,21 +494,29 @@ impl Operator for CudaMax {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size: usize = res_shape.iter().product();
-        let a_index_fn_exp = tensors[0].1.shape.index_fn_node().to_string_no_range();
-        let b_index_fn_exp = tensors[1].1.shape.index_fn_node().to_string_no_range();
+        let (a_idx, a_valid) = tensors[0].1.shape.index_node();
+        let (a_idx_exp, a_valid_exp) = (a_idx.to_string_no_range(), a_valid.to_string_no_range());
+        let (b_idx, b_valid) = tensors[1].1.shape.index_node();
+        let (b_idx_exp, b_valid_exp) = (b_idx.to_string_no_range(), b_valid.to_string_no_range());
         let ptx = compile_ptx(format!(
             "
 extern \"C\" __global__ void max_kernel(float *out, const float *a, const float *b, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int a_idx = {a_index_fn_exp};
-    int b_idx = {b_index_fn_exp};
     if (idx < numel) {{
-        out[idx] = max(a[a_idx], b[b_idx]);
+        float a_t = 0.0;
+        float b_t = 0.0;
+        if ({a_valid_exp} != 0) {{
+            a_t = a[{a_idx_exp}];
+        }}
+        if ({b_valid_exp} != 0) {{
+            b_t = b[{b_idx_exp}];
+        }}
+        out[idx] = max(a_t, b_t);
     }}
 }}"
         ))
         .unwrap();
-        let dev = CudaDevice::new(0).unwrap();
+        let dev: std::sync::Arc<CudaDevice> = CudaDevice::new(0).unwrap();
         dev.load_ptx(ptx, "max", &["max_kernel"]).unwrap();
         let f = dev.get_func("max", "max_kernel").unwrap();
 
@@ -533,16 +558,24 @@ impl Operator for CudaMod {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size: usize = res_shape.iter().product();
-        let a_index_fn_exp = tensors[0].1.shape.index_fn_node().to_string_no_range();
-        let b_index_fn_exp = tensors[1].1.shape.index_fn_node().to_string_no_range();
+        let (a_idx, a_valid) = tensors[0].1.shape.index_node();
+        let (a_idx_exp, a_valid_exp) = (a_idx.to_string_no_range(), a_valid.to_string_no_range());
+        let (b_idx, b_valid) = tensors[1].1.shape.index_node();
+        let (b_idx_exp, b_valid_exp) = (b_idx.to_string_no_range(), b_valid.to_string_no_range());
         let ptx = compile_ptx(format!(
             "
 extern \"C\" __global__ void mod_kernel(float *out, const float *a, const float *b, int numel) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int a_idx = {a_index_fn_exp};
-    int b_idx = {b_index_fn_exp};
     if (idx < numel) {{
-        out[idx] = fmod(a[a_idx], b[b_idx]);
+        float a_t = 0.0;
+        float b_t = 0.0;
+        if ({a_valid_exp} != 0) {{
+            a_t = a[{a_idx_exp}];
+        }}
+        if ({b_valid_exp} != 0) {{
+            b_t = b[{b_idx_exp}];
+        }}
+        out[idx] = fmod(a_t, b_t);
     }}
 }}"
         ))
@@ -584,7 +617,8 @@ impl Operator for CudaSumReduce {
         let front_size: usize = tensors[0].1.shape.shape().iter().take(self.0).product();
         let back_size: usize = tensors[0].1.shape.shape().iter().skip(self.0 + 1).product();
         let dim_size = tensors[0].1.shape.shape()[self.0];
-        let inp_idx_exp = tensors[0].1.shape.index_fn_node().to_string_no_range();
+        let (a_idx, a_valid) = tensors[0].1.shape.index_node();
+        let (a_idx_exp, a_valid_exp) = (a_idx.to_string_no_range(), a_valid.to_string_no_range());
 
         let ptx = compile_ptx(
             format!("
@@ -597,8 +631,10 @@ extern \"C\" __global__ void sumreduce_kernel(float *out, const float *inp, cons
         float reduce_value = 0.0;
         for (int c = 0; c < dim_size; c++) {{
             int idx = a * dim_size * back_size + c * back_size + b;
-            int a_idx = {inp_idx_exp};
-            reduce_value += inp[a_idx];
+            if ({a_valid_exp} != 0) {{
+                int a_idx = {a_idx_exp};
+                reduce_value += inp[a_idx];
+            }}
         }}
         out[i] = reduce_value;
     }}
@@ -661,7 +697,8 @@ impl Operator for CudaMaxReduce {
         let front_size: usize = tensors[0].1.shape.shape().iter().take(self.0).product();
         let back_size: usize = tensors[0].1.shape.shape().iter().skip(self.0 + 1).product();
         let dim_size = tensors[0].1.shape.shape()[self.0];
-        let inp_idx_exp = tensors[0].1.shape.index_fn_node().to_string_no_range();
+        let (a_idx, a_valid) = tensors[0].1.shape.index_node();
+        let (a_idx_exp, a_valid_exp) = (a_idx.to_string_no_range(), a_valid.to_string_no_range());
 
         let ptx = compile_ptx(
             format!("
@@ -674,8 +711,10 @@ extern \"C\" __global__ void maxreduce_kernel(float *out, const float *inp, cons
         float reduce_value = -__int_as_float(0x7f800000);
         for (int c = 0; c < dim_size; c++) {{
             int idx = a * dim_size * back_size + c * back_size + b;
-            int a_idx = {inp_idx_exp};
-            reduce_value = max(reduce_value, inp[a_idx]);
+            if ({a_valid_exp} != 0) {{
+                int a_idx = {a_idx_exp};
+                reduce_value = max(reduce_value, inp[a_idx]);
+            }}
         }}
         out[i] = reduce_value;
     }}

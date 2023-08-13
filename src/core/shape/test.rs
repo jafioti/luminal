@@ -5,7 +5,7 @@ use crate::{prelude::View, shape::symbolic::Node};
 fn test_create() {
     let s = ShapeTracker::new(vec![2, 2, 3]);
     assert_eq!(
-        s.index_fn_node(),
+        s.index_node().0,
         Node {
             b: 12,
             min: 0,

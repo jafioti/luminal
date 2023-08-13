@@ -368,19 +368,6 @@ impl ShapeTracker {
         view.shape_strides = to_shapes_strides(&view.shape, &view.strides);
     }
 
-    pub fn index_fn_node(&self) -> Node {
-        // Get expression
-        let mut idx = Node::variable(
-            "idx".to_string(),
-            0,
-            self.shape().iter().product::<usize>() as i32,
-        );
-        for view in self.views.iter().rev() {
-            idx = expr_node(idx, view.offset, &view.shape_strides);
-        }
-        idx
-    }
-
     pub fn pad(&mut self, arg: &[(i32, i32)]) {
         if arg.iter().any(|(a, b)| *a != 0 || *b != 0) {
             let (zvarg, mask) =

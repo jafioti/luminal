@@ -62,7 +62,7 @@ impl Operator for Print {
             println!(
                 "{} Idx: {}",
                 i + 1,
-                view.shape.index_fn_node().to_string_no_range()
+                view.shape.index_node().0.to_string_no_range()
             );
         }
         (
