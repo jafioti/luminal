@@ -298,11 +298,7 @@ mod tests {
         cx.execute_no_delete();
 
         let state_dict = StateDictSaver.save(&model, &mut cx);
-        let out1 = out1
-            .retrieve()
-            .unwrap()
-            .real_data(out1.view().unwrap())
-            .unwrap();
+        let out1 = out1.data();
 
         let mut cx = Graph::new();
         let model: Transformer<32, 200, 5, 5, 3, 2> = InitModule::initialize(&mut cx);
@@ -318,11 +314,7 @@ mod tests {
         cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
         cx.execute();
 
-        let out2 = out2
-            .retrieve()
-            .unwrap()
-            .real_data(out2.view().unwrap())
-            .unwrap();
+        let out2 = out2.data();
         assert_close_data(&out1, &out2);
     }
 }

@@ -70,10 +70,7 @@ fn test_shapes() {
 
     cx.execute();
 
-    assert_close_data(
-        &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-        &[1., 3., 2., 4.],
-    );
+    assert_close_data(&b.data(), &[1., 3., 2., 4.]);
 }
 
 /// Ensure two tensors are nearly equal (only works with Vec<f32> data)

@@ -5,7 +5,7 @@ use super::CudaOptimizer;
 use crate::{
     nn::{activation::ReLU, linear::Linear},
     prelude::{Module, *},
-    tests::{assert_close, assert_close_data},
+    tests::assert_close_data,
 };
 
 #[test]
@@ -21,7 +21,7 @@ fn test_log2() {
     cx.execute();
 
     assert_close_data(
-        &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+        &b.data(),
         &vec![1., 2., 3.]
             .into_iter()
             .map(|i: f32| i.log2())
@@ -42,7 +42,7 @@ fn test_exp2() {
     cx.execute();
 
     assert_close_data(
-        &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+        &b.data(),
         &vec![1., 2., 3.]
             .into_iter()
             .map(|i: f32| i.exp2())
@@ -62,10 +62,7 @@ fn test_log2exp2() {
     cx.optimize(<(GenericOptimizer, CudaOptimizer)>::default());
     cx.execute();
 
-    assert_close_data(
-        &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-        &[1., 2., 3.],
-    );
+    assert_close_data(&b.data(), &[1., 2., 3.]);
 }
 
 #[test]
@@ -82,10 +79,7 @@ fn test_recip() {
     let d_a = d_dev.tensor([1., 2., 3.]);
     let d_b = d_a.recip();
 
-    assert_close_data(
-        &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-        &d_b.as_vec(),
-    );
+    assert_close_data(&b.data(), &d_b.as_vec());
 }
 
 #[test]
@@ -102,10 +96,7 @@ fn test_sin() {
     let d_a = d_dev.tensor([1., 2., 3.]);
     let d_b = d_a.sin();
 
-    assert_close_data(
-        &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-        &d_b.as_vec(),
-    );
+    assert_close_data(&b.data(), &d_b.as_vec());
 }
 
 #[test]
@@ -122,10 +113,7 @@ fn test_sqrt() {
     let d_a = d_dev.tensor([1., 2., 3.]);
     let d_b = d_a.sqrt();
 
-    assert_close_data(
-        &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-        &d_b.as_vec(),
-    );
+    assert_close_data(&b.data(), &d_b.as_vec());
 }
 
 #[test]
@@ -146,10 +134,7 @@ fn test_add() {
     let d_b = d_dev.tensor([1., 2., 3.]);
     let d_c = d_a + d_b;
 
-    assert_close_data(
-        &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-        &d_c.as_vec(),
-    );
+    assert_close_data(&c.data(), &d_c.as_vec());
 }
 
 #[test]
@@ -170,10 +155,7 @@ fn test_sub() {
     let d_b = d_dev.tensor([1., 2., 3.]);
     let d_c = d_a - d_b;
 
-    assert_close_data(
-        &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-        &d_c.as_vec(),
-    );
+    assert_close_data(&c.data(), &d_c.as_vec());
 }
 
 #[test]
@@ -194,10 +176,7 @@ fn test_mul() {
     let d_b = d_dev.tensor([1., 2., 3.]);
     let d_c = d_a * d_b;
 
-    assert_close_data(
-        &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-        &d_c.as_vec(),
-    );
+    assert_close_data(&c.data(), &d_c.as_vec());
 }
 
 #[test]
@@ -218,10 +197,7 @@ fn test_div() {
     let d_b = d_dev.tensor([1., 2., 3.]);
     let d_c = d_a / d_b;
 
-    assert_close_data(
-        &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-        &d_c.as_vec(),
-    );
+    assert_close_data(&c.data(), &d_c.as_vec());
 }
 
 #[test]
@@ -242,10 +218,7 @@ fn test_max() {
     let d_b = d_dev.tensor([1., 2., 3.]);
     let d_c = d_a.maximum(d_b);
 
-    assert_close_data(
-        &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-        &d_c.as_vec(),
-    );
+    assert_close_data(&c.data(), &d_c.as_vec());
 }
 
 #[test]
@@ -264,7 +237,7 @@ fn test_mod() {
     // No dfdx equivalent
 
     assert_close_data(
-        &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+        &c.data(),
         &[1., 2., 3.]
             .into_iter()
             .zip([1., 2., 3.].into_iter())
@@ -296,18 +269,9 @@ fn test_sum_reduce() {
     let d_c = d_a.clone().sum::<_, dfdx::shapes::Axis<0>>();
     let d_d = d_a.sum::<_, dfdx::shapes::Axis<2>>();
 
-    assert_close_data(
-        &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-        &d_b.as_vec(),
-    );
-    assert_close_data(
-        &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-        &d_c.as_vec(),
-    );
-    assert_close_data(
-        &d.retrieve().unwrap().real_data(d.view().unwrap()).unwrap(),
-        &d_d.as_vec(),
-    );
+    assert_close_data(&b.data(), &d_b.as_vec());
+    assert_close_data(&c.data(), &d_c.as_vec());
+    assert_close_data(&d.data(), &d_d.as_vec());
 }
 
 #[test]
@@ -331,18 +295,9 @@ fn test_max_reduce() {
     let d_c = d_a.clone().max::<_, dfdx::shapes::Axis<0>>();
     let d_d = d_a.max::<_, dfdx::shapes::Axis<2>>();
 
-    assert_close_data(
-        &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-        &d_b.as_vec(),
-    );
-    assert_close_data(
-        &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-        &d_c.as_vec(),
-    );
-    assert_close_data(
-        &d.retrieve().unwrap().real_data(d.view().unwrap()).unwrap(),
-        &d_d.as_vec(),
-    );
+    assert_close_data(&b.data(), &d_b.as_vec());
+    assert_close_data(&c.data(), &d_c.as_vec());
+    assert_close_data(&d.data(), &d_d.as_vec());
 }
 
 #[test]
@@ -360,10 +315,7 @@ fn test_mean_reduce() {
     let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
     let d_b = d_a.mean::<_, dfdx::shapes::Axis<1>>();
 
-    assert_close_data(
-        &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-        &d_b.as_vec(),
-    );
+    assert_close_data(&b.data(), &d_b.as_vec());
 }
 
 #[test]
@@ -388,14 +340,14 @@ fn test_relu_and_linear() {
     batch_out.mark();
     cx.execute();
 
-    let (unoptimized_b, unoptimized_b_view) = (b.retrieve().unwrap(), b.view().unwrap().clone());
-    let unoptimized_batch_out = batch_out.retrieve().unwrap();
+    let unoptimized_b = b.data();
+    let unoptimized_batch_out = batch_out.data();
 
     cx.optimize(<(CudaOptimizer, GenericOptimizer)>::default());
     cx.execute();
 
-    assert_close(&unoptimized_b, &b.retrieve().unwrap());
-    assert_close(&unoptimized_batch_out, &batch_out.retrieve().unwrap());
+    assert_close_data(&unoptimized_b, &b.data());
+    assert_close_data(&unoptimized_batch_out, &batch_out.data());
 
     // Test against dfdx
     let dev = Cpu::default();
@@ -419,10 +371,7 @@ fn test_relu_and_linear() {
         .permute();
     let a = dev.tensor_from_vec(vec![1.0, 2.0, 3.0], (dfdx::shapes::Const::<3>,));
     let out = model.forward(a);
-    assert_close_data(
-        &unoptimized_b.real_data(&unoptimized_b_view).unwrap(),
-        &out.as_vec(),
-    );
+    assert_close_data(&unoptimized_b, &out.as_vec());
 }
 
 #[test]
@@ -527,8 +476,5 @@ fn test_transformer_encoder_block() {
     );
     let d_b = d_model.forward(d_a);
 
-    assert_close_data(
-        &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-        &d_b.as_vec(),
-    );
+    assert_close_data(&b.data(), &d_b.as_vec());
 }

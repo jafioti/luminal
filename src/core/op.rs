@@ -568,10 +568,7 @@ mod tests {
         let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
         let d_b: dfdx::tensor::Tensor<Rank1<6>, f32, Cpu> = d_a.reshape();
 
-        assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-            &d_b.as_vec(),
-        );
+        assert_close_data(&b.data(), &d_b.as_vec());
     }
 
     #[test]
@@ -587,10 +584,7 @@ mod tests {
         let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
         let d_b: dfdx::tensor::Tensor<Rank2<3, 2>, f32, Cpu> = d_a.permute();
 
-        assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-            &d_b.as_vec(),
-        );
+        assert_close_data(&b.data(), &d_b.as_vec());
     }
 
     #[test]
@@ -606,10 +600,7 @@ mod tests {
         let d_a = d_dev.tensor([1., 2., 3.]);
         let d_b: dfdx::tensor::Tensor<Rank2<3, 2>, f32, Cpu> = d_a.broadcast();
 
-        assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-            &d_b.as_vec(),
-        );
+        assert_close_data(&b.data(), &d_b.as_vec());
     }
 
     #[test]
@@ -625,10 +616,7 @@ mod tests {
         let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
         let d_b = d_a.slice((1.., ..));
 
-        assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-            &d_b.as_vec(),
-        );
+        assert_close_data(&b.data(), &d_b.as_vec());
     }
 
     // Unary op tests
@@ -644,7 +632,7 @@ mod tests {
         cx.execute();
 
         assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+            &b.data(),
             &vec![1., 2., 3.]
                 .into_iter()
                 .map(|i: f32| i.log2())
@@ -663,7 +651,7 @@ mod tests {
         cx.execute();
 
         assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
+            &b.data(),
             &vec![1., 2., 3.]
                 .into_iter()
                 .map(|i: f32| i.exp2())
@@ -684,10 +672,7 @@ mod tests {
         let d_a = d_dev.tensor([1., 2., 3.]);
         let d_b = d_a.recip();
 
-        assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-            &d_b.as_vec(),
-        );
+        assert_close_data(&b.data(), &d_b.as_vec());
     }
 
     #[test]
@@ -703,10 +688,7 @@ mod tests {
         let d_a = d_dev.tensor([1., 2., 3.]);
         let d_b = d_a.sin();
 
-        assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-            &d_b.as_vec(),
-        );
+        assert_close_data(&b.data(), &d_b.as_vec());
     }
 
     #[test]
@@ -722,10 +704,7 @@ mod tests {
         let d_a = d_dev.tensor([1., 2., 3.]);
         let d_b = d_a.sqrt();
 
-        assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-            &d_b.as_vec(),
-        );
+        assert_close_data(&b.data(), &d_b.as_vec());
     }
 
     // Binary op tests
@@ -746,10 +725,7 @@ mod tests {
         let d_b = d_dev.tensor([1., 2., 3.]);
         let d_c = d_a + d_b;
 
-        assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &d_c.as_vec(),
-        );
+        assert_close_data(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -768,10 +744,7 @@ mod tests {
         let d_b = d_dev.tensor([1., 2., 3.]);
         let d_c = d_a - d_b;
 
-        assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &d_c.as_vec(),
-        );
+        assert_close_data(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -790,10 +763,7 @@ mod tests {
         let d_b = d_dev.tensor([1., 2., 3.]);
         let d_c = d_a * d_b;
 
-        assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &d_c.as_vec(),
-        );
+        assert_close_data(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -812,10 +782,7 @@ mod tests {
         let d_b = d_dev.tensor([1., 2., 3.]);
         let d_c = d_a / d_b;
 
-        assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &d_c.as_vec(),
-        );
+        assert_close_data(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -835,10 +802,7 @@ mod tests {
         let d_b = d_dev.tensor([1., 2., 3.]);
         let d_c = d_a.maximum(d_b);
 
-        assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &d_c.as_vec(),
-        );
+        assert_close_data(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -855,7 +819,7 @@ mod tests {
         // No dfdx equivalent
 
         assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
+            &c.data(),
             &[1., 2., 3.]
                 .into_iter()
                 .zip([1., 2., 3.].into_iter())
@@ -885,18 +849,9 @@ mod tests {
         let d_c = d_a.clone().sum::<_, dfdx::shapes::Axis<0>>();
         let d_d = d_a.sum::<_, dfdx::shapes::Axis<2>>();
 
-        assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-            &d_b.as_vec(),
-        );
-        assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &d_c.as_vec(),
-        );
-        assert_close_data(
-            &d.retrieve().unwrap().real_data(d.view().unwrap()).unwrap(),
-            &d_d.as_vec(),
-        );
+        assert_close_data(&b.data(), &d_b.as_vec());
+        assert_close_data(&c.data(), &d_c.as_vec());
+        assert_close_data(&d.data(), &d_d.as_vec());
     }
 
     #[test]
@@ -924,10 +879,7 @@ mod tests {
         );
         let d_b = d_a.sum::<_, dfdx::shapes::Axis<3>>();
 
-        assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-            &d_b.as_vec(),
-        );
+        assert_close_data(&b.data(), &d_b.as_vec());
     }
 
     #[test]
@@ -950,17 +902,8 @@ mod tests {
         let d_c = d_a.clone().max::<_, dfdx::shapes::Axis<0>>();
         let d_d = d_a.max::<_, dfdx::shapes::Axis<2>>();
 
-        assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-            &d_b.as_vec(),
-        );
-        assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &d_c.as_vec(),
-        );
-        assert_close_data(
-            &d.retrieve().unwrap().real_data(d.view().unwrap()).unwrap(),
-            &d_d.as_vec(),
-        );
+        assert_close_data(&b.data(), &d_b.as_vec());
+        assert_close_data(&c.data(), &d_c.as_vec());
+        assert_close_data(&d.data(), &d_d.as_vec());
     }
 }

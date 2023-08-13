@@ -53,10 +53,7 @@ mod tests {
             (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<2>),
         );
         let d_b = d_a.relu();
-        assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-            &d_b.as_vec(),
-        );
+        assert_close_data(&b.data(), &d_b.as_vec());
     }
 
     #[test]
@@ -75,10 +72,7 @@ mod tests {
             (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<2>),
         );
         let d_b = d_a.sigmoid();
-        assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-            &d_b.as_vec(),
-        );
+        assert_close_data(&b.data(), &d_b.as_vec());
     }
 
     #[test]
@@ -97,9 +91,6 @@ mod tests {
             (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<2>),
         );
         let d_b = d_a.tanh();
-        assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-            &d_b.as_vec(),
-        );
+        assert_close_data(&b.data(), &d_b.as_vec());
     }
 }

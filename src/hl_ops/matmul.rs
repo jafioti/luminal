@@ -97,10 +97,7 @@ mod tests {
         let d_b = d_dev.tensor([[1., 2.], [3., 1.], [2., 3.]]);
         let d_c = d_a.matmul(d_b);
 
-        assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &d_c.as_vec(),
-        );
+        assert_close_data(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -120,10 +117,7 @@ mod tests {
         let d_b = d_dev.tensor([[1., 2., 3.], [1., 2., 3.], [1., 2., 3.]]);
         let d_c = d_a.matmul(d_b);
 
-        assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &d_c.as_vec(),
-        );
+        assert_close_data(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -146,10 +140,7 @@ mod tests {
         let d_b = d_dev.tensor([[1., 2., 3., 1.], [1., 2., 3., 1.]]);
         let d_c = d_a.matmul(d_b);
 
-        assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &d_c.as_vec(),
-        );
+        assert_close_data(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -183,10 +174,7 @@ mod tests {
         );
         let d_c = d_a.matmul(d_b.permute::<Rank3<1, 3, 2>, dfdx::shapes::Axes3<0, 2, 1>>());
 
-        assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &d_c.as_vec(),
-        );
+        assert_close_data(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -221,9 +209,6 @@ mod tests {
         );
         let d_c = d_a.matmul(d_b);
 
-        assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &d_c.as_vec(),
-        );
+        assert_close_data(&c.data(), &d_c.as_vec());
     }
 }

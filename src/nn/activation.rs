@@ -158,7 +158,7 @@ mod tests {
     use crate::{
         nn::linear::Linear,
         prelude::{Module, *},
-        tests::{assert_close, assert_close_data},
+        tests::assert_close_data,
     };
     use dfdx::prelude::{Module as DfdxModule, *};
 
@@ -184,18 +184,14 @@ mod tests {
         batch_out.mark();
         cx.execute();
 
-        let (unoptimized_b, unoptimized_b_view) =
-            (b.retrieve().unwrap(), b.view().unwrap().clone());
-        let (unoptimized_batch_out, unoptimized_batch_out_view) = (
-            batch_out.retrieve().unwrap(),
-            batch_out.view().unwrap().clone(),
-        );
+        let unoptimized_b = b.data();
+        let unoptimized_batch_out = batch_out.data();
 
         cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
         cx.execute();
 
-        assert_close(&unoptimized_b, &b.retrieve().unwrap());
-        assert_close(&unoptimized_batch_out, &batch_out.retrieve().unwrap());
+        assert_close_data(&unoptimized_b, &b.data());
+        assert_close_data(&unoptimized_batch_out, &batch_out.data());
 
         // Test against dfdx
         let dev = Cpu::default();
@@ -225,15 +221,7 @@ mod tests {
         let out = model.forward(a);
         let d_batch_out = model.forward(d_batch);
 
-        assert_close_data(
-            &unoptimized_b.real_data(&unoptimized_b_view).unwrap(),
-            &out.as_vec(),
-        );
-        assert_close_data(
-            &unoptimized_batch_out
-                .real_data(&unoptimized_batch_out_view)
-                .unwrap(),
-            &d_batch_out.as_vec(),
-        );
+        assert_close_data(&unoptimized_b, &out.as_vec());
+        assert_close_data(&unoptimized_batch_out, &d_batch_out.as_vec());
     }
 }

@@ -10,8 +10,5 @@ fn main() {
     b.mark();
     cx.execute();
 
-    println!(
-        "B: {:?}",
-        b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap()
-    );
+    println!("B: {:?}", b.data());
 }

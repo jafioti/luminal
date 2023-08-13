@@ -297,10 +297,7 @@ mod tests {
         let d_c = (d_a.realize::<(usize,)>(), d_b.realize::<(usize,)>())
             .concat_along(dfdx::shapes::Axis::<0>);
 
-        assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &d_c.as_vec(),
-        );
+        assert_close_data(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -344,13 +341,7 @@ mod tests {
         )
             .concat_along(dfdx::shapes::Axis::<0>);
 
-        assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &d_c.as_vec(),
-        );
-        assert_close_data(
-            &d.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &d_d.as_vec(),
-        );
+        assert_close_data(&c.data(), &d_c.as_vec());
+        assert_close_data(&d.data(), &d_d.as_vec());
     }
 }

@@ -117,9 +117,6 @@ mod tests {
         let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
         let d_b = d_a.mean::<_, dfdx::shapes::Axis<1>>();
 
-        assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-            &d_b.as_vec(),
-        );
+        assert_close_data(&b.data(), &d_b.as_vec());
     }
 }

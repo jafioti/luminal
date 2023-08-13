@@ -252,15 +252,10 @@ mod tests {
 
         cx.execute();
 
-        let (unoptimized_c, unoptimized_c_view) =
-            (c.retrieve().unwrap(), c.view().unwrap().clone());
-
+        let unoptimized_c = c.data();
         cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
         cx.execute();
 
-        assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &unoptimized_c.real_data(&unoptimized_c_view).unwrap(),
-        );
+        assert_close_data(&c.data(), &unoptimized_c);
     }
 }

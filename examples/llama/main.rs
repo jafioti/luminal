@@ -43,7 +43,7 @@ fn main() {
     cx.execute();
     println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
 
-    let out = out.retrieve().unwrap().real_data(out.view().unwrap()).unwrap();
+    let out = out.data();
     input.push(sample_index(&out[(input.len() - 1) * 32_000..]));
     println!("{}", tokenizer.decode(input.iter().map(|i| *i as u32).collect(), false).unwrap());
 
@@ -64,7 +64,7 @@ fn main() {
         cx.execute();
         println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
         
-        let o = out.retrieve().unwrap().real_data(out.view().unwrap()).unwrap();
+        let o = out.data();
         // Sample tokens
         input.push(sample_index(&o));
         println!("{}", tokenizer.decode(input.iter().map(|i| *i as u32).collect(), false).unwrap());

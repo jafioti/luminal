@@ -134,14 +134,8 @@ mod tests {
         let d_b = d_a.clone().normalize::<dfdx::shapes::Axis<0>>(1e-5);
         let d_c = d_a.normalize::<dfdx::shapes::Axis<1>>(1e-5);
 
-        assert_close_data(
-            &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-            &d_b.as_vec(),
-        );
-        assert_close_data(
-            &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-            &d_c.as_vec(),
-        );
+        assert_close_data(&b.data(), &d_b.as_vec());
+        assert_close_data(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -163,7 +157,7 @@ mod tests {
         );
         let d_b = d_a.softmax::<dfdx::shapes::Axis<1>>();
 
-        let r = b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap();
+        let r = b.data();
         assert_close_data(&r, &d_b.as_vec());
     }
 
@@ -186,7 +180,7 @@ mod tests {
         );
         let d_b = d_a.sin();
 
-        let r = b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap();
+        let r = b.data();
         assert_close_data(&r, &d_b.as_vec());
     }
 
@@ -209,7 +203,7 @@ mod tests {
         );
         let d_b = d_a.cos();
 
-        let r = b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap();
+        let r = b.data();
         assert_close_data(&r, &d_b.as_vec());
     }
 }

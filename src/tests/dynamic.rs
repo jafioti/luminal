@@ -13,7 +13,7 @@ use crate::{
     prelude::*,
 };
 
-use super::{assert_close, assert_close_data};
+use super::assert_close_data;
 
 #[test]
 fn test_movement() {
@@ -39,10 +39,7 @@ fn test_movement() {
     ]);
     let d_b = d_a.reshape::<Rank2<6, 2>>().permute::<Rank2<2, 6>, _>();
 
-    assert_close_data(
-        &b.retrieve().unwrap().real_data(b.view().unwrap()).unwrap(),
-        &d_b.as_vec(),
-    );
+    assert_close_data(&b.data(), &d_b.as_vec());
 }
 
 #[test]
@@ -61,7 +58,7 @@ fn test_matmul() {
     let d_b = d_dev.tensor([[1., 2., 3.], [1., 2., 3.], [1., 2., 3.]]);
     let d_c = d_a.matmul(d_b);
 
-    let r = c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap();
+    let r = c.data();
     assert_close_data(&r, &d_c.as_vec());
 }
 
@@ -88,10 +85,7 @@ fn test_batch_matmul() {
     let d_b = d_dev.tensor([[1., 2., 3., 1.], [1., 2., 3., 1.]]);
     let d_c = d_a.matmul(d_b);
 
-    assert_close_data(
-        &c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap(),
-        &d_c.as_vec(),
-    );
+    assert_close_data(&c.data(), &d_c.as_vec());
 }
 
 #[test]
@@ -112,15 +106,12 @@ fn test_feedforward() {
 
     cx.execute();
 
-    let (unoptimized_batch_out, unoptimized_batch_out_view) = (
-        batch_out.retrieve().unwrap(),
-        batch_out.view().unwrap().clone(),
-    );
+    let unoptimized_batch_out = batch_out.data();
 
     cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
     cx.execute();
 
-    assert_close(&unoptimized_batch_out, &batch_out.retrieve().unwrap());
+    assert_close_data(&unoptimized_batch_out, &batch_out.data());
 
     // Test against dfdx
     let dev = Cpu::default();
@@ -148,8 +139,5 @@ fn test_feedforward() {
     );
     let out = model.forward(a);
 
-    let r = unoptimized_batch_out
-        .real_data(&unoptimized_batch_out_view)
-        .unwrap();
-    assert_close_data(&r, &out.as_vec());
+    assert_close_data(&unoptimized_batch_out, &out.as_vec());
 }

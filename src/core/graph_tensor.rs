@@ -59,6 +59,14 @@ impl<S: Shape> GraphTensor<S> {
         unsafe { self.graph_ref.as_mut().unwrap().get_tensor(self.id) }
     }
 
+    /// Get the contiguous data of the tensor
+    pub fn data(&self) -> Vec<f32> {
+        self.retrieve()
+            .unwrap()
+            .real_data(self.view().unwrap())
+            .unwrap()
+    }
+
     /// Set the value of the tensor, with dynamic dimensions.
     pub fn set_dyn<T: Data + Clone>(&self, data: T, shape: Vec<usize>) {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
