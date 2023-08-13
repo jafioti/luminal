@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::{any::TypeId, collections::HashMap};
 
 use itertools::Itertools;
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
 
 use crate::{
-    op::{Exp2, Function, Log2, Permute},
+    op::{Exp2, Function, Log2, Permute, Recip},
     prelude::*,
 };
 
@@ -20,40 +20,60 @@ pub struct UnarySequentialOpt;
 
 impl GraphOptimizer for UnarySequentialOpt {
     fn optimize(&self, graph: &mut Graph) {
-        // Scan through unary sequential eliminations
+        // Here are all the complementary ops that should be removed
+        let sequences = [
+            (TypeId::of::<Log2>(), TypeId::of::<Exp2>()),
+            (TypeId::of::<Recip>(), TypeId::of::<Recip>()),
+        ];
         let (mut first, mut last) = (NodeIndex::default(), NodeIndex::default());
-        let a = GraphSelector::default();
-        a.edge(
-            a.op().ty::<Log2>().ptr(&mut first),
-            a.op().ty::<Exp2>().ptr(&mut last),
-        );
-        let b = GraphSelector::default();
-        b.edge(
-            b.op().ty::<Exp2>().ptr(&mut first),
-            b.op().ty::<Log2>().ptr(&mut last),
-        );
-        for _ in a.search(graph).chain(b.search(graph)) {
-            if graph.no_delete.contains(&first) || graph.no_delete.contains(&last) {
-                continue;
-            }
-            // Remove current node and next node
-            let pre_node = graph
-                .graph
-                .edges_directed(first, petgraph::Direction::Incoming)
-                .next()
-                .unwrap()
-                .source();
+        for selector_graph in sequences
+            .into_iter()
+            .flat_map(|(f, l)| {
+                // Construct two searches: in order and reversed
+                let a = GraphSelector::default();
+                a.edge(
+                    a.op().type_id(f).ptr(&mut first),
+                    a.op().type_id(l).ptr(&mut last),
+                );
+                let b = GraphSelector::default();
+                b.edge(
+                    b.op().type_id(l).ptr(&mut first),
+                    b.op().type_id(f).ptr(&mut last),
+                );
+                [a, b]
+            })
+            .collect::<Vec<_>>()
+        {
+            for _ in selector_graph.search(graph) {
+                if graph.no_delete.contains(&first)
+                    || graph
+                        .graph
+                        .edges_directed(first, Direction::Outgoing)
+                        .count()
+                        != 1
+                {
+                    // Either first is marked as no_delete or there are other nodes depending on first
+                    continue;
+                }
+                // Remove current node and next node
+                let pre_node = graph
+                    .graph
+                    .edges_directed(first, petgraph::Direction::Incoming)
+                    .next()
+                    .unwrap()
+                    .source();
 
-            move_outgoing_edge(last, pre_node, &mut graph.graph);
-            move_references(
-                &mut graph.id_remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                last,
-                pre_node,
-            );
-            graph.graph.remove_node(first);
-            graph.graph.remove_node(last);
+                move_outgoing_edge(last, pre_node, &mut graph.graph);
+                move_references(
+                    &mut graph.id_remap,
+                    &mut graph.no_delete,
+                    &mut graph.to_retrieve,
+                    last,
+                    pre_node,
+                );
+                graph.graph.remove_node(first);
+                graph.graph.remove_node(last);
+            }
         }
     }
 }
@@ -256,5 +276,20 @@ impl GraphOptimizer for RemoveUnusedNodes {
                 graph.graph.remove_node(node);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::prelude::*;
+    #[test]
+    fn test_log_exp() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R0>("I");
+        let b = a.log_2().exp_2();
+        b.mark();
+
+        cx.optimize(GenericOptimizer::default());
+        assert_eq!(cx.graph.node_count(), 1);
     }
 }

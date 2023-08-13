@@ -113,14 +113,6 @@ impl<S: 'static + PartialEq> TraitObjEq for S {
     }
 }
 
-// pub trait SelfPartialEq: PartialEq<Self> {
-//     fn is_eq(&self, s: &Self) -> bool {
-//         self.partial_eq(s)
-//     }
-// }
-
-// impl<P: PartialEq<Self>> SelfPartialEq for P {}
-
 // Graph Selector
 #[derive(Default)]
 pub struct GraphSelector {
@@ -157,6 +149,7 @@ impl Iterator for GraphSearch {
         };
         let graph = unsafe { self.graph.as_ref().unwrap() };
         let mut used = HashSet::new();
+        let mut selector_used = HashSet::new();
         for node in graph.graph.node_indices() {
             if self.already_returned.contains(&node) {
                 continue;
@@ -166,8 +159,8 @@ impl Iterator for GraphSearch {
                 &self.selector.graph.lock().unwrap(),
                 node,
                 &graph.graph,
-                NodeIndex::default(),
                 &mut used,
+                &mut selector_used,
             ) {
                 self.already_returned.insert(node);
                 return Some(());
@@ -192,8 +185,8 @@ fn search(
     >,
     graph_node: petgraph::stable_graph::NodeIndex,
     graph: &StableGraph<(Box<dyn Operator>, Vec<RealDim>), u8>,
-    coming_from: NodeIndex,
     used: &mut HashSet<NodeIndex>,
+    selector_used: &mut HashSet<NodeIndex>,
 ) -> bool {
     let selector_weight = selector_graph.node_weight(selector_node).unwrap();
     let current_weight = graph.node_weight(graph_node).unwrap();
@@ -222,13 +215,15 @@ fn search(
     }
     // Used is to make sure we don't use the same node from the source graph twice, which prevents cycles
     used.insert(graph_node);
+    selector_used.insert(selector_node);
     // Match outgoing
-    for select_outgoing in
-        selector_graph.edges_directed(selector_node, petgraph::Direction::Outgoing)
+    for select_outgoing in selector_graph
+        .edges_directed(selector_node, petgraph::Direction::Outgoing)
+        .map(|e| e.target())
+        .filter(|i| !selector_used.contains(i))
+        .collect::<Vec<_>>()
+        .into_iter()
     {
-        if select_outgoing.target() == coming_from {
-            continue;
-        }
         if let Some(target) = graph
             .edges_directed(graph_node, petgraph::Direction::Outgoing)
             .map(|e| e.target())
@@ -237,27 +232,31 @@ fn search(
             .into_iter()
             .find(|i| {
                 search(
-                    select_outgoing.target(),
+                    select_outgoing,
                     selector_graph,
                     *i,
                     graph,
-                    selector_node,
                     used,
+                    selector_used,
                 )
             })
         {
             used.insert(target);
         } else {
+            println!("No found");
+            used.remove(&graph_node);
+            selector_used.remove(&selector_node);
             return false;
         }
     }
     // Match incoming
-    for select_incoming in
-        selector_graph.edges_directed(selector_node, petgraph::Direction::Incoming)
+    for select_incoming in selector_graph
+        .edges_directed(selector_node, petgraph::Direction::Incoming)
+        .map(|e| e.source())
+        .filter(|i| !selector_used.contains(i))
+        .collect::<Vec<_>>()
+        .into_iter()
     {
-        if select_incoming.source() == coming_from {
-            continue;
-        }
         if let Some(target) = graph
             .edges_directed(graph_node, petgraph::Direction::Outgoing)
             .map(|e| e.target())
@@ -266,17 +265,19 @@ fn search(
             .into_iter()
             .find(|i| {
                 search(
-                    select_incoming.source(),
+                    select_incoming,
                     selector_graph,
                     *i,
                     graph,
-                    selector_node,
                     used,
+                    selector_used,
                 )
             })
         {
             used.insert(target);
         } else {
+            used.remove(&graph_node);
+            selector_used.remove(&selector_node);
             return false;
         }
     }
@@ -326,6 +327,13 @@ impl OpSelector {
         let graph = unsafe { self.graph.as_ref().unwrap() };
         let mut m_graph = graph.graph.lock().unwrap();
         m_graph.node_weight_mut(self.id).unwrap().0 = Some(TypeId::of::<O>());
+        self
+    }
+    /// Constrain the op to a type
+    pub fn type_id(self, type_id: TypeId) -> OpSelector {
+        let graph = unsafe { self.graph.as_ref().unwrap() };
+        let mut m_graph = graph.graph.lock().unwrap();
+        m_graph.node_weight_mut(self.id).unwrap().0 = Some(type_id);
         self
     }
     /// Constrain the op to a value
