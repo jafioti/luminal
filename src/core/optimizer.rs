@@ -243,7 +243,6 @@ fn search(
         {
             used.insert(target);
         } else {
-            println!("No found");
             used.remove(&graph_node);
             selector_used.remove(&selector_node);
             return false;

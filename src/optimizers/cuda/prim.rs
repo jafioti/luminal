@@ -601,6 +601,75 @@ extern \"C\" __global__ void mod_kernel(float *out, const float *a, const float 
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct CudaLessThan;
+impl Operator for CudaLessThan {
+    fn process(
+        &self,
+        tensors: Vec<(&Tensor, TensorView)>,
+        i: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let res_shape = tensors[0].1.shape.get_real_shape([&tensors[1].1.shape]);
+        let a = tensors[0]
+            .0
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let b = tensors[1]
+            .0
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let inp_size: usize = res_shape.iter().product();
+        let (a_idx, a_valid) = tensors[0].1.shape.index_node();
+        let (a_idx_exp, a_valid_exp) = (a_idx.to_string_no_range(), a_valid.to_string_no_range());
+        let (b_idx, b_valid) = tensors[1].1.shape.index_node();
+        let (b_idx_exp, b_valid_exp) = (b_idx.to_string_no_range(), b_valid.to_string_no_range());
+        let ptx = compile_ptx(format!(
+            "
+extern \"C\" __global__ void less_than_kernel(float *out, const float *a, const float *b, int numel) {{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < numel) {{
+        float a_t = 0.0;
+        float b_t = 0.0;
+        if ({a_valid_exp} != 0) {{
+            a_t = a[{a_idx_exp}];
+        }}
+        if ({b_valid_exp} != 0) {{
+            b_t = b[{b_idx_exp}];
+        }}
+        if (a_t < b_t) {{
+            out[idx] = 1.0;
+        }} else {{
+            out[idx] = 0.0;
+        }}
+    }}
+}}"
+        ))
+        .unwrap();
+        let dev = CudaDevice::new(0).unwrap();
+        dev.load_ptx(ptx, "less_than", &["less_than_kernel"])
+            .unwrap();
+        let f = dev.get_func("less_than", "less_than_kernel").unwrap();
+
+        let mut out = unsafe { dev.alloc::<f32>(inp_size) }.unwrap();
+        let cfg = LaunchConfig::for_num_elems(inp_size as u32);
+        unsafe { f.launch(cfg, (&mut out, a, b, inp_size as i32)) }.unwrap();
+
+        (
+            Some(Tensor {
+                data: Box::new(out),
+            }),
+            TensorView {
+                tensor_id: i,
+                shape: ShapeTracker::new(res_shape),
+            },
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct CudaSumReduce(pub usize);
 impl Operator for CudaSumReduce {
     fn process(
@@ -860,6 +929,8 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
                 *op_ref = Box::new(CudaMax);
             } else if is::<Mod>(op) {
                 *op_ref = Box::new(CudaMod);
+            } else if is::<LessThan>(op) {
+                *op_ref = Box::new(CudaLessThan);
             } else if is::<Contiguous>(op) {
                 *op_ref = Box::new(CudaContiguous);
             } else if let Some(SumReduce(dim)) = op_ref.as_any().downcast_ref::<SumReduce>() {

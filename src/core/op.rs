@@ -464,6 +464,43 @@ impl Operator for Mod {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LessThan;
+impl Operator for LessThan {
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        nid: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let ((a_idx, a_valid), (b_idx, b_valid), a_data, b_data, mut data, res_shape) =
+            binary_op_setup(inp);
+        for i in 0..data.len() as i32 {
+            data[i as usize] = if if a_valid.solve(i) != 0 {
+                a_data[a_idx.solve(i) as usize]
+            } else {
+                0.
+            } < if b_valid.solve(i) != 0 {
+                b_data[b_idx.solve(i) as usize]
+            } else {
+                0.
+            } {
+                1.
+            } else {
+                0.
+            };
+        }
+        (
+            Some(Tensor {
+                data: Box::new(data),
+            }),
+            TensorView {
+                tensor_id: nid,
+                shape: ShapeTracker::new(res_shape),
+            },
+        )
+    }
+}
+
 // Reduce Ops (A -> B (different shape))
 
 #[derive(Debug, Clone, Default, PartialEq)]

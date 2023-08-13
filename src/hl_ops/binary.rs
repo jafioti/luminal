@@ -124,6 +124,39 @@ impl<S: Shape> Rem<f32> for GraphTensor<S> {
     }
 }
 
+// Comparisons (based on https://github.com/tinygrad/tinygrad/blob/3e0c2d256fe9f4f5f85cd3e4d8733a51d7b4a984/tinygrad/tensor.py#L653)
+impl<S: Shape> GraphTensor<S> {
+    pub fn less_than(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
+        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        let new_id = graph
+            .add_op(op::Max, self.shape().clone())
+            .input(self.id)
+            .input(rhs.id)
+            .finish();
+        GraphTensor::from_id(new_id, self.graph_ref)
+    }
+
+    pub fn greater_than(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
+        -self.less_than(rhs) + 1.0
+    }
+
+    pub fn less_than_equal(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
+        -self.greater_than(rhs) + 1.0
+    }
+
+    pub fn greater_than_equal(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
+        -self.less_than(rhs) + 1.0
+    }
+
+    pub fn not_equals(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
+        self.less_than(rhs) + self.greater_than(rhs)
+    }
+
+    pub fn equals(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
+        -self.not_equals(rhs) + 1.0
+    }
+}
+
 // Clipping ops (min, max, clip)
 impl<S: Shape> GraphTensor<S> {
     /// Take the elementwise maximum of two tensors
