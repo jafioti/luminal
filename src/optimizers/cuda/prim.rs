@@ -60,6 +60,60 @@ impl Operator for CudaCopyFromDevice {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct CudaContiguous;
+impl Operator for CudaContiguous {
+    fn process(
+        &self,
+        tensors: Vec<(&Tensor, TensorView)>,
+        i: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let view = &tensors[0].1;
+        if view.shape.is_contiguous() {
+            // It's already contiguous
+            return (None, view.clone());
+        }
+        let res_shape = view.shape.shape().clone();
+        let a = tensors[0]
+            .0
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let inp_size: usize = res_shape.iter().product();
+        let a_valid_exp = tensors[0].1.shape.index_node().1.to_string_no_range();
+        let a_index_fn_exp = tensors[0].1.shape.index_fn_node().to_string_no_range();
+        let ptx = compile_ptx(format!(
+            "
+extern \"C\" __global__ void contiguous_kernel(float *out, const float *a, int numel) {{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int a_idx = {a_index_fn_exp};
+    if (idx < numel && {a_valid_exp} != 0) {{
+        out[idx] = a[a_idx];
+    }}
+}}"
+        ))
+        .unwrap();
+        let dev = CudaDevice::new(0).unwrap();
+        dev.load_ptx(ptx, "add", &["add_kernel"]).unwrap();
+        let f = dev.get_func("add", "add_kernel").unwrap();
+
+        let mut out = unsafe { dev.alloc::<f32>(inp_size) }.unwrap();
+        let cfg = LaunchConfig::for_num_elems(inp_size as u32);
+        unsafe { f.launch(cfg, (&mut out, a, inp_size as i32)) }.unwrap();
+
+        (
+            Some(Tensor {
+                data: Box::new(out),
+            }),
+            TensorView {
+                tensor_id: i,
+                shape: ShapeTracker::new(res_shape),
+            },
+        )
+    }
+}
+
 // Unary Op (A -> A)
 
 #[derive(Debug, Clone, PartialEq)]
@@ -767,6 +821,8 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
                 *op_ref = Box::new(CudaMax);
             } else if is::<Mod>(op) {
                 *op_ref = Box::new(CudaMod);
+            } else if is::<Contiguous>(op) {
+                *op_ref = Box::new(CudaContiguous);
             } else if let Some(SumReduce(dim)) = op_ref.as_any().downcast_ref::<SumReduce>() {
                 *op_ref = Box::new(CudaSumReduce(*dim));
             } else if let Some(MaxReduce(dim)) = op_ref.as_any().downcast_ref::<MaxReduce>() {

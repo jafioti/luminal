@@ -142,6 +142,41 @@ impl Operator for Slice {
     }
 }
 
+/// Ensure a tensor is contiguously layed out in memory. May involve copying
+#[derive(Debug, Clone, PartialEq)]
+pub struct Contiguous;
+impl Operator for Contiguous {
+    fn process(
+        &self,
+        inp: Vec<(&Tensor, TensorView)>,
+        i: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        let view = &inp[0].1;
+        if view.shape.is_contiguous() {
+            // It's already contiguous
+            return (None, view.clone());
+        }
+        // Copy data over to new tensor
+        let src = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let (idx, valid) = view.shape.index_node();
+        let mut res = vec![0.; view.shape.shape().iter().product()];
+        for i in 0..res.len() {
+            if valid.solve(i as i32) != 0 {
+                res[i] = src[idx.solve(i as i32) as usize];
+            }
+        }
+        (
+            Some(Tensor {
+                data: Box::new(res),
+            }),
+            TensorView {
+                tensor_id: i,
+                shape: ShapeTracker::new(view.shape.shape().to_vec()),
+            },
+        )
+    }
+}
+
 // Below are the primitive operators currently supported
 
 // Unary Op (A -> A)

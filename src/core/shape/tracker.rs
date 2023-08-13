@@ -200,6 +200,14 @@ impl ShapeTracker {
         }
     }
 
+    pub fn is_contiguous(&self) -> bool {
+        if self.views.len() > 1 {
+            false
+        } else {
+            self.views.last().unwrap().is_contiguous()
+        }
+    }
+
     pub fn get_real_shape<const N: usize>(&self, other: [&ShapeTracker; N]) -> Vec<usize> {
         let mut our = self.views.last().unwrap().shape.clone();
         if !our.iter().any(|i| *i == 100) {

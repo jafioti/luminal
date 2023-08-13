@@ -93,6 +93,15 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(id, graph_ref)
     }
 
+    pub fn contiguous(self) -> GraphTensor<S> {
+        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        let new_id = graph
+            .add_op(op::Contiguous, S::realized_shape())
+            .input(self.id)
+            .finish();
+        GraphTensor::from_id(new_id, self.graph_ref)
+    }
+
     /// Take a slice of the original tensor. Any dimension with bounds becomes a dynamic dimension
     pub fn slice<Slice: SliceOfShape<S>>(self, slice: Slice) -> GraphTensor<Slice::OutputShape> {
         let slice = slice.to_range_vec();
