@@ -129,7 +129,7 @@ impl<S: Shape> GraphTensor<S> {
     pub fn less_than(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(op::Max, self.shape().clone())
+            .add_op(op::LessThan, self.shape().clone())
             .input(self.id)
             .input(rhs.id)
             .finish();
@@ -137,7 +137,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     pub fn greater_than(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
-        -self.less_than(rhs) + 1.0
+        rhs.less_than(self)
     }
 
     pub fn less_than_equal(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
@@ -161,13 +161,7 @@ impl<S: Shape> GraphTensor<S> {
 impl<S: Shape> GraphTensor<S> {
     /// Take the elementwise maximum of two tensors
     pub fn max(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let new_id = graph
-            .add_op(op::Max, self.shape().clone())
-            .input(self.id)
-            .input(rhs.id)
-            .finish();
-        GraphTensor::from_id(new_id, self.graph_ref)
+        (self.less_than(rhs) * rhs) + (rhs.less_than_equal(self) * self)
     }
 
     /// Take the elementwise maximum of a tensor and a float

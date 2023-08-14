@@ -45,7 +45,7 @@ fn main() {
 
     let out = out.data();
     input.push(sample_index(&out[(input.len() - 1) * 32_000..]));
-    println!("{}", tokenizer.decode(input.iter().map(|i| *i as u32).collect(), false).unwrap());
+    println!("{}", tokenizer.decode(&input.iter().map(|i| *i as u32).collect::<Vec<_>>(), false).unwrap());
 
 
     // Build KV cache forward graph
@@ -67,7 +67,7 @@ fn main() {
         let o = out.data();
         // Sample tokens
         input.push(sample_index(&o));
-        println!("{}", tokenizer.decode(input.iter().map(|i| *i as u32).collect(), false).unwrap());
+        println!("{}", tokenizer.decode(&input.iter().map(|i| *i as u32).collect::<Vec<_>>(), false).unwrap());
 
         // Swap caches
         for ((src_k, src_v), (dest_k, dest_v)) in cache_src.iter().copied().zip(cache_dest.iter().copied()) {
