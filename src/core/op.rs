@@ -398,40 +398,6 @@ impl Operator for Mul {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct Max;
-impl Operator for Max {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        let ((a_idx, a_valid), (b_idx, b_valid), a_data, b_data, mut data, res_shape) =
-            binary_op_setup(inp);
-        for i in 0..data.len() as i32 {
-            data[i as usize] = if a_valid.solve(i) != 0 {
-                a_data[a_idx.solve(i) as usize]
-            } else {
-                0.
-            }
-            .max(if b_valid.solve(i) != 0 {
-                b_data[b_idx.solve(i) as usize]
-            } else {
-                0.
-            });
-        }
-        (
-            Some(Tensor {
-                data: Box::new(data),
-            }),
-            TensorView {
-                tensor_id: nid,
-                shape: ShapeTracker::new(res_shape),
-            },
-        )
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mod;
 impl Operator for Mod {
     fn process(
@@ -475,19 +441,17 @@ impl Operator for LessThan {
         let ((a_idx, a_valid), (b_idx, b_valid), a_data, b_data, mut data, res_shape) =
             binary_op_setup(inp);
         for i in 0..data.len() as i32 {
-            data[i as usize] = if if a_valid.solve(i) != 0 {
+            let a = if a_valid.solve(i) != 0 {
                 a_data[a_idx.solve(i) as usize]
             } else {
                 0.
-            } < if b_valid.solve(i) != 0 {
+            };
+            let b = if b_valid.solve(i) != 0 {
                 b_data[b_idx.solve(i) as usize]
             } else {
                 0.
-            } {
-                1.
-            } else {
-                0.
             };
+            data[i as usize] = if a < b { 1. } else { 0. };
         }
         (
             Some(Tensor {
@@ -826,17 +790,17 @@ mod tests {
     fn test_max() {
         let mut cx = Graph::new();
         let a = cx.new_tensor::<R1<3>>("Input");
-        a.set(vec![1., 2., 3.]);
+        a.set(vec![1., 0., 3.]);
         let b = cx.new_tensor::<R1<3>>("Input");
-        b.set(vec![1., 2., 3.]);
+        b.set(vec![1., 2., -2.]);
         let c = a.max(b);
         c.mark();
 
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor([1., 2., 3.]);
-        let d_b = d_dev.tensor([1., 2., 3.]);
+        let d_a = d_dev.tensor([1., 0., 3.]);
+        let d_b = d_dev.tensor([1., 2., -2.]);
         let d_c = d_a.maximum(d_b);
 
         assert_close_data(&c.data(), &d_c.as_vec());
