@@ -176,15 +176,4 @@ mod tests {
         let dst = ReduceStridesTo::<_, Axis<0>>::reduced(&src);
         assert_eq!(dst, (2, Const::<3>));
     }
-
-    #[test]
-    fn test_broadcast_strides() {
-        let src = (1,);
-        let dst_strides =
-            BroadcastStridesTo::<(usize, usize, usize), Axes2<0, 2>>::broadcast_strides(
-                &src,
-                src.strides(),
-            );
-        assert_eq!(dst_strides, [0, 1, 0]);
-    }
 }

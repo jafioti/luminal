@@ -182,18 +182,6 @@ pub trait Shape:
         self.concrete().into_iter().product()
     }
 
-    /// The strides of how this shape is layed out in memory.
-    #[inline(always)]
-    fn strides(&self) -> Self::Concrete {
-        let sizes = self.concrete();
-        let mut strides: Self::Concrete = Default::default();
-        strides[Self::NUM_DIMS - 1] = 1;
-        for i in (0..(Self::NUM_DIMS - 1)).rev() {
-            strides[i] = strides[i + 1] * sizes[i + 1];
-        }
-        strides
-    }
-
     fn realized_shape() -> Vec<RealDim>;
 }
 
@@ -297,10 +285,6 @@ impl Shape for () {
     }
     fn realized_shape() -> Vec<RealDim> {
         vec![]
-    }
-    #[inline(always)]
-    fn strides(&self) -> Self::Concrete {
-        []
     }
     #[inline(always)]
     fn from_concrete(_: &Self::Concrete) -> Option<Self> {

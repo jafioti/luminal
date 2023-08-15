@@ -5,3 +5,4 @@ Cargo.lock
 *.st
 *.npx
 *.npz
+/**/llama-7b-hf

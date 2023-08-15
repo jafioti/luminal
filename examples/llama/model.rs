@@ -3,7 +3,7 @@ use std::ops::{Add, Mul};
 
 use luminal::{
     nn::{activation::RMSNorm, embedding::Embedding},
-    op,
+    op::Function,
     prelude::{movement::TryConcatAlong, *},
 };
 use rand::{thread_rng, Rng};
@@ -83,7 +83,7 @@ impl<
             Option<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
         ),
     ) -> Self::Output {
-        let (sin, cos) = self.get_sincos(q, cache);
+        let (sin, cos) = self.get_sincos::<Batch, NUM_HEADS, Seq, PrevSeq>(q, cache);
         let sin = sin.expand();
         let cos = cos.expand();
         let q_embed = (Self::rotate_half(q) * sin) + (q * cos);
@@ -107,7 +107,7 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
         let has_cache = cache.is_some();
         let mut op = graph
             .add_op(
-                op::Function(
+                Function(
                     "ARange".to_string(),
                     Box::new(move |inp, i| {
                         let offset = if has_cache {
@@ -536,7 +536,7 @@ impl<
         let attn_mask: GraphTensor<(CurSeq, CurSeq)> = GraphTensor::from_id(
             graph
                 .add_op(
-                    op::Function(
+                    Function(
                         "AttentionMask".to_string(),
                         Box::new(|inp, i| {
                             let seq_len = inp[0].1.shape.shape()[1];
