@@ -47,6 +47,26 @@ impl Debug for Function {
     }
 }
 
+/// An operand that does nothing. It's purpose is to force a shape resolution between multiple tensors
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NoOp;
+
+impl Operator for NoOp {
+    fn process(
+        &self,
+        input: Vec<(&Tensor, TensorView)>,
+        _: NodeIndex,
+    ) -> (Option<Tensor>, TensorView) {
+        (
+            None,
+            TensorView {
+                tensor_id: input[0].1.tensor_id,
+                shape: input[0].1.shape.clone(),
+            },
+        )
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Print(pub String);
 impl Operator for Print {
