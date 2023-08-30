@@ -131,7 +131,13 @@ impl Operator for CudaLog2 {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let inp_size: usize = tensors[0].1.shape.shape().iter().product();
+        let inp_size: usize = tensors[0]
+            .1
+            .shape
+            .shape()
+            .iter()
+            .filter(|i| **i != usize::MAX)
+            .product();
         let ptx = compile_ptx(
             "
 extern \"C\" __global__ void log2_kernel(float *out, const float *inp, int numel) {
@@ -176,7 +182,13 @@ impl Operator for CudaExp2 {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let inp_size: usize = tensors[0].1.shape.shape().iter().product();
+        let inp_size: usize = tensors[0]
+            .1
+            .shape
+            .shape()
+            .iter()
+            .filter(|i| **i != usize::MAX)
+            .product();
         let ptx = compile_ptx(
             "
 extern \"C\" __global__ void exp2_kernel(float *out, const float *inp, int numel) {
@@ -221,7 +233,13 @@ impl Operator for CudaSin {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let inp_size: usize = tensors[0].1.shape.shape().iter().product();
+        let inp_size: usize = tensors[0]
+            .1
+            .shape
+            .shape()
+            .iter()
+            .filter(|i| **i != usize::MAX)
+            .product();
         let ptx = compile_ptx(
             "
 extern \"C\" __global__ void sin_kernel(float *out, const float *inp, int numel) {
@@ -266,7 +284,13 @@ impl Operator for CudaSqrt {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let inp_size: usize = tensors[0].1.shape.shape().iter().product();
+        let inp_size: usize = tensors[0]
+            .1
+            .shape
+            .shape()
+            .iter()
+            .filter(|i| **i != usize::MAX)
+            .product();
         let ptx = compile_ptx(
             "
 extern \"C\" __global__ void sqrt_kernel(float *out, const float *inp, int numel) {
@@ -311,7 +335,13 @@ impl Operator for CudaRecip {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let inp_size: usize = tensors[0].1.shape.shape().iter().product();
+        let inp_size: usize = tensors[0]
+            .1
+            .shape
+            .shape()
+            .iter()
+            .filter(|i| **i != usize::MAX)
+            .product();
         let ptx = compile_ptx(
             "
 extern \"C\" __global__ void recip_kernel(float *out, const float *inp, int numel) {
@@ -352,7 +382,6 @@ impl Operator for CudaAdd {
         tensors: Vec<(&Tensor, TensorView)>,
         i: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let res_shape = tensors[0].1.shape.get_real_shape([&tensors[1].1.shape]);
         let a = tensors[0]
             .0
             .data
@@ -365,7 +394,13 @@ impl Operator for CudaAdd {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let inp_size: usize = res_shape.iter().product();
+        let inp_size: usize = tensors[0]
+            .1
+            .shape
+            .shape()
+            .iter()
+            .filter(|i| **i != usize::MAX)
+            .product();
         let (a_idx, a_valid) = tensors[0].1.shape.index_node();
         let (a_idx_exp, a_valid_exp) = (a_idx.to_string_no_range(), a_valid.to_string_no_range());
         let (b_idx, b_valid) = tensors[1].1.shape.index_node();
@@ -402,7 +437,7 @@ extern \"C\" __global__ void add_kernel(float *out, const float *a, const float 
             }),
             TensorView {
                 tensor_id: i,
-                shape: ShapeTracker::new(res_shape),
+                shape: ShapeTracker::new(tensors[0].1.shape.shape().clone()),
             },
         )
     }
@@ -416,7 +451,6 @@ impl Operator for CudaMul {
         tensors: Vec<(&Tensor, TensorView)>,
         i: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let res_shape = tensors[0].1.shape.get_real_shape([&tensors[1].1.shape]);
         let a = tensors[0]
             .0
             .data
@@ -429,7 +463,13 @@ impl Operator for CudaMul {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let inp_size: usize = res_shape.iter().product();
+        let inp_size: usize = tensors[0]
+            .1
+            .shape
+            .shape()
+            .iter()
+            .filter(|i| **i != usize::MAX)
+            .product();
         let (a_idx, a_valid) = tensors[0].1.shape.index_node();
         let (a_idx_exp, a_valid_exp) = (a_idx.to_string_no_range(), a_valid.to_string_no_range());
         let (b_idx, b_valid) = tensors[1].1.shape.index_node();
@@ -466,7 +506,7 @@ extern \"C\" __global__ void mul_kernel(float *out, const float *a, const float 
             }),
             TensorView {
                 tensor_id: i,
-                shape: ShapeTracker::new(res_shape),
+                shape: ShapeTracker::new(tensors[0].1.shape.shape().clone()),
             },
         )
     }
@@ -480,7 +520,6 @@ impl Operator for CudaMod {
         tensors: Vec<(&Tensor, TensorView)>,
         i: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let res_shape = tensors[0].1.shape.get_real_shape([&tensors[1].1.shape]);
         let a = tensors[0]
             .0
             .data
@@ -493,7 +532,13 @@ impl Operator for CudaMod {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let inp_size: usize = res_shape.iter().product();
+        let inp_size: usize = tensors[0]
+            .1
+            .shape
+            .shape()
+            .iter()
+            .filter(|i| **i != usize::MAX)
+            .product();
         let (a_idx, a_valid) = tensors[0].1.shape.index_node();
         let (a_idx_exp, a_valid_exp) = (a_idx.to_string_no_range(), a_valid.to_string_no_range());
         let (b_idx, b_valid) = tensors[1].1.shape.index_node();
@@ -530,7 +575,7 @@ extern \"C\" __global__ void mod_kernel(float *out, const float *a, const float 
             }),
             TensorView {
                 tensor_id: i,
-                shape: ShapeTracker::new(res_shape),
+                shape: ShapeTracker::new(tensors[0].1.shape.shape().clone()),
             },
         )
     }
@@ -544,7 +589,6 @@ impl Operator for CudaLessThan {
         tensors: Vec<(&Tensor, TensorView)>,
         i: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let res_shape = tensors[0].1.shape.get_real_shape([&tensors[1].1.shape]);
         let a = tensors[0]
             .0
             .data
@@ -557,7 +601,13 @@ impl Operator for CudaLessThan {
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
-        let inp_size: usize = res_shape.iter().product();
+        let inp_size: usize = tensors[0]
+            .1
+            .shape
+            .shape()
+            .iter()
+            .filter(|i| **i != usize::MAX)
+            .product();
         let (a_idx, a_valid) = tensors[0].1.shape.index_node();
         let (a_idx_exp, a_valid_exp) = (a_idx.to_string_no_range(), a_valid.to_string_no_range());
         let (b_idx, b_valid) = tensors[1].1.shape.index_node();
@@ -599,7 +649,7 @@ extern \"C\" __global__ void less_than_kernel(float *out, const float *a, const 
             }),
             TensorView {
                 tensor_id: i,
-                shape: ShapeTracker::new(res_shape),
+                shape: ShapeTracker::new(tensors[0].1.shape.shape().clone()),
             },
         )
     }
