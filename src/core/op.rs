@@ -54,13 +54,16 @@ pub struct NoOp;
 impl Operator for NoOp {
     fn process(
         &self,
-        input: Vec<(&Tensor, TensorView)>,
+        mut input: Vec<(&Tensor, TensorView)>,
         _: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
+        let id = input[0].1.tensor_id;
+        let res_shape = input[0].1.shape.get_real_shape([&input[1].1.shape]);
+        input[0].1.shape.views.last_mut().unwrap().shape = res_shape;
         (
             None,
             TensorView {
-                tensor_id: input[0].1.tensor_id,
+                tensor_id: id,
                 shape: input[0].1.shape.clone(),
             },
         )

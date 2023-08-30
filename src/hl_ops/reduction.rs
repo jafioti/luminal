@@ -58,6 +58,11 @@ impl<S: Shape> GraphTensor<S> {
                     .input(ones)
                     .finish();
             }
+            ones = graph
+                .add_op(op::NoOp, ones_shape.clone())
+                .input(ones)
+                .input(node_id)
+                .finish();
             ones_shape.remove(dim as usize);
             // Sum reduce on current dimension
             let div_tensor = graph
