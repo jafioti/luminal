@@ -72,7 +72,9 @@ impl View {
         };
         for (d, s) in self.shape_strides.iter().rev() {
             ret.push(((idx.clone() / (acc as i32)) % (*d as i32)) * (*s as i32));
-            acc *= d;
+            if *d != usize::MAX {
+                acc *= d;
+            }
         }
 
         Node::sum(ret)
@@ -206,35 +208,6 @@ impl ShapeTracker {
         } else {
             self.views.last().unwrap().is_contiguous()
         }
-    }
-
-    pub fn get_real_shape<const N: usize>(&self, other: [&ShapeTracker; N]) -> Vec<usize> {
-        let mut our = self.views.last().unwrap().shape.clone();
-        if !our.iter().any(|i| *i == usize::MAX) {
-            return our;
-        }
-
-        // Fill in holes
-        for other in other {
-            let mut has_zero = false;
-            for (i, o) in our.iter_mut().enumerate() {
-                if *o == usize::MAX {
-                    has_zero = true;
-                    *o = other.shape()[i];
-                }
-            }
-            if !has_zero {
-                break;
-            }
-        }
-
-        // Turn remaining usize::MAXs into 1s
-        for i in &mut our {
-            if *i == usize::MAX {
-                *i = 1;
-            }
-        }
-        our
     }
 
     pub fn shape(&self) -> &Vec<usize> {
@@ -397,7 +370,10 @@ impl ShapeTracker {
         let idx = Node::variable(
             "idx".to_string(),
             0,
-            self.shape().iter().product::<usize>() as i32,
+            self.shape()
+                .iter()
+                .filter(|i| **i != usize::MAX)
+                .product::<usize>() as i32,
         );
         let (idx, valid) = self._expr_idxs(
             self.views.last().unwrap().expr_node(idx.clone()),
@@ -405,6 +381,21 @@ impl ShapeTracker {
         );
 
         (idx, valid)
+    }
+}
+
+pub fn resolve_shapes(s1: &mut [usize], s2: &mut [usize]) {
+    for (i, v) in s1.iter_mut().enumerate() {
+        if *v == usize::MAX {
+            *v = if s2[i] == usize::MAX { 1 } else { s2[i] };
+        }
+    }
+
+    for (i, v) in s2.iter_mut().enumerate() {
+        if *v == usize::MAX || *v == 1 {
+            // Unsure if this is correct with the == 1
+            *v = s1[i]
+        }
     }
 }
 

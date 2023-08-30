@@ -27,20 +27,20 @@ impl<S: Dim, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
                 op::Function(
                     "Gather".to_string(),
                     Box::new(|tensors, i| {
-                        let data = tensors[0]
-                            .0
-                            .data
-                            .as_any()
-                            .downcast_ref::<Vec<f32>>()
-                            .unwrap();
-                        let (data_idx, data_val) = tensors[0].1.shape.index_node();
-                        let indexes = tensors[1]
+                        let indexes = tensors[0]
                             .0
                             .data
                             .as_any()
                             .downcast_ref::<Vec<usize>>()
                             .unwrap();
-                        let (index_idx, index_val) = tensors[1].1.shape.index_node();
+                        let (index_idx, index_val) = tensors[0].1.shape.index_node();
+                        let data = tensors[1]
+                            .0
+                            .data
+                            .as_any()
+                            .downcast_ref::<Vec<f32>>()
+                            .unwrap();
+                        let (data_idx, data_val) = tensors[1].1.shape.index_node();
                         let mut res = Vec::with_capacity(indexes.len() * DIM);
                         for i in 0..indexes.len() {
                             if index_val.solve(i as i32) == 0 {
@@ -56,7 +56,7 @@ impl<S: Dim, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
                                 });
                             }
                         }
-                        let mut shape = tensors[1].1.shape.shape().clone();
+                        let mut shape = tensors[0].1.shape.shape().clone();
                         shape.push(DIM);
                         (
                             Some(Tensor {
@@ -71,8 +71,8 @@ impl<S: Dim, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
                 ),
                 vec![S1::const_size(), RealDim::Const(DIM)],
             )
-            .input(self.id)
             .input(indexes.id)
+            .input(self.id) // Since indexes might have a 1 dimension we don't want getting changed, we feed it in as the first argument
             .finish();
 
         GraphTensor::from_id(res, self.graph_ref)

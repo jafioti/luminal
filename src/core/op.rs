@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use petgraph::stable_graph::NodeIndex;
 
 use crate::{
-    prelude::{Node, RealDim, ReshapeDim, TensorView, TraitObjEq},
+    prelude::{RealDim, ReshapeDim, TensorView, TraitObjEq},
     shape::ShapeTracker,
     tensor::Tensor,
 };
@@ -54,16 +54,13 @@ pub struct NoOp;
 impl Operator for NoOp {
     fn process(
         &self,
-        mut input: Vec<(&Tensor, TensorView)>,
+        input: Vec<(&Tensor, TensorView)>,
         _: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let id = input[0].1.tensor_id;
-        let res_shape = input[0].1.shape.get_real_shape([&input[1].1.shape]);
-        input[0].1.shape.views.last_mut().unwrap().shape = res_shape;
         (
             None,
             TensorView {
-                tensor_id: id,
+                tensor_id: input[0].1.tensor_id,
                 shape: input[0].1.shape.clone(),
             },
         )
@@ -326,33 +323,6 @@ impl Operator for Recip {
 
 // Binary Ops (A x A -> A)
 
-#[allow(clippy::type_complexity)]
-fn binary_op_setup(
-    inp: Vec<(&Tensor, TensorView)>,
-) -> (
-    (Node, Node),
-    (Node, Node),
-    &Vec<f32>,
-    &Vec<f32>,
-    Vec<f32>,
-    Vec<usize>,
-) {
-    let res_shape = inp[0].1.shape.get_real_shape([&inp[1].1.shape]);
-    let (mut left_shape, mut right_shape) = (inp[0].1.shape.clone(), inp[1].1.shape.clone());
-    left_shape.views.last_mut().unwrap().shape = res_shape.clone();
-    left_shape.reset_shape_strides();
-    right_shape.views.last_mut().unwrap().shape = res_shape.clone();
-    right_shape.reset_shape_strides();
-    (
-        left_shape.index_node(),
-        right_shape.index_node(),
-        inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
-        inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
-        vec![0.; res_shape.iter().product()],
-        res_shape,
-    )
-}
-
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Add;
 impl Operator for Add {
@@ -361,8 +331,13 @@ impl Operator for Add {
         inp: Vec<(&Tensor, TensorView)>,
         nid: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let ((a_idx, a_valid), (b_idx, b_valid), a_data, b_data, mut data, res_shape) =
-            binary_op_setup(inp);
+        let ((a_idx, a_valid), (b_idx, b_valid)) =
+            (inp[0].1.shape.index_node(), inp[1].1.shape.index_node());
+        let (a_data, b_data) = (
+            inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+            inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+        );
+        let mut data = vec![0.; inp[0].1.shape.shape().iter().product()];
         for i in 0..data.len() as i32 {
             data[i as usize] = if a_valid.solve(i) != 0 {
                 a_data[a_idx.solve(i) as usize]
@@ -380,7 +355,7 @@ impl Operator for Add {
             }),
             TensorView {
                 tensor_id: nid,
-                shape: ShapeTracker::new(res_shape),
+                shape: ShapeTracker::new(inp[0].1.shape.shape().clone()),
             },
         )
     }
@@ -394,8 +369,13 @@ impl Operator for Mul {
         inp: Vec<(&Tensor, TensorView)>,
         nid: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let ((a_idx, a_valid), (b_idx, b_valid), a_data, b_data, mut data, res_shape) =
-            binary_op_setup(inp);
+        let ((a_idx, a_valid), (b_idx, b_valid)) =
+            (inp[0].1.shape.index_node(), inp[1].1.shape.index_node());
+        let (a_data, b_data) = (
+            inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+            inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+        );
+        let mut data = vec![0.; inp[0].1.shape.shape().iter().product()];
         for i in 0..data.len() as i32 {
             data[i as usize] = if a_valid.solve(i) != 0 {
                 a_data[a_idx.solve(i) as usize]
@@ -414,7 +394,7 @@ impl Operator for Mul {
             }),
             TensorView {
                 tensor_id: nid,
-                shape: ShapeTracker::new(res_shape),
+                shape: ShapeTracker::new(inp[0].1.shape.shape().clone()),
             },
         )
     }
@@ -428,8 +408,13 @@ impl Operator for Mod {
         inp: Vec<(&Tensor, TensorView)>,
         nid: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let ((a_idx, a_valid), (b_idx, b_valid), a_data, b_data, mut data, res_shape) =
-            binary_op_setup(inp);
+        let ((a_idx, a_valid), (b_idx, b_valid)) =
+            (inp[0].1.shape.index_node(), inp[1].1.shape.index_node());
+        let (a_data, b_data) = (
+            inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+            inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+        );
+        let mut data = vec![0.; inp[0].1.shape.shape().iter().product()];
         for i in 0..data.len() as i32 {
             data[i as usize] = if a_valid.solve(i) != 0 {
                 a_data[a_idx.solve(i) as usize]
@@ -447,7 +432,7 @@ impl Operator for Mod {
             }),
             TensorView {
                 tensor_id: nid,
-                shape: ShapeTracker::new(res_shape),
+                shape: ShapeTracker::new(inp[0].1.shape.shape().clone()),
             },
         )
     }
@@ -461,8 +446,13 @@ impl Operator for LessThan {
         inp: Vec<(&Tensor, TensorView)>,
         nid: NodeIndex,
     ) -> (Option<Tensor>, TensorView) {
-        let ((a_idx, a_valid), (b_idx, b_valid), a_data, b_data, mut data, res_shape) =
-            binary_op_setup(inp);
+        let ((a_idx, a_valid), (b_idx, b_valid)) =
+            (inp[0].1.shape.index_node(), inp[1].1.shape.index_node());
+        let (a_data, b_data) = (
+            inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+            inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+        );
+        let mut data = vec![0.; inp[0].1.shape.shape().iter().product()];
         for i in 0..data.len() as i32 {
             let a = if a_valid.solve(i) != 0 {
                 a_data[a_idx.solve(i) as usize]
@@ -482,7 +472,7 @@ impl Operator for LessThan {
             }),
             TensorView {
                 tensor_id: nid,
-                shape: ShapeTracker::new(res_shape),
+                shape: ShapeTracker::new(inp[0].1.shape.shape().clone()),
             },
         )
     }

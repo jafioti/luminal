@@ -221,7 +221,7 @@ impl Graph {
                     continue;
                 }
             }
-            let srcs = src_ids
+            let mut srcs = src_ids
                 .iter()
                 .map(|i| {
                     let view = self.views.get(i).unwrap().clone();
@@ -229,7 +229,18 @@ impl Graph {
                 })
                 .collect_vec();
 
-            // All sources are ready, execute
+            // All sources are ready
+            // Resolve shapes
+            if srcs.len() == 2 && (srcs[0].1.shape.shape().len() == srcs[1].1.shape.shape().len()) {
+                let (a, b) = srcs.split_at_mut(1);
+                resolve_shapes(
+                    &mut a[0].1.shape.views.last_mut().unwrap().shape,
+                    &mut b[0].1.shape.views.last_mut().unwrap().shape,
+                );
+                a[0].1.shape.reset_shape_strides();
+                b[0].1.shape.reset_shape_strides();
+            }
+            // Execute
             let (t, v) = self
                 .graph
                 .node_weight(*node)
@@ -274,13 +285,22 @@ impl Graph {
                     continue;
                 }
             }
-            let srcs = src_ids
+            let mut srcs = src_ids
                 .iter()
                 .map(|i| {
                     let view = self.views.get(i).unwrap().clone();
                     (self.tensors.get(&view.tensor_id).unwrap(), view)
                 })
                 .collect_vec();
+            if srcs.len() == 2 && (srcs[0].1.shape.shape().len() == srcs[1].1.shape.shape().len()) {
+                let (a, b) = srcs.split_at_mut(1);
+                resolve_shapes(
+                    &mut a[0].1.shape.views.last_mut().unwrap().shape,
+                    &mut b[0].1.shape.views.last_mut().unwrap().shape,
+                );
+                a[0].1.shape.reset_shape_strides();
+                b[0].1.shape.reset_shape_strides();
+            }
 
             // All sources are ready, execute
             let (t, v) = self
