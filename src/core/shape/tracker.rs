@@ -210,7 +210,7 @@ impl ShapeTracker {
 
     pub fn get_real_shape<const N: usize>(&self, other: [&ShapeTracker; N]) -> Vec<usize> {
         let mut our = self.views.last().unwrap().shape.clone();
-        if !our.iter().any(|i| *i == 100) {
+        if !our.iter().any(|i| *i == usize::MAX) {
             return our;
         }
 
@@ -218,7 +218,7 @@ impl ShapeTracker {
         for other in other {
             let mut has_zero = false;
             for (i, o) in our.iter_mut().enumerate() {
-                if *o == 100 {
+                if *o == usize::MAX {
                     has_zero = true;
                     *o = other.shape()[i];
                 }
@@ -228,9 +228,9 @@ impl ShapeTracker {
             }
         }
 
-        // Turn remaining 100s into 1s
+        // Turn remaining usize::MAXs into 1s
         for i in &mut our {
-            if *i == 100 {
+            if *i == usize::MAX {
                 *i = 1;
             }
         }
@@ -263,7 +263,7 @@ impl ShapeTracker {
             dimension,
             match new_size {
                 RealDim::Const(i) => i,
-                RealDim::Dyn => 100, // Very sloppy, this just needs to be a substantial number that the symbolic library can't get rid of. This needs to change!
+                RealDim::Dyn => usize::MAX, // Very sloppy, this just needs to be a substantial number that the symbolic library can't get rid of. This needs to change!
             },
         );
         self.views.last_mut().unwrap().strides.insert(dimension, 0);
@@ -424,7 +424,14 @@ pub fn to_shapes_strides(shape: &[usize], strides: &[usize]) -> Vec<(usize, usiz
             || ret.last().map(|(i, _)| *i == 1).unwrap_or_default()
             || (strides[i] == 0 && ret.last().map(|(_, i)| *i == 0).unwrap_or_default())
         {
-            *ret.last_mut().unwrap() = (ret.last().unwrap().0 * shape[i], strides[i]);
+            *ret.last_mut().unwrap() = (
+                if ret.last().unwrap().0 == usize::MAX || shape[i] == usize::MAX {
+                    ret.last().unwrap().0
+                } else {
+                    ret.last().unwrap().0 * shape[i]
+                },
+                strides[i],
+            );
         } else {
             ret.push((shape[i], strides[i]));
         }
