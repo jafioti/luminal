@@ -18,13 +18,20 @@ pub struct Graph {
     pub tensors: HashMap<NodeIndex, Tensor>,
     pub views: HashMap<NodeIndex, TensorView>,
     pub(crate) id_remap: HashMap<NodeIndex, NodeIndex>,
-    pub graph: StableGraph<(Box<dyn Operator>, Vec<RealDim>), u8>,
+    pub graph:
+        StableGraph<Box<dyn Operator>, (u8, crate::core::shape::simple_tracker::ShapeTracker)>,
     pub no_delete: HashSet<NodeIndex>,
     /// Mark tensors that need to be retrieved later (mostly for optimizers to insert copy back calls, the graph itself doesn't treat these differently)
     pub(crate) to_retrieve: HashSet<NodeIndex>,
     /// A list of current node to run, source nodes, and view nodes to delete after execution.
     #[allow(clippy::type_complexity)]
-    pub(crate) linearized_graph: Option<Vec<(NodeIndex, Vec<NodeIndex>, Vec<NodeIndex>)>>,
+    pub(crate) linearized_graph: Option<
+        Vec<(
+            NodeIndex,
+            Vec<(NodeIndex, crate::core::shape::simple_tracker::ShapeTracker)>,
+            Vec<NodeIndex>,
+        )>,
+    >,
 }
 
 impl Graph {
@@ -32,17 +39,17 @@ impl Graph {
         Graph::default()
     }
 
-    pub fn add_op<O: Operator + 'static>(&mut self, op: O, output_shape: Vec<RealDim>) -> NewOp {
+    pub fn add_op<O: Operator + 'static>(&mut self, op: O) -> NewOp {
         self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
         NewOp {
-            new_op_id: self.graph.add_node((Box::new(op), output_shape)),
+            new_op_id: self.graph.add_node(Box::new(op)),
             graph_ref: self,
             num_srcs: 0,
         }
     }
 
     pub(crate) fn get_op(&self, id: NodeIndex) -> Option<&dyn Operator> {
-        self.graph.node_weight(id).map(|n| n.0.as_ref())
+        self.graph.node_weight(id).map(|n| n.as_ref())
     }
 
     pub fn get_tensor(&mut self, id: NodeIndex) -> Option<Tensor> {
@@ -67,14 +74,12 @@ impl Graph {
     pub fn new_tensor<S: Shape>(&mut self, name: &str) -> GraphTensor<S> {
         self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
         GraphTensor {
-            id: self.graph.add_node((
-                Box::new(op::Function(
-                    name.to_string(),
-                    Box::new(|_, _| panic!("You must set a value for this tensor!")),
-                )),
-                S::realized_shape(),
-            )),
+            id: self.graph.add_node(Box::new(op::Function(
+                name.to_string(),
+                Box::new(|_| panic!("You must set a value for this tensor!")),
+            ))),
             graph_ref: self,
+            shape: S::to_tracker(),
             _phantom: Default::default(),
         }
     }
@@ -111,11 +116,11 @@ impl Graph {
             let src_ids = self
                 .graph
                 .edges_directed(node, Direction::Incoming)
-                .sorted_by_key(|e| e.weight())
-                .map(|i| i.source())
+                .sorted_by_key(|e| e.weight().0)
+                .map(|i| (i.source(), i.weight().1))
                 .collect_vec();
             let mut srcs_to_remove = vec![];
-            for source in src_ids.iter().filter(|n| !self.no_delete.contains(n)) {
+            for (source, _) in src_ids.iter().filter(|(n, _)| !self.no_delete.contains(n)) {
                 let deps = dependencies.get_mut(source).unwrap();
                 *deps -= 1;
                 if *deps == 0 {
@@ -223,39 +228,23 @@ impl Graph {
             }
             let mut srcs = src_ids
                 .iter()
-                .map(|i| {
-                    let view = self.views.get(i).unwrap().clone();
-                    (self.tensors.get(&view.tensor_id).unwrap(), view)
-                })
+                .map(|(id, st)| (self.tensors.get(id).unwrap(), *st))
                 .collect_vec();
 
             // All sources are ready
             // Resolve shapes
-            if srcs.len() == 2 && (srcs[0].1.shape.shape().len() == srcs[1].1.shape.shape().len()) {
+            if srcs.len() == 2 && (srcs[0].1.shape().len() == srcs[1].1.shape().len()) {
                 let (a, b) = srcs.split_at_mut(1);
-                resolve_shapes(
-                    &mut a[0].1.shape.views.last_mut().unwrap().shape,
-                    &mut b[0].1.shape.views.last_mut().unwrap().shape,
-                );
-                a[0].1.shape.reset_shape_strides();
-                b[0].1.shape.reset_shape_strides();
+                // resolve_shapes(
+                //     &mut a[0].1.shape.views.last_mut().unwrap().shape,
+                //     &mut b[0].1.shape.views.last_mut().unwrap().shape,
+                // );
+                // a[0].1.shape.reset_shape_strides();
+                // b[0].1.shape.reset_shape_strides();
             }
             // Execute
-            let (t, v) = self
-                .graph
-                .node_weight(*node)
-                .unwrap()
-                .0
-                .process(srcs, *node);
-            if let Some(tensor) = t {
-                self.tensors.insert(*node, tensor);
-            }
-            if let Some(vp) = views_pointing.get_mut(&v.tensor_id) {
-                *vp += 1;
-            } else {
-                views_pointing.insert(v.tensor_id, 1);
-            }
-            self.views.insert(*node, v);
+            let tensor = self.graph.node_weight(*node).unwrap().process(srcs);
+            self.tensors.insert(*node, tensor);
 
             // Check if we can delete the source tensors now
             for source in srcs_to_remove {
@@ -287,32 +276,21 @@ impl Graph {
             }
             let mut srcs = src_ids
                 .iter()
-                .map(|i| {
-                    let view = self.views.get(i).unwrap().clone();
-                    (self.tensors.get(&view.tensor_id).unwrap(), view)
-                })
+                .map(|(id, st)| (self.tensors.get(id).unwrap(), *st))
                 .collect_vec();
-            if srcs.len() == 2 && (srcs[0].1.shape.shape().len() == srcs[1].1.shape.shape().len()) {
+            if srcs.len() == 2 && (srcs[0].1.shape().len() == srcs[1].1.shape().len()) {
                 let (a, b) = srcs.split_at_mut(1);
-                resolve_shapes(
-                    &mut a[0].1.shape.views.last_mut().unwrap().shape,
-                    &mut b[0].1.shape.views.last_mut().unwrap().shape,
-                );
-                a[0].1.shape.reset_shape_strides();
-                b[0].1.shape.reset_shape_strides();
+                // resolve_shapes(
+                //     &mut a[0].1.shape.views.last_mut().unwrap().shape,
+                //     &mut b[0].1.shape.views.last_mut().unwrap().shape,
+                // );
+                // a[0].1.shape.reset_shape_strides();
+                // b[0].1.shape.reset_shape_strides();
             }
 
             // All sources are ready, execute
-            let (t, v) = self
-                .graph
-                .node_weight(*node)
-                .unwrap()
-                .0
-                .process(srcs, *node);
-            if let Some(tensor) = t {
-                self.tensors.insert(*node, tensor);
-            }
-            self.views.insert(*node, v);
+            let tensor = self.graph.node_weight(*node).unwrap().process(srcs);
+            self.tensors.insert(*node, tensor);
         }
     }
 
@@ -324,18 +302,7 @@ impl Graph {
         let mut new_graph = petgraph::stable_graph::StableGraph::default();
         let mut id_map = HashMap::new();
         for (id, node) in self.graph.node_indices().zip(self.graph.node_weights()) {
-            id_map.insert(
-                id,
-                new_graph.add_node(if show_shapes {
-                    format!(
-                        "{:?} | [{}]",
-                        node.0,
-                        node.1.iter().map(|i| i.to_string()).join(", ")
-                    )
-                } else {
-                    format!("{:?}", node.0)
-                }),
-            );
+            id_map.insert(id, new_graph.add_node(format!("{node:?}")));
         }
 
         for node in self.graph.node_indices() {
@@ -346,7 +313,7 @@ impl Graph {
                 new_graph.add_edge(
                     id_map[&edge.source()],
                     id_map[&edge.target()],
-                    *edge.weight(),
+                    edge.weight().0,
                 );
             }
         }
@@ -364,10 +331,7 @@ impl Graph {
 
     /// Get the sources of a node given it's id
     #[allow(clippy::type_complexity)]
-    pub fn get_sources(
-        &self,
-        node_id: NodeIndex,
-    ) -> Vec<(NodeIndex, &(Box<dyn Operator>, Vec<RealDim>))> {
+    pub fn get_sources(&self, node_id: NodeIndex) -> Vec<(NodeIndex, &Box<dyn Operator>)> {
         self.graph
             .edges_directed(node_id, Direction::Incoming)
             .map(|e| e.source())
@@ -377,10 +341,7 @@ impl Graph {
 
     /// Get the dests of a node given it's id
     #[allow(clippy::type_complexity)]
-    pub fn get_dests(
-        &self,
-        node_id: NodeIndex,
-    ) -> Vec<(NodeIndex, &(Box<dyn Operator>, Vec<RealDim>))> {
+    pub fn get_dests(&self, node_id: NodeIndex) -> Vec<(NodeIndex, &Box<dyn Operator>)> {
         self.graph
             .edges_directed(node_id, Direction::Outgoing)
             .map(|e| e.target())
@@ -448,10 +409,14 @@ impl<'a> NewOp<'a> {
         self.new_op_id
     }
 
-    pub fn input(mut self, id: NodeIndex) -> Self {
+    pub fn input(
+        mut self,
+        id: NodeIndex,
+        shape: crate::core::shape::simple_tracker::ShapeTracker,
+    ) -> Self {
         self.graph_ref
             .graph
-            .add_edge(id, self.new_op_id, self.num_srcs);
+            .add_edge(id, self.new_op_id, (self.num_srcs, shape));
         self.num_srcs += 1;
         self
     }
@@ -459,7 +424,7 @@ impl<'a> NewOp<'a> {
 
 fn toposort(
     id: NodeIndex,
-    graph: &StableGraph<(Box<dyn Operator>, Vec<RealDim>), u8>,
+    graph: &StableGraph<Box<dyn Operator>, (u8, crate::core::shape::simple_tracker::ShapeTracker)>,
     visited: &mut HashSet<NodeIndex>,
 ) -> (Vec<NodeIndex>, usize, bool) {
     if visited.contains(&id) {

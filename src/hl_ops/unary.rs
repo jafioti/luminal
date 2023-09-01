@@ -6,23 +6,15 @@ impl<S: Shape> GraphTensor<S> {
     /// Base 2 log
     pub fn log_2(self) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let shape = self.shape();
-        let new_id = graph
-            .add_op(op::Log2, shape.clone())
-            .input(self.id)
-            .finish();
-        GraphTensor::from_id(new_id, self.graph_ref)
+        let new_id = graph.add_op(op::Log2).input(self.id, self.shape).finish();
+        GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
 
     /// Base 2 exp
     pub fn exp_2(self) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let shape = self.shape();
-        let new_id = graph
-            .add_op(op::Exp2, shape.clone())
-            .input(self.id)
-            .finish();
-        GraphTensor::from_id(new_id, self.graph_ref)
+        let new_id = graph.add_op(op::Exp2).input(self.id, self.shape).finish();
+        GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
 
     /// Natural exp
@@ -37,19 +29,14 @@ impl<S: Shape> GraphTensor<S> {
 
     pub fn recip(self) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let shape = self.shape();
-        let new_id = graph
-            .add_op(op::Recip, shape.clone())
-            .input(self.id)
-            .finish();
-        GraphTensor::from_id(new_id, self.graph_ref)
+        let new_id = graph.add_op(op::Recip).input(self.id, self.shape).finish();
+        GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
 
     pub fn sin(self) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let shape = self.shape();
-        let new_id = graph.add_op(op::Sin, shape.clone()).input(self.id).finish();
-        GraphTensor::from_id(new_id, self.graph_ref)
+        let new_id = graph.add_op(op::Sin).input(self.id, self.shape).finish();
+        GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
 
     pub fn cos(self) -> GraphTensor<S> {
@@ -58,12 +45,8 @@ impl<S: Shape> GraphTensor<S> {
 
     pub fn sqrt(self) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let shape = self.shape();
-        let new_id = graph
-            .add_op(op::Sqrt, shape.clone())
-            .input(self.id)
-            .finish();
-        GraphTensor::from_id(new_id, self.graph_ref)
+        let new_id = graph.add_op(op::Sqrt).input(self.id, self.shape).finish();
+        GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
 
     pub fn layer_norm<const DIM: isize>(self) -> GraphTensor<S>

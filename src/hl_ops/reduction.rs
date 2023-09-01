@@ -8,17 +8,22 @@ impl<S: Shape> GraphTensor<S> {
         S: HasAxes<Ax> + ReduceShapeTo<Dst, Ax>,
     {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let mut shape = self.shape().clone();
+        let mut shape = self.shape;
 
         let mut new_id = self.id;
         for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
-            shape.remove(dim as usize);
             new_id = graph
-                .add_op(op::SumReduce(dim as usize), shape.clone())
-                .input(new_id)
+                .add_op(op::SumReduce(dim as usize))
+                .input(new_id, shape)
                 .finish();
+            // Reduce shape
+            for i in (dim as usize)..shape.n_dims {
+                shape.orig_shape[i - 1] = shape.orig_shape[i];
+                shape.orig_shape[i] = crate::core::shape::simple_tracker::Dim::Unknown;
+            }
+            shape.n_dims -= 1;
         }
-        GraphTensor::from_id(new_id, self.graph_ref)
+        GraphTensor::from_id(new_id, shape, self.graph_ref)
     }
 
     pub fn max_reduce<Dst: Shape, Ax: Axes>(self) -> GraphTensor<Dst>
@@ -26,17 +31,22 @@ impl<S: Shape> GraphTensor<S> {
         S: HasAxes<Ax> + ReduceShapeTo<Dst, Ax>,
     {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let mut shape = self.shape().clone();
+        let mut shape = self.shape;
 
         let mut new_id = self.id;
         for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
-            shape.remove(dim as usize);
             new_id = graph
-                .add_op(op::MaxReduce(dim as usize), shape.clone())
-                .input(new_id)
+                .add_op(op::MaxReduce(dim as usize))
+                .input(new_id, shape)
                 .finish();
+            // Reduce shape
+            for i in (dim as usize)..shape.n_dims {
+                shape.orig_shape[i - 1] = shape.orig_shape[i];
+                shape.orig_shape[i] = crate::core::shape::simple_tracker::Dim::Unknown;
+            }
+            shape.n_dims -= 1;
         }
-        GraphTensor::from_id(new_id, self.graph_ref)
+        GraphTensor::from_id(new_id, shape, self.graph_ref)
     }
 
     pub fn mean_reduce<Dst: Shape, Ax: Axes>(self) -> GraphTensor<Dst>
@@ -44,23 +54,23 @@ impl<S: Shape> GraphTensor<S> {
         S: HasAxes<Ax> + ReduceShapeTo<Dst, Ax>,
     {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let mut shape = <S as Shape>::realized_shape();
+        let mut shape = self.shape;
         let mut node_id = self.id;
         for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
             // Create div tensor
             // Create ones tensor and expand up to full tensor shape
             let mut ones = graph.constant(1.0).id;
-            let mut ones_shape = vec![];
-            for (dim, size) in shape.iter().enumerate() {
-                ones_shape.insert(dim, *size);
+            let mut ones_shape = crate::core::shape::simple_tracker::ShapeTracker::default();
+            for (dim, size) in shape.orig_shape.iter().enumerate() {
                 ones = graph
-                    .add_op(op::Expand(dim, *size), ones_shape.clone())
-                    .input(ones)
+                    .add_op(op::Expand(dim, *size))
+                    .input(ones, ones_shape)
                     .finish();
+                ones_shape.insert(dim, *size);
             }
             ones = graph
-                .add_op(op::NoOp, ones_shape.clone())
-                .input(ones)
+                .add_op(op::NoOp)
+                .input(ones, ones_shape)
                 .input(node_id)
                 .finish();
             ones_shape.remove(dim as usize);

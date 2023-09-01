@@ -23,59 +23,51 @@ impl<S: Dim, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
     ) -> GraphTensor<(S1, S2, Const<DIM>)> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let res = graph
-            .add_op(
-                op::Function(
-                    "Gather".to_string(),
-                    Box::new(|tensors, i| {
-                        let indexes = tensors[0]
-                            .0
-                            .data
-                            .as_any()
-                            .downcast_ref::<Vec<usize>>()
-                            .unwrap();
-                        let (index_idx, index_val) = tensors[0].1.shape.index_node();
-                        let data = tensors[1]
-                            .0
-                            .data
-                            .as_any()
-                            .downcast_ref::<Vec<f32>>()
-                            .unwrap();
-                        let (data_idx, data_val) = tensors[1].1.shape.index_node();
-                        let mut res = Vec::with_capacity(indexes.len() * DIM);
-                        for i in 0..indexes.len() {
-                            if index_val.solve(i as i32) == 0 {
-                                res.extend(std::iter::once(0.).cycle().take(DIM));
-                                continue;
-                            }
-                            let start = indexes[index_idx.solve(i as i32) as usize] * DIM;
-                            for n in 0..DIM {
-                                res.push(if data_val.solve((start + n) as i32) != 0 {
-                                    data[data_idx.solve((start + n) as i32) as usize]
-                                } else {
-                                    0.
-                                });
-                            }
+            .add_op(op::Function(
+                "Gather".to_string(),
+                Box::new(|tensors| {
+                    let indexes = tensors[0]
+                        .0
+                        .data
+                        .as_any()
+                        .downcast_ref::<Vec<usize>>()
+                        .unwrap();
+                    let data = tensors[1]
+                        .0
+                        .data
+                        .as_any()
+                        .downcast_ref::<Vec<f32>>()
+                        .unwrap();
+                    let mut res = Vec::with_capacity(indexes.len() * DIM);
+                    for i in 0..indexes.len() {
+                        let Some(index_idx) = tensors[0].1.index(i) else {
+                            res.append(&mut vec![0.; DIM]);
+                            continue;
+                        };
+                        let start = indexes[index_idx] * DIM;
+                        for n in 0..DIM {
+                            res.push(
+                                tensors[1]
+                                    .1
+                                    .index(start + n)
+                                    .map(|i| data[i])
+                                    .unwrap_or_default(),
+                            );
                         }
-                        let mut shape = tensors[0].1.shape.shape().clone();
-                        shape.push(DIM);
-                        (
-                            Some(Tensor {
-                                data: Box::new(res),
-                            }),
-                            TensorView {
-                                tensor_id: i,
-                                shape: ShapeTracker::new(shape),
-                            },
-                        )
-                    }),
-                ),
-                vec![S1::const_size(), RealDim::Const(DIM)],
-            )
-            .input(indexes.id)
-            .input(self.id) // Since indexes might have a 1 dimension we don't want getting changed, we feed it in as the first argument
+                    }
+                    Tensor {
+                        data: Box::new(res),
+                    }
+                }),
+            ))
+            .input(indexes.id, indexes.shape)
+            .input(self.id, self.shape) // Since indexes might have a 1 dimension we don't want getting changed, we feed it in as the first argument
             .finish();
 
-        GraphTensor::from_id(res, self.graph_ref)
+        let mut shape = indexes.shape.clone();
+        shape.orig_shape[2] = crate::core::shape::simple_tracker::Dim::Known(DIM);
+        shape.n_dims += 1;
+        GraphTensor::from_id(res, shape, self.graph_ref)
     }
 }
 

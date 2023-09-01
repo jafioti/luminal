@@ -8,11 +8,11 @@ impl<S: Shape> Add<GraphTensor<S>> for GraphTensor<S> {
     fn add(self, rhs: GraphTensor<S>) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(op::Add, self.shape().clone())
-            .input(self.id)
-            .input(rhs.id)
+            .add_op(op::Add)
+            .input(self.id, self.shape)
+            .input(rhs.id, rhs.shape)
             .finish();
-        GraphTensor::from_id(new_id, self.graph_ref)
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 }
 
@@ -30,11 +30,11 @@ impl<S: Shape> Mul<GraphTensor<S>> for GraphTensor<S> {
     fn mul(self, rhs: GraphTensor<S>) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(op::Mul, self.shape().clone())
-            .input(self.id)
-            .input(rhs.id)
+            .add_op(op::Mul)
+            .input(self.id, self.shape)
+            .input(rhs.id, rhs.shape)
             .finish();
-        GraphTensor::from_id(new_id, self.graph_ref)
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 }
 
@@ -53,11 +53,11 @@ impl<S: Shape> Rem<GraphTensor<S>> for GraphTensor<S> {
     fn rem(self, rhs: GraphTensor<S>) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(op::Mod, self.shape().clone())
-            .input(self.id)
-            .input(rhs.id)
+            .add_op(op::Mod)
+            .input(self.id, self.shape)
+            .input(rhs.id, rhs.shape)
             .finish();
-        GraphTensor::from_id(new_id, self.graph_ref)
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 }
 
@@ -119,11 +119,11 @@ impl<S: Shape> GraphTensor<S> {
     pub fn less_than(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(op::LessThan, self.shape().clone())
-            .input(self.id)
-            .input(rhs.id)
+            .add_op(op::LessThan)
+            .input(self.id, self.shape)
+            .input(rhs.id, rhs.shape)
             .finish();
-        GraphTensor::from_id(new_id, self.graph_ref)
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 
     pub fn greater_than(self, rhs: GraphTensor<S>) -> GraphTensor<S> {

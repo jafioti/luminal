@@ -14,21 +14,21 @@ pub struct GraphTensor<S: Shape> {
     pub id: NodeIndex,
     pub graph_ref: *mut Graph,
     pub(crate) _phantom: PhantomData<S>,
+    pub shape: crate::core::shape::simple_tracker::ShapeTracker,
 }
 
 impl<S: Shape> GraphTensor<S> {
-    pub fn from_id(id: NodeIndex, graph_ref: *mut Graph) -> Self {
+    pub fn from_id(
+        id: NodeIndex,
+        shape: crate::core::shape::simple_tracker::ShapeTracker,
+        graph_ref: *mut Graph,
+    ) -> Self {
         Self {
             id,
             graph_ref,
+            shape,
             _phantom: Default::default(),
         }
-    }
-
-    /// Get the shape tracker for this tensor
-    pub fn shape(&self) -> &Vec<RealDim> {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        &graph.graph.node_weight(self.id).unwrap().1
     }
 
     /// Mark this tensor to be retrieved later
@@ -74,21 +74,12 @@ impl<S: Shape> GraphTensor<S> {
             .graph
             .node_weight_mut(self.id)
             .unwrap()
-            .0
             .as_any_mut()
             .downcast_mut::<Function>()
             .unwrap();
         // We shouldn't do cloning here!
-        node.1 = Box::new(move |_, i| {
-            (
-                Some(Tensor {
-                    data: Box::new(data.clone()),
-                }),
-                TensorView {
-                    tensor_id: i,
-                    shape: ShapeTracker::new(shape.clone()),
-                },
-            )
+        node.1 = Box::new(move |_| Tensor {
+            data: Box::new(data.clone()),
         });
     }
 
@@ -99,7 +90,6 @@ impl<S: Shape> GraphTensor<S> {
             .graph
             .node_weight_mut(self.id)
             .unwrap()
-            .0
             .as_any_mut()
             .downcast_mut::<Function>()
             .unwrap();
@@ -109,8 +99,8 @@ impl<S: Shape> GraphTensor<S> {
     pub fn debug(&self, message: &str) {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         graph
-            .add_op(op::Print(message.to_string()), vec![])
-            .input(self.id)
+            .add_op(op::Print(message.to_string()))
+            .input(self.id, Default::default())
             .finish();
     }
 
@@ -127,21 +117,12 @@ impl<S: ConstShape> GraphTensor<S> {
             .graph
             .node_weight_mut(self.id)
             .unwrap()
-            .0
             .as_any_mut()
             .downcast_mut::<Function>()
             .unwrap();
         // We shouldn't do cloning here!
-        node.1 = Box::new(move |_, i| {
-            (
-                Some(Tensor {
-                    data: Box::new(data.clone()),
-                }),
-                TensorView {
-                    tensor_id: i,
-                    shape: ShapeTracker::new(<S as ConstShape>::realized_shape()),
-                },
-            )
+        node.1 = Box::new(move |_| Tensor {
+            data: Box::new(data.clone()),
         });
     }
 }

@@ -2,27 +2,26 @@
 
 use std::fmt::Debug;
 
-use petgraph::stable_graph::NodeIndex;
-
 use crate::{
-    prelude::{RealDim, ReshapeDim, TensorView, TraitObjEq},
-    shape::ShapeTracker,
+    prelude::{
+        simple_tracker::{Dim, ShapeTracker},
+        TraitObjEq,
+    },
     tensor::Tensor,
 };
 
 pub trait Operator: Debug + TraitObjEq {
     fn process(
         &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView);
+        inp: Vec<(&Tensor, crate::core::shape::simple_tracker::ShapeTracker)>,
+    ) -> Tensor;
 }
 
 /// An opaque function running on CPU that takes in tensor references and outputs a new tensor
 #[allow(clippy::type_complexity)]
 pub struct Function(
     pub String,
-    pub Box<dyn Fn(Vec<(&Tensor, TensorView)>, NodeIndex) -> (Option<Tensor>, TensorView)>,
+    pub Box<dyn Fn(Vec<(&Tensor, crate::core::shape::simple_tracker::ShapeTracker)>) -> Tensor>,
 );
 
 impl PartialEq for Function {
@@ -32,12 +31,8 @@ impl PartialEq for Function {
 }
 
 impl Operator for Function {
-    fn process(
-        &self,
-        input: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        (self.1)(input, nid)
+    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
+        (self.1)(inp)
     }
 }
 
@@ -52,148 +47,122 @@ impl Debug for Function {
 pub struct NoOp;
 
 impl Operator for NoOp {
-    fn process(
-        &self,
-        input: Vec<(&Tensor, TensorView)>,
-        _: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        (
-            None,
-            TensorView {
-                tensor_id: input[0].1.tensor_id,
-                shape: input[0].1.shape.clone(),
-            },
-        )
+    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
+        Tensor {
+            data: inp[0].0.data.clone(),
+        }
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Print(pub String);
 impl Operator for Print {
-    fn process(
-        &self,
-        input: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
+    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
         println!("{}", self.0);
-        for (i, (tensor, view)) in input.iter().enumerate() {
-            println!("{} Data: {:?}", i + 1, tensor.real_data(view));
-            println!("{} Shape: {:?}", i + 1, view.shape.shape());
-            println!(
-                "{} Idx: {}",
-                i + 1,
-                view.shape.index_node().0.to_string_no_range()
-            );
+        for (i, (tensor, tracker)) in inp.iter().enumerate() {
+            println!("{} Data: {:?}", i + 1, tensor.data);
+            println!("{} Shape: {:?}", i + 1, tracker);
         }
-        (
-            None,
-            TensorView {
-                tensor_id: nid,
-                shape: ShapeTracker::new(vec![]),
-            },
-        )
+        Tensor {
+            data: Box::new(Vec::<f32>::new()),
+        }
     }
 }
 
 // Movement Op (A -> B)
 
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Permute(pub Vec<usize>);
-impl Operator for Permute {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        _: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        let mut view = inp[0].1.clone();
-        view.shape.permute(&self.0);
-        (None, view)
-    }
-}
+// #[derive(Debug, Clone, Default, PartialEq)]
+// pub struct Permute(pub Vec<usize>);
+// impl Operator for Permute {
+//     fn process(
+//         &self,
+//         inp: Vec<(&Tensor, TensorView)>,
+//         _: NodeIndex,
+//     ) -> (Option<Tensor>, TensorView) {
+//         let mut view = inp[0].1.clone();
+//         view.shape.permute(&self.0);
+//         (None, view)
+//     }
+// }
 
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Reshape(pub Vec<ReshapeDim>);
-impl Operator for Reshape {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        _: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        let mut view = inp[0].1.clone();
-        // Figure out the proper shapes
-        let real_shape = self
-            .0
-            .iter()
-            .map(|i| match i {
-                ReshapeDim::Const(n) => *n,
-                ReshapeDim::PrevDim(i) => view.shape.shape()[*i],
-            })
-            .collect();
-        view.shape.reshape(real_shape);
-        (None, view)
-    }
-}
+// #[derive(Debug, Clone, Default, PartialEq)]
+// pub struct Reshape(pub Vec<ReshapeDim>);
+// impl Operator for Reshape {
+//     fn process(
+//         &self,
+//         inp: Vec<(&Tensor, TensorView)>,
+//         _: NodeIndex,
+//     ) -> (Option<Tensor>, TensorView) {
+//         let mut view = inp[0].1.clone();
+//         // Figure out the proper shapes
+//         let real_shape = self
+//             .0
+//             .iter()
+//             .map(|i| match i {
+//                 ReshapeDim::Const(n) => *n,
+//                 ReshapeDim::PrevDim(i) => view.shape.shape()[*i],
+//             })
+//             .collect();
+//         view.shape.reshape(real_shape);
+//         (None, view)
+//     }
+// }
 
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Expand(pub usize, pub RealDim);
-impl Operator for Expand {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        _: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        let mut view = inp[0].1.clone();
-        view.shape.expand(self.0, self.1);
-        (None, view)
-    }
-}
+// #[derive(Debug, Clone, Default, PartialEq)]
+// pub struct Expand(pub usize, pub Dim);
+// impl Operator for Expand {
+//     fn process(
+//         &self,
+//         inp: Vec<(&Tensor, TensorView)>,
+//         _: NodeIndex,
+//     ) -> (Option<Tensor>, TensorView) {
+//         let mut view = inp[0].1.clone();
+//         view.shape.expand(self.0, self.1);
+//         (None, view)
+//     }
+// }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Slice(pub Vec<(usize, usize)>);
-impl Operator for Slice {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        _: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        let mut view = inp[0].1.clone();
-        view.shape.slice(&self.0);
-        (None, view)
-    }
-}
+// #[derive(Debug, Clone, PartialEq)]
+// pub struct Slice(pub Vec<(usize, usize)>);
+// impl Operator for Slice {
+//     fn process(
+//         &self,
+//         inp: Vec<(&Tensor, TensorView)>,
+//         _: NodeIndex,
+//     ) -> (Option<Tensor>, TensorView) {
+//         let mut view = inp[0].1.clone();
+//         view.shape.slice(&self.0);
+//         (None, view)
+//     }
+// }
 
 /// Ensure a tensor is contiguously layed out in memory. May involve copying
 #[derive(Debug, Clone, PartialEq)]
 pub struct Contiguous;
 impl Operator for Contiguous {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        i: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        let view = &inp[0].1;
-        if view.shape.is_contiguous() {
-            // It's already contiguous
-            return (None, view.clone());
-        }
+    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
         // Copy data over to new tensor
         let src = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let (idx, valid) = view.shape.index_node();
-        let mut res = vec![0.; view.shape.shape().iter().product()];
+        let mut res = vec![
+            0.;
+            inp[0]
+                .1
+                .orig_shape
+                .iter()
+                .filter_map(|i| match i {
+                    Dim::Known(n) => Some(n),
+                    Dim::Unknown => None,
+                })
+                .product()
+        ];
         for i in 0..res.len() {
-            if valid.solve(i as i32) != 0 {
-                res[i] = src[idx.solve(i as i32) as usize];
+            if let Some(n) = inp[0].1.index(i) {
+                res[i] = src[n];
             }
         }
-        (
-            Some(Tensor {
-                data: Box::new(res),
-            }),
-            TensorView {
-                tensor_id: i,
-                shape: ShapeTracker::new(view.shape.shape().to_vec()),
-            },
-        )
+        Tensor {
+            data: Box::new(res),
+        }
     }
 }
 
@@ -204,11 +173,7 @@ impl Operator for Contiguous {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Log2;
 impl Operator for Log2 {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
+    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
         let (mut t, mut view) = (inp[0].0.clone(), inp[0].1.clone());
         for a in t
             .data
@@ -220,19 +185,14 @@ impl Operator for Log2 {
             *a = a.log2();
         }
 
-        view.tensor_id = nid;
-        (Some(t), view)
+        t
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Exp2;
 impl Operator for Exp2 {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
+    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
         let (mut t, mut view) = (inp[0].0.clone(), inp[0].1.clone());
         for a in t
             .data
@@ -244,19 +204,14 @@ impl Operator for Exp2 {
             *a = a.exp2();
         }
 
-        view.tensor_id = nid;
-        (Some(t), view)
+        t
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Sin;
 impl Operator for Sin {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
+    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
         let (mut t, mut view) = (inp[0].0.clone(), inp[0].1.clone());
         for a in t
             .data
@@ -267,20 +222,14 @@ impl Operator for Sin {
         {
             *a = a.sin();
         }
-
-        view.tensor_id = nid;
-        (Some(t), view)
+        t
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Sqrt;
 impl Operator for Sqrt {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
+    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
         let (mut t, mut view) = (inp[0].0.clone(), inp[0].1.clone());
         for a in t
             .data
@@ -291,20 +240,14 @@ impl Operator for Sqrt {
         {
             *a = a.sqrt();
         }
-
-        view.tensor_id = nid;
-        (Some(t), view)
+        t
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Recip;
 impl Operator for Recip {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
+    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
         let (mut t, mut view) = (inp[0].0.clone(), inp[0].1.clone());
         for a in t
             .data
@@ -315,9 +258,7 @@ impl Operator for Recip {
         {
             *a = a.recip();
         }
-
-        view.tensor_id = nid;
-        (Some(t), view)
+        t
     }
 }
 
@@ -326,155 +267,77 @@ impl Operator for Recip {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Add;
 impl Operator for Add {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        let ((a_idx, a_valid), (b_idx, b_valid)) =
-            (inp[0].1.shape.index_node(), inp[1].1.shape.index_node());
+    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
         let (a_data, b_data) = (
             inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
             inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
         );
-        let mut data = vec![0.; inp[0].1.shape.shape().iter().product()];
-        for i in 0..data.len() as i32 {
-            data[i as usize] = if a_valid.solve(i) != 0 {
-                a_data[a_idx.solve(i) as usize]
-            } else {
-                0.
-            } + if b_valid.solve(i) != 0 {
-                b_data[b_idx.solve(i) as usize]
-            } else {
-                0.
-            };
+        let mut data = vec![0.; inp[0].1.n_elements()];
+        for i in 0..data.len() {
+            data[i] = inp[0].1.index(i).map(|i| a_data[i]).unwrap_or_default()
+                + inp[1].1.index(i).map(|i| b_data[i]).unwrap_or_default();
         }
-        (
-            Some(Tensor {
-                data: Box::new(data),
-            }),
-            TensorView {
-                tensor_id: nid,
-                shape: ShapeTracker::new(inp[0].1.shape.shape().clone()),
-            },
-        )
+        Tensor {
+            data: Box::new(data),
+        }
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mul;
 impl Operator for Mul {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        let ((a_idx, a_valid), (b_idx, b_valid)) =
-            (inp[0].1.shape.index_node(), inp[1].1.shape.index_node());
+    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
         let (a_data, b_data) = (
             inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
             inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
         );
-        let mut data = vec![0.; inp[0].1.shape.shape().iter().product()];
-        for i in 0..data.len() as i32 {
-            data[i as usize] = if a_valid.solve(i) != 0 {
-                a_data[a_idx.solve(i) as usize]
-            } else {
-                0.
-            } * if b_valid.solve(i) != 0 {
-                b_data[b_idx.solve(i) as usize]
-            } else {
-                0.
-            };
+        let mut data = vec![0.; inp[0].1.n_elements()];
+        for i in 0..data.len() {
+            data[i] = inp[0].1.index(i).map(|i| a_data[i]).unwrap_or_default()
+                * inp[1].1.index(i).map(|i| b_data[i]).unwrap_or_default();
         }
-
-        (
-            Some(Tensor {
-                data: Box::new(data),
-            }),
-            TensorView {
-                tensor_id: nid,
-                shape: ShapeTracker::new(inp[0].1.shape.shape().clone()),
-            },
-        )
+        Tensor {
+            data: Box::new(data),
+        }
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mod;
 impl Operator for Mod {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        let ((a_idx, a_valid), (b_idx, b_valid)) =
-            (inp[0].1.shape.index_node(), inp[1].1.shape.index_node());
+    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
         let (a_data, b_data) = (
             inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
             inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
         );
-        let mut data = vec![0.; inp[0].1.shape.shape().iter().product()];
-        for i in 0..data.len() as i32 {
-            data[i as usize] = if a_valid.solve(i) != 0 {
-                a_data[a_idx.solve(i) as usize]
-            } else {
-                0.
-            } % if b_valid.solve(i) != 0 {
-                b_data[b_idx.solve(i) as usize]
-            } else {
-                0.
-            };
+        let mut data = vec![0.; inp[0].1.n_elements()];
+        for i in 0..data.len() {
+            data[i] = inp[0].1.index(i).map(|i| a_data[i]).unwrap_or_default()
+                % inp[1].1.index(i).map(|i| b_data[i]).unwrap_or_default();
         }
-        (
-            Some(Tensor {
-                data: Box::new(data),
-            }),
-            TensorView {
-                tensor_id: nid,
-                shape: ShapeTracker::new(inp[0].1.shape.shape().clone()),
-            },
-        )
+        Tensor {
+            data: Box::new(data),
+        }
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LessThan;
 impl Operator for LessThan {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        let ((a_idx, a_valid), (b_idx, b_valid)) =
-            (inp[0].1.shape.index_node(), inp[1].1.shape.index_node());
+    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
         let (a_data, b_data) = (
             inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
             inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
         );
-        let mut data = vec![0.; inp[0].1.shape.shape().iter().product()];
-        for i in 0..data.len() as i32 {
-            let a = if a_valid.solve(i) != 0 {
-                a_data[a_idx.solve(i) as usize]
-            } else {
-                0.
-            };
-            let b = if b_valid.solve(i) != 0 {
-                b_data[b_idx.solve(i) as usize]
-            } else {
-                0.
-            };
+        let mut data = vec![0.; inp[0].1.n_elements()];
+        for i in 0..data.len() {
+            let a = inp[0].1.index(i).map(|i| a_data[i]).unwrap_or_default();
+            let b = inp[1].1.index(i).map(|i| b_data[i]).unwrap_or_default();
             data[i as usize] = if a < b { 1. } else { 0. };
         }
-        (
-            Some(Tensor {
-                data: Box::new(data),
-            }),
-            TensorView {
-                tensor_id: nid,
-                shape: ShapeTracker::new(inp[0].1.shape.shape().clone()),
-            },
-        )
+        Tensor {
+            data: Box::new(data),
+        }
     }
 }
 
@@ -483,81 +346,84 @@ impl Operator for LessThan {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SumReduce(pub usize);
 impl Operator for SumReduce {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        let front_size: usize = inp[0].1.shape.shape().iter().take(self.0).product();
-        let back_size: usize = inp[0].1.shape.shape().iter().skip(self.0 + 1).product();
-        let dim_size = inp[0].1.shape.shape()[self.0];
+    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
+        let front_size: usize = inp[0]
+            .1
+            .shape()
+            .iter()
+            .take(self.0)
+            .filter_map(|i| if let Dim::Known(n) = i { Some(n) } else { None })
+            .product();
+        let back_size: usize = inp[0]
+            .1
+            .shape()
+            .iter()
+            .skip(self.0 + 1)
+            .filter_map(|i| if let Dim::Known(n) = i { Some(n) } else { None })
+            .product();
+        let dim_size = match inp[0].1.shape()[self.0] {
+            Dim::Known(n) => n,
+            Dim::Unknown => panic!("Can't reduce over an unknown dimension"),
+        };
         let mut result: Vec<f32> = vec![0.0; front_size * back_size];
         let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let (a_idx, a_valid) = inp[0].1.shape.index_node();
 
         for i in 0..front_size {
             for j in 0..back_size {
                 for k in 0..dim_size {
                     let original_index = i * dim_size * back_size + k * back_size + j;
                     let new_index = i * back_size + j;
-                    if a_valid.solve(original_index as i32) != 0 {
-                        result[new_index] += a_data[a_idx.solve(original_index as i32) as usize];
+                    if let Some(n) = inp[0].1.index(original_index) {
+                        result[new_index] += a_data[n];
                     }
                 }
             }
         }
-        let mut shape = inp[0].1.shape.shape().clone();
-        shape.remove(self.0);
-        (
-            Some(Tensor {
-                data: Box::new(result),
-            }),
-            TensorView {
-                tensor_id: nid,
-                shape: ShapeTracker::new(shape),
-            },
-        )
+        Tensor {
+            data: Box::new(result),
+        }
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MaxReduce(pub usize);
 impl Operator for MaxReduce {
-    fn process(
-        &self,
-        inp: Vec<(&Tensor, TensorView)>,
-        nid: NodeIndex,
-    ) -> (Option<Tensor>, TensorView) {
-        let front_size: usize = inp[0].1.shape.shape().iter().take(self.0).product();
-        let back_size: usize = inp[0].1.shape.shape().iter().skip(self.0 + 1).product();
-        let dim_size = inp[0].1.shape.shape()[self.0];
+    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
+        let front_size: usize = inp[0]
+            .1
+            .shape()
+            .iter()
+            .take(self.0)
+            .filter_map(|i| if let Dim::Known(n) = i { Some(n) } else { None })
+            .product();
+        let back_size: usize = inp[0]
+            .1
+            .shape()
+            .iter()
+            .skip(self.0 + 1)
+            .filter_map(|i| if let Dim::Known(n) = i { Some(n) } else { None })
+            .product();
+        let dim_size = match inp[0].1.shape()[self.0] {
+            Dim::Known(n) => n,
+            Dim::Unknown => panic!("Can't reduce over an unknown dimension"),
+        };
         let mut result: Vec<f32> = vec![-f32::INFINITY; front_size * back_size];
         let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let (a_idx, a_valid) = inp[0].1.shape.index_node();
 
         for i in 0..front_size {
             for j in 0..back_size {
                 for k in 0..dim_size {
                     let original_index = i * dim_size * back_size + k * back_size + j;
                     let new_index = i * back_size + j;
-                    if a_valid.solve(original_index as i32) != 0 {
-                        result[new_index] = result[new_index]
-                            .max(a_data[a_idx.solve(original_index as i32) as usize]);
+                    if let Some(n) = inp[0].1.index(original_index) {
+                        result[new_index] = result[new_index].max(a_data[n]);
                     }
                 }
             }
         }
-        let mut shape = inp[0].1.shape.shape().clone();
-        shape.remove(self.0);
-        (
-            Some(Tensor {
-                data: Box::new(result),
-            }),
-            TensorView {
-                tensor_id: nid,
-                shape: ShapeTracker::new(shape),
-            },
-        )
+        Tensor {
+            data: Box::new(result),
+        }
     }
 }
 

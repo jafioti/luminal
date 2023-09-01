@@ -1,6 +1,6 @@
 use crate::{
     op::{Function, NoOp},
-    prelude::*,
+    prelude::{simple_tracker::Dim, *},
 };
 
 impl<S: Shape> GraphTensor<S> {
@@ -8,59 +8,68 @@ impl<S: Shape> GraphTensor<S> {
     pub fn cumsum<const DIM: usize>(self) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let id = graph
-            .add_op(
-                Function(
-                    "CumSum".to_string(),
-                    Box::new(move |inp, i| {
-                        let front_size: usize = inp[0].1.shape.shape().iter().take(DIM).product();
-                        let back_size: usize =
-                            inp[0].1.shape.shape().iter().skip(DIM + 1).product();
-                        let dim_size = inp[0].1.shape.shape()[DIM];
-                        let mut scratchpad: Vec<f32> = vec![0.0; front_size * back_size];
-                        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-                        let mut result = vec![0.0; front_size * back_size * dim_size];
-                        let (a_idx, a_valid) = inp[0].1.shape.index_node();
+            .add_op(Function(
+                "CumSum".to_string(),
+                Box::new(move |inp| {
+                    let front_size: usize = inp[0]
+                        .1
+                        .shape()
+                        .iter()
+                        .take(DIM)
+                        .filter_map(|i| match i {
+                            Dim::Known(n) => Some(n),
+                            Dim::Unknown => None,
+                        })
+                        .product();
+                    let back_size: usize = inp[0]
+                        .1
+                        .shape()
+                        .iter()
+                        .skip(DIM + 1)
+                        .filter_map(|i| match i {
+                            Dim::Known(n) => Some(n),
+                            Dim::Unknown => None,
+                        })
+                        .product();
+                    let dim_size = match inp[0].1.shape()[DIM] {
+                        Dim::Known(n) => n,
+                        Dim::Unknown => panic!(),
+                    };
+                    let mut scratchpad: Vec<f32> = vec![0.0; front_size * back_size];
+                    let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+                    let mut result = vec![0.0; front_size * back_size * dim_size];
 
-                        for i in 0..front_size {
-                            for j in 0..back_size {
-                                for k in 0..dim_size {
-                                    let original_index =
-                                        i * dim_size * back_size + k * back_size + j;
-                                    let new_index = i * back_size + j;
-                                    if a_valid.solve(original_index as i32) != 0 {
-                                        scratchpad[new_index] +=
-                                            a_data[a_idx.solve(original_index as i32) as usize];
-                                    }
-                                    result[original_index] = scratchpad[new_index];
+                    for i in 0..front_size {
+                        for j in 0..back_size {
+                            for k in 0..dim_size {
+                                let original_index = i * dim_size * back_size + k * back_size + j;
+                                let new_index = i * back_size + j;
+                                if let Some(n) = inp[0].1.index(original_index) {
+                                    scratchpad[new_index] += a_data[n];
                                 }
+                                result[original_index] = scratchpad[new_index];
                             }
                         }
-                        (
-                            Some(Tensor {
-                                data: Box::new(result),
-                            }),
-                            TensorView {
-                                tensor_id: i,
-                                shape: ShapeTracker::new(inp[0].1.shape.shape().clone()),
-                            },
-                        )
-                    }),
-                ),
-                S::realized_shape(),
-            )
-            .input(self.id)
+                    }
+                    Tensor {
+                        data: Box::new(result),
+                    }
+                }),
+            ))
+            .input(self.id, self.shape)
             .finish();
-        GraphTensor::from_id(id, graph)
+        GraphTensor::from_id(id, self.shape, graph)
     }
 
     pub fn match_shape<Dst: Shape>(self, rhs: GraphTensor<Dst>) -> GraphTensor<Dst> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         GraphTensor::from_id(
             graph
-                .add_op(NoOp, Dst::realized_shape())
-                .input(self.id)
-                .input(rhs.id)
+                .add_op(NoOp)
+                .input(self.id, self.shape)
+                .input(rhs.id, rhs.shape)
                 .finish(),
+            self.shape,
             graph,
         )
     }

@@ -170,20 +170,18 @@ impl Loader for SafeTensorDeferredLoader {
                 .graph
                 .node_weight_mut(n)
                 .unwrap()
-                .0
                 .as_any_mut()
                 .downcast_mut::<Function>()
             {
                 let path = self.path.clone();
-                inp_func.1 = Box::new(move |_, i| {
+                inp_func.1 = Box::new(move |_| {
                     // Get memmapped tensor
                     let file = std::fs::File::open(path.clone()).unwrap();
                     let buffer = unsafe { MmapOptions::new().map(&file).unwrap() };
                     let st = safetensors::SafeTensors::deserialize(&buffer).unwrap();
                     let SaveTensor(tensor, mut view) = st.tensor(&s).unwrap().into();
 
-                    view.tensor_id = i;
-                    (Some(tensor), view)
+                    tensor
                 });
             };
         }
@@ -225,7 +223,7 @@ impl<'data> View for SaveTensorRef<'data> {
         Dtype::F32 // For now just assume float, this should change in the future
     }
     fn shape(&self) -> &[usize] {
-        self.1.shape.shape()
+        todo!()
     }
     fn data(&self) -> Cow<[u8]> {
         self.0

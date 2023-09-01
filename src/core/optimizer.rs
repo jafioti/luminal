@@ -184,7 +184,7 @@ fn search(
         (),
     >,
     graph_node: petgraph::stable_graph::NodeIndex,
-    graph: &StableGraph<(Box<dyn Operator>, Vec<RealDim>), u8>,
+    graph: &StableGraph<Box<dyn Operator>, (u8, crate::core::shape::simple_tracker::ShapeTracker)>,
     used: &mut HashSet<NodeIndex>,
     selector_used: &mut HashSet<NodeIndex>,
 ) -> bool {
@@ -192,26 +192,26 @@ fn search(
     let current_weight = graph.node_weight(graph_node).unwrap();
     // Test type
     if let Some(ty) = &selector_weight.0 {
-        if current_weight.0.as_any().type_id() != *ty {
+        if current_weight.as_any().type_id() != *ty {
             return false;
         }
     }
     // Test value
     if let Some(value) = &selector_weight.1 {
-        if !current_weight.0.is_equal(value.as_ref()) {
+        if !current_weight.is_equal(value.as_ref()) {
             return false;
         }
     }
     // Test shape
     if let Some(shape) = &selector_weight.2 {
-        if shape.len() != current_weight.1.len() {
-            return false;
-        }
-        for (a, b) in shape.iter().zip(current_weight.1.iter()) {
-            if a != b {
-                return false;
-            }
-        }
+        // if shape.len() != current_weight.1.len() {
+        //     return false;
+        // }
+        // for (a, b) in shape.iter().zip(current_weight.1.iter()) {
+        //     if a != b {
+        //         return false;
+        //     }
+        // }
     }
     // Used is to make sure we don't use the same node from the source graph twice, which prevents cycles
     used.insert(graph_node);
@@ -371,7 +371,7 @@ mod tests {
     use petgraph::adj::NodeIndex;
 
     use crate::{
-        op::{Exp2, Expand, Log2, Mul, Permute, SumReduce},
+        op::{Exp2, Log2, Mul, SumReduce},
         prelude::Graph,
     };
 

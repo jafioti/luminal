@@ -3,6 +3,7 @@ mod broadcast;
 mod pad;
 mod permute;
 mod realize;
+pub mod simple_tracker;
 mod slice;
 mod symbolic;
 mod tracker;
@@ -183,6 +184,7 @@ pub trait Shape:
     }
 
     fn realized_shape() -> Vec<RealDim>;
+    fn to_tracker() -> crate::core::shape::simple_tracker::ShapeTracker;
 }
 
 /// Represents a [Shape] that has all [ConstDim]s
@@ -244,6 +246,15 @@ macro_rules! shape {
             fn realized_shape() -> Vec<RealDim> {
                 vec![$($D::const_size(), )*]
             }
+            fn to_tracker() -> crate::core::shape::simple_tracker::ShapeTracker {
+                let mut st = crate::core::shape::simple_tracker::ShapeTracker::default();
+                $( st.orig_shape[$Idx] = match $D::const_size() {
+                    RealDim::Const(n) => crate::core::shape::simple_tracker::Dim::Known(n),
+                    RealDim::Dyn => crate::core::shape::simple_tracker::Dim::Unknown,
+                }; )*
+                st.n_dims = Self::NUM_DIMS;
+                st
+            }
         }
         impl<$($D: ConstDim, )*> ConstShape for ($($D, )*) {
             const NUMEL: usize = $($D::SIZE * )* 1;
@@ -270,6 +281,12 @@ macro_rules! shape {
             fn from_concrete(concrete: &Self::Concrete) -> Option<Self> {
                 Some(*concrete)
             }
+
+            fn to_tracker() -> crate::core::shape::simple_tracker::ShapeTracker {
+                let mut st = crate::core::shape::simple_tracker::ShapeTracker::default();
+                st.n_dims = Self::NUM_DIMS;
+                st
+            }
         }
     };
 }
@@ -289,6 +306,11 @@ impl Shape for () {
     #[inline(always)]
     fn from_concrete(_: &Self::Concrete) -> Option<Self> {
         Some(())
+    }
+    fn to_tracker() -> crate::core::shape::simple_tracker::ShapeTracker {
+        let mut st = crate::core::shape::simple_tracker::ShapeTracker::default();
+        st.n_dims = 0;
+        st
     }
 }
 impl ConstShape for () {
