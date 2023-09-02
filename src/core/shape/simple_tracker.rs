@@ -18,11 +18,21 @@ impl Default for Dim {
     }
 }
 
-#[derive(Clone, Debug, Copy, Default)]
+#[derive(Clone, Debug, Copy)]
 pub struct ShapeTracker {
     pub orig_shape: [Dim; 6],
     pub n_dims: usize,
     pub permuted_inds: [usize; 6],
+}
+
+impl Default for ShapeTracker {
+    fn default() -> Self {
+        Self {
+            orig_shape: Default::default(),
+            n_dims: 0,
+            permuted_inds: [0, 1, 2, 3, 4, 5],
+        }
+    }
 }
 
 impl ShapeTracker {
@@ -61,6 +71,33 @@ impl ShapeTracker {
             .iter()
             .filter_map(|i| if let Dim::Known(n) = i { Some(n) } else { None })
             .product()
+    }
+
+    pub fn expand(&mut self, index: usize, dim: Dim) {
+        self.orig_shape[self.n_dims] = dim;
+        for x in index..(self.permuted_inds.len() - 1) {
+            self.permuted_inds[x + 1] = self.permuted_inds[x];
+        }
+        self.permuted_inds[index] = self.n_dims;
+        self.n_dims += 1;
+    }
+
+    pub fn remove_dim(&mut self, dim: usize) {
+        for i in self.permuted_inds[dim]..(self.orig_shape.len() - 1) {
+            self.orig_shape[i] = self.orig_shape[i + 1];
+        }
+        for i in dim..(self.orig_shape.len() - 1) {
+            self.permuted_inds[i] = self.permuted_inds[i + 1];
+        }
+        self.n_dims -= 1;
+        self.permuted_inds
+            .iter_mut()
+            .take(self.n_dims)
+            .for_each(|i| {
+                if *i > dim {
+                    *i -= 1
+                }
+            });
     }
 }
 

@@ -61,41 +61,30 @@ impl<S: Shape> GraphTensor<S> {
             // Create ones tensor and expand up to full tensor shape
             let mut ones = graph.constant(1.0).id;
             let mut ones_shape = crate::core::shape::simple_tracker::ShapeTracker::default();
-            for (dim, size) in shape.orig_shape.iter().enumerate() {
-                ones = graph
-                    .add_op(op::Expand(dim, *size))
-                    .input(ones, ones_shape)
-                    .finish();
-                ones_shape.insert(dim, *size);
-            }
+            ones_shape.orig_shape = shape.orig_shape;
             ones = graph
                 .add_op(op::NoOp)
                 .input(ones, ones_shape)
-                .input(node_id)
+                .input(node_id, shape)
                 .finish();
-            ones_shape.remove(dim as usize);
             // Sum reduce on current dimension
             let div_tensor = graph
-                .add_op(op::SumReduce(dim as usize), ones_shape)
-                .input(ones)
+                .add_op(op::SumReduce(dim as usize))
+                .input(ones, ones_shape)
                 .finish();
-            // Reduce shape
-            shape.remove(dim as usize);
+            ones_shape.remove_dim(dim as usize);
             // Sum reduce
             node_id = graph
-                .add_op(op::SumReduce(dim as usize), shape.clone())
-                .input(node_id)
+                .add_op(op::SumReduce(dim as usize))
+                .input(node_id, shape)
                 .finish();
 
             // Divide by div tensor
-            let mul_tensor = graph
-                .add_op(op::Recip, shape.clone())
-                .input(div_tensor)
-                .finish();
+            let mul_tensor = graph.add_op(op::Recip).input(div_tensor, shape).finish();
             node_id = graph
-                .add_op(op::Mul, shape.clone())
-                .input(node_id)
-                .input(mul_tensor)
+                .add_op(op::Mul)
+                .input(node_id, shape)
+                .input(mul_tensor, shape)
                 .finish();
         }
         GraphTensor::from_id(node_id, self.graph_ref)

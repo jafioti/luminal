@@ -1,43 +1,30 @@
-use itertools::Itertools;
-
 use crate::{op, prelude::*};
 
 impl<S: Shape> GraphTensor<S> {
-    pub fn permute<Dst: Shape, Ax: Axes>(self) -> GraphTensor<Dst>
+    pub fn permute<Dst: Shape, Ax: Axes>(mut self) -> GraphTensor<Dst>
     where
         S: PermuteShapeTo<Dst, Ax>,
     {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let new_id = graph
-            .add_op(
-                op::Permute(Ax::as_array().into_iter().map(|i| i as usize).collect_vec()),
-                <Dst as Shape>::realized_shape(),
-            )
-            .input(self.id)
-            .finish();
-        GraphTensor::from_id(new_id, self.graph_ref)
+        for (ind, i) in Ax::as_array().into_iter().enumerate() {
+            self.shape.permuted_inds[ind] = i as usize;
+        }
+        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
-    pub fn expand<Dst: Shape, Ax: Axes>(self) -> GraphTensor<Dst>
+    pub fn expand<Dst: Shape, Ax: Axes>(mut self) -> GraphTensor<Dst>
     where
         S: BroadcastShapeTo<Dst, Ax>,
     {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let new_shape = <Dst as Shape>::realized_shape();
-        let mut shape = self.shape().clone();
-
-        let mut new_id = self.id;
-        for (dim, size) in Ax::as_array()
-            .into_iter()
-            .map(|i| (i as usize, new_shape[i as usize]))
-        {
-            shape.insert(dim, size);
-            new_id = graph
-                .add_op(op::Expand(dim, size), shape.clone())
-                .input(new_id)
-                .finish();
+        for (i, dim) in Ax::as_array().into_iter().map(|i| i as usize).zip(
+            Dst::realized_shape().into_iter().map(|i| match i {
+                RealDim::Const(n) => crate::core::shape::simple_tracker::Dim::Known(n),
+                RealDim::Dyn => crate::core::shape::simple_tracker::Dim::Unknown,
+            }),
+        ) {
+            self.shape.expand(i, dim);
         }
-        GraphTensor::from_id(new_id, self.graph_ref)
+
+        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
     pub fn reshape<N: ConstShape>(self) -> GraphTensor<N> {
@@ -89,17 +76,16 @@ impl<S: Shape> GraphTensor<S> {
     where
         S: RealizeShapeTo<Dst>,
     {
-        let GraphTensor { id, graph_ref, .. } = self;
-        GraphTensor::from_id(id, graph_ref)
+        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
     pub fn contiguous(self) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
-            .add_op(op::Contiguous, S::realized_shape())
-            .input(self.id)
+            .add_op(op::Contiguous)
+            .input(self.id, self.shape)
             .finish();
-        GraphTensor::from_id(new_id, self.graph_ref)
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 
     /// Take a slice of the original tensor. Any dimension with bounds becomes a dynamic dimension
