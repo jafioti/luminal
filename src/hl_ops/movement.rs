@@ -65,7 +65,7 @@ impl<S: Shape> GraphTensor<S> {
 
     /// Dynamically reshape with annotations for the shape tracker
     pub fn dyn_reshape<N: Shape>(
-        self,
+        mut self,
         shape: Vec<crate::core::shape::simple_tracker::Dim>,
     ) -> GraphTensor<N> {
         if self.shape.is_contiguous() {
@@ -142,7 +142,7 @@ where
         let fin = graph
             .add_op(op::Function(
                 "Concat".to_string(),
-                Box::new(move |inps| {
+                Box::new(move |mut inps| {
                     let mut pad_shape = vec![(0, 0); A::NUM_DIMS];
                     pad_shape[dim].1 = inps[1].1.shape()[dim]
                         .to_usize()
@@ -158,6 +158,7 @@ where
                         inps[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
                     );
                     let mut data = vec![0.; inps[0].1.n_elements()];
+                    #[allow(clippy::needless_range_loop)]
                     for i in 0..data.len() {
                         data[i] = inps[0].1.index(i).map(|i| a_data[i]).unwrap_or_default()
                             + inps[1].1.index(i).map(|i| b_data[i]).unwrap_or_default();

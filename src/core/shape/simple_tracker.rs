@@ -80,9 +80,6 @@ impl ShapeTracker {
             };
             if !self.fake[*ind] {
                 let dim_ind = (logical / acc) % (sh) + self.slices[*ind].0;
-                if dim_ind < self.padding[*ind].0 || dim_ind > (sh - self.padding[*ind].1) {
-                    return None;
-                }
                 ret += dim_ind * acc;
             }
             acc *= sh;
@@ -103,6 +100,10 @@ impl ShapeTracker {
     /// The number of dimensions
     pub fn len(&self) -> usize {
         self.dims.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Create a contiguous version
@@ -135,7 +136,7 @@ impl ShapeTracker {
             let mut s = *s;
             if self.padding[self.indexes[i]].0 != 0 {
                 let padding = self.padding[self.indexes[i]].0;
-                self.padding[self.indexes[i]].0.saturating_sub(s);
+                self.padding[self.indexes[i]].0 = self.padding[self.indexes[i]].0.saturating_sub(s);
                 s = s.saturating_sub(padding);
             }
             self.slices[self.indexes[i]].0 += s;
@@ -147,6 +148,9 @@ impl ShapeTracker {
     pub fn pad(&mut self, padding: &[(usize, usize)]) {
         for (i, (s, e)) in padding.iter().enumerate() {
             self.padding[self.indexes[i]].0 += *s;
+            if *e != 0 && self.slices[self.indexes[i]].1 != 0 {
+                panic!("Adding padding to a slice isn't supported")
+            }
             self.padding[self.indexes[i]].1 += *e;
         }
     }
