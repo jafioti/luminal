@@ -100,7 +100,7 @@ impl<S: Shape> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         graph
             .add_op(op::Print(message.to_string()))
-            .input(self.id, Default::default())
+            .input(self.id, self.shape)
             .finish();
     }
 

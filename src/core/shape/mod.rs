@@ -247,12 +247,14 @@ macro_rules! shape {
                 vec![$($D::const_size(), )*]
             }
             fn to_tracker() -> crate::core::shape::simple_tracker::ShapeTracker {
-                let mut st = crate::core::shape::simple_tracker::ShapeTracker::default();
-                $( st.orig_shape[$Idx] = match $D::const_size() {
-                    RealDim::Const(n) => crate::core::shape::simple_tracker::Dim::Known(n),
-                    RealDim::Dyn => crate::core::shape::simple_tracker::Dim::Unknown,
-                }; )*
-                st.n_dims = Self::NUM_DIMS;
+                let mut st = crate::core::shape::simple_tracker::ShapeTracker::new(&[
+                    $(
+                    match $D::const_size() {
+                        RealDim::Const(n) => crate::core::shape::simple_tracker::Dim::Known(n),
+                        RealDim::Dyn => crate::core::shape::simple_tracker::Dim::Unknown,
+                    },
+                    )*
+                ]);
                 st
             }
         }
@@ -283,8 +285,7 @@ macro_rules! shape {
             }
 
             fn to_tracker() -> crate::core::shape::simple_tracker::ShapeTracker {
-                let mut st = crate::core::shape::simple_tracker::ShapeTracker::default();
-                st.n_dims = Self::NUM_DIMS;
+                let st = crate::core::shape::simple_tracker::ShapeTracker::new(&[crate::core::shape::simple_tracker::Dim::Unknown; Self::NUM_DIMS]);
                 st
             }
         }
@@ -308,8 +309,7 @@ impl Shape for () {
         Some(())
     }
     fn to_tracker() -> crate::core::shape::simple_tracker::ShapeTracker {
-        let mut st = crate::core::shape::simple_tracker::ShapeTracker::default();
-        st.n_dims = 0;
+        let mut st = crate::core::shape::simple_tracker::ShapeTracker::new(&[]);
         st
     }
 }
