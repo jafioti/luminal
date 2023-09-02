@@ -64,7 +64,7 @@ impl Operator for Print {
             println!("{} Shape: {:?}", i + 1, tracker);
         }
         Tensor {
-            data: Box::new(Vec::<f32>::new()),
+            data: Box::<Vec<f32>>::default(),
         }
     }
 }
@@ -96,7 +96,7 @@ impl Operator for Contiguous {
 pub struct Log2;
 impl Operator for Log2 {
     fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
-        let (mut t, mut view) = (inp[0].0.clone(), inp[0].1.clone());
+        let mut t = inp[0].0.clone();
         for a in t
             .data
             .as_any_mut()
@@ -115,7 +115,7 @@ impl Operator for Log2 {
 pub struct Exp2;
 impl Operator for Exp2 {
     fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
-        let (mut t, mut view) = (inp[0].0.clone(), inp[0].1.clone());
+        let mut t = inp[0].0.clone();
         for a in t
             .data
             .as_any_mut()
@@ -134,7 +134,7 @@ impl Operator for Exp2 {
 pub struct Sin;
 impl Operator for Sin {
     fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
-        let (mut t, mut view) = (inp[0].0.clone(), inp[0].1.clone());
+        let mut t = inp[0].0.clone();
         for a in t
             .data
             .as_any_mut()
@@ -152,7 +152,7 @@ impl Operator for Sin {
 pub struct Sqrt;
 impl Operator for Sqrt {
     fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
-        let (mut t, mut view) = (inp[0].0.clone(), inp[0].1.clone());
+        let mut t = inp[0].0.clone();
         for a in t
             .data
             .as_any_mut()
@@ -170,7 +170,7 @@ impl Operator for Sqrt {
 pub struct Recip;
 impl Operator for Recip {
     fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
-        let (mut t, mut view) = (inp[0].0.clone(), inp[0].1.clone());
+        let mut t = inp[0].0.clone();
         for a in t
             .data
             .as_any_mut()
@@ -255,7 +255,7 @@ impl Operator for LessThan {
         for i in 0..data.len() {
             let a = inp[0].1.index(i).map(|i| a_data[i]).unwrap_or_default();
             let b = inp[1].1.index(i).map(|i| b_data[i]).unwrap_or_default();
-            data[i as usize] = if a < b { 1. } else { 0. };
+            data[i] = if a < b { 1. } else { 0. };
         }
         Tensor {
             data: Box::new(data),

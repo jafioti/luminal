@@ -20,8 +20,8 @@ impl<S: Shape> GraphTensor<S> {
     {
         for (i, dim) in Ax::as_array().into_iter().map(|i| i as usize).zip(
             Dst::realized_shape().into_iter().map(|i| match i {
-                RealDim::Const(n) => crate::core::shape::simple_tracker::Dim::Known(n),
-                RealDim::Dyn => crate::core::shape::simple_tracker::Dim::Unknown,
+                RealDim::Const(n) => Dim::Known(n),
+                RealDim::Dyn => Dim::Unknown,
             }),
         ) {
             self.shape.expand(i, dim);
@@ -35,8 +35,8 @@ impl<S: Shape> GraphTensor<S> {
             // Just do reshape
             for (i, dim) in N::realized_shape().into_iter().enumerate() {
                 self.shape.dims[self.shape.indexes[i]] = match dim {
-                    RealDim::Const(n) => crate::core::shape::simple_tracker::Dim::Known(n),
-                    RealDim::Dyn => crate::core::shape::simple_tracker::Dim::Unknown,
+                    RealDim::Const(n) => Dim::Known(n),
+                    RealDim::Dyn => Dim::Unknown,
                 };
             }
             GraphTensor::from_id(self.id, self.shape, self.graph_ref)
@@ -49,12 +49,12 @@ impl<S: Shape> GraphTensor<S> {
                 .finish();
             GraphTensor::from_id(
                 new_id,
-                crate::core::shape::simple_tracker::ShapeTracker::new(
+                ShapeTracker::new(
                     &N::realized_shape()
                         .into_iter()
                         .map(|dim| match dim {
-                            RealDim::Const(n) => crate::core::shape::simple_tracker::Dim::Known(n),
-                            RealDim::Dyn => crate::core::shape::simple_tracker::Dim::Unknown,
+                            RealDim::Const(n) => Dim::Known(n),
+                            RealDim::Dyn => Dim::Unknown,
                         })
                         .collect::<Vec<_>>(),
                 ),
@@ -64,10 +64,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Dynamically reshape with annotations for the shape tracker
-    pub fn dyn_reshape<N: Shape>(
-        mut self,
-        shape: Vec<crate::core::shape::simple_tracker::Dim>,
-    ) -> GraphTensor<N> {
+    pub fn dyn_reshape<N: Shape>(mut self, shape: Vec<Dim>) -> GraphTensor<N> {
         if self.shape.is_contiguous() {
             // Just do reshape
             for (i, dim) in shape.into_iter().enumerate() {
@@ -81,11 +78,7 @@ impl<S: Shape> GraphTensor<S> {
                 .add_op(op::Contiguous)
                 .input(self.id, self.shape)
                 .finish();
-            GraphTensor::from_id(
-                new_id,
-                crate::core::shape::simple_tracker::ShapeTracker::new(&shape),
-                self.graph_ref,
-            )
+            GraphTensor::from_id(new_id, ShapeTracker::new(&shape), self.graph_ref)
         }
     }
 
@@ -173,12 +166,12 @@ where
             .finish();
         GraphTensor::from_id(
             fin,
-            crate::core::shape::simple_tracker::ShapeTracker::new(
+            ShapeTracker::new(
                 &<(A, B) as TryConcatAlong<Ax>>::Output::realized_shape()
                     .into_iter()
                     .map(|i| match i {
-                        RealDim::Const(n) => crate::core::shape::simple_tracker::Dim::Known(n),
-                        RealDim::Dyn => crate::core::shape::simple_tracker::Dim::Unknown,
+                        RealDim::Const(n) => Dim::Known(n),
+                        RealDim::Dyn => Dim::Unknown,
                     })
                     .collect::<Vec<_>>(),
             ),

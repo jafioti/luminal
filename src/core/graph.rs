@@ -180,9 +180,7 @@ impl Graph {
         }
 
         // Swap shapes
-        let s = a.shape;
-        a.shape = b.shape;
-        b.shape = s;
+        std::mem::swap(&mut a.shape, &mut b.shape);
     }
 
     /// Execute the graph.
@@ -299,7 +297,7 @@ impl Graph {
     }
 
     /// Get the sources of a node given it's id
-    #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity, clippy::borrowed_box)]
     pub fn get_sources(&self, node_id: NodeIndex) -> Vec<(NodeIndex, &Box<dyn Operator>)> {
         self.graph
             .edges_directed(node_id, Direction::Incoming)
@@ -309,7 +307,7 @@ impl Graph {
     }
 
     /// Get the dests of a node given it's id
-    #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity, clippy::borrowed_box)]
     pub fn get_dests(&self, node_id: NodeIndex) -> Vec<(NodeIndex, &Box<dyn Operator>)> {
         self.graph
             .edges_directed(node_id, Direction::Outgoing)

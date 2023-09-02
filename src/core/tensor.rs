@@ -1,9 +1,6 @@
 use std::{any::Any, fmt::Debug};
 
 use dyn_clone::{clone_trait_object, DynClone};
-use petgraph::stable_graph::NodeIndex;
-
-use crate::shape::ShapeTracker;
 
 /// An entirely dynamic tensor with data
 #[derive(Debug, Clone)]
