@@ -1,7 +1,7 @@
 use crate::{
     graph::Graph,
     op::{self, Function},
-    prelude::{Data, TensorView},
+    prelude::Data,
     shape::*,
     tensor::Tensor,
 };
@@ -42,9 +42,7 @@ impl<S: Shape> GraphTensor<S> {
     /// Remove this tensor's data from the graph. All other views pointing to the same tensor become invalidated.
     pub fn drop(&self) {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        graph
-            .tensors
-            .remove(&graph.views.remove(&self.id).unwrap().tensor_id);
+        graph.tensors.remove(&self.id);
     }
 
     /// Mark this tensor to not be deleted, but not retrieved either
@@ -61,14 +59,23 @@ impl<S: Shape> GraphTensor<S> {
 
     /// Get the contiguous data of the tensor
     pub fn data(&self) -> Vec<f32> {
-        self.retrieve()
-            .unwrap()
-            .real_data(self.view().unwrap())
-            .unwrap()
+        let tensor = self.retrieve().unwrap();
+        let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let mut data = vec![0.; self.shape.n_elements()];
+        #[allow(unused_mut)]
+        for (i, mut r) in data.iter_mut().enumerate() {
+            if let Some(n) = self.shape.index(i) {
+                *r = orig_data[n];
+            }
+        }
+        data
     }
 
     /// Set the value of the tensor, with dynamic dimensions.
-    pub fn set_dyn<T: Data + Clone>(&self, data: T, shape: Vec<usize>) {
+    pub fn set_dyn<T: Data + Clone>(&mut self, data: T, shape: Vec<usize>) {
+        self.shape
+            .dims
+            .copy_from_slice(&shape.into_iter().map(Dim::Known).collect::<Vec<_>>());
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let node = graph
             .graph
@@ -102,10 +109,6 @@ impl<S: Shape> GraphTensor<S> {
             .add_op(op::Print(message.to_string()))
             .input(self.id, self.shape)
             .finish();
-    }
-
-    pub fn view(&self) -> Option<&TensorView> {
-        unsafe { self.graph_ref.as_mut().unwrap().get_view(self.id) }
     }
 }
 

@@ -18,13 +18,13 @@ impl<T: InitModule, const N: usize> InitModule for Repeated<T, N> {
     }
 }
 
-impl<T: SerializeModule, const N: usize> SerializeModule for Repeated<T, N> {
-    fn serialize(&self, s: &mut Serializer) {
-        for (i, l) in self.modules.iter().enumerate() {
-            s.module(&format!("layer{i}"), l);
-        }
-    }
-}
+// impl<T: SerializeModule, const N: usize> SerializeModule for Repeated<T, N> {
+//     fn serialize(&self, s: &mut Serializer) {
+//         for (i, l) in self.modules.iter().enumerate() {
+//             s.module(&format!("layer{i}"), l);
+//         }
+//     }
+// }
 
 impl<I, T: Module<I, Output = I>, const N: usize> Module<I> for Repeated<T, N> {
     type Output = I;
@@ -71,11 +71,11 @@ macro_rules! tuple_impls {
             }
         }
 
-        impl<$($name: SerializeModule,)+> SerializeModule for ($($name,)+) {
-            fn serialize(&self, s: &mut Serializer) {
-                $(s.module(&format!("layer{}", $idx), &self.$idx);)+
-            }
-        }
+        // impl<$($name: SerializeModule,)+> SerializeModule for ($($name,)+) {
+        //     fn serialize(&self, s: &mut Serializer) {
+        //         $(s.module(&format!("layer{}", $idx), &self.$idx);)+
+        //     }
+        // }
     };
 }
 

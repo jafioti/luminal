@@ -189,14 +189,14 @@ where
 
 macro_rules! impl_concat {
     ($Ax:expr, $NumDims:expr, [$($Head:tt),*], [$($Tail:tt),*]) => {
-        impl<A: Dim, B: Dim, $($Head: Dim, )* $($Tail: Dim, )*> TryConcatAlong<Axis<$Ax>>
+        impl<A: Dimension, B: Dimension, $($Head: Dimension, )* $($Tail: Dimension, )*> TryConcatAlong<Axis<$Ax>>
             for (
                 ($($Head, )* A, $($Tail, )*),
                 ($($Head, )* B, $($Tail, )*),
             )
         where
             A: std::ops::Add<B>,
-            <A as std::ops::Add<B>>::Output: Dim,
+            <A as std::ops::Add<B>>::Output: Dimension,
             {
                 type Output = (
                     $($Head, )*

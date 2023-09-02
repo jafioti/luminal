@@ -25,15 +25,15 @@ impl<const DIM: usize, const FF: usize, const HEADS: usize, const LAYERS: usize>
     }
 }
 
-impl<const DIM: usize, const FF: usize, const HEADS: usize, const LAYERS: usize> SerializeModule
-    for TransformerDecoder<DIM, FF, HEADS, LAYERS>
-{
-    fn serialize(&self, s: &mut Serializer) {
-        for (i, l) in self.layers.iter().enumerate() {
-            s.module(&format!("layer{i}"), l);
-        }
-    }
-}
+// impl<const DIM: usize, const FF: usize, const HEADS: usize, const LAYERS: usize> SerializeModule
+//     for TransformerDecoder<DIM, FF, HEADS, LAYERS>
+// {
+//     fn serialize(&self, s: &mut Serializer) {
+//         for (i, l) in self.layers.iter().enumerate() {
+//             s.module(&format!("layer{i}"), l);
+//         }
+//     }
+// }
 
 // Single
 impl<
@@ -41,8 +41,8 @@ impl<
         const FF: usize,
         const HEADS: usize,
         const LAYERS: usize,
-        S1: Dim,
-        S2: Dim,
+        S1: Dimension,
+        S2: Dimension,
     > Module<(GraphTensor<(S1, Const<DIM>)>, GraphTensor<(S2, Const<DIM>)>)>
     for TransformerDecoder<DIM, FF, HEADS, LAYERS>
 {
@@ -66,9 +66,9 @@ impl<
         const FF: usize,
         const HEADS: usize,
         const LAYERS: usize,
-        B: Dim,
-        S1: Dim,
-        S2: Dim,
+        B: Dimension,
+        S1: Dimension,
+        S2: Dimension,
     >
     Module<(
         GraphTensor<(B, S1, Const<DIM>)>,
@@ -110,18 +110,18 @@ impl<const DIM: usize, const FF: usize, const HEADS: usize> InitModule
     }
 }
 
-impl<const DIM: usize, const FF: usize, const HEADS: usize> SerializeModule
-    for TransformerDecoderBlock<DIM, FF, HEADS>
-{
-    fn serialize(&self, s: &mut Serializer) {
-        s.module("self_attn", &self.self_attention);
-        s.module("cross_attn", &self.cross_attention);
-        s.module("ff", &self.ff);
-    }
-}
+// impl<const DIM: usize, const FF: usize, const HEADS: usize> SerializeModule
+//     for TransformerDecoderBlock<DIM, FF, HEADS>
+// {
+//     fn serialize(&self, s: &mut Serializer) {
+//         s.module("self_attn", &self.self_attention);
+//         s.module("cross_attn", &self.cross_attention);
+//         s.module("ff", &self.ff);
+//     }
+// }
 
 // Single
-impl<const DIM: usize, const FF: usize, const HEADS: usize, S1: Dim, S2: Dim>
+impl<const DIM: usize, const FF: usize, const HEADS: usize, S1: Dimension, S2: Dimension>
     Module<(GraphTensor<(S1, Const<DIM>)>, GraphTensor<(S2, Const<DIM>)>)>
     for TransformerDecoderBlock<DIM, FF, HEADS>
 {
@@ -141,7 +141,14 @@ impl<const DIM: usize, const FF: usize, const HEADS: usize, S1: Dim, S2: Dim>
 }
 
 // Batched
-impl<const DIM: usize, const FF: usize, const HEADS: usize, S1: Dim, S2: Dim, B: Dim>
+impl<
+        const DIM: usize,
+        const FF: usize,
+        const HEADS: usize,
+        S1: Dimension,
+        S2: Dimension,
+        B: Dimension,
+    >
     Module<(
         GraphTensor<(B, S1, Const<DIM>)>,
         GraphTensor<(B, S2, Const<DIM>)>,
@@ -234,8 +241,8 @@ mod tests {
             .weight
             .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
-        let a = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
-        let e = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
+        let mut a = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
+        let mut e = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
         let b = model.forward((a, e));
 
         a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![2, 3]);

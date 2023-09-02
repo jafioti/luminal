@@ -4,7 +4,6 @@ use crate::{
     graph_tensor::GraphTensor,
     op::{self, Operator},
     optimizer::GraphOptimizer,
-    prelude::TensorView,
     shape::*,
     tensor::Tensor,
 };
@@ -16,7 +15,6 @@ use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Dire
 #[derive(Debug, Default)]
 pub struct Graph {
     pub tensors: HashMap<NodeIndex, Tensor>,
-    pub views: HashMap<NodeIndex, TensorView>,
     pub(crate) id_remap: HashMap<NodeIndex, NodeIndex>,
     pub graph:
         StableGraph<Box<dyn Operator>, (u8, crate::core::shape::simple_tracker::ShapeTracker)>,
@@ -48,27 +46,20 @@ impl Graph {
         }
     }
 
-    pub(crate) fn get_op(&self, id: NodeIndex) -> Option<&dyn Operator> {
-        self.graph.node_weight(id).map(|n| n.as_ref())
-    }
-
-    pub fn get_tensor(&mut self, id: NodeIndex) -> Option<Tensor> {
-        let v_id = self.get_view(id)?.tensor_id;
-        self.tensors.remove(&v_id)
-    }
-
-    pub fn get_tensor_ref(&self, id: NodeIndex) -> Option<&Tensor> {
-        let view = self.get_view(id)?;
-        self.tensors.get(&view.tensor_id)
-    }
-
-    pub fn get_view(&self, mut id: NodeIndex) -> Option<&TensorView> {
-        // Walk through remaps
+    pub fn get_tensor(&mut self, mut id: NodeIndex) -> Option<Tensor> {
+        // Walk through remap
         while let Some(new_id) = self.id_remap.get(&id) {
             id = *new_id;
         }
+        self.tensors.remove(&id)
+    }
 
-        self.views.get(&id)
+    pub fn get_tensor_ref(&self, mut id: NodeIndex) -> Option<&Tensor> {
+        // Walk through remap
+        while let Some(new_id) = self.id_remap.get(&id) {
+            id = *new_id;
+        }
+        self.tensors.get(&id)
     }
 
     pub fn new_tensor<S: Shape>(&mut self, name: &str) -> GraphTensor<S> {
@@ -142,22 +133,9 @@ impl Graph {
     /// Clear any remaining tensors that may be around from old executions
     pub fn reset(&mut self) {
         // (This is where we should do the tensor caching!)
-        let mut views_pointing: HashMap<NodeIndex, usize> = self
-            .views
-            .iter()
-            .group_by(|(_, v)| v.tensor_id)
-            .into_iter()
-            .map(|(v, i)| (v, i.count()))
-            .collect();
-        for t in self.views.keys().copied().collect_vec() {
+        for t in self.tensors.keys().copied().collect_vec() {
             if !self.no_delete.contains(&t) {
-                self.views.remove(&t);
-                if let Some(c) = views_pointing.get_mut(&t) {
-                    *c -= 1;
-                    if *c == 0 {
-                        self.tensors.remove(&t);
-                    }
-                }
+                self.tensors.remove(&t);
             }
         }
     }
@@ -186,45 +164,43 @@ impl Graph {
     }
 
     /// Swap the tensors with these ids
-    pub fn swap_tensors<A: Shape, B: Shape>(&mut self, a: GraphTensor<A>, b: GraphTensor<B>) {
-        let a_id = self.views.get(&a.id).unwrap().tensor_id;
-        let b_id = self.views.get(&b.id).unwrap().tensor_id;
-
+    pub fn swap_tensors<A: Shape, B: Shape>(
+        &mut self,
+        mut a: GraphTensor<A>,
+        mut b: GraphTensor<B>,
+    ) {
         // Swap tensors
-        let a_t = self.tensors.remove(&a_id);
-        let b_t = self.tensors.remove(&b_id);
+        let a_t = self.tensors.remove(&a.id);
+        let b_t = self.tensors.remove(&b.id);
         if let Some(a_t) = a_t {
-            self.tensors.insert(b_id, a_t);
+            self.tensors.insert(b.id, a_t);
         }
         if let Some(b_t) = b_t {
-            self.tensors.insert(a_id, b_t);
+            self.tensors.insert(a.id, b_t);
         }
 
-        // Swap views
-        let b_view = self.views.get(&b.id).unwrap().shape.clone();
-        self.views.get_mut(&b.id).unwrap().shape =
-            std::mem::replace(&mut self.views.get_mut(&a.id).unwrap().shape, b_view);
+        // Swap shapes
+        let s = a.shape;
+        a.shape = b.shape;
+        b.shape = s;
     }
 
     /// Execute the graph.
     pub fn execute(&mut self) {
         self.reset();
-        // Track the number of views pointing to each tensor so we know when to clear;
-        let mut views_pointing: HashMap<NodeIndex, usize> = self
-            .views
-            .iter()
-            .group_by(|(_, v)| v.tensor_id)
-            .into_iter()
-            .map(|(v, i)| (v, i.count()))
-            .collect();
+        // Track the number of views pointing to each tensor so we know when to clear
         if self.linearized_graph.is_none() {
             self.toposort();
         }
+        let mut remaining_consumers: HashMap<NodeIndex, usize> = self
+            .graph
+            .node_indices()
+            .map(|i| (i, self.graph.edges_directed(i, Direction::Outgoing).count()))
+            .collect();
+
         for (node, src_ids, srcs_to_remove) in self.linearized_graph.as_ref().unwrap().iter() {
-            if let Some(v) = self.views.get(node) {
-                if self.tensors.contains_key(&v.tensor_id) {
-                    continue;
-                }
+            if self.tensors.contains_key(node) {
+                continue;
             }
             let mut srcs = src_ids
                 .iter()
@@ -248,14 +224,9 @@ impl Graph {
 
             // Check if we can delete the source tensors now
             for source in srcs_to_remove {
-                // No more dependencies for this view, let's remove it
-                if let Some(view) = self.views.remove(source) {
-                    let vp = views_pointing.get_mut(&view.tensor_id).unwrap();
-                    *vp -= 1;
-                    if *vp == 0 && !self.no_delete.contains(&view.tensor_id) {
-                        // No views pointing at this tensor, remove it
-                        self.tensors.remove(&view.tensor_id);
-                    }
+                *remaining_consumers.get_mut(source).unwrap() -= 1;
+                if remaining_consumers[source] == 0 && !self.no_delete.contains(source) {
+                    self.tensors.remove(source);
                 }
             }
         }
@@ -269,10 +240,8 @@ impl Graph {
             self.toposort();
         }
         for (node, src_ids, _) in self.linearized_graph.as_ref().unwrap().iter() {
-            if let Some(v) = self.views.get(node) {
-                if self.tensors.contains_key(&v.tensor_id) {
-                    continue;
-                }
+            if self.tensors.contains_key(node) {
+                continue;
             }
             let mut srcs = src_ids
                 .iter()

@@ -86,7 +86,7 @@ pub trait HasAxes<Ax> {
 
 macro_rules! impl_has_axis {
     (($($Vars:tt),*), $Num:tt, $Axis:tt) => {
-        impl<$($Vars: Dim, )*> HasAxes<Axis<$Axis>> for ($($Vars, )*) {
+        impl<$($Vars: Dimension, )*> HasAxes<Axis<$Axis>> for ($($Vars, )*) {
             #[inline(always)]
             fn size(&self) -> usize {
                 self.$Axis.size()

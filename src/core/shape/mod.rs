@@ -5,8 +5,6 @@ mod permute;
 mod realize;
 pub mod simple_tracker;
 mod slice;
-mod symbolic;
-mod tracker;
 use std::fmt::Display;
 
 pub use pad::*;
@@ -19,14 +17,16 @@ mod test;
 pub use axes::*;
 pub use broadcast::*;
 pub use permute::*;
-pub use tracker::*;
+pub use simple_tracker::*;
 
 // This currently is a lot more complicated than it needs to be, because it's based on dfdx and is ready to do dynamic dimensions.
 // TODO: Actually use dynamic dimensions
 // TODO: Simplify this code
 
 /// Represents a single dimension of a multi dimensional [Shape]
-pub trait Dim: 'static + Copy + Clone + std::fmt::Debug + Send + Sync + Eq + PartialEq {
+pub trait Dimension:
+    'static + Copy + Clone + std::fmt::Debug + Send + Sync + Eq + PartialEq
+{
     fn size(&self) -> usize;
     fn const_size() -> RealDim;
     fn from_size(size: usize) -> Option<Self>;
@@ -34,11 +34,11 @@ pub trait Dim: 'static + Copy + Clone + std::fmt::Debug + Send + Sync + Eq + Par
 
 /// Represents a single dimension where all
 /// instances are guaranteed to be the same size at compile time.
-pub trait ConstDim: Default + Dim {
+pub trait ConstDim: Default + Dimension {
     const SIZE: usize;
 }
 
-impl Dim for usize {
+impl Dimension for usize {
     #[inline(always)]
     fn size(&self) -> usize {
         *self
@@ -55,7 +55,7 @@ impl Dim for usize {
 /// Represents a [Dim] with size known at compile time
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Const<const M: usize>;
-impl<const M: usize> Dim for Const<M> {
+impl<const M: usize> Dimension for Const<M> {
     #[inline(always)]
     fn size(&self) -> usize {
         M
@@ -118,7 +118,7 @@ impl<const N: usize> core::ops::Div<usize> for Const<N> {
 
 /// Represents either `[T; N]` or `Vec<T>`
 pub trait Array<T>: IntoIterator<Item = T> {
-    type Dim: Dim;
+    type Dim: Dimension;
     fn dim(&self) -> Self::Dim;
 }
 impl<T, const N: usize> Array<T> for [T; N] {
@@ -229,7 +229,7 @@ pub type R6<const M: usize, const N: usize, const O: usize, const P: usize, cons
 
 macro_rules! shape {
     (($($D:tt $Idx:tt),*), rank=$Num:expr, all=$All:tt) => {
-        impl<$($D: Dim, )*> Shape for ($($D, )*) {
+        impl<$($D: Dimension, )*> Shape for ($($D, )*) {
             const NUM_DIMS: usize = $Num;
             type Concrete = [usize; $Num];
             type AllAxes = $All<$($Idx,)*>;
@@ -240,22 +240,21 @@ macro_rules! shape {
             }
             #[inline(always)]
             fn from_concrete(concrete: &Self::Concrete) -> Option<Self> {
-                Some(($(Dim::from_size(concrete[$Idx])?, )*))
+                Some(($(Dimension::from_size(concrete[$Idx])?, )*))
             }
 
             fn realized_shape() -> Vec<RealDim> {
                 vec![$($D::const_size(), )*]
             }
-            fn to_tracker() -> crate::core::shape::simple_tracker::ShapeTracker {
-                let mut st = crate::core::shape::simple_tracker::ShapeTracker::new(&[
+            fn to_tracker() -> ShapeTracker {
+                ShapeTracker::new(&[
                     $(
                     match $D::const_size() {
-                        RealDim::Const(n) => crate::core::shape::simple_tracker::Dim::Known(n),
-                        RealDim::Dyn => crate::core::shape::simple_tracker::Dim::Unknown,
+                        RealDim::Const(n) => Dim::Known(n),
+                        RealDim::Dyn => Dim::Unknown,
                     },
                     )*
-                ]);
-                st
+                ])
             }
         }
         impl<$($D: ConstDim, )*> ConstShape for ($($D, )*) {
@@ -309,8 +308,7 @@ impl Shape for () {
         Some(())
     }
     fn to_tracker() -> crate::core::shape::simple_tracker::ShapeTracker {
-        let mut st = crate::core::shape::simple_tracker::ShapeTracker::new(&[]);
-        st
+        crate::core::shape::simple_tracker::ShapeTracker::new(&[])
     }
 }
 impl ConstShape for () {

@@ -25,24 +25,24 @@ fn real_dim_to_size(r: RealDim) -> usize {
     }
 }
 
-pub trait RangeToDim<D: Dim> {
-    type Dim: Dim;
+pub trait RangeToDim<D: Dimension> {
+    type Dimension: Dimension;
 }
 
-impl<D: Dim> RangeToDim<D> for RangeFrom<usize> {
-    type Dim = usize;
+impl<D: Dimension> RangeToDim<D> for RangeFrom<usize> {
+    type Dimension = usize;
 }
-impl<D: Dim> RangeToDim<D> for RangeTo<usize> {
-    type Dim = usize;
+impl<D: Dimension> RangeToDim<D> for RangeTo<usize> {
+    type Dimension = usize;
 }
-impl<D: Dim> RangeToDim<D> for RangeToInclusive<usize> {
-    type Dim = usize;
+impl<D: Dimension> RangeToDim<D> for RangeToInclusive<usize> {
+    type Dimension = usize;
 }
-impl<D: Dim> RangeToDim<D> for Range<usize> {
-    type Dim = usize;
+impl<D: Dimension> RangeToDim<D> for Range<usize> {
+    type Dimension = usize;
 }
-impl<D: Dim> RangeToDim<D> for RangeFull {
-    type Dim = D;
+impl<D: Dimension> RangeToDim<D> for RangeFull {
+    type Dimension = D;
 }
 
 pub trait SliceOfShape<S: Shape> {
@@ -57,8 +57,8 @@ impl SliceOfShape<R0> for () {
     }
 }
 
-impl<A: Dim, R: RangeBounds<usize> + RangeToDim<A>> SliceOfShape<(A,)> for (R,) {
-    type OutputShape = (R::Dim,);
+impl<A: Dimension, R: RangeBounds<usize> + RangeToDim<A>> SliceOfShape<(A,)> for (R,) {
+    type OutputShape = (R::Dimension,);
     fn to_range_vec(&self) -> Vec<(usize, usize)> {
         vec![(
             get_start_bound(self.0.start_bound()),
@@ -68,13 +68,13 @@ impl<A: Dim, R: RangeBounds<usize> + RangeToDim<A>> SliceOfShape<(A,)> for (R,) 
 }
 
 impl<
-        A: Dim,
-        B: Dim,
+        A: Dimension,
+        B: Dimension,
         R1: RangeBounds<usize> + RangeToDim<A>,
         R2: RangeBounds<usize> + RangeToDim<B>,
     > SliceOfShape<(A, B)> for (R1, R2)
 {
-    type OutputShape = (R1::Dim, R2::Dim);
+    type OutputShape = (R1::Dimension, R2::Dimension);
     fn to_range_vec(&self) -> Vec<(usize, usize)> {
         vec![
             (
@@ -90,15 +90,15 @@ impl<
 }
 
 impl<
-        A: Dim,
-        B: Dim,
-        C: Dim,
+        A: Dimension,
+        B: Dimension,
+        C: Dimension,
         R1: RangeBounds<usize> + RangeToDim<A>,
         R2: RangeBounds<usize> + RangeToDim<B>,
         R3: RangeBounds<usize> + RangeToDim<C>,
     > SliceOfShape<(A, B, C)> for (R1, R2, R3)
 {
-    type OutputShape = (R1::Dim, R2::Dim, R3::Dim);
+    type OutputShape = (R1::Dimension, R2::Dimension, R3::Dimension);
     fn to_range_vec(&self) -> Vec<(usize, usize)> {
         vec![
             (
@@ -118,17 +118,17 @@ impl<
 }
 
 impl<
-        A: Dim,
-        B: Dim,
-        C: Dim,
-        D: Dim,
+        A: Dimension,
+        B: Dimension,
+        C: Dimension,
+        D: Dimension,
         R1: RangeBounds<usize> + RangeToDim<A>,
         R2: RangeBounds<usize> + RangeToDim<B>,
         R3: RangeBounds<usize> + RangeToDim<C>,
         R4: RangeBounds<usize> + RangeToDim<C>,
     > SliceOfShape<(A, B, C, D)> for (R1, R2, R3, R4)
 {
-    type OutputShape = (R1::Dim, R2::Dim, R3::Dim, R4::Dim);
+    type OutputShape = (R1::Dimension, R2::Dimension, R3::Dimension, R4::Dimension);
     fn to_range_vec(&self) -> Vec<(usize, usize)> {
         vec![
             (
@@ -152,11 +152,11 @@ impl<
 }
 
 impl<
-        A: Dim,
-        B: Dim,
-        C: Dim,
-        D: Dim,
-        E: Dim,
+        A: Dimension,
+        B: Dimension,
+        C: Dimension,
+        D: Dimension,
+        E: Dimension,
         R1: RangeBounds<usize> + RangeToDim<A>,
         R2: RangeBounds<usize> + RangeToDim<B>,
         R3: RangeBounds<usize> + RangeToDim<C>,
@@ -164,7 +164,13 @@ impl<
         R5: RangeBounds<usize> + RangeToDim<C>,
     > SliceOfShape<(A, B, C, D, E)> for (R1, R2, R3, R4, R5)
 {
-    type OutputShape = (R1::Dim, R2::Dim, R3::Dim, R4::Dim, R5::Dim);
+    type OutputShape = (
+        R1::Dimension,
+        R2::Dimension,
+        R3::Dimension,
+        R4::Dimension,
+        R5::Dimension,
+    );
     fn to_range_vec(&self) -> Vec<(usize, usize)> {
         vec![
             (

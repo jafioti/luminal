@@ -2,7 +2,7 @@ use std::any::Any;
 
 use rand::{thread_rng, Rng};
 
-use crate::{op, prelude::*, serialization::SerializeModule};
+use crate::{op, prelude::*};
 
 // This is a really shoddy way to do gathers TODO: Do something else
 
@@ -16,8 +16,8 @@ impl Data for Vec<usize> {
 }
 
 // Gather batch of batches from 2D embedding matrix
-impl<S: Dim, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
-    pub fn gather<S1: Dim, S2: Dim>(
+impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
+    pub fn gather<S1: Dimension, S2: Dimension>(
         mut self,
         indexes: GraphTensor<(S1, S2)>,
     ) -> GraphTensor<(S1, S2, Const<DIM>)> {
@@ -90,14 +90,16 @@ impl<const A: usize, const B: usize> InitModule for Embedding<A, B> {
     }
 }
 
-impl<const A: usize, const B: usize> SerializeModule for Embedding<A, B> {
-    fn serialize(&self, s: &mut crate::serialization::Serializer) {
-        s.tensor("weight", self.weight);
-    }
-}
+// impl<const A: usize, const B: usize> SerializeModule for Embedding<A, B> {
+//     fn serialize(&self, s: &mut crate::serialization::Serializer) {
+//         s.tensor("weight", self.weight);
+//     }
+// }
 
 // Single
-impl<S: Dim, const N: usize, const DIM: usize> Module<GraphTensor<(S,)>> for Embedding<N, DIM> {
+impl<S: Dimension, const N: usize, const DIM: usize> Module<GraphTensor<(S,)>>
+    for Embedding<N, DIM>
+{
     type Output = GraphTensor<(S, Const<DIM>)>;
 
     fn forward(&self, input: GraphTensor<(S,)>) -> Self::Output {
@@ -106,7 +108,7 @@ impl<S: Dim, const N: usize, const DIM: usize> Module<GraphTensor<(S,)>> for Emb
 }
 
 // Batch
-impl<B: Dim, S: Dim, const N: usize, const DIM: usize> Module<GraphTensor<(B, S)>>
+impl<B: Dimension, S: Dimension, const N: usize, const DIM: usize> Module<GraphTensor<(B, S)>>
     for Embedding<N, DIM>
 {
     type Output = GraphTensor<(B, S, Const<DIM>)>;

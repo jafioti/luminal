@@ -37,8 +37,8 @@ macro_rules! broadcast_to {
     ($SrcNum:tt, ($($SrcDims:tt),*), $DstNum:tt, ($($DstDims:tt),*), ()<>) => {
     };
     ($SrcNum:tt, ($($SrcDims:tt),*), $DstNum:tt, ($($DstDims:tt),*), $Axes:ty) => {
-        impl<$($DstDims: Dim, )*> ReduceShapeTo<($($SrcDims, )*), $Axes> for ($($DstDims, )*) {}
-        impl<$($DstDims: Dim, )*> ReduceShape<$Axes> for ($($DstDims, )*) {
+        impl<$($DstDims: Dimension, )*> ReduceShapeTo<($($SrcDims, )*), $Axes> for ($($DstDims, )*) {}
+        impl<$($DstDims: Dimension, )*> ReduceShape<$Axes> for ($($DstDims, )*) {
             type Reduced = ($($SrcDims, )*);
         }
         broadcast_to_array!($SrcNum, ($($SrcDims),*), $DstNum, ($($DstDims),*), $Axes);

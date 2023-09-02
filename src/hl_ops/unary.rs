@@ -222,7 +222,7 @@ mod tests {
     #[test]
     fn test_relu() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<(usize, usize)>("Input");
+        let mut a = cx.new_tensor::<(usize, usize)>("Input");
         a.set_dyn(vec![0.0, 1.0, 0.0, 1.0], vec![2, 2]);
         let b = a.relu();
         b.mark();
@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn test_sigmoid() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<(usize, usize)>("Input");
+        let mut a = cx.new_tensor::<(usize, usize)>("Input");
         a.set_dyn(vec![0.0, 1.0, 0.0, 1.0], vec![2, 2]);
         let b = a.sigmoid();
         b.mark();
@@ -260,7 +260,7 @@ mod tests {
     #[test]
     fn test_tanh() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<(usize, usize)>("Input");
+        let mut a = cx.new_tensor::<(usize, usize)>("Input");
         a.set_dyn(vec![0.0, 1.0, 0.0, 1.0], vec![2, 2]);
         let b = a.tanh();
         b.mark();

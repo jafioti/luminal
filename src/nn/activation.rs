@@ -11,9 +11,9 @@ impl InitModule for ReLU {
     }
 }
 
-impl SerializeModule for ReLU {
-    fn serialize(&self, _: &mut Serializer) {}
-}
+// impl SerializeModule for ReLU {
+//     fn serialize(&self, _: &mut Serializer) {}
+// }
 
 impl<S: Shape> Module<GraphTensor<S>> for ReLU {
     type Output = GraphTensor<S>;
@@ -32,9 +32,9 @@ impl InitModule for Sigmoid {
     }
 }
 
-impl SerializeModule for Sigmoid {
-    fn serialize(&self, _: &mut Serializer) {}
-}
+// impl SerializeModule for Sigmoid {
+//     fn serialize(&self, _: &mut Serializer) {}
+// }
 
 impl<S: ConstShape> Module<GraphTensor<S>> for Sigmoid {
     type Output = GraphTensor<S>;
@@ -53,9 +53,9 @@ impl InitModule for Swish {
     }
 }
 
-impl SerializeModule for Swish {
-    fn serialize(&self, _: &mut Serializer) {}
-}
+// impl SerializeModule for Swish {
+//     fn serialize(&self, _: &mut Serializer) {}
+// }
 
 impl<S: ConstShape> Module<GraphTensor<S>> for Swish {
     type Output = GraphTensor<S>;
@@ -74,9 +74,9 @@ impl InitModule for Tanh {
     }
 }
 
-impl SerializeModule for Tanh {
-    fn serialize(&self, _: &mut Serializer) {}
-}
+// impl SerializeModule for Tanh {
+//     fn serialize(&self, _: &mut Serializer) {}
+// }
 
 impl<S: ConstShape> Module<GraphTensor<S>> for Tanh {
     type Output = GraphTensor<S>;
@@ -101,11 +101,11 @@ impl<const DIM: usize> InitModule for RMSNorm<DIM> {
     }
 }
 
-impl<const DIM: usize> SerializeModule for RMSNorm<DIM> {
-    fn serialize(&self, s: &mut Serializer) {
-        s.tensor("weight", self.weight);
-    }
-}
+// impl<const DIM: usize> SerializeModule for RMSNorm<DIM> {
+//     fn serialize(&self, s: &mut Serializer) {
+//         s.tensor("weight", self.weight);
+//     }
+// }
 
 impl<const DIM: usize> Module<GraphTensor<R1<DIM>>> for RMSNorm<DIM> {
     type Output = GraphTensor<R1<DIM>>;
@@ -122,7 +122,7 @@ impl<const DIM: usize> Module<GraphTensor<R1<DIM>>> for RMSNorm<DIM> {
     }
 }
 
-impl<S: Dim, const DIM: usize> Module<GraphTensor<(S, Const<DIM>)>> for RMSNorm<DIM> {
+impl<S: Dimension, const DIM: usize> Module<GraphTensor<(S, Const<DIM>)>> for RMSNorm<DIM> {
     type Output = GraphTensor<(S, Const<DIM>)>;
 
     fn forward(&self, input: GraphTensor<(S, Const<DIM>)>) -> Self::Output {
@@ -137,7 +137,9 @@ impl<S: Dim, const DIM: usize> Module<GraphTensor<(S, Const<DIM>)>> for RMSNorm<
     }
 }
 
-impl<B: Dim, S: Dim, const DIM: usize> Module<GraphTensor<(B, S, Const<DIM>)>> for RMSNorm<DIM> {
+impl<B: Dimension, S: Dimension, const DIM: usize> Module<GraphTensor<(B, S, Const<DIM>)>>
+    for RMSNorm<DIM>
+{
     type Output = GraphTensor<(B, S, Const<DIM>)>;
 
     fn forward(&self, input: GraphTensor<(B, S, Const<DIM>)>) -> Self::Output {

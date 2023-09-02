@@ -31,16 +31,16 @@ impl<const DIM: usize, const K_DIM: usize, const V_DIM: usize, const HEADS: usiz
     }
 }
 
-impl<const DIM: usize, const K_DIM: usize, const V_DIM: usize, const HEADS: usize> SerializeModule
-    for MultiHeadSelfAttention<DIM, K_DIM, V_DIM, HEADS>
-{
-    fn serialize(&self, s: &mut Serializer) {
-        s.module("w_q", &self.w_q);
-        s.module("w_k", &self.w_k);
-        s.module("w_v", &self.w_v);
-        s.module("w_o", &self.w_o);
-    }
-}
+// impl<const DIM: usize, const K_DIM: usize, const V_DIM: usize, const HEADS: usize> SerializeModule
+//     for MultiHeadSelfAttention<DIM, K_DIM, V_DIM, HEADS>
+// {
+//     fn serialize(&self, s: &mut Serializer) {
+//         s.module("w_q", &self.w_q);
+//         s.module("w_k", &self.w_k);
+//         s.module("w_v", &self.w_v);
+//         s.module("w_o", &self.w_o);
+//     }
+// }
 
 // Single
 impl<
@@ -48,7 +48,7 @@ impl<
         const K_DIM: usize,
         const V_DIM: usize,
         const HEADS: usize,
-        S: crate::shape::Dim,
+        S: Dimension,
     > Module<GraphTensor<(S, Const<DIM>)>> for MultiHeadSelfAttention<DIM, K_DIM, V_DIM, HEADS>
 {
     type Output = GraphTensor<(S, Const<DIM>)>;
@@ -65,8 +65,8 @@ impl<
         const K_DIM: usize,
         const V_DIM: usize,
         const HEADS: usize,
-        S: crate::shape::Dim,
-        S1: crate::shape::Dim,
+        S: Dimension,
+        S1: Dimension,
     >
     Module<(
         GraphTensor<(S, Const<DIM>)>,
@@ -100,8 +100,8 @@ impl<
         const K_DIM: usize,
         const V_DIM: usize,
         const HEADS: usize,
-        S: crate::shape::Dim,
-        B: crate::shape::Dim,
+        S: Dimension,
+        B: Dimension,
     > Module<GraphTensor<(B, S, Const<DIM>)>> for MultiHeadSelfAttention<DIM, K_DIM, V_DIM, HEADS>
 {
     type Output = GraphTensor<(B, S, Const<DIM>)>;
@@ -121,9 +121,9 @@ impl<
         const K_DIM: usize,
         const V_DIM: usize,
         const HEADS: usize,
-        S1: crate::shape::Dim,
-        S2: crate::shape::Dim,
-        B: crate::shape::Dim,
+        S1: Dimension,
+        S2: Dimension,
+        B: Dimension,
     >
     Module<(
         GraphTensor<(B, S1, Const<DIM>)>,
@@ -243,8 +243,8 @@ mod tests {
             .weight
             .set(vec![1., 22., 3., 1., 2., 3., 1., 2., 3.]);
 
-        let a = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
-        let e = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
+        let mut a = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
+        let mut e = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
         let b = model.forward((e, a, e));
 
         a.set_dyn(

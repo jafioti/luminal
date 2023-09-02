@@ -33,20 +33,20 @@ impl<
     }
 }
 
-impl<
-        const DIM: usize,
-        const FF: usize,
-        const ENC_HEADS: usize,
-        const DEC_HEADS: usize,
-        const ENC_LAYERS: usize,
-        const DEC_LAYERS: usize,
-    > SerializeModule for Transformer<DIM, FF, ENC_HEADS, DEC_HEADS, ENC_LAYERS, DEC_LAYERS>
-{
-    fn serialize(&self, s: &mut Serializer) {
-        s.module("encoder", &self.encoder);
-        s.module("decoder", &self.decoder);
-    }
-}
+// impl<
+//         const DIM: usize,
+//         const FF: usize,
+//         const ENC_HEADS: usize,
+//         const DEC_HEADS: usize,
+//         const ENC_LAYERS: usize,
+//         const DEC_LAYERS: usize,
+//     > SerializeModule for Transformer<DIM, FF, ENC_HEADS, DEC_HEADS, ENC_LAYERS, DEC_LAYERS>
+// {
+//     fn serialize(&self, s: &mut Serializer) {
+//         s.module("encoder", &self.encoder);
+//         s.module("decoder", &self.decoder);
+//     }
+// }
 
 // Single Sequence
 impl<
@@ -56,8 +56,8 @@ impl<
         const DEC_HEADS: usize,
         const ENC_LAYERS: usize,
         const DEC_LAYERS: usize,
-        S1: Dim,
-        S2: Dim,
+        S1: Dimension,
+        S2: Dimension,
     > Module<(GraphTensor<(S1, Const<DIM>)>, GraphTensor<(S2, Const<DIM>)>)>
     for Transformer<DIM, FF, ENC_HEADS, DEC_HEADS, ENC_LAYERS, DEC_LAYERS>
 {
@@ -171,8 +171,8 @@ mod tests {
             .weight
             .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
-        let a = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
-        let e = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
+        let mut a = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
+        let mut e = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
         let b = model.forward((a, e));
 
         a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![2, 3]);

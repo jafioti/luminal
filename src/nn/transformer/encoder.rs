@@ -30,17 +30,17 @@ impl<const DIM: usize, const FF: usize, const HEADS: usize> InitModule
     }
 }
 
-impl<const DIM: usize, const FF: usize, const HEADS: usize> SerializeModule
-    for TransformerEncoderBlock<DIM, FF, HEADS>
-{
-    fn serialize(&self, s: &mut Serializer) {
-        s.module("self_attn", &self.attention);
-        s.module("ff", &self.ff);
-    }
-}
+// impl<const DIM: usize, const FF: usize, const HEADS: usize> SerializeModule
+//     for TransformerEncoderBlock<DIM, FF, HEADS>
+// {
+//     fn serialize(&self, s: &mut Serializer) {
+//         s.module("self_attn", &self.attention);
+//         s.module("ff", &self.ff);
+//     }
+// }
 
 // Single
-impl<const DIM: usize, const FF: usize, const HEADS: usize, S: Dim>
+impl<const DIM: usize, const FF: usize, const HEADS: usize, S: Dimension>
     Module<GraphTensor<(S, Const<DIM>)>> for TransformerEncoderBlock<DIM, FF, HEADS>
 {
     type Output = GraphTensor<(S, Const<DIM>)>;
@@ -53,7 +53,7 @@ impl<const DIM: usize, const FF: usize, const HEADS: usize, S: Dim>
 }
 
 // Batched
-impl<const DIM: usize, const FF: usize, const HEADS: usize, S: Dim, B: Dim>
+impl<const DIM: usize, const FF: usize, const HEADS: usize, S: Dimension, B: Dimension>
     Module<GraphTensor<(B, S, Const<DIM>)>> for TransformerEncoderBlock<DIM, FF, HEADS>
 {
     type Output = GraphTensor<(B, S, Const<DIM>)>;
@@ -115,7 +115,7 @@ mod tests {
             .weight
             .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
-        let a = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
+        let mut a = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
         let b = model.forward(a);
 
         a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![2, 3]);
