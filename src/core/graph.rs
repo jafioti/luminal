@@ -233,7 +233,7 @@ impl Graph {
 
             // All sources are ready
             // Resolve shapes
-            if srcs.len() == 2 && (srcs[0].1.shape().len() == srcs[1].1.shape().len()) {
+            if srcs.len() == 2 && (srcs[0].1.len() == srcs[1].1.len()) {
                 let (a, b) = srcs.split_at_mut(1);
                 // resolve_shapes(
                 //     &mut a[0].1.shape.views.last_mut().unwrap().shape,
@@ -278,7 +278,7 @@ impl Graph {
                 .iter()
                 .map(|(id, st)| (self.tensors.get(id).unwrap(), *st))
                 .collect_vec();
-            if srcs.len() == 2 && (srcs[0].1.shape().len() == srcs[1].1.shape().len()) {
+            if srcs.len() == 2 && (srcs[0].1.len() == srcs[1].1.len()) {
                 let (a, b) = srcs.split_at_mut(1);
                 // resolve_shapes(
                 //     &mut a[0].1.shape.views.last_mut().unwrap().shape,

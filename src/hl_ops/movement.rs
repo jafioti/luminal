@@ -5,9 +5,12 @@ impl<S: Shape> GraphTensor<S> {
     where
         S: PermuteShapeTo<Dst, Ax>,
     {
-        for (ind, i) in Ax::as_array().into_iter().enumerate() {
-            self.shape.permuted_inds[ind] = i as usize;
-        }
+        self.shape.permute(
+            &Ax::as_array()
+                .into_iter()
+                .map(|i| i as usize)
+                .collect::<Vec<_>>(),
+        );
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
@@ -28,46 +31,48 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     pub fn reshape<N: ConstShape>(self) -> GraphTensor<N> {
-        // <S as AssertSameNumel<N>>::assert_same_numel();
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let new_id = graph
-            .add_op(
-                op::Reshape(
-                    <N as ConstShape>::realized_shape()
-                        .into_iter()
-                        .map(ReshapeDim::Const)
-                        .collect(),
-                ),
-                <N as Shape>::realized_shape(),
-            )
-            .input(self.id)
-            .finish();
-        GraphTensor::from_id(new_id, self.graph_ref)
+        todo!();
+        // // <S as AssertSameNumel<N>>::assert_same_numel();
+        // let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        // let new_id = graph
+        //     .add_op(
+        //         op::Reshape(
+        //             <N as ConstShape>::realized_shape()
+        //                 .into_iter()
+        //                 .map(ReshapeDim::Const)
+        //                 .collect(),
+        //         ),
+        //         <N as Shape>::realized_shape(),
+        //     )
+        //     .input(self.id)
+        //     .finish();
+        // GraphTensor::from_id(new_id, self.graph_ref)
     }
 
     /// Dynamically reshape. Panics if destination shape doesn't match given shape.
     pub fn dyn_reshape<N: Shape>(self, shape: Vec<ReshapeDim>) -> GraphTensor<N> {
-        for (a, b) in N::realized_shape().iter().zip(shape.iter()) {
-            match a {
-                RealDim::Const(n) => assert_eq!(ReshapeDim::Const(*n), *b),
-                RealDim::Dyn => {}
-            }
-        }
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let new_id = graph
-            .add_op(
-                op::Reshape(shape.clone()),
-                shape
-                    .iter()
-                    .map(|i| match i {
-                        ReshapeDim::Const(n) => RealDim::Const(*n),
-                        ReshapeDim::PrevDim(_) => RealDim::Dyn,
-                    })
-                    .collect(),
-            )
-            .input(self.id)
-            .finish();
-        GraphTensor::from_id(new_id, self.graph_ref)
+        todo!();
+        // for (a, b) in N::realized_shape().iter().zip(shape.iter()) {
+        //     match a {
+        //         RealDim::Const(n) => assert_eq!(ReshapeDim::Const(*n), *b),
+        //         RealDim::Dyn => {}
+        //     }
+        // }
+        // let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        // let new_id = graph
+        //     .add_op(
+        //         op::Reshape(shape.clone()),
+        //         shape
+        //             .iter()
+        //             .map(|i| match i {
+        //                 ReshapeDim::Const(n) => RealDim::Const(*n),
+        //                 ReshapeDim::PrevDim(_) => RealDim::Dyn,
+        //             })
+        //             .collect(),
+        //     )
+        //     .input(self.id)
+        //     .finish();
+        // GraphTensor::from_id(new_id, self.graph_ref)
     }
 
     pub fn realize<Dst: Shape<Concrete = <<S as HasShape>::Shape as Shape>::Concrete>>(

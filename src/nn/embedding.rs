@@ -18,7 +18,7 @@ impl Data for Vec<usize> {
 // Gather batch of batches from 2D embedding matrix
 impl<S: Dim, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
     pub fn gather<S1: Dim, S2: Dim>(
-        self,
+        mut self,
         indexes: GraphTensor<(S1, S2)>,
     ) -> GraphTensor<(S1, S2, Const<DIM>)> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
@@ -64,10 +64,9 @@ impl<S: Dim, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
             .input(self.id, self.shape) // Since indexes might have a 1 dimension we don't want getting changed, we feed it in as the first argument
             .finish();
 
-        let mut shape = indexes.shape.clone();
-        shape.orig_shape[2] = crate::core::shape::simple_tracker::Dim::Known(DIM);
-        shape.n_dims += 1;
-        GraphTensor::from_id(res, shape, self.graph_ref)
+        self.shape
+            .expand(2, crate::core::shape::simple_tracker::Dim::Known(DIM));
+        GraphTensor::from_id(res, self.shape, self.graph_ref)
     }
 }
 

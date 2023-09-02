@@ -4,7 +4,7 @@ use itertools::Itertools;
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
 
 use crate::{
-    op::{Exp2, Function, Log2, Permute, Recip},
+    op::{Exp2, Function, Log2, Recip},
     prelude::*,
 };
 

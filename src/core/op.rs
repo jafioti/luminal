@@ -143,18 +143,7 @@ impl Operator for Contiguous {
     fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
         // Copy data over to new tensor
         let src = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let mut res = vec![
-            0.;
-            inp[0]
-                .1
-                .orig_shape
-                .iter()
-                .filter_map(|i| match i {
-                    Dim::Known(n) => Some(n),
-                    Dim::Unknown => None,
-                })
-                .product()
-        ];
+        let mut res = vec![0.; inp[0].1.n_elements()];
         for i in 0..res.len() {
             if let Some(n) = inp[0].1.index(i) {
                 res[i] = src[n];

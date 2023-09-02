@@ -17,11 +17,7 @@ impl<S: Shape> GraphTensor<S> {
                 .input(new_id, shape)
                 .finish();
             // Reduce shape
-            for i in (dim as usize)..shape.n_dims {
-                shape.orig_shape[i - 1] = shape.orig_shape[i];
-                shape.orig_shape[i] = crate::core::shape::simple_tracker::Dim::Unknown;
-            }
-            shape.n_dims -= 1;
+            shape.remove_dim(dim as usize);
         }
         GraphTensor::from_id(new_id, shape, self.graph_ref)
     }
@@ -40,11 +36,7 @@ impl<S: Shape> GraphTensor<S> {
                 .input(new_id, shape)
                 .finish();
             // Reduce shape
-            for i in (dim as usize)..shape.n_dims {
-                shape.orig_shape[i - 1] = shape.orig_shape[i];
-                shape.orig_shape[i] = crate::core::shape::simple_tracker::Dim::Unknown;
-            }
-            shape.n_dims -= 1;
+            shape.remove_dim(dim as usize);
         }
         GraphTensor::from_id(new_id, shape, self.graph_ref)
     }
@@ -60,8 +52,8 @@ impl<S: Shape> GraphTensor<S> {
             // Create div tensor
             // Create ones tensor and expand up to full tensor shape
             let mut ones = graph.constant(1.0).id;
-            let mut ones_shape = crate::core::shape::simple_tracker::ShapeTracker::default();
-            ones_shape.orig_shape = shape.orig_shape;
+            let mut ones_shape =
+                crate::core::shape::simple_tracker::ShapeTracker::new(&shape.shape());
             ones = graph
                 .add_op(op::NoOp)
                 .input(ones, ones_shape)
@@ -78,6 +70,7 @@ impl<S: Shape> GraphTensor<S> {
                 .add_op(op::SumReduce(dim as usize))
                 .input(node_id, shape)
                 .finish();
+            shape.remove_dim(dim as usize);
 
             // Divide by div tensor
             let mul_tensor = graph.add_op(op::Recip).input(div_tensor, shape).finish();
@@ -87,7 +80,7 @@ impl<S: Shape> GraphTensor<S> {
                 .input(mul_tensor, shape)
                 .finish();
         }
-        GraphTensor::from_id(node_id, self.graph_ref)
+        GraphTensor::from_id(node_id, shape, self.graph_ref)
     }
 }
 

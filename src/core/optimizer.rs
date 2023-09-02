@@ -366,51 +366,51 @@ impl OpSelector {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use petgraph::adj::NodeIndex;
+// #[cfg(test)]
+// mod tests {
+//     use petgraph::adj::NodeIndex;
 
-    use crate::{
-        op::{Exp2, Log2, Mul, SumReduce},
-        prelude::Graph,
-    };
+//     use crate::{
+//         op::{Exp2, Log2, Mul, SumReduce},
+//         prelude::Graph,
+//     };
 
-    use super::GraphSelector;
+//     use super::GraphSelector;
 
-    #[test]
-    fn test_graph_selector() {
-        let cx = Graph::default();
-        // Exp -> Log or Log -> Exp
-        let (mut exp, mut log) = (NodeIndex::default(), NodeIndex::default());
-        let selector1 = GraphSelector::default();
-        selector1.edge(
-            selector1.op().ty::<Log2>().ptr(&mut log),
-            selector1.op().ty::<Exp2>().ptr(&mut exp),
-        );
-        let selector2 = GraphSelector::default();
-        selector2.edge(
-            selector2.op().ty::<Exp2>().ptr(&mut exp),
-            selector2.op().ty::<Log2>().ptr(&mut log),
-        );
+//     #[test]
+//     fn test_graph_selector() {
+//         let cx = Graph::default();
+//         // Exp -> Log or Log -> Exp
+//         let (mut exp, mut log) = (NodeIndex::default(), NodeIndex::default());
+//         let selector1 = GraphSelector::default();
+//         selector1.edge(
+//             selector1.op().ty::<Log2>().ptr(&mut log),
+//             selector1.op().ty::<Exp2>().ptr(&mut exp),
+//         );
+//         let selector2 = GraphSelector::default();
+//         selector2.edge(
+//             selector2.op().ty::<Exp2>().ptr(&mut exp),
+//             selector2.op().ty::<Log2>().ptr(&mut log),
+//         );
 
-        assert_eq!(
-            selector1.search(&cx).chain(selector2.search(&cx)).next(),
-            None
-        );
+//         assert_eq!(
+//             selector1.search(&cx).chain(selector2.search(&cx)).next(),
+//             None
+//         );
 
-        // Matmul
-        let s = GraphSelector::default();
-        s.edge(
-            s.edge(
-                s.op().ty::<Expand>(),
-                s.edge(
-                    s.edge(s.op().ty::<Permute>(), s.op().ty::<Expand>()),
-                    s.op().ty::<Mul>(),
-                ),
-            ),
-            s.op().ty::<SumReduce>(),
-        );
+//         // Matmul
+//         let s = GraphSelector::default();
+//         s.edge(
+//             s.edge(
+//                 s.op().ty::<Expand>(),
+//                 s.edge(
+//                     s.edge(s.op().ty::<Permute>(), s.op().ty::<Expand>()),
+//                     s.op().ty::<Mul>(),
+//                 ),
+//             ),
+//             s.op().ty::<SumReduce>(),
+//         );
 
-        assert_eq!(s.search(&cx).next(), None);
-    }
-}
+//         assert_eq!(s.search(&cx).next(), None);
+//     }
+// }

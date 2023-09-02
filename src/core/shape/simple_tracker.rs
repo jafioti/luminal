@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use petgraph::stable_graph::NodeIndex;
+use tinyvec::ArrayVec;
 
 use crate::prelude::Graph;
 
@@ -18,86 +19,88 @@ impl Default for Dim {
     }
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct ShapeTracker {
-    pub orig_shape: [Dim; 6],
-    pub n_dims: usize,
-    pub permuted_inds: [usize; 6],
-}
-
-impl Default for ShapeTracker {
-    fn default() -> Self {
-        Self {
-            orig_shape: Default::default(),
-            n_dims: 0,
-            permuted_inds: [0, 1, 2, 3, 4, 5],
-        }
-    }
+    dims: ArrayVec<[Dim; 10]>,
+    indexes: ArrayVec<[usize; 10]>,
+    fake: ArrayVec<[bool; 10]>,
 }
 
 impl ShapeTracker {
-    pub fn shape(&self) -> Vec<Dim> {
-        (0..self.n_dims)
-            .map(|i| self.orig_shape[self.permuted_inds[i]])
-            .collect()
-    }
-
-    pub fn contiguous(mut self) -> Self {
-        self.permuted_inds = Default::default();
-        self
-    }
-
-    pub fn is_contiguous(&self) -> bool {
-        self.permuted_inds.iter().enumerate().all(|(a, b)| a == *b)
-    }
-
-    /// Convert a logical to a physical index
-    pub fn index(&self, logical_index: usize) -> Option<usize> {
-        let mut m_acc = 1;
-        let mut s_acc = 0;
-        for i in (0..self.n_dims).rev() {
-            let d = match self.orig_shape[self.permuted_inds[i]] {
-                Dim::Known(n) => n,
-                Dim::Unknown => panic!("Running index on an unknown dimension"),
-            };
-            m_acc *= d;
-            s_acc += m_acc;
+    pub fn new(dims: &[Dim]) -> Self {
+        let mut s = Self {
+            dims: Default::default(),
+            indexes: Default::default(),
+            fake: Default::default(),
+        };
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..dims.len() {
+            s.dims.push(dims[i]);
+            s.indexes.push(i);
+            s.fake.push(false);
         }
-        Some(s_acc)
+        s
+    }
+
+    pub fn expand(&mut self, axis: usize, dim: Dim) {
+        self.dims.push(dim);
+        self.indexes.insert(axis, self.dims.len() - 1);
+        self.fake.push(true);
+    }
+
+    pub fn remove_dim(&mut self, axis: usize) {
+        let index = self.indexes.remove(axis);
+        self.dims.remove(index);
+        self.fake.remove(index);
+    }
+
+    pub fn permute(&mut self, axes: &[usize]) {
+        self.indexes.copy_from_slice(axes);
+    }
+
+    pub fn index(&self, logical: usize) -> Option<usize> {
+        let mut ret = 0;
+        let mut acc = 1;
+        for ind in self.indexes.iter().rev() {
+            let sh = match self.dims[*ind] {
+                Dim::Known(n) => n,
+                Dim::Unknown => panic!("All dims must be known before indexing!"),
+            };
+            if !self.fake[*ind] {
+                ret += ((logical / acc) % (sh)) * acc;
+            }
+            acc *= sh;
+        }
+        Some(ret)
     }
 
     pub fn n_elements(&self) -> usize {
-        self.orig_shape
+        self.dims
             .iter()
-            .filter_map(|i| if let Dim::Known(n) = i { Some(n) } else { None })
+            .enumerate()
+            .filter(|(i, _)| !self.fake[*i])
+            .filter_map(|(_, i)| if let Dim::Known(n) = i { Some(n) } else { None })
             .product()
     }
 
-    pub fn expand(&mut self, index: usize, dim: Dim) {
-        self.orig_shape[self.n_dims] = dim;
-        for x in index..(self.permuted_inds.len() - 1) {
-            self.permuted_inds[x + 1] = self.permuted_inds[x];
-        }
-        self.permuted_inds[index] = self.n_dims;
-        self.n_dims += 1;
+    pub fn len(&self) -> usize {
+        self.dims.len()
     }
 
-    pub fn remove_dim(&mut self, dim: usize) {
-        for i in self.permuted_inds[dim]..(self.orig_shape.len() - 1) {
-            self.orig_shape[i] = self.orig_shape[i + 1];
-        }
-        for i in dim..(self.orig_shape.len() - 1) {
-            self.permuted_inds[i] = self.permuted_inds[i + 1];
-        }
-        self.n_dims -= 1;
-        self.permuted_inds
+    pub fn contiguous(mut self) -> Self {
+        self.indexes
             .iter_mut()
-            .take(self.n_dims)
-            .for_each(|i| {
-                if *i > dim {
-                    *i -= 1
-                }
-            });
+            .enumerate()
+            .for_each(|(i, x)| *x = i);
+        self
+    }
+
+    pub fn shape(&self) -> Vec<Dim> {
+        let mut dims = Vec::with_capacity(self.dims.len());
+        for i in self.indexes {
+            dims.push(self.dims[i]);
+        }
+        dims
     }
 }
 
