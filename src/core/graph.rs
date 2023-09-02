@@ -2,12 +2,12 @@
 
 use crate::{
     graph_tensor::GraphTensor,
-    op::{self, Operator},
+    op::{self, InputTensor, Operator},
     optimizer::GraphOptimizer,
     shape::*,
     tensor::Tensor,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use itertools::Itertools;
 use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Direction};
@@ -200,10 +200,31 @@ impl Graph {
             if self.tensors.contains_key(node) {
                 continue;
             }
-            let mut srcs = src_ids
-                .iter()
-                .map(|(id, st)| (self.tensors.get(id).unwrap(), *st))
-                .collect_vec();
+
+            // This needs to be done in a weird way with sperate queues to satisfy the borrow checker (all mutable calls to self.tensors happen before references are taken)
+            let mut owned = VecDeque::default();
+            let mut refs = VecDeque::default();
+            for (i, (id, _)) in src_ids.iter().enumerate() {
+                if remaining_consumers[id] == 1 && !self.no_delete.contains(id) {
+                    owned.push_back((InputTensor::Owned(self.tensors.remove(id).unwrap()), i));
+                }
+            }
+            for (i, (id, _)) in src_ids.iter().enumerate() {
+                if remaining_consumers[id] != 1 || !self.no_delete.contains(id) {
+                    refs.push_back((InputTensor::Borrowed(self.tensors.get(id).unwrap()), i));
+                }
+            }
+            let mut srcs = vec![];
+            for (i, (_, st)) in src_ids.iter().enumerate() {
+                srcs.push((
+                    if owned.front().map(|(_, ind)| *ind == i).unwrap_or_default() {
+                        owned.pop_front().unwrap().0
+                    } else {
+                        refs.pop_front().unwrap().0
+                    },
+                    *st,
+                ));
+            }
 
             // All sources are ready
             // Resolve shapes
@@ -223,9 +244,6 @@ impl Graph {
             // Check if we can delete the source tensors now
             for source in srcs_to_remove {
                 *remaining_consumers.get_mut(source).unwrap() -= 1;
-                if remaining_consumers[source] == 0 && !self.no_delete.contains(source) {
-                    self.tensors.remove(source);
-                }
             }
         }
     }
@@ -243,7 +261,7 @@ impl Graph {
             }
             let mut srcs = src_ids
                 .iter()
-                .map(|(id, st)| (self.tensors.get(id).unwrap(), *st))
+                .map(|(id, st)| (InputTensor::Borrowed(self.tensors.get(id).unwrap()), *st))
                 .collect_vec();
             if srcs.len() == 2 && (srcs[0].1.len() == srcs[1].1.len()) {
                 let (a, b) = srcs.split_at_mut(1);

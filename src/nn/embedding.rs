@@ -28,12 +28,14 @@ impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
                 Box::new(|tensors| {
                     let indexes = tensors[0]
                         .0
+                        .borrowed()
                         .data
                         .as_any()
                         .downcast_ref::<Vec<usize>>()
                         .unwrap();
                     let data = tensors[1]
                         .0
+                        .borrowed()
                         .data
                         .as_any()
                         .downcast_ref::<Vec<f32>>()

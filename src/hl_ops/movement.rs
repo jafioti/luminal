@@ -147,8 +147,20 @@ where
                         .expect("Tried to concat on a dim with an unknown size");
                     inps[1].1.pad(&pad_shape);
                     let (a_data, b_data) = (
-                        inps[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
-                        inps[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+                        inps[0]
+                            .0
+                            .borrowed()
+                            .data
+                            .as_any()
+                            .downcast_ref::<Vec<f32>>()
+                            .unwrap(),
+                        inps[1]
+                            .0
+                            .borrowed()
+                            .data
+                            .as_any()
+                            .downcast_ref::<Vec<f32>>()
+                            .unwrap(),
                     );
                     let mut data = vec![0.; inps[0].1.n_elements()];
                     #[allow(clippy::needless_range_loop)]

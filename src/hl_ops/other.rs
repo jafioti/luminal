@@ -36,7 +36,13 @@ impl<S: Shape> GraphTensor<S> {
                         Dim::Unknown => panic!(),
                     };
                     let mut scratchpad: Vec<f32> = vec![0.0; front_size * back_size];
-                    let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+                    let a_data = inp[0]
+                        .0
+                        .borrowed()
+                        .data
+                        .as_any()
+                        .downcast_ref::<Vec<f32>>()
+                        .unwrap();
                     let mut result = vec![0.0; front_size * back_size * dim_size];
 
                     for i in 0..front_size {

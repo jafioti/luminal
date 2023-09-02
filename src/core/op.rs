@@ -10,10 +10,27 @@ use crate::{
     tensor::Tensor,
 };
 
+pub enum InputTensor<'a> {
+    Owned(Tensor),
+    Borrowed(&'a Tensor),
+}
+
+impl<'a> InputTensor<'a> {
+    pub fn borrowed(&'a self) -> &'a Tensor {
+        match self {
+            InputTensor::Owned(t) => t,
+            InputTensor::Borrowed(t) => t,
+        }
+    }
+}
+
 pub trait Operator: Debug + TraitObjEq {
     fn process(
         &self,
-        inp: Vec<(&Tensor, crate::core::shape::simple_tracker::ShapeTracker)>,
+        inp: Vec<(
+            InputTensor,
+            crate::core::shape::simple_tracker::ShapeTracker,
+        )>,
     ) -> Tensor;
 }
 
@@ -21,7 +38,14 @@ pub trait Operator: Debug + TraitObjEq {
 #[allow(clippy::type_complexity)]
 pub struct Function(
     pub String,
-    pub Box<dyn Fn(Vec<(&Tensor, crate::core::shape::simple_tracker::ShapeTracker)>) -> Tensor>,
+    pub  Box<
+        dyn Fn(
+            Vec<(
+                InputTensor,
+                crate::core::shape::simple_tracker::ShapeTracker,
+            )>,
+        ) -> Tensor,
+    >,
 );
 
 impl PartialEq for Function {
@@ -31,7 +55,7 @@ impl PartialEq for Function {
 }
 
 impl Operator for Function {
-    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
         (self.1)(inp)
     }
 }
@@ -47,9 +71,12 @@ impl Debug for Function {
 pub struct NoOp;
 
 impl Operator for NoOp {
-    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
-        Tensor {
-            data: inp[0].0.data.clone(),
+    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+        match inp.pop().unwrap().0 {
+            InputTensor::Owned(t) => t,
+            InputTensor::Borrowed(t) => Tensor {
+                data: t.data.clone(),
+            },
         }
     }
 }
@@ -57,10 +84,10 @@ impl Operator for NoOp {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Print(pub String);
 impl Operator for Print {
-    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
         println!("{}", self.0);
         for (i, (tensor, tracker)) in inp.iter().enumerate() {
-            println!("{} Data: {:?}", i + 1, tensor.data);
+            println!("{} Data: {:?}", i + 1, tensor.borrowed().data);
             println!("{} Shape: {:?}", i + 1, tracker);
         }
         Tensor {
@@ -73,9 +100,15 @@ impl Operator for Print {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Contiguous;
 impl Operator for Contiguous {
-    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
         // Copy data over to new tensor
-        let src = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let src = inp[0]
+            .0
+            .borrowed()
+            .data
+            .as_any()
+            .downcast_ref::<Vec<f32>>()
+            .unwrap();
         let mut res = vec![0.; inp[0].1.n_elements()];
         for i in 0..res.len() {
             if let Some(n) = inp[0].1.index(i) {
@@ -95,8 +128,11 @@ impl Operator for Contiguous {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Log2;
 impl Operator for Log2 {
-    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
-        let mut t = inp[0].0.clone();
+    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+        let mut t = match inp.pop().unwrap().0 {
+            InputTensor::Borrowed(t) => t.clone(),
+            InputTensor::Owned(t) => t,
+        };
         for a in t
             .data
             .as_any_mut()
@@ -114,8 +150,11 @@ impl Operator for Log2 {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Exp2;
 impl Operator for Exp2 {
-    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
-        let mut t = inp[0].0.clone();
+    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+        let mut t = match inp.pop().unwrap().0 {
+            InputTensor::Borrowed(t) => t.clone(),
+            InputTensor::Owned(t) => t,
+        };
         for a in t
             .data
             .as_any_mut()
@@ -133,8 +172,11 @@ impl Operator for Exp2 {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Sin;
 impl Operator for Sin {
-    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
-        let mut t = inp[0].0.clone();
+    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+        let mut t = match inp.pop().unwrap().0 {
+            InputTensor::Borrowed(t) => t.clone(),
+            InputTensor::Owned(t) => t,
+        };
         for a in t
             .data
             .as_any_mut()
@@ -151,8 +193,11 @@ impl Operator for Sin {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Sqrt;
 impl Operator for Sqrt {
-    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
-        let mut t = inp[0].0.clone();
+    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+        let mut t = match inp.pop().unwrap().0 {
+            InputTensor::Borrowed(t) => t.clone(),
+            InputTensor::Owned(t) => t,
+        };
         for a in t
             .data
             .as_any_mut()
@@ -169,8 +214,11 @@ impl Operator for Sqrt {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Recip;
 impl Operator for Recip {
-    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
-        let mut t = inp[0].0.clone();
+    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+        let mut t = match inp.pop().unwrap().0 {
+            InputTensor::Borrowed(t) => t.clone(),
+            InputTensor::Owned(t) => t,
+        };
         for a in t
             .data
             .as_any_mut()
@@ -189,10 +237,22 @@ impl Operator for Recip {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Add;
 impl Operator for Add {
-    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
         let (a_data, b_data) = (
-            inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
-            inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+            inp[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Vec<f32>>()
+                .unwrap(),
+            inp[1]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Vec<f32>>()
+                .unwrap(),
         );
         let mut data = vec![0.; inp[0].1.n_elements()];
         for i in 0..data.len() {
@@ -208,10 +268,22 @@ impl Operator for Add {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mul;
 impl Operator for Mul {
-    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
         let (a_data, b_data) = (
-            inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
-            inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+            inp[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Vec<f32>>()
+                .unwrap(),
+            inp[1]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Vec<f32>>()
+                .unwrap(),
         );
         let mut data = vec![0.; inp[0].1.n_elements()];
         for i in 0..data.len() {
@@ -227,10 +299,22 @@ impl Operator for Mul {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mod;
 impl Operator for Mod {
-    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
         let (a_data, b_data) = (
-            inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
-            inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+            inp[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Vec<f32>>()
+                .unwrap(),
+            inp[1]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Vec<f32>>()
+                .unwrap(),
         );
         let mut data = vec![0.; inp[0].1.n_elements()];
         for i in 0..data.len() {
@@ -246,10 +330,22 @@ impl Operator for Mod {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LessThan;
 impl Operator for LessThan {
-    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
         let (a_data, b_data) = (
-            inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
-            inp[1].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
+            inp[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Vec<f32>>()
+                .unwrap(),
+            inp[1]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Vec<f32>>()
+                .unwrap(),
         );
         let mut data = vec![0.; inp[0].1.n_elements()];
         for i in 0..data.len() {
@@ -268,7 +364,7 @@ impl Operator for LessThan {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SumReduce(pub usize);
 impl Operator for SumReduce {
-    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
         let front_size: usize = inp[0]
             .1
             .shape()
@@ -288,7 +384,13 @@ impl Operator for SumReduce {
             Dim::Unknown => panic!("Can't reduce over an unknown dimension"),
         };
         let mut result: Vec<f32> = vec![0.0; front_size * back_size];
-        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let a_data = inp[0]
+            .0
+            .borrowed()
+            .data
+            .as_any()
+            .downcast_ref::<Vec<f32>>()
+            .unwrap();
 
         for i in 0..front_size {
             for j in 0..back_size {
@@ -310,7 +412,7 @@ impl Operator for SumReduce {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MaxReduce(pub usize);
 impl Operator for MaxReduce {
-    fn process(&self, inp: Vec<(&Tensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
         let front_size: usize = inp[0]
             .1
             .shape()
@@ -330,7 +432,13 @@ impl Operator for MaxReduce {
             Dim::Unknown => panic!("Can't reduce over an unknown dimension"),
         };
         let mut result: Vec<f32> = vec![-f32::INFINITY; front_size * back_size];
-        let a_data = inp[0].0.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let a_data = inp[0]
+            .0
+            .borrowed()
+            .data
+            .as_any()
+            .downcast_ref::<Vec<f32>>()
+            .unwrap();
 
         for i in 0..front_size {
             for j in 0..back_size {
