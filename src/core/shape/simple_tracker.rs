@@ -155,3 +155,24 @@ impl ShapeTracker {
         }
     }
 }
+
+/// Resolve shapes between the two trackers to the best of our ability
+pub fn resolve_shapes(a: &mut ShapeTracker, b: &mut ShapeTracker) {
+    // B to A
+    for i in 0..a.dims.len() {
+        if matches!(a.dims[a.indexes[i]], Dim::Unknown) {
+            if let Dim::Known(n) = b.dims[b.indexes[i]] {
+                a.dims[a.indexes[i]] = Dim::Known(n);
+            }
+        }
+    }
+
+    // A to B
+    for i in 0..a.dims.len() {
+        if matches!(b.dims[b.indexes[i]], Dim::Unknown) {
+            if let Dim::Known(n) = a.dims[a.indexes[i]] {
+                b.dims[b.indexes[i]] = Dim::Known(n);
+            }
+        }
+    }
+}

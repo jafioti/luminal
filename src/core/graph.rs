@@ -230,12 +230,7 @@ impl Graph {
             // Resolve shapes
             if srcs.len() == 2 && (srcs[0].1.len() == srcs[1].1.len()) {
                 let (a, b) = srcs.split_at_mut(1);
-                // resolve_shapes(
-                //     &mut a[0].1.shape.views.last_mut().unwrap().shape,
-                //     &mut b[0].1.shape.views.last_mut().unwrap().shape,
-                // );
-                // a[0].1.shape.reset_shape_strides();
-                // b[0].1.shape.reset_shape_strides();
+                resolve_shapes(&mut a[0].1, &mut b[0].1);
             }
             // Execute
             let tensor = self.graph.node_weight(*node).unwrap().process(srcs);
@@ -265,12 +260,7 @@ impl Graph {
                 .collect_vec();
             if srcs.len() == 2 && (srcs[0].1.len() == srcs[1].1.len()) {
                 let (a, b) = srcs.split_at_mut(1);
-                // resolve_shapes(
-                //     &mut a[0].1.shape.views.last_mut().unwrap().shape,
-                //     &mut b[0].1.shape.views.last_mut().unwrap().shape,
-                // );
-                // a[0].1.shape.reset_shape_strides();
-                // b[0].1.shape.reset_shape_strides();
+                resolve_shapes(&mut a[0].1, &mut b[0].1);
             }
 
             // All sources are ready, execute
