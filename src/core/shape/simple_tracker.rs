@@ -23,8 +23,8 @@ impl Default for Dim {
 
 #[derive(Debug, Clone, Copy)]
 pub struct ShapeTracker {
-    dims: ArrayVec<[Dim; 10]>,
-    indexes: ArrayVec<[usize; 10]>,
+    pub dims: ArrayVec<[Dim; 10]>,
+    pub indexes: ArrayVec<[usize; 10]>,
     fake: ArrayVec<[bool; 10]>,
     slices: ArrayVec<[(usize, usize); 10]>,
     padding: ArrayVec<[(usize, usize); 10]>,

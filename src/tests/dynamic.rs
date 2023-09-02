@@ -20,7 +20,10 @@ fn test_movement() {
     let mut cx = Graph::new();
     let a = cx.new_tensor::<(Const<3>, usize, Const<2>)>("Input");
     let b = a
-        .dyn_reshape::<(Const<6>, usize)>(vec![ReshapeDim::Const(6), ReshapeDim::PrevDim(1)])
+        .dyn_reshape::<(Const<6>, usize)>(vec![
+            crate::core::shape::simple_tracker::Dim::Known(6),
+            crate::core::shape::simple_tracker::Dim::Unknown,
+        ])
         .permute::<_, Axes2<1, 0>>();
 
     a.set_dyn(

@@ -1,6 +1,9 @@
 use std::ops::Mul;
 
-use crate::{nn::linear::Linear, prelude::*};
+use crate::{
+    nn::linear::Linear,
+    prelude::{simple_tracker::Dim, *},
+};
 
 // This is still single head attention because I need a runtime reshape, like the try_reshape in dfdx
 pub struct MultiHeadSelfAttention<
@@ -40,8 +43,13 @@ impl<const DIM: usize, const K_DIM: usize, const V_DIM: usize, const HEADS: usiz
 }
 
 // Single
-impl<const DIM: usize, const K_DIM: usize, const V_DIM: usize, const HEADS: usize, S: Dim>
-    Module<GraphTensor<(S, Const<DIM>)>> for MultiHeadSelfAttention<DIM, K_DIM, V_DIM, HEADS>
+impl<
+        const DIM: usize,
+        const K_DIM: usize,
+        const V_DIM: usize,
+        const HEADS: usize,
+        S: crate::shape::Dim,
+    > Module<GraphTensor<(S, Const<DIM>)>> for MultiHeadSelfAttention<DIM, K_DIM, V_DIM, HEADS>
 {
     type Output = GraphTensor<(S, Const<DIM>)>;
 
@@ -57,8 +65,8 @@ impl<
         const K_DIM: usize,
         const V_DIM: usize,
         const HEADS: usize,
-        S: Dim,
-        S1: Dim,
+        S: crate::shape::Dim,
+        S1: crate::shape::Dim,
     >
     Module<(
         GraphTensor<(S, Const<DIM>)>,
@@ -92,8 +100,8 @@ impl<
         const K_DIM: usize,
         const V_DIM: usize,
         const HEADS: usize,
-        S: Dim,
-        B: Dim,
+        S: crate::shape::Dim,
+        B: crate::shape::Dim,
     > Module<GraphTensor<(B, S, Const<DIM>)>> for MultiHeadSelfAttention<DIM, K_DIM, V_DIM, HEADS>
 {
     type Output = GraphTensor<(B, S, Const<DIM>)>;
@@ -113,9 +121,9 @@ impl<
         const K_DIM: usize,
         const V_DIM: usize,
         const HEADS: usize,
-        S1: Dim,
-        S2: Dim,
-        B: Dim,
+        S1: crate::shape::Dim,
+        S2: crate::shape::Dim,
+        B: crate::shape::Dim,
     >
     Module<(
         GraphTensor<(B, S1, Const<DIM>)>,
@@ -137,30 +145,48 @@ impl<
             .w_v
             .forward(values)
             .dyn_reshape::<(B, S1, usize, usize)>(vec![
-                B::const_size().to_reshape(0),
-                S1::const_size().to_reshape(1),
-                ReshapeDim::Const(HEADS),
-                ReshapeDim::Const(K_DIM / HEADS),
+                match B::const_size() {
+                    RealDim::Const(n) => Dim::Known(n),
+                    RealDim::Dyn => Dim::Unknown,
+                },
+                match S1::const_size() {
+                    RealDim::Const(n) => Dim::Known(n),
+                    RealDim::Dyn => Dim::Unknown,
+                },
+                Dim::Known(HEADS),
+                Dim::Known(K_DIM / HEADS),
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let keys = self
             .w_k
             .forward(keys)
             .dyn_reshape::<(B, S1, usize, usize)>(vec![
-                B::const_size().to_reshape(0),
-                S1::const_size().to_reshape(1),
-                ReshapeDim::Const(HEADS),
-                ReshapeDim::Const(K_DIM / HEADS),
+                match B::const_size() {
+                    RealDim::Const(n) => Dim::Known(n),
+                    RealDim::Dyn => Dim::Unknown,
+                },
+                match S1::const_size() {
+                    RealDim::Const(n) => Dim::Known(n),
+                    RealDim::Dyn => Dim::Unknown,
+                },
+                Dim::Known(HEADS),
+                Dim::Known(K_DIM / HEADS),
             ])
             .permute::<_, Axes4<0, 2, 3, 1>>();
         let queries = self
             .w_q
             .forward(queries)
             .dyn_reshape::<(B, S2, usize, usize)>(vec![
-                B::const_size().to_reshape(0),
-                S2::const_size().to_reshape(1),
-                ReshapeDim::Const(HEADS),
-                ReshapeDim::Const(K_DIM / HEADS),
+                match B::const_size() {
+                    RealDim::Const(n) => Dim::Known(n),
+                    RealDim::Dyn => Dim::Unknown,
+                },
+                match S2::const_size() {
+                    RealDim::Const(n) => Dim::Known(n),
+                    RealDim::Dyn => Dim::Unknown,
+                },
+                Dim::Known(HEADS),
+                Dim::Known(K_DIM / HEADS),
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
@@ -173,9 +199,15 @@ impl<
             .batch_matmul(values)
             .permute::<_, Axes4<0, 2, 1, 3>>()
             .dyn_reshape(vec![
-                B::const_size().to_reshape(0),
-                S2::const_size().to_reshape(1),
-                ReshapeDim::Const(V_DIM),
+                match B::const_size() {
+                    RealDim::Const(n) => Dim::Known(n),
+                    RealDim::Dyn => Dim::Unknown,
+                },
+                match S2::const_size() {
+                    RealDim::Const(n) => Dim::Known(n),
+                    RealDim::Dyn => Dim::Unknown,
+                },
+                Dim::Known(V_DIM),
             ]);
         self.w_o.forward(tokens)
     }

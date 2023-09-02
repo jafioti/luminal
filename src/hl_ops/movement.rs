@@ -30,49 +30,63 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
-    pub fn reshape<N: ConstShape>(self) -> GraphTensor<N> {
-        todo!();
-        // // <S as AssertSameNumel<N>>::assert_same_numel();
-        // let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        // let new_id = graph
-        //     .add_op(
-        //         op::Reshape(
-        //             <N as ConstShape>::realized_shape()
-        //                 .into_iter()
-        //                 .map(ReshapeDim::Const)
-        //                 .collect(),
-        //         ),
-        //         <N as Shape>::realized_shape(),
-        //     )
-        //     .input(self.id)
-        //     .finish();
-        // GraphTensor::from_id(new_id, self.graph_ref)
+    pub fn reshape<N: Shape>(mut self) -> GraphTensor<N> {
+        if self.shape.is_contiguous() {
+            // Just do reshape
+            for (i, dim) in N::realized_shape().into_iter().enumerate() {
+                self.shape.dims[self.shape.indexes[i]] = match dim {
+                    RealDim::Const(n) => crate::core::shape::simple_tracker::Dim::Known(n),
+                    RealDim::Dyn => crate::core::shape::simple_tracker::Dim::Unknown,
+                };
+            }
+            GraphTensor::from_id(self.id, self.shape, self.graph_ref)
+        } else {
+            // Insert contiguous call
+            let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+            let new_id = graph
+                .add_op(op::Contiguous)
+                .input(self.id, self.shape)
+                .finish();
+            GraphTensor::from_id(
+                new_id,
+                crate::core::shape::simple_tracker::ShapeTracker::new(
+                    &N::realized_shape()
+                        .into_iter()
+                        .map(|dim| match dim {
+                            RealDim::Const(n) => crate::core::shape::simple_tracker::Dim::Known(n),
+                            RealDim::Dyn => crate::core::shape::simple_tracker::Dim::Unknown,
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                self.graph_ref,
+            )
+        }
     }
 
-    /// Dynamically reshape. Panics if destination shape doesn't match given shape.
-    pub fn dyn_reshape<N: Shape>(self, shape: Vec<ReshapeDim>) -> GraphTensor<N> {
-        todo!();
-        // for (a, b) in N::realized_shape().iter().zip(shape.iter()) {
-        //     match a {
-        //         RealDim::Const(n) => assert_eq!(ReshapeDim::Const(*n), *b),
-        //         RealDim::Dyn => {}
-        //     }
-        // }
-        // let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        // let new_id = graph
-        //     .add_op(
-        //         op::Reshape(shape.clone()),
-        //         shape
-        //             .iter()
-        //             .map(|i| match i {
-        //                 ReshapeDim::Const(n) => RealDim::Const(*n),
-        //                 ReshapeDim::PrevDim(_) => RealDim::Dyn,
-        //             })
-        //             .collect(),
-        //     )
-        //     .input(self.id)
-        //     .finish();
-        // GraphTensor::from_id(new_id, self.graph_ref)
+    /// Dynamically reshape with annotations for the shape tracker
+    pub fn dyn_reshape<N: Shape>(
+        self,
+        shape: Vec<crate::core::shape::simple_tracker::Dim>,
+    ) -> GraphTensor<N> {
+        if self.shape.is_contiguous() {
+            // Just do reshape
+            for (i, dim) in shape.into_iter().enumerate() {
+                self.shape.dims[self.shape.indexes[i]] = dim;
+            }
+            GraphTensor::from_id(self.id, self.shape, self.graph_ref)
+        } else {
+            // Insert contiguous call
+            let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+            let new_id = graph
+                .add_op(op::Contiguous)
+                .input(self.id, self.shape)
+                .finish();
+            GraphTensor::from_id(
+                new_id,
+                crate::core::shape::simple_tracker::ShapeTracker::new(&shape),
+                self.graph_ref,
+            )
+        }
     }
 
     pub fn realize<Dst: Shape<Concrete = <<S as HasShape>::Shape as Shape>::Concrete>>(
