@@ -5,13 +5,14 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 impl<S: Shape> Add<GraphTensor<S>> for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
-    fn add(self, rhs: GraphTensor<S>) -> Self::Output {
+    fn add(mut self, mut rhs: GraphTensor<S>) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
             .add_op(op::Add)
             .input(self.id, self.shape)
             .input(rhs.id, rhs.shape)
             .finish();
+        resolve_shapes(&mut self.shape, &mut rhs.shape, false);
         GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 }
@@ -27,13 +28,14 @@ impl<S: Shape> Sub<GraphTensor<S>> for GraphTensor<S> {
 impl<S: Shape> Mul<GraphTensor<S>> for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
-    fn mul(self, rhs: GraphTensor<S>) -> Self::Output {
+    fn mul(mut self, mut rhs: GraphTensor<S>) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
             .add_op(op::Mul)
             .input(self.id, self.shape)
             .input(rhs.id, rhs.shape)
             .finish();
+        resolve_shapes(&mut self.shape, &mut rhs.shape, false);
         GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 }
@@ -50,13 +52,14 @@ impl<S: Shape> Div<GraphTensor<S>> for GraphTensor<S> {
 impl<S: Shape> Rem<GraphTensor<S>> for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
-    fn rem(self, rhs: GraphTensor<S>) -> Self::Output {
+    fn rem(mut self, mut rhs: GraphTensor<S>) -> Self::Output {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
             .add_op(op::Mod)
             .input(self.id, self.shape)
             .input(rhs.id, rhs.shape)
             .finish();
+        resolve_shapes(&mut self.shape, &mut rhs.shape, false);
         GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 }
@@ -116,13 +119,14 @@ impl<S: Shape> Rem<f32> for GraphTensor<S> {
 
 // Comparisons (based on https://github.com/tinygrad/tinygrad/blob/3e0c2d256fe9f4f5f85cd3e4d8733a51d7b4a984/tinygrad/tensor.py#L653)
 impl<S: Shape> GraphTensor<S> {
-    pub fn less_than(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
+    pub fn less_than(mut self, mut rhs: GraphTensor<S>) -> GraphTensor<S> {
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let new_id = graph
             .add_op(op::LessThan)
             .input(self.id, self.shape)
             .input(rhs.id, rhs.shape)
             .finish();
+        resolve_shapes(&mut self.shape, &mut rhs.shape, false);
         GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 

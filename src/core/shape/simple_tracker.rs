@@ -21,7 +21,7 @@ impl Default for Dim {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShapeTracker {
     pub dims: ArrayVec<[Dim; 10]>,
     pub indexes: ArrayVec<[usize; 10]>,
@@ -78,7 +78,6 @@ impl ShapeTracker {
 
     /// Convert a logical index into a physical one
     pub fn index(&self, logical: usize) -> Option<usize> {
-        println!("Fake: {:?}", self.fake);
         let mut ret = 0;
         let mut acc = 1;
         let mut strides = self
@@ -95,24 +94,17 @@ impl ShapeTracker {
             })
             .collect::<Vec<_>>();
         strides.reverse();
-        println!("Strides: {:?}", strides);
-        println!("Logical: {logical}");
-        println!("Shape: {:?}", self.dims);
-        println!("Indexes: {:?}", self.indexes);
         for ind in self.indexes.iter().rev() {
             let sh = match self.dims[*ind] {
                 Dim::Known(n) => n,
                 Dim::Unknown => panic!("All dims must be known before indexing!"),
             };
-            println!("Shape: {sh}");
             if !self.fake[*ind] {
                 let dim_ind = (logical / acc) % sh + self.slices[*ind].0;
-                println!("Dim: {:?}", dim_ind);
                 ret += dim_ind * strides[*ind];
             }
             acc *= sh;
         }
-        println!("Physical: {ret}");
         Some(ret)
     }
 
@@ -191,12 +183,14 @@ impl ShapeTracker {
 }
 
 /// Resolve shapes between the two trackers to the best of our ability
-pub fn resolve_shapes(a: &mut ShapeTracker, b: &mut ShapeTracker) {
+pub fn resolve_shapes(a: &mut ShapeTracker, b: &mut ShapeTracker, default_to_one: bool) {
     // B to A
     for i in 0..a.dims.len() {
         if matches!(a.dims[a.indexes[i]], Dim::Unknown) {
             if let Dim::Known(n) = b.dims[b.indexes[i]] {
                 a.dims[a.indexes[i]] = Dim::Known(n);
+            } else if default_to_one {
+                a.dims[a.indexes[i]] = Dim::Known(1);
             }
         }
     }
@@ -206,6 +200,8 @@ pub fn resolve_shapes(a: &mut ShapeTracker, b: &mut ShapeTracker) {
         if matches!(b.dims[b.indexes[i]], Dim::Unknown) {
             if let Dim::Known(n) = a.dims[a.indexes[i]] {
                 b.dims[b.indexes[i]] = Dim::Known(n);
+            } else if default_to_one {
+                b.dims[b.indexes[i]] = Dim::Known(1);
             }
         }
     }

@@ -7,7 +7,7 @@ use crate::{
 };
 use std::marker::PhantomData;
 
-use petgraph::graph::NodeIndex;
+use petgraph::{graph::NodeIndex, visit::EdgeRef};
 
 #[derive(Clone, Copy)]
 pub struct GraphTensor<S: Shape> {
@@ -61,8 +61,6 @@ impl<S: Shape> GraphTensor<S> {
     pub fn data(&self) -> Vec<f32> {
         let tensor = self.retrieve().unwrap();
         let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        println!("N: {}", orig_data.len());
-        println!("Shape: {:?}", self.shape);
         let mut data = vec![0.; self.shape.n_elements()];
         #[allow(unused_mut)]
         for (i, mut r) in data.iter_mut().enumerate() {
@@ -75,10 +73,11 @@ impl<S: Shape> GraphTensor<S> {
 
     /// Set the value of the tensor, with dynamic dimensions.
     pub fn set_dyn<T: Data + Clone>(&mut self, data: T, shape: Vec<usize>) {
-        self.shape
-            .dims
-            .copy_from_slice(&shape.into_iter().map(Dim::Known).collect::<Vec<_>>());
+        // Go down tree looking for exact matches of this shape tracker and replacing it with the new one
+        let new_shape = ShapeTracker::new(&shape.into_iter().map(Dim::Known).collect::<Vec<_>>());
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
+        replace_trackers(self.id, self.shape, new_shape, graph);
+        self.shape = new_shape;
         let node = graph
             .graph
             .node_weight_mut(self.id)
@@ -111,6 +110,21 @@ impl<S: Shape> GraphTensor<S> {
             .add_op(op::Print(message.to_string()))
             .input(self.id, self.shape)
             .finish();
+    }
+}
+
+fn replace_trackers(start_node: NodeIndex, from: ShapeTracker, to: ShapeTracker, cx: &mut Graph) {
+    for (edge, trg) in cx
+        .graph
+        .edges_directed(start_node, petgraph::Direction::Outgoing)
+        .map(|e| (e.id(), e.target()))
+        .collect::<Vec<_>>()
+    {
+        let shape = &mut cx.graph.edge_weight_mut(edge).unwrap().1;
+        if *shape == from {
+            *shape = to;
+            replace_trackers(trg, from, to, cx);
+        }
     }
 }
 
