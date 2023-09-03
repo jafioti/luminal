@@ -6,8 +6,8 @@ use crate::{
 impl<S: Shape> GraphTensor<S> {
     /// Cumulative summation along a dimension
     pub fn cumsum<const DIM: usize>(self) -> GraphTensor<S> {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let id = graph
+        let id = self
+            .graph()
             .add_op(Function(
                 "CumSum".to_string(),
                 Box::new(move |inp| {
@@ -64,26 +64,24 @@ impl<S: Shape> GraphTensor<S> {
             ))
             .input(self.id, self.shape)
             .finish();
-        GraphTensor::from_id(id, self.shape, graph)
+        GraphTensor::from_id(id, self.shape, self.graph_ref)
     }
 
     pub fn match_shape<Dst: Shape>(self, rhs: GraphTensor<Dst>) -> GraphTensor<Dst> {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         GraphTensor::from_id(
-            graph
+            self.graph()
                 .add_op(NoOp)
                 .input(self.id, self.shape)
                 .input(rhs.id, rhs.shape)
                 .finish(),
             self.shape,
-            graph,
+            self.graph_ref,
         )
     }
 
     /// Create an arange of the same shape, along a certian dimension
     pub fn arange<const DIM: usize>(self) -> GraphTensor<S> {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        graph.constant(1.).match_shape(self).cumsum::<DIM>() - 1.0
+        self.graph().constant(1.).match_shape(self).cumsum::<DIM>() - 1.0
     }
 }
 

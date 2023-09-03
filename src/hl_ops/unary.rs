@@ -5,15 +5,21 @@ use crate::{op, prelude::*};
 impl<S: Shape> GraphTensor<S> {
     /// Base 2 log
     pub fn log_2(self) -> GraphTensor<S> {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let new_id = graph.add_op(op::Log2).input(self.id, self.shape).finish();
+        let new_id = self
+            .graph()
+            .add_op(op::Log2)
+            .input(self.id, self.shape)
+            .finish();
         GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
 
     /// Base 2 exp
     pub fn exp_2(self) -> GraphTensor<S> {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let new_id = graph.add_op(op::Exp2).input(self.id, self.shape).finish();
+        let new_id = self
+            .graph()
+            .add_op(op::Exp2)
+            .input(self.id, self.shape)
+            .finish();
         GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
 
@@ -28,14 +34,20 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     pub fn recip(self) -> GraphTensor<S> {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let new_id = graph.add_op(op::Recip).input(self.id, self.shape).finish();
+        let new_id = self
+            .graph()
+            .add_op(op::Recip)
+            .input(self.id, self.shape)
+            .finish();
         GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
 
     pub fn sin(self) -> GraphTensor<S> {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let new_id = graph.add_op(op::Sin).input(self.id, self.shape).finish();
+        let new_id = self
+            .graph()
+            .add_op(op::Sin)
+            .input(self.id, self.shape)
+            .finish();
         GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
 
@@ -44,8 +56,11 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     pub fn sqrt(self) -> GraphTensor<S> {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let new_id = graph.add_op(op::Sqrt).input(self.id, self.shape).finish();
+        let new_id = self
+            .graph()
+            .add_op(op::Sqrt)
+            .input(self.id, self.shape)
+            .finish();
         GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
 
@@ -103,8 +118,7 @@ impl<S: Shape> GraphTensor<S> {
     /// The sigmoid activation function
     pub fn sigmoid(self) -> GraphTensor<S> {
         // Based on https://github.com/tinygrad/tinygrad/blob/9d142430cbe61121c864c0015f1de83c94a7d2c0/tinygrad/mlops.py#L70
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let one = graph.constant(1.0);
+        let one = self.graph().constant(1.0);
         one.expand() / (one.expand() + (self * (-1. / 2_f32.ln())).exp_2())
     }
 
@@ -273,6 +287,9 @@ mod tests {
             (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<2>),
         );
         let d_b = d_a.tanh();
-        assert_close_data(&b.data(), &d_b.as_vec());
+        let d = b.data();
+        println!("D: {:?}", d);
+
+        assert_close_data(&d, &d_b.as_vec());
     }
 }

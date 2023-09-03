@@ -21,8 +21,8 @@ impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
         mut self,
         indexes: GraphTensor<(S1, S2)>,
     ) -> GraphTensor<(S1, S2, Const<DIM>)> {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let res = graph
+        let res = self
+            .graph()
             .add_op(op::Function(
                 "Gather".to_string(),
                 Box::new(|tensors| {

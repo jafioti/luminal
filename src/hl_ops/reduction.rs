@@ -7,12 +7,12 @@ impl<S: Shape> GraphTensor<S> {
     where
         S: HasAxes<Ax> + ReduceShapeTo<Dst, Ax>,
     {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let mut shape = self.shape;
 
         let mut new_id = self.id;
         for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
-            new_id = graph
+            new_id = self
+                .graph()
                 .add_op(op::SumReduce(dim as usize))
                 .input(new_id, shape)
                 .finish();
@@ -26,12 +26,12 @@ impl<S: Shape> GraphTensor<S> {
     where
         S: HasAxes<Ax> + ReduceShapeTo<Dst, Ax>,
     {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let mut shape = self.shape;
 
         let mut new_id = self.id;
         for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
-            new_id = graph
+            new_id = self
+                .graph()
                 .add_op(op::MaxReduce(dim as usize))
                 .input(new_id, shape)
                 .finish();
@@ -45,36 +45,43 @@ impl<S: Shape> GraphTensor<S> {
     where
         S: HasAxes<Ax> + ReduceShapeTo<Dst, Ax>,
     {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let mut shape = self.shape;
         let mut node_id = self.id;
         for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
             // Create div tensor
             // Create ones tensor and expand up to full tensor shape
-            let mut ones = graph.constant(1.0).id;
+            let mut ones = self.graph().constant(1.0).id;
             let mut ones_shape =
                 crate::core::shape::simple_tracker::ShapeTracker::new(&shape.shape());
-            ones = graph
+            ones = self
+                .graph()
                 .add_op(op::NoOp)
                 .input(ones, ones_shape)
                 .input(node_id, shape)
                 .finish();
             // Sum reduce on current dimension
-            let div_tensor = graph
+            let div_tensor = self
+                .graph()
                 .add_op(op::SumReduce(dim as usize))
                 .input(ones, ones_shape)
                 .finish();
             ones_shape.remove_dim(dim as usize);
             // Sum reduce
-            node_id = graph
+            node_id = self
+                .graph()
                 .add_op(op::SumReduce(dim as usize))
                 .input(node_id, shape)
                 .finish();
             shape.remove_dim(dim as usize);
 
             // Divide by div tensor
-            let mul_tensor = graph.add_op(op::Recip).input(div_tensor, shape).finish();
-            node_id = graph
+            let mul_tensor = self
+                .graph()
+                .add_op(op::Recip)
+                .input(div_tensor, shape)
+                .finish();
+            node_id = self
+                .graph()
                 .add_op(op::Mul)
                 .input(node_id, shape)
                 .input(mul_tensor, shape)

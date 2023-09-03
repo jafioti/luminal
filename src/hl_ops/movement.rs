@@ -38,8 +38,7 @@ impl<S: Shape> GraphTensor<S> {
     pub fn reshape<N: Shape>(self) -> GraphTensor<N> {
         let id = if !self.shape.is_contiguous() {
             // Insert contiguous call
-            let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-            graph
+            self.graph()
                 .add_op(op::Contiguous)
                 .input(self.id, self.shape)
                 .finish()
@@ -73,8 +72,8 @@ impl<S: Shape> GraphTensor<S> {
             GraphTensor::from_id(self.id, self.shape, self.graph_ref)
         } else {
             // Insert contiguous call
-            let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-            let new_id = graph
+            let new_id = self
+                .graph()
                 .add_op(op::Contiguous)
                 .input(self.id, self.shape)
                 .finish();
@@ -92,8 +91,8 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     pub fn contiguous(self) -> GraphTensor<S> {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-        let new_id = graph
+        let new_id = self
+            .graph()
             .add_op(op::Contiguous)
             .input(self.id, self.shape)
             .finish();
@@ -130,9 +129,10 @@ where
 {
     type Output = GraphTensor<<(A, B) as TryConcatAlong<Ax>>::Output>;
     fn concat_along(self, _: Ax) -> Self::Output {
-        let graph = unsafe { self.0.graph_ref.as_mut().unwrap() };
         let dim = Ax::as_array()[0] as usize;
-        let fin = graph
+        let fin = self
+            .0
+            .graph()
             .add_op(op::Function(
                 "Concat".to_string(),
                 Box::new(move |mut inps| {
