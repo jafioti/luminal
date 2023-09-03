@@ -18,49 +18,49 @@ impl<S: Shape> GraphTensor<S> {
     where
         S: BroadcastShapeTo<Dst, Ax>,
     {
-        for (i, dim) in Ax::as_array().into_iter().map(|i| i as usize).zip(
-            Dst::realized_shape().into_iter().map(|i| match i {
+        let new_dims = Dst::realized_shape()
+            .into_iter()
+            .map(|i| match i {
                 RealDim::Const(n) => Dim::Known(n),
                 RealDim::Dyn => Dim::Unknown,
-            }),
-        ) {
+            })
+            .collect::<Vec<_>>();
+        for (i, dim) in Ax::as_array()
+            .into_iter()
+            .map(|i| (i as usize, new_dims[i as usize]))
+        {
             self.shape.expand(i, dim);
         }
 
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
-    pub fn reshape<N: Shape>(mut self) -> GraphTensor<N> {
-        if self.shape.is_contiguous() {
-            // Just do reshape
-            for (i, dim) in N::realized_shape().into_iter().enumerate() {
-                self.shape.dims[self.shape.indexes[i]] = match dim {
-                    RealDim::Const(n) => Dim::Known(n),
-                    RealDim::Dyn => Dim::Unknown,
-                };
-            }
-            GraphTensor::from_id(self.id, self.shape, self.graph_ref)
-        } else {
+    pub fn reshape<N: Shape>(self) -> GraphTensor<N> {
+        let id = if !self.shape.is_contiguous() {
             // Insert contiguous call
             let graph = unsafe { self.graph_ref.as_mut().unwrap() };
-            let new_id = graph
+            graph
                 .add_op(op::Contiguous)
                 .input(self.id, self.shape)
-                .finish();
-            GraphTensor::from_id(
-                new_id,
-                ShapeTracker::new(
-                    &N::realized_shape()
-                        .into_iter()
-                        .map(|dim| match dim {
-                            RealDim::Const(n) => Dim::Known(n),
-                            RealDim::Dyn => Dim::Unknown,
-                        })
-                        .collect::<Vec<_>>(),
-                ),
-                self.graph_ref,
-            )
-        }
+                .finish()
+        } else {
+            // Already contiguous
+            self.id
+        };
+
+        GraphTensor::from_id(
+            id,
+            ShapeTracker::new(
+                &N::realized_shape()
+                    .into_iter()
+                    .map(|dim| match dim {
+                        RealDim::Const(n) => Dim::Known(n),
+                        RealDim::Dyn => Dim::Unknown,
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            self.graph_ref,
+        )
     }
 
     /// Dynamically reshape with annotations for the shape tracker

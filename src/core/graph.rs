@@ -210,7 +210,7 @@ impl Graph {
                 }
             }
             for (i, (id, _)) in src_ids.iter().enumerate() {
-                if remaining_consumers[id] != 1 || !self.no_delete.contains(id) {
+                if remaining_consumers[id] != 1 || self.no_delete.contains(id) {
                     refs.push_back((InputTensor::Borrowed(self.tensors.get(id).unwrap()), i));
                 }
             }

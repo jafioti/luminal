@@ -52,8 +52,8 @@ impl ShapeTracker {
 
     /// Add dim along a certian axis
     pub fn expand(&mut self, axis: usize, dim: Dim) {
+        self.indexes.insert(axis, self.dims.len());
         self.dims.push(dim);
-        self.indexes.insert(axis, self.dims.len() - 1);
         self.fake.push(true);
     }
 
@@ -62,6 +62,11 @@ impl ShapeTracker {
         let index = self.indexes.remove(axis);
         self.dims.remove(index);
         self.fake.remove(index);
+        for i in self.indexes.iter_mut() {
+            if *i > index {
+                *i -= 1;
+            }
+        }
     }
 
     /// Permute the dimensions
@@ -71,19 +76,41 @@ impl ShapeTracker {
 
     /// Convert a logical index into a physical one
     pub fn index(&self, logical: usize) -> Option<usize> {
+        println!("Fake: {:?}", self.fake);
         let mut ret = 0;
         let mut acc = 1;
+        let mut strides = self
+            .dims
+            .iter()
+            .enumerate()
+            .rev()
+            .scan(1, |state, (i, x)| {
+                let ret = *state;
+                if !self.fake[i] {
+                    *state *= x.to_usize().unwrap();
+                }
+                Some(ret)
+            })
+            .collect::<Vec<_>>();
+        strides.reverse();
+        println!("Strides: {:?}", strides);
+        println!("Logical: {logical}");
+        println!("Shape: {:?}", self.dims);
+        println!("Indexes: {:?}", self.indexes);
         for ind in self.indexes.iter().rev() {
             let sh = match self.dims[*ind] {
                 Dim::Known(n) => n,
                 Dim::Unknown => panic!("All dims must be known before indexing!"),
             };
+            println!("Shape: {sh}");
             if !self.fake[*ind] {
-                let dim_ind = (logical / acc) % (sh) + self.slices[*ind].0;
-                ret += dim_ind * acc;
+                let dim_ind = (logical / acc) % sh + self.slices[*ind].0;
+                println!("Dim: {:?}", dim_ind);
+                ret += dim_ind * strides[*ind];
             }
             acc *= sh;
         }
+        println!("Physical: {ret}");
         Some(ret)
     }
 
@@ -91,9 +118,7 @@ impl ShapeTracker {
     pub fn n_elements(&self) -> usize {
         self.dims
             .iter()
-            .enumerate()
-            .filter(|(i, _)| !self.fake[*i])
-            .filter_map(|(_, i)| if let Dim::Known(n) = i { Some(n) } else { None })
+            .filter_map(|i| if let Dim::Known(n) = i { Some(n) } else { None })
             .product()
     }
 
