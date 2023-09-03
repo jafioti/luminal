@@ -21,8 +21,8 @@ pub struct Mlp<const I: usize, const H: usize> {
     pub up_proj: GraphTensor<(Const<I>, Const<H>)>,
 }
 
-impl<const I: usize, const H: usize, B: Dim, S: Dim> Module<GraphTensor<(B, S, Const<H>)>>
-    for Mlp<I, H>
+impl<const I: usize, const H: usize, B: Dimension, S: Dimension>
+    Module<GraphTensor<(B, S, Const<H>)>> for Mlp<I, H>
 {
     type Output = GraphTensor<(B, S, Const<H>)>;
 
@@ -57,10 +57,10 @@ pub struct RotaryEmbedding<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> 
 }
 
 impl<
-        Batch: Dim,
+        Batch: Dimension,
         const NUM_HEADS: usize,
-        Seq: Dim,
-        PrevSeq: Dim,
+        Seq: Dimension,
+        PrevSeq: Dimension,
         const HEAD_DIM: usize,
         const HEAD_DIM_OVER_2: usize,
     >
@@ -95,7 +95,7 @@ impl<
 impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
     RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
 {
-    fn get_sincos<Batch: Dim, const NUM_HEADS: usize, Seq: Dim, PrevSeq: Dim>(
+    fn get_sincos<Batch: Dimension, const NUM_HEADS: usize, Seq: Dimension, PrevSeq: Dimension>(
         &self,
         seq_tensor: GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
         cache: Option<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
@@ -106,37 +106,29 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
         let graph = unsafe { self.inv_freq.graph_ref.as_mut().unwrap() };
         let has_cache = cache.is_some();
         let mut op = graph
-            .add_op(
-                Function(
-                    "ARange".to_string(),
-                    Box::new(move |inp, i| {
-                        let offset = if has_cache {
-                            inp[1].1.shape.shape()[2]
-                        } else {
-                            0
-                        };
-                        (
-                            Some(Tensor {
-                                data: Box::new(
-                                    (0..inp[0].1.shape.shape()[2])
-                                        .map(|i| (i + offset) as f32)
-                                        .collect::<Vec<_>>(),
-                                ),
-                            }),
-                            TensorView {
-                                tensor_id: i,
-                                shape: ShapeTracker::new(vec![inp[0].1.shape.shape()[2]]),
-                            },
-                        )
-                    }),
-                ),
-                vec![Seq::const_size()],
-            )
-            .input(seq_tensor.id);
+            .add_op(Function(
+                "ARange".to_string(),
+                Box::new(move |inp| {
+                    let offset = if has_cache {
+                        inp[1].1.shape()[2].to_usize().unwrap()
+                    } else {
+                        0
+                    };
+                    Tensor {
+                        data: Box::new(
+                            (0..inp[0].1.shape()[2].to_usize().unwrap())
+                                .map(|i| (i + offset) as f32)
+                                .collect::<Vec<_>>(),
+                        ),
+                    }
+                }),
+            ))
+            .input(seq_tensor.id, seq_tensor.shape);
         if has_cache {
-            op = op.input(cache.unwrap().0.id);
+            op = op.input(cache.unwrap().0.id, cache.unwrap().0.shape);
         }
-        let t: GraphTensor<(Seq,)> = GraphTensor::from_id(op.finish(), graph);
+        let t: GraphTensor<(Seq,)> =
+            GraphTensor::from_id(op.finish(), <(Seq,)>::to_tracker(), graph);
         let freqs = t
             .expand::<(Seq, Const<1>), _>()
             .matmul(
@@ -148,7 +140,7 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
         (emb.sin().realize(), emb.cos().realize())
     }
 
-    fn rotate_half<Batch: Dim, NumHeads: Dim, Seq: Dim>(
+    fn rotate_half<Batch: Dimension, NumHeads: Dimension, Seq: Dimension>(
         x: GraphTensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>)>,
     ) -> GraphTensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>)> {
         let x1 = x.slice((.., .., .., ..HEAD_DIM_OVER_2));
@@ -201,9 +193,9 @@ fn attn_forward<
     const HIDDEN: usize,
     const HEAD_DIM: usize,
     const HEAD_DIM_OVER_2: usize,
-    Batch: Dim,
-    Seq: Dim,
-    PrevSeq: Dim,
+    Batch: Dimension,
+    Seq: Dimension,
+    PrevSeq: Dimension,
 >(
     attn: &Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>,
     x: GraphTensor<(Batch, Seq, Const<HIDDEN>)>,
@@ -216,29 +208,47 @@ fn attn_forward<
     let q = x
         .matmul(attn.q_proj.permute())
         .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-            Batch::const_size().to_reshape(0),
-            Seq::const_size().to_reshape(1),
-            ReshapeDim::Const(NUM_HEADS),
-            ReshapeDim::Const(HEAD_DIM),
+            match Batch::const_size() {
+                RealDim::Const(n) => Dim::Known(n),
+                RealDim::Dyn => Dim::Unknown,
+            },
+            match Seq::const_size() {
+                RealDim::Const(n) => Dim::Known(n),
+                RealDim::Dyn => Dim::Unknown,
+            },
+            Dim::Known(NUM_HEADS),
+            Dim::Known(HEAD_DIM),
         ])
         .permute::<_, Axes4<0, 2, 1, 3>>();
 
     let k = x
         .matmul(attn.k_proj.permute())
         .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-            Batch::const_size().to_reshape(0),
-            Seq::const_size().to_reshape(1),
-            ReshapeDim::Const(NUM_HEADS),
-            ReshapeDim::Const(HEAD_DIM),
+            match Batch::const_size() {
+                RealDim::Const(n) => Dim::Known(n),
+                RealDim::Dyn => Dim::Unknown,
+            },
+            match Seq::const_size() {
+                RealDim::Const(n) => Dim::Known(n),
+                RealDim::Dyn => Dim::Unknown,
+            },
+            Dim::Known(NUM_HEADS),
+            Dim::Known(HEAD_DIM),
         ])
         .permute::<_, Axes4<0, 2, 1, 3>>();
     let v = x
         .matmul(attn.v_proj.permute())
         .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-            Batch::const_size().to_reshape(0),
-            Seq::const_size().to_reshape(1),
-            ReshapeDim::Const(NUM_HEADS),
-            ReshapeDim::Const(HEAD_DIM),
+            match Batch::const_size() {
+                RealDim::Const(n) => Dim::Known(n),
+                RealDim::Dyn => Dim::Unknown,
+            },
+            match Seq::const_size() {
+                RealDim::Const(n) => Dim::Known(n),
+                RealDim::Dyn => Dim::Unknown,
+            },
+            Dim::Known(NUM_HEADS),
+            Dim::Known(HEAD_DIM),
         ])
         .permute::<_, Axes4<0, 2, 1, 3>>();
     let (q, k) = attn.rotary_embed.forward((
@@ -255,8 +265,8 @@ impl<
         const HIDDEN: usize,
         const HEAD_DIM: usize,
         const HEAD_DIM_OVER_2: usize,
-        Batch: Dim,
-        CurSeq: Dim,
+        Batch: Dimension,
+        CurSeq: Dimension,
     >
     Module<(
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
@@ -291,9 +301,15 @@ impl<
             .batch_matmul(v)
             .permute::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>), _>()
             .dyn_reshape::<(Batch, CurSeq, Const<HIDDEN>)>(vec![
-                Batch::const_size().to_reshape(0),
-                CurSeq::const_size().to_reshape(1),
-                ReshapeDim::Const(HIDDEN),
+                match Batch::const_size() {
+                    RealDim::Const(n) => Dim::Known(n),
+                    RealDim::Dyn => Dim::Unknown,
+                },
+                match CurSeq::const_size() {
+                    RealDim::Const(n) => Dim::Known(n),
+                    RealDim::Dyn => Dim::Unknown,
+                },
+                Dim::Known(HIDDEN),
             ]);
 
         (o.matmul(self.o_proj.permute()), (k, v))
@@ -308,7 +324,7 @@ impl<
         const HEAD_DIM_OVER_2: usize,
     > Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
 {
-    fn forward_kv<Batch: Dim, CurSeq: Dim, PrevSeq: Dim, TotSeq: Dim>(
+    fn forward_kv<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>(
         &self,
         (x, cache): (
             GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
@@ -347,9 +363,15 @@ impl<
             .batch_matmul(v)
             .permute::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>), _>()
             .dyn_reshape::<(Batch, CurSeq, Const<HIDDEN>)>(vec![
-                Batch::const_size().to_reshape(0),
-                CurSeq::const_size().to_reshape(1),
-                ReshapeDim::Const(HIDDEN),
+                match Batch::const_size() {
+                    RealDim::Const(n) => Dim::Known(n),
+                    RealDim::Dyn => Dim::Unknown,
+                },
+                match CurSeq::const_size() {
+                    RealDim::Const(n) => Dim::Known(n),
+                    RealDim::Dyn => Dim::Unknown,
+                },
+                Dim::Known(HIDDEN),
             ]);
 
         (o.matmul(self.o_proj.permute()), (k, v))
@@ -409,8 +431,8 @@ impl<
         const INTERMEDIATE: usize,
         const HEAD_DIM: usize,
         const HEAD_DIM_OVER_2: usize,
-        Batch: Dim,
-        CurSeq: Dim,
+        Batch: Dimension,
+        CurSeq: Dimension,
     >
     Module<(
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
@@ -446,7 +468,7 @@ impl<
         const HEAD_DIM_OVER_2: usize,
     > DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>
 {
-    fn forward_kv<Batch: Dim, CurSeq: Dim, PrevSeq: Dim, TotSeq: Dim>(
+    fn forward_kv<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>(
         &self,
         (x, cache): (
             GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
@@ -522,8 +544,8 @@ impl<
         const HEAD_DIM: usize,
         const HEAD_DIM_OVER_2: usize,
         const LAYERS: usize,
-        Batch: Dim,
-        CurSeq: Dim,
+        Batch: Dimension,
+        CurSeq: Dimension,
     > Module<GraphTensor<(Batch, CurSeq)>>
     for Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
 {
@@ -535,35 +557,33 @@ impl<
         let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let attn_mask: GraphTensor<(CurSeq, CurSeq)> = GraphTensor::from_id(
             graph
-                .add_op(
-                    Function(
-                        "AttentionMask".to_string(),
-                        Box::new(|inp, i| {
-                            let seq_len = inp[0].1.shape.shape()[1];
-                            let mut data = vec![0.; seq_len * seq_len];
-                            for i in 0..seq_len {
-                                for j in (i + 1)..seq_len {
-                                    data[i * seq_len + j] = f32::NEG_INFINITY;
-                                }
+                .add_op(Function(
+                    "AttentionMask".to_string(),
+                    Box::new(|inp| {
+                        let seq_len = inp[0].1.shape()[1].to_usize().unwrap();
+                        let mut data = vec![0.; seq_len * seq_len];
+                        for i in 0..seq_len {
+                            for j in (i + 1)..seq_len {
+                                data[i * seq_len + j] = f32::NEG_INFINITY;
                             }
-                            (
-                                Some(Tensor {
-                                    data: Box::new(data),
-                                }),
-                                TensorView {
-                                    tensor_id: i,
-                                    shape: ShapeTracker::new(vec![
-                                        inp[0].1.shape.shape()[1],
-                                        inp[0].1.shape.shape()[1],
-                                    ]),
-                                },
-                            )
-                        }),
-                    ),
-                    vec![CurSeq::const_size(), CurSeq::const_size()],
-                )
-                .input(input.id)
+                        }
+                        Tensor {
+                            data: Box::new(data),
+                        }
+                    }),
+                ))
+                .input(input.id, input.shape)
                 .finish(),
+            ShapeTracker::new(&[
+                match CurSeq::const_size() {
+                    RealDim::Const(n) => Dim::Known(n),
+                    RealDim::Dyn => Dim::Unknown,
+                },
+                match CurSeq::const_size() {
+                    RealDim::Const(n) => Dim::Known(n),
+                    RealDim::Dyn => Dim::Unknown,
+                },
+            ]),
             graph,
         );
 
@@ -588,7 +608,12 @@ impl<
         const LAYERS: usize,
     > Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
 {
-    pub fn forward_kv<Batch: Dim, CurSeq: Dim, PrevSeq: Dim, TotSeq: Dim>(
+    pub fn forward_kv<
+        Batch: Dimension,
+        CurSeq: Dimension,
+        PrevSeq: Dimension,
+        TotSeq: Dimension,
+    >(
         &self,
         (input, caches): (
             GraphTensor<(Batch, CurSeq)>,
@@ -671,8 +696,8 @@ impl<
         const HEAD_DIM: usize,
         const HEAD_DIM_OVER_2: usize,
         const LAYERS: usize,
-        Batch: Dim,
-        CurSeq: Dim,
+        Batch: Dimension,
+        CurSeq: Dimension,
     > Module<GraphTensor<(Batch, CurSeq)>>
     for LlamaForCausalLM<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
 {
@@ -697,7 +722,12 @@ impl<
         const LAYERS: usize,
     > LlamaForCausalLM<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
 {
-    pub fn forward_kv<Batch: Dim, CurSeq: Dim, PrevSeq: Dim, TotSeq: Dim>(
+    pub fn forward_kv<
+        Batch: Dimension,
+        CurSeq: Dimension,
+        PrevSeq: Dimension,
+        TotSeq: Dimension,
+    >(
         &self,
         (input, caches): (
             GraphTensor<(Batch, CurSeq)>,

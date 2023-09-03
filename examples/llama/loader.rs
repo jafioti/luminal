@@ -21,31 +21,26 @@ impl Loader for DfdxDeferredLoader {
         model.serialize(&mut serializer);
 
         for (s, n) in serializer.state {
-            let shape: Vec<usize> = graph
+            let n_elements = graph
                 .graph
-                .node_weight_mut(n)
+                .edges_directed(n, petgraph::Direction::Outgoing)
+                .next()
                 .unwrap()
+                .weight()
                 .1
-                .iter()
-                .map(|i| match i {
-                    RealDim::Const(m) => *m,
-                    RealDim::Dyn => panic!("Dyn dimension in a weight"),
-                })
-                .collect();
+                .n_elements();
             if let Some(inp_func) = graph
                 .graph
                 .node_weight_mut(n)
                 .unwrap()
-                .0
                 .as_any_mut()
                 .downcast_mut::<Function>()
             {
                 let path = self.path.clone();
-                inp_func.1 = Box::new(move |_, i| {
+                inp_func.1 = Box::new(move |_| {
                     // Get memmapped tensor
                     let bytes = std::fs::read(format!("{path}/{s}")).unwrap();
-                    let num_params: usize = shape.iter().product();
-                    let data: Vec<f32> = if bytes.len() == num_params * 2 {
+                    let data: Vec<f32> = if bytes.len() == n_elements * 2 {
                         // Half-precision
                         bytes
                             .chunks_exact(std::mem::size_of::<f16>())
@@ -53,7 +48,7 @@ impl Loader for DfdxDeferredLoader {
                                 std::mem::transmute::<[u8; 2], f16>([chunk[0], chunk[1]]).to_f32()
                             })
                             .collect()
-                    } else if bytes.len() == num_params * 4 {
+                    } else if bytes.len() == n_elements * 4 {
                         // Full precision
                         bytes
                             .chunks_exact(std::mem::size_of::<f32>())
@@ -66,22 +61,17 @@ impl Loader for DfdxDeferredLoader {
                     } else {
                         panic!(
                             "Expected {} or {} bytes, got {} when loading {}{}",
-                            num_params * 2,
-                            num_params * 4,
+                            n_elements * 2,
+                            n_elements * 4,
                             bytes.len(),
                             path,
                             s
                         )
                     };
-                    (
-                        Some(Tensor {
-                            data: Box::new(data),
-                        }),
-                        TensorView {
-                            tensor_id: i,
-                            shape: ShapeTracker::new(shape.clone()),
-                        },
-                    )
+
+                    Tensor {
+                        data: Box::new(data),
+                    }
                 });
             };
         }

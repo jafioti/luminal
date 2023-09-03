@@ -61,6 +61,8 @@ impl<S: Shape> GraphTensor<S> {
     pub fn data(&self) -> Vec<f32> {
         let tensor = self.retrieve().unwrap();
         let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        println!("N: {}", orig_data.len());
+        println!("Shape: {:?}", self.shape);
         let mut data = vec![0.; self.shape.n_elements()];
         #[allow(unused_mut)]
         for (i, mut r) in data.iter_mut().enumerate() {

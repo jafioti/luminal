@@ -55,6 +55,8 @@ impl ShapeTracker {
         self.indexes.insert(axis, self.dims.len());
         self.dims.push(dim);
         self.fake.push(true);
+        self.slices.push((0, usize::MAX));
+        self.padding.push((0, 0));
     }
 
     /// Remove a dimension
@@ -118,7 +120,14 @@ impl ShapeTracker {
     pub fn n_elements(&self) -> usize {
         self.dims
             .iter()
-            .filter_map(|i| if let Dim::Known(n) = i { Some(n) } else { None })
+            .enumerate()
+            .filter_map(|(ind, i)| {
+                if let Dim::Known(n) = i {
+                    Some((*n).min(self.slices[ind].1) - self.slices[ind].0)
+                } else {
+                    None
+                }
+            })
             .product()
     }
 

@@ -24,7 +24,7 @@ fn main() {
         { config::HEAD_DIM_OVER_2 },
         { config::LAYERS },
     > = InitModule::initialize(&mut cx);
-    let inp = cx.new_tensor::<(usize, usize)>("Input");
+    let mut inp = cx.new_tensor::<(usize, usize)>("Input");
     let (out, cache_src) = model.forward(inp);
     out.mark();
     for (k, v) in &cache_src {

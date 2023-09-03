@@ -23,11 +23,11 @@ impl<const A: usize, const B: usize> InitModule for Linear<A, B> {
     }
 }
 
-// impl<const A: usize, const B: usize> SerializeModule for Linear<A, B> {
-//     fn serialize(&self, s: &mut crate::serialization::Serializer) {
-//         s.tensor("weight", self.weight);
-//     }
-// }
+impl<const A: usize, const B: usize> SerializeModule for Linear<A, B> {
+    fn serialize(&self, s: &mut crate::serialization::Serializer) {
+        s.tensor("weight", self.weight);
+    }
+}
 
 // Single
 impl<const A: usize, const B: usize> Module<GraphTensor<R1<A>>> for Linear<A, B> {

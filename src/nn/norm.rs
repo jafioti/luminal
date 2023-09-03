@@ -19,3 +19,7 @@ where
         input.layer_norm::<DIM>()
     }
 }
+
+impl<const DIM: isize> SerializeModule for LayerNorm<DIM> {
+    fn serialize(&self, _: &mut Serializer) {}
+}

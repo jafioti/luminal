@@ -290,6 +290,12 @@ impl Graph {
                     id_map[&edge.target()],
                     edge.weight().0,
                 );
+                if show_shapes {
+                    new_graph
+                        .node_weight_mut(edge.target())
+                        .unwrap()
+                        .push_str(&format!(" | {:?}", edge.weight().1.shape()));
+                }
             }
         }
 

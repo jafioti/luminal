@@ -30,14 +30,14 @@ impl<const DIM: usize, const FF: usize, const HEADS: usize> InitModule
     }
 }
 
-// impl<const DIM: usize, const FF: usize, const HEADS: usize> SerializeModule
-//     for TransformerEncoderBlock<DIM, FF, HEADS>
-// {
-//     fn serialize(&self, s: &mut Serializer) {
-//         s.module("self_attn", &self.attention);
-//         s.module("ff", &self.ff);
-//     }
-// }
+impl<const DIM: usize, const FF: usize, const HEADS: usize> SerializeModule
+    for TransformerEncoderBlock<DIM, FF, HEADS>
+{
+    fn serialize(&self, s: &mut Serializer) {
+        s.module("self_attn", &self.attention);
+        s.module("ff", &self.ff);
+    }
+}
 
 // Single
 impl<const DIM: usize, const FF: usize, const HEADS: usize, S: Dimension>

@@ -33,20 +33,20 @@ impl<
     }
 }
 
-// impl<
-//         const DIM: usize,
-//         const FF: usize,
-//         const ENC_HEADS: usize,
-//         const DEC_HEADS: usize,
-//         const ENC_LAYERS: usize,
-//         const DEC_LAYERS: usize,
-//     > SerializeModule for Transformer<DIM, FF, ENC_HEADS, DEC_HEADS, ENC_LAYERS, DEC_LAYERS>
-// {
-//     fn serialize(&self, s: &mut Serializer) {
-//         s.module("encoder", &self.encoder);
-//         s.module("decoder", &self.decoder);
-//     }
-// }
+impl<
+        const DIM: usize,
+        const FF: usize,
+        const ENC_HEADS: usize,
+        const DEC_HEADS: usize,
+        const ENC_LAYERS: usize,
+        const DEC_LAYERS: usize,
+    > SerializeModule for Transformer<DIM, FF, ENC_HEADS, DEC_HEADS, ENC_LAYERS, DEC_LAYERS>
+{
+    fn serialize(&self, s: &mut Serializer) {
+        s.module("encoder", &self.encoder);
+        s.module("decoder", &self.decoder);
+    }
+}
 
 // Single Sequence
 impl<
