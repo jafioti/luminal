@@ -7,7 +7,7 @@ use crate::{
 };
 use std::marker::PhantomData;
 
-use petgraph::{graph::NodeIndex, visit::EdgeRef};
+use petgraph::graph::NodeIndex;
 
 #[derive(Clone, Copy)]
 pub struct GraphTensor<S: Shape> {
@@ -74,9 +74,6 @@ impl<S: Shape> GraphTensor<S> {
     /// Set the value of the tensor, with dynamic dimensions.
     pub fn set_dyn<T: Data + Clone>(&mut self, data: T, shape: Vec<usize>) {
         // Go down tree looking for exact matches of this shape tracker and replacing it with the new one
-        let new_shape = ShapeTracker::new(&shape.into_iter().map(Dim::Known).collect::<Vec<_>>());
-        replace_trackers(self.id, self.shape, new_shape, self.graph());
-        self.shape = new_shape;
         let node = self
             .graph()
             .graph
@@ -109,21 +106,6 @@ impl<S: Shape> GraphTensor<S> {
             .add_op(op::Print(message.to_string()))
             .input(self.id, self.shape)
             .finish();
-    }
-}
-
-fn replace_trackers(start_node: NodeIndex, from: ShapeTracker, to: ShapeTracker, cx: &mut Graph) {
-    for (edge, trg) in cx
-        .graph
-        .edges_directed(start_node, petgraph::Direction::Outgoing)
-        .map(|e| (e.id(), e.target()))
-        .collect::<Vec<_>>()
-    {
-        let shape = &mut cx.graph.edge_weight_mut(edge).unwrap().1;
-        if *shape == from {
-            *shape = to;
-            replace_trackers(trg, from, to, cx);
-        }
     }
 }
 
