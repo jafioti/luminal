@@ -184,17 +184,7 @@ macro_rules! impl_concat {
                     $($Tail, )*
                 );
                 fn concat_along(self, _: Axis<$Ax>) -> Self::Output {
-                    let (lhs, rhs) = self;
-                    let lhs_dims = lhs.concrete();
-                    let rhs_dims = rhs.concrete();
-                    for i in 0..$NumDims {
-                        if i != $Ax {
-                            assert_eq!(lhs_dims[i], rhs_dims[i]);
-                        }
-                    }
-                    let mut out_dims = lhs_dims;
-                    out_dims[$Ax] += rhs_dims[$Ax];
-                    Self::Output::from_concrete(&out_dims).unwrap()
+                    todo!()
                 }
             }
     };

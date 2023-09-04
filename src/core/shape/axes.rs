@@ -79,35 +79,19 @@ impl<const I: isize, const J: isize, const K: isize, const L: isize, const M: is
 }
 
 /// Represents something that has the axes `Ax`
-pub trait HasAxes<Ax> {
-    /// Returns the number of elements in dimensions along `Ax`
-    fn size(&self) -> usize;
-}
+pub trait HasAxes<Ax> {}
 
 macro_rules! impl_has_axis {
     (($($Vars:tt),*), $Num:tt, $Axis:tt) => {
         impl<$($Vars: Dimension, )*> HasAxes<Axis<$Axis>> for ($($Vars, )*) {
-            #[inline(always)]
-            fn size(&self) -> usize {
-                self.$Axis.size()
-            }
         }
 
         impl HasAxes<Axis<$Axis>> for [usize; $Num] {
-            #[inline(always)]
-            fn size(&self) -> usize {
-                self[$Axis]
-            }
         }
     };
 }
 
-impl HasAxes<Axis<0>> for () {
-    #[inline(always)]
-    fn size(&self) -> usize {
-        1
-    }
-}
+impl HasAxes<Axis<0>> for () {}
 
 impl_has_axis!((D1), 1, 0);
 impl_has_axis!((D1, D2), 2, 0);
@@ -131,26 +115,14 @@ impl_has_axis!((D1, D2, D3, D4, D5, D6), 6, 3);
 impl_has_axis!((D1, D2, D3, D4, D5, D6), 6, 4);
 impl_has_axis!((D1, D2, D3, D4, D5, D6), 6, 5);
 
-impl<const I: isize, const J: isize, S> HasAxes<Axes2<I, J>> for S
-where
-    Self: HasAxes<Axis<I>> + HasAxes<Axis<J>>,
+impl<const I: isize, const J: isize, S> HasAxes<Axes2<I, J>> for S where
+    Self: HasAxes<Axis<I>> + HasAxes<Axis<J>>
 {
-    #[inline(always)]
-    fn size(&self) -> usize {
-        <Self as HasAxes<Axis<I>>>::size(self) * <Self as HasAxes<Axis<J>>>::size(self)
-    }
 }
 
-impl<const I: isize, const J: isize, const K: isize, S> HasAxes<Axes3<I, J, K>> for S
-where
-    Self: HasAxes<Axis<I>> + HasAxes<Axis<J>> + HasAxes<Axis<K>>,
+impl<const I: isize, const J: isize, const K: isize, S> HasAxes<Axes3<I, J, K>> for S where
+    Self: HasAxes<Axis<I>> + HasAxes<Axis<J>> + HasAxes<Axis<K>>
 {
-    #[inline(always)]
-    fn size(&self) -> usize {
-        <Self as HasAxes<Axis<I>>>::size(self)
-            * <Self as HasAxes<Axis<J>>>::size(self)
-            * <Self as HasAxes<Axis<K>>>::size(self)
-    }
 }
 
 impl<const I: isize, const J: isize, const K: isize, const L: isize, S> HasAxes<Axes4<I, J, K, L>>
@@ -158,13 +130,6 @@ impl<const I: isize, const J: isize, const K: isize, const L: isize, S> HasAxes<
 where
     Self: HasAxes<Axis<I>> + HasAxes<Axis<J>> + HasAxes<Axis<K>> + HasAxes<Axis<L>>,
 {
-    #[inline(always)]
-    fn size(&self) -> usize {
-        <Self as HasAxes<Axis<I>>>::size(self)
-            * <Self as HasAxes<Axis<J>>>::size(self)
-            * <Self as HasAxes<Axis<K>>>::size(self)
-            * <Self as HasAxes<Axis<L>>>::size(self)
-    }
 }
 
 impl<const I: isize, const J: isize, const K: isize, const L: isize, const M: isize, S>
@@ -176,14 +141,6 @@ where
         + HasAxes<Axis<L>>
         + HasAxes<Axis<M>>,
 {
-    #[inline(always)]
-    fn size(&self) -> usize {
-        <Self as HasAxes<Axis<I>>>::size(self)
-            * <Self as HasAxes<Axis<J>>>::size(self)
-            * <Self as HasAxes<Axis<K>>>::size(self)
-            * <Self as HasAxes<Axis<L>>>::size(self)
-            * <Self as HasAxes<Axis<M>>>::size(self)
-    }
 }
 
 impl<
@@ -203,13 +160,4 @@ where
         + HasAxes<Axis<M>>
         + HasAxes<Axis<N>>,
 {
-    #[inline(always)]
-    fn size(&self) -> usize {
-        <Self as HasAxes<Axis<I>>>::size(self)
-            * <Self as HasAxes<Axis<J>>>::size(self)
-            * <Self as HasAxes<Axis<K>>>::size(self)
-            * <Self as HasAxes<Axis<L>>>::size(self)
-            * <Self as HasAxes<Axis<M>>>::size(self)
-            * <Self as HasAxes<Axis<N>>>::size(self)
-    }
 }

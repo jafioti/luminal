@@ -24,9 +24,9 @@ pub use simple_tracker::*;
 pub trait Dimension:
     'static + Copy + Clone + std::fmt::Debug + Send + Sync + Eq + PartialEq
 {
-    fn size(&self) -> usize;
+    // fn size(&self) -> usize;
     fn const_size() -> Dim;
-    fn from_size(size: usize) -> Option<Self>;
+    // fn from_size(size: usize) -> Option<Self>;
 }
 
 /// Represents a single dimension where all
@@ -39,16 +39,8 @@ pub trait ConstDim: Default + Dimension {
 pub struct Dyn<const C: char>;
 
 impl<const C: char> Dimension for Dyn<C> {
-    #[inline(always)]
-    fn size(&self) -> usize {
-        todo!()
-    }
     fn const_size() -> Dim {
         Dim::Unknown(C)
-    }
-    #[inline(always)]
-    fn from_size(size: usize) -> Option<Self> {
-        todo!()
     }
 }
 
@@ -56,20 +48,8 @@ impl<const C: char> Dimension for Dyn<C> {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Const<const M: usize>;
 impl<const M: usize> Dimension for Const<M> {
-    #[inline(always)]
-    fn size(&self) -> usize {
-        M
-    }
     fn const_size() -> Dim {
         Dim::Known(M)
-    }
-    #[inline(always)]
-    fn from_size(size: usize) -> Option<Self> {
-        if size == M {
-            Some(Const)
-        } else {
-            None
-        }
     }
 }
 
@@ -80,14 +60,12 @@ impl<const M: usize> ConstDim for Const<M> {
 impl<const N: usize, const C: char> core::ops::Add<Const<N>> for Dyn<C> {
     type Output = Dyn<C>;
     fn add(self, _: Const<N>) -> Self::Output {
-        // self.size() + N
         todo!();
     }
 }
 impl<const N: usize, const C: char> core::ops::Add<Dyn<C>> for Const<N> {
     type Output = Dyn<C>;
-    fn add(self, rhs: Dyn<C>) -> Self::Output {
-        // N + rhs.size()
+    fn add(self, _: Dyn<C>) -> Self::Output {
         todo!();
     }
 }
@@ -95,14 +73,12 @@ impl<const N: usize, const C: char> core::ops::Add<Dyn<C>> for Const<N> {
 impl<const N: usize, const C: char> core::ops::Mul<Const<N>> for Dyn<C> {
     type Output = Dyn<C>;
     fn mul(self, _: Const<N>) -> Self::Output {
-        // self.size() * N
         todo!();
     }
 }
 impl<const N: usize, const C: char> core::ops::Mul<Dyn<C>> for Const<N> {
     type Output = Dyn<C>;
-    fn mul(self, rhs: Dyn<C>) -> Self::Output {
-        // N * rhs.size()
+    fn mul(self, _: Dyn<C>) -> Self::Output {
         todo!();
     }
 }
@@ -110,14 +86,12 @@ impl<const N: usize, const C: char> core::ops::Mul<Dyn<C>> for Const<N> {
 impl<const N: usize, const C: char> core::ops::Div<Const<N>> for Dyn<C> {
     type Output = Dyn<C>;
     fn div(self, _: Const<N>) -> Self::Output {
-        // self.size() / N
         todo!();
     }
 }
 impl<const N: usize, const C: char> core::ops::Div<Dyn<C>> for Const<N> {
     type Output = Dyn<C>;
-    fn div(self, rhs: Dyn<C>) -> Self::Output {
-        // N / rhs.size()
+    fn div(self, _: Dyn<C>) -> Self::Output {
         todo!();
     }
 }
@@ -125,7 +99,6 @@ impl<const N: usize, const C: char> core::ops::Div<Dyn<C>> for Const<N> {
 impl<const A: char, const C: char> core::ops::Add<Dyn<A>> for Dyn<C> {
     type Output = Dyn<'-'>;
     fn add(self, _: Dyn<A>) -> Self::Output {
-        // self.size() + N
         todo!();
     }
 }
@@ -133,7 +106,6 @@ impl<const A: char, const C: char> core::ops::Add<Dyn<A>> for Dyn<C> {
 impl<const A: char, const C: char> core::ops::Mul<Dyn<A>> for Dyn<C> {
     type Output = Dyn<'-'>;
     fn mul(self, _: Dyn<A>) -> Self::Output {
-        // self.size() * N
         todo!();
     }
 }
@@ -141,7 +113,6 @@ impl<const A: char, const C: char> core::ops::Mul<Dyn<A>> for Dyn<C> {
 impl<const A: char, const C: char> core::ops::Div<Dyn<A>> for Dyn<C> {
     type Output = Dyn<'-'>;
     fn div(self, _: Dyn<A>) -> Self::Output {
-        // self.size() / N
         todo!();
     }
 }
@@ -204,15 +175,6 @@ pub trait Shape:
     /// The last axis of this shape
     type LastAxis: Axes;
 
-    fn concrete(&self) -> Self::Concrete;
-    fn from_concrete(concrete: &Self::Concrete) -> Option<Self>;
-
-    /// The number of elements in this shape; the product of all dimensions.
-    #[inline(always)]
-    fn num_elements(&self) -> usize {
-        self.concrete().into_iter().product()
-    }
-
     fn realized_shape() -> Vec<Dim>;
     fn to_tracker() -> crate::core::shape::simple_tracker::ShapeTracker;
 }
@@ -264,14 +226,6 @@ macro_rules! shape {
             type Concrete = [usize; $Num];
             type AllAxes = $All<$($Idx,)*>;
             type LastAxis = Axis<{$Num - 1}>;
-            #[inline(always)]
-            fn concrete(&self) -> Self::Concrete {
-                [$(self.$Idx.size(), )*]
-            }
-            #[inline(always)]
-            fn from_concrete(concrete: &Self::Concrete) -> Option<Self> {
-                Some(($(Dimension::from_size(concrete[$Idx])?, )*))
-            }
 
             fn realized_shape() -> Vec<Dim> {
                 vec![$($D::const_size(), )*]
@@ -294,16 +248,8 @@ macro_rules! shape {
             type AllAxes = $All<$($Idx,)*>;
             type LastAxis = Axis<{$Num - 1}>;
 
-            fn concrete(&self) -> Self::Concrete {
-                *self
-            }
-
             fn realized_shape() -> Vec<Dim> {
                 vec![Dim::Unknown('-'); $Num]
-            }
-
-            fn from_concrete(concrete: &Self::Concrete) -> Option<Self> {
-                Some(*concrete)
             }
 
             fn to_tracker() -> ShapeTracker {
@@ -319,16 +265,8 @@ impl Shape for () {
     type Concrete = [usize; 0];
     type AllAxes = Axis<0>;
     type LastAxis = Axis<0>;
-    #[inline(always)]
-    fn concrete(&self) -> Self::Concrete {
-        []
-    }
     fn realized_shape() -> Vec<Dim> {
         vec![]
-    }
-    #[inline(always)]
-    fn from_concrete(_: &Self::Concrete) -> Option<Self> {
-        Some(())
     }
     fn to_tracker() -> ShapeTracker {
         ShapeTracker::new(&[])
