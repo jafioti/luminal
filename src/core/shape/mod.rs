@@ -1,13 +1,10 @@
 mod axes;
 mod broadcast;
-mod pad;
 mod permute;
 mod realize;
 pub mod simple_tracker;
 mod slice;
-use std::fmt::Display;
 
-pub use pad::*;
 pub use realize::*;
 pub use slice::*;
 
@@ -28,7 +25,7 @@ pub trait Dimension:
     'static + Copy + Clone + std::fmt::Debug + Send + Sync + Eq + PartialEq
 {
     fn size(&self) -> usize;
-    fn const_size() -> RealDim;
+    fn const_size() -> Dim;
     fn from_size(size: usize) -> Option<Self>;
 }
 
@@ -46,8 +43,8 @@ impl<const C: char> Dimension for Dyn<C> {
     fn size(&self) -> usize {
         todo!()
     }
-    fn const_size() -> RealDim {
-        RealDim::Dyn
+    fn const_size() -> Dim {
+        Dim::Unknown(C)
     }
     #[inline(always)]
     fn from_size(size: usize) -> Option<Self> {
@@ -63,8 +60,8 @@ impl<const M: usize> Dimension for Const<M> {
     fn size(&self) -> usize {
         M
     }
-    fn const_size() -> RealDim {
-        RealDim::Const(M)
+    fn const_size() -> Dim {
+        Dim::Known(M)
     }
     #[inline(always)]
     fn from_size(size: usize) -> Option<Self> {
@@ -216,7 +213,7 @@ pub trait Shape:
         self.concrete().into_iter().product()
     }
 
-    fn realized_shape() -> Vec<RealDim>;
+    fn realized_shape() -> Vec<Dim>;
     fn to_tracker() -> crate::core::shape::simple_tracker::ShapeTracker;
 }
 
@@ -276,18 +273,11 @@ macro_rules! shape {
                 Some(($(Dimension::from_size(concrete[$Idx])?, )*))
             }
 
-            fn realized_shape() -> Vec<RealDim> {
+            fn realized_shape() -> Vec<Dim> {
                 vec![$($D::const_size(), )*]
             }
             fn to_tracker() -> ShapeTracker {
-                ShapeTracker::new(&[
-                    $(
-                    match $D::const_size() {
-                        RealDim::Const(n) => Dim::Known(n),
-                        RealDim::Dyn => Dim::Unknown,
-                    },
-                    )*
-                ])
+                ShapeTracker::new(&Self::realized_shape())
             }
         }
         impl<$($D: ConstDim, )*> ConstShape for ($($D, )*) {
@@ -308,16 +298,16 @@ macro_rules! shape {
                 *self
             }
 
-            fn realized_shape() -> Vec<RealDim> {
-                vec![RealDim::Dyn; $Num]
+            fn realized_shape() -> Vec<Dim> {
+                vec![Dim::Unknown('-'); $Num]
             }
 
             fn from_concrete(concrete: &Self::Concrete) -> Option<Self> {
                 Some(*concrete)
             }
 
-            fn to_tracker() -> crate::core::shape::simple_tracker::ShapeTracker {
-                let st = crate::core::shape::simple_tracker::ShapeTracker::new(&[crate::core::shape::simple_tracker::Dim::Unknown; Self::NUM_DIMS]);
+            fn to_tracker() -> ShapeTracker {
+                let st = ShapeTracker::new(&Self::realized_shape());
                 st
             }
         }
@@ -333,15 +323,15 @@ impl Shape for () {
     fn concrete(&self) -> Self::Concrete {
         []
     }
-    fn realized_shape() -> Vec<RealDim> {
+    fn realized_shape() -> Vec<Dim> {
         vec![]
     }
     #[inline(always)]
     fn from_concrete(_: &Self::Concrete) -> Option<Self> {
         Some(())
     }
-    fn to_tracker() -> crate::core::shape::simple_tracker::ShapeTracker {
-        crate::core::shape::simple_tracker::ShapeTracker::new(&[])
+    fn to_tracker() -> ShapeTracker {
+        ShapeTracker::new(&[])
     }
 }
 impl ConstShape for () {
@@ -372,35 +362,10 @@ impl<Src: ConstShape, Dst: ConstShape> AssertSameNumel<Dst> for Src {
     const TYPE_CHECK: () = assert!(Src::NUMEL == Dst::NUMEL);
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum RealDim {
-    Const(usize),
-    #[default]
-    Dyn,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReshapeDim {
     /// A known size for the dim
     Const(usize),
     /// A reference to the size of a dim of the previous shape
     PrevDim(usize),
-}
-
-impl RealDim {
-    pub fn to_reshape(self, prev_dim: usize) -> ReshapeDim {
-        match self {
-            RealDim::Const(n) => ReshapeDim::Const(n),
-            RealDim::Dyn => ReshapeDim::PrevDim(prev_dim),
-        }
-    }
-}
-
-impl Display for RealDim {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RealDim::Dyn => write!(f, "Dyn"),
-            RealDim::Const(n) => write!(f, "Const({n})"),
-        }
-    }
 }

@@ -9,7 +9,7 @@ use petgraph::{
     visit::EdgeRef,
 };
 
-use crate::{graph::Graph, op::Operator, prelude::RealDim};
+use crate::{graph::Graph, op::Operator, prelude::Dim};
 
 pub trait GraphOptimizer {
     /// Run an optimization pass
@@ -123,7 +123,7 @@ pub struct GraphSelector {
                 (
                     Option<TypeId>,
                     Option<Box<dyn TraitObjEq>>,
-                    Option<Vec<RealDim>>,
+                    Option<Vec<Dim>>,
                     Vec<*mut NodeIndex>,
                     Option<usize>,
                 ),
@@ -177,7 +177,7 @@ fn search(
         (
             Option<TypeId>,
             Option<Box<dyn TraitObjEq>>,
-            Option<Vec<RealDim>>,
+            Option<Vec<Dim>>,
             Vec<*mut NodeIndex>,
             Option<usize>,
         ),
@@ -344,7 +344,7 @@ impl OpSelector {
         self
     }
     /// Constrain the op to an output shape
-    pub fn shape(self, shape: &[RealDim]) -> Self {
+    pub fn shape(self, shape: &[Dim]) -> Self {
         let graph = unsafe { self.graph.as_ref().unwrap() };
         let mut m_graph = graph.graph.lock().unwrap();
         m_graph.node_weight_mut(self.id).unwrap().2 = Some(shape.to_vec());

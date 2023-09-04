@@ -18,13 +18,7 @@ impl<S: Shape> GraphTensor<S> {
     where
         S: BroadcastShapeTo<Dst, Ax>,
     {
-        let new_dims = Dst::realized_shape()
-            .into_iter()
-            .map(|i| match i {
-                RealDim::Const(n) => Dim::Known(n),
-                RealDim::Dyn => Dim::Unknown,
-            })
-            .collect::<Vec<_>>();
+        let new_dims = Dst::realized_shape();
         for (i, dim) in Ax::as_array()
             .into_iter()
             .map(|i| (i as usize, new_dims[i as usize]))
@@ -47,38 +41,23 @@ impl<S: Shape> GraphTensor<S> {
             self.id
         };
 
-        GraphTensor::from_id(
-            id,
-            ShapeTracker::new(
-                &N::realized_shape()
-                    .into_iter()
-                    .map(|dim| match dim {
-                        RealDim::Const(n) => Dim::Known(n),
-                        RealDim::Dyn => Dim::Unknown,
-                    })
-                    .collect::<Vec<_>>(),
-            ),
-            self.graph_ref,
-        )
+        GraphTensor::from_id(id, ShapeTracker::new(&N::realized_shape()), self.graph_ref)
     }
 
     /// Dynamically reshape with annotations for the shape tracker
-    pub fn dyn_reshape<N: Shape>(mut self, shape: Vec<Dim>) -> GraphTensor<N> {
-        if self.shape.is_contiguous() {
-            // Just do reshape
-            for (i, dim) in shape.into_iter().enumerate() {
-                self.shape.dims[self.shape.indexes[i]] = dim;
-            }
-            GraphTensor::from_id(self.id, self.shape, self.graph_ref)
-        } else {
+    pub fn dyn_reshape<N: Shape>(self, shape: Vec<Dim>) -> GraphTensor<N> {
+        let id = if !self.shape.is_contiguous() {
             // Insert contiguous call
-            let new_id = self
-                .graph()
+            self.graph()
                 .add_op(op::Contiguous)
                 .input(self.id, self.shape)
-                .finish();
-            GraphTensor::from_id(new_id, ShapeTracker::new(&shape), self.graph_ref)
-        }
+                .finish()
+        } else {
+            // Already contiguous
+            self.id
+        };
+
+        GraphTensor::from_id(id, ShapeTracker::new(&shape), self.graph_ref)
     }
 
     pub fn realize<Dst: Shape<Concrete = <<S as HasShape>::Shape as Shape>::Concrete>>(
@@ -89,15 +68,7 @@ impl<S: Shape> GraphTensor<S> {
     {
         GraphTensor::from_id(
             self.id,
-            self.shape.realize(
-                &Dst::realized_shape()
-                    .into_iter()
-                    .map(|i| match i {
-                        RealDim::Const(n) => Dim::Known(n),
-                        RealDim::Dyn => Dim::Unknown,
-                    })
-                    .collect::<Vec<_>>(),
-            ),
+            self.shape.realize(&Dst::realized_shape()),
             self.graph_ref,
         )
     }
@@ -190,15 +161,7 @@ where
             .finish();
         GraphTensor::from_id(
             fin,
-            ShapeTracker::new(
-                &<(A, B) as TryConcatAlong<Ax>>::Output::realized_shape()
-                    .into_iter()
-                    .map(|i| match i {
-                        RealDim::Const(n) => Dim::Known(n),
-                        RealDim::Dyn => Dim::Unknown,
-                    })
-                    .collect::<Vec<_>>(),
-            ),
+            ShapeTracker::new(&<(A, B) as TryConcatAlong<Ax>>::Output::realized_shape()),
             self.0.graph_ref,
         )
     }

@@ -18,7 +18,7 @@ impl<S: Shape> GraphTensor<S> {
                         .take(DIM)
                         .filter_map(|i| match i {
                             Dim::Known(n) => Some(n),
-                            Dim::Unknown => None,
+                            Dim::Unknown(_) => None,
                         })
                         .product();
                     let back_size: usize = inp[0]
@@ -28,12 +28,12 @@ impl<S: Shape> GraphTensor<S> {
                         .skip(DIM + 1)
                         .filter_map(|i| match i {
                             Dim::Known(n) => Some(n),
-                            Dim::Unknown => None,
+                            Dim::Unknown(_) => None,
                         })
                         .product();
                     let dim_size = match inp[0].1.shape()[DIM] {
                         Dim::Known(n) => n,
-                        Dim::Unknown => panic!(),
+                        Dim::Unknown(_) => panic!(),
                     };
                     let mut scratchpad: Vec<f32> = vec![0.0; front_size * back_size];
                     let a_data = inp[0]

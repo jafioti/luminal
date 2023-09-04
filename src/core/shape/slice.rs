@@ -17,8 +17,8 @@ fn get_end_bound(bound: Bound<&usize>, size: usize) -> usize {
     }
 }
 
-fn real_dim_to_size(r: RealDim) -> usize {
-    if let RealDim::Const(n) = r {
+fn dim_to_size(r: Dim) -> usize {
+    if let Dim::Known(n) = r {
         n
     } else {
         usize::MAX
@@ -62,7 +62,7 @@ impl<A: Dimension, R: RangeBounds<usize> + RangeToDim<A>> SliceOfShape<(A,)> for
     fn to_range_vec(&self) -> Vec<(usize, usize)> {
         vec![(
             get_start_bound(self.0.start_bound()),
-            get_end_bound(self.0.end_bound(), real_dim_to_size(A::const_size())),
+            get_end_bound(self.0.end_bound(), dim_to_size(A::const_size())),
         )]
     }
 }
@@ -79,11 +79,11 @@ impl<
         vec![
             (
                 get_start_bound(self.0.start_bound()),
-                get_end_bound(self.0.end_bound(), real_dim_to_size(A::const_size())),
+                get_end_bound(self.0.end_bound(), dim_to_size(A::const_size())),
             ),
             (
                 get_start_bound(self.1.start_bound()),
-                get_end_bound(self.1.end_bound(), real_dim_to_size(B::const_size())),
+                get_end_bound(self.1.end_bound(), dim_to_size(B::const_size())),
             ),
         ]
     }
@@ -103,15 +103,15 @@ impl<
         vec![
             (
                 get_start_bound(self.0.start_bound()),
-                get_end_bound(self.0.end_bound(), real_dim_to_size(A::const_size())),
+                get_end_bound(self.0.end_bound(), dim_to_size(A::const_size())),
             ),
             (
                 get_start_bound(self.1.start_bound()),
-                get_end_bound(self.1.end_bound(), real_dim_to_size(B::const_size())),
+                get_end_bound(self.1.end_bound(), dim_to_size(B::const_size())),
             ),
             (
                 get_start_bound(self.2.start_bound()),
-                get_end_bound(self.2.end_bound(), real_dim_to_size(C::const_size())),
+                get_end_bound(self.2.end_bound(), dim_to_size(C::const_size())),
             ),
         ]
     }
@@ -133,19 +133,19 @@ impl<
         vec![
             (
                 get_start_bound(self.0.start_bound()),
-                get_end_bound(self.0.end_bound(), real_dim_to_size(A::const_size())),
+                get_end_bound(self.0.end_bound(), dim_to_size(A::const_size())),
             ),
             (
                 get_start_bound(self.1.start_bound()),
-                get_end_bound(self.1.end_bound(), real_dim_to_size(B::const_size())),
+                get_end_bound(self.1.end_bound(), dim_to_size(B::const_size())),
             ),
             (
                 get_start_bound(self.2.start_bound()),
-                get_end_bound(self.2.end_bound(), real_dim_to_size(C::const_size())),
+                get_end_bound(self.2.end_bound(), dim_to_size(C::const_size())),
             ),
             (
                 get_start_bound(self.3.start_bound()),
-                get_end_bound(self.3.end_bound(), real_dim_to_size(D::const_size())),
+                get_end_bound(self.3.end_bound(), dim_to_size(D::const_size())),
             ),
         ]
     }
@@ -175,23 +175,23 @@ impl<
         vec![
             (
                 get_start_bound(self.0.start_bound()),
-                get_end_bound(self.0.end_bound(), real_dim_to_size(A::const_size())),
+                get_end_bound(self.0.end_bound(), dim_to_size(A::const_size())),
             ),
             (
                 get_start_bound(self.1.start_bound()),
-                get_end_bound(self.1.end_bound(), real_dim_to_size(B::const_size())),
+                get_end_bound(self.1.end_bound(), dim_to_size(B::const_size())),
             ),
             (
                 get_start_bound(self.2.start_bound()),
-                get_end_bound(self.2.end_bound(), real_dim_to_size(C::const_size())),
+                get_end_bound(self.2.end_bound(), dim_to_size(C::const_size())),
             ),
             (
                 get_start_bound(self.3.start_bound()),
-                get_end_bound(self.3.end_bound(), real_dim_to_size(D::const_size())),
+                get_end_bound(self.3.end_bound(), dim_to_size(D::const_size())),
             ),
             (
                 get_start_bound(self.4.start_bound()),
-                get_end_bound(self.4.end_bound(), real_dim_to_size(E::const_size())),
+                get_end_bound(self.4.end_bound(), dim_to_size(E::const_size())),
             ),
         ]
     }

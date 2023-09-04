@@ -145,14 +145,8 @@ impl<
             .w_v
             .forward(values)
             .dyn_reshape::<(B, S1, Dyn<'-'>, Dyn<'-'>)>(vec![
-                match B::const_size() {
-                    RealDim::Const(n) => Dim::Known(n),
-                    RealDim::Dyn => Dim::Unknown,
-                },
-                match S1::const_size() {
-                    RealDim::Const(n) => Dim::Known(n),
-                    RealDim::Dyn => Dim::Unknown,
-                },
+                B::const_size(),
+                S1::const_size(),
                 Dim::Known(HEADS),
                 Dim::Known(K_DIM / HEADS),
             ])
@@ -161,14 +155,8 @@ impl<
             .w_k
             .forward(keys)
             .dyn_reshape::<(B, S1, Dyn<'-'>, Dyn<'-'>)>(vec![
-                match B::const_size() {
-                    RealDim::Const(n) => Dim::Known(n),
-                    RealDim::Dyn => Dim::Unknown,
-                },
-                match S1::const_size() {
-                    RealDim::Const(n) => Dim::Known(n),
-                    RealDim::Dyn => Dim::Unknown,
-                },
+                B::const_size(),
+                S1::const_size(),
                 Dim::Known(HEADS),
                 Dim::Known(K_DIM / HEADS),
             ])
@@ -177,14 +165,8 @@ impl<
             .w_q
             .forward(queries)
             .dyn_reshape::<(B, S2, Dyn<'-'>, Dyn<'-'>)>(vec![
-                match B::const_size() {
-                    RealDim::Const(n) => Dim::Known(n),
-                    RealDim::Dyn => Dim::Unknown,
-                },
-                match S2::const_size() {
-                    RealDim::Const(n) => Dim::Known(n),
-                    RealDim::Dyn => Dim::Unknown,
-                },
+                B::const_size(),
+                S2::const_size(),
                 Dim::Known(HEADS),
                 Dim::Known(K_DIM / HEADS),
             ])
@@ -198,17 +180,7 @@ impl<
         let tokens: GraphTensor<(B, S2, Const<V_DIM>)> = weights
             .batch_matmul(values)
             .permute::<_, Axes4<0, 2, 1, 3>>()
-            .dyn_reshape(vec![
-                match B::const_size() {
-                    RealDim::Const(n) => Dim::Known(n),
-                    RealDim::Dyn => Dim::Unknown,
-                },
-                match S2::const_size() {
-                    RealDim::Const(n) => Dim::Known(n),
-                    RealDim::Dyn => Dim::Unknown,
-                },
-                Dim::Known(V_DIM),
-            ]);
+            .dyn_reshape(vec![B::const_size(), S2::const_size(), Dim::Known(V_DIM)]);
         self.w_o.forward(tokens)
     }
 }

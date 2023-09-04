@@ -208,14 +208,8 @@ fn attn_forward<
     let q = x
         .matmul(attn.q_proj.permute())
         .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-            match Batch::const_size() {
-                RealDim::Const(n) => Dim::Known(n),
-                RealDim::Dyn => Dim::Unknown,
-            },
-            match Seq::const_size() {
-                RealDim::Const(n) => Dim::Known(n),
-                RealDim::Dyn => Dim::Unknown,
-            },
+            Batch::const_size(),
+            Seq::const_size(),
             Dim::Known(NUM_HEADS),
             Dim::Known(HEAD_DIM),
         ])
@@ -224,14 +218,8 @@ fn attn_forward<
     let k = x
         .matmul(attn.k_proj.permute())
         .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-            match Batch::const_size() {
-                RealDim::Const(n) => Dim::Known(n),
-                RealDim::Dyn => Dim::Unknown,
-            },
-            match Seq::const_size() {
-                RealDim::Const(n) => Dim::Known(n),
-                RealDim::Dyn => Dim::Unknown,
-            },
+            Batch::const_size(),
+            Seq::const_size(),
             Dim::Known(NUM_HEADS),
             Dim::Known(HEAD_DIM),
         ])
@@ -239,14 +227,8 @@ fn attn_forward<
     let v = x
         .matmul(attn.v_proj.permute())
         .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-            match Batch::const_size() {
-                RealDim::Const(n) => Dim::Known(n),
-                RealDim::Dyn => Dim::Unknown,
-            },
-            match Seq::const_size() {
-                RealDim::Const(n) => Dim::Known(n),
-                RealDim::Dyn => Dim::Unknown,
-            },
+            Batch::const_size(),
+            Seq::const_size(),
             Dim::Known(NUM_HEADS),
             Dim::Known(HEAD_DIM),
         ])
@@ -301,14 +283,8 @@ impl<
             .batch_matmul(v)
             .permute::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>), _>()
             .dyn_reshape::<(Batch, CurSeq, Const<HIDDEN>)>(vec![
-                match Batch::const_size() {
-                    RealDim::Const(n) => Dim::Known(n),
-                    RealDim::Dyn => Dim::Unknown,
-                },
-                match CurSeq::const_size() {
-                    RealDim::Const(n) => Dim::Known(n),
-                    RealDim::Dyn => Dim::Unknown,
-                },
+                Batch::const_size(),
+                CurSeq::const_size(),
                 Dim::Known(HIDDEN),
             ]);
 
@@ -363,14 +339,8 @@ impl<
             .batch_matmul(v)
             .permute::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>), _>()
             .dyn_reshape::<(Batch, CurSeq, Const<HIDDEN>)>(vec![
-                match Batch::const_size() {
-                    RealDim::Const(n) => Dim::Known(n),
-                    RealDim::Dyn => Dim::Unknown,
-                },
-                match CurSeq::const_size() {
-                    RealDim::Const(n) => Dim::Known(n),
-                    RealDim::Dyn => Dim::Unknown,
-                },
+                Batch::const_size(),
+                CurSeq::const_size(),
                 Dim::Known(HIDDEN),
             ]);
 
@@ -574,16 +544,7 @@ impl<
                 ))
                 .input(input.id, input.shape)
                 .finish(),
-            ShapeTracker::new(&[
-                match CurSeq::const_size() {
-                    RealDim::Const(n) => Dim::Known(n),
-                    RealDim::Dyn => Dim::Unknown,
-                },
-                match CurSeq::const_size() {
-                    RealDim::Const(n) => Dim::Known(n),
-                    RealDim::Dyn => Dim::Unknown,
-                },
-            ]),
+            ShapeTracker::new(&[CurSeq::const_size(), CurSeq::const_size()]),
             graph,
         );
 

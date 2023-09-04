@@ -381,7 +381,7 @@ impl Operator for SumReduce {
             .product();
         let dim_size = match inp[0].1.shape()[self.0] {
             Dim::Known(n) => n,
-            Dim::Unknown => panic!("Can't reduce over an unknown dimension"),
+            Dim::Unknown(_) => panic!("Can't reduce over an unknown dimension"),
         };
         let mut result: Vec<f32> = vec![0.0; front_size * back_size];
         let a_data = inp[0]
@@ -429,7 +429,7 @@ impl Operator for MaxReduce {
             .product();
         let dim_size = match inp[0].1.shape()[self.0] {
             Dim::Known(n) => n,
-            Dim::Unknown => panic!("Can't reduce over an unknown dimension"),
+            Dim::Unknown(_) => panic!("Can't reduce over an unknown dimension"),
         };
         let mut result: Vec<f32> = vec![-f32::INFINITY; front_size * back_size];
         let a_data = inp[0]

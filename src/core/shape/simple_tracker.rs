@@ -3,21 +3,21 @@ use tinyvec::ArrayVec;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dim {
     Known(usize),
-    Unknown,
+    Unknown(char),
 }
 
 impl Dim {
     pub fn to_usize(self) -> Option<usize> {
         match self {
             Dim::Known(n) => Some(n),
-            Dim::Unknown => None,
+            Dim::Unknown(_) => None,
         }
     }
 }
 
 impl Default for Dim {
     fn default() -> Self {
-        Self::Unknown
+        Self::Unknown('-')
     }
 }
 
@@ -105,7 +105,7 @@ impl ShapeTracker {
         for ind in self.indexes.iter().rev() {
             let sh = match self.dims[*ind] {
                 Dim::Known(n) => n,
-                Dim::Unknown => panic!("All dims must be known before indexing!"),
+                Dim::Unknown(_) => panic!("All dims must be known before indexing!"),
             };
             if !self.fake[*ind] {
                 let dim_ind = (logical / acc) % sh + self.slices[*ind].0;
@@ -201,9 +201,11 @@ impl ShapeTracker {
 pub fn resolve_shapes(a: &mut ShapeTracker, b: &mut ShapeTracker, default_to_one: bool) {
     // B to A
     for i in 0..a.dims.len() {
-        if matches!(a.dims[a.indexes[i]], Dim::Unknown) {
+        if matches!(a.dims[a.indexes[i]], Dim::Unknown('-')) {
             if let Dim::Known(n) = b.dims[b.indexes[i]] {
                 a.dims[a.indexes[i]] = Dim::Known(n);
+            } else if let Dim::Unknown(c) = b.dims[b.indexes[i]] {
+                a.dims[a.indexes[i]] = Dim::Unknown(c);
             } else if default_to_one {
                 a.dims[a.indexes[i]] = Dim::Known(1);
             }
@@ -212,9 +214,11 @@ pub fn resolve_shapes(a: &mut ShapeTracker, b: &mut ShapeTracker, default_to_one
 
     // A to B
     for i in 0..a.dims.len() {
-        if matches!(b.dims[b.indexes[i]], Dim::Unknown) {
+        if matches!(b.dims[b.indexes[i]], Dim::Unknown('-')) {
             if let Dim::Known(n) = a.dims[a.indexes[i]] {
                 b.dims[b.indexes[i]] = Dim::Known(n);
+            } else if let Dim::Unknown(c) = a.dims[a.indexes[i]] {
+                b.dims[b.indexes[i]] = Dim::Unknown(c);
             } else if default_to_one {
                 b.dims[b.indexes[i]] = Dim::Known(1);
             }
