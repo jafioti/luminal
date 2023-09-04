@@ -16,6 +16,7 @@ use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Dire
 pub struct Graph {
     pub tensors: HashMap<NodeIndex, Tensor>,
     pub(crate) id_remap: HashMap<NodeIndex, NodeIndex>,
+    pub(crate) dyn_map: HashMap<char, usize>,
     pub graph:
         StableGraph<Box<dyn Operator>, (u8, crate::core::shape::simple_tracker::ShapeTracker)>,
     pub no_delete: HashSet<NodeIndex>,
@@ -226,6 +227,11 @@ impl Graph {
                 ));
             }
 
+            // Substitute in the dyn dims
+            for (_, st) in srcs.iter_mut() {
+                *st = st.resolve_global_dyn_dims(&self.dyn_map);
+            }
+
             // All sources are ready
             // Execute
             let tensor = self.graph.node_weight(*node).unwrap().process(srcs);
@@ -249,10 +255,15 @@ impl Graph {
             if self.tensors.contains_key(node) {
                 continue;
             }
-            let srcs = src_ids
+            let mut srcs = src_ids
                 .iter()
                 .map(|(id, st)| (InputTensor::Borrowed(self.tensors.get(id).unwrap()), *st))
                 .collect_vec();
+
+            // Substitute in the dyn dims
+            for (_, st) in srcs.iter_mut() {
+                *st = st.resolve_global_dyn_dims(&self.dyn_map);
+            }
 
             // All sources are ready, execute
             let tensor = self.graph.node_weight(*node).unwrap().process(srcs);

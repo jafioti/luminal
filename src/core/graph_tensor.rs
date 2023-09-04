@@ -73,7 +73,12 @@ impl<S: Shape> GraphTensor<S> {
 
     /// Set the value of the tensor, with dynamic dimensions.
     pub fn set_dyn<T: Data + Clone>(&mut self, data: T, shape: Vec<usize>) {
-        // Go down tree looking for exact matches of this shape tracker and replacing it with the new one
+        // Report dyn dim values to graph dyn map
+        for (d, s) in S::realized_shape().iter().zip(shape.iter()) {
+            if let Dim::Unknown(c) = d {
+                self.graph().dyn_map.insert(*c, *s);
+            }
+        }
         let node = self
             .graph()
             .graph
