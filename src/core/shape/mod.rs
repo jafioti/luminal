@@ -38,17 +38,20 @@ pub trait ConstDim: Default + Dimension {
     const SIZE: usize;
 }
 
-impl Dimension for usize {
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Dyn<const C: char>;
+
+impl<const C: char> Dimension for Dyn<C> {
     #[inline(always)]
     fn size(&self) -> usize {
-        *self
+        todo!()
     }
     fn const_size() -> RealDim {
         RealDim::Dyn
     }
     #[inline(always)]
     fn from_size(size: usize) -> Option<Self> {
-        Some(size)
+        todo!()
     }
 }
 
@@ -77,42 +80,72 @@ impl<const M: usize> ConstDim for Const<M> {
     const SIZE: usize = M;
 }
 
-impl<const N: usize> core::ops::Add<Const<N>> for usize {
-    type Output = usize;
+impl<const N: usize, const C: char> core::ops::Add<Const<N>> for Dyn<C> {
+    type Output = Dyn<C>;
     fn add(self, _: Const<N>) -> Self::Output {
-        self.size() + N
+        // self.size() + N
+        todo!();
     }
 }
-impl<const N: usize> core::ops::Add<usize> for Const<N> {
-    type Output = usize;
-    fn add(self, rhs: usize) -> Self::Output {
-        N + rhs.size()
+impl<const N: usize, const C: char> core::ops::Add<Dyn<C>> for Const<N> {
+    type Output = Dyn<C>;
+    fn add(self, rhs: Dyn<C>) -> Self::Output {
+        // N + rhs.size()
+        todo!();
     }
 }
 
-impl<const N: usize> core::ops::Mul<Const<N>> for usize {
-    type Output = usize;
+impl<const N: usize, const C: char> core::ops::Mul<Const<N>> for Dyn<C> {
+    type Output = Dyn<C>;
     fn mul(self, _: Const<N>) -> Self::Output {
-        self.size() * N
+        // self.size() * N
+        todo!();
     }
 }
-impl<const N: usize> core::ops::Mul<usize> for Const<N> {
-    type Output = usize;
-    fn mul(self, rhs: usize) -> Self::Output {
-        N * rhs.size()
+impl<const N: usize, const C: char> core::ops::Mul<Dyn<C>> for Const<N> {
+    type Output = Dyn<C>;
+    fn mul(self, rhs: Dyn<C>) -> Self::Output {
+        // N * rhs.size()
+        todo!();
     }
 }
 
-impl<const N: usize> core::ops::Div<Const<N>> for usize {
-    type Output = usize;
+impl<const N: usize, const C: char> core::ops::Div<Const<N>> for Dyn<C> {
+    type Output = Dyn<C>;
     fn div(self, _: Const<N>) -> Self::Output {
-        self.size() / N
+        // self.size() / N
+        todo!();
     }
 }
-impl<const N: usize> core::ops::Div<usize> for Const<N> {
-    type Output = usize;
-    fn div(self, rhs: usize) -> Self::Output {
-        N / rhs.size()
+impl<const N: usize, const C: char> core::ops::Div<Dyn<C>> for Const<N> {
+    type Output = Dyn<C>;
+    fn div(self, rhs: Dyn<C>) -> Self::Output {
+        // N / rhs.size()
+        todo!();
+    }
+}
+
+impl<const A: char, const C: char> core::ops::Add<Dyn<A>> for Dyn<C> {
+    type Output = Dyn<'-'>;
+    fn add(self, _: Dyn<A>) -> Self::Output {
+        // self.size() + N
+        todo!();
+    }
+}
+
+impl<const A: char, const C: char> core::ops::Mul<Dyn<A>> for Dyn<C> {
+    type Output = Dyn<'-'>;
+    fn mul(self, _: Dyn<A>) -> Self::Output {
+        // self.size() * N
+        todo!();
+    }
+}
+
+impl<const A: char, const C: char> core::ops::Div<Dyn<A>> for Dyn<C> {
+    type Output = Dyn<'-'>;
+    fn div(self, _: Dyn<A>) -> Self::Output {
+        // self.size() / N
+        todo!();
     }
 }
 
@@ -128,9 +161,9 @@ impl<T, const N: usize> Array<T> for [T; N] {
     }
 }
 impl<T> Array<T> for std::vec::Vec<T> {
-    type Dim = usize;
+    type Dim = Dyn<'-'>;
     fn dim(&self) -> Self::Dim {
-        self.len()
+        Dyn::<'-'>
     }
 }
 

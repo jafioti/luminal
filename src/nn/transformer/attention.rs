@@ -144,7 +144,7 @@ impl<
         let values = self
             .w_v
             .forward(values)
-            .dyn_reshape::<(B, S1, usize, usize)>(vec![
+            .dyn_reshape::<(B, S1, Dyn<'-'>, Dyn<'-'>)>(vec![
                 match B::const_size() {
                     RealDim::Const(n) => Dim::Known(n),
                     RealDim::Dyn => Dim::Unknown,
@@ -160,7 +160,7 @@ impl<
         let keys = self
             .w_k
             .forward(keys)
-            .dyn_reshape::<(B, S1, usize, usize)>(vec![
+            .dyn_reshape::<(B, S1, Dyn<'-'>, Dyn<'-'>)>(vec![
                 match B::const_size() {
                     RealDim::Const(n) => Dim::Known(n),
                     RealDim::Dyn => Dim::Unknown,
@@ -176,7 +176,7 @@ impl<
         let queries = self
             .w_q
             .forward(queries)
-            .dyn_reshape::<(B, S2, usize, usize)>(vec![
+            .dyn_reshape::<(B, S2, Dyn<'-'>, Dyn<'-'>)>(vec![
                 match B::const_size() {
                     RealDim::Const(n) => Dim::Known(n),
                     RealDim::Dyn => Dim::Unknown,
@@ -243,8 +243,8 @@ mod tests {
             .weight
             .set(vec![1., 22., 3., 1., 2., 3., 1., 2., 3.]);
 
-        let mut a = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
-        let mut e = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
+        let mut a = cx.new_tensor::<(Dyn<'d'>, crate::shape::Const<3>)>("Input");
+        let mut e = cx.new_tensor::<(Dyn<'e'>, crate::shape::Const<3>)>("Input");
         let b = model.forward((e, a, e));
 
         a.set_dyn(

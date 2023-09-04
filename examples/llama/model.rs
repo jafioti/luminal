@@ -135,7 +135,7 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
                 self.inv_freq
                     .expand::<(Const<1>, Const<HEAD_DIM_OVER_2>), _>(),
             )
-            .realize::<(Seq, usize)>();
+            .realize::<(Seq, Dyn<'-'>)>();
         let emb = (freqs, freqs).concat_along(Axis::<1>);
         (emb.sin().realize(), emb.cos().realize())
     }
@@ -288,7 +288,7 @@ impl<
         let (q, k, v) = attn_forward(
             self,
             x,
-            Option::<KVCache<_, usize, NUM_HEADS, HEAD_DIM>>::None,
+            Option::<KVCache<_, Dyn<'s'>, NUM_HEADS, HEAD_DIM>>::None,
         );
         let inv_head_scale = (HEAD_DIM as f64).sqrt().recip() as f32;
         let w = q
@@ -340,16 +340,16 @@ impl<
         let k = (
             cache
                 .0
-                .realize::<(Batch, Const<NUM_HEADS>, usize, Const<HEAD_DIM>)>(),
-            k.realize::<(Batch, Const<NUM_HEADS>, usize, Const<HEAD_DIM>)>(),
+                .realize::<(Batch, Const<NUM_HEADS>, Dyn<'s'>, Const<HEAD_DIM>)>(),
+            k.realize::<(Batch, Const<NUM_HEADS>, Dyn<'s'>, Const<HEAD_DIM>)>(),
         )
             .concat_along(Axis::<2>)
             .realize::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>)>();
         let v = (
             cache
                 .1
-                .realize::<(Batch, Const<NUM_HEADS>, usize, Const<HEAD_DIM>)>(),
-            v.realize::<(Batch, Const<NUM_HEADS>, usize, Const<HEAD_DIM>)>(),
+                .realize::<(Batch, Const<NUM_HEADS>, Dyn<'s'>, Const<HEAD_DIM>)>(),
+            v.realize::<(Batch, Const<NUM_HEADS>, Dyn<'s'>, Const<HEAD_DIM>)>(),
         )
             .concat_along(Axis::<2>)
             .realize::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>)>();

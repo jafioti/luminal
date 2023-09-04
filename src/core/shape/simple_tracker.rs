@@ -140,6 +140,13 @@ impl ShapeTracker {
         self.len() == 0
     }
 
+    pub fn realize(mut self, dims: &[Dim]) -> Self {
+        for (i, ind) in self.indexes.iter().enumerate() {
+            self.dims[*ind] = dims[i];
+        }
+        self
+    }
+
     /// Create a contiguous version
     pub fn contiguous(mut self) -> Self {
         self.indexes

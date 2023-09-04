@@ -24,7 +24,7 @@ fn main() {
         { config::HEAD_DIM_OVER_2 },
         { config::LAYERS },
     > = InitModule::initialize(&mut cx);
-    let mut inp = cx.new_tensor::<(usize, usize)>("Input");
+    let mut inp = cx.new_tensor::<(Dyn<'b'>, Dyn<'s'>)>("Input");
     let (out, cache_src) = model.forward(inp);
     out.mark();
     for (k, v) in &cache_src {
@@ -49,7 +49,7 @@ fn main() {
 
 
     // Build KV cache forward graph
-    let (out, cache_dest): (_, Vec<KVCache<_, usize, {config::HEADS}, {config::HEAD_DIM}>>) = model.forward_kv((inp, cache_src.clone()));
+    let (out, cache_dest): (_, Vec<KVCache<_, Dyn<'s'>, {config::HEADS}, {config::HEAD_DIM}>>) = model.forward_kv((inp, cache_src.clone()));
     out.mark();
     for (k, v) in &cache_dest {
         k.mark_no_delete();

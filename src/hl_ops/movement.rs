@@ -87,7 +87,19 @@ impl<S: Shape> GraphTensor<S> {
     where
         S: RealizeShapeTo<Dst>,
     {
-        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
+        GraphTensor::from_id(
+            self.id,
+            self.shape.realize(
+                &Dst::realized_shape()
+                    .into_iter()
+                    .map(|i| match i {
+                        RealDim::Const(n) => Dim::Known(n),
+                        RealDim::Dyn => Dim::Unknown,
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            self.graph_ref,
+        )
     }
 
     pub fn contiguous(self) -> GraphTensor<S> {
@@ -270,7 +282,7 @@ mod tests {
         a.set(vec![1.4325, 2.492428, 3.127365, 3.54865]);
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![2.30434, 2.2343113, 1.4393]);
-        let c = (a.realize::<(usize,)>(), b.realize::<(usize,)>()).concat_along(Axis::<0>);
+        let c = (a.realize::<(Dyn<'-'>,)>(), b.realize::<(Dyn<'-'>,)>()).concat_along(Axis::<0>);
         c.mark();
         cx.execute();
 
@@ -291,13 +303,13 @@ mod tests {
         let b = cx.new_tensor::<R2<3, 2>>("Input");
         b.set(vec![2.30434, 2.2343113, 1.4393, 482.4312, 8.1234, 54.2054]);
         let c = (
-            a.realize::<(Const<3>, usize)>(),
-            b.realize::<(Const<3>, usize)>(),
+            a.realize::<(Const<3>, Dyn<'-'>)>(),
+            b.realize::<(Const<3>, Dyn<'-'>)>(),
         )
             .concat_along(Axis::<1>);
         let d = (
-            a.realize::<(usize, Const<2>)>(),
-            b.realize::<(usize, Const<2>)>(),
+            a.realize::<(Dyn<'-'>, Const<2>)>(),
+            b.realize::<(Dyn<'-'>, Const<2>)>(),
         )
             .concat_along(Axis::<0>);
         c.mark();

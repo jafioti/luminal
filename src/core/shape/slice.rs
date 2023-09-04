@@ -30,16 +30,16 @@ pub trait RangeToDim<D: Dimension> {
 }
 
 impl<D: Dimension> RangeToDim<D> for RangeFrom<usize> {
-    type Dimension = usize;
+    type Dimension = Dyn<'-'>;
 }
 impl<D: Dimension> RangeToDim<D> for RangeTo<usize> {
-    type Dimension = usize;
+    type Dimension = Dyn<'-'>;
 }
 impl<D: Dimension> RangeToDim<D> for RangeToInclusive<usize> {
-    type Dimension = usize;
+    type Dimension = Dyn<'-'>;
 }
 impl<D: Dimension> RangeToDim<D> for Range<usize> {
-    type Dimension = usize;
+    type Dimension = Dyn<'-'>;
 }
 impl<D: Dimension> RangeToDim<D> for RangeFull {
     type Dimension = D;
