@@ -69,17 +69,16 @@ impl<S: Shape> GraphTensor<S> {
         <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
         S: ReduceShape<Axis<DIM>>,
     {
-        let mean = self
-            .mean_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
-            .expand();
-        let centered = self - mean;
+        let centered = self
+            - self
+                .mean_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
+                .expand();
         let std = centered
             .mul(centered)
             .mean_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
-            .expand()
             .add(1e-5)
             .sqrt();
-        centered / std
+        centered / std.expand()
     }
 
     pub fn softmax<const DIM: isize>(self) -> GraphTensor<S>
@@ -278,7 +277,7 @@ mod tests {
         let b = a.tanh();
         b.mark();
 
-        cx.display_shapes();
+        // cx.display_shapes();
         cx.execute();
 
         let d_dev = Cpu::default();

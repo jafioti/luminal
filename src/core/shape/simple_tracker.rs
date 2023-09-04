@@ -39,13 +39,21 @@ impl ShapeTracker {
             slices: Default::default(),
             padding: Default::default(),
         };
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..dims.len() {
-            s.dims.push(dims[i]);
+        for (i, d) in dims.iter().enumerate() {
+            s.dims.push(*d);
             s.indexes.push(i);
             s.fake.push(false);
             s.slices.push((0, usize::MAX));
             s.padding.push((0, 0));
+        }
+        s
+    }
+
+    /// Create a shape tracker where all dims are fake
+    pub fn fake(dims: &[Dim]) -> Self {
+        let mut s = Self::new(dims);
+        for i in 0..dims.len() {
+            s.fake[i] = true;
         }
         s
     }
