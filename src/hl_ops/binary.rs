@@ -12,7 +12,7 @@ impl<S: Shape> Add<GraphTensor<S>> for GraphTensor<S> {
             .input(self.id, self.shape)
             .input(rhs.id, rhs.shape)
             .finish();
-        resolve_shapes(&mut self.shape, &mut rhs.shape, false);
+        resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
         GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 }
@@ -35,7 +35,7 @@ impl<S: Shape> Mul<GraphTensor<S>> for GraphTensor<S> {
             .input(self.id, self.shape)
             .input(rhs.id, rhs.shape)
             .finish();
-        resolve_shapes(&mut self.shape, &mut rhs.shape, false);
+        resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
         GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 }
@@ -59,7 +59,7 @@ impl<S: Shape> Rem<GraphTensor<S>> for GraphTensor<S> {
             .input(self.id, self.shape)
             .input(rhs.id, rhs.shape)
             .finish();
-        resolve_shapes(&mut self.shape, &mut rhs.shape, false);
+        resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
         GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 }
@@ -121,7 +121,7 @@ impl<S: Shape> GraphTensor<S> {
             .input(self.id, self.shape)
             .input(rhs.id, rhs.shape)
             .finish();
-        resolve_shapes(&mut self.shape, &mut rhs.shape, false);
+        resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
         GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use tinyvec::ArrayVec;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,10 +197,20 @@ impl ShapeTracker {
             self.padding[self.indexes[i]].1 += *e;
         }
     }
+
+    /// Given a dyn dim map, resolve global dyn dims into known dims
+    pub fn resolve_global_dyn_dims(mut self, dyn_dim_map: &HashMap<char, usize>) -> Self {
+        for d in self.dims.iter_mut() {
+            if let Dim::Unknown(u) = *d {
+                *d = Dim::Known(dyn_dim_map[&u]);
+            }
+        }
+        self
+    }
 }
 
 /// Resolve shapes between the two trackers to the best of our ability
-pub fn resolve_shapes(a: &mut ShapeTracker, b: &mut ShapeTracker, default_to_one: bool) {
+pub fn resolve_local_dyn_dims(a: &mut ShapeTracker, b: &mut ShapeTracker, default_to_one: bool) {
     // B to A
     for i in 0..a.dims.len() {
         if matches!(a.dims[a.indexes[i]], Dim::Unknown('-')) {
