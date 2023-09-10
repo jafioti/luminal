@@ -213,6 +213,6 @@ mod tests {
         );
         let d_c = d_a.matmul(d_b);
 
-        assert_close_data(&c.data(), &d_c.as_vec());
+        assert_close_data(&c.dyn_data(&cx.dyn_map), &d_c.as_vec());
     }
 }

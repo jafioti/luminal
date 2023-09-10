@@ -5,7 +5,7 @@ use crate::{
     shape::*,
     tensor::Tensor,
 };
-use std::marker::PhantomData;
+use std::{collections::HashMap, marker::PhantomData};
 
 use petgraph::graph::NodeIndex;
 
@@ -57,20 +57,6 @@ impl<S: Shape> GraphTensor<S> {
         unsafe { self.graph_ref.as_mut().unwrap() }
     }
 
-    /// Get the contiguous data of the tensor
-    pub fn data(&self) -> Vec<f32> {
-        let tensor = self.retrieve().unwrap();
-        let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let mut data = vec![0.; self.shape.n_elements()];
-        #[allow(unused_mut)]
-        for (i, mut r) in data.iter_mut().enumerate() {
-            if let Some(n) = self.shape.index(i) {
-                *r = orig_data[n];
-            }
-        }
-        data
-    }
-
     /// Set the value of the tensor, with dynamic dimensions.
     pub fn set_dyn<T: Data + Clone>(&mut self, data: T, shape: Vec<usize>) {
         // Report dyn dim values to graph dyn map
@@ -112,6 +98,20 @@ impl<S: Shape> GraphTensor<S> {
             .input(self.id, self.shape)
             .finish();
     }
+
+    pub fn dyn_data(&self, dyn_dim_map: &HashMap<char, usize>) -> Vec<f32> {
+        let st = self.shape.resolve_global_dyn_dims(dyn_dim_map);
+        let tensor = self.retrieve().unwrap();
+        let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let mut data = vec![0.; st.n_elements()];
+        #[allow(unused_mut)]
+        for (i, mut r) in data.iter_mut().enumerate() {
+            if let Some(n) = st.index(i) {
+                *r = orig_data[n];
+            }
+        }
+        data
+    }
 }
 
 impl<S: ConstShape> GraphTensor<S> {
@@ -129,5 +129,19 @@ impl<S: ConstShape> GraphTensor<S> {
         node.1 = Box::new(move |_| Tensor {
             data: Box::new(data.clone()),
         });
+    }
+
+    /// Get the contiguous data of the tensor
+    pub fn data(&self) -> Vec<f32> {
+        let tensor = self.retrieve().unwrap();
+        let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let mut data = vec![0.; self.shape.n_elements()];
+        #[allow(unused_mut)]
+        for (i, mut r) in data.iter_mut().enumerate() {
+            if let Some(n) = self.shape.index(i) {
+                *r = orig_data[n];
+            }
+        }
+        data
     }
 }

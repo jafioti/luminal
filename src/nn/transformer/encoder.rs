@@ -183,6 +183,6 @@ mod tests {
         );
         let d_b = d_model.forward(d_a);
 
-        assert_close_data(&b.data(), &d_b.as_vec());
+        assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
     }
 }

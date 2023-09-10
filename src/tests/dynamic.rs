@@ -39,7 +39,7 @@ fn test_movement() {
     ]);
     let d_b = d_a.reshape::<Rank2<6, 2>>().permute::<Rank2<2, 6>, _>();
 
-    assert_close_data(&b.data(), &d_b.as_vec());
+    assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
 }
 
 #[test]
@@ -51,6 +51,7 @@ fn test_matmul() {
     b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
     let c = a.matmul(b);
     c.mark();
+
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -58,7 +59,7 @@ fn test_matmul() {
     let d_b = d_dev.tensor([[1., 2., 3.], [1., 2., 3.], [1., 2., 3.]]);
     let d_c = d_a.matmul(d_b);
 
-    let r = c.data();
+    let r = c.dyn_data(&cx.dyn_map);
     assert_close_data(&r, &d_c.as_vec());
 }
 
@@ -85,7 +86,7 @@ fn test_batch_matmul() {
     let d_b = d_dev.tensor([[1., 2., 3., 1.], [1., 2., 3., 1.]]);
     let d_c = d_a.matmul(d_b);
 
-    assert_close_data(&c.data(), &d_c.as_vec());
+    assert_close_data(&c.dyn_data(&cx.dyn_map), &d_c.as_vec());
 }
 
 #[test]
@@ -106,12 +107,12 @@ fn test_feedforward() {
 
     cx.execute();
 
-    let unoptimized_batch_out = batch_out.data();
+    let unoptimized_batch_out = batch_out.dyn_data(&cx.dyn_map);
 
     cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
     cx.execute();
 
-    assert_close_data(&unoptimized_batch_out, &batch_out.data());
+    assert_close_data(&unoptimized_batch_out, &batch_out.dyn_data(&cx.dyn_map));
 
     // Test against dfdx
     let dev = Cpu::default();

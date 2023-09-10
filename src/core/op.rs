@@ -285,6 +285,11 @@ impl Operator for Mul {
                 .downcast_ref::<Vec<f32>>()
                 .unwrap(),
         );
+        println!(
+            "Mulling with {:?} and {:?}",
+            inp[0].1.shape(),
+            inp[1].1.shape()
+        );
         let mut data = vec![0.; inp[0].1.n_elements()];
         for i in 0..data.len() {
             data[i] = inp[0].1.index(i).map(|i| a_data[i]).unwrap_or_default()
@@ -526,7 +531,7 @@ mod tests {
         let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
         let d_b = d_a.slice((1.., ..));
 
-        assert_close_data(&b.data(), &d_b.as_vec());
+        assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
     }
 
     // Unary op tests

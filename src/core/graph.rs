@@ -16,7 +16,7 @@ use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Dire
 pub struct Graph {
     pub tensors: HashMap<NodeIndex, Tensor>,
     pub(crate) id_remap: HashMap<NodeIndex, NodeIndex>,
-    pub(crate) dyn_map: HashMap<char, usize>,
+    pub dyn_map: HashMap<char, usize>,
     pub graph:
         StableGraph<Box<dyn Operator>, (u8, crate::core::shape::simple_tracker::ShapeTracker)>,
     pub no_delete: HashSet<NodeIndex>,
@@ -28,7 +28,6 @@ pub struct Graph {
         Vec<(
             NodeIndex,
             Vec<(NodeIndex, crate::core::shape::simple_tracker::ShapeTracker)>,
-            Vec<NodeIndex>,
         )>,
     >,
 }
@@ -99,11 +98,6 @@ impl Graph {
             nodes.append(&mut stack);
         }
         let mut v = Vec::with_capacity(nodes.len());
-        let mut dependencies: HashMap<NodeIndex, usize> = self
-            .graph
-            .node_indices()
-            .map(|n| (n, self.graph.edges_directed(n, Direction::Outgoing).count()))
-            .collect();
         for node in nodes {
             let src_ids = self
                 .graph
@@ -111,22 +105,7 @@ impl Graph {
                 .sorted_by_key(|e| e.weight().0)
                 .map(|i| (i.source(), i.weight().1))
                 .collect_vec();
-            let mut srcs_to_remove = vec![];
-            for (source, _) in src_ids.iter().filter(|(n, _)| !self.no_delete.contains(n)) {
-                let deps = dependencies.get_mut(source).unwrap();
-                *deps -= 1;
-                if *deps == 0 {
-                    // No more dependencies for this view, let's remove it
-                    srcs_to_remove.push(*source);
-                }
-            }
-            if !self.no_delete.contains(&node)
-                && dependencies.get(&node).copied().unwrap_or_default() == 0
-            {
-                // Delete current node now (really this shouldn't be ran in the first place)
-                srcs_to_remove.push(node);
-            }
-            v.push((node, src_ids, srcs_to_remove));
+            v.push((node, src_ids));
         }
         self.linearized_graph = Some(v);
     }
@@ -197,7 +176,7 @@ impl Graph {
             .map(|i| (i, self.graph.edges_directed(i, Direction::Outgoing).count()))
             .collect();
 
-        for (node, src_ids, srcs_to_remove) in self.linearized_graph.as_ref().unwrap().iter() {
+        for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
             if self.tensors.contains_key(node) {
                 continue;
             }
@@ -238,7 +217,7 @@ impl Graph {
             self.tensors.insert(*node, tensor);
 
             // Check if we can delete the source tensors now
-            for source in srcs_to_remove {
+            for (source, _) in src_ids {
                 *remaining_consumers.get_mut(source).unwrap() -= 1;
             }
         }
@@ -251,7 +230,7 @@ impl Graph {
         if self.linearized_graph.is_none() {
             self.toposort();
         }
-        for (node, src_ids, _) in self.linearized_graph.as_ref().unwrap().iter() {
+        for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
             if self.tensors.contains_key(node) {
                 continue;
             }
@@ -286,6 +265,7 @@ impl Graph {
             for edge in self
                 .graph
                 .edges_directed(node, petgraph::Direction::Outgoing)
+                .sorted_by_key(|e| e.weight().0)
             {
                 new_graph.add_edge(
                     id_map[&edge.source()],

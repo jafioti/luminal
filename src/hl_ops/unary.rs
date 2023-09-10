@@ -247,7 +247,7 @@ mod tests {
             (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<2>),
         );
         let d_b = d_a.relu();
-        assert_close_data(&b.data(), &d_b.as_vec());
+        assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
     }
 
     #[test]
@@ -266,7 +266,7 @@ mod tests {
             (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<2>),
         );
         let d_b = d_a.sigmoid();
-        assert_close_data(&b.data(), &d_b.as_vec());
+        assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
     }
 
     #[test]
@@ -286,7 +286,7 @@ mod tests {
             (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<2>),
         );
         let d_b = d_a.tanh();
-        let d = b.data();
+        let d = b.dyn_data(&cx.dyn_map);
         println!("D: {:?}", d);
 
         assert_close_data(&d, &d_b.as_vec());

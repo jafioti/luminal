@@ -83,7 +83,8 @@ impl ShapeTracker {
 
     /// Permute the dimensions
     pub fn permute(&mut self, axes: &[usize]) {
-        self.indexes.copy_from_slice(axes);
+        let new_indexes = axes.iter().map(|i| self.indexes[*i]).collect::<Vec<_>>();
+        self.indexes.copy_from_slice(&new_indexes);
     }
 
     /// Convert a logical index into a physical one
@@ -165,11 +166,7 @@ impl ShapeTracker {
 
     /// Realize the true shape
     pub fn shape(&self) -> Vec<Dim> {
-        let mut dims = Vec::with_capacity(self.dims.len());
-        for i in self.indexes {
-            dims.push(self.dims[i]);
-        }
-        dims
+        self.indexes.into_iter().map(|i| self.dims[i]).collect()
     }
 
     /// Take a slice
@@ -214,11 +211,8 @@ pub fn resolve_local_dyn_dims(a: &mut ShapeTracker, b: &mut ShapeTracker, defaul
     // B to A
     for i in 0..a.dims.len() {
         if matches!(a.dims[a.indexes[i]], Dim::Unknown('-')) {
-            if let Dim::Known(n) = b.dims[b.indexes[i]] {
-                a.dims[a.indexes[i]] = Dim::Known(n);
-            } else if let Dim::Unknown(c) = b.dims[b.indexes[i]] {
-                a.dims[a.indexes[i]] = Dim::Unknown(c);
-            } else if default_to_one {
+            a.dims[a.indexes[i]] = b.dims[b.indexes[i]];
+            if matches!(a.dims[a.indexes[i]], Dim::Unknown('-')) && default_to_one {
                 a.dims[a.indexes[i]] = Dim::Known(1);
             }
         }
@@ -227,11 +221,8 @@ pub fn resolve_local_dyn_dims(a: &mut ShapeTracker, b: &mut ShapeTracker, defaul
     // A to B
     for i in 0..a.dims.len() {
         if matches!(b.dims[b.indexes[i]], Dim::Unknown('-')) {
-            if let Dim::Known(n) = a.dims[a.indexes[i]] {
-                b.dims[b.indexes[i]] = Dim::Known(n);
-            } else if let Dim::Unknown(c) = a.dims[a.indexes[i]] {
-                b.dims[b.indexes[i]] = Dim::Unknown(c);
-            } else if default_to_one {
+            b.dims[b.indexes[i]] = a.dims[a.indexes[i]];
+            if matches!(b.dims[b.indexes[i]], Dim::Unknown('-')) && default_to_one {
                 b.dims[b.indexes[i]] = Dim::Known(1);
             }
         }

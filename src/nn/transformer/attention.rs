@@ -172,8 +172,9 @@ impl<
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        let weights = queries
-            .batch_matmul(keys)
+        let weights = queries.batch_matmul(keys);
+        weights.debug("YEQ");
+        let weights = weights
             .mul((1.0 / ((K_DIM / HEADS) as f64).sqrt()) as f32)
             .softmax::<3>();
 
@@ -231,6 +232,7 @@ mod tests {
         );
         b.mark();
 
+        cx.display_shapes();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -276,6 +278,6 @@ mod tests {
         );
         let d_b = d_model.forward((d_a, d_e.clone(), d_e));
 
-        assert_close_data(&b.data(), &d_b.as_vec());
+        assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
     }
 }
