@@ -25,7 +25,7 @@ cx.optimize(GenericOptimizer::default());
 cx.execute();
 
 // Get result
-println!("Result: {:?}", c.retrieve().unwrap().data);
+println!("Result: {:?}", c.data());
 ```
 
 ## Getting Started
