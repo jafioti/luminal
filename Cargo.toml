@@ -5,8 +5,6 @@ edition = "2021"
 description = "Deep learning at the speed of light."
 license = "MIT OR Apache-2.0"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [features]
 #default = ["cuda"]
 cuda = ["dep:cudarc"]

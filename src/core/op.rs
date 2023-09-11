@@ -66,21 +66,6 @@ impl Debug for Function {
     }
 }
 
-/// An operand that does nothing. It's purpose is to force a shape resolution between multiple tensors
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct NoOp;
-
-impl Operator for NoOp {
-    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
-        match inp.pop().unwrap().0 {
-            InputTensor::Owned(t) => t,
-            InputTensor::Borrowed(t) => Tensor {
-                data: t.data.clone(),
-            },
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Print(pub String);
 impl Operator for Print {
@@ -753,7 +738,7 @@ mod tests {
             &c.data(),
             &[1., 2., 3.]
                 .into_iter()
-                .zip([1., 2., 3.].into_iter())
+                .zip([1., 2., 3.])
                 .map(|(a, b)| a % b)
                 .collect_vec(),
         );

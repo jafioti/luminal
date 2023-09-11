@@ -1,5 +1,5 @@
 use crate::{
-    op::{Function, NoOp},
+    op::Function,
     prelude::{simple_tracker::Dim, *},
 };
 
@@ -67,21 +67,9 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(id, self.shape, self.graph_ref)
     }
 
-    pub fn match_shape<Dst: Shape>(self, rhs: GraphTensor<Dst>) -> GraphTensor<Dst> {
-        GraphTensor::from_id(
-            self.graph()
-                .add_op(NoOp)
-                .input(self.id, self.shape)
-                .input(rhs.id, rhs.shape)
-                .finish(),
-            self.shape,
-            self.graph_ref,
-        )
-    }
-
     /// Create an arange of the same shape, along a certian dimension
     pub fn arange<const DIM: usize>(self) -> GraphTensor<S> {
-        self.graph().constant(1.).match_shape(self).cumsum::<DIM>() - 1.0
+        self.graph().constant(1.).expand::<S, _>().cumsum::<DIM>() - 1.0
     }
 }
 

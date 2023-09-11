@@ -109,6 +109,7 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
             .add_op(Function(
                 "ARange".to_string(),
                 Box::new(move |inp| {
+                    println!("Arange");
                     let offset = if has_cache {
                         inp[1].1.shape()[2].to_usize().unwrap()
                     } else {

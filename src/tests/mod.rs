@@ -25,16 +25,16 @@ fn main() {
 
     cx.execute();
 
-    let unoptimized_a = a.retrieve().unwrap();
-    let unoptimized_d = d.retrieve().unwrap();
+    let unoptimized_a = a.data();
+    let unoptimized_d = d.data();
 
     cx.optimize(GenericOptimizer::default());
 
     cx.execute();
-    let a = a.retrieve().unwrap();
-    let d = d.retrieve().unwrap();
-    assert_close(&unoptimized_a, &a);
-    assert_close(&unoptimized_d, &d);
+    let a = a.data();
+    let d = d.data();
+    assert_close_data(&unoptimized_a, &a);
+    assert_close_data(&unoptimized_d, &d);
 }
 
 #[test]
@@ -51,12 +51,12 @@ fn test_matmul() {
 
     cx.execute();
 
-    let unoptimized_a = a.retrieve().unwrap();
+    let unoptimized_a = a.data();
 
     cx.optimize(GenericOptimizer::default());
     cx.execute();
 
-    assert_close(&unoptimized_a, &a.retrieve().unwrap());
+    assert_close_data(&unoptimized_a, &a.data());
 }
 
 #[test]
@@ -73,15 +73,7 @@ fn test_shapes() {
     assert_close_data(&b.data(), &[1., 3., 2., 4.]);
 }
 
-/// Ensure two tensors are nearly equal (only works with Vec<f32> data)
-pub fn assert_close(a: &Tensor, b: &Tensor) {
-    assert_close_data(
-        a.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
-        b.data.as_any().downcast_ref::<Vec<f32>>().unwrap(),
-    );
-}
-
-/// Ensure two tensor data arrays are nearly equal
+/// Ensure two arrays are nearly equal
 pub fn assert_close_data(a: &[f32], b: &[f32]) {
     assert_eq!(a.len(), b.len(), "Number of elements doesn't match");
     for (a, b) in a.iter().zip(b.iter()) {
