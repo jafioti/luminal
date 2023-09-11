@@ -172,9 +172,8 @@ impl<
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        let weights = queries.batch_matmul(keys);
-        weights.debug("YEQ");
-        let weights = weights
+        let weights = queries
+            .batch_matmul(keys)
             .mul((1.0 / ((K_DIM / HEADS) as f64).sqrt()) as f32)
             .softmax::<3>();
 

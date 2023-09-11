@@ -6,8 +6,9 @@ impl<A: Dimension, B: Dimension> GraphTensor<(A, B)> {
         // Reshape
         let w = rhs.permute::<_, Axes2<1, 0>>();
 
+        let e = self.expand::<(A, C, B), _>();
         // Broadcasted Multiply
-        let mul = self.expand::<(A, C, B), _>() * w.expand::<(A, C, B), _>();
+        let mul = e * w.expand::<(A, C, B), _>();
 
         // Sum Reduce
         mul.sum_reduce::<_, Axis<2>>()
@@ -93,6 +94,7 @@ mod tests {
         b.set(vec![1., 2., 3., 1., 2., 3.]);
         let c = a.matmul(b);
         c.mark();
+
         cx.execute();
 
         let d_dev = Cpu::default();

@@ -152,6 +152,12 @@ impl ShapeTracker {
 
     /// Create a contiguous version
     pub fn contiguous(mut self) -> Self {
+        let new_dims = self
+            .indexes
+            .into_iter()
+            .map(|i| self.dims[i])
+            .collect::<Vec<_>>();
+        self.dims.copy_from_slice(&new_dims);
         self.indexes
             .iter_mut()
             .enumerate()
@@ -228,28 +234,4 @@ pub fn resolve_local_dyn_dims(a: &mut ShapeTracker, b: &mut ShapeTracker, defaul
             }
         }
     }
-}
-
-fn to_shapes_strides(shape: &[usize], strides: &[usize]) -> Vec<(usize, usize)> {
-    let mut ret = if !shape.is_empty() {
-        vec![(shape[0], strides[0])]
-    } else {
-        vec![]
-    };
-
-    for i in 1..shape.len() {
-        if (strides[i] != 0
-            && ret
-                .last()
-                .map(|(_, x)| *x == shape[i] * strides[i])
-                .unwrap_or_default())
-            || ret.last().map(|(i, _)| *i == 1).unwrap_or_default()
-            || (strides[i] == 0 && ret.last().map(|(_, i)| *i == 0).unwrap_or_default())
-        {
-            *ret.last_mut().unwrap() = (ret.last().unwrap().0 * shape[i], strides[i]);
-        } else {
-            ret.push((shape[i], strides[i]));
-        }
-    }
-    ret
 }

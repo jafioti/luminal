@@ -29,17 +29,7 @@ impl<S: Shape> Mul<GraphTensor<S>> for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
     fn mul(mut self, mut rhs: GraphTensor<S>) -> Self::Output {
-        println!(
-            "Resolving shape {:?} and {:?}",
-            self.shape.shape(),
-            rhs.shape.shape()
-        );
         resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
-        println!(
-            "Resolved shape {:?} and {:?}",
-            self.shape.shape(),
-            rhs.shape.shape()
-        );
         let new_id = self
             .graph()
             .add_op(op::Mul)
@@ -102,7 +92,6 @@ impl<S: Shape> Mul<f32> for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
     fn mul(self, rhs: f32) -> Self::Output {
-        println!("Mul with float {rhs}");
         self * self.graph().constant(rhs).expand()
     }
 }

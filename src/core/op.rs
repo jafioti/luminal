@@ -285,7 +285,6 @@ impl Operator for Mul {
                 .downcast_ref::<Vec<f32>>()
                 .unwrap(),
         );
-        println!("Mulling with {:?} and {:?}", inp[0].1, inp[1].1);
         let mut data = vec![0.; inp[0].1.n_elements()];
         for i in 0..data.len() {
             data[i] = inp[0].1.index(i).map(|i| a_data[i]).unwrap_or_default()
