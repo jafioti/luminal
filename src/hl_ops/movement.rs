@@ -95,36 +95,23 @@ impl<S: Shape> GraphTensor<S> {
         self.shape.pad(&ranges);
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
-}
 
-pub trait TryConcatAlong<Ax>: Sized {
-    type Output;
-    fn concat_along(self, ax: Ax) -> Self::Output;
-}
-
-impl<A, B, Ax> TryConcatAlong<Ax> for (GraphTensor<A>, GraphTensor<B>)
-where
-    Ax: Axes<Array = [isize; 1]>,
-    A: Shape + HasAxes<Ax>,
-    B: Shape<Concrete = A::Concrete> + HasAxes<Ax>,
-    (A, B): TryConcatAlong<Ax>,
-    <(A, B) as TryConcatAlong<Ax>>::Output: Shape,
-{
-    type Output = GraphTensor<<(A, B) as TryConcatAlong<Ax>>::Output>;
-    fn concat_along(self, _: Ax) -> Self::Output {
+    pub fn concat_along<Dst: Shape, Ax: Axes<Array = [isize; 1]>, Rhs: Shape>(
+        self,
+        rhs: GraphTensor<Rhs>,
+    ) -> GraphTensor<Dst> {
         let dim = Ax::as_array()[0] as usize;
         let fin = self
-            .0
             .graph()
             .add_op(op::Function(
                 "Concat".to_string(),
                 Box::new(move |mut inps| {
-                    let mut pad_shape = vec![(0, 0); A::NUM_DIMS];
+                    let mut pad_shape = vec![(0, 0); S::NUM_DIMS];
                     pad_shape[dim].1 = inps[1].1.shape()[dim]
                         .to_usize()
                         .expect("Tried to concat on a dim with an unknown size");
                     inps[0].1.pad(&pad_shape);
-                    let mut pad_shape = vec![(0, 0); A::NUM_DIMS];
+                    let mut pad_shape = vec![(0, 0); S::NUM_DIMS];
                     pad_shape[dim].1 = inps[0].1.shape()[dim]
                         .to_usize()
                         .expect("Tried to concat on a dim with an unknown size");
@@ -156,77 +143,25 @@ where
                     }
                 }),
             ))
-            .input(self.0.id, self.0.shape)
-            .input(self.1.id, self.1.shape)
+            .input(self.id, self.shape)
+            .input(rhs.id, rhs.shape)
             .finish();
         GraphTensor::from_id(
             fin,
-            ShapeTracker::new(&<(A, B) as TryConcatAlong<Ax>>::Output::realized_shape()),
-            self.0.graph_ref,
+            ShapeTracker::new(&Dst::realized_shape()),
+            self.graph_ref,
         )
     }
 }
-
-macro_rules! impl_concat {
-    ($Ax:expr, $NumDims:expr, [$($Head:tt),*], [$($Tail:tt),*]) => {
-        impl<A: Dimension, B: Dimension, $($Head: Dimension, )* $($Tail: Dimension, )*> TryConcatAlong<Axis<$Ax>>
-            for (
-                ($($Head, )* A, $($Tail, )*),
-                ($($Head, )* B, $($Tail, )*),
-            )
-        where
-            A: std::ops::Add<B>,
-            <A as std::ops::Add<B>>::Output: Dimension,
-            {
-                type Output = (
-                    $($Head, )*
-                    <A as std::ops::Add<B>>::Output,
-                    $($Tail, )*
-                );
-                fn concat_along(self, _: Axis<$Ax>) -> Self::Output {
-                    todo!()
-                }
-            }
-    };
-}
-
-impl_concat!(0, 1, [], []);
-impl_concat!(0, 2, [], [D1]);
-impl_concat!(0, 3, [], [D1, D2]);
-impl_concat!(0, 4, [], [D1, D2, D3]);
-impl_concat!(0, 5, [], [D1, D2, D3, D4]);
-impl_concat!(0, 6, [], [D1, D2, D3, D4, D5]);
-
-impl_concat!(1, 2, [D0], []);
-impl_concat!(1, 3, [D0], [D2]);
-impl_concat!(1, 4, [D0], [D2, D3]);
-impl_concat!(1, 5, [D0], [D2, D3, D4]);
-impl_concat!(1, 6, [D0], [D2, D3, D4, D5]);
-
-impl_concat!(2, 3, [D0, D1], []);
-impl_concat!(2, 4, [D0, D1], [D3]);
-impl_concat!(2, 5, [D0, D1], [D3, D4]);
-impl_concat!(2, 6, [D0, D1], [D3, D4, D5]);
-
-impl_concat!(3, 4, [D0, D1, D2], []);
-impl_concat!(3, 5, [D0, D1, D2], [D4]);
-impl_concat!(3, 6, [D0, D1, D2], [D4, D5]);
-
-impl_concat!(4, 5, [D0, D1, D2, D3], []);
-impl_concat!(4, 6, [D0, D1, D2, D3], [D5]);
-
-impl_concat!(5, 6, [D0, D1, D2, D3, D4], []);
 
 #[cfg(test)]
 mod tests {
     use dfdx::{
         tensor::{Cpu, TensorFrom, TensorFromVec},
-        tensor_ops::{RealizeTo, TryConcatAlong as DfdxTryConcatAlong},
+        tensor_ops::{RealizeTo, TryConcatAlong},
     };
 
     use crate::{prelude::*, tests::assert_close_data};
-
-    use super::TryConcatAlong;
 
     #[test]
     fn test_concat_1d() {
@@ -235,7 +170,7 @@ mod tests {
         a.set(vec![1.4325, 2.492428, 3.127365, 3.54865]);
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![2.30434, 2.2343113, 1.4393]);
-        let c = (a.realize::<(Dyn<'-'>,)>(), b.realize::<(Dyn<'-'>,)>()).concat_along(Axis::<0>);
+        let c = a.concat_along::<R1<7>, crate::prelude::Axis<0>, _>(b);
         c.mark();
         cx.execute();
 
@@ -255,16 +190,8 @@ mod tests {
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
         let b = cx.new_tensor::<R2<3, 2>>("Input");
         b.set(vec![2.30434, 2.2343113, 1.4393, 482.4312, 8.1234, 54.2054]);
-        let c = (
-            a.realize::<(Const<3>, Dyn<'-'>)>(),
-            b.realize::<(Const<3>, Dyn<'-'>)>(),
-        )
-            .concat_along(Axis::<1>);
-        let d = (
-            a.realize::<(Dyn<'-'>, Const<2>)>(),
-            b.realize::<(Dyn<'-'>, Const<2>)>(),
-        )
-            .concat_along(Axis::<0>);
+        let c = a.concat_along::<R2<3, 4>, Axis<1>, _>(b);
+        let d = a.concat_along::<R2<6, 2>, Axis<0>, _>(b);
         c.mark();
         d.mark();
         cx.execute();

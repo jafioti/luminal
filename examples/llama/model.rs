@@ -4,7 +4,7 @@ use std::ops::{Add, Mul};
 use luminal::{
     nn::{activation::RMSNorm, embedding::Embedding},
     op::Function,
-    prelude::{movement::TryConcatAlong, *},
+    prelude::*,
 };
 use rand::{thread_rng, Rng};
 
@@ -129,14 +129,11 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
         }
         let t: GraphTensor<(Seq,)> =
             GraphTensor::from_id(op.finish(), <(Seq,)>::to_tracker(), graph);
-        let freqs = t
-            .expand::<(Seq, Const<1>), _>()
-            .matmul(
-                self.inv_freq
-                    .expand::<(Const<1>, Const<HEAD_DIM_OVER_2>), _>(),
-            )
-            .realize::<(Seq, Dyn<'-'>)>();
-        let emb = (freqs, freqs).concat_along(Axis::<1>);
+        let freqs = t.expand::<(Seq, Const<1>), _>().matmul(
+            self.inv_freq
+                .expand::<(Const<1>, Const<HEAD_DIM_OVER_2>), _>(),
+        );
+        let emb = freqs.concat_along::<(Seq, Const<HEAD_DIM>), Axis<1>, _>(freqs);
         (emb.sin().realize(), emb.cos().realize())
     }
 
@@ -145,7 +142,7 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
     ) -> GraphTensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>)> {
         let x1 = x.slice((.., .., .., ..HEAD_DIM_OVER_2));
         let x2 = x.slice((.., .., .., HEAD_DIM_OVER_2..));
-        (-x2, x1).concat_along(Axis::<3>).realize()
+        (-x2).concat_along::<(Batch, NumHeads, Seq, Const<HEAD_DIM>), Axis<3>, _>(x1)
     }
 }
 
@@ -313,23 +310,12 @@ impl<
         let (q, k, v) = attn_forward(self, x, Some(cache));
 
         // Add KV cache
-        let k = (
-            cache
-                .0
-                .realize::<(Batch, Const<NUM_HEADS>, Dyn<'s'>, Const<HEAD_DIM>)>(),
-            k.realize::<(Batch, Const<NUM_HEADS>, Dyn<'s'>, Const<HEAD_DIM>)>(),
-        )
-            .concat_along(Axis::<2>)
-            .realize::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>)>();
-        let v = (
-            cache
-                .1
-                .realize::<(Batch, Const<NUM_HEADS>, Dyn<'s'>, Const<HEAD_DIM>)>(),
-            v.realize::<(Batch, Const<NUM_HEADS>, Dyn<'s'>, Const<HEAD_DIM>)>(),
-        )
-            .concat_along(Axis::<2>)
-            .realize::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>)>();
-
+        let k = cache
+            .0
+            .concat_along::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(k);
+        let v = cache
+            .1
+            .concat_along::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(v);
         let w = q
             .batch_matmul(k.permute())
             .mul((HEAD_DIM as f64).sqrt().recip() as f32) // Inv head scale

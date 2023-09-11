@@ -195,7 +195,7 @@ impl ShapeTracker {
     pub fn pad(&mut self, padding: &[(usize, usize)]) {
         for (i, (s, e)) in padding.iter().enumerate() {
             self.padding[self.indexes[i]].0 += *s;
-            if *e != 0 && self.slices[self.indexes[i]].1 != 0 {
+            if *e != 0 && self.slices[self.indexes[i]].1 != usize::MAX {
                 panic!("Adding padding to a slice isn't supported")
             }
             self.padding[self.indexes[i]].1 += *e;
