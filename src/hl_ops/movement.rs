@@ -112,7 +112,7 @@ impl<S: Shape> GraphTensor<S> {
                         .expect("Tried to concat on a dim with an unknown size");
                     inps[0].1.pad(&pad_shape);
                     let mut pad_shape = vec![(0, 0); S::NUM_DIMS];
-                    pad_shape[dim].1 = inps[0].1.shape()[dim]
+                    pad_shape[dim].0 = inps[0].1.shape()[dim]
                         .to_usize()
                         .expect("Tried to concat on a dim with an unknown size");
                     inps[1].1.pad(&pad_shape);
@@ -132,11 +132,17 @@ impl<S: Shape> GraphTensor<S> {
                             .downcast_ref::<Vec<f32>>()
                             .unwrap(),
                     );
-                    let mut data = vec![0.; inps[0].1.n_elements()];
-                    #[allow(clippy::needless_range_loop)]
-                    for i in 0..data.len() {
-                        data[i] = inps[0].1.index(i).map(|i| a_data[i]).unwrap_or_default()
-                            + inps[1].1.index(i).map(|i| b_data[i]).unwrap_or_default();
+                    let mut data = vec![0.; inps[0].1.n_elements() + inps[1].1.n_elements()];
+                    for (i, d) in data.iter_mut().enumerate() {
+                        *d = inps[0]
+                            .1
+                            .index(i)
+                            .map(|i| {
+                                println!("A: {i}");
+                                a_data[i]
+                            })
+                            .unwrap_or_default()
+                            + inps[1].1.index(i).map(|i| b_data[i]).unwrap_or_default()
                     }
                     Tensor {
                         data: Box::new(data),
@@ -180,7 +186,7 @@ mod tests {
         let d_c = (d_a.realize::<(usize,)>(), d_b.realize::<(usize,)>())
             .concat_along(dfdx::shapes::Axis::<0>);
 
-        assert_close_data(&c.dyn_data(&cx.dyn_map), &d_c.as_vec());
+        assert_close_data(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -216,7 +222,11 @@ mod tests {
         )
             .concat_along(dfdx::shapes::Axis::<0>);
 
-        assert_close_data(&c.dyn_data(&cx.dyn_map), &d_c.as_vec());
-        assert_close_data(&d.dyn_data(&cx.dyn_map), &d_d.as_vec());
+        println!("Executed");
+        let c = c.data();
+        println!("C: {:?}", c);
+        println!("D: {:?}", d_c.as_vec());
+        assert_close_data(&c, &d_c.as_vec());
+        assert_close_data(&d.data(), &d_d.as_vec());
     }
 }

@@ -89,6 +89,11 @@ impl ShapeTracker {
 
     /// Convert a logical index into a physical one
     pub fn index(&self, logical: usize) -> Option<usize> {
+        println!("Logical: {logical}");
+        println!("Dims: {:?}", self.shape());
+        println!("Padding: {:?}", self.padding);
+        println!("Slices: {:?}", self.slices);
+        println!("Indexes: {:?}", self.indexes);
         let mut ret = 0;
         let mut acc = 1;
         let mut strides = self
@@ -99,22 +104,45 @@ impl ShapeTracker {
             .scan(1, |state, (i, x)| {
                 let ret = *state;
                 if !self.fake[i] {
-                    *state *= x.to_usize().unwrap();
+                    *state *= (x
+                        .to_usize()
+                        .expect("All dims must be known before indexing!")
+                        + self.padding[i].0
+                        + self.padding[i].1)
+                        .min(self.slices[i].1)
+                        - self.slices[i].0;
                 }
                 Some(ret)
             })
             .collect::<Vec<_>>();
         strides.reverse();
         for ind in self.indexes.iter().rev() {
-            let sh = match self.dims[*ind] {
-                Dim::Known(n) => n,
-                Dim::Unknown(_) => panic!("All dims must be known before indexing!"),
-            };
+            println!("L: {logical} Acc: {acc} | {}", logical / acc);
+            let sh = self.dims[*ind]
+                .to_usize()
+                .expect("All dims must be known before indexing!");
             if !self.fake[*ind] {
-                let dim_ind = (logical / acc) % sh + self.slices[*ind].0;
-                ret += dim_ind * strides[*ind];
+                let dim_ind = (logical / acc)
+                    % ((sh + self.padding[*ind].0 + self.padding[*ind].1).min(self.slices[*ind].1)
+                        - self.slices[*ind].0);
+                println!("Sh: {sh}");
+                println!("Dim Ind: {dim_ind}");
+                // Over top
+                if dim_ind
+                    >= (sh + self.padding[*ind].0 + self.padding[*ind].1).min(self.slices[*ind].1)
+                {
+                    return None;
+                }
+                // Under bottom
+                if dim_ind < self.padding[*ind].0.saturating_sub(self.slices[*ind].0) {
+                    return None;
+                }
+                ret += (dim_ind - self.padding[*ind].0
+                    + (self.slices[*ind].0.saturating_sub(self.padding[*ind].0)))
+                    * strides[*ind];
             }
-            acc *= sh;
+            acc *= (sh + self.padding[*ind].0 + self.padding[*ind].1).min(self.slices[*ind].1)
+                - self.slices[*ind].0;
         }
         Some(ret)
     }
@@ -151,19 +179,13 @@ impl ShapeTracker {
     }
 
     /// Create a contiguous version
-    pub fn contiguous(mut self) -> Self {
+    pub fn contiguous(self) -> Self {
         let new_dims = self
             .indexes
             .into_iter()
             .map(|i| self.dims[i])
             .collect::<Vec<_>>();
-        self.dims.copy_from_slice(&new_dims);
-        self.indexes
-            .iter_mut()
-            .enumerate()
-            .for_each(|(i, x)| *x = i);
-        self.fake.iter_mut().for_each(|i| *i = false);
-        self
+        Self::new(&new_dims)
     }
 
     /// Check if contiguous
@@ -193,6 +215,7 @@ impl ShapeTracker {
 
     /// Add padding
     pub fn pad(&mut self, padding: &[(usize, usize)]) {
+        println!("PAdding: {:?}", padding);
         for (i, (s, e)) in padding.iter().enumerate() {
             self.padding[self.indexes[i]].0 += *s;
             if *e != 0 && self.slices[self.indexes[i]].1 != usize::MAX {
