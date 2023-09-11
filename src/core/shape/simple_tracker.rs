@@ -89,11 +89,6 @@ impl ShapeTracker {
 
     /// Convert a logical index into a physical one
     pub fn index(&self, logical: usize) -> Option<usize> {
-        println!("Logical: {logical}");
-        println!("Dims: {:?}", self.shape());
-        println!("Padding: {:?}", self.padding);
-        println!("Slices: {:?}", self.slices);
-        println!("Indexes: {:?}", self.indexes);
         let mut ret = 0;
         let mut acc = 1;
         let mut strides = self
@@ -104,20 +99,15 @@ impl ShapeTracker {
             .scan(1, |state, (i, x)| {
                 let ret = *state;
                 if !self.fake[i] {
-                    *state *= (x
+                    *state *= x
                         .to_usize()
-                        .expect("All dims must be known before indexing!")
-                        + self.padding[i].0
-                        + self.padding[i].1)
-                        .min(self.slices[i].1)
-                        - self.slices[i].0;
+                        .expect("All dims must be known before indexing!");
                 }
                 Some(ret)
             })
             .collect::<Vec<_>>();
         strides.reverse();
         for ind in self.indexes.iter().rev() {
-            println!("L: {logical} Acc: {acc} | {}", logical / acc);
             let sh = self.dims[*ind]
                 .to_usize()
                 .expect("All dims must be known before indexing!");
@@ -125,12 +115,8 @@ impl ShapeTracker {
                 let dim_ind = (logical / acc)
                     % ((sh + self.padding[*ind].0 + self.padding[*ind].1).min(self.slices[*ind].1)
                         - self.slices[*ind].0);
-                println!("Sh: {sh}");
-                println!("Dim Ind: {dim_ind}");
                 // Over top
-                if dim_ind
-                    >= (sh + self.padding[*ind].0 + self.padding[*ind].1).min(self.slices[*ind].1)
-                {
+                if dim_ind >= (sh + self.padding[*ind].0).min(self.slices[*ind].1) {
                     return None;
                 }
                 // Under bottom
@@ -147,18 +133,22 @@ impl ShapeTracker {
         Some(ret)
     }
 
-    /// The number of elements in this tensor. Counts unknown dims as size 0
+    /// The number of elements in this tensor, including pads and slices. Counts unknown dims as size 0
     pub fn n_elements(&self) -> usize {
-        self.dims
-            .iter()
-            .enumerate()
-            .filter_map(|(ind, i)| {
-                if let Dim::Known(n) = i {
-                    Some((*n).min(self.slices[ind].1) - self.slices[ind].0)
+        self.indexes
+            .into_iter()
+            // Filter out unknowns
+            .filter_map(|i| {
+                if let Dim::Known(n) = self.dims[i] {
+                    Some((i, n))
                 } else {
                     None
                 }
             })
+            // Add pads
+            .map(|(ind, dim)| (ind, dim + self.padding[ind].0 + self.padding[ind].1))
+            // Slice
+            .map(|(ind, dim)| dim.min(self.slices[ind].1) - self.slices[ind].0)
             .product()
     }
 

@@ -4,7 +4,6 @@ mod permute;
 mod realize;
 pub mod simple_tracker;
 mod slice;
-mod symbolic;
 
 pub use realize::*;
 pub use slice::*;
