@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn test_serialization() {
         let mut cx = Graph::new();
-        let model: Transformer<32, 200, 5, 5, 3, 2> = InitModule::initialize(&mut cx);
+        let model: Transformer<32, 200, 4, 4, 3, 2> = InitModule::initialize(&mut cx);
         let enc = cx.new_tensor::<R2<24, 32>>("EncInp");
         let trg = cx.new_tensor::<R2<20, 32>>("TrgInp");
         let out1 = model.forward((trg, enc));
@@ -260,7 +260,7 @@ mod tests {
         let out1 = out1.data();
 
         let mut cx = Graph::new();
-        let model: Transformer<32, 200, 5, 5, 3, 2> = InitModule::initialize(&mut cx);
+        let model: Transformer<32, 200, 4, 4, 3, 2> = InitModule::initialize(&mut cx);
         StateDictLoader::new(state_dict).load(&model, &mut cx);
         let enc = cx.new_tensor::<R2<24, 32>>("EncInp");
         let trg = cx.new_tensor::<R2<20, 32>>("TrgInp");

@@ -135,14 +135,7 @@ impl<S: Shape> GraphTensor<S> {
                     // Each input is already padded, so the final answer will be the same size as each input
                     let mut data = vec![0.; inps[0].1.n_elements()];
                     for (i, d) in data.iter_mut().enumerate() {
-                        *d = inps[0]
-                            .1
-                            .index(i)
-                            .map(|i| {
-                                println!("A: {i}");
-                                a_data[i]
-                            })
-                            .unwrap_or_default()
+                        *d = inps[0].1.index(i).map(|i| a_data[i]).unwrap_or_default()
                             + inps[1].1.index(i).map(|i| b_data[i]).unwrap_or_default()
                     }
                     Tensor {
@@ -199,9 +192,9 @@ mod tests {
         let b = cx.new_tensor::<R2<3, 2>>("Input");
         b.set(vec![2.30434, 2.2343113, 1.4393, 482.4312, 8.1234, 54.2054]);
         let c = a.concat_along::<R2<3, 4>, Axis<1>, _>(b);
-        // let d = a.concat_along::<R2<6, 2>, Axis<0>, _>(b);
+        let d = a.concat_along::<R2<6, 2>, Axis<0>, _>(b);
         c.mark();
-        // d.mark();
+        d.mark();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -224,12 +217,8 @@ mod tests {
         )
             .concat_along(dfdx::shapes::Axis::<0>);
 
-        println!("Executed");
-        let c = c.data();
-        println!("C: {:?}", c);
-        println!("D: {:?}", d_c.as_vec());
-        assert_close_data(&c, &d_c.as_vec());
-        // assert_close_data(&d.data(), &d_d.as_vec());
+        assert_close_data(&c.data(), &d_c.as_vec());
+        assert_close_data(&d.data(), &d_d.as_vec());
     }
 
     #[test]
@@ -257,10 +246,6 @@ mod tests {
             .concat_along(dfdx::shapes::Axis::<1>)
             .realize::<Rank2<3, 4>>();
 
-        println!("B: {:?}", b.shape);
-        let b = b.data();
-        println!("C: {:?}", b);
-        println!("D: {:?}", d_b.as_vec());
-        assert_close_data(&b, &d_b.as_vec());
+        assert_close_data(&b.data(), &d_b.as_vec());
     }
 }

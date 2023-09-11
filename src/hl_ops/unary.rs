@@ -293,7 +293,6 @@ mod tests {
         let b = a.tanh();
         b.mark();
 
-        // cx.display_shapes();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -302,9 +301,6 @@ mod tests {
             (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<2>),
         );
         let d_b = d_a.tanh();
-        let d = b.dyn_data(&cx.dyn_map);
-        println!("D: {:?}", d);
-
-        assert_close_data(&d, &d_b.as_vec());
+        assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
     }
 }

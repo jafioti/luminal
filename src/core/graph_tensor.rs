@@ -48,8 +48,8 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Get the value of the tensor (if the graph was executed)
-    pub fn retrieve(&self) -> Option<Tensor> {
-        self.graph().get_tensor(self.id)
+    pub fn retrieve(&self) -> Option<&Tensor> {
+        self.graph().get_tensor_ref(self.id)
     }
 
     #[allow(clippy::mut_from_ref)]

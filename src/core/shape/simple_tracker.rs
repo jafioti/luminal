@@ -27,9 +27,9 @@ impl Default for Dim {
 pub struct ShapeTracker {
     pub dims: ArrayVec<[Dim; 10]>,
     pub indexes: ArrayVec<[usize; 10]>,
-    fake: ArrayVec<[bool; 10]>,
-    slices: ArrayVec<[(usize, usize); 10]>,
-    padding: ArrayVec<[(usize, usize); 10]>,
+    pub fake: ArrayVec<[bool; 10]>,
+    pub slices: ArrayVec<[(usize, usize); 10]>,
+    pub padding: ArrayVec<[(usize, usize); 10]>,
 }
 
 impl ShapeTracker {
@@ -205,7 +205,6 @@ impl ShapeTracker {
 
     /// Add padding
     pub fn pad(&mut self, padding: &[(usize, usize)]) {
-        println!("PAdding: {:?}", padding);
         for (i, (s, e)) in padding.iter().enumerate() {
             self.padding[self.indexes[i]].0 += *s;
             if *e != 0 && self.slices[self.indexes[i]].1 != usize::MAX {
