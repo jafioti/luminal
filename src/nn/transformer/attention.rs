@@ -232,7 +232,6 @@ mod tests {
         );
         b.mark();
 
-        cx.display_shapes();
         cx.execute();
 
         let d_dev = Cpu::default();

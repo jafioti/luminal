@@ -132,7 +132,7 @@ impl<S: ConstShape> GraphTensor<S> {
     }
 
     /// Get the contiguous data of the tensor
-    pub fn data(&self) -> Vec<f32> {
+    pub fn data(self) -> Vec<f32> {
         let tensor = self.retrieve().unwrap();
         let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; self.shape.n_elements()];

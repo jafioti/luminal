@@ -285,11 +285,7 @@ impl Operator for Mul {
                 .downcast_ref::<Vec<f32>>()
                 .unwrap(),
         );
-        println!(
-            "Mulling with {:?} and {:?}",
-            inp[0].1.shape(),
-            inp[1].1.shape()
-        );
+        println!("Mulling with {:?} and {:?}", inp[0].1, inp[1].1);
         let mut data = vec![0.; inp[0].1.n_elements()];
         for i in 0..data.len() {
             data[i] = inp[0].1.index(i).map(|i| a_data[i]).unwrap_or_default()
@@ -677,6 +673,27 @@ mod tests {
         let d_a = d_dev.tensor([1., 2., 3.]);
         let d_b = d_dev.tensor([1., 2., 3.]);
         let d_c = d_a * d_b;
+
+        assert_close_data(&c.data(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_permute_mul() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<3, 2>>("Input");
+        a.set(vec![1., 2., 3., 2., 3., 1.]);
+        let b = cx.new_tensor::<R2<3, 2>>("Input");
+        b.set(vec![1., 2., 3., -1., 3., 0.]);
+        let c = a.expand::<R3<3, 2, 3>, crate::prelude::Axis<2>>()
+            * b.expand::<R3<3, 2, 3>, crate::prelude::Axis<2>>();
+        c.mark();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([[1., 2.], [3., 2.], [3., 1.]]);
+        let d_b = d_dev.tensor([[1., 2.], [3., -1.], [3., 0.]]);
+        let d_c = d_a.broadcast::<Rank3<3, 2, 3>, dfdx::prelude::Axis<2>>()
+            * d_b.broadcast::<Rank3<3, 2, 3>, dfdx::prelude::Axis<2>>();
 
         assert_close_data(&c.data(), &d_c.as_vec());
     }

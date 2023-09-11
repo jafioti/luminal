@@ -4,7 +4,7 @@ use crate::prelude::*;
 impl<A: Dimension, B: Dimension> GraphTensor<(A, B)> {
     pub fn matmul<C: Dimension>(self, rhs: GraphTensor<(B, C)>) -> GraphTensor<(A, C)> {
         // Reshape
-        let w: GraphTensor<(C, B)> = rhs.permute::<_, Axes2<1, 0>>();
+        let w = rhs.permute::<_, Axes2<1, 0>>();
 
         // Broadcasted Multiply
         let mul = self.expand::<(A, C, B), _>() * w.expand::<(A, C, B), _>();

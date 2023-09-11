@@ -143,6 +143,22 @@ mod tests {
     use dfdx::prelude::*;
 
     #[test]
+    fn test_exp() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<2, 3>>("Input");
+        a.set(vec![1., 2., 3., 3., 1., 3.]);
+        let b = a.exp();
+        b.mark();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([[1., 2., 3.], [3., 1., 3.]]);
+        let d_b = d_a.exp();
+
+        assert_close_data(&b.data(), &d_b.as_vec());
+    }
+
+    #[test]
     fn test_layer_norm() {
         let mut cx = Graph::new();
         let a = cx.new_tensor::<R2<2, 3>>("Input");
