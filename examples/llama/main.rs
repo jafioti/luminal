@@ -4,12 +4,21 @@ mod model;
 
 use luminal::prelude::*;
 use model::LlamaForCausalLM;
+use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
 
 #[rustfmt::skip]
 fn main() {
-    let tokenizer = tokenizers::tokenizer::Tokenizer::from_pretrained("oobabooga/llama-tokenizer", None).unwrap();
-
-    let mut input: Vec<usize> = tokenizer.encode("The young boy ran over to the", false).unwrap().get_ids().iter().map(|i| *i as usize).collect();
+    let prompt = "The young boy ran over to the";
+    let tokenizer =
+            SentencePieceBpeTokenizer::from_file("./examples/llama/setup/llama-7b-hf/tokenizer.model", false).unwrap();
+    let mut input: Vec<usize> = tokenizer.encode(
+        prompt,
+        None,
+        prompt.len(),
+        &TruncationStrategy::LongestFirst,
+        0
+    ).token_ids.iter() .map(|&x| x as usize).collect();
+    input.insert(0, 1);
 
     println!("Creating Graph...");
     let mut cx = Graph::new();
@@ -45,8 +54,8 @@ fn main() {
     println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
 
     let out = out.dyn_data(&cx.dyn_map);
-    input.push(sample_index(&out[(input.len() - 1) * 32_000..]));
-    println!("{}", tokenizer.decode(&input.iter().map(|i| *i as u32).collect::<Vec<_>>(), false).unwrap());
+    input.push(sample_index(&out[out.len() - 32_000..]));
+    println!("{}", tokenizer.decode(&input.iter().map(|i| *i as i64).collect::<Vec<_>>(), true, false));
 
 
     // Build KV cache forward graph
@@ -72,7 +81,7 @@ fn main() {
         out.drop();
         // Sample tokens
         input.push(sample_index(&o));
-        println!("{}", tokenizer.decode(&input.iter().map(|i| *i as u32).collect::<Vec<_>>(), false).unwrap());
+        println!("{}", tokenizer.decode(&input.iter().map(|i| *i as i64).collect::<Vec<_>>(), true, false));
 
         // Swap caches
         for ((src_k, src_v), (dest_k, dest_v)) in cache_src.iter().copied().zip(cache_dest.iter().copied()) {
