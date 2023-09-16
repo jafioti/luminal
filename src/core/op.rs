@@ -101,8 +101,9 @@ impl Operator for Contiguous {
             .downcast_ref::<Vec<f32>>()
             .unwrap();
         let mut res = vec![0.; inp[0].1.n_elements()];
+        let ind = inp[0].1.indexer();
         for i in 0..res.len() {
-            if let Some(n) = inp[0].1.index(i) {
+            if let Some(n) = ind.index(i) {
                 res[i] = src[n];
             }
         }
@@ -245,10 +246,11 @@ impl Operator for Add {
                 .downcast_ref::<Vec<f32>>()
                 .unwrap(),
         );
+        let (a_ind, b_ind) = (inp[0].1.indexer(), inp[1].1.indexer());
         let mut data = vec![0.; inp[0].1.n_elements()];
         for i in 0..data.len() {
-            data[i] = inp[0].1.index(i).map(|i| a_data[i]).unwrap_or_default()
-                + inp[1].1.index(i).map(|i| b_data[i]).unwrap_or_default();
+            data[i] = a_ind.index(i).map(|i| a_data[i]).unwrap_or_default()
+                + b_ind.index(i).map(|i| b_data[i]).unwrap_or_default();
         }
         Tensor {
             data: Box::new(data),
@@ -277,9 +279,10 @@ impl Operator for Mul {
                 .unwrap(),
         );
         let mut data = vec![0.; inp[0].1.n_elements()];
+        let (a_ind, b_ind) = (inp[0].1.indexer(), inp[1].1.indexer());
         for i in 0..data.len() {
-            data[i] = inp[0].1.index(i).map(|i| a_data[i]).unwrap_or_default()
-                * inp[1].1.index(i).map(|i| b_data[i]).unwrap_or_default();
+            data[i] = a_ind.index(i).map(|i| a_data[i]).unwrap_or_default()
+                * b_ind.index(i).map(|i| b_data[i]).unwrap_or_default();
         }
         Tensor {
             data: Box::new(data),
@@ -308,9 +311,10 @@ impl Operator for Mod {
                 .unwrap(),
         );
         let mut data = vec![0.; inp[0].1.n_elements()];
+        let (a_ind, b_ind) = (inp[0].1.indexer(), inp[1].1.indexer());
         for i in 0..data.len() {
-            data[i] = inp[0].1.index(i).map(|i| a_data[i]).unwrap_or_default()
-                % inp[1].1.index(i).map(|i| b_data[i]).unwrap_or_default();
+            data[i] = a_ind.index(i).map(|i| a_data[i]).unwrap_or_default()
+                % b_ind.index(i).map(|i| b_data[i]).unwrap_or_default();
         }
         Tensor {
             data: Box::new(data),
@@ -339,9 +343,10 @@ impl Operator for LessThan {
                 .unwrap(),
         );
         let mut data = vec![0.; inp[0].1.n_elements()];
+        let (a_ind, b_ind) = (inp[0].1.indexer(), inp[1].1.indexer());
         for i in 0..data.len() {
-            let a = inp[0].1.index(i).map(|i| a_data[i]).unwrap_or_default();
-            let b = inp[1].1.index(i).map(|i| b_data[i]).unwrap_or_default();
+            let a = a_ind.index(i).map(|i| a_data[i]).unwrap_or_default();
+            let b = b_ind.index(i).map(|i| b_data[i]).unwrap_or_default();
             data[i] = if a < b { 1. } else { 0. };
         }
         Tensor {
@@ -382,13 +387,14 @@ impl Operator for SumReduce {
             .as_any()
             .downcast_ref::<Vec<f32>>()
             .unwrap();
+        let ind = inp[0].1.indexer();
 
         for i in 0..front_size {
             for j in 0..back_size {
                 for k in 0..dim_size {
                     let original_index = i * dim_size * back_size + k * back_size + j;
                     let new_index = i * back_size + j;
-                    if let Some(n) = inp[0].1.index(original_index) {
+                    if let Some(n) = ind.index(original_index) {
                         result[new_index] += a_data[n];
                     }
                 }
@@ -430,13 +436,14 @@ impl Operator for MaxReduce {
             .as_any()
             .downcast_ref::<Vec<f32>>()
             .unwrap();
+        let ind = inp[0].1.indexer();
 
         for i in 0..front_size {
             for j in 0..back_size {
                 for k in 0..dim_size {
                     let original_index = i * dim_size * back_size + k * back_size + j;
                     let new_index = i * back_size + j;
-                    if let Some(n) = inp[0].1.index(original_index) {
+                    if let Some(n) = ind.index(original_index) {
                         result[new_index] = result[new_index].max(a_data[n]);
                     }
                 }

@@ -87,10 +87,8 @@ impl ShapeTracker {
         self.indexes.copy_from_slice(&new_indexes);
     }
 
-    /// Convert a logical index into a physical one
-    pub fn index(&self, logical: usize) -> Option<usize> {
-        let mut ret = 0;
-        let mut acc = 1;
+    /// Create an indexer to convert logical indexes into physical indexes
+    pub fn indexer(&self) -> Indexer {
         let mut strides = self
             .dims
             .iter()
@@ -107,28 +105,22 @@ impl ShapeTracker {
             })
             .collect::<Vec<_>>();
         strides.reverse();
-        for ind in self.indexes.iter().rev() {
-            let sh = self.dims[*ind]
-                .to_usize()
-                .expect("All dims must be known before indexing!");
-            let logical_sh = (sh + self.padding[*ind].0 + self.padding[*ind].1)
-                .min(self.slices[*ind].1)
-                - self.slices[*ind].0;
-            if !self.fake[*ind] {
-                let dim_ind = (logical / acc) % logical_sh;
-                // Over top or under bottom
-                if dim_ind >= (sh + self.padding[*ind].0).min(self.slices[*ind].1)
-                    || dim_ind < self.padding[*ind].0.saturating_sub(self.slices[*ind].0)
-                {
-                    return None;
-                }
-                ret += (dim_ind - self.padding[*ind].0
-                    + (self.slices[*ind].0.saturating_sub(self.padding[*ind].0)))
-                    * strides[*ind];
-            }
-            acc *= logical_sh;
+        Indexer {
+            data: self
+                .indexes
+                .into_iter()
+                .rev()
+                .map(|i| {
+                    (
+                        self.dims[i].to_usize().unwrap(),
+                        strides[i],
+                        self.padding[i],
+                        self.slices[i],
+                        self.fake[i],
+                    )
+                })
+                .collect(),
         }
-        Some(ret)
     }
 
     /// The number of elements in this tensor, including pads and slices. Counts unknown dims as size 0
@@ -250,5 +242,33 @@ pub fn resolve_local_dyn_dims(a: &mut ShapeTracker, b: &mut ShapeTracker, defaul
                 b.dims[b.indexes[i]] = Dim::Known(1);
             }
         }
+    }
+}
+
+pub struct Indexer {
+    #[allow(clippy::type_complexity)]
+    pub data: ArrayVec<[(usize, usize, (usize, usize), (usize, usize), bool); 10]>,
+}
+
+impl Indexer {
+    /// Convert a logical index into a physical index
+    pub fn index(&self, logical: usize) -> Option<usize> {
+        let mut ret = 0;
+        let mut acc = 1;
+        for (sh, stride, padding, slice, fake) in self.data.into_iter() {
+            let logical_sh = (sh + padding.0 + padding.1).min(slice.1) - slice.0;
+            if !fake {
+                let dim_ind = (logical / acc) % logical_sh;
+                // Over top or under bottom
+                if dim_ind >= (sh + padding.0).min(slice.1)
+                    || dim_ind < padding.0.saturating_sub(slice.0)
+                {
+                    return None;
+                }
+                ret += (dim_ind - padding.0 + (slice.0.saturating_sub(padding.0))) * stride;
+            }
+            acc *= logical_sh;
+        }
+        Some(ret)
     }
 }

@@ -133,9 +133,10 @@ impl<S: Shape> GraphTensor<S> {
                     );
                     // Each input is already padded, so the final answer will be the same size as each input
                     let mut data = vec![0.; inps[0].1.n_elements()];
+                    let (a_ind, b_ind) = (inps[0].1.indexer(), inps[1].1.indexer());
                     for (i, d) in data.iter_mut().enumerate() {
-                        *d = inps[0].1.index(i).map(|i| a_data[i]).unwrap_or_default()
-                            + inps[1].1.index(i).map(|i| b_data[i]).unwrap_or_default()
+                        *d = a_ind.index(i).map(|i| a_data[i]).unwrap_or_default()
+                            + b_ind.index(i).map(|i| b_data[i]).unwrap_or_default()
                     }
                     Tensor {
                         data: Box::new(data),

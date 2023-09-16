@@ -44,13 +44,14 @@ impl<S: Shape> GraphTensor<S> {
                         .downcast_ref::<Vec<f32>>()
                         .unwrap();
                     let mut result = vec![0.0; front_size * back_size * dim_size];
+                    let ind = inp[0].1.indexer();
 
                     for i in 0..front_size {
                         for j in 0..back_size {
                             for k in 0..dim_size {
                                 let original_index = i * dim_size * back_size + k * back_size + j;
                                 let new_index = i * back_size + j;
-                                if let Some(n) = inp[0].1.index(original_index) {
+                                if let Some(n) = ind.index(original_index) {
                                     scratchpad[new_index] += a_data[n];
                                 }
                                 result[original_index] = scratchpad[new_index];

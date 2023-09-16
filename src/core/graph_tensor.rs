@@ -104,9 +104,10 @@ impl<S: Shape> GraphTensor<S> {
         let tensor = self.retrieve().unwrap();
         let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; st.n_elements()];
+        let ind = st.indexer();
         #[allow(unused_mut)]
         for (i, mut r) in data.iter_mut().enumerate() {
-            if let Some(n) = st.index(i) {
+            if let Some(n) = ind.index(i) {
                 *r = orig_data[n];
             }
         }
@@ -136,9 +137,10 @@ impl<S: ConstShape> GraphTensor<S> {
         let tensor = self.retrieve().unwrap();
         let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; self.shape.n_elements()];
+        let ind = self.shape.indexer();
         #[allow(unused_mut)]
         for (i, mut r) in data.iter_mut().enumerate() {
-            if let Some(n) = self.shape.index(i) {
+            if let Some(n) = ind.index(i) {
                 *r = orig_data[n];
             }
         }
