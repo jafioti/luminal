@@ -5,8 +5,6 @@ mod model;
 use luminal::prelude::*;
 use model::LlamaForCausalLM;
 
-use crate::model::KVCache;
-
 #[rustfmt::skip]
 fn main() {
     let tokenizer = tokenizers::tokenizer::Tokenizer::from_pretrained("oobabooga/llama-tokenizer", None).unwrap();
@@ -26,6 +24,9 @@ fn main() {
     > = InitModule::initialize(&mut cx);
     let mut inp = cx.new_tensor::<(Dyn<'b'>, Dyn<'s'>)>("Input");
     let (out, cache_src) = model.forward(inp);
+    let cache_src = cache_src.into_iter().map(|(a, b)| {
+        (a.reshape(), b.reshape())
+    }).collect::<Vec<_>>();
     out.mark();
     for (k, v) in &cache_src {
         k.mark_no_delete();
@@ -49,7 +50,8 @@ fn main() {
 
 
     // Build KV cache forward graph
-    let (out, cache_dest): (_, Vec<KVCache<_, Dyn<'s'>, {config::HEADS}, {config::HEAD_DIM}>>) = model.forward_kv((inp, cache_src.clone()));
+    let mut single_inp = cx.new_tensor::<(Dyn<'b'>, Const<1>)>("Single Input");
+    let (out, cache_dest)= model.forward_kv::<_, _, Dyn<'p'>, Dyn<'t'>>((single_inp, cache_src.clone()));
     out.mark();
     for (k, v) in &cache_dest {
         k.mark_no_delete();
@@ -58,13 +60,16 @@ fn main() {
     cx.prune([out.id], cache_src.iter().flat_map(|(k, v)| [k.id, v.id]));
 
     loop {
-        inp.set_dyn(vec![*input.last().unwrap()], vec![1, 1]);
+        single_inp.set_dyn(vec![*input.last().unwrap()], vec![1, 1]);
+        cx.set_dyn_dim('p', input.len() - 1);
+        cx.set_dyn_dim('t', input.len());
 
         let now = std::time::Instant::now();
         cx.execute();
         println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
         
         let o = out.dyn_data(&cx.dyn_map);
+        out.drop();
         // Sample tokens
         input.push(sample_index(&o));
         println!("{}", tokenizer.decode(&input.iter().map(|i| *i as u32).collect::<Vec<_>>(), false).unwrap());

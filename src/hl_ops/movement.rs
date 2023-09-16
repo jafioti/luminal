@@ -66,14 +66,13 @@ impl<S: Shape> GraphTensor<S> {
     where
         S: RealizeShapeTo<Dst>,
     {
-        GraphTensor::from_id(
-            self.id,
-            self.shape.realize(&Dst::realized_shape()),
-            self.graph_ref,
-        )
+        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
     pub fn contiguous(self) -> GraphTensor<S> {
+        if self.shape.is_contiguous() && !self.shape.is_sliced() {
+            return self;
+        }
         let new_id = self
             .graph()
             .add_op(op::Contiguous)
@@ -247,5 +246,49 @@ mod tests {
             .realize::<Rank2<3, 4>>();
 
         assert_close_data(&b.data(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_slice_2d() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<3, 2>>("Input");
+        a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
+        let b = a.slice((.., ..1)).realize::<R2<3, 1>>();
+        b.mark();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor_from_vec(
+            vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854],
+            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<2>),
+        );
+        let d_b = d_a.slice((.., ..1)).realize::<Rank2<3, 1>>();
+
+        assert_close_data(&b.data(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_rotate_half() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R2<3, 2>>("Input");
+        a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
+        let x1 = a.slice((.., ..1)).contiguous();
+        let x2 = a.slice((.., 1..)).contiguous();
+        let c = (-x2).concat_along::<R2<3, 2>, Axis<1>, _>(x1);
+        c.mark();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor_from_vec(
+            vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854],
+            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<2>),
+        );
+        let d_x1 = d_a.clone().slice((.., ..1));
+        let d_x2 = d_a.slice((.., 1..));
+        let d_c = (-d_x2, d_x1)
+            .concat_along(dfdx::shapes::Axis::<1>)
+            .realize::<Rank2<3, 2>>();
+
+        assert_close_data(&c.data(), &d_c.as_vec());
     }
 }

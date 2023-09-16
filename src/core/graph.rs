@@ -2,7 +2,7 @@
 
 use crate::{
     graph_tensor::GraphTensor,
-    op::{self, InputTensor, Operator},
+    op::{self, InputTensor, Operator, Print},
     optimizer::GraphOptimizer,
     shape::*,
     tensor::Tensor,
@@ -60,6 +60,10 @@ impl Graph {
             id = *new_id;
         }
         self.tensors.get(&id)
+    }
+
+    pub fn set_dyn_dim(&mut self, dim: char, val: usize) {
+        self.dyn_map.insert(dim, val);
     }
 
     pub fn new_tensor<S: Shape>(&mut self, name: &str) -> GraphTensor<S> {
@@ -134,7 +138,9 @@ impl Graph {
             reverse_dfs_mark(n, self, &mut keep_nodes, &input_nodes);
         }
         for node in self.graph.node_indices().collect_vec() {
-            if !keep_nodes.contains(&node) {
+            if !keep_nodes.contains(&node)
+                && !self.graph.node_weight(node).unwrap().as_any().is::<Print>()
+            {
                 self.graph.remove_node(node);
                 self.no_delete.remove(&node);
                 self.to_retrieve.remove(&node);
@@ -144,11 +150,7 @@ impl Graph {
     }
 
     /// Swap the tensors with these ids
-    pub fn swap_tensors<A: Shape, B: Shape>(
-        &mut self,
-        mut a: GraphTensor<A>,
-        mut b: GraphTensor<B>,
-    ) {
+    pub fn swap_tensors<A: Shape, B: Shape>(&mut self, a: GraphTensor<A>, b: GraphTensor<B>) {
         // Swap tensors
         let a_t = self.tensors.remove(&a.id);
         let b_t = self.tensors.remove(&b.id);
@@ -158,9 +160,6 @@ impl Graph {
         if let Some(b_t) = b_t {
             self.tensors.insert(a.id, b_t);
         }
-
-        // Swap shapes
-        std::mem::swap(&mut a.shape, &mut b.shape);
     }
 
     /// Execute the graph.
@@ -272,9 +271,9 @@ impl Graph {
                     id_map[&edge.target()],
                     edge.weight().0,
                 );
-                if show_shapes {
+                if show_shapes && new_graph.contains_node(id_map[&edge.target()]) {
                     new_graph
-                        .node_weight_mut(edge.target())
+                        .node_weight_mut(id_map[&edge.target()])
                         .unwrap()
                         .push_str(&format!(" | {:?}", edge.weight().1.shape()));
                 }

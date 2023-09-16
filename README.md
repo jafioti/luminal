@@ -53,9 +53,9 @@ Some huge benefits are now unlocked:
 - Networks can be written in generic code, but compiled and ran fast on hyper-specific architectures (try writing a PyTorch network that works with both TF32 dtypes and TPUs; get ready for if statement hell...)
 
 ## RISC-style architecture
-Luminal can be ran on new accelerators by implementing 11 primitive ops. Take a look at `src/optimizers/cuda/prim.rs` to see 1-to-1 CUDA translations of the primops.
+Luminal can be ran on new accelerators by implementing 12 primitive ops. Take a look at `src/optimizers/cuda/prim.rs` to see 1-to-1 CUDA translations of the primops.
 
-Accellerators are free to implement their own custom ops, and their own optimizers to convert luminal primitive ops to their bespoke ops.
+Accelerators are free to implement their own custom ops, and their own optimizers to convert luminal primitive ops to bespoke ops.
 
 ## Compile-time Shape Checks
 All operations are shape checked at compile time, so no more shape mismatches! All credit for this goes to [dfdx](https://github.com/coreylowman/dfdx).

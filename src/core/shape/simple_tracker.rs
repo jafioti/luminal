@@ -111,24 +111,22 @@ impl ShapeTracker {
             let sh = self.dims[*ind]
                 .to_usize()
                 .expect("All dims must be known before indexing!");
+            let logical_sh = (sh + self.padding[*ind].0 + self.padding[*ind].1)
+                .min(self.slices[*ind].1)
+                - self.slices[*ind].0;
             if !self.fake[*ind] {
-                let dim_ind = (logical / acc)
-                    % ((sh + self.padding[*ind].0 + self.padding[*ind].1).min(self.slices[*ind].1)
-                        - self.slices[*ind].0);
-                // Over top
-                if dim_ind >= (sh + self.padding[*ind].0).min(self.slices[*ind].1) {
-                    return None;
-                }
-                // Under bottom
-                if dim_ind < self.padding[*ind].0.saturating_sub(self.slices[*ind].0) {
+                let dim_ind = (logical / acc) % logical_sh;
+                // Over top or under bottom
+                if dim_ind >= (sh + self.padding[*ind].0).min(self.slices[*ind].1)
+                    || dim_ind < self.padding[*ind].0.saturating_sub(self.slices[*ind].0)
+                {
                     return None;
                 }
                 ret += (dim_ind - self.padding[*ind].0
                     + (self.slices[*ind].0.saturating_sub(self.padding[*ind].0)))
                     * strides[*ind];
             }
-            acc *= (sh + self.padding[*ind].0 + self.padding[*ind].1).min(self.slices[*ind].1)
-                - self.slices[*ind].0;
+            acc *= logical_sh;
         }
         Some(ret)
     }
@@ -173,7 +171,10 @@ impl ShapeTracker {
         let new_dims = self
             .indexes
             .into_iter()
-            .map(|i| self.dims[i])
+            .map(|i| match self.dims[i] {
+                Dim::Known(n) => Dim::Known(n.min(self.slices[i].1 - self.slices[i].0)),
+                Dim::Unknown(c) => Dim::Unknown(c),
+            })
             .collect::<Vec<_>>();
         Self::new(&new_dims)
     }
@@ -222,6 +223,10 @@ impl ShapeTracker {
             }
         }
         self
+    }
+
+    pub fn is_sliced(&self) -> bool {
+        self.slices.iter().any(|(b, e)| *b != 0 || *e != usize::MAX)
     }
 }
 

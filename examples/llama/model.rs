@@ -109,7 +109,6 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
             .add_op(Function(
                 "ARange".to_string(),
                 Box::new(move |inp| {
-                    println!("Arange");
                     let offset = if has_cache {
                         inp[1].1.shape()[2].to_usize().unwrap()
                     } else {
@@ -135,14 +134,14 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
                 .expand::<(Const<1>, Const<HEAD_DIM_OVER_2>), _>(),
         );
         let emb = freqs.concat_along::<(Seq, Const<HEAD_DIM>), Axis<1>, _>(freqs);
-        (emb.sin().realize(), emb.cos().realize())
+        (emb.sin().reshape(), emb.cos().reshape())
     }
 
     fn rotate_half<Batch: Dimension, NumHeads: Dimension, Seq: Dimension>(
         x: GraphTensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>)>,
     ) -> GraphTensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>)> {
-        let x1 = x.slice((.., .., .., ..HEAD_DIM_OVER_2));
-        let x2 = x.slice((.., .., .., HEAD_DIM_OVER_2..));
+        let x1 = x.slice((.., .., .., ..HEAD_DIM_OVER_2)).contiguous();
+        let x2 = x.slice((.., .., .., HEAD_DIM_OVER_2..)).contiguous();
         (-x2).concat_along::<(Batch, NumHeads, Seq, Const<HEAD_DIM>), Axis<3>, _>(x1)
     }
 }
@@ -232,8 +231,8 @@ fn attn_forward<
         ])
         .permute::<_, Axes4<0, 2, 1, 3>>();
     let (q, k) = attn.rotary_embed.forward((
-        q.realize::<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>(),
-        k.realize(),
+        q.reshape::<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>(),
+        k.reshape(),
         cache,
     ));
 
@@ -309,16 +308,21 @@ impl<
         KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>,
     ) {
         let (q, k, v) = attn_forward(self, x, Some(cache));
-
         // Add KV cache
         let k = cache
             .0
-            .concat_along::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(k);
+            .contiguous()
+            .concat_along::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(
+                k.contiguous(),
+            );
         let v = cache
             .1
-            .concat_along::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(v);
+            .contiguous()
+            .concat_along::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(
+                v.contiguous(),
+            );
         let w = q
-            .batch_matmul(k.permute())
+            .batch_matmul(k.permute::<(Batch, Const<NUM_HEADS>, Const<HEAD_DIM>, TotSeq), _>())
             .mul((HEAD_DIM as f64).sqrt().recip() as f32) // Inv head scale
             .softmax::<3>();
 
@@ -538,9 +542,10 @@ impl<
         let mut hidden_states = self.embed_tokens.forward(input);
         let mut caches = vec![];
         for layer_i in &self.layers {
-            let (new_hidden_states, kv_cache) = layer_i.forward((hidden_states, attn_mask));
+            let (new_hidden_states, (k_cache, v_cache)) =
+                layer_i.forward((hidden_states, attn_mask));
             hidden_states = new_hidden_states;
-            caches.push(kv_cache);
+            caches.push((k_cache.contiguous(), v_cache.contiguous()));
         }
         (self.norm.forward(hidden_states), caches)
     }
@@ -572,11 +577,12 @@ impl<
         Vec<KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>>,
     ) {
         let mut hidden_states = self.embed_tokens.forward(input);
-        let mut new_caches = vec![];
+        let mut new_caches = Vec::with_capacity(caches.len());
         for (layer_i, cache) in self.layers.iter().zip(caches.into_iter()) {
-            let (new_hidden_states, kv_cache) = layer_i.forward_kv((hidden_states, cache));
+            let (new_hidden_states, (k_cache, v_cache)) =
+                layer_i.forward_kv((hidden_states, cache));
             hidden_states = new_hidden_states;
-            new_caches.push(kv_cache);
+            new_caches.push((k_cache.contiguous(), v_cache.contiguous()));
         }
         (self.norm.forward(hidden_states), new_caches)
     }

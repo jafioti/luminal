@@ -70,9 +70,15 @@ impl Debug for Function {
 pub struct Print(pub String);
 impl Operator for Print {
     fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
-        println!("{}", self.0);
         for (i, (tensor, tracker)) in inp.iter().enumerate() {
-            println!("{} Data: {:?}", i + 1, tensor.borrowed().data);
+            println!("{}", self.0);
+            let d = tensor
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Vec<f32>>()
+                .unwrap();
+            println!("{} Data: {:?}", i + 1, &d[d.len() - 10..]);
             println!("{} Shape: {:?}", i + 1, tracker);
         }
         Tensor {
