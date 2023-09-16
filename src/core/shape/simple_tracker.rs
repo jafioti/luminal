@@ -247,7 +247,7 @@ pub fn resolve_local_dyn_dims(a: &mut ShapeTracker, b: &mut ShapeTracker, defaul
 
 pub struct Indexer {
     #[allow(clippy::type_complexity)]
-    pub data: ArrayVec<[(usize, usize, (usize, usize), (usize, usize), bool); 10]>,
+    data: ArrayVec<[(usize, usize, (usize, usize), (usize, usize), bool); 10]>,
 }
 
 impl Indexer {
