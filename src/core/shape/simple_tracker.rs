@@ -87,8 +87,8 @@ impl ShapeTracker {
         self.indexes.copy_from_slice(&new_indexes);
     }
 
-    /// Create an indexer to convert logical indexes into physical indexes
-    pub fn indexer(&self) -> Indexer {
+    /// Once all dims are known, compute strides
+    pub fn strides(&self) -> Vec<usize> {
         let mut strides = self
             .dims
             .iter()
@@ -105,6 +105,12 @@ impl ShapeTracker {
             })
             .collect::<Vec<_>>();
         strides.reverse();
+        strides
+    }
+
+    /// Create an indexer to convert logical indexes into physical indexes
+    pub fn indexer(&self) -> Indexer {
+        let strides = self.strides();
         Indexer {
             data: self
                 .indexes

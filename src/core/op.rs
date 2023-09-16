@@ -22,6 +22,13 @@ impl<'a> InputTensor<'a> {
             InputTensor::Borrowed(t) => t,
         }
     }
+
+    pub fn cloned(self) -> Tensor {
+        match self {
+            InputTensor::Owned(t) => t,
+            InputTensor::Borrowed(t) => t.clone(),
+        }
+    }
 }
 
 pub trait Operator: Debug + TraitObjEq {
@@ -78,7 +85,7 @@ impl Operator for Print {
                 .as_any()
                 .downcast_ref::<Vec<f32>>()
                 .unwrap();
-            println!("{} Data: {:?}", i + 1, &d[d.len() - 10..]);
+            println!("{} Data: {:?}", i + 1, &d[d.len().saturating_sub(10)..]);
             println!("{} Shape: {:?}", i + 1, tracker);
         }
         Tensor {

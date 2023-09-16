@@ -3,12 +3,9 @@ use crate::prelude::*;
 // ABxBC -> AC
 impl<A: Dimension, B: Dimension> GraphTensor<(A, B)> {
     pub fn matmul<C: Dimension>(self, rhs: GraphTensor<(B, C)>) -> GraphTensor<(A, C)> {
-        // Reshape
-        let w = rhs.permute::<_, Axes2<1, 0>>();
-
-        let e = self.expand::<(A, C, B), _>();
         // Broadcasted Multiply
-        let mul = e * w.expand::<(A, C, B), _>();
+        let mul = self.expand::<(A, C, B), _>()
+            * rhs.permute::<_, Axes2<1, 0>>().expand::<(A, C, B), _>();
 
         // Sum Reduce
         mul.sum_reduce::<_, Axis<2>>()

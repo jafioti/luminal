@@ -104,14 +104,13 @@ fn test_feedforward() {
 
     batch.set_dyn(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0], vec![2, 3]);
     batch_out.mark();
-
     cx.execute();
 
     let unoptimized_batch_out = batch_out.dyn_data(&cx.dyn_map);
+    batch_out.drop();
 
-    cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
+    cx.optimize(<CPUOptimizer>::default());
     cx.execute();
-
     assert_close_data(&unoptimized_batch_out, &batch_out.dyn_data(&cx.dyn_map));
 
     // Test against dfdx

@@ -4,6 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use itertools::Itertools;
 use petgraph::{
     stable_graph::{NodeIndex, StableGraph},
     visit::EdgeRef,
@@ -121,11 +122,11 @@ pub struct GraphSelector {
         Mutex<
             petgraph::Graph<
                 (
-                    Option<TypeId>,
-                    Option<Box<dyn TraitObjEq>>,
-                    Option<Vec<Dim>>,
-                    Vec<*mut NodeIndex>,
-                    Option<usize>,
+                    Option<TypeId>,              // Type constraint
+                    Option<Box<dyn TraitObjEq>>, // Value constraint
+                    Option<Vec<Vec<Dim>>>,       // Shape constraint
+                    Option<Vec<Vec<bool>>>,      // Fake constraint
+                    Vec<*mut NodeIndex>,         // Pointers
                 ),
                 (),
             >,
@@ -175,11 +176,11 @@ fn search(
     selector_node: NodeIndex,
     selector_graph: &petgraph::Graph<
         (
-            Option<TypeId>,
-            Option<Box<dyn TraitObjEq>>,
-            Option<Vec<Dim>>,
-            Vec<*mut NodeIndex>,
-            Option<usize>,
+            Option<TypeId>,              // Type constraint
+            Option<Box<dyn TraitObjEq>>, // Value constraint
+            Option<Vec<Vec<Dim>>>,       // Shape constraint
+            Option<Vec<Vec<bool>>>,      // Fake constraint
+            Vec<*mut NodeIndex>,         // Pointers
         ),
         (),
     >,
@@ -202,16 +203,44 @@ fn search(
             return false;
         }
     }
+    let input_shapes = graph
+        .edges_directed(graph_node, petgraph::Direction::Incoming)
+        .sorted_by_key(|e| e.weight().0)
+        .map(|e| e.weight().1)
+        .collect::<Vec<_>>();
     // Test shape
     if let Some(shape) = &selector_weight.2 {
-        // if shape.len() != current_weight.1.len() {
-        //     return false;
-        // }
-        // for (a, b) in shape.iter().zip(current_weight.1.iter()) {
-        //     if a != b {
-        //         return false;
-        //     }
-        // }
+        let mut shape_map = HashMap::new();
+        for (a_sh, b_sh) in shape.iter().zip(input_shapes.iter()) {
+            for (a, b) in a_sh.iter().zip(b_sh.shape().iter()) {
+                match a {
+                    Dim::Known(n) => {
+                        if *b != Dim::Known(*n) {
+                            return false;
+                        }
+                    }
+                    Dim::Unknown(c) => {
+                        if let Some(expected) = shape_map.get(c) {
+                            if b != expected {
+                                return false;
+                            }
+                        } else {
+                            shape_map.insert(*c, *b);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Test fakes
+    if let Some(fakes) = &selector_weight.3 {
+        for (a_sh, b_sh) in fakes.iter().zip(input_shapes.iter()) {
+            for (a, b) in a_sh.iter().zip(b_sh.indexes.iter().map(|i| b_sh.fake[*i])) {
+                if *a != b {
+                    return false;
+                }
+            }
+        }
     }
     // Used is to make sure we don't use the same node from the source graph twice, which prevents cycles
     used.insert(graph_node);
@@ -281,7 +310,7 @@ fn search(
         }
     }
     // All checks out
-    for ptr in &selector_weight.3 {
+    for ptr in &selector_weight.4 {
         unsafe {
             **ptr = graph_node;
         }
@@ -293,7 +322,7 @@ impl GraphSelector {
     /// Create a new op to select
     pub fn op(&self) -> OpSelector {
         let mut m_self = self.graph.lock().unwrap();
-        let id = m_self.add_node((None, None, None, vec![], None));
+        let id = m_self.add_node((None, None, None, None, vec![]));
         OpSelector { graph: self, id }
     }
 
@@ -343,25 +372,25 @@ impl OpSelector {
         m_graph.node_weight_mut(self.id).unwrap().1 = Some(Box::new(value));
         self
     }
-    /// Constrain the op to an output shape
-    pub fn shape(self, shape: &[Dim]) -> Self {
+    /// Constrain the op to input shapes
+    pub fn shapes<S: Into<Vec<Vec<Dim>>>>(self, shapes: S) -> Self {
         let graph = unsafe { self.graph.as_ref().unwrap() };
         let mut m_graph = graph.graph.lock().unwrap();
-        m_graph.node_weight_mut(self.id).unwrap().2 = Some(shape.to_vec());
+        m_graph.node_weight_mut(self.id).unwrap().2 = Some(shapes.into());
         self
     }
-    /// Constrain the op to an output shape of a dimension
-    pub fn dim(self, dim: usize) -> Self {
+    /// Constrain the op to input shape fakes
+    pub fn fakes<S: Into<Vec<Vec<bool>>>>(self, fakes: S) -> Self {
         let graph = unsafe { self.graph.as_ref().unwrap() };
         let mut m_graph = graph.graph.lock().unwrap();
-        m_graph.node_weight_mut(self.id).unwrap().4 = Some(dim);
+        m_graph.node_weight_mut(self.id).unwrap().3 = Some(fakes.into());
         self
     }
     /// Register a pointer to set if the op is matched
     pub fn ptr(self, ptr: *mut NodeIndex) -> Self {
         let graph = unsafe { self.graph.as_ref().unwrap() };
         let mut m_graph = graph.graph.lock().unwrap();
-        m_graph.node_weight_mut(self.id).unwrap().3.push(ptr);
+        m_graph.node_weight_mut(self.id).unwrap().4.push(ptr);
         self
     }
 }
