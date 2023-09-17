@@ -26,6 +26,7 @@ half = "2.3.1"
 tinyvec = "1.6.0"
 term_size = "0.3.2"
 colored = "2.0.4"
+regex = "1.9.5"
 
 [dev-dependencies]
 dfdx = "0.13"

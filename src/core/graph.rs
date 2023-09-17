@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use colored::Colorize;
 use itertools::Itertools;
 use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Direction};
+use regex::Regex;
 
 #[derive(Debug, Default)]
 pub struct Graph {
@@ -229,6 +230,9 @@ impl Graph {
             .node_indices()
             .map(|i| (i, self.graph.edges_directed(i, Direction::Outgoing).count()))
             .collect();
+        let mut op_times = HashMap::new();
+        // Very janky way of extracting the type name only from an op, stripping out the struct contents
+        let op_regex = Regex::new(r"(?s)\{.*|\(.*").unwrap();
 
         for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
             if self.tensors.contains_key(node) {
@@ -266,7 +270,6 @@ impl Graph {
             }
 
             // All sources are ready
-            let now = std::time::Instant::now();
             let op_name = format!("{:?}", self.graph.node_weight(*node).unwrap());
             let mut shapes_string = srcs
                 .iter()
@@ -286,24 +289,57 @@ impl Graph {
             print!("{}", op_name.bold().bright_green());
             print!("{shapes_string}");
             // Execute
+            let now = std::time::Instant::now();
             let tensor = self.graph.node_weight(*node).unwrap().process(srcs);
+            let elapsed = now.elapsed();
             println!(
                 "{:.>1$}",
-                if now.elapsed().as_secs() > 1 {
-                    format!("{:.2}s", now.elapsed().as_secs_f32()).bold()
-                } else if now.elapsed().as_millis() > 1 {
-                    format!("{}ms", now.elapsed().as_millis()).bold()
+                if elapsed.as_secs() > 1 {
+                    format!("{:.2}s", elapsed.as_secs_f32())
+                } else if elapsed.as_millis() > 1 {
+                    format!("{}ms", elapsed.as_millis())
                 } else {
-                    format!("{}µs", now.elapsed().as_micros()).bold()
-                },
+                    format!("{}µs", elapsed.as_micros())
+                }
+                .bold(),
                 term_size::dimensions().unwrap().0 - op_name.len() - shapes_string.len(),
             );
             self.tensors.insert(*node, tensor);
+            let stripped_op_name = op_regex.replace_all(&op_name, "").to_string();
+            if let Some(t) = op_times.get_mut(&stripped_op_name) {
+                *t += elapsed;
+            } else {
+                op_times.insert(stripped_op_name, elapsed);
+            }
 
             // Check if we can delete the source tensors now
             for (source, _) in src_ids {
                 *remaining_consumers.get_mut(source).unwrap() -= 1;
             }
+        }
+
+        // Print out total times
+        println!();
+        println!(
+            "{:->2$} Total Times {:->2$}",
+            "",
+            "",
+            (term_size::dimensions().unwrap().0 - " Total Times ".len()) / 2
+        );
+        for (name, elapsed) in op_times.into_iter().sorted_by(|(_, a), (_, b)| b.cmp(a)) {
+            print!("{}", name.bold().bright_green());
+            println!(
+                "{:.>1$}",
+                if elapsed.as_secs() > 1 {
+                    format!("{:.2}s", elapsed.as_secs_f32())
+                } else if elapsed.as_millis() > 1 {
+                    format!("{}ms", elapsed.as_millis())
+                } else {
+                    format!("{}µs", elapsed.as_micros())
+                }
+                .bold(),
+                term_size::dimensions().unwrap().0 - name.len(),
+            );
         }
     }
 
