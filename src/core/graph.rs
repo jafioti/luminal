@@ -9,6 +9,7 @@ use crate::{
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use colored::Colorize;
 use itertools::Itertools;
 use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Direction};
 
@@ -207,6 +208,96 @@ impl Graph {
             // All sources are ready
             // Execute
             let tensor = self.graph.node_weight(*node).unwrap().process(srcs);
+            self.tensors.insert(*node, tensor);
+
+            // Check if we can delete the source tensors now
+            for (source, _) in src_ids {
+                *remaining_consumers.get_mut(source).unwrap() -= 1;
+            }
+        }
+    }
+
+    /// Execute the graph with debug prints
+    pub fn execute_debug(&mut self) {
+        self.reset();
+        // Track the number of views pointing to each tensor so we know when to clear
+        if self.linearized_graph.is_none() {
+            self.toposort();
+        }
+        let mut remaining_consumers: HashMap<NodeIndex, usize> = self
+            .graph
+            .node_indices()
+            .map(|i| (i, self.graph.edges_directed(i, Direction::Outgoing).count()))
+            .collect();
+
+        for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
+            if self.tensors.contains_key(node) {
+                continue;
+            }
+
+            // This needs to be done in a weird way with sperate queues to satisfy the borrow checker (all mutable calls to self.tensors happen before references are taken)
+            let mut owned = VecDeque::default();
+            let mut refs = VecDeque::default();
+            for (i, (id, _)) in src_ids.iter().enumerate() {
+                if remaining_consumers[id] == 1 && !self.no_delete.contains(id) {
+                    owned.push_back((InputTensor::Owned(self.tensors.remove(id).unwrap()), i));
+                }
+            }
+            for (i, (id, _)) in src_ids.iter().enumerate() {
+                if remaining_consumers[id] != 1 || self.no_delete.contains(id) {
+                    refs.push_back((InputTensor::Borrowed(self.tensors.get(id).unwrap()), i));
+                }
+            }
+            let mut srcs = vec![];
+            for (i, (_, st)) in src_ids.iter().enumerate() {
+                srcs.push((
+                    if owned.front().map(|(_, ind)| *ind == i).unwrap_or_default() {
+                        owned.pop_front().unwrap().0
+                    } else {
+                        refs.pop_front().unwrap().0
+                    },
+                    *st,
+                ));
+            }
+
+            // Substitute in the dyn dims
+            for (_, st) in srcs.iter_mut() {
+                *st = st.resolve_global_dyn_dims(&self.dyn_map);
+            }
+
+            // All sources are ready
+            let now = std::time::Instant::now();
+            let op_name = format!("{:?}", self.graph.node_weight(*node).unwrap());
+            let mut shapes_string = srcs
+                .iter()
+                .map(|(_, s)| {
+                    format!(
+                        "{:?}",
+                        s.shape()
+                            .into_iter()
+                            .map(|i| i.to_usize().unwrap())
+                            .collect::<Vec<_>>()
+                    )
+                })
+                .join(", ");
+            if !shapes_string.is_empty() {
+                shapes_string = format!(" ({shapes_string})");
+            }
+            print!("{}", op_name.bold().bright_green());
+            print!("{shapes_string}");
+            // Execute
+            let tensor = self.graph.node_weight(*node).unwrap().process(srcs);
+            println!(
+                "{:.>1$}",
+                if now.elapsed().as_secs() > 1 {
+                    format!("{:.2}s", now.elapsed().as_secs_f32()).bold()
+                } else if now.elapsed().as_millis() > 1 {
+                    format!("{}ms", now.elapsed().as_millis()).bold()
+                } else {
+                    format!("{}µs", now.elapsed().as_micros()).bold()
+                },
+                term_size::dimensions().unwrap().0 - op_name.len() - shapes_string.len(),
+            );
             self.tensors.insert(*node, tensor);
 
             // Check if we can delete the source tensors now

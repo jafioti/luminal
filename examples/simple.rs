@@ -8,7 +8,7 @@ fn main() {
 
     a.set(vec![1., 2., 3., 4.]);
     b.mark();
-    cx.execute();
+    cx.execute_debug();
 
     println!("B: {:?}", b.data());
 }

@@ -11,10 +11,9 @@ cuda = ["dep:cudarc"]
 
 [dependencies]
 itertools = "0.11.0"
-matrixmultiply = {version="0.3.7"}
+matrixmultiply = "0.3.7"
 num-traits = "0.2.16"
 petgraph = {path="./resources/petgraph"} # Literally only need this because the free_node field of the stable graph is private
-#petgraph = "0.6.3"
 rand = "0.8.5"
 strum = { version = "0.25.0", features = ["derive"] }
 urlencoding = "2.1.2"
@@ -25,6 +24,8 @@ safetensors = "0.3.1"
 memmap2 = "0.7.1"
 half = "2.3.1"
 tinyvec = "1.6.0"
+term_size = "0.3.2"
+colored = "2.0.4"
 
 [dev-dependencies]
 dfdx = "0.13"
