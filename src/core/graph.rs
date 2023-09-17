@@ -234,6 +234,12 @@ impl Graph {
         // Very janky way of extracting the type name only from an op, stripping out the struct contents
         let op_regex = Regex::new(r"(?s)\{.*|\(.*").unwrap();
 
+        println!(
+            "{:->2$} Executing {:->2$}",
+            "",
+            "",
+            (term_size::dimensions().unwrap().0 - " Executing ".len()) / 2
+        );
         for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
             if self.tensors.contains_key(node) {
                 continue;
