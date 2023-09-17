@@ -1,7 +1,7 @@
 use crate::{
     graph::Graph,
     op::{self, Function},
-    prelude::Data,
+    prelude::{remap_id, Data},
     shape::*,
     tensor::Tensor,
 };
@@ -39,12 +39,16 @@ impl<S: Shape> GraphTensor<S> {
 
     /// Remove this tensor's data from the graph. All other views pointing to the same tensor become invalidated.
     pub fn drop(&self) {
-        self.graph().tensors.remove(&self.id);
+        self.graph()
+            .tensors
+            .remove(&remap_id(self.id, &self.graph().id_remap));
     }
 
     /// Mark this tensor to not be deleted, but not retrieved either
     pub fn mark_no_delete(&self) {
-        self.graph().no_delete.insert(self.id);
+        self.graph()
+            .no_delete
+            .insert(remap_id(self.id, &self.graph().id_remap));
     }
 
     /// Get the value of the tensor (if the graph was executed)
@@ -68,7 +72,7 @@ impl<S: Shape> GraphTensor<S> {
         let node = self
             .graph()
             .graph
-            .node_weight_mut(self.id)
+            .node_weight_mut(remap_id(self.id, &self.graph().id_remap))
             .unwrap()
             .as_any_mut()
             .downcast_mut::<Function>()
@@ -121,7 +125,7 @@ impl<S: ConstShape> GraphTensor<S> {
         let node = self
             .graph()
             .graph
-            .node_weight_mut(self.id)
+            .node_weight_mut(remap_id(self.id, &self.graph().id_remap))
             .unwrap()
             .as_any_mut()
             .downcast_mut::<Function>()

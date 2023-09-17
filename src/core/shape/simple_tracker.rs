@@ -87,8 +87,8 @@ impl ShapeTracker {
         self.indexes.copy_from_slice(&new_indexes);
     }
 
-    /// Once all dims are known, compute strides
-    pub fn strides(&self) -> Vec<usize> {
+    /// Strides without permute applied
+    fn unordered_strides(&self) -> Vec<usize> {
         let mut strides = self
             .dims
             .iter()
@@ -108,9 +108,15 @@ impl ShapeTracker {
         strides
     }
 
+    /// Once all dims are known, compute strides
+    pub fn strides(&self) -> Vec<usize> {
+        let strides = self.unordered_strides();
+        self.indexes.into_iter().map(|i| strides[i]).collect()
+    }
+
     /// Create an indexer to convert logical indexes into physical indexes
     pub fn indexer(&self) -> Indexer {
-        let strides = self.strides();
+        let strides = self.unordered_strides();
         Indexer {
             data: self
                 .indexes

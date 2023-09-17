@@ -46,20 +46,14 @@ impl Graph {
         }
     }
 
-    pub fn get_tensor(&mut self, mut id: NodeIndex) -> Option<Tensor> {
+    pub fn get_tensor(&mut self, id: NodeIndex) -> Option<Tensor> {
         // Walk through remap
-        while let Some(new_id) = self.id_remap.get(&id) {
-            id = *new_id;
-        }
-        self.tensors.remove(&id)
+        self.tensors.remove(&remap_id(id, &self.id_remap))
     }
 
-    pub fn get_tensor_ref(&self, mut id: NodeIndex) -> Option<&Tensor> {
+    pub fn get_tensor_ref(&self, id: NodeIndex) -> Option<&Tensor> {
         // Walk through remap
-        while let Some(new_id) = self.id_remap.get(&id) {
-            id = *new_id;
-        }
-        self.tensors.get(&id)
+        self.tensors.get(&remap_id(id, &self.id_remap))
     }
 
     pub fn set_dyn_dim(&mut self, dim: char, val: usize) {
@@ -377,12 +371,25 @@ impl<'a> NewOp<'a> {
         id: NodeIndex,
         shape: crate::core::shape::simple_tracker::ShapeTracker,
     ) -> Self {
-        self.graph_ref
-            .graph
-            .add_edge(id, self.new_op_id, (self.num_srcs, shape));
+        self.graph_ref.graph.add_edge(
+            remap_id(id, &self.graph_ref.id_remap),
+            self.new_op_id,
+            (self.num_srcs, shape),
+        );
         self.num_srcs += 1;
         self
     }
+}
+
+/// Walk through remap to get new id
+pub(crate) fn remap_id(
+    mut id: NodeIndex,
+    map: &HashMap<NodeIndex<u32>, NodeIndex<u32>>,
+) -> NodeIndex {
+    while let Some(new_id) = map.get(&id) {
+        id = *new_id;
+    }
+    id
 }
 
 fn toposort(

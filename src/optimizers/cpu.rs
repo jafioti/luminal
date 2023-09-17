@@ -12,10 +12,12 @@ use crate::{
 
 pub type CPUOptimizer = (MatMulOptimizer, UnaryFusionOptimizer);
 
-#[derive(Debug, Default)]
-pub struct MatMulOptimizer;
+pub type MatMulOptimizer = (MatMul2DOptimizer, BatchMatMul2DOptimizer);
 
-impl GraphOptimizer for MatMulOptimizer {
+#[derive(Debug, Default)]
+pub struct MatMul2DOptimizer;
+
+impl GraphOptimizer for MatMul2DOptimizer {
     fn optimize(&self, graph: &mut Graph) {
         // Look for the matmul pattern
         let s = GraphSelector::default();
@@ -109,6 +111,137 @@ impl Operator for MatMul2D {
                 b_shape[1].to_usize().unwrap() as isize,
                 1,
             );
+        }
+
+        Tensor { data: Box::new(c) }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct BatchMatMul2DOptimizer;
+
+impl GraphOptimizer for BatchMatMul2DOptimizer {
+    fn optimize(&self, graph: &mut Graph) {
+        // Look for the matmul pattern
+        let s = GraphSelector::default();
+        let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
+        // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
+        // Actually starts at [A,B] | [B, C]
+        s.edge(
+            s.op()
+                .ty::<Mul>()
+                .shapes(vec![
+                    vec![
+                        Dim::Unknown('Z'),
+                        Dim::Unknown('A'),
+                        Dim::Unknown('C'),
+                        Dim::Unknown('B'),
+                    ],
+                    vec![
+                        Dim::Unknown('Z'),
+                        Dim::Unknown('A'),
+                        Dim::Unknown('C'),
+                        Dim::Unknown('B'),
+                    ],
+                ])
+                .fakes(vec![
+                    vec![false, false, true, false],
+                    vec![true, true, false, false],
+                ])
+                .ptr(&mut mul),
+            s.op()
+                .ty::<SumReduce>()
+                .value(SumReduce(3))
+                .ptr(&mut sum_reduce),
+        );
+        for _ in s.search(graph) {
+            if graph.no_delete.contains(&mul) {
+                // The intermediate mul can't be deleted
+                continue;
+            }
+            // Insert MatMul2D op
+            let mut srcs = graph.get_sources(mul);
+            // Undo expansions and permute
+            srcs[0].1.remove_dim(2);
+            srcs[1].1.remove_dim(1);
+            srcs[1].1.remove_dim(0);
+            srcs[1].1.permute(&[1, 0]);
+            let new_op = graph
+                .add_op(BatchedMatMul2D)
+                .input(srcs[0].0, srcs[0].1)
+                .input(srcs[1].0, srcs[1].1)
+                .finish();
+
+            // Create edges to dests
+            move_outgoing_edge(sum_reduce, new_op, &mut graph.graph);
+            move_references(
+                &mut graph.id_remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                sum_reduce,
+                new_op,
+            );
+
+            // Remove the old ops
+            graph.graph.remove_node(mul);
+            graph.graph.remove_node(sum_reduce);
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct BatchedMatMul2D;
+
+// ABCxCD -> ABD
+impl Operator for BatchedMatMul2D {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+        let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
+        let (a_strides, b_strides) = (inp[0].1.strides(), inp[1].1.strides());
+        let a_data = inp[0]
+            .0
+            .borrowed()
+            .data
+            .as_any()
+            .downcast_ref::<Vec<f32>>()
+            .unwrap();
+        let b_data = inp[1]
+            .0
+            .borrowed()
+            .data
+            .as_any()
+            .downcast_ref::<Vec<f32>>()
+            .unwrap();
+        let mut c = vec![
+            0.;
+            a_shape[0].to_usize().unwrap()
+                * a_shape[1].to_usize().unwrap()
+                * b_shape[1].to_usize().unwrap()
+        ];
+
+        let logical_batch_size = a_shape
+            .iter()
+            .skip(1)
+            .map(|i| i.to_usize().unwrap())
+            .product::<usize>();
+        for i in 0..a_shape[0].to_usize().unwrap() {
+            unsafe {
+                matrixmultiply::sgemm(
+                    a_shape[1].to_usize().unwrap(),
+                    a_shape[2].to_usize().unwrap(),
+                    b_shape[1].to_usize().unwrap(),
+                    1.0,
+                    &a_data[i * a_strides[0]],
+                    a_strides[1] as isize,
+                    a_strides[2] as isize,
+                    &b_data[0],
+                    b_strides[0] as isize,
+                    b_strides[1] as isize,
+                    0.0,
+                    &mut c[i * logical_batch_size],
+                    b_shape[1].to_usize().unwrap() as isize,
+                    1,
+                );
+            }
         }
 
         Tensor { data: Box::new(c) }
@@ -230,7 +363,7 @@ impl Operator for FusedUnary {
 mod tests {
     use crate::{prelude::*, tests::assert_close_data};
     #[test]
-    fn test_cpu_matmul_2_d() {
+    fn test_cpu_matmul_2d() {
         let mut cx = Graph::new();
         let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(vec![1., 2., 3., 1., 2., 3.]);
@@ -249,7 +382,26 @@ mod tests {
     }
 
     #[test]
-    fn test_cpu_matmul_2_d_2() {
+    fn test_cpu_batch_matmul_2d() {
+        let mut cx = Graph::new();
+        let a = cx.new_tensor::<R3<2, 2, 3>>("Input");
+        a.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
+        let b = cx.new_tensor::<R2<3, 3>>("Input");
+        b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
+        let c = a.matmul(b);
+        c.mark();
+
+        cx.execute();
+
+        let unoptimized_c = c.data();
+        cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
+        cx.execute();
+
+        assert_close_data(&c.data(), &unoptimized_c);
+    }
+
+    #[test]
+    fn test_cpu_matmul_2d_2() {
         let mut cx = Graph::new();
         let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);

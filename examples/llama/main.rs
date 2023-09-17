@@ -50,6 +50,7 @@ fn main() {
     inp.set_dyn(input.clone(), vec![1, input.len()]);
     let now = std::time::Instant::now();
 
+    cx.optimize(CPUOptimizer::default());
     cx.execute();
     println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
 
@@ -67,6 +68,7 @@ fn main() {
         v.mark_no_delete();
     }
     cx.prune([out.id], cache_src.iter().flat_map(|(k, v)| [k.id, v.id]));
+    cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
 
     loop {
         single_inp.set_dyn(vec![*input.last().unwrap()], vec![1, 1]);

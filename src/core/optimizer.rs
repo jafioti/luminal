@@ -211,7 +211,13 @@ fn search(
     // Test shape
     if let Some(shape) = &selector_weight.2 {
         let mut shape_map = HashMap::new();
+        if shape.len() != input_shapes.len() {
+            return false;
+        }
         for (a_sh, b_sh) in shape.iter().zip(input_shapes.iter()) {
+            if a_sh.len() != b_sh.dims.len() {
+                return false;
+            }
             for (a, b) in a_sh.iter().zip(b_sh.shape().iter()) {
                 match a {
                     Dim::Known(n) => {
