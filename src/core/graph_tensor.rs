@@ -31,24 +31,24 @@ impl<S: Shape> GraphTensor<S> {
         }
     }
 
-    /// Mark this tensor to be retrieved later
-    pub fn mark(&self) {
-        self.graph().no_delete.insert(self.id);
-        self.graph().to_retrieve.insert(self.id);
+    pub fn id(&self) -> NodeIndex {
+        remap_id(self.id, &self.graph().id_remap)
     }
 
-    /// Remove this tensor's data from the graph. All other views pointing to the same tensor become invalidated.
+    /// Mark this tensor to be retrieved later
+    pub fn mark(&self) {
+        self.graph().no_delete.insert(self.id());
+        self.graph().to_retrieve.insert(self.id());
+    }
+
+    /// Remove this tensor's data from the graph.
     pub fn drop(&self) {
-        self.graph()
-            .tensors
-            .remove(&remap_id(self.id, &self.graph().id_remap));
+        self.graph().tensors.remove(&self.id());
     }
 
     /// Mark this tensor to not be deleted, but not retrieved either
     pub fn mark_no_delete(&self) {
-        self.graph()
-            .no_delete
-            .insert(remap_id(self.id, &self.graph().id_remap));
+        self.graph().no_delete.insert(self.id());
     }
 
     /// Get the value of the tensor (if the graph was executed)
@@ -72,7 +72,7 @@ impl<S: Shape> GraphTensor<S> {
         let node = self
             .graph()
             .graph
-            .node_weight_mut(remap_id(self.id, &self.graph().id_remap))
+            .node_weight_mut(self.id())
             .unwrap()
             .as_any_mut()
             .downcast_mut::<Function>()
@@ -125,7 +125,7 @@ impl<S: ConstShape> GraphTensor<S> {
         let node = self
             .graph()
             .graph
-            .node_weight_mut(remap_id(self.id, &self.graph().id_remap))
+            .node_weight_mut(self.id())
             .unwrap()
             .as_any_mut()
             .downcast_mut::<Function>()

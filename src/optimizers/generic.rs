@@ -166,7 +166,7 @@ impl GraphOptimizer for RemoveUnusedNodes {
                 .edges_directed(node, petgraph::Direction::Outgoing)
                 .count()
                 == 0
-                && !graph.to_retrieve.contains(&node)
+                && !graph.no_delete.contains(&node)
             {
                 // No dependencies and not marked for retrieval, so remove
                 graph.graph.remove_node(node);

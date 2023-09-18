@@ -2,7 +2,7 @@
 
 use crate::{
     graph_tensor::GraphTensor,
-    op::{self, InputTensor, Operator, Print},
+    op::{self, InputTensor, Operator},
     optimizer::GraphOptimizer,
     shape::*,
     tensor::Tensor,
@@ -17,13 +17,13 @@ use regex::Regex;
 #[derive(Debug, Default)]
 pub struct Graph {
     pub tensors: HashMap<NodeIndex, Tensor>,
-    pub(crate) id_remap: HashMap<NodeIndex, NodeIndex>,
+    pub id_remap: HashMap<NodeIndex, NodeIndex>,
     pub dyn_map: HashMap<char, usize>,
     pub graph:
         StableGraph<Box<dyn Operator>, (u8, crate::core::shape::simple_tracker::ShapeTracker)>,
     pub no_delete: HashSet<NodeIndex>,
     /// Mark tensors that need to be retrieved later (mostly for optimizers to insert copy back calls, the graph itself doesn't treat these differently)
-    pub(crate) to_retrieve: HashSet<NodeIndex>,
+    pub to_retrieve: HashSet<NodeIndex>,
     /// A list of current node to run, source nodes, and view nodes to delete after execution.
     #[allow(clippy::type_complexity)]
     pub(crate) linearized_graph: Option<
@@ -56,6 +56,10 @@ impl Graph {
     pub fn get_tensor_ref(&self, id: NodeIndex) -> Option<&Tensor> {
         // Walk through remap
         self.tensors.get(&remap_id(id, &self.id_remap))
+    }
+
+    pub fn set_tensor(&mut self, id: NodeIndex, tensor: Tensor) {
+        self.tensors.insert(remap_id(id, &self.id_remap), tensor);
     }
 
     pub fn set_dyn_dim(&mut self, dim: char, val: usize) {
@@ -118,31 +122,6 @@ impl Graph {
                 self.tensors.remove(&t);
             }
         }
-    }
-
-    /// Clear all nodes not required to produce output nodes, stop looking past inputs.
-    ///
-    /// Pruning doesn't respect nodes marked as no_delete.
-    pub fn prune<O: IntoIterator<Item = NodeIndex>, I: IntoIterator<Item = NodeIndex>>(
-        &mut self,
-        outputs: O,
-        inputs: I,
-    ) {
-        let mut keep_nodes = HashSet::default();
-        let input_nodes: HashSet<NodeIndex> = inputs.into_iter().collect();
-        for n in outputs {
-            reverse_dfs_mark(n, self, &mut keep_nodes, &input_nodes);
-        }
-        for node in self.graph.node_indices().collect_vec() {
-            if !keep_nodes.contains(&node)
-                && !self.graph.node_weight(node).unwrap().as_any().is::<Print>()
-            {
-                self.graph.remove_node(node);
-                self.no_delete.remove(&node);
-                self.to_retrieve.remove(&node);
-            }
-        }
-        self.linearized_graph = None;
     }
 
     /// Swap the tensors with these ids
@@ -240,6 +219,7 @@ impl Graph {
             "",
             (term_size::dimensions().unwrap().0 - " Executing ".len()) / 2
         );
+        let start = std::time::Instant::now();
         for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
             if self.tensors.contains_key(node) {
                 continue;
@@ -300,9 +280,9 @@ impl Graph {
             let elapsed = now.elapsed();
             println!(
                 "{:.>1$}",
-                if elapsed.as_secs() > 1 {
+                if elapsed.as_secs() > 0 {
                     format!("{:.2}s", elapsed.as_secs_f32())
-                } else if elapsed.as_millis() > 1 {
+                } else if elapsed.as_millis() > 0 {
                     format!("{}ms", elapsed.as_millis())
                 } else {
                     format!("{}µs", elapsed.as_micros())
@@ -336,9 +316,9 @@ impl Graph {
             print!("{}", name.bold().bright_green());
             println!(
                 "{:.>1$}",
-                if elapsed.as_secs() > 1 {
+                if elapsed.as_secs() > 0 {
                     format!("{:.2}s", elapsed.as_secs_f32())
-                } else if elapsed.as_millis() > 1 {
+                } else if elapsed.as_millis() > 0 {
                     format!("{}ms", elapsed.as_millis())
                 } else {
                     format!("{}µs", elapsed.as_micros())
@@ -347,6 +327,17 @@ impl Graph {
                 term_size::dimensions().unwrap().0 - name.len(),
             );
         }
+        println!(
+            "Total: {}",
+            if start.elapsed().as_secs() > 0 {
+                format!("{:.2}s", start.elapsed().as_secs_f32())
+            } else if start.elapsed().as_millis() > 0 {
+                format!("{}ms", start.elapsed().as_millis())
+            } else {
+                format!("{}µs", start.elapsed().as_micros())
+            }
+            .bold()
+        )
     }
 
     /// Execute the graph without deleting intermediate tensors
@@ -551,24 +542,4 @@ fn toposort(
     visited.insert(id);
 
     (final_stack, num_stacks, complete)
-}
-
-fn reverse_dfs_mark(
-    curr_node: NodeIndex,
-    cx: &Graph,
-    marked: &mut HashSet<NodeIndex>,
-    input_nodes: &HashSet<NodeIndex>,
-) {
-    marked.insert(curr_node);
-    if !input_nodes.contains(&curr_node) {
-        for i in cx
-            .graph
-            .edges_directed(curr_node, Direction::Incoming)
-            .map(|e| e.source())
-            .filter(|i| !marked.contains(i))
-            .collect_vec()
-        {
-            reverse_dfs_mark(i, cx, marked, input_nodes);
-        }
-    }
 }

@@ -8,7 +8,7 @@ use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, Truncatio
 
 #[rustfmt::skip]
 fn main() {
-    let prompt = "The young boy ran over to the";
+    let prompt = "Here is a python implementation of merge sort:";
     let tokenizer =
             SentencePieceBpeTokenizer::from_file("./examples/llama/setup/llama-7b-hf/tokenizer.model", false).unwrap();
     let mut input: Vec<usize> = tokenizer.encode(
@@ -58,9 +58,7 @@ fn main() {
     println!("Inferencing...");
     // First pass
     inp.set_dyn(input.clone(), vec![1, input.len()]);
-    let now = std::time::Instant::now();
-    cx1.execute();
-    println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
+    cx1.execute_debug();
 
     let out1 = out1.dyn_data(&cx1.dyn_map);
     input.push(sample_index(&out1[out1.len() - 32_000..]));
@@ -68,8 +66,10 @@ fn main() {
 
     // Move cache over to second graph
     for ((key_src, val_src), (key_dest, val_dest)) in cache1.into_iter().zip(cache_src.iter()) {
-        cx2.tensors.insert(key_dest.id, cx1.tensors.remove(&key_src.id).unwrap());
-        cx2.tensors.insert(val_dest.id, cx1.tensors.remove(&val_src.id).unwrap());
+        cx2.set_tensor(key_dest.id, cx1.get_tensor(key_src.id).unwrap());
+        cx2.set_tensor(val_dest.id, cx1.get_tensor(val_src.id).unwrap());
+        key_dest.mark_no_delete();
+        val_dest.mark_no_delete();
     }
     drop(cx1);
 
@@ -86,7 +86,7 @@ fn main() {
         out.drop();
         // Sample tokens
         input.push(sample_index(&o));
-        println!("{}", tokenizer.decode(&input.iter().map(|i| *i as i64).collect::<Vec<_>>(), true, false));
+        println!("{}", tokenizer.decode(&input.iter().map(|i| *i as i64).collect::<Vec<_>>(), true, false).replace("<0x0A>", "\n"));
 
         // Swap caches
         for ((src_k, src_v), (dest_k, dest_v)) in cache_src.iter().copied().zip(cache_dest.iter().copied()) {
