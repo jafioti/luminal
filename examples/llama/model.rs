@@ -114,18 +114,18 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
                     } else {
                         0
                     };
-                    Tensor {
+                    vec![Tensor {
                         data: Box::new(
                             (0..inp[0].1.shape()[2].to_usize().unwrap())
                                 .map(|i| (i + offset) as f32)
                                 .collect::<Vec<_>>(),
                         ),
-                    }
+                    }]
                 }),
             ))
-            .input(seq_tensor.id, seq_tensor.shape);
+            .input(seq_tensor.id, 0, seq_tensor.shape);
         if has_cache {
-            op = op.input(cache.unwrap().0.id, cache.unwrap().0.shape);
+            op = op.input(cache.unwrap().0.id, 0, cache.unwrap().0.shape);
         }
         let t: GraphTensor<(Seq,)> =
             GraphTensor::from_id(op.finish(), <(Seq,)>::to_tracker(), graph);
@@ -528,12 +528,12 @@ impl<
                                 data[i * seq_len + j] = f32::NEG_INFINITY;
                             }
                         }
-                        Tensor {
+                        vec![Tensor {
                             data: Box::new(data),
-                        }
+                        }]
                     }),
                 ))
-                .input(input.id, input.shape)
+                .input(input.id, 0, input.shape)
                 .finish(),
             ShapeTracker::new(&[CurSeq::const_size(), CurSeq::const_size()]),
             graph,

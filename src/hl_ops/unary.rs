@@ -8,7 +8,7 @@ impl<S: Shape> GraphTensor<S> {
         let new_id = self
             .graph()
             .add_op(op::Log2)
-            .input(self.id, self.shape)
+            .input(self.id, 0, self.shape)
             .finish();
         GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
@@ -18,7 +18,7 @@ impl<S: Shape> GraphTensor<S> {
         let new_id = self
             .graph()
             .add_op(op::Exp2)
-            .input(self.id, self.shape)
+            .input(self.id, 0, self.shape)
             .finish();
         GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
@@ -37,7 +37,7 @@ impl<S: Shape> GraphTensor<S> {
         let new_id = self
             .graph()
             .add_op(op::Recip)
-            .input(self.id, self.shape)
+            .input(self.id, 0, self.shape)
             .finish();
         GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
@@ -46,7 +46,7 @@ impl<S: Shape> GraphTensor<S> {
         let new_id = self
             .graph()
             .add_op(op::Sin)
-            .input(self.id, self.shape)
+            .input(self.id, 0, self.shape)
             .finish();
         GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
@@ -59,7 +59,7 @@ impl<S: Shape> GraphTensor<S> {
         let new_id = self
             .graph()
             .add_op(op::Sqrt)
-            .input(self.id, self.shape)
+            .input(self.id, 0, self.shape)
             .finish();
         GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }

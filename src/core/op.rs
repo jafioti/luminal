@@ -38,7 +38,7 @@ pub trait Operator: Debug + TraitObjEq {
             InputTensor,
             crate::core::shape::simple_tracker::ShapeTracker,
         )>,
-    ) -> Tensor;
+    ) -> Vec<Tensor>;
 }
 
 /// An opaque function running on CPU that takes in tensor references and outputs a new tensor
@@ -51,7 +51,7 @@ pub struct Function(
                 InputTensor,
                 crate::core::shape::simple_tracker::ShapeTracker,
             )>,
-        ) -> Tensor,
+        ) -> Vec<Tensor>,
     >,
 );
 
@@ -62,7 +62,7 @@ impl PartialEq for Function {
 }
 
 impl Operator for Function {
-    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         (self.1)(inp)
     }
 }
@@ -76,7 +76,7 @@ impl Debug for Function {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Print(pub String);
 impl Operator for Print {
-    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         for (i, (tensor, tracker)) in inp.iter().enumerate() {
             println!("{}", self.0);
             let d = tensor
@@ -88,9 +88,9 @@ impl Operator for Print {
             println!("{} Data: {:?}", i + 1, &d[d.len().saturating_sub(10)..]);
             println!("{} Shape: {:?}", i + 1, tracker);
         }
-        Tensor {
+        vec![Tensor {
             data: Box::<Vec<f32>>::default(),
-        }
+        }]
     }
 }
 
@@ -98,7 +98,7 @@ impl Operator for Print {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Contiguous;
 impl Operator for Contiguous {
-    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         // Copy data over to new tensor
         let src = inp[0]
             .0
@@ -114,9 +114,9 @@ impl Operator for Contiguous {
                 res[i] = src[n];
             }
         }
-        Tensor {
+        vec![Tensor {
             data: Box::new(res),
-        }
+        }]
     }
 }
 
@@ -127,7 +127,7 @@ impl Operator for Contiguous {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Log2;
 impl Operator for Log2 {
-    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let mut t = match inp.pop().unwrap().0 {
             InputTensor::Borrowed(t) => t.clone(),
             InputTensor::Owned(t) => t,
@@ -142,14 +142,14 @@ impl Operator for Log2 {
             *a = a.log2();
         }
 
-        t
+        vec![t]
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Exp2;
 impl Operator for Exp2 {
-    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let mut t = match inp.pop().unwrap().0 {
             InputTensor::Borrowed(t) => t.clone(),
             InputTensor::Owned(t) => t,
@@ -164,14 +164,14 @@ impl Operator for Exp2 {
             *a = a.exp2();
         }
 
-        t
+        vec![t]
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Sin;
 impl Operator for Sin {
-    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let mut t = match inp.pop().unwrap().0 {
             InputTensor::Borrowed(t) => t.clone(),
             InputTensor::Owned(t) => t,
@@ -185,14 +185,14 @@ impl Operator for Sin {
         {
             *a = a.sin();
         }
-        t
+        vec![t]
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Sqrt;
 impl Operator for Sqrt {
-    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let mut t = match inp.pop().unwrap().0 {
             InputTensor::Borrowed(t) => t.clone(),
             InputTensor::Owned(t) => t,
@@ -206,14 +206,14 @@ impl Operator for Sqrt {
         {
             *a = a.sqrt();
         }
-        t
+        vec![t]
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Recip;
 impl Operator for Recip {
-    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let mut t = match inp.pop().unwrap().0 {
             InputTensor::Borrowed(t) => t.clone(),
             InputTensor::Owned(t) => t,
@@ -227,7 +227,7 @@ impl Operator for Recip {
         {
             *a = a.recip();
         }
-        t
+        vec![t]
     }
 }
 
@@ -236,7 +236,7 @@ impl Operator for Recip {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Add;
 impl Operator for Add {
-    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let (a_data, b_data) = (
             inp[0]
                 .0
@@ -259,16 +259,16 @@ impl Operator for Add {
             data[i] = a_ind.index(i).map(|i| a_data[i]).unwrap_or_default()
                 + b_ind.index(i).map(|i| b_data[i]).unwrap_or_default();
         }
-        Tensor {
+        vec![Tensor {
             data: Box::new(data),
-        }
+        }]
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mul;
 impl Operator for Mul {
-    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let (a_data, b_data) = (
             inp[0]
                 .0
@@ -291,16 +291,16 @@ impl Operator for Mul {
             data[i] = a_ind.index(i).map(|i| a_data[i]).unwrap_or_default()
                 * b_ind.index(i).map(|i| b_data[i]).unwrap_or_default();
         }
-        Tensor {
+        vec![Tensor {
             data: Box::new(data),
-        }
+        }]
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mod;
 impl Operator for Mod {
-    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let (a_data, b_data) = (
             inp[0]
                 .0
@@ -323,16 +323,16 @@ impl Operator for Mod {
             data[i] = a_ind.index(i).map(|i| a_data[i]).unwrap_or_default()
                 % b_ind.index(i).map(|i| b_data[i]).unwrap_or_default();
         }
-        Tensor {
+        vec![Tensor {
             data: Box::new(data),
-        }
+        }]
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LessThan;
 impl Operator for LessThan {
-    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let (a_data, b_data) = (
             inp[0]
                 .0
@@ -356,9 +356,9 @@ impl Operator for LessThan {
             let b = b_ind.index(i).map(|i| b_data[i]).unwrap_or_default();
             data[i] = if a < b { 1. } else { 0. };
         }
-        Tensor {
+        vec![Tensor {
             data: Box::new(data),
-        }
+        }]
     }
 }
 
@@ -367,7 +367,7 @@ impl Operator for LessThan {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SumReduce(pub usize);
 impl Operator for SumReduce {
-    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let front_size: usize = inp[0]
             .1
             .shape()
@@ -407,16 +407,16 @@ impl Operator for SumReduce {
                 }
             }
         }
-        Tensor {
+        vec![Tensor {
             data: Box::new(result),
-        }
+        }]
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MaxReduce(pub usize);
 impl Operator for MaxReduce {
-    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let front_size: usize = inp[0]
             .1
             .shape()
@@ -456,9 +456,9 @@ impl Operator for MaxReduce {
                 }
             }
         }
-        Tensor {
+        vec![Tensor {
             data: Box::new(result),
-        }
+        }]
     }
 }
 

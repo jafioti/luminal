@@ -66,8 +66,8 @@ fn main() {
 
     // Move cache over to second graph
     for ((key_src, val_src), (key_dest, val_dest)) in cache1.into_iter().zip(cache_src.iter()) {
-        cx2.set_tensor(key_dest.id, cx1.get_tensor(key_src.id).unwrap());
-        cx2.set_tensor(val_dest.id, cx1.get_tensor(val_src.id).unwrap());
+        cx2.set_tensor(key_dest.id, 0, cx1.get_tensor(key_src.id, 0).unwrap());
+        cx2.set_tensor(val_dest.id, 0, cx1.get_tensor(val_src.id, 0).unwrap());
         key_dest.mark_no_delete();
         val_dest.mark_no_delete();
     }

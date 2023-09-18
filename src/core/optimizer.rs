@@ -185,7 +185,10 @@ fn search(
         (),
     >,
     graph_node: petgraph::stable_graph::NodeIndex,
-    graph: &StableGraph<Box<dyn Operator>, (u8, crate::core::shape::simple_tracker::ShapeTracker)>,
+    graph: &StableGraph<
+        Box<dyn Operator>,
+        (u8, u8, crate::core::shape::simple_tracker::ShapeTracker),
+    >,
     used: &mut HashSet<NodeIndex>,
     selector_used: &mut HashSet<NodeIndex>,
 ) -> bool {
@@ -206,7 +209,7 @@ fn search(
     let input_shapes = graph
         .edges_directed(graph_node, petgraph::Direction::Incoming)
         .sorted_by_key(|e| e.weight().0)
-        .map(|e| e.weight().1)
+        .map(|e| e.weight().2)
         .collect::<Vec<_>>();
     // Test shape
     if let Some(shape) = &selector_weight.2 {

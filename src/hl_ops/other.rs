@@ -58,12 +58,12 @@ impl<S: Shape> GraphTensor<S> {
                             }
                         }
                     }
-                    Tensor {
+                    vec![Tensor {
                         data: Box::new(result),
-                    }
+                    }]
                 }),
             ))
-            .input(self.id, self.shape)
+            .input(self.id, 0, self.shape)
             .finish();
         GraphTensor::from_id(id, self.shape, self.graph_ref)
     }

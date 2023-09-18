@@ -52,13 +52,13 @@ impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
                             res.push(b_ind.index(start + n).map(|i| data[i]).unwrap_or_default());
                         }
                     }
-                    Tensor {
+                    vec![Tensor {
                         data: Box::new(res),
-                    }
+                    }]
                 }),
             ))
-            .input(indexes.id, indexes.shape)
-            .input(self.id, self.shape) // Since indexes might have a 1 dimension we don't want getting changed, we feed it in as the first argument
+            .input(indexes.id, 0, indexes.shape)
+            .input(self.id, 0, self.shape) // Since indexes might have a 1 dimension we don't want getting changed, we feed it in as the first argument
             .finish();
 
         indexes.shape.expand(2, Dim::Known(DIM));

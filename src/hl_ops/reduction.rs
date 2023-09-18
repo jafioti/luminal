@@ -14,7 +14,7 @@ impl<S: Shape> GraphTensor<S> {
             new_id = self
                 .graph()
                 .add_op(op::SumReduce(dim as usize))
-                .input(new_id, shape)
+                .input(new_id, 0, shape)
                 .finish();
             // Reduce shape
             shape.remove_dim(dim as usize);
@@ -33,7 +33,7 @@ impl<S: Shape> GraphTensor<S> {
             new_id = self
                 .graph()
                 .add_op(op::MaxReduce(dim as usize))
-                .input(new_id, shape)
+                .input(new_id, 0, shape)
                 .finish();
             // Reduce shape
             shape.remove_dim(dim as usize);
@@ -57,13 +57,13 @@ impl<S: Shape> GraphTensor<S> {
             let div_tensor = self
                 .graph()
                 .add_op(op::SumReduce(0))
-                .input(ones, st)
+                .input(ones, 0, st)
                 .finish();
             // Sum reduce
             node_id = self
                 .graph()
                 .add_op(op::SumReduce(dim as usize))
-                .input(node_id, shape)
+                .input(node_id, 0, shape)
                 .finish();
             shape.remove_dim(dim as usize);
 
@@ -71,13 +71,13 @@ impl<S: Shape> GraphTensor<S> {
             let mul_tensor = self
                 .graph()
                 .add_op(op::Recip)
-                .input(div_tensor, ShapeTracker::new(&[]))
+                .input(div_tensor, 0, ShapeTracker::new(&[]))
                 .finish();
             node_id = self
                 .graph()
                 .add_op(op::Mul)
-                .input(node_id, shape)
-                .input(mul_tensor, ShapeTracker::fake(&shape.shape()))
+                .input(node_id, 0, shape)
+                .input(mul_tensor, 0, ShapeTracker::fake(&shape.shape()))
                 .finish();
         }
         GraphTensor::from_id(node_id, shape, self.graph_ref)

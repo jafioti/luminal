@@ -10,8 +10,8 @@ impl<S: Shape> Add<GraphTensor<S>> for GraphTensor<S> {
         let new_id = self
             .graph()
             .add_op(op::Add)
-            .input(self.id, self.shape)
-            .input(rhs.id, rhs.shape)
+            .input(self.id, 0, self.shape)
+            .input(rhs.id, 0, rhs.shape)
             .finish();
         GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
@@ -33,8 +33,8 @@ impl<S: Shape> Mul<GraphTensor<S>> for GraphTensor<S> {
         let new_id = self
             .graph()
             .add_op(op::Mul)
-            .input(self.id, self.shape)
-            .input(rhs.id, rhs.shape)
+            .input(self.id, 0, self.shape)
+            .input(rhs.id, 0, rhs.shape)
             .finish();
         GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
@@ -57,8 +57,8 @@ impl<S: Shape> Rem<GraphTensor<S>> for GraphTensor<S> {
         let new_id = self
             .graph()
             .add_op(op::Mod)
-            .input(self.id, self.shape)
-            .input(rhs.id, rhs.shape)
+            .input(self.id, 0, self.shape)
+            .input(rhs.id, 0, rhs.shape)
             .finish();
         GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
@@ -119,8 +119,8 @@ impl<S: Shape> GraphTensor<S> {
         let new_id = self
             .graph()
             .add_op(op::LessThan)
-            .input(self.id, self.shape)
-            .input(rhs.id, rhs.shape)
+            .input(self.id, 0, self.shape)
+            .input(rhs.id, 0, rhs.shape)
             .finish();
         GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }

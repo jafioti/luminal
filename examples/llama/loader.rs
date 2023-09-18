@@ -27,7 +27,7 @@ impl Loader for DfdxDeferredLoader {
                 .next()
                 .unwrap()
                 .weight()
-                .1
+                .2
                 .n_elements();
             if let Some(inp_func) = graph
                 .graph
@@ -69,9 +69,9 @@ impl Loader for DfdxDeferredLoader {
                         )
                     };
 
-                    Tensor {
+                    vec![Tensor {
                         data: Box::new(data),
-                    }
+                    }]
                 });
             };
         }

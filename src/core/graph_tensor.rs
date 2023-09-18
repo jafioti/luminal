@@ -43,7 +43,7 @@ impl<S: Shape> GraphTensor<S> {
 
     /// Remove this tensor's data from the graph.
     pub fn drop(&self) {
-        self.graph().tensors.remove(&self.id());
+        self.graph().tensors.remove(&(self.id(), 0));
     }
 
     /// Mark this tensor to not be deleted, but not retrieved either
@@ -53,7 +53,7 @@ impl<S: Shape> GraphTensor<S> {
 
     /// Get the value of the tensor (if the graph was executed)
     pub fn retrieve(&self) -> Option<&Tensor> {
-        self.graph().get_tensor_ref(self.id)
+        self.graph().get_tensor_ref(self.id, 0)
     }
 
     #[allow(clippy::mut_from_ref)]
@@ -78,8 +78,10 @@ impl<S: Shape> GraphTensor<S> {
             .downcast_mut::<Function>()
             .unwrap();
         // We shouldn't do cloning here!
-        node.1 = Box::new(move |_| Tensor {
-            data: Box::new(data.clone()),
+        node.1 = Box::new(move |_| {
+            vec![Tensor {
+                data: Box::new(data.clone()),
+            }]
         });
     }
 
@@ -99,7 +101,7 @@ impl<S: Shape> GraphTensor<S> {
     pub fn debug(&self, message: &str) {
         self.graph()
             .add_op(op::Print(message.to_string()))
-            .input(self.id, self.shape)
+            .input(self.id, 0, self.shape)
             .finish();
     }
 
@@ -131,8 +133,10 @@ impl<S: ConstShape> GraphTensor<S> {
             .downcast_mut::<Function>()
             .unwrap();
         // We shouldn't do cloning here!
-        node.1 = Box::new(move |_| Tensor {
-            data: Box::new(data.clone()),
+        node.1 = Box::new(move |_| {
+            vec![Tensor {
+                data: Box::new(data.clone()),
+            }]
         });
     }
 

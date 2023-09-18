@@ -51,8 +51,8 @@ impl GraphOptimizer for MatMul2DOptimizer {
             srcs[1].1.permute(&[1, 0]);
             let new_op = graph
                 .add_op(MatMul2D)
-                .input(srcs[0].0, srcs[0].1)
-                .input(srcs[1].0, srcs[1].1)
+                .input(srcs[0].0, 0, srcs[0].1)
+                .input(srcs[1].0, 0, srcs[1].1)
                 .finish();
 
             // Create edges to dests
@@ -76,7 +76,7 @@ impl GraphOptimizer for MatMul2DOptimizer {
 pub struct MatMul2D;
 
 impl Operator for MatMul2D {
-    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
         let (a_strides, b_strides) = (inp[0].1.strides(), inp[1].1.strides());
         let a_data = inp[0]
@@ -113,7 +113,7 @@ impl Operator for MatMul2D {
             );
         }
 
-        Tensor { data: Box::new(c) }
+        vec![Tensor { data: Box::new(c) }]
     }
 }
 
@@ -168,8 +168,8 @@ impl GraphOptimizer for BatchMatMul2DOptimizer {
             srcs[1].1.permute(&[1, 0]);
             let new_op = graph
                 .add_op(BatchedMatMul2D)
-                .input(srcs[0].0, srcs[0].1)
-                .input(srcs[1].0, srcs[1].1)
+                .input(srcs[0].0, 0, srcs[0].1)
+                .input(srcs[1].0, 0, srcs[1].1)
                 .finish();
 
             // Create edges to dests
@@ -194,7 +194,7 @@ pub struct BatchedMatMul2D;
 
 // ABCxCD -> ABD
 impl Operator for BatchedMatMul2D {
-    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
         let (a_strides, b_strides) = (inp[0].1.strides(), inp[1].1.strides());
         let a_data = inp[0]
@@ -244,7 +244,7 @@ impl Operator for BatchedMatMul2D {
             }
         }
 
-        Tensor { data: Box::new(c) }
+        vec![Tensor { data: Box::new(c) }]
     }
 }
 
@@ -338,7 +338,7 @@ impl GraphOptimizer for UnaryFusionOptimizer {
 pub struct FusedUnary(Vec<fn(f32) -> f32>);
 
 impl Operator for FusedUnary {
-    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Tensor {
+    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let mut t = match inp.pop().unwrap().0 {
             InputTensor::Owned(t) => t,
             InputTensor::Borrowed(t) => t.clone(),
@@ -355,7 +355,7 @@ impl Operator for FusedUnary {
             }
         }
 
-        t
+        vec![t]
     }
 }
 

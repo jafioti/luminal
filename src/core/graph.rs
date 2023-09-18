@@ -16,11 +16,11 @@ use regex::Regex;
 
 #[derive(Debug, Default)]
 pub struct Graph {
-    pub tensors: HashMap<NodeIndex, Tensor>,
+    pub tensors: HashMap<(NodeIndex, u8), Tensor>,
     pub id_remap: HashMap<NodeIndex, NodeIndex>,
     pub dyn_map: HashMap<char, usize>,
     pub graph:
-        StableGraph<Box<dyn Operator>, (u8, crate::core::shape::simple_tracker::ShapeTracker)>,
+        StableGraph<Box<dyn Operator>, (u8, u8, crate::core::shape::simple_tracker::ShapeTracker)>,
     pub no_delete: HashSet<NodeIndex>,
     /// Mark tensors that need to be retrieved later (mostly for optimizers to insert copy back calls, the graph itself doesn't treat these differently)
     pub to_retrieve: HashSet<NodeIndex>,
@@ -29,7 +29,10 @@ pub struct Graph {
     pub(crate) linearized_graph: Option<
         Vec<(
             NodeIndex,
-            Vec<(NodeIndex, crate::core::shape::simple_tracker::ShapeTracker)>,
+            Vec<(
+                (NodeIndex, u8),
+                crate::core::shape::simple_tracker::ShapeTracker,
+            )>,
         )>,
     >,
 }
@@ -48,18 +51,19 @@ impl Graph {
         }
     }
 
-    pub fn get_tensor(&mut self, id: NodeIndex) -> Option<Tensor> {
+    pub fn get_tensor(&mut self, id: NodeIndex, ind: u8) -> Option<Tensor> {
         // Walk through remap
-        self.tensors.remove(&remap_id(id, &self.id_remap))
+        self.tensors.remove(&(remap_id(id, &self.id_remap), ind))
     }
 
-    pub fn get_tensor_ref(&self, id: NodeIndex) -> Option<&Tensor> {
+    pub fn get_tensor_ref(&self, id: NodeIndex, ind: u8) -> Option<&Tensor> {
         // Walk through remap
-        self.tensors.get(&remap_id(id, &self.id_remap))
+        self.tensors.get(&(remap_id(id, &self.id_remap), ind))
     }
 
-    pub fn set_tensor(&mut self, id: NodeIndex, tensor: Tensor) {
-        self.tensors.insert(remap_id(id, &self.id_remap), tensor);
+    pub fn set_tensor(&mut self, id: NodeIndex, ind: u8, tensor: Tensor) {
+        self.tensors
+            .insert((remap_id(id, &self.id_remap), ind), tensor);
     }
 
     pub fn set_dyn_dim(&mut self, dim: char, val: usize) {
@@ -107,7 +111,7 @@ impl Graph {
                 .graph
                 .edges_directed(node, Direction::Incoming)
                 .sorted_by_key(|e| e.weight().0)
-                .map(|i| (i.source(), i.weight().1))
+                .map(|i| ((i.source(), i.weight().1), i.weight().2))
                 .collect_vec();
             v.push((node, src_ids));
         }
@@ -117,9 +121,9 @@ impl Graph {
     /// Clear any remaining tensors that may be around from old executions
     pub fn reset(&mut self) {
         // (This is where we should do the tensor caching!)
-        for t in self.tensors.keys().copied().collect_vec() {
+        for (t, i) in self.tensors.keys().copied().collect_vec() {
             if !self.no_delete.contains(&t) {
-                self.tensors.remove(&t);
+                self.tensors.remove(&(t, i));
             }
         }
     }
@@ -127,13 +131,13 @@ impl Graph {
     /// Swap the tensors with these ids
     pub fn swap_tensors<A: Shape, B: Shape>(&mut self, a: GraphTensor<A>, b: GraphTensor<B>) {
         // Swap tensors
-        let a_t = self.tensors.remove(&a.id);
-        let b_t = self.tensors.remove(&b.id);
+        let a_t = self.tensors.remove(&(a.id, 0)); // Assume 0th output for now
+        let b_t = self.tensors.remove(&(b.id, 0));
         if let Some(a_t) = a_t {
-            self.tensors.insert(b.id, a_t);
+            self.tensors.insert((b.id, 0), a_t);
         }
         if let Some(b_t) = b_t {
-            self.tensors.insert(a.id, b_t);
+            self.tensors.insert((a.id, 0), b_t);
         }
     }
 
@@ -144,14 +148,21 @@ impl Graph {
         if self.linearized_graph.is_none() {
             self.toposort();
         }
-        let mut remaining_consumers: HashMap<NodeIndex, usize> = self
+        let mut remaining_consumers: HashMap<(NodeIndex, u8), usize> = self
             .graph
             .node_indices()
-            .map(|i| (i, self.graph.edges_directed(i, Direction::Outgoing).count()))
+            .flat_map(|i| {
+                self.graph
+                    .edges_directed(i, Direction::Outgoing)
+                    .group_by(|k| k.weight().1)
+                    .into_iter()
+                    .map(|k| ((i, k.0), k.1.count()))
+                    .collect::<Vec<_>>()
+            })
             .collect();
 
         for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
-            if self.tensors.contains_key(node) {
+            if self.tensors.contains_key(&(*node, 0)) {
                 continue;
             }
 
@@ -159,12 +170,12 @@ impl Graph {
             let mut owned = VecDeque::default();
             let mut refs = VecDeque::default();
             for (i, (id, _)) in src_ids.iter().enumerate() {
-                if remaining_consumers[id] == 1 && !self.no_delete.contains(id) {
+                if remaining_consumers[id] == 1 && !self.no_delete.contains(&id.0) {
                     owned.push_back((InputTensor::Owned(self.tensors.remove(id).unwrap()), i));
                 }
             }
             for (i, (id, _)) in src_ids.iter().enumerate() {
-                if remaining_consumers[id] != 1 || self.no_delete.contains(id) {
+                if remaining_consumers[id] != 1 || self.no_delete.contains(&id.0) {
                     refs.push_back((InputTensor::Borrowed(self.tensors.get(id).unwrap()), i));
                 }
             }
@@ -187,8 +198,10 @@ impl Graph {
 
             // All sources are ready
             // Execute
-            let tensor = self.graph.node_weight(*node).unwrap().process(srcs);
-            self.tensors.insert(*node, tensor);
+            let tensors = self.graph.node_weight(*node).unwrap().process(srcs);
+            for (i, tensor) in tensors.into_iter().enumerate() {
+                self.tensors.insert((*node, i as u8), tensor);
+            }
 
             // Check if we can delete the source tensors now
             for (source, _) in src_ids {
@@ -204,10 +217,17 @@ impl Graph {
         if self.linearized_graph.is_none() {
             self.toposort();
         }
-        let mut remaining_consumers: HashMap<NodeIndex, usize> = self
+        let mut remaining_consumers: HashMap<(NodeIndex, u8), usize> = self
             .graph
             .node_indices()
-            .map(|i| (i, self.graph.edges_directed(i, Direction::Outgoing).count()))
+            .flat_map(|i| {
+                self.graph
+                    .edges_directed(i, Direction::Outgoing)
+                    .group_by(|k| k.weight().1)
+                    .into_iter()
+                    .map(|k| ((i, k.0), k.1.count()))
+                    .collect::<Vec<_>>()
+            })
             .collect();
         let mut op_times = HashMap::new();
         // Very janky way of extracting the type name only from an op, stripping out the struct contents
@@ -221,7 +241,7 @@ impl Graph {
         );
         let start = std::time::Instant::now();
         for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
-            if self.tensors.contains_key(node) {
+            if self.tensors.contains_key(&(*node, 0)) {
                 continue;
             }
 
@@ -229,12 +249,12 @@ impl Graph {
             let mut owned = VecDeque::default();
             let mut refs = VecDeque::default();
             for (i, (id, _)) in src_ids.iter().enumerate() {
-                if remaining_consumers[id] == 1 && !self.no_delete.contains(id) {
+                if remaining_consumers[id] == 1 && !self.no_delete.contains(&id.0) {
                     owned.push_back((InputTensor::Owned(self.tensors.remove(id).unwrap()), i));
                 }
             }
             for (i, (id, _)) in src_ids.iter().enumerate() {
-                if remaining_consumers[id] != 1 || self.no_delete.contains(id) {
+                if remaining_consumers[id] != 1 || self.no_delete.contains(&(id.0)) {
                     refs.push_back((InputTensor::Borrowed(self.tensors.get(id).unwrap()), i));
                 }
             }
@@ -276,7 +296,7 @@ impl Graph {
             print!("{shapes_string}");
             // Execute
             let now = std::time::Instant::now();
-            let tensor = self.graph.node_weight(*node).unwrap().process(srcs);
+            let tensors = self.graph.node_weight(*node).unwrap().process(srcs);
             let elapsed = now.elapsed();
             println!(
                 "{:.>1$}",
@@ -290,7 +310,9 @@ impl Graph {
                 .bold(),
                 term_size::dimensions().unwrap().0 - op_name.len() - shapes_string.len(),
             );
-            self.tensors.insert(*node, tensor);
+            for (i, tensor) in tensors.into_iter().enumerate() {
+                self.tensors.insert((*node, i as u8), tensor);
+            }
             let stripped_op_name = op_regex.replace_all(&op_name, "").to_string();
             if let Some(t) = op_times.get_mut(&stripped_op_name) {
                 *t += elapsed;
@@ -348,7 +370,7 @@ impl Graph {
             self.toposort();
         }
         for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
-            if self.tensors.contains_key(node) {
+            if self.tensors.contains_key(&(*node, 0)) {
                 continue;
             }
             let mut srcs = src_ids
@@ -362,8 +384,10 @@ impl Graph {
             }
 
             // All sources are ready, execute
-            let tensor = self.graph.node_weight(*node).unwrap().process(srcs);
-            self.tensors.insert(*node, tensor);
+            let tensors = self.graph.node_weight(*node).unwrap().process(srcs);
+            for (i, tensor) in tensors.into_iter().enumerate() {
+                self.tensors.insert((*node, i as u8), tensor);
+            }
         }
     }
 
@@ -393,7 +417,7 @@ impl Graph {
                     new_graph
                         .node_weight_mut(id_map[&edge.target()])
                         .unwrap()
-                        .push_str(&format!(" | {:?}", edge.weight().1.shape()));
+                        .push_str(&format!(" | {:?}", edge.weight().2.shape()));
                 }
             }
         }
@@ -415,7 +439,7 @@ impl Graph {
         self.graph
             .edges_directed(node_id, Direction::Incoming)
             .sorted_by_key(|e| e.weight().0)
-            .map(|e| (e.source(), e.weight().1))
+            .map(|e| (e.source(), e.weight().2))
             .collect()
     }
 
@@ -493,12 +517,13 @@ impl<'a> NewOp<'a> {
     pub fn input(
         mut self,
         id: NodeIndex,
+        from_output: u8,
         shape: crate::core::shape::simple_tracker::ShapeTracker,
     ) -> Self {
         self.graph_ref.graph.add_edge(
             remap_id(id, &self.graph_ref.id_remap),
             self.new_op_id,
-            (self.num_srcs, shape),
+            (self.num_srcs, from_output, shape),
         );
         self.num_srcs += 1;
         self
@@ -518,7 +543,10 @@ pub(crate) fn remap_id(
 
 fn toposort(
     id: NodeIndex,
-    graph: &StableGraph<Box<dyn Operator>, (u8, crate::core::shape::simple_tracker::ShapeTracker)>,
+    graph: &StableGraph<
+        Box<dyn Operator>,
+        (u8, u8, crate::core::shape::simple_tracker::ShapeTracker),
+    >,
     visited: &mut HashSet<NodeIndex>,
 ) -> (Vec<NodeIndex>, usize, bool) {
     if visited.contains(&id) {

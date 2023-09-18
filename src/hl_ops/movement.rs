@@ -34,7 +34,7 @@ impl<S: Shape> GraphTensor<S> {
             // Insert contiguous call
             self.graph()
                 .add_op(op::Contiguous)
-                .input(self.id, self.shape)
+                .input(self.id, 0, self.shape)
                 .finish()
         } else {
             // Already contiguous
@@ -50,7 +50,7 @@ impl<S: Shape> GraphTensor<S> {
             // Insert contiguous call
             self.graph()
                 .add_op(op::Contiguous)
-                .input(self.id, self.shape)
+                .input(self.id, 0, self.shape)
                 .finish()
         } else {
             // Already contiguous
@@ -76,7 +76,7 @@ impl<S: Shape> GraphTensor<S> {
         let new_id = self
             .graph()
             .add_op(op::Contiguous)
-            .input(self.id, self.shape)
+            .input(self.id, 0, self.shape)
             .finish();
         GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
@@ -138,13 +138,13 @@ impl<S: Shape> GraphTensor<S> {
                         *d = a_ind.index(i).map(|i| a_data[i]).unwrap_or_default()
                             + b_ind.index(i).map(|i| b_data[i]).unwrap_or_default()
                     }
-                    Tensor {
+                    vec![Tensor {
                         data: Box::new(data),
-                    }
+                    }]
                 }),
             ))
-            .input(self.id, self.shape)
-            .input(rhs.id, rhs.shape)
+            .input(self.id, 0, self.shape)
+            .input(rhs.id, 0, rhs.shape)
             .finish();
         GraphTensor::from_id(
             fin,

@@ -35,7 +35,7 @@ impl Saver for StateDictSaver {
         serializer
             .state
             .into_iter()
-            .map(|(k, v)| (k, graph.get_tensor(v).unwrap()))
+            .map(|(k, v)| (k, graph.get_tensor(v, 0).unwrap()))
             .collect()
     }
 }
@@ -62,7 +62,7 @@ impl Saver for SafeTensorSaver {
         let state_dict: HashMap<_, _> = serializer
             .state
             .into_iter()
-            .map(|(k, v)| (k, graph.get_tensor_ref(v).unwrap()))
+            .map(|(k, v)| (k, graph.get_tensor_ref(v, 0).unwrap()))
             .collect();
         safetensors::serialize_to_file(state_dict, &None, self.path.as_ref())
     }
@@ -87,7 +87,7 @@ impl Loader for StateDictLoader {
         for (s, n) in serializer.state {
             let t = self.state_dict.remove(&s).unwrap();
             graph.no_delete.insert(n);
-            graph.tensors.insert(n, t);
+            graph.tensors.insert((n, 0), t);
         }
     }
 }
@@ -119,7 +119,7 @@ impl Loader for SafeTensorLoader {
         model.serialize(&mut serializer);
 
         for (s, n) in serializer.state {
-            graph.tensors.insert(n, state_dict.remove(&s).unwrap());
+            graph.tensors.insert((n, 0), state_dict.remove(&s).unwrap());
         }
     }
 }
@@ -159,7 +159,7 @@ impl Loader for SafeTensorDeferredLoader {
                     let st = safetensors::SafeTensors::deserialize(&buffer).unwrap();
                     let tensor = st.tensor(&s).unwrap().into();
 
-                    tensor
+                    vec![tensor]
                 });
             };
         }
