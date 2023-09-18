@@ -240,7 +240,7 @@ fn test_mod() {
         &c.data(),
         &[1., 2., 3.]
             .into_iter()
-            .zip([1., 2., 3.].into_iter())
+            .zip([1., 2., 3.])
             .map(|(a, b)| a % b)
             .collect_vec(),
     );
@@ -410,7 +410,7 @@ fn test_transformer_encoder_block() {
         .weight
         .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
-    let a = cx.new_tensor::<(usize, crate::shape::Const<3>)>("Input");
+    let mut a = cx.new_tensor::<(Dyn<'a'>, crate::shape::Const<3>)>("Input");
     let b = model.forward(a);
 
     a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![2, 3]);
@@ -476,5 +476,5 @@ fn test_transformer_encoder_block() {
     );
     let d_b = d_model.forward(d_a);
 
-    assert_close_data(&b.data(), &d_b.as_vec());
+    assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
 }

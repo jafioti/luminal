@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use num::BigInt;
+use savage_core::expression::Expression;
 use tinyvec::ArrayVec;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -135,6 +137,82 @@ impl ShapeTracker {
         }
     }
 
+    pub fn index_expression(&self) -> Expression {
+        let strides = self.unordered_strides();
+        let mut ret = Expression::Integer(BigInt::from(0));
+        let mut acc = Expression::Integer(BigInt::from(1));
+        let logical = Expression::Variable("idx".to_string());
+        for (sh, stride, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
+            (
+                self.dims[i].to_usize().unwrap(),
+                strides[i],
+                self.padding[i],
+                self.slices[i],
+                self.fake[i],
+            )
+        }) {
+            let logical_sh = Expression::Integer(BigInt::from(
+                (sh + padding.0 + padding.1).min(slice.1) - slice.0,
+            ));
+            if !fake {
+                let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
+                ret += (dim_ind - Expression::Integer(BigInt::from(padding.0))
+                    + Expression::Integer(BigInt::from(slice.0.saturating_sub(padding.0))))
+                    * Expression::Integer(BigInt::from(stride));
+            }
+            acc *= logical_sh;
+        }
+        ret
+    }
+
+    /// If this expression evaluates to 0, the logical index is invalid. Otherwise it is valid
+    pub fn valid_expression(&self) -> Expression {
+        let strides = self.unordered_strides();
+        let mut ret = Expression::Integer(BigInt::from(1));
+        let mut acc = Expression::Integer(BigInt::from(1));
+        let logical = Expression::Variable("idx".to_string());
+        for (sh, stride, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
+            (
+                self.dims[i].to_usize().unwrap(),
+                strides[i],
+                self.padding[i],
+                self.slices[i],
+                self.fake[i],
+            )
+        }) {
+            let logical_sh = Expression::Integer(BigInt::from(
+                (sh + padding.0 + padding.1).min(slice.1) - slice.0,
+            ));
+            if !fake {
+                let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
+                ret = Expression::And(
+                    ret.into(),
+                    Expression::LessThan(
+                        dim_ind.clone().into(),
+                        Expression::Integer(BigInt::from((sh + padding.0).min(slice.1))).into(),
+                    )
+                    .into(),
+                );
+                ret = Expression::And(
+                    ret.into(),
+                    Expression::GreaterThanOrEqual(
+                        dim_ind.clone().into(),
+                        Expression::Integer(BigInt::from(padding.0.saturating_sub(slice.0))).into(),
+                    )
+                    .into(),
+                );
+            }
+            if !fake {
+                let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
+                ret += (dim_ind - Expression::Integer(BigInt::from(padding.0))
+                    + Expression::Integer(BigInt::from(slice.0.saturating_sub(padding.0))))
+                    * Expression::Integer(BigInt::from(stride));
+            }
+            acc *= logical_sh;
+        }
+        ret
+    }
+
     /// The number of elements in this tensor, including pads and slices. Counts unknown dims as size 0
     pub fn n_elements(&self) -> usize {
         self.indexes
@@ -152,6 +230,11 @@ impl ShapeTracker {
             // Slice
             .map(|(ind, dim)| dim.min(self.slices[ind].1) - self.slices[ind].0)
             .product()
+    }
+
+    /// The number of elements in this tensor, not including pads and slices. Counts unknown dims as size 0
+    pub fn n_physical_elements(&self) -> usize {
+        self.dims.into_iter().flat_map(|i| i.to_usize()).product()
     }
 
     /// The number of dimensions
