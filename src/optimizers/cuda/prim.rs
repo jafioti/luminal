@@ -1,9 +1,13 @@
-use std::any::{Any, TypeId};
+use std::{
+    any::{Any, TypeId},
+    sync::Arc,
+};
 
 use cudarc::{
-    driver::{CudaDevice, CudaSlice, LaunchAsync, LaunchConfig},
+    driver::{CudaDevice, CudaFunction, CudaSlice, DeviceRepr, LaunchAsync, LaunchConfig},
     nvrtc::compile_ptx,
 };
+use itertools::Itertools;
 use petgraph::visit::EdgeRef;
 
 use crate::{op::*, prelude::*};
@@ -47,8 +51,60 @@ impl Operator for CudaCopyFromDevice {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct CudaContiguous;
+#[derive(Debug, Clone)]
+pub struct CudaContiguous(Arc<CudaDevice>, CudaFunction, ShapeTracker);
+
+impl PartialEq for CudaContiguous {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl CudaContiguous {
+    fn new(shape: ShapeTracker) -> Self {
+        let idx_exp = shape.index_expression();
+        let valid_exp = shape.valid_expression();
+        let ptx = compile_ptx(format!(
+            "
+extern \"C\" __global__ void contiguous_kernel(float *out, const float *inp_a, int numel{}) {{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int a_idx = {idx_exp};
+    if (idx < numel && {valid_exp} != 0) {{
+        out[idx] = inp_a[a_idx];
+    }}
+}}",
+            shape
+                .dims
+                .into_iter()
+                .filter_map(|d| if let Dim::Unknown(c) = d {
+                    Some(c)
+                } else {
+                    None
+                })
+                .map(|c| format!(", int {c}"))
+                .collect::<String>()
+        ))
+        .unwrap();
+        println!(
+            "Params: {:?}",
+            shape
+                .dims
+                .into_iter()
+                .filter_map(|d| if let Dim::Unknown(c) = d {
+                    Some(c)
+                } else {
+                    None
+                })
+                .map(|c| format!(", int {c}"))
+                .collect::<String>()
+        );
+        let dev = CudaDevice::new(0).unwrap();
+        dev.load_ptx(ptx, "contiguous", &["contiguous_kernel"])
+            .unwrap();
+        let f = dev.get_func("contiguous", "contiguous_kernel").unwrap();
+        Self(dev, f, shape)
+    }
+}
 impl Operator for CudaContiguous {
     fn process(&self, mut tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         if tensors[0].1.is_contiguous() {
@@ -68,27 +124,20 @@ impl Operator for CudaContiguous {
             .iter()
             .map(|d| d.to_usize().unwrap())
             .product();
-        let idx_exp = tensors[0].1.index_expression();
-        let valid_exp = tensors[0].1.valid_expression();
-        let ptx = compile_ptx(format!(
-            "
-extern \"C\" __global__ void contiguous_kernel(float *out, const float *a, int numel) {{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int a_idx = {idx_exp};
-    if (idx < numel && {valid_exp} != 0) {{
-        out[idx] = a[a_idx];
-    }}
-}}"
-        ))
-        .unwrap();
-        let dev = CudaDevice::new(0).unwrap();
-        dev.load_ptx(ptx, "contiguous", &["contiguous_kernel"])
-            .unwrap();
-        let f = dev.get_func("contiguous", "contiguous_kernel").unwrap();
 
-        let mut out = unsafe { dev.alloc::<f32>(inp_size) }.unwrap();
+        let out = unsafe { self.0.alloc::<f32>(inp_size) }.unwrap();
         let cfg = LaunchConfig::for_num_elems(inp_size as u32);
-        unsafe { f.launch(cfg, (&mut out, a, inp_size as i32)) }.unwrap();
+        let mut params: Vec<*mut std::ffi::c_void> = vec![
+            (&out).as_kernel_param(),
+            a.as_kernel_param(),
+            (inp_size as i32).as_kernel_param(),
+        ];
+        for (d1, d2) in self.2.shape().into_iter().zip(tensors[0].1.shape()) {
+            if matches!(d1, Dim::Unknown(_)) {
+                params.push(d2.to_usize().unwrap().as_kernel_param());
+            }
+        }
+        unsafe { self.1.clone().launch_async_impl(cfg, &mut params) }.unwrap();
 
         vec![Tensor {
             data: Box::new(out),
@@ -775,6 +824,12 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
 
         // Swap primitive ops
         for id in graph.graph.node_indices().collect::<Vec<_>>() {
+            let src_shapes = graph
+                .graph
+                .edges_directed(id, petgraph::Direction::Incoming)
+                .sorted_by_key(|e| e.weight().0)
+                .map(|e| e.weight().2)
+                .collect::<Vec<_>>();
             let op = graph.graph.node_weight(id).unwrap().as_any().type_id();
             let op_ref = graph.graph.node_weight_mut(id).unwrap();
             if is::<Log2>(op) {
@@ -796,7 +851,7 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
             } else if is::<LessThan>(op) {
                 *op_ref = Box::new(CudaLessThan);
             } else if is::<Contiguous>(op) {
-                *op_ref = Box::new(CudaContiguous);
+                *op_ref = Box::new(CudaContiguous::new(src_shapes[0]));
             } else if let Some(SumReduce(dim)) = op_ref.as_any().downcast_ref::<SumReduce>() {
                 *op_ref = Box::new(CudaSumReduce(*dim));
             } else if let Some(MaxReduce(dim)) = op_ref.as_any().downcast_ref::<MaxReduce>() {

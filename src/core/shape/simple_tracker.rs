@@ -138,58 +138,106 @@ impl ShapeTracker {
     }
 
     pub fn index_expression(&self) -> Expression {
-        let strides = self.unordered_strides();
+        let mut strides = self
+            .dims
+            .iter()
+            .enumerate()
+            .rev()
+            .scan(Expression::Integer(BigInt::from(1)), |state, (i, x)| {
+                let ret = state.clone();
+                if !self.fake[i] {
+                    *state *= match x {
+                        Dim::Known(n) => Expression::Integer(BigInt::from(*n)),
+                        Dim::Unknown(c) => Expression::Variable(c.to_string()),
+                    };
+                }
+                Some(ret)
+            })
+            .collect::<Vec<_>>();
+        strides.reverse();
         let mut ret = Expression::Integer(BigInt::from(0));
         let mut acc = Expression::Integer(BigInt::from(1));
         let logical = Expression::Variable("idx".to_string());
         for (sh, stride, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
             (
-                self.dims[i].to_usize().unwrap(),
-                strides[i],
+                match self.dims[i] {
+                    Dim::Known(n) => Expression::Integer(BigInt::from(n)),
+                    Dim::Unknown(c) => Expression::Variable(c.to_string()),
+                },
+                strides[i].clone(),
                 self.padding[i],
                 self.slices[i],
                 self.fake[i],
             )
         }) {
-            let logical_sh = Expression::Integer(BigInt::from(
-                (sh + padding.0 + padding.1).min(slice.1) - slice.0,
-            ));
+            let logical_sh = sh
+                + Expression::Integer(BigInt::from(padding.0))
+                + Expression::Integer(BigInt::from(padding.1))
+                - Expression::Integer(BigInt::from(slice.0));
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
                 ret += (dim_ind - Expression::Integer(BigInt::from(padding.0))
                     + Expression::Integer(BigInt::from(slice.0.saturating_sub(padding.0))))
-                    * Expression::Integer(BigInt::from(stride));
+                    * stride;
             }
             acc *= logical_sh;
         }
-        ret
+        ret.evaluate(HashMap::default()).unwrap()
     }
 
     /// If this expression evaluates to 0, the logical index is invalid. Otherwise it is valid
     pub fn valid_expression(&self) -> Expression {
-        let strides = self.unordered_strides();
+        let mut strides = self
+            .dims
+            .iter()
+            .enumerate()
+            .rev()
+            .scan(Expression::Integer(BigInt::from(1)), |state, (i, x)| {
+                let ret = state.clone();
+                if !self.fake[i] {
+                    *state *= match x {
+                        Dim::Known(n) => Expression::Integer(BigInt::from(*n)),
+                        Dim::Unknown(c) => Expression::Variable(c.to_string()),
+                    };
+                }
+                Some(ret)
+            })
+            .collect::<Vec<_>>();
+        strides.reverse();
         let mut ret = Expression::Integer(BigInt::from(1));
         let mut acc = Expression::Integer(BigInt::from(1));
         let logical = Expression::Variable("idx".to_string());
         for (sh, stride, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
             (
-                self.dims[i].to_usize().unwrap(),
-                strides[i],
+                match self.dims[i] {
+                    Dim::Known(n) => Expression::Integer(BigInt::from(n)),
+                    Dim::Unknown(c) => Expression::Variable(c.to_string()),
+                },
+                strides[i].clone(),
                 self.padding[i],
                 self.slices[i],
                 self.fake[i],
             )
         }) {
-            let logical_sh = Expression::Integer(BigInt::from(
-                (sh + padding.0 + padding.1).min(slice.1) - slice.0,
-            ));
+            let logical_sh = sh.clone()
+                + Expression::Integer(BigInt::from(padding.0))
+                + Expression::Integer(BigInt::from(padding.1))
+                - Expression::Integer(BigInt::from(slice.0));
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
                 ret = Expression::And(
                     ret.into(),
                     Expression::LessThan(
                         dim_ind.clone().into(),
-                        Expression::Integer(BigInt::from((sh + padding.0).min(slice.1))).into(),
+                        Expression::Integer(BigInt::from(slice.1)).into(),
+                    )
+                    .into(),
+                );
+                ret = Expression::And(
+                    ret.into(),
+                    Expression::LessThan(
+                        dim_ind.clone().into(),
+                        (sh + Expression::Integer(BigInt::from(padding.0))).into(),
                     )
                     .into(),
                 );
@@ -206,11 +254,12 @@ impl ShapeTracker {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
                 ret += (dim_ind - Expression::Integer(BigInt::from(padding.0))
                     + Expression::Integer(BigInt::from(slice.0.saturating_sub(padding.0))))
-                    * Expression::Integer(BigInt::from(stride));
+                    * stride;
             }
             acc *= logical_sh;
         }
         ret
+        // ret.evaluate(HashMap::default()).unwrap()
     }
 
     /// The number of elements in this tensor, including pads and slices. Counts unknown dims as size 0

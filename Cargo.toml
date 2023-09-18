@@ -6,7 +6,7 @@ description = "Deep learning at the speed of light."
 license = "MIT OR Apache-2.0"
 
 [features]
-#default = ["cuda"]
+default = ["cuda"]
 cuda = ["dep:cudarc"]
 
 [dependencies]
@@ -19,7 +19,7 @@ strum = { version = "0.25.0", features = ["derive"] }
 urlencoding = "2.1.2"
 webbrowser = "0.8.10"
 dyn-clone = "1.0.12"
-cudarc = {version="0.9.13", optional=true}
+cudarc = {path="./resources/cudarc", optional=true}
 safetensors = "0.3.1"
 memmap2 = "0.7.1"
 half = "2.3.1"
