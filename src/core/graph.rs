@@ -19,6 +19,7 @@ pub struct Graph {
     pub tensors: HashMap<(NodeIndex, u8), Tensor>,
     pub id_remap: HashMap<NodeIndex, NodeIndex>,
     pub dyn_map: HashMap<char, usize>,
+    /// Edge weights: (Input index, Output index, Input shape)
     pub graph:
         StableGraph<Box<dyn Operator>, (u8, u8, crate::core::shape::simple_tracker::ShapeTracker)>,
     pub no_delete: HashSet<NodeIndex>,
