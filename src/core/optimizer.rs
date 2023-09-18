@@ -128,7 +128,7 @@ pub struct GraphSelector {
                     Option<Vec<Vec<bool>>>,      // Fake constraint
                     Vec<*mut NodeIndex>,         // Pointers
                 ),
-                (),
+                u8,
             >,
         >,
     >,
@@ -182,7 +182,7 @@ fn search(
             Option<Vec<Vec<bool>>>,      // Fake constraint
             Vec<*mut NodeIndex>,         // Pointers
         ),
-        (),
+        u8,
     >,
     graph_node: petgraph::stable_graph::NodeIndex,
     graph: &StableGraph<
@@ -255,24 +255,24 @@ fn search(
     used.insert(graph_node);
     selector_used.insert(selector_node);
     // Match outgoing
-    for select_outgoing in selector_graph
+    for (select_outgoing, select_output) in selector_graph
         .edges_directed(selector_node, petgraph::Direction::Outgoing)
-        .map(|e| e.target())
-        .filter(|i| !selector_used.contains(i))
+        .map(|e| (e.target(), e.weight()))
+        .filter(|i| !selector_used.contains(&i.0))
         .collect::<Vec<_>>()
         .into_iter()
     {
-        if let Some(target) = graph
+        if let Some((target, _)) = graph
             .edges_directed(graph_node, petgraph::Direction::Outgoing)
-            .map(|e| e.target())
-            .filter(|i| !used.contains(i))
+            .map(|e| (e.target(), e.weight().1))
+            .filter(|i| !used.contains(&i.0) && i.1 == *select_output)
             .collect::<Vec<_>>()
             .into_iter()
             .find(|i| {
                 search(
                     select_outgoing,
                     selector_graph,
-                    *i,
+                    i.0,
                     graph,
                     used,
                     selector_used,
@@ -287,24 +287,24 @@ fn search(
         }
     }
     // Match incoming
-    for select_incoming in selector_graph
+    for (select_incoming, select_output) in selector_graph
         .edges_directed(selector_node, petgraph::Direction::Incoming)
-        .map(|e| e.source())
-        .filter(|i| !selector_used.contains(i))
+        .map(|e| (e.source(), e.weight()))
+        .filter(|i| !selector_used.contains(&i.0))
         .collect::<Vec<_>>()
         .into_iter()
     {
-        if let Some(target) = graph
+        if let Some((target, _)) = graph
             .edges_directed(graph_node, petgraph::Direction::Outgoing)
-            .map(|e| e.target())
-            .filter(|i| !used.contains(i))
+            .map(|e| (e.target(), e.weight().1))
+            .filter(|i| !used.contains(&i.0) && i.1 == *select_output)
             .collect::<Vec<_>>()
             .into_iter()
             .find(|i| {
                 search(
                     select_incoming,
                     selector_graph,
-                    *i,
+                    i.0,
                     graph,
                     used,
                     selector_used,
@@ -336,9 +336,9 @@ impl GraphSelector {
     }
 
     /// Specify an edge between ops
-    pub fn edge(&self, o1: OpSelector, o2: OpSelector) -> OpSelector {
+    pub fn edge(&self, o1: OpSelector, output: u8, o2: OpSelector) -> OpSelector {
         let mut m_self = self.graph.lock().unwrap();
-        m_self.add_edge(o1.id, o2.id, ());
+        m_self.add_edge(o1.id, o2.id, output);
         o2
     }
 
