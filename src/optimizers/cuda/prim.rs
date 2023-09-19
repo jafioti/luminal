@@ -147,18 +147,17 @@ impl Operator for CudaContiguous {
 
 // Unary Op (A -> A)
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct CudaLog2;
-impl Operator for CudaLog2 {
-    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<CudaSlice<f32>>()
-            .unwrap();
-        let inp_size = tensors[0].1.n_physical_elements();
+#[derive(Debug, Clone)]
+pub struct CudaLog2(Arc<CudaDevice>, CudaFunction);
+
+impl PartialEq for CudaLog2 {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl CudaLog2 {
+    pub fn new() -> Self {
         let ptx = compile_ptx(
             "
 extern \"C\" __global__ void log2_kernel(float *out, const float *inp, int numel) {
@@ -172,20 +171,11 @@ extern \"C\" __global__ void log2_kernel(float *out, const float *inp, int numel
         let dev = CudaDevice::new(0).unwrap();
         dev.load_ptx(ptx, "log2", &["log2_kernel"]).unwrap();
         let f = dev.get_func("log2", "log2_kernel").unwrap();
-
-        let mut out = unsafe { dev.alloc::<f32>(inp_size) }.unwrap();
-        let cfg = LaunchConfig::for_num_elems(inp_size as u32);
-        unsafe { f.launch(cfg, (&mut out, inp, inp_size as i32)) }.unwrap();
-
-        vec![Tensor {
-            data: Box::new(out),
-        }]
+        Self(dev, f)
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct CudaExp2;
-impl Operator for CudaExp2 {
+impl Operator for CudaLog2 {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let inp = tensors[0]
             .0
@@ -195,6 +185,31 @@ impl Operator for CudaExp2 {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size = tensors[0].1.n_physical_elements();
+        let mut out = unsafe { self.0.alloc::<f32>(inp_size) }.unwrap();
+        unsafe {
+            self.1.clone().launch(
+                LaunchConfig::for_num_elems(inp_size as u32),
+                (&mut out, inp, inp_size as i32),
+            )
+        }
+        .unwrap();
+
+        vec![Tensor {
+            data: Box::new(out),
+        }]
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CudaExp2(Arc<CudaDevice>, CudaFunction);
+impl PartialEq for CudaExp2 {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl CudaExp2 {
+    pub fn new() -> Self {
         let ptx = compile_ptx(
             "
 extern \"C\" __global__ void exp2_kernel(float *out, const float *inp, int numel) {
@@ -208,20 +223,11 @@ extern \"C\" __global__ void exp2_kernel(float *out, const float *inp, int numel
         let dev = CudaDevice::new(0).unwrap();
         dev.load_ptx(ptx, "exp2", &["exp2_kernel"]).unwrap();
         let f = dev.get_func("exp2", "exp2_kernel").unwrap();
-
-        let mut out = unsafe { dev.alloc::<f32>(inp_size) }.unwrap();
-        let cfg = LaunchConfig::for_num_elems(inp_size as u32);
-        unsafe { f.launch(cfg, (&mut out, inp, inp_size as i32)) }.unwrap();
-
-        vec![Tensor {
-            data: Box::new(out),
-        }]
+        Self(dev, f)
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct CudaSin;
-impl Operator for CudaSin {
+impl Operator for CudaExp2 {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let inp = tensors[0]
             .0
@@ -231,6 +237,31 @@ impl Operator for CudaSin {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size = tensors[0].1.n_physical_elements();
+        let mut out = unsafe { self.0.alloc::<f32>(inp_size) }.unwrap();
+        unsafe {
+            self.1.clone().launch(
+                LaunchConfig::for_num_elems(inp_size as u32),
+                (&mut out, inp, inp_size as i32),
+            )
+        }
+        .unwrap();
+
+        vec![Tensor {
+            data: Box::new(out),
+        }]
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CudaSin(Arc<CudaDevice>, CudaFunction);
+impl PartialEq for CudaSin {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl CudaSin {
+    pub fn new() -> Self {
         let ptx = compile_ptx(
             "
 extern \"C\" __global__ void sin_kernel(float *out, const float *inp, int numel) {
@@ -244,20 +275,11 @@ extern \"C\" __global__ void sin_kernel(float *out, const float *inp, int numel)
         let dev = CudaDevice::new(0).unwrap();
         dev.load_ptx(ptx, "sin", &["sin_kernel"]).unwrap();
         let f = dev.get_func("sin", "sin_kernel").unwrap();
-
-        let mut out = unsafe { dev.alloc::<f32>(inp_size) }.unwrap();
-        let cfg = LaunchConfig::for_num_elems(inp_size as u32);
-        unsafe { f.launch(cfg, (&mut out, inp, inp_size as i32)) }.unwrap();
-
-        vec![Tensor {
-            data: Box::new(out),
-        }]
+        Self(dev, f)
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct CudaSqrt;
-impl Operator for CudaSqrt {
+impl Operator for CudaSin {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let inp = tensors[0]
             .0
@@ -267,6 +289,31 @@ impl Operator for CudaSqrt {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size = tensors[0].1.n_physical_elements();
+        let mut out = unsafe { self.0.alloc::<f32>(inp_size) }.unwrap();
+        unsafe {
+            self.1.clone().launch(
+                LaunchConfig::for_num_elems(inp_size as u32),
+                (&mut out, inp, inp_size as i32),
+            )
+        }
+        .unwrap();
+
+        vec![Tensor {
+            data: Box::new(out),
+        }]
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CudaSqrt(Arc<CudaDevice>, CudaFunction);
+impl PartialEq for CudaSqrt {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl CudaSqrt {
+    pub fn new() -> Self {
         let ptx = compile_ptx(
             "
 extern \"C\" __global__ void sqrt_kernel(float *out, const float *inp, int numel) {
@@ -280,10 +327,28 @@ extern \"C\" __global__ void sqrt_kernel(float *out, const float *inp, int numel
         let dev = CudaDevice::new(0).unwrap();
         dev.load_ptx(ptx, "sqrt", &["sqrt_kernel"]).unwrap();
         let f = dev.get_func("sqrt", "sqrt_kernel").unwrap();
+        Self(dev, f)
+    }
+}
 
-        let mut out = unsafe { dev.alloc::<f32>(inp_size) }.unwrap();
-        let cfg = LaunchConfig::for_num_elems(inp_size as u32);
-        unsafe { f.launch(cfg, (&mut out, inp, inp_size as i32)) }.unwrap();
+impl Operator for CudaSqrt {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let inp = tensors[0]
+            .0
+            .borrowed()
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f32>>()
+            .unwrap();
+        let inp_size = tensors[0].1.n_physical_elements();
+        let mut out = unsafe { self.0.alloc::<f32>(inp_size) }.unwrap();
+        unsafe {
+            self.1.clone().launch(
+                LaunchConfig::for_num_elems(inp_size as u32),
+                (&mut out, inp, inp_size as i32),
+            )
+        }
+        .unwrap();
 
         vec![Tensor {
             data: Box::new(out),
@@ -291,8 +356,33 @@ extern \"C\" __global__ void sqrt_kernel(float *out, const float *inp, int numel
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct CudaRecip;
+#[derive(Debug, Clone)]
+pub struct CudaRecip(Arc<CudaDevice>, CudaFunction);
+impl PartialEq for CudaRecip {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl CudaRecip {
+    pub fn new() -> Self {
+        let ptx = compile_ptx(
+            "
+extern \"C\" __global__ void recip_kernel(float *out, const float *inp, int numel) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < numel) {
+        out[i] = __frcp_rn(inp[i]);
+    }
+}",
+        )
+        .unwrap();
+        let dev = CudaDevice::new(0).unwrap();
+        dev.load_ptx(ptx, "recip", &["recip_kernel"]).unwrap();
+        let f = dev.get_func("recip", "recip_kernel").unwrap();
+        Self(dev, f)
+    }
+}
+
 impl Operator for CudaRecip {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let inp = tensors[0]
@@ -303,23 +393,14 @@ impl Operator for CudaRecip {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size = tensors[0].1.n_physical_elements();
-        let ptx = compile_ptx(
-            "
-extern \"C\" __global__ void recip_kernel(float *out, const float *inp, int numel) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < numel) {
-        out[i] = 1.0 / inp[i];
-    }
-}",
-        )
+        let mut out = unsafe { self.0.alloc::<f32>(inp_size) }.unwrap();
+        unsafe {
+            self.1.clone().launch(
+                LaunchConfig::for_num_elems(inp_size as u32),
+                (&mut out, inp, inp_size as i32),
+            )
+        }
         .unwrap();
-        let dev = CudaDevice::new(0).unwrap();
-        dev.load_ptx(ptx, "recip", &["recip_kernel"]).unwrap();
-        let f = dev.get_func("recip", "recip_kernel").unwrap();
-
-        let mut out = unsafe { dev.alloc::<f32>(inp_size) }.unwrap();
-        let cfg = LaunchConfig::for_num_elems(inp_size as u32);
-        unsafe { f.launch(cfg, (&mut out, inp, inp_size as i32)) }.unwrap();
 
         vec![Tensor {
             data: Box::new(out),
@@ -833,15 +914,15 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
             let op = graph.graph.node_weight(id).unwrap().as_any().type_id();
             let op_ref = graph.graph.node_weight_mut(id).unwrap();
             if is::<Log2>(op) {
-                *op_ref = Box::new(CudaLog2);
+                *op_ref = Box::new(CudaLog2::new());
             } else if is::<Exp2>(op) {
-                *op_ref = Box::new(CudaExp2);
+                *op_ref = Box::new(CudaExp2::new());
             } else if is::<Sin>(op) {
-                *op_ref = Box::new(CudaSin);
+                *op_ref = Box::new(CudaSin::new());
             } else if is::<Sqrt>(op) {
-                *op_ref = Box::new(CudaSqrt);
+                *op_ref = Box::new(CudaSqrt::new());
             } else if is::<Recip>(op) {
-                *op_ref = Box::new(CudaRecip);
+                *op_ref = Box::new(CudaRecip::new());
             } else if is::<Add>(op) {
                 *op_ref = Box::new(CudaAdd);
             } else if is::<Mul>(op) {
