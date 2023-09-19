@@ -399,8 +399,12 @@ impl Graph {
     ) -> petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32> {
         let mut new_graph = petgraph::stable_graph::StableGraph::default();
         let mut id_map = HashMap::new();
+        let op_regex = Regex::new(r"(?s)\{.*|\(.*").unwrap();
         for (id, node) in self.graph.node_indices().zip(self.graph.node_weights()) {
-            id_map.insert(id, new_graph.add_node(format!("{node:?}")));
+            id_map.insert(
+                id,
+                new_graph.add_node(op_regex.replace_all(&format!("{node:?}"), "").to_string()),
+            );
         }
 
         for node in self.graph.node_indices() {

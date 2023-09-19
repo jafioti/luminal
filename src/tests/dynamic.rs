@@ -18,7 +18,7 @@ use super::assert_close_data;
 #[test]
 fn test_movement() {
     let mut cx = Graph::new();
-    let mut a = cx.new_tensor::<(Const<3>, Dyn<'a'>, Const<2>)>("Input");
+    let a = cx.new_tensor::<(Const<3>, Dyn<'a'>, Const<2>)>("Input");
     let b = a
         .reshape::<(Const<6>, Dyn<'a'>)>()
         .permute::<_, Axes2<1, 0>>();
@@ -45,7 +45,7 @@ fn test_movement() {
 #[test]
 fn test_matmul() {
     let mut cx = Graph::new();
-    let mut a = cx.new_tensor::<(Dyn<'a'>, Const<3>)>("Input");
+    let a = cx.new_tensor::<(Dyn<'a'>, Const<3>)>("Input");
     a.set_dyn(vec![1., 2., 3., 1., 2., 3.], vec![2, 3]);
     let b = cx.new_tensor::<R2<3, 3>>("Input");
     b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
@@ -66,7 +66,7 @@ fn test_matmul() {
 #[test]
 fn test_batch_matmul() {
     let mut cx = Graph::new();
-    let mut a = cx.new_tensor::<(Dyn<'a'>, Dyn<'b'>, Const<2>)>("Input");
+    let a = cx.new_tensor::<(Dyn<'a'>, Dyn<'b'>, Const<2>)>("Input");
     a.set_dyn(
         vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.],
         vec![2, 3, 2],
@@ -93,7 +93,7 @@ fn test_batch_matmul() {
 fn test_feedforward() {
     // Test single and batch, unoptimized and optimized
     let mut cx = Graph::new();
-    let mut batch = cx.new_tensor::<(Dyn<'a'>, Const<3>)>("Input");
+    let batch = cx.new_tensor::<(Dyn<'a'>, Const<3>)>("Input");
     let model: (Linear<3, 4>, ReLU, Linear<4, 2>) = InitModule::initialize(&mut cx);
     model
         .0

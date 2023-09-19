@@ -182,10 +182,10 @@ mod tests {
     #[test]
     fn test_batch_batch_matmul2() {
         let mut cx = Graph::new();
-        let mut a = cx.new_tensor::<(Dyn<'a'>, Dyn<'b'>)>("Input");
+        let a = cx.new_tensor::<(Dyn<'a'>, Dyn<'b'>)>("Input");
         a.set_dyn(vec![0.0, 1.0, 0.0, 1.0], vec![2, 2]);
         let a = a.expand::<(crate::shape::Const<1>, Dyn<'a'>, Dyn<'b'>), _>();
-        let mut b =
+        let b =
             cx.new_tensor::<(crate::shape::Const<1>, Dyn<'b'>, crate::shape::Const<3>)>("Input");
         b.set_dyn(vec![32.0, -2.0, 0.0, -17.0, 40.0, -3.0], vec![1, 2, 3]);
         let c = a.batch_matmul(b);

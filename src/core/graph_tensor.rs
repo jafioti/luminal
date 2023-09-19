@@ -62,7 +62,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Set the value of the tensor, with dynamic dimensions.
-    pub fn set_dyn<T: Data + Clone>(&mut self, data: T, shape: Vec<usize>) {
+    pub fn set_dyn<T: Data + Clone>(&self, data: T, shape: Vec<usize>) {
         // Report dyn dim values to graph dyn map
         for (d, s) in S::realized_shape().iter().zip(shape.iter()) {
             if let Dim::Unknown(c) = d {
@@ -99,10 +99,12 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     pub fn debug(&self, message: &str) {
-        self.graph()
+        let id = self
+            .graph()
             .add_op(op::Print(message.to_string()))
             .input(self.id, 0, self.shape)
             .finish();
+        self.graph().no_delete.insert(id);
     }
 
     pub fn dyn_data(&self, dyn_dim_map: &HashMap<char, usize>) -> Vec<f32> {

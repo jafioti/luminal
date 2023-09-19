@@ -180,6 +180,32 @@ fn test_mul() {
 }
 
 #[test]
+fn test_mul2() {
+    let mut cx = Graph::new();
+    let a = cx.new_tensor::<(
+        crate::prelude::Const<1>,
+        crate::prelude::Const<1>,
+        Dyn<'a'>,
+        Dyn<'a'>,
+    )>("Input");
+    a.set_dyn(vec![82.4, 783.0, 99.6, 974.5], vec![1, 1, 2, 2]);
+    let b = cx.new_tensor::<R0>("Input");
+    b.set(vec![0.57735026]);
+    let c = a * b.expand();
+    c.mark();
+
+    cx.optimize(CudaOptimizer::default());
+    cx.execute();
+
+    let d_dev = Cpu::default();
+    let d_a = d_dev.tensor([[[[82.4, 783.0], [99.6, 974.5]]]]);
+    let d_b = d_dev.tensor(0.57735026);
+    let d_c = d_a * d_b.broadcast::<_, dfdx::shapes::Axes4<0, 1, 2, 3>>();
+
+    assert_close_data(&c.dyn_data(&cx.dyn_map), &d_c.as_vec());
+}
+
+#[test]
 fn test_div() {
     let mut cx = Graph::new();
     let a = cx.new_tensor::<R1<3>>("Input");
@@ -410,7 +436,7 @@ fn test_transformer_encoder_block() {
         .weight
         .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
-    let mut a = cx.new_tensor::<(Dyn<'a'>, crate::shape::Const<3>)>("Input");
+    let a = cx.new_tensor::<(Dyn<'a'>, crate::shape::Const<3>)>("Input");
     let b = model.forward(a);
 
     a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![2, 3]);

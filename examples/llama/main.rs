@@ -32,7 +32,7 @@ fn main() {
         { config::HEAD_DIM_OVER_2 },
         { config::LAYERS },
     > = InitModule::initialize(&mut cx1);
-    let mut inp = cx1.new_tensor::<(Dyn<'b'>, Dyn<'s'>)>("Input");
+    let inp = cx1.new_tensor::<(Dyn<'b'>, Dyn<'s'>)>("Input");
     let (out1, cache1) = model.forward(inp);
     out1.mark();
     for (k, v) in &cache1 {
@@ -44,7 +44,7 @@ fn main() {
 
     // Build KV cache forward graph
     model = InitModule::initialize(&mut cx2);
-    let mut single_inp = cx2.new_tensor::<(Dyn<'b'>, Const<1>)>("Input");
+    let single_inp = cx2.new_tensor::<(Dyn<'b'>, Const<1>)>("Input");
     let cache_src = (0..config::LAYERS).map(|_| (cx2.new_tensor("Key Cache"), cx2.new_tensor("Value Cache"))).collect::<Vec<_>>();
     let (out, cache_dest)= model.forward_kv::<_, _, Dyn<'s'>, Dyn<'t'>>((single_inp, cache_src.clone()));
     out.mark();

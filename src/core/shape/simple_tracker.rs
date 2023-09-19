@@ -182,38 +182,20 @@ impl ShapeTracker {
             }
             acc *= logical_sh;
         }
-        ret.evaluate(HashMap::default()).unwrap()
+        ret
     }
 
     /// If this expression evaluates to 0, the logical index is invalid. Otherwise it is valid
     pub fn valid_expression(&self) -> Expression {
-        let mut strides = self
-            .dims
-            .iter()
-            .enumerate()
-            .rev()
-            .scan(Expression::Integer(BigInt::from(1)), |state, (i, x)| {
-                let ret = state.clone();
-                if !self.fake[i] {
-                    *state *= match x {
-                        Dim::Known(n) => Expression::Integer(BigInt::from(*n)),
-                        Dim::Unknown(c) => Expression::Variable(c.to_string()),
-                    };
-                }
-                Some(ret)
-            })
-            .collect::<Vec<_>>();
-        strides.reverse();
         let mut ret = Expression::Integer(BigInt::from(1));
         let mut acc = Expression::Integer(BigInt::from(1));
         let logical = Expression::Variable("idx".to_string());
-        for (sh, stride, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
+        for (sh, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
             (
                 match self.dims[i] {
                     Dim::Known(n) => Expression::Integer(BigInt::from(n)),
                     Dim::Unknown(c) => Expression::Variable(c.to_string()),
                 },
-                strides[i].clone(),
                 self.padding[i],
                 self.slices[i],
                 self.fake[i],
@@ -250,16 +232,9 @@ impl ShapeTracker {
                     .into(),
                 );
             }
-            if !fake {
-                let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
-                ret += (dim_ind - Expression::Integer(BigInt::from(padding.0))
-                    + Expression::Integer(BigInt::from(slice.0.saturating_sub(padding.0))))
-                    * stride;
-            }
             acc *= logical_sh;
         }
         ret
-        // ret.evaluate(HashMap::default()).unwrap()
     }
 
     /// The number of elements in this tensor, including pads and slices. Counts unknown dims as size 0
@@ -283,7 +258,13 @@ impl ShapeTracker {
 
     /// The number of elements in this tensor, not including pads and slices. Counts unknown dims as size 0
     pub fn n_physical_elements(&self) -> usize {
-        self.dims.into_iter().flat_map(|i| i.to_usize()).product()
+        self.dims
+            .into_iter()
+            // Filter out fake dimensions
+            .enumerate()
+            .filter(|(i, _)| !self.fake[*i])
+            .flat_map(|(_, i)| i.to_usize())
+            .product()
     }
 
     /// The number of dimensions
