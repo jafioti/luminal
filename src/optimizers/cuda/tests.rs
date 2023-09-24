@@ -1,5 +1,6 @@
 use dfdx::prelude::{Module as DfdxModule, *};
 use itertools::Itertools;
+use rand::Rng;
 
 use super::CudaOptimizer;
 use crate::{
@@ -156,6 +157,35 @@ fn test_sub() {
     let d_c = d_a - d_b;
 
     assert_close_data(&c.data(), &d_c.as_vec());
+}
+
+#[test]
+fn test_square() {
+    let mut cx = Graph::new();
+    let a = cx.new_tensor::<(Dyn<'b'>, Dyn<'s'>, crate::prelude::Const<4096>)>("Input");
+    let mut rng = rand::thread_rng();
+    let data = (0..40960)
+        .map(|_| rng.gen_range(-0.01..0.01))
+        .collect::<Vec<f32>>();
+    a.set_dyn(data.clone(), vec![1, 10, 4096]);
+    let b = a * a;
+    b.mark();
+
+    cx.optimize(<(CudaOptimizer, GenericOptimizer)>::default());
+    cx.execute();
+
+    let d_dev = Cpu::default();
+    let d_a = d_dev.tensor_from_vec::<Rank3<1, 10, 4096>>(
+        data,
+        (
+            dfdx::prelude::Const::<1>,
+            dfdx::prelude::Const::<10>,
+            dfdx::prelude::Const::<4096>,
+        ),
+    );
+    let d_b = d_a.clone() * d_a;
+
+    assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
 }
 
 #[test]
@@ -436,10 +466,10 @@ fn test_transformer_encoder_block() {
         .weight
         .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
-    let a = cx.new_tensor::<(Dyn<'a'>, crate::shape::Const<3>)>("Input");
+    let a = cx.new_tensor::<(Dyn<'b'>, Dyn<'a'>, crate::prelude::Const<3>)>("Input");
     let b = model.forward(a);
 
-    a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![2, 3]);
+    a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![1, 2, 3]);
     b.mark();
 
     cx.optimize(<(CudaOptimizer, GenericOptimizer)>::default());

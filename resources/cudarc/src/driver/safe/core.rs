@@ -249,7 +249,7 @@ impl<T: Clone + Default + DeviceRepr + Unpin> TryFrom<CudaSlice<T>> for Vec<T> {
 #[derive(Debug)]
 pub(crate) struct CudaModule {
     pub(crate) cu_module: sys::CUmodule,
-    pub(crate) functions: BTreeMap<&'static str, sys::CUfunction>,
+    pub(crate) functions: BTreeMap<String, sys::CUfunction>,
 }
 
 unsafe impl Send for CudaModule {}

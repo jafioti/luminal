@@ -8,6 +8,7 @@ pub const HIDDEN: usize = 4096;
 pub const INTERMEDIATE: usize = 11008;
 pub const HEADS: usize = 32;
 pub const LAYERS: usize = 32;
+// pub const LAYERS: usize = 10;
 
 // 13B
 // pub const HIDDEN: usize = 5120;

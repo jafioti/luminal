@@ -7,7 +7,10 @@ use crate::{
     shape::*,
     tensor::Tensor,
 };
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    io::Write,
+};
 
 use colored::Colorize;
 use itertools::Itertools;
@@ -75,7 +78,7 @@ impl Graph {
         self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
         GraphTensor {
             id: self.graph.add_node(Box::new(op::Function(
-                name.to_string(),
+                format!("{name} Load"),
                 Box::new(|_| panic!("You must set a value for this tensor!")),
             ))),
             graph_ref: self,
@@ -277,7 +280,9 @@ impl Graph {
             }
 
             // All sources are ready
-            let op_name = format!("{:?}", self.graph.node_weight(*node).unwrap());
+            let op_name = op_regex
+                .replace_all(&format!("{:?}", self.graph.node_weight(*node).unwrap()), "")
+                .to_string();
             let mut shapes_string = srcs
                 .iter()
                 .map(|(_, s)| {
@@ -295,6 +300,7 @@ impl Graph {
             }
             print!("{}", op_name.bold().bright_green());
             print!("{shapes_string}");
+            std::io::stdout().flush().unwrap();
             // Execute
             let now = std::time::Instant::now();
             let tensors = self.graph.node_weight(*node).unwrap().process(srcs);
@@ -314,11 +320,10 @@ impl Graph {
             for (i, tensor) in tensors.into_iter().enumerate() {
                 self.tensors.insert((*node, i as u8), tensor);
             }
-            let stripped_op_name = op_regex.replace_all(&op_name, "").to_string();
-            if let Some(t) = op_times.get_mut(&stripped_op_name) {
+            if let Some(t) = op_times.get_mut(&op_name) {
                 *t += elapsed;
             } else {
-                op_times.insert(stripped_op_name, elapsed);
+                op_times.insert(op_name, elapsed);
             }
 
             // Check if we can delete the source tensors now
@@ -418,7 +423,10 @@ impl Graph {
                     id_map[&edge.target()],
                     edge.weight().0,
                 );
-                if show_shapes && new_graph.contains_node(id_map[&edge.target()]) {
+                if show_shapes
+                    && new_graph.contains_node(id_map[&edge.target()])
+                    && !edge.weight().2.shape().is_empty()
+                {
                     new_graph
                         .node_weight_mut(id_map[&edge.target()])
                         .unwrap()

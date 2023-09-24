@@ -6,7 +6,7 @@ description = "Deep learning at the speed of light."
 license = "MIT OR Apache-2.0"
 
 [features]
-#default = ["cuda"]
+default = ["cuda"]
 cuda = ["dep:cudarc"]
 
 [dependencies]

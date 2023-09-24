@@ -150,17 +150,9 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> InitModule
     for RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
 {
     fn initialize(cx: &mut Graph) -> Self {
-        let s = Self {
+        Self {
             inv_freq: cx.new_tensor("Inv Freq"),
-        };
-        // Init weight as uniform(-1, 1)
-        let mut rng = thread_rng();
-        s.inv_freq.set(
-            (0..HEAD_DIM_OVER_2)
-                .map(|_| rng.gen_range(-1_f32..1_f32))
-                .collect::<Vec<_>>(),
-        );
-        s
+        }
     }
 }
 
@@ -347,13 +339,35 @@ impl<
     > InitModule for Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
 {
     fn initialize(cx: &mut Graph) -> Self {
-        Self {
+        let s = Self {
             q_proj: cx.new_tensor("Query Weight"),
             k_proj: cx.new_tensor("Key Weight"),
             v_proj: cx.new_tensor("Value Weight"),
             o_proj: cx.new_tensor("Output Weight"),
             rotary_embed: InitModule::initialize(cx),
-        }
+        };
+        let mut rng = thread_rng();
+        s.k_proj.set(
+            (0..(HIDDEN * HIDDEN))
+                .map(|_| rng.gen_range(-1_f32..1_f32))
+                .collect::<Vec<_>>(),
+        );
+        s.v_proj.set(
+            (0..(HIDDEN * HIDDEN))
+                .map(|_| rng.gen_range(-1_f32..1_f32))
+                .collect::<Vec<_>>(),
+        );
+        s.q_proj.set(
+            (0..(HIDDEN * HIDDEN))
+                .map(|_| rng.gen_range(-1_f32..1_f32))
+                .collect::<Vec<_>>(),
+        );
+        s.o_proj.set(
+            (0..(HIDDEN * HIDDEN))
+                .map(|_| rng.gen_range(-1_f32..1_f32))
+                .collect::<Vec<_>>(),
+        );
+        s
     }
 }
 
@@ -411,9 +425,8 @@ impl<
             GraphTensor<(CurSeq, CurSeq)>,
         ),
     ) -> Self::Output {
-        let (y, kv_cache) = self
-            .self_attn
-            .forward((self.input_layer_norm.forward(x), attn_mask));
+        let normed = self.input_layer_norm.forward(x);
+        let (y, kv_cache) = self.self_attn.forward((normed, attn_mask));
         let x = x + y;
         let y = self.mlp.forward(self.post_attention_layer_norm.forward(x));
         (x + y, kv_cache)
@@ -515,9 +528,9 @@ impl<
         Vec<KVCache<Batch, CurSeq, NUM_HEADS, HEAD_DIM>>,
     );
     fn forward(&self, input: GraphTensor<(Batch, CurSeq)>) -> Self::Output {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let attn_mask: GraphTensor<(CurSeq, CurSeq)> = GraphTensor::from_id(
-            graph
+            input
+                .graph()
                 .add_op(Function(
                     "AttentionMask".to_string(),
                     Box::new(|inp| {
@@ -536,7 +549,7 @@ impl<
                 .input(input.id, 0, input.shape)
                 .finish(),
             ShapeTracker::new(&[CurSeq::const_size(), CurSeq::const_size()]),
-            graph,
+            input.graph(),
         );
 
         let mut hidden_states = self.embed_tokens.forward(input);

@@ -19,11 +19,13 @@ impl<S: Shape> GraphTensor<S> {
         S: BroadcastShapeTo<Dst, Ax>,
     {
         let new_dims = Dst::realized_shape();
-        for (i, dim) in Ax::as_array()
-            .into_iter()
-            .map(|i| (i as usize, new_dims[i as usize]))
-        {
-            self.shape.expand(i, dim);
+        if !new_dims.is_empty() {
+            for (i, dim) in Ax::as_array()
+                .into_iter()
+                .map(|i| (i as usize, new_dims[i as usize]))
+            {
+                self.shape.expand(i, dim);
+            }
         }
 
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)

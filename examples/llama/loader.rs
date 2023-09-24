@@ -21,14 +21,14 @@ impl Loader for DfdxDeferredLoader {
         model.serialize(&mut serializer);
 
         for (s, n) in serializer.state {
-            let n_elements = graph
+            let Some(n_elements) = graph
                 .graph
                 .edges_directed(n, petgraph::Direction::Outgoing)
                 .next()
-                .unwrap()
-                .weight()
-                .2
-                .n_elements();
+                .map(|e| e.weight().2.n_physical_elements())
+            else {
+                continue;
+            };
             if let Some(inp_func) = graph
                 .graph
                 .node_weight_mut(n)
@@ -60,12 +60,10 @@ impl Loader for DfdxDeferredLoader {
                             .collect()
                     } else {
                         panic!(
-                            "Expected {} or {} bytes, got {} when loading {}{}",
+                            "Expected {} or {} bytes, got {} when loading {path}/{s}",
                             n_elements * 2,
                             n_elements * 4,
                             bytes.len(),
-                            path,
-                            s
                         )
                     };
 

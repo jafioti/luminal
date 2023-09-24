@@ -18,7 +18,7 @@ impl CudaDevice {
         self: &Arc<Self>,
         ptx: Ptx,
         module_name: &str,
-        func_names: &[&'static str],
+        func_names: &[&str],
     ) -> Result<(), result::DriverError> {
         self.bind_to_thread()?;
 
@@ -39,7 +39,7 @@ impl CudaDevice {
         for &fn_name in func_names.iter() {
             let fn_name_c = CString::new(fn_name).unwrap();
             let cu_function = unsafe { result::module::get_function(cu_module, fn_name_c) }?;
-            functions.insert(fn_name, cu_function);
+            functions.insert(fn_name.to_string(), cu_function);
         }
         let module = CudaModule {
             cu_module,
