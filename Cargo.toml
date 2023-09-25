@@ -6,7 +6,7 @@ description = "Deep learning at the speed of light."
 license = "MIT OR Apache-2.0"
 
 [features]
-default = ["cuda"]
+#default = ["cuda"]
 cuda = ["dep:cudarc"]
 
 [dependencies]
@@ -27,7 +27,7 @@ tinyvec = "1.6.0"
 term_size = "0.3.2"
 colored = "2.0.4"
 regex = "1.9.5"
-savage_core = "0.2.0"
+savage_core = {path="./resources/savage_core"}
 num = "0.4.1"
 
 [dev-dependencies]

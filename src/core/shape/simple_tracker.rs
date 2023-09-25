@@ -47,7 +47,7 @@ impl ShapeTracker {
             s.dims.push(*d);
             s.indexes.push(i);
             s.fake.push(false);
-            s.slices.push((0, usize::MAX));
+            s.slices.push((0, i32::MAX as usize)); // Unset upper bound slices are i32::MAX
             s.padding.push((0, 0));
         }
         s
@@ -67,7 +67,7 @@ impl ShapeTracker {
         self.indexes.insert(axis, self.dims.len());
         self.dims.push(dim);
         self.fake.push(true);
-        self.slices.push((0, usize::MAX));
+        self.slices.push((0, i32::MAX as usize));
         self.padding.push((0, 0));
     }
 
@@ -170,9 +170,10 @@ impl ShapeTracker {
                 self.fake[i],
             )
         }) {
-            let logical_sh = sh
+            let logical_sh = (sh
                 + Expression::Integer(BigInt::from(padding.0))
-                + Expression::Integer(BigInt::from(padding.1))
+                + Expression::Integer(BigInt::from(padding.1)))
+            .min(Expression::Integer(BigInt::from(slice.1)))
                 - Expression::Integer(BigInt::from(slice.0));
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
@@ -201,33 +202,28 @@ impl ShapeTracker {
                 self.fake[i],
             )
         }) {
-            let logical_sh = sh.clone()
+            let logical_sh = (sh.clone()
                 + Expression::Integer(BigInt::from(padding.0))
-                + Expression::Integer(BigInt::from(padding.1))
+                + Expression::Integer(BigInt::from(padding.1)))
+            .min(Expression::Integer(BigInt::from(slice.1)))
                 - Expression::Integer(BigInt::from(slice.0));
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
                 ret = Expression::And(
                     ret.into(),
-                    Expression::LessThan(
-                        dim_ind.clone().into(),
-                        Expression::Integer(BigInt::from(slice.1)).into(),
-                    )
-                    .into(),
-                );
-                ret = Expression::And(
-                    ret.into(),
-                    Expression::LessThan(
-                        dim_ind.clone().into(),
-                        (sh + Expression::Integer(BigInt::from(padding.0))).into(),
-                    )
-                    .into(),
-                );
-                ret = Expression::And(
-                    ret.into(),
                     Expression::GreaterThanOrEqual(
                         dim_ind.clone().into(),
                         Expression::Integer(BigInt::from(padding.0.saturating_sub(slice.0))).into(),
+                    )
+                    .into(),
+                );
+                ret = Expression::And(
+                    ret.into(),
+                    Expression::LessThan(
+                        dim_ind.clone().into(),
+                        (sh + Expression::Integer(BigInt::from(padding.0)))
+                            .min(Expression::Integer(BigInt::from(slice.1)))
+                            .into(),
                     )
                     .into(),
                 );
@@ -325,7 +321,7 @@ impl ShapeTracker {
     pub fn pad(&mut self, padding: &[(usize, usize)]) {
         for (i, (s, e)) in padding.iter().enumerate() {
             self.padding[self.indexes[i]].0 += *s;
-            if *e != 0 && self.slices[self.indexes[i]].1 != usize::MAX {
+            if *e != 0 && self.slices[self.indexes[i]].1 as i32 != i32::MAX {
                 panic!("Adding padding to a slice isn't supported")
             }
             self.padding[self.indexes[i]].1 += *e;
@@ -343,7 +339,9 @@ impl ShapeTracker {
     }
 
     pub fn is_sliced(&self) -> bool {
-        self.slices.iter().any(|(b, e)| *b != 0 || *e != usize::MAX)
+        self.slices
+            .iter()
+            .any(|(b, e)| *b != 0 || *e as i32 != i32::MAX)
     }
 }
 

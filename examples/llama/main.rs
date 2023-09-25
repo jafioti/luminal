@@ -40,26 +40,27 @@ fn main() {
         v.mark_no_delete();
     }
     loader::DfdxDeferredLoader::new("./examples/llama/setup/llama-7b-hf").load(&model, &mut cx1);
-    cx1.optimize(<(CudaOptimizer, GenericOptimizer)>::default());
+    // cx1.optimize(<(CudaOptimizer, GenericOptimizer)>::default());
+    cx1.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
 
     // Build KV cache forward graph
     model = InitModule::initialize(&mut cx2);
     let single_inp = cx2.new_tensor::<(Dyn<'b'>, Const<1>)>("Input");
     let cache_src = (0..config::LAYERS).map(|_| (cx2.new_tensor("Key Cache"), cx2.new_tensor("Value Cache"))).collect::<Vec<_>>();
-    let (out, cache_dest)= model.forward_kv::<_, _, Dyn<'s'>, Dyn<'t'>>((single_inp, cache_src.clone()));
+    let (out, cache_dest)= model.forward_kv::<_, _, Dyn<'p'>, Dyn<'t'>>((single_inp, cache_src.clone()));
     out.mark();
     for (k, v) in &cache_dest {
         k.mark_no_delete();
         v.mark_no_delete();
     }
     loader::DfdxDeferredLoader::new("./examples/llama/setup/llama-7b-hf").load(&model, &mut cx2);
-    cx2.optimize(<(CudaOptimizer, GenericOptimizer)>::default());
+    // cx2.optimize(<(CudaOptimizer, GenericOptimizer)>::default());
+    cx2.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
 
     println!("Inferencing...");
     // First pass
     inp.set_dyn(input.clone(), vec![1, input.len()]);
-    // cx1.display_shapes();
-    cx1.execute();
+    cx1.execute_debug();
 
     let out1 = out1.dyn_data(&cx1.dyn_map);
     input.push(sample_index(&out1[out1.len() - 32_000..]));
@@ -76,11 +77,11 @@ fn main() {
 
     loop {
         single_inp.set_dyn(vec![*input.last().unwrap()], vec![1, 1]);
-        cx2.set_dyn_dim('s', input.len() - 1);
+        cx2.set_dyn_dim('p', input.len() - 1);
         cx2.set_dyn_dim('t', input.len());
 
         let now = std::time::Instant::now();
-        cx2.execute();
+        cx2.execute_debug();
         println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
         
         let o = out.dyn_data(&cx2.dyn_map);

@@ -269,10 +269,9 @@ impl<
             x,
             Option::<KVCache<_, Dyn<'s'>, NUM_HEADS, HEAD_DIM>>::None,
         );
-        let inv_head_scale = (HEAD_DIM as f64).sqrt().recip() as f32;
         let w = q
             .batch_matmul(k.permute())
-            .mul(inv_head_scale)
+            .mul((HEAD_DIM as f64).sqrt().recip() as f32)
             .add(attn_mask.expand())
             .softmax::<3>();
 
@@ -411,12 +410,12 @@ impl<
             GraphTensor<(CurSeq, CurSeq)>,
         ),
     ) -> Self::Output {
-        let (y, kv_cache) = self
+        let (y, cache) = self
             .self_attn
             .forward((self.input_layer_norm.forward(x), attn_mask));
         let x = x + y;
         let y = self.mlp.forward(self.post_attention_layer_norm.forward(x));
-        (x + y, kv_cache)
+        (x + y, cache)
     }
 }
 
@@ -439,12 +438,12 @@ impl<
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
         KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>,
     ) {
-        let (y, kv_cache) = self
+        let (y, cache) = self
             .self_attn
             .forward_kv((self.input_layer_norm.forward(x), cache));
         let x = x + y;
         let y = self.mlp.forward(self.post_attention_layer_norm.forward(x));
-        (x + y, kv_cache)
+        (x + y, cache)
     }
 }
 

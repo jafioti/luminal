@@ -33,7 +33,7 @@ impl Operator for CudaCopyToDevice {
             return vec![inp.pop().unwrap().0.cloned()];
         }
         if let Some(cpu_data) = inp[0].0.borrowed().data.as_any().downcast_ref::<Vec<f32>>() {
-            let mut a: CudaSlice<f32> = self.0.alloc_zeros::<f32>(cpu_data.len()).unwrap();
+            let mut a = unsafe { self.0.alloc::<f32>(cpu_data.len()).unwrap() };
             self.0.htod_sync_copy_into(cpu_data, &mut a).unwrap();
             vec![Tensor { data: Box::new(a) }]
         } else {
@@ -44,7 +44,7 @@ impl Operator for CudaCopyToDevice {
                 .as_any()
                 .downcast_ref::<Vec<usize>>()
                 .unwrap();
-            let mut a: CudaSlice<usize> = self.0.alloc_zeros::<usize>(cpu_data.len()).unwrap();
+            let mut a = unsafe { self.0.alloc::<usize>(cpu_data.len()).unwrap() };
             self.0.htod_sync_copy_into(cpu_data, &mut a).unwrap();
             vec![Tensor { data: Box::new(a) }]
         }
@@ -135,11 +135,7 @@ impl CudaContiguous {
     }
 }
 impl Operator for CudaContiguous {
-    fn process(&self, mut tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        if tensors[0].1.is_contiguous() {
-            // It's already contiguous
-            return vec![tensors.pop().unwrap().0.cloned()];
-        }
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let res_shape = tensors[0].1.contiguous();
         let inp_size = res_shape.n_elements();
         let a = tensors[0]
@@ -195,12 +191,13 @@ impl PartialEq for CudaLog2 {
 impl CudaLog2 {
     pub fn new(dev: Arc<CudaDevice>) -> Self {
         let mut code =
-        "extern \"C\" __global__ void kernel(float *out, const float *inp, unsigned int numel) {
-    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+            "extern \"C\" __global__ void kernel(float *out, const float *inp, int numel) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < numel) {
         out[i] = log2(inp[i]);
     }
-}".to_string();
+}"
+            .to_string();
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("kernel", &name);
         if !dev.has_func(&name, &name) {
@@ -221,7 +218,7 @@ impl Operator for CudaLog2 {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size = tensors[0].1.n_physical_elements();
-        let mut out = unsafe { self.1.alloc::<f32>(inp_size).unwrap() };
+        let mut out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
         unsafe {
             self.0
                 .clone()
@@ -249,12 +246,13 @@ impl PartialEq for CudaExp2 {
 impl CudaExp2 {
     pub fn new(dev: Arc<CudaDevice>) -> Self {
         let mut code =
-        "extern \"C\" __global__ void kernel(float *out, const float *inp, unsigned int numel) {
-    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+            "extern \"C\" __global__ void kernel(float *out, const float *inp, int numel) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < numel) {
         out[i] = exp2(inp[i]);
     }
-}".to_string();
+}"
+            .to_string();
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("kernel", &name);
         if !dev.has_func(&name, &name) {
@@ -275,7 +273,7 @@ impl Operator for CudaExp2 {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size = tensors[0].1.n_physical_elements();
-        let mut out = unsafe { self.1.alloc::<f32>(inp_size).unwrap() };
+        let mut out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
         unsafe {
             self.0
                 .clone()
@@ -303,12 +301,13 @@ impl PartialEq for CudaSin {
 impl CudaSin {
     pub fn new(dev: Arc<CudaDevice>) -> Self {
         let mut code =
-        "extern \"C\" __global__ void kernel(float *out, const float *inp, unsigned int numel) {
-    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+            "extern \"C\" __global__ void kernel(float *out, const float *inp, int numel) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < numel) {
         out[i] = sin(inp[i]);
     }
-}".to_string();
+}"
+            .to_string();
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("kernel", &name);
         if !dev.has_func(&name, &name) {
@@ -329,7 +328,7 @@ impl Operator for CudaSin {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size = tensors[0].1.n_physical_elements();
-        let mut out = unsafe { self.1.alloc::<f32>(inp_size).unwrap() };
+        let mut out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
         unsafe {
             self.0
                 .clone()
@@ -357,12 +356,13 @@ impl PartialEq for CudaSqrt {
 impl CudaSqrt {
     pub fn new(dev: Arc<CudaDevice>) -> Self {
         let mut code =
-        "extern \"C\" __global__ void kernel(float *out, const float *inp, unsigned int numel) {
-    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+            "extern \"C\" __global__ void kernel(float *out, const float *inp, int numel) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < numel) {
         out[i] = sqrt(inp[i]);
     }
-}".to_string();
+}"
+            .to_string();
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("kernel", &name);
         if !dev.has_func(&name, &name) {
@@ -383,7 +383,7 @@ impl Operator for CudaSqrt {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size = tensors[0].1.n_physical_elements();
-        let mut out = unsafe { self.1.alloc::<f32>(inp_size).unwrap() };
+        let mut out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
         unsafe {
             self.0
                 .clone()
@@ -411,12 +411,13 @@ impl PartialEq for CudaRecip {
 impl CudaRecip {
     pub fn new(dev: Arc<CudaDevice>) -> Self {
         let mut code =
-        "extern \"C\" __global__ void kernel(float *out, const float *inp, unsigned int numel) {
-    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+            "extern \"C\" __global__ void kernel(float *out, const float *inp, int numel) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < numel) {
         out[i] = __frcp_rn(inp[i]);
     }
-}".to_string();
+}"
+            .to_string();
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("kernel", &name);
         if !dev.has_func(&name, &name) {
@@ -437,7 +438,7 @@ impl Operator for CudaRecip {
             .downcast_ref::<CudaSlice<f32>>()
             .unwrap();
         let inp_size = tensors[0].1.n_physical_elements();
-        let mut out = unsafe { self.1.alloc::<f32>(inp_size).unwrap() };
+        let mut out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
         unsafe {
             self.0
                 .clone()
@@ -469,12 +470,12 @@ impl CudaAdd {
         let (a_idx_exp, a_valid_exp) = (a_shape.index_expression(), a_shape.valid_expression());
         let (b_idx_exp, b_valid_exp) = (b_shape.index_expression(), b_shape.valid_expression());
         let mut code = format!(
-            "extern \"C\" __global__ void kernel(float *out, const float *inp_a, const float *inp_b, unsigned int numel{}) {{
-    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            "extern \"C\" __global__ void kernel(float *out, const float *inp_a, const float *inp_b, int numel{}) {{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < numel) {{
         out[idx] = 
-            ({a_valid_exp} == 0 ? 0.0 : inp_a[{a_idx_exp}]) 
-            + ({b_valid_exp} == 0 ? 0.0 : inp_b[{b_idx_exp}]);
+            (({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}]) 
+            + (({b_valid_exp}) == 0 ? 0.0 : inp_b[{b_idx_exp}]);
     }}
 }}",
             a_shape
@@ -487,7 +488,7 @@ impl CudaAdd {
                     None
                 })
                 .unique()
-                .map(|c| format!(", unsigned int {c}"))
+                .map(|c| format!(", int {c}"))
                 .collect::<String>()
         );
         let name = format!("kernel_{}", hash(&code));
@@ -518,7 +519,7 @@ impl Operator for CudaAdd {
             .unwrap();
         let inp_size: usize = tensors[0].1.n_elements();
 
-        let out = unsafe { self.1.alloc::<f32>(inp_size).unwrap() };
+        let out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
         let mut params = vec![
             (&out).as_kernel_param(),
             a.as_kernel_param(),
@@ -570,12 +571,12 @@ impl CudaMul {
         let (a_idx_exp, a_valid_exp) = (a_shape.index_expression(), a_shape.valid_expression());
         let (b_idx_exp, b_valid_exp) = (b_shape.index_expression(), b_shape.valid_expression());
         let mut code = format!(
-            "extern \"C\" __global__ void kernel(float *out, const float *inp_a, const float *inp_b, unsigned int numel{}) {{
-    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            "extern \"C\" __global__ void kernel(float *out, const float *inp_a, const float *inp_b, int numel{}) {{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < numel) {{
         out[idx] = 
-        ({a_valid_exp} == 0 ? 0.0 : inp_a[{a_idx_exp}])
-            * ({b_valid_exp} == 0 ? 0.0 : inp_b[{b_idx_exp}]);
+        (({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}])
+            * (({b_valid_exp}) == 0 ? 0.0 : inp_b[{b_idx_exp}]);
     }}
 }}",
             a_shape
@@ -588,7 +589,7 @@ impl CudaMul {
                     None
                 })
                 .unique()
-                .map(|c| format!(", unsigned int {c}"))
+                .map(|c| format!(", int {c}"))
                 .collect::<String>()
         );
         let name = format!("kernel_{}", hash(&code));
@@ -619,7 +620,7 @@ impl Operator for CudaMul {
             .unwrap();
         let inp_size: usize = tensors[0].1.n_elements();
 
-        let out = unsafe { self.1.alloc::<f32>(inp_size).unwrap() };
+        let out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
         let mut params = vec![
             (&out).as_kernel_param(),
             a.as_kernel_param(),
@@ -671,12 +672,12 @@ impl CudaMod {
         let (a_idx_exp, a_valid_exp) = (a_shape.index_expression(), a_shape.valid_expression());
         let (b_idx_exp, b_valid_exp) = (b_shape.index_expression(), b_shape.valid_expression());
         let mut code = format!(
-            "extern \"C\" __global__ void kernel(float *out, const float *inp_a, const float *inp_b, unsigned int numel{}) {{
-    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            "extern \"C\" __global__ void kernel(float *out, const float *inp_a, const float *inp_b, int numel{}) {{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < numel) {{
         out[idx] = fmod(
-            {a_valid_exp} == 0 ? 0.0 : inp_a[{a_idx_exp}], 
-            {b_valid_exp} == 0 ? 0.0 : inp_b[{b_idx_exp}]
+            ({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}], 
+            ({b_valid_exp}) == 0 ? 0.0 : inp_b[{b_idx_exp}]
         );
     }}
 }}",
@@ -690,7 +691,7 @@ impl CudaMod {
                     None
                 })
                 .unique()
-                .map(|c| format!(", unsigned int {c}"))
+                .map(|c| format!(", int {c}"))
                 .collect::<String>()
         );
         let name = format!("kernel_{}", hash(&code));
@@ -721,7 +722,7 @@ impl Operator for CudaMod {
             .unwrap();
         let inp_size: usize = tensors[0].1.n_elements();
 
-        let out = unsafe { self.1.alloc::<f32>(inp_size).unwrap() };
+        let out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
         let mut params = vec![
             (&out).as_kernel_param(),
             a.as_kernel_param(),
@@ -773,15 +774,15 @@ impl CudaLessThan {
         let (a_idx_exp, a_valid_exp) = (a_shape.index_expression(), a_shape.valid_expression());
         let (b_idx_exp, b_valid_exp) = (b_shape.index_expression(), b_shape.valid_expression());
         let mut code = format!(
-            "extern \"C\" __global__ void kernel(float *out, const float *inp_a, const float *inp_b, unsigned int numel{}) {{
-    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            "extern \"C\" __global__ void kernel(float *out, const float *inp_a, const float *inp_b, int numel{}) {{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < numel) {{
         float a_t = 0.0;
         float b_t = 0.0;
-        if ({a_valid_exp} != 0) {{
+        if (({a_valid_exp}) != 0) {{
             a_t = inp_a[{a_idx_exp}];
         }}
-        if ({b_valid_exp} != 0) {{
+        if (({b_valid_exp}) != 0) {{
             b_t = inp_b[{b_idx_exp}];
         }}
         if (a_t < b_t) {{
@@ -801,7 +802,7 @@ impl CudaLessThan {
                     None
                 })
                 .unique()
-                .map(|c| format!(", unsigned int {c}"))
+                .map(|c| format!(", int {c}"))
                 .collect::<String>()
         );
         let name = format!("kernel_{}", hash(&code));
@@ -832,7 +833,7 @@ impl Operator for CudaLessThan {
             .unwrap();
         let inp_size: usize = tensors[0].1.n_elements();
 
-        let out = unsafe { self.1.alloc::<f32>(inp_size).unwrap() };
+        let out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
         let mut params = vec![
             (&out).as_kernel_param(),
             a.as_kernel_param(),
@@ -884,17 +885,17 @@ impl CudaSumReduce {
     fn new(dim: usize, shape: ShapeTracker, dev: Arc<CudaDevice>) -> Self {
         let idx_exp = shape.index_expression();
         let valid_exp = shape.valid_expression();
-        let mut code = format!("extern \"C\" __global__ void kernel(float *out, const float *inp, const unsigned int front_size, const unsigned int back_size, const unsigned int dim_size, unsigned int numel{}) {{
-    unsigned int i_ = blockIdx.x * blockDim.x + threadIdx.x;
+        let mut code = format!("extern \"C\" __global__ void kernel(float *out, const float *inp, const int front_size, const int back_size, const int dim_size, int numel{}) {{
+    int i_ = blockIdx.x * blockDim.x + threadIdx.x;
     
     if (i_ < numel) {{
-        unsigned int a_ = i_ / back_size;
-        unsigned int b_ = i_ % back_size;
+        int a_ = i_ / back_size;
+        int b_ = i_ % back_size;
         float reduce_value = 0.0;
-        for (unsigned int c_ = 0; c_ < dim_size; c_++) {{
-            unsigned int idx = a_ * dim_size * back_size + c_ * back_size + b_;
-            if ({valid_exp} != 0) {{
-                unsigned int a_idx = {idx_exp};
+        for (int c_ = 0; c_ < dim_size; c_++) {{
+            int idx = a_ * dim_size * back_size + c_ * back_size + b_;
+            if (({valid_exp}) != 0) {{
+                int a_idx = {idx_exp};
                 reduce_value += inp[a_idx];
             }}
         }}
@@ -910,7 +911,7 @@ impl CudaSumReduce {
                     None
                 })
                 .unique()
-                .map(|c| format!(", unsigned int {c}"))
+                .map(|c| format!(", int {c}"))
                 .collect::<String>()
         );
         let name = format!("kernel_{}", hash(&code));
@@ -950,7 +951,7 @@ impl Operator for CudaSumReduce {
             .product();
         let dim_size = tensors[0].1.shape()[self.2].to_usize().unwrap();
 
-        let out = unsafe { self.1.alloc::<f32>(inp_size) }.unwrap();
+        let out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
         let mut params = vec![
             (&out).as_kernel_param(),
             inp.as_kernel_param(),
@@ -998,17 +999,17 @@ impl CudaMaxReduce {
     fn new(dim: usize, shape: ShapeTracker, dev: Arc<CudaDevice>) -> Self {
         let idx_exp = shape.index_expression();
         let valid_exp = shape.valid_expression();
-        let mut code = format!("extern \"C\" __global__ void kernel(float *out, const float *inp, const unsigned int front_size, const unsigned int back_size, const unsigned int dim_size, unsigned int numel{}) {{
-    unsigned int i_ = blockIdx.x * blockDim.x + threadIdx.x;
+        let mut code = format!("extern \"C\" __global__ void kernel(float *out, const float *inp, const int front_size, const int back_size, const int dim_size, int numel{}) {{
+    int i_ = blockIdx.x * blockDim.x + threadIdx.x;
     
     if (i_ < numel) {{
-        unsigned int a_ = i_ / back_size;
-        unsigned int b_ = i_ % back_size;
+        int a_ = i_ / back_size;
+        int b_ = i_ % back_size;
         float reduce_value = -__int_as_float(0x7f800000);
-        for (unsigned int c_ = 0; c_ < dim_size; c_++) {{
-            unsigned int idx = a_ * dim_size * back_size + c_ * back_size + b_;
-            if ({valid_exp} != 0) {{
-                unsigned int a_idx = {idx_exp};
+        for (int c_ = 0; c_ < dim_size; c_++) {{
+            int idx = a_ * dim_size * back_size + c_ * back_size + b_;
+            if (({valid_exp}) != 0) {{
+                int a_idx = {idx_exp};
                 reduce_value = max(reduce_value, inp[a_idx]);
             }}
         }}
@@ -1024,7 +1025,7 @@ impl CudaMaxReduce {
                     None
                 })
                 .unique()
-                .map(|c| format!(", unsigned int {c}"))
+                .map(|c| format!(", int {c}"))
                 .collect::<String>()
         );
         let name = format!("kernel_{}", hash(&code));
@@ -1064,7 +1065,7 @@ impl Operator for CudaMaxReduce {
             .product();
         let dim_size = tensors[0].1.shape()[self.2].to_usize().unwrap();
 
-        let out = unsafe { self.1.alloc::<f32>(inp_size) }.unwrap();
+        let out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
         let mut params = vec![
             (&out).as_kernel_param(),
             inp.as_kernel_param(),
@@ -1258,7 +1259,6 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
             } else if is::<Add>(op) {
                 *op_ref = Box::new(CudaAdd::new(src_shapes[0], src_shapes[1], dev.clone()));
             } else if is::<Mul>(op) {
-                // *op_ref = Box::new(CudaMul::new(src_shapes[0], src_shapes[1]));
                 *op_ref = Box::new(CudaMul::new(src_shapes[0], src_shapes[1], dev.clone()));
             } else if is::<Mod>(op) {
                 *op_ref = Box::new(CudaMod::new(src_shapes[0], src_shapes[1], dev.clone()));
