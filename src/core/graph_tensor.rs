@@ -109,7 +109,6 @@ impl<S: Shape> GraphTensor<S> {
 
     pub fn dyn_data(&self, dyn_dim_map: &HashMap<char, usize>) -> Vec<f32> {
         let st = self.shape.resolve_global_dyn_dims(dyn_dim_map);
-        println!("ST: {:?}", st);
         let tensor = self.retrieve().unwrap();
         let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; st.n_elements()];

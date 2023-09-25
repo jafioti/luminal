@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
-pub type GenericOptimizer = (UnarySequentialOpt, RemoveUnusedNodes, CSE);
+pub type GenericOptimizer = (UnarySequentialOpt, CSE);
 
 /// Eliminate complementary unary sequential operations like `x.log().exp()`
 #[derive(Default)]

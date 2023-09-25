@@ -2,6 +2,7 @@ use std::{
     any::{Any, TypeId},
     collections::{hash_map::DefaultHasher, HashSet},
     hash::{Hash, Hasher},
+    mem::size_of,
     sync::Arc,
 };
 
@@ -67,7 +68,6 @@ impl Operator for CudaCopyFromDevice {
             // Already off device
             return vec![inp.pop().unwrap().0.cloned()];
         }
-        // self.0.synchronize().unwrap();
         if let Some(cuda_data) = inp[0]
             .0
             .borrowed()
@@ -107,11 +107,10 @@ impl CudaContiguous {
         let idx_exp = shape.index_expression();
         let valid_exp = shape.valid_expression();
         let mut code = format!(
-            "extern \"C\" __global__ void kernel(float *out, const float *inp_a, unsigned int numel{}) {{
-    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int a_idx = {idx_exp};
-    if (idx < numel && {valid_exp}) {{
-        out[idx] = inp_a[a_idx];
+            "extern \"C\" __global__ void kernel(float *out, const float *inp_a, int numel{}) {{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < numel && ({valid_exp}) != 0) {{
+        out[idx] = inp_a[{idx_exp}];
     }}
 }}",
             shape
@@ -123,7 +122,7 @@ impl CudaContiguous {
                     None
                 })
                 .unique()
-                .map(|c| format!(", unsigned int {c}"))
+                .map(|c| format!(", int {c}"))
                 .collect::<String>()
         );
         let name = format!("kernel_{}", hash(&code));
@@ -157,13 +156,17 @@ impl Operator for CudaContiguous {
             inp_size.as_kernel_param(),
         ];
         let mut added = HashSet::new();
+        let mut dims = [0; 10];
         for (d1, d2) in self.2.shape().into_iter().zip(tensors[0].1.shape()) {
             if let Dim::Unknown(c) = d1 {
                 if !added.contains(&c) {
-                    params.push(d2.to_usize().unwrap().as_kernel_param());
+                    dims[added.len()] = d2.to_usize().unwrap() as i32;
                     added.insert(c);
                 }
             }
+        }
+        for i in 0..added.len() {
+            params.push(unsafe { dims[0].as_kernel_param().add(i * size_of::<i32>()) });
         }
         unsafe {
             self.0
@@ -522,7 +525,8 @@ impl Operator for CudaAdd {
             b.as_kernel_param(),
             inp_size.as_kernel_param(),
         ];
-        let mut added_dims = HashSet::new();
+        let mut added = HashSet::new();
+        let mut dims = [0; 10];
         for (d1, d2) in self
             .2
             .shape()
@@ -531,11 +535,14 @@ impl Operator for CudaAdd {
             .chain(self.3.shape().into_iter().zip(tensors[1].1.shape()))
         {
             if let Dim::Unknown(c) = d1 {
-                if !added_dims.contains(&c) {
-                    params.push(d2.to_usize().unwrap().as_kernel_param());
-                    added_dims.insert(c);
+                if !added.contains(&c) {
+                    dims[added.len()] = d2.to_usize().unwrap() as i32;
+                    added.insert(c);
                 }
             }
+        }
+        for i in 0..added.len() {
+            params.push(unsafe { dims[0].as_kernel_param().add(i * size_of::<i32>()) });
         }
         unsafe {
             self.0
@@ -619,7 +626,8 @@ impl Operator for CudaMul {
             b.as_kernel_param(),
             inp_size.as_kernel_param(),
         ];
-        let mut added_dims = HashSet::new();
+        let mut added = HashSet::new();
+        let mut dims = [0; 10];
         for (d1, d2) in self
             .2
             .shape()
@@ -628,11 +636,14 @@ impl Operator for CudaMul {
             .chain(self.3.shape().into_iter().zip(tensors[1].1.shape()))
         {
             if let Dim::Unknown(c) = d1 {
-                if !added_dims.contains(&c) {
-                    params.push(d2.to_usize().unwrap().as_kernel_param());
-                    added_dims.insert(c);
+                if !added.contains(&c) {
+                    dims[added.len()] = d2.to_usize().unwrap() as i32;
+                    added.insert(c);
                 }
             }
+        }
+        for i in 0..added.len() {
+            params.push(unsafe { dims[0].as_kernel_param().add(i * size_of::<i32>()) });
         }
         unsafe {
             self.0
@@ -717,7 +728,8 @@ impl Operator for CudaMod {
             b.as_kernel_param(),
             inp_size.as_kernel_param(),
         ];
-        let mut added_dims = HashSet::new();
+        let mut added = HashSet::new();
+        let mut dims = [0; 10];
         for (d1, d2) in self
             .2
             .shape()
@@ -726,11 +738,14 @@ impl Operator for CudaMod {
             .chain(self.3.shape().into_iter().zip(tensors[1].1.shape()))
         {
             if let Dim::Unknown(c) = d1 {
-                if !added_dims.contains(&c) {
-                    params.push(d2.to_usize().unwrap().as_kernel_param());
-                    added_dims.insert(c);
+                if !added.contains(&c) {
+                    dims[added.len()] = d2.to_usize().unwrap() as i32;
+                    added.insert(c);
                 }
             }
+        }
+        for i in 0..added.len() {
+            params.push(unsafe { dims[0].as_kernel_param().add(i * size_of::<i32>()) });
         }
         unsafe {
             self.0
@@ -824,7 +839,8 @@ impl Operator for CudaLessThan {
             b.as_kernel_param(),
             inp_size.as_kernel_param(),
         ];
-        let mut added_dims = HashSet::new();
+        let mut added = HashSet::new();
+        let mut dims = [0; 10];
         for (d1, d2) in self
             .2
             .shape()
@@ -833,11 +849,14 @@ impl Operator for CudaLessThan {
             .chain(self.3.shape().into_iter().zip(tensors[1].1.shape()))
         {
             if let Dim::Unknown(c) = d1 {
-                if !added_dims.contains(&c) {
-                    params.push(d2.to_usize().unwrap().as_kernel_param());
-                    added_dims.insert(c);
+                if !added.contains(&c) {
+                    dims[added.len()] = d2.to_usize().unwrap() as i32;
+                    added.insert(c);
                 }
             }
+        }
+        for i in 0..added.len() {
+            params.push(unsafe { dims[0].as_kernel_param().add(i * size_of::<i32>()) });
         }
         unsafe {
             self.0
@@ -941,13 +960,17 @@ impl Operator for CudaSumReduce {
             inp_size.as_kernel_param(),
         ];
         let mut added = HashSet::new();
+        let mut dims = [0; 10];
         for (d1, d2) in self.3.shape().into_iter().zip(tensors[0].1.shape()) {
             if let Dim::Unknown(c) = d1 {
                 if !added.contains(&c) {
-                    params.push(d2.to_usize().unwrap().as_kernel_param());
+                    dims[added.len()] = d2.to_usize().unwrap() as i32;
                     added.insert(c);
                 }
             }
+        }
+        for i in 0..added.len() {
+            params.push(unsafe { dims[0].as_kernel_param().add(i * size_of::<i32>()) });
         }
         unsafe {
             self.0
@@ -1051,13 +1074,17 @@ impl Operator for CudaMaxReduce {
             inp_size.as_kernel_param(),
         ];
         let mut added = HashSet::new();
+        let mut dims = [0; 10];
         for (d1, d2) in self.3.shape().into_iter().zip(tensors[0].1.shape()) {
             if let Dim::Unknown(c) = d1 {
                 if !added.contains(&c) {
-                    params.push(d2.to_usize().unwrap().as_kernel_param());
+                    dims[added.len()] = d2.to_usize().unwrap() as i32;
                     added.insert(c);
                 }
             }
+        }
+        for i in 0..added.len() {
+            params.push(unsafe { dims[0].as_kernel_param().add(i * size_of::<i32>()) });
         }
         unsafe {
             self.0
