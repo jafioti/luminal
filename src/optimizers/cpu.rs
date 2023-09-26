@@ -140,13 +140,13 @@ impl GraphOptimizer for BatchMatMul2DOptimizer {
                 .ty::<Mul>()
                 .shapes(vec![
                     vec![
-                        Dim::Unknown('Z'),
+                        Dim::Unknown('D'),
                         Dim::Unknown('A'),
                         Dim::Unknown('C'),
                         Dim::Unknown('B'),
                     ],
                     vec![
-                        Dim::Unknown('Z'),
+                        Dim::Unknown('D'),
                         Dim::Unknown('A'),
                         Dim::Unknown('C'),
                         Dim::Unknown('B'),

@@ -14,7 +14,7 @@ use std::sync::Arc;
 ///
 /// Note: This maintains a instance of [`Arc<CudaDevice>`], so will prevent the device
 /// from being dropped.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CudaBlas {
     pub(crate) handle: sys::cublasHandle_t,
     pub(crate) device: Arc<CudaDevice>,

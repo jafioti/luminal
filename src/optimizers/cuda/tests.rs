@@ -397,6 +397,27 @@ fn test_matmul() {
 }
 
 #[test]
+fn test_batch_matmul() {
+    let mut cx = Graph::new();
+    let a = cx.new_tensor::<R3<2, 2, 3>>("Input");
+    a.set(vec![1., 2., 3., 1., 2., 1., 1., 2., 3., 1., 2., 1.]);
+    let b = cx.new_tensor::<R2<3, 4>>("Input");
+    b.set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
+    let c = a.matmul(b);
+    c.mark();
+
+    cx.optimize(<(CudaOptimizer, CudaMatMulOptimizer)>::default());
+    cx.execute();
+
+    let d_dev = Cpu::default();
+    let d_a = d_dev.tensor([[[1., 2., 3.], [1., 2., 1.]], [[1., 2., 3.], [1., 2., 1.]]]);
+    let d_b = d_dev.tensor([[1., 2., 3., 1.], [1., 2., 1., 2.], [-1., -2., 1., 2.]]);
+    let d_c = d_a.matmul(d_b);
+
+    assert_close_data(&c.data(), &d_c.as_vec());
+}
+
+#[test]
 fn test_matmul_transpose() {
     let mut cx = Graph::new();
     let a = cx.new_tensor::<R2<2, 3>>("Input");
