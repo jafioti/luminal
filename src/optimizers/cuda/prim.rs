@@ -873,7 +873,7 @@ impl Operator for CudaLessThan {
 }
 
 #[derive(Debug, Clone)]
-pub struct CudaSumReduce(CudaFunction, Arc<CudaDevice>, usize, ShapeTracker);
+pub struct CudaSumReduce(CudaFunction, Arc<CudaDevice>, pub usize, ShapeTracker);
 
 impl PartialEq for CudaSumReduce {
     fn eq(&self, _: &Self) -> bool {
@@ -987,7 +987,7 @@ impl Operator for CudaSumReduce {
 }
 
 #[derive(Debug, Clone)]
-pub struct CudaMaxReduce(CudaFunction, Arc<CudaDevice>, usize, ShapeTracker);
+pub struct CudaMaxReduce(CudaFunction, Arc<CudaDevice>, pub usize, ShapeTracker);
 
 impl PartialEq for CudaMaxReduce {
     fn eq(&self, _: &Self) -> bool {

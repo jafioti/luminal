@@ -1,4 +1,5 @@
-pub mod prim;
+mod matmul;
+mod prim;
 
 #[cfg(test)]
 mod tests;
@@ -9,7 +10,7 @@ use crate::prelude::*;
 
 // Ops and optimizers specific to CUDA execution
 
-pub type CudaOptimizer = (prim::CudaPrimitiveOptimizer,);
+pub type CudaOptimizer = (prim::CudaPrimitiveOptimizer, matmul::CudaMatMulOptimizer);
 
 impl Data for CudaSlice<f32> {
     fn as_any(&self) -> &dyn std::any::Any {

@@ -5,6 +5,7 @@ use rand::Rng;
 use super::CudaOptimizer;
 use crate::{
     nn::{activation::ReLU, linear::Linear},
+    optimizers::cuda::matmul::CudaMatMulOptimizer,
     prelude::{Module, *},
     tests::assert_close_data,
 };
@@ -375,6 +376,70 @@ fn test_mean_reduce() {
 }
 
 #[test]
+fn test_matmul() {
+    let mut cx = Graph::new();
+    let a = cx.new_tensor::<R2<2, 3>>("Input");
+    a.set(vec![1., 2., 3., 1., 2., 1.]);
+    let b = cx.new_tensor::<R2<3, 4>>("Input");
+    b.set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
+    let c = a.matmul(b);
+    c.mark();
+
+    cx.optimize(<(CudaOptimizer, CudaMatMulOptimizer)>::default());
+    cx.execute();
+
+    let d_dev = Cpu::default();
+    let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 1.]]);
+    let d_b = d_dev.tensor([[1., 2., 3., 1.], [1., 2., 1., 2.], [-1., -2., 1., 2.]]);
+    let d_c = d_a.matmul(d_b);
+
+    assert_close_data(&c.data(), &d_c.as_vec());
+}
+
+#[test]
+fn test_matmul_transpose() {
+    let mut cx = Graph::new();
+    let a = cx.new_tensor::<R2<2, 3>>("Input");
+    a.set(vec![1., 2., 3., 1., 2., 1.]);
+    let b = cx.new_tensor::<R2<4, 3>>("Input");
+    b.set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
+    let a_t = cx.new_tensor::<R2<3, 2>>("Input");
+    a_t.set(vec![1., 2., 3., 1., 2., 1.]);
+    let b_t = cx.new_tensor::<R2<3, 4>>("Input");
+    b_t.set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
+
+    let a_b = a.matmul(b.permute());
+    let a_b_t = a.matmul(b_t);
+    let a_t_b = a_t.permute::<R2<2, 3>, _>().matmul(b.permute());
+    let a_t_b_t = a_t.permute::<R2<2, 3>, _>().matmul(b_t);
+    a_b.mark();
+    a_b_t.mark();
+    a_t_b.mark();
+    a_t_b_t.mark();
+
+    cx.optimize(CudaOptimizer::default());
+    cx.execute();
+
+    let d_dev = Cpu::default();
+    let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 1.]]);
+    let d_b = d_dev.tensor([[1., 2., 3.], [1., 1., 2.], [1., 2., -1.], [-2., 1., 2.]]);
+    let d_a_t = d_dev.tensor([[1., 2.], [3., 1.], [2., 1.]]);
+    let d_b_t = d_dev.tensor([[1., 2., 3., 1.], [1., 2., 1., 2.], [-1., -2., 1., 2.]]);
+    let d_a_b = d_a.clone().matmul(d_b.clone().permute());
+    let d_a_b_t = d_a.matmul(d_b_t.clone());
+    let d_a_t_b = d_a_t
+        .clone()
+        .permute::<Rank2<2, 3>, _>()
+        .matmul(d_b.permute());
+    let d_a_t_b_t = d_a_t.permute::<Rank2<2, 3>, _>().matmul(d_b_t);
+
+    assert_close_data(&a_b.data(), &d_a_b.as_vec());
+    assert_close_data(&a_b_t.data(), &d_a_b_t.as_vec());
+    assert_close_data(&a_t_b.data(), &d_a_t_b.as_vec());
+    assert_close_data(&a_t_b_t.data(), &d_a_t_b_t.as_vec());
+}
+
+#[test]
 fn test_relu_and_linear() {
     // Test single and batch, unoptimized and optimized
     let mut cx = Graph::new();
@@ -398,7 +463,6 @@ fn test_relu_and_linear() {
 
     let unoptimized_b = b.data();
     let unoptimized_batch_out = batch_out.data();
-
     cx.optimize(<(CudaOptimizer, GenericOptimizer)>::default());
     cx.execute();
 
@@ -427,6 +491,7 @@ fn test_relu_and_linear() {
         .permute();
     let a = dev.tensor_from_vec(vec![1.0, 2.0, 3.0], (dfdx::shapes::Const::<3>,));
     let out = model.forward(a);
+
     assert_close_data(&unoptimized_b, &out.as_vec());
 }
 

@@ -1,6 +1,6 @@
 use std::{
     any::{Any, TypeId},
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
@@ -61,15 +61,18 @@ pub fn move_references(
     src: NodeIndex,
     trg: NodeIndex,
 ) {
-    // Create remap
-    id_remap.insert(src, trg);
-    // Transfer no_delete
-    if no_delete.remove(&src) {
-        no_delete.insert(trg);
-    }
-    // Transfer to_retrieve
-    if to_retrieve.remove(&src) {
-        to_retrieve.insert(trg);
+    // Only remap if it isn't already remapped, otherwise it would invalidate the past remappig
+    if let Entry::Vacant(e) = id_remap.entry(src) {
+        // Create remap
+        e.insert(trg);
+        // Transfer no_delete
+        if no_delete.remove(&src) {
+            no_delete.insert(trg);
+        }
+        // Transfer to_retrieve
+        if to_retrieve.remove(&src) {
+            to_retrieve.insert(trg);
+        }
     }
 }
 
@@ -122,11 +125,11 @@ pub struct GraphSelector {
         Mutex<
             petgraph::Graph<
                 (
-                    Option<TypeId>,              // Type constraint
-                    Option<Box<dyn TraitObjEq>>, // Value constraint
-                    Option<Vec<Vec<Dim>>>,       // Shape constraint
-                    Option<Vec<Vec<bool>>>,      // Fake constraint
-                    Vec<*mut NodeIndex>,         // Pointers
+                    Option<TypeId>,                    // Type constraint
+                    Option<fn(&dyn Operator) -> bool>, // Check constraint
+                    Option<Vec<Vec<Dim>>>,             // Shape constraint
+                    Option<Vec<Vec<bool>>>,            // Fake constraint
+                    Vec<*mut NodeIndex>,               // Pointers
                 ),
                 u8,
             >,
@@ -176,11 +179,11 @@ fn search(
     selector_node: NodeIndex,
     selector_graph: &petgraph::Graph<
         (
-            Option<TypeId>,              // Type constraint
-            Option<Box<dyn TraitObjEq>>, // Value constraint
-            Option<Vec<Vec<Dim>>>,       // Shape constraint
-            Option<Vec<Vec<bool>>>,      // Fake constraint
-            Vec<*mut NodeIndex>,         // Pointers
+            Option<TypeId>,                    // Type constraint
+            Option<fn(&dyn Operator) -> bool>, // Check constraint
+            Option<Vec<Vec<Dim>>>,             // Shape constraint
+            Option<Vec<Vec<bool>>>,            // Fake constraint
+            Vec<*mut NodeIndex>,               // Pointers
         ),
         u8,
     >,
@@ -202,7 +205,7 @@ fn search(
     }
     // Test value
     if let Some(value) = &selector_weight.1 {
-        if !current_weight.is_equal(value.as_ref()) {
+        if !value(current_weight.as_ref()) {
             return false;
         }
     }
@@ -373,12 +376,11 @@ impl OpSelector {
         m_graph.node_weight_mut(self.id).unwrap().0 = Some(type_id);
         self
     }
-    /// Constrain the op to a value
-    pub fn value<O: Operator + 'static>(self, value: O) -> Self {
+    /// Constrain the op to a checking function
+    pub fn check(self, check: fn(&dyn Operator) -> bool) -> Self {
         let graph = unsafe { self.graph.as_ref().unwrap() };
         let mut m_graph = graph.graph.lock().unwrap();
-        m_graph.node_weight_mut(self.id).unwrap().0 = Some(TypeId::of::<O>());
-        m_graph.node_weight_mut(self.id).unwrap().1 = Some(Box::new(value));
+        m_graph.node_weight_mut(self.id).unwrap().1 = Some(check);
         self
     }
     /// Constrain the op to input shapes
@@ -404,51 +406,44 @@ impl OpSelector {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use petgraph::adj::NodeIndex;
+#[cfg(test)]
+mod tests {
+    use petgraph::adj::NodeIndex;
 
-//     use crate::{
-//         op::{Exp2, Log2, Mul, SumReduce},
-//         prelude::Graph,
-//     };
+    use crate::{
+        op::{Exp2, Log2, Mul, SumReduce},
+        prelude::Graph,
+    };
 
-//     use super::GraphSelector;
+    use super::GraphSelector;
 
-//     #[test]
-//     fn test_graph_selector() {
-//         let cx = Graph::default();
-//         // Exp -> Log or Log -> Exp
-//         let (mut exp, mut log) = (NodeIndex::default(), NodeIndex::default());
-//         let selector1 = GraphSelector::default();
-//         selector1.edge(
-//             selector1.op().ty::<Log2>().ptr(&mut log),
-//             selector1.op().ty::<Exp2>().ptr(&mut exp),
-//         );
-//         let selector2 = GraphSelector::default();
-//         selector2.edge(
-//             selector2.op().ty::<Exp2>().ptr(&mut exp),
-//             selector2.op().ty::<Log2>().ptr(&mut log),
-//         );
+    #[test]
+    fn test_graph_selector() {
+        let cx = Graph::default();
+        // Exp -> Log or Log -> Exp
+        let (mut exp, mut log) = (NodeIndex::default(), NodeIndex::default());
+        let selector1 = GraphSelector::default();
+        selector1.edge(
+            selector1.op().ty::<Log2>().ptr(&mut log),
+            0,
+            selector1.op().ty::<Exp2>().ptr(&mut exp),
+        );
+        let selector2 = GraphSelector::default();
+        selector2.edge(
+            selector2.op().ty::<Exp2>().ptr(&mut exp),
+            0,
+            selector2.op().ty::<Log2>().ptr(&mut log),
+        );
 
-//         assert_eq!(
-//             selector1.search(&cx).chain(selector2.search(&cx)).next(),
-//             None
-//         );
+        assert_eq!(
+            selector1.search(&cx).chain(selector2.search(&cx)).next(),
+            None
+        );
 
-//         // Matmul
-//         let s = GraphSelector::default();
-//         s.edge(
-//             s.edge(
-//                 s.op().ty::<Expand>(),
-//                 s.edge(
-//                     s.edge(s.op().ty::<Permute>(), s.op().ty::<Expand>()),
-//                     s.op().ty::<Mul>(),
-//                 ),
-//             ),
-//             s.op().ty::<SumReduce>(),
-//         );
+        // Matmul
+        let s = GraphSelector::default();
+        s.edge(s.op().ty::<Mul>(), 0, s.op().ty::<SumReduce>());
 
-//         assert_eq!(s.search(&cx).next(), None);
-//     }
-// }
+        assert_eq!(s.search(&cx).next(), None);
+    }
+}

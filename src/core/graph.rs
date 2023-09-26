@@ -408,7 +408,11 @@ impl Graph {
         for (id, node) in self.graph.node_indices().zip(self.graph.node_weights()) {
             id_map.insert(
                 id,
-                new_graph.add_node(op_regex.replace_all(&format!("{node:?}"), "").to_string()),
+                new_graph.add_node(format!(
+                    "{:?} | {:?}",
+                    op_regex.replace_all(&format!("{node:?}"), "").to_string(),
+                    id
+                )),
             );
         }
 

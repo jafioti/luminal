@@ -36,7 +36,7 @@ impl GraphOptimizer for MatMul2DOptimizer {
             0,
             s.op()
                 .ty::<SumReduce>()
-                .value(SumReduce(2))
+                .check(|o| o.is_equal(&SumReduce(0)))
                 .ptr(&mut sum_reduce),
         );
         for _ in s.search(graph) {
@@ -63,6 +63,13 @@ impl GraphOptimizer for MatMul2DOptimizer {
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 sum_reduce,
+                new_op,
+            );
+            move_references(
+                &mut graph.id_remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                mul,
                 new_op,
             );
 
@@ -153,7 +160,7 @@ impl GraphOptimizer for BatchMatMul2DOptimizer {
             0,
             s.op()
                 .ty::<SumReduce>()
-                .value(SumReduce(3))
+                .check(|o| o.is_equal(&SumReduce(3)))
                 .ptr(&mut sum_reduce),
         );
         for _ in s.search(graph) {
@@ -181,6 +188,13 @@ impl GraphOptimizer for BatchMatMul2DOptimizer {
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 sum_reduce,
+                new_op,
+            );
+            move_references(
+                &mut graph.id_remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                mul,
                 new_op,
             );
 

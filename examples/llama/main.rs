@@ -81,7 +81,7 @@ fn main() {
         cx2.set_dyn_dim('t', input.len());
 
         let now = std::time::Instant::now();
-        cx2.execute_debug();
+        cx2.execute();
         println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
         
         let o = out.dyn_data(&cx2.dyn_map);
