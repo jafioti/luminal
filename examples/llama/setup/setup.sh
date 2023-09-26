@@ -3,7 +3,11 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
 # Setup git LFS
 echo "Setting up git LFS..."
-sudo apt install git-lfs
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+	sudo apt install git-lfs
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+	brew install git-lfs
+fi
 git lfs install
 
 echo "Downloading Model..."
