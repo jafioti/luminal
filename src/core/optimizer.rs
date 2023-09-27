@@ -188,10 +188,7 @@ fn search(
         u8,
     >,
     graph_node: petgraph::stable_graph::NodeIndex,
-    graph: &StableGraph<
-        Box<dyn Operator>,
-        (u8, u8, crate::core::shape::simple_tracker::ShapeTracker),
-    >,
+    graph: &StableGraph<Box<dyn Operator>, (u8, u8, crate::core::shape::tracker::ShapeTracker)>,
     used: &mut HashSet<NodeIndex>,
     selector_used: &mut HashSet<NodeIndex>,
 ) -> bool {

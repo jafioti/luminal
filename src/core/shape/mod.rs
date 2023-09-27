@@ -2,8 +2,8 @@ mod axes;
 mod broadcast;
 mod permute;
 mod realize;
-pub mod simple_tracker;
 mod slice;
+pub mod tracker;
 
 pub use realize::*;
 pub use slice::*;
@@ -14,7 +14,7 @@ mod test;
 pub use axes::*;
 pub use broadcast::*;
 pub use permute::*;
-pub use simple_tracker::*;
+pub use tracker::*;
 
 // This currently is a lot more complicated than it needs to be, because it's based on dfdx and is ready to do dynamic dimensions.
 // TODO: Actually use dynamic dimensions
@@ -176,7 +176,7 @@ pub trait Shape:
     type LastAxis: Axes;
 
     fn realized_shape() -> Vec<Dim>;
-    fn to_tracker() -> crate::core::shape::simple_tracker::ShapeTracker;
+    fn to_tracker() -> crate::core::shape::tracker::ShapeTracker;
 }
 
 /// Represents a [Shape] that has all [ConstDim]s

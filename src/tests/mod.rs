@@ -1,5 +1,7 @@
 mod dynamic;
 
+use rand::{thread_rng, Rng};
+
 use crate::prelude::*;
 
 // Integration and other tests
@@ -81,4 +83,28 @@ pub fn assert_close_data(a: &[f32], b: &[f32]) {
             panic!("{a} is not close to {b}");
         }
     }
+}
+
+pub fn random_vec(n: usize) -> Vec<f32> {
+    let mut rng = thread_rng();
+    (0..n).map(|_| rng.gen()).collect()
+}
+
+#[macro_export]
+macro_rules! test_imports {
+    () => {
+        #[allow(unused_imports)]
+        use dfdx::prelude::{
+            Axes as DAxes, Axes2 as DAxes2, Axes3 as DAxes3, Axes4 as DAxes4, Axes5 as DAxes5,
+            Axis as DAxis, Const as DConst, *,
+        };
+        #[allow(unused_imports)]
+        use $crate::{
+            prelude::{
+                Axes as LAxes, Axes2 as LAxes2, Axes3 as LAxes3, Axes4 as LAxes4, Axes5 as LAxes5,
+                Axis as LAxis, Const as LConst, *,
+            },
+            tests::{assert_close_data, random_vec},
+        };
+    };
 }

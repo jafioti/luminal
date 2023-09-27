@@ -139,20 +139,20 @@ impl<S: Shape> GraphTensor<S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, tests::assert_close_data};
-    use dfdx::prelude::*;
+    crate::test_imports!();
 
     #[test]
     fn test_exp() {
         let mut cx = Graph::new();
+        let a_data = random_vec(6);
         let a = cx.new_tensor::<R2<2, 3>>("Input");
-        a.set(vec![1., 2., 3., 3., 1., 3.]);
+        a.set(a_data.clone());
         let b = a.exp();
         b.mark();
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor([[1., 2., 3.], [3., 1., 3.]]);
+        let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<3>));
         let d_b = d_a.exp();
 
         assert_close_data(&b.data(), &d_b.as_vec());
@@ -161,8 +161,9 @@ mod tests {
     #[test]
     fn test_layer_norm() {
         let mut cx = Graph::new();
+        let a_data = random_vec(6);
         let a = cx.new_tensor::<R2<2, 3>>("Input");
-        a.set(vec![1., 2., 3., 3., 1., 3.]);
+        a.set(a_data.clone());
         let b = a.layer_norm::<0>();
         let c = a.layer_norm::<1>();
         b.mark();
@@ -170,9 +171,9 @@ mod tests {
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor([[1., 2., 3.], [3., 1., 3.]]);
-        let d_b = d_a.clone().normalize::<dfdx::shapes::Axis<0>>(1e-5);
-        let d_c = d_a.normalize::<dfdx::shapes::Axis<1>>(1e-5);
+        let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<3>));
+        let d_b = d_a.clone().normalize::<DAxis<0>>(1e-5);
+        let d_c = d_a.normalize::<DAxis<1>>(1e-5);
 
         assert_close_data(&b.data(), &d_b.as_vec());
         assert_close_data(&c.data(), &d_c.as_vec());
@@ -181,21 +182,17 @@ mod tests {
     #[test]
     fn test_softmax() {
         let mut cx = Graph::new();
+        let a_data = random_vec(6);
         let a = cx.new_tensor::<R2<2, 3>>("Input");
-        a.set(vec![
-            5.51743, 6.896794, 5.51743, 5.528703, 6.9108624, 5.528703,
-        ]);
+        a.set(a_data.clone());
         let b = a.softmax::<1>();
         b.mark();
 
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor_from_vec(
-            vec![5.51743, 6.896794, 5.51743, 5.528703, 6.9108624, 5.528703],
-            (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<3>),
-        );
-        let d_b = d_a.softmax::<dfdx::shapes::Axis<1>>();
+        let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<3>));
+        let d_b = d_a.softmax::<DAxis<1>>();
 
         let r = b.data();
         assert_close_data(&r, &d_b.as_vec());
@@ -204,20 +201,16 @@ mod tests {
     #[test]
     fn test_sin() {
         let mut cx = Graph::new();
+        let a_data = random_vec(6);
         let a = cx.new_tensor::<R2<2, 3>>("Input");
-        a.set(vec![
-            5.51743, 6.896794, 5.51743, 5.528703, 6.9108624, 5.528703,
-        ]);
+        a.set(a_data.clone());
         let b = a.sin();
         b.mark();
 
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor_from_vec(
-            vec![5.51743, 6.896794, 5.51743, 5.528703, 6.9108624, 5.528703],
-            (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<3>),
-        );
+        let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<3>));
         let d_b = d_a.sin();
 
         let r = b.data();
@@ -227,41 +220,33 @@ mod tests {
     #[test]
     fn test_cos() {
         let mut cx = Graph::new();
+        let a_data = random_vec(6);
         let a = cx.new_tensor::<R2<2, 3>>("Input");
-        a.set(vec![
-            5.51743, 6.896794, 5.51743, 5.528703, 6.9108624, 5.528703,
-        ]);
+        a.set(a_data.clone());
         let b = a.cos();
         b.mark();
 
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor_from_vec(
-            vec![5.51743, 6.896794, 5.51743, 5.528703, 6.9108624, 5.528703],
-            (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<3>),
-        );
+        let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<3>));
         let d_b = d_a.cos();
-
-        let r = b.data();
-        assert_close_data(&r, &d_b.as_vec());
+        assert_close_data(&b.data(), &d_b.as_vec());
     }
 
     #[test]
     fn test_relu() {
         let mut cx = Graph::new();
+        let a_data = random_vec(4);
         let a = cx.new_tensor::<(Dyn<'a'>, Dyn<'b'>)>("Input");
-        a.set_dyn(vec![0.0, 1.0, 0.0, 1.0], vec![2, 2]);
+        a.set_dyn(a_data.clone(), vec![2, 2]);
         let b = a.relu();
         b.mark();
 
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor_from_vec(
-            vec![0.0, 1.0, 0.0, 1.0],
-            (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<2>),
-        );
+        let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<2>));
         let d_b = d_a.relu();
         assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
     }
@@ -269,18 +254,16 @@ mod tests {
     #[test]
     fn test_sigmoid() {
         let mut cx = Graph::new();
+        let a_data = random_vec(4);
         let a = cx.new_tensor::<(Dyn<'a'>, Dyn<'b'>)>("Input");
-        a.set_dyn(vec![0.0, 1.0, 0.0, 1.0], vec![2, 2]);
+        a.set_dyn(a_data.clone(), vec![2, 2]);
         let b = a.sigmoid();
         b.mark();
 
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor_from_vec(
-            vec![0.0, 1.0, 0.0, 1.0],
-            (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<2>),
-        );
+        let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<2>));
         let d_b = d_a.sigmoid();
         assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
     }
@@ -288,18 +271,16 @@ mod tests {
     #[test]
     fn test_tanh() {
         let mut cx = Graph::new();
+        let a_data = random_vec(4);
         let a = cx.new_tensor::<(Dyn<'a'>, Dyn<'b'>)>("Input");
-        a.set_dyn(vec![0.0, 1.0, 0.0, 1.0], vec![2, 2]);
+        a.set_dyn(a_data.clone(), vec![2, 2]);
         let b = a.tanh();
         b.mark();
 
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor_from_vec(
-            vec![0.0, 1.0, 0.0, 1.0],
-            (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<2>),
-        );
+        let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<2>));
         let d_b = d_a.tanh();
         assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
     }

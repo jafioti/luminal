@@ -2,7 +2,7 @@ use std::ops::Mul;
 
 use crate::{
     nn::linear::Linear,
-    prelude::{simple_tracker::Dim, *},
+    prelude::{tracker::Dim, *},
 };
 
 // This is still single head attention because I need a runtime reshape, like the try_reshape in dfdx

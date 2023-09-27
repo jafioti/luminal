@@ -23,8 +23,7 @@ pub struct Graph {
     pub id_remap: HashMap<NodeIndex, NodeIndex>,
     pub dyn_map: HashMap<char, usize>,
     /// Edge weights: (Input index, Output index, Input shape)
-    pub graph:
-        StableGraph<Box<dyn Operator>, (u8, u8, crate::core::shape::simple_tracker::ShapeTracker)>,
+    pub graph: StableGraph<Box<dyn Operator>, (u8, u8, crate::core::shape::tracker::ShapeTracker)>,
     pub no_delete: HashSet<NodeIndex>,
     /// Mark tensors that need to be retrieved later (mostly for optimizers to insert copy back calls, the graph itself doesn't treat these differently)
     pub to_retrieve: HashSet<NodeIndex>,
@@ -33,10 +32,7 @@ pub struct Graph {
     pub(crate) linearized_graph: Option<
         Vec<(
             NodeIndex,
-            Vec<(
-                (NodeIndex, u8),
-                crate::core::shape::simple_tracker::ShapeTracker,
-            )>,
+            Vec<((NodeIndex, u8), crate::core::shape::tracker::ShapeTracker)>,
         )>,
     >,
 }
@@ -532,7 +528,7 @@ impl<'a> NewOp<'a> {
         mut self,
         id: NodeIndex,
         from_output: u8,
-        shape: crate::core::shape::simple_tracker::ShapeTracker,
+        shape: crate::core::shape::tracker::ShapeTracker,
     ) -> Self {
         self.graph_ref.graph.add_edge(
             remap_id(id, &self.graph_ref.id_remap),
@@ -557,10 +553,7 @@ pub(crate) fn remap_id(
 
 fn toposort(
     id: NodeIndex,
-    graph: &StableGraph<
-        Box<dyn Operator>,
-        (u8, u8, crate::core::shape::simple_tracker::ShapeTracker),
-    >,
+    graph: &StableGraph<Box<dyn Operator>, (u8, u8, crate::core::shape::tracker::ShapeTracker)>,
     visited: &mut HashSet<NodeIndex>,
 ) -> (Vec<NodeIndex>, usize, bool) {
     if visited.contains(&id) {

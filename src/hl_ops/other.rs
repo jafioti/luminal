@@ -1,6 +1,6 @@
 use crate::{
     op::Function,
-    prelude::{simple_tracker::Dim, *},
+    prelude::{tracker::Dim, *},
 };
 
 impl<S: Shape> GraphTensor<S> {

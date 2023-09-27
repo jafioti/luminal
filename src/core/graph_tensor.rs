@@ -14,13 +14,13 @@ pub struct GraphTensor<S: Shape> {
     pub id: NodeIndex,
     pub graph_ref: *mut Graph,
     pub(crate) _phantom: PhantomData<S>,
-    pub shape: crate::core::shape::simple_tracker::ShapeTracker,
+    pub shape: crate::core::shape::tracker::ShapeTracker,
 }
 
 impl<S: Shape> GraphTensor<S> {
     pub fn from_id(
         id: NodeIndex,
-        shape: crate::core::shape::simple_tracker::ShapeTracker,
+        shape: crate::core::shape::tracker::ShapeTracker,
         graph_ref: *mut Graph,
     ) -> Self {
         Self {

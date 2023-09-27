@@ -4,7 +4,7 @@ use std::fmt::Debug;
 
 use crate::{
     prelude::{
-        simple_tracker::{Dim, ShapeTracker},
+        tracker::{Dim, ShapeTracker},
         TraitObjEq,
     },
     tensor::Tensor,
@@ -34,10 +34,7 @@ impl<'a> InputTensor<'a> {
 pub trait Operator: Debug + TraitObjEq {
     fn process(
         &self,
-        inp: Vec<(
-            InputTensor,
-            crate::core::shape::simple_tracker::ShapeTracker,
-        )>,
+        inp: Vec<(InputTensor, crate::core::shape::tracker::ShapeTracker)>,
     ) -> Vec<Tensor>;
 }
 
@@ -45,14 +42,7 @@ pub trait Operator: Debug + TraitObjEq {
 #[allow(clippy::type_complexity)]
 pub struct Function(
     pub String,
-    pub  Box<
-        dyn Fn(
-            Vec<(
-                InputTensor,
-                crate::core::shape::simple_tracker::ShapeTracker,
-            )>,
-        ) -> Vec<Tensor>,
-    >,
+    pub Box<dyn Fn(Vec<(InputTensor, crate::core::shape::tracker::ShapeTracker)>) -> Vec<Tensor>>,
 );
 
 impl PartialEq for Function {

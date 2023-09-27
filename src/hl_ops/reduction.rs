@@ -86,22 +86,22 @@ impl<S: Shape> GraphTensor<S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, tests::assert_close_data};
-    use dfdx::prelude::*;
+    crate::test_imports!();
 
     #[test]
     fn test_sum_reduce() {
         let mut cx = Graph::new();
+        let a_data = random_vec(6);
         let a = cx.new_tensor::<R2<2, 3>>("Input");
-        a.set(vec![1., 2., 3., 1., 2., 3.]);
-        let b = a.sum_reduce::<_, crate::prelude::Axis<1>>();
+        a.set(a_data.clone());
+        let b = a.sum_reduce::<_, LAxis<1>>();
         b.mark();
 
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
-        let d_b = d_a.sum::<_, dfdx::shapes::Axis<1>>();
+        let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<3>));
+        let d_b = d_a.sum::<_, DAxis<1>>();
 
         assert_close_data(&b.data(), &d_b.as_vec());
     }
@@ -109,16 +109,17 @@ mod tests {
     #[test]
     fn test_max_reduce() {
         let mut cx = Graph::new();
+        let a_data = random_vec(6);
         let a = cx.new_tensor::<R2<2, 3>>("Input");
-        a.set(vec![1., 2., 3., 1., 2., 3.]);
-        let b = a.max_reduce::<_, crate::prelude::Axis<1>>();
+        a.set(a_data.clone());
+        let b = a.max_reduce::<_, LAxis<1>>();
         b.mark();
 
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
-        let d_b = d_a.max::<_, dfdx::shapes::Axis<1>>();
+        let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<3>));
+        let d_b = d_a.max::<_, DAxis<1>>();
 
         assert_close_data(&b.data(), &d_b.as_vec());
     }
@@ -126,16 +127,17 @@ mod tests {
     #[test]
     fn test_mean_reduce() {
         let mut cx = Graph::new();
+        let a_data = random_vec(6);
         let a = cx.new_tensor::<R2<2, 3>>("Input");
-        a.set(vec![1., 2., 3., 1., 2., 3.]);
-        let b = a.mean_reduce::<_, crate::prelude::Axis<1>>();
+        a.set(a_data.clone());
+        let b = a.mean_reduce::<_, LAxis<1>>();
         b.mark();
 
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
-        let d_b = d_a.mean::<_, dfdx::shapes::Axis<1>>();
+        let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<3>));
+        let d_b = d_a.mean::<_, DAxis<1>>();
 
         assert_close_data(&b.data(), &d_b.as_vec());
     }
