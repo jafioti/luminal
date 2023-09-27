@@ -6,32 +6,34 @@ use luminal::prelude::*;
 use model::LlamaForCausalLM;
 use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
 
+type Model = LlamaForCausalLM<
+    { config::VOCAB },
+    { config::HEADS },
+    { config::HIDDEN },
+    { config::INTERMEDIATE },
+    { config::HEAD_DIM },
+    { config::HEAD_DIM_OVER_2 },
+    { config::LAYERS },
+>;
+
 #[rustfmt::skip]
 fn main() {
     let prompt = "Here is a python implementation of merge sort:";
     let tokenizer =
             SentencePieceBpeTokenizer::from_file("./examples/llama/setup/llama-7b-hf/tokenizer.model", false).unwrap();
-    let mut input: Vec<usize> = tokenizer.encode(
+    let mut input = tokenizer.encode(
         prompt,
         None,
         prompt.len(),
         &TruncationStrategy::LongestFirst,
         0
-    ).token_ids.iter().map(|&x| x as usize).collect();
-    input.insert(0, 1);
+    ).token_ids.iter().map(|&x| x as usize).collect::<Vec<_>>();
+    input.insert(0, 1); // Start token
 
     println!("Creating Graphs...");
     let mut cx1 = Graph::new();
     let mut cx2 = Graph::new();
-    let model: LlamaForCausalLM<
-        { config::VOCAB },
-        { config::HEADS },
-        { config::HIDDEN },
-        { config::INTERMEDIATE },
-        { config::HEAD_DIM },
-        { config::HEAD_DIM_OVER_2 },
-        { config::LAYERS },
-    > = InitModule::initialize(&mut cx1);
+    let model = Model::initialize(&mut cx1);
     // mark_weights(&model, &mut cx1);
     let inp = cx1.new_tensor::<(Dyn<'b'>, Dyn<'s'>)>("Input");
     let (out1, cache1) = model.forward(inp);
@@ -45,15 +47,7 @@ fn main() {
     cx1.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
 
     // Build KV cache forward graph
-    let kv_model: LlamaForCausalLM<
-        { config::VOCAB },
-        { config::HEADS },
-        { config::HIDDEN },
-        { config::INTERMEDIATE },
-        { config::HEAD_DIM },
-        { config::HEAD_DIM_OVER_2 },
-        { config::LAYERS },
-    > = InitModule::initialize(&mut cx2);
+    let kv_model = Model::initialize(&mut cx2);
     // mark_weights(&kv_model, &mut cx2);
     let single_inp = cx2.new_tensor::<(Dyn<'b'>, Const<1>)>("Input");
     let cache_src = (0..config::LAYERS).map(|_| (cx2.new_tensor("Key Cache"), cx2.new_tensor("Value Cache"))).collect::<Vec<_>>();

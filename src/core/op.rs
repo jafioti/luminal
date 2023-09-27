@@ -32,17 +32,14 @@ impl<'a> InputTensor<'a> {
 }
 
 pub trait Operator: Debug + TraitObjEq {
-    fn process(
-        &self,
-        inp: Vec<(InputTensor, crate::core::shape::tracker::ShapeTracker)>,
-    ) -> Vec<Tensor>;
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor>;
 }
 
 /// An opaque function running on CPU that takes in tensor references and outputs a new tensor
 #[allow(clippy::type_complexity)]
 pub struct Function(
     pub String,
-    pub Box<dyn Fn(Vec<(InputTensor, crate::core::shape::tracker::ShapeTracker)>) -> Vec<Tensor>>,
+    pub Box<dyn Fn(Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor>>,
 );
 
 impl PartialEq for Function {
@@ -118,10 +115,7 @@ impl Operator for Contiguous {
 pub struct Log2;
 impl Operator for Log2 {
     fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut t = match inp.pop().unwrap().0 {
-            InputTensor::Borrowed(t) => t.clone(),
-            InputTensor::Owned(t) => t,
-        };
+        let mut t = inp.pop().unwrap().0.cloned();
         for a in t
             .data
             .as_any_mut()
@@ -140,10 +134,7 @@ impl Operator for Log2 {
 pub struct Exp2;
 impl Operator for Exp2 {
     fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut t = match inp.pop().unwrap().0 {
-            InputTensor::Borrowed(t) => t.clone(),
-            InputTensor::Owned(t) => t,
-        };
+        let mut t = inp.pop().unwrap().0.cloned();
         for a in t
             .data
             .as_any_mut()
@@ -162,10 +153,7 @@ impl Operator for Exp2 {
 pub struct Sin;
 impl Operator for Sin {
     fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut t = match inp.pop().unwrap().0 {
-            InputTensor::Borrowed(t) => t.clone(),
-            InputTensor::Owned(t) => t,
-        };
+        let mut t = inp.pop().unwrap().0.cloned();
         for a in t
             .data
             .as_any_mut()
@@ -183,10 +171,7 @@ impl Operator for Sin {
 pub struct Sqrt;
 impl Operator for Sqrt {
     fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut t = match inp.pop().unwrap().0 {
-            InputTensor::Borrowed(t) => t.clone(),
-            InputTensor::Owned(t) => t,
-        };
+        let mut t = inp.pop().unwrap().0.cloned();
         for a in t
             .data
             .as_any_mut()
@@ -204,10 +189,7 @@ impl Operator for Sqrt {
 pub struct Recip;
 impl Operator for Recip {
     fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut t = match inp.pop().unwrap().0 {
-            InputTensor::Borrowed(t) => t.clone(),
-            InputTensor::Owned(t) => t,
-        };
+        let mut t = inp.pop().unwrap().0.cloned();
         for a in t
             .data
             .as_any_mut()
