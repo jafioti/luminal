@@ -355,10 +355,7 @@ pub struct FusedUnary(Vec<fn(f32) -> f32>);
 
 impl Operator for FusedUnary {
     fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut t = match inp.pop().unwrap().0 {
-            InputTensor::Owned(t) => t,
-            InputTensor::Borrowed(t) => t.clone(),
-        };
+        let mut t = inp.pop().unwrap().0.cloned();
         for a in t
             .data
             .as_any_mut()

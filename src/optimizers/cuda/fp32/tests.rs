@@ -2,10 +2,9 @@ use dfdx::prelude::{Module as DfdxModule, *};
 use itertools::Itertools;
 use rand::Rng;
 
-use super::CudaOptimizer;
+use super::CudaFp32Optimizer;
 use crate::{
     nn::{activation::ReLU, linear::Linear},
-    optimizers::cuda::matmul::CudaMatMulOptimizer,
     prelude::{Module, *},
     tests::assert_close_data,
 };
@@ -19,7 +18,7 @@ fn test_log2() {
     let b = a.log_2();
     b.mark();
 
-    cx.optimize(CudaOptimizer::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     assert_close_data(
@@ -40,7 +39,7 @@ fn test_exp2() {
     let b = a.exp_2();
     b.mark();
 
-    cx.optimize(CudaOptimizer::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     assert_close_data(
@@ -61,7 +60,7 @@ fn test_log2exp2() {
     let b = a.exp_2().log_2();
     b.mark();
 
-    cx.optimize(<(GenericOptimizer, CudaOptimizer)>::default());
+    cx.optimize(<(GenericOptimizer, CudaFp32Optimizer)>::default());
     cx.execute();
 
     assert_close_data(&b.data(), &[1., 2., 3.]);
@@ -74,7 +73,7 @@ fn test_recip() {
     a.set(vec![1., 2., 3.]);
     let b = a.recip();
     b.mark();
-    cx.optimize(CudaOptimizer::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -91,7 +90,7 @@ fn test_sin() {
     a.set(vec![1., 2., 3.]);
     let b = a.sin();
     b.mark();
-    cx.optimize(CudaOptimizer::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -108,7 +107,7 @@ fn test_sqrt() {
     a.set(vec![1., 2., 3.]);
     let b = a.sqrt();
     b.mark();
-    cx.optimize(CudaOptimizer::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -128,7 +127,7 @@ fn test_add() {
     let c = a + b;
     c.mark();
 
-    cx.optimize(CudaOptimizer::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -149,7 +148,7 @@ fn test_sub() {
     let c = a - b;
     c.mark();
 
-    cx.optimize(CudaOptimizer::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -172,7 +171,7 @@ fn test_square() {
     let b = a * a;
     b.mark();
 
-    cx.optimize(<(CudaOptimizer, GenericOptimizer)>::default());
+    cx.optimize(<(CudaFp32Optimizer, GenericOptimizer)>::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -199,7 +198,7 @@ fn test_mul() {
     let c = a * b;
     c.mark();
 
-    cx.optimize(CudaOptimizer::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -225,7 +224,7 @@ fn test_mul2() {
     let c = a * b.expand();
     c.mark();
 
-    cx.optimize(CudaOptimizer::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -246,7 +245,7 @@ fn test_div() {
     let c = a / b;
     c.mark();
 
-    cx.optimize(CudaOptimizer::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -267,7 +266,7 @@ fn test_max() {
     let c = a.max(b);
     c.mark();
 
-    cx.optimize(CudaOptimizer::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -288,7 +287,7 @@ fn test_mod() {
     let c = a % b;
     c.mark();
 
-    cx.optimize(CudaOptimizer::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     // No dfdx equivalent
@@ -317,7 +316,7 @@ fn test_sum_reduce() {
     c.mark();
     d.mark();
 
-    cx.optimize(CudaOptimizer::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -343,7 +342,7 @@ fn test_max_reduce() {
     c.mark();
     d.mark();
 
-    cx.optimize(CudaOptimizer::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -365,7 +364,7 @@ fn test_mean_reduce() {
     let b = a.mean_reduce::<_, crate::prelude::Axis<1>>();
     b.mark();
 
-    cx.optimize(CudaOptimizer::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -385,7 +384,7 @@ fn test_matmul() {
     let c = a.matmul(b);
     c.mark();
 
-    cx.optimize(<(CudaOptimizer, CudaMatMulOptimizer)>::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -406,7 +405,7 @@ fn test_batch_matmul() {
     let c = a.matmul(b);
     c.mark();
 
-    cx.optimize(<(CudaOptimizer, CudaMatMulOptimizer)>::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -438,7 +437,7 @@ fn test_matmul_transpose() {
     a_t_b.mark();
     a_t_b_t.mark();
 
-    cx.optimize(CudaOptimizer::default());
+    cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -484,7 +483,7 @@ fn test_relu_and_linear() {
 
     let unoptimized_b = b.data();
     let unoptimized_batch_out = batch_out.data();
-    cx.optimize(<(CudaOptimizer, GenericOptimizer)>::default());
+    cx.optimize(<(CudaFp32Optimizer, GenericOptimizer)>::default());
     cx.execute();
 
     assert_close_data(&unoptimized_b, &b.data());
@@ -558,7 +557,7 @@ fn test_transformer_encoder_block() {
     a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![1, 2, 3]);
     b.mark();
 
-    cx.optimize(<(CudaOptimizer, GenericOptimizer)>::default());
+    cx.optimize(<(CudaFp32Optimizer, GenericOptimizer)>::default());
     cx.execute();
 
     let d_dev = Cpu::default();

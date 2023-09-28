@@ -18,7 +18,7 @@ type Model = LlamaForCausalLM<
 
 #[rustfmt::skip]
 fn main() {
-    let prompt = "Here is a python implementation of merge sort:";
+    let prompt = "The young boy ran over to";
     let tokenizer =
             SentencePieceBpeTokenizer::from_file("./examples/llama/setup/llama-7b-hf/tokenizer.model", false).unwrap();
     let mut input = tokenizer.encode(
@@ -38,13 +38,13 @@ fn main() {
     let inp = cx1.new_tensor::<(Dyn<'b'>, Dyn<'s'>)>("Input");
     let (out1, cache1) = model.forward(inp);
     out1.mark();
+    loader::DfdxDeferredLoader::new("./examples/llama/setup/llama-7b-hf").load(&model, &mut cx1);
     for (k, v) in &cache1 {
         k.mark_no_delete();
         v.mark_no_delete();
     }
-    loader::DfdxDeferredLoader::new("./examples/llama/setup/llama-7b-hf").load(&model, &mut cx1);
-    // cx1.optimize(<(CudaOptimizer, GenericOptimizer)>::default());
-    cx1.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
+    cx1.optimize(<(CudaFp16Optimizer, GenericOptimizer)>::default());
+    // cx1.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
 
     // Build KV cache forward graph
     let kv_model = Model::initialize(&mut cx2);
@@ -53,13 +53,13 @@ fn main() {
     let cache_src = (0..config::LAYERS).map(|_| (cx2.new_tensor("Key Cache"), cx2.new_tensor("Value Cache"))).collect::<Vec<_>>();
     let (out, cache_dest)= kv_model.forward_kv::<_, _, Dyn<'p'>, Dyn<'t'>>((single_inp, cache_src.clone()));
     out.mark();
+    loader::DfdxDeferredLoader::new("./examples/llama/setup/llama-7b-hf").load(&kv_model, &mut cx2);
     for (k, v) in &cache_dest {
         k.mark_no_delete();
         v.mark_no_delete();
     }
-    loader::DfdxDeferredLoader::new("./examples/llama/setup/llama-7b-hf").load(&kv_model, &mut cx2);
-    // cx2.optimize(<(CudaOptimizer, GenericOptimizer)>::default());
-    cx2.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
+    cx2.optimize(<(CudaFp16Optimizer, GenericOptimizer)>::default());
+    // cx2.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
 
     println!("Inferencing...");
     // First pass
@@ -72,8 +72,8 @@ fn main() {
 
     // Move cache over to second graph
     for ((key_src, val_src), (key_dest, val_dest)) in cache1.into_iter().zip(cache_src.iter()) {
-        cx2.set_tensor(key_dest.id, 0, cx1.get_tensor(key_src.id, 0).unwrap());
-        cx2.set_tensor(val_dest.id, 0, cx1.get_tensor(val_src.id, 0).unwrap());
+        cx2.set_tensor(key_dest.id(), 0, cx1.get_tensor(key_src.id(), 0).unwrap());
+        cx2.set_tensor(val_dest.id(), 0, cx1.get_tensor(val_src.id(), 0).unwrap());
         key_dest.mark_no_delete();
         val_dest.mark_no_delete();
     }

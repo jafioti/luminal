@@ -131,13 +131,13 @@ impl Graph {
     /// Swap the tensors with these ids
     pub fn swap_tensors<A: Shape, B: Shape>(&mut self, a: GraphTensor<A>, b: GraphTensor<B>) {
         // Swap tensors
-        let a_t = self.tensors.remove(&(a.id, 0)); // Assume 0th output for now
-        let b_t = self.tensors.remove(&(b.id, 0));
+        let a_t = self.tensors.remove(&(a.id(), 0)); // Assume 0th output for now
+        let b_t = self.tensors.remove(&(b.id(), 0));
         if let Some(a_t) = a_t {
-            self.tensors.insert((b.id, 0), a_t);
+            self.tensors.insert((b.id(), 0), a_t);
         }
         if let Some(b_t) = b_t {
-            self.tensors.insert((a.id, 0), b_t);
+            self.tensors.insert((a.id(), 0), b_t);
         }
     }
 
@@ -207,6 +207,7 @@ impl Graph {
                 *remaining_consumers.get_mut(source).unwrap() -= 1;
             }
         }
+        self.reset();
     }
 
     /// Execute the graph with debug prints
@@ -359,7 +360,8 @@ impl Graph {
                 format!("{}µs", start.elapsed().as_micros())
             }
             .bold()
-        )
+        );
+        self.reset();
     }
 
     /// Execute the graph without deleting intermediate tensors
@@ -401,11 +403,7 @@ impl Graph {
         for (id, node) in self.graph.node_indices().zip(self.graph.node_weights()) {
             id_map.insert(
                 id,
-                new_graph.add_node(format!(
-                    "{:?} | {:?}",
-                    op_regex.replace_all(&format!("{node:?}"), "").to_string(),
-                    id
-                )),
+                new_graph.add_node(op_regex.replace_all(&format!("{node:?}"), "").to_string()),
             );
         }
 

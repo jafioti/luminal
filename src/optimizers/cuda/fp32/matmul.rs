@@ -6,7 +6,10 @@ use cudarc::{
 };
 use petgraph::stable_graph::NodeIndex;
 
-use crate::{op::Operator, prelude::*};
+use crate::{
+    op::{InputTensor, Operator},
+    prelude::*,
+};
 
 use super::prim::{CudaMul, CudaSumReduce};
 
@@ -20,13 +23,7 @@ impl PartialEq for CudaMatmul2D {
 }
 
 impl Operator for CudaMatmul2D {
-    fn process(
-        &self,
-        inp: Vec<(
-            crate::op::InputTensor,
-            crate::core::shape::simple_tracker::ShapeTracker,
-        )>,
-    ) -> Vec<Tensor> {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
         let (a_strides, b_strides) = (inp[0].1.strides(), inp[1].1.strides());
         let (m, k, n) = (
@@ -94,13 +91,7 @@ impl PartialEq for CudaBatchMatmul2D {
 }
 
 impl Operator for CudaBatchMatmul2D {
-    fn process(
-        &self,
-        inp: Vec<(
-            crate::op::InputTensor,
-            crate::core::shape::simple_tracker::ShapeTracker,
-        )>,
-    ) -> Vec<Tensor> {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
         let (a_strides, b_strides) = (inp[0].1.strides(), inp[1].1.strides());
         let (batch_size, m, k, n) = (

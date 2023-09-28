@@ -1144,6 +1144,22 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
                 graph.to_retrieve.insert(copy_node);
             }
 
+            // If there are inputs to this function remap the function to the copy node
+            if graph
+                .graph
+                .edges_directed(function_node, petgraph::Direction::Incoming)
+                .count()
+                != 0
+            {
+                move_references(
+                    &mut graph.id_remap,
+                    &mut graph.no_delete,
+                    &mut graph.to_retrieve,
+                    function_node,
+                    copy_node,
+                );
+            }
+
             // Insert copy from device for function inputs
             for (source, edge, edge_weight) in graph
                 .graph
