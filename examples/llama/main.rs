@@ -18,7 +18,7 @@ type Model = LlamaForCausalLM<
 
 #[rustfmt::skip]
 fn main() {
-    let prompt = "The young boy ran over to";
+    let prompt = "Here is a python implementation of merge sort:";
     let tokenizer =
             SentencePieceBpeTokenizer::from_file("./examples/llama/setup/llama-7b-hf/tokenizer.model", false).unwrap();
     let mut input = tokenizer.encode(
@@ -43,8 +43,8 @@ fn main() {
         k.mark_no_delete();
         v.mark_no_delete();
     }
-    cx1.optimize(<(CudaFp16Optimizer, GenericOptimizer)>::default());
-    // cx1.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
+    // cx1.optimize(<(CudaFp16Optimizer, GenericOptimizer)>::default());
+    cx1.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
 
     // Build KV cache forward graph
     let kv_model = Model::initialize(&mut cx2);
@@ -58,8 +58,8 @@ fn main() {
         k.mark_no_delete();
         v.mark_no_delete();
     }
-    cx2.optimize(<(CudaFp16Optimizer, GenericOptimizer)>::default());
-    // cx2.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
+    // cx2.optimize(<(CudaFp16Optimizer, GenericOptimizer)>::default());
+    cx2.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
 
     println!("Inferencing...");
     // First pass

@@ -36,7 +36,8 @@ impl Operator for CudaCopyToDevice {
         if let Some(cpu_data) = inp[0].0.borrowed().data.as_any().downcast_ref::<Vec<f32>>() {
             let vec = cpu_data
                 .iter()
-                .map(|i| f16::from_f32(*i))
+                .copied()
+                .map(f16::from_f32)
                 .collect::<Vec<_>>();
             let mut a = unsafe { self.0.alloc::<f16>(vec.len()).unwrap() };
             self.0.htod_copy_into(vec, &mut a).unwrap();
