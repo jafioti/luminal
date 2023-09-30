@@ -1197,10 +1197,9 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
                     graph
                         .graph
                         .edges_directed(*n, petgraph::Direction::Incoming)
-                        .next()
-                        .unwrap()
-                        .weight()
-                        .2,
+                        .map(|i| i.weight().2)
+                        .max_by_key(|s| s.n_physical_elements())
+                        .unwrap(),
                 )
             })
             .collect::<Vec<_>>()
@@ -1282,9 +1281,9 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
                 *op_ref = Box::new(CudaLessThan::new(src_shapes[0], src_shapes[1], dev.clone()));
             } else if is::<Contiguous>(op) {
                 *op_ref = Box::new(CudaContiguous::new(src_shapes[0], dev.clone()));
-            } else if let Some(SumReduce(dim)) = op_ref.as_any().downcast_ref::<SumReduce>() {
+            } else if let Some(SumReduce(dim)) = op_ref.as_any().downcast_ref() {
                 *op_ref = Box::new(CudaSumReduce::new(*dim, src_shapes[0], dev.clone()));
-            } else if let Some(MaxReduce(dim)) = op_ref.as_any().downcast_ref::<MaxReduce>() {
+            } else if let Some(MaxReduce(dim)) = op_ref.as_any().downcast_ref() {
                 *op_ref = Box::new(CudaMaxReduce::new(*dim, src_shapes[0], dev.clone()));
             }
         }
