@@ -269,6 +269,7 @@ impl<
             x,
             Option::<KVCache<_, Dyn<'s'>, NUM_HEADS, HEAD_DIM>>::None,
         );
+
         let w = q
             .batch_matmul(k.permute())
             .mul((HEAD_DIM as f64).sqrt().recip() as f32)

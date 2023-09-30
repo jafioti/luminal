@@ -10,7 +10,11 @@ use petgraph::{
     visit::EdgeRef,
 };
 
-use crate::{graph::Graph, op::Operator, prelude::Dim};
+use crate::{
+    graph::Graph,
+    op::Operator,
+    prelude::{Dim, ShapeTracker},
+};
 
 pub trait GraphOptimizer {
     /// Run an optimization pass
@@ -125,11 +129,11 @@ pub struct GraphSelector {
         Mutex<
             petgraph::Graph<
                 (
-                    Option<TypeId>,                    // Type constraint
-                    Option<fn(&dyn Operator) -> bool>, // Check constraint
-                    Option<Vec<Vec<Dim>>>,             // Shape constraint
-                    Option<Vec<Vec<bool>>>,            // Fake constraint
-                    Vec<*mut NodeIndex>,               // Pointers
+                    Option<TypeId>,                                     // Type constraint
+                    Option<fn(&dyn Operator, &[ShapeTracker]) -> bool>, // Check constraint
+                    Option<Vec<Vec<Dim>>>,                              // Shape constraint
+                    Option<Vec<Vec<bool>>>,                             // Fake constraint
+                    Vec<*mut NodeIndex>,                                // Pointers
                 ),
                 u8,
             >,
@@ -179,11 +183,11 @@ fn search(
     selector_node: NodeIndex,
     selector_graph: &petgraph::Graph<
         (
-            Option<TypeId>,                    // Type constraint
-            Option<fn(&dyn Operator) -> bool>, // Check constraint
-            Option<Vec<Vec<Dim>>>,             // Shape constraint
-            Option<Vec<Vec<bool>>>,            // Fake constraint
-            Vec<*mut NodeIndex>,               // Pointers
+            Option<TypeId>,                                     // Type constraint
+            Option<fn(&dyn Operator, &[ShapeTracker]) -> bool>, // Check constraint
+            Option<Vec<Vec<Dim>>>,                              // Shape constraint
+            Option<Vec<Vec<bool>>>,                             // Fake constraint
+            Vec<*mut NodeIndex>,                                // Pointers
         ),
         u8,
     >,
@@ -200,17 +204,17 @@ fn search(
             return false;
         }
     }
-    // Test value
-    if let Some(value) = &selector_weight.1 {
-        if !value(current_weight.as_ref()) {
-            return false;
-        }
-    }
     let input_shapes = graph
         .edges_directed(graph_node, petgraph::Direction::Incoming)
         .sorted_by_key(|e| e.weight().0)
         .map(|e| e.weight().2)
         .collect::<Vec<_>>();
+    // Run check
+    if let Some(check) = &selector_weight.1 {
+        if !check(current_weight.as_ref(), &input_shapes) {
+            return false;
+        }
+    }
     // Test shape
     if let Some(shape) = &selector_weight.2 {
         let mut shape_map = HashMap::new();
@@ -374,7 +378,7 @@ impl OpSelector {
         self
     }
     /// Constrain the op to a checking function
-    pub fn check(self, check: fn(&dyn Operator) -> bool) -> Self {
+    pub fn check(self, check: fn(&dyn Operator, &[ShapeTracker]) -> bool) -> Self {
         let graph = unsafe { self.graph.as_ref().unwrap() };
         let mut m_graph = graph.graph.lock().unwrap();
         m_graph.node_weight_mut(self.id).unwrap().1 = Some(check);

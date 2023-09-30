@@ -11,7 +11,11 @@ use crate::prelude::*;
 
 // Ops and optimizers specific to CUDA execution
 
-pub type CudaFp16Optimizer = (prim::CudaPrimitiveOptimizer,);
+pub type CudaFp16Optimizer = (
+    prim::CudaPrimitiveOptimizer,
+    prim::FakeReductionOptimizer,
+    matmul::CudaMatMulOptimizer,
+);
 
 impl Data for CudaSlice<f16> {
     fn as_any(&self) -> &dyn std::any::Any {

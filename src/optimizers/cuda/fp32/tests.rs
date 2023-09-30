@@ -6,8 +6,8 @@ use super::CudaFp32Optimizer;
 use crate::{
     nn::{activation::ReLU, linear::Linear},
     prelude::{Module, *},
-    tests::assert_close_data,
 };
+crate::test_imports!();
 
 #[test]
 fn test_log2() {
@@ -21,7 +21,7 @@ fn test_log2() {
     cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
-    assert_close_data(
+    assert_close(
         &b.data(),
         &vec![1., 2., 3.]
             .into_iter()
@@ -42,7 +42,7 @@ fn test_exp2() {
     cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
-    assert_close_data(
+    assert_close(
         &b.data(),
         &vec![1., 2., 3.]
             .into_iter()
@@ -63,7 +63,7 @@ fn test_log2exp2() {
     cx.optimize(<(GenericOptimizer, CudaFp32Optimizer)>::default());
     cx.execute();
 
-    assert_close_data(&b.data(), &[1., 2., 3.]);
+    assert_close(&b.data(), &[1., 2., 3.]);
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn test_recip() {
     let d_a = d_dev.tensor([1., 2., 3.]);
     let d_b = d_a.recip();
 
-    assert_close_data(&b.data(), &d_b.as_vec());
+    assert_close(&b.data(), &d_b.as_vec());
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn test_sin() {
     let d_a = d_dev.tensor([1., 2., 3.]);
     let d_b = d_a.sin();
 
-    assert_close_data(&b.data(), &d_b.as_vec());
+    assert_close(&b.data(), &d_b.as_vec());
 }
 
 #[test]
@@ -114,7 +114,7 @@ fn test_sqrt() {
     let d_a = d_dev.tensor([1., 2., 3.]);
     let d_b = d_a.sqrt();
 
-    assert_close_data(&b.data(), &d_b.as_vec());
+    assert_close(&b.data(), &d_b.as_vec());
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn test_add() {
     let d_b = d_dev.tensor([1., 2., 3.]);
     let d_c = d_a + d_b;
 
-    assert_close_data(&c.data(), &d_c.as_vec());
+    assert_close(&c.data(), &d_c.as_vec());
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn test_sub() {
     let d_b = d_dev.tensor([1., 2., 3.]);
     let d_c = d_a - d_b;
 
-    assert_close_data(&c.data(), &d_c.as_vec());
+    assert_close(&c.data(), &d_c.as_vec());
 }
 
 #[test]
@@ -185,7 +185,7 @@ fn test_square() {
     );
     let d_b = d_a.clone() * d_a;
 
-    assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
+    assert_close(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
 }
 
 #[test]
@@ -206,7 +206,7 @@ fn test_mul() {
     let d_b = d_dev.tensor([1., 2., 3.]);
     let d_c = d_a * d_b;
 
-    assert_close_data(&c.data(), &d_c.as_vec());
+    assert_close(&c.data(), &d_c.as_vec());
 }
 
 #[test]
@@ -232,7 +232,7 @@ fn test_mul2() {
     let d_b = d_dev.tensor(0.57735026);
     let d_c = d_a * d_b.broadcast::<_, dfdx::shapes::Axes4<0, 1, 2, 3>>();
 
-    assert_close_data(&c.dyn_data(&cx.dyn_map), &d_c.as_vec());
+    assert_close(&c.dyn_data(&cx.dyn_map), &d_c.as_vec());
 }
 
 #[test]
@@ -253,7 +253,7 @@ fn test_div() {
     let d_b = d_dev.tensor([1., 2., 3.]);
     let d_c = d_a / d_b;
 
-    assert_close_data(&c.data(), &d_c.as_vec());
+    assert_close(&c.data(), &d_c.as_vec());
 }
 
 #[test]
@@ -274,16 +274,18 @@ fn test_max() {
     let d_b = d_dev.tensor([1., 2., 3.]);
     let d_c = d_a.maximum(d_b);
 
-    assert_close_data(&c.data(), &d_c.as_vec());
+    assert_close(&c.data(), &d_c.as_vec());
 }
 
 #[test]
 fn test_mod() {
     let mut cx = Graph::new();
+    let a_data = random_vec(3);
+    let b_data = random_vec(3);
     let a = cx.new_tensor::<R1<3>>("Input");
-    a.set(vec![1., 2., 3.]);
+    a.set(a_data.clone());
     let b = cx.new_tensor::<R1<3>>("Input");
-    b.set(vec![1., 2., 3.]);
+    b.set(b_data.clone());
     let c = a % b;
     c.mark();
 
@@ -292,11 +294,11 @@ fn test_mod() {
 
     // No dfdx equivalent
 
-    assert_close_data(
+    assert_close(
         &c.data(),
-        &[1., 2., 3.]
+        &a_data
             .into_iter()
-            .zip([1., 2., 3.])
+            .zip(b_data)
             .map(|(a, b)| a % b)
             .collect_vec(),
     );
@@ -307,11 +309,12 @@ fn test_mod() {
 #[test]
 fn test_sum_reduce() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R3<2, 2, 3>>("Input");
-    a.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
-    let b = a.sum_reduce::<_, crate::prelude::Axis<1>>();
-    let c = a.sum_reduce::<_, crate::prelude::Axis<0>>();
-    let d = a.sum_reduce::<_, crate::prelude::Axis<2>>();
+    let data = random_vec(4096);
+    let a = cx.new_tensor::<R3<1, 1, 4096>>("Input");
+    a.set(data.clone());
+    let b = a.sum_reduce::<_, LAxis<1>>();
+    let c = a.sum_reduce::<_, LAxis<0>>();
+    let d = a.sum_reduce::<_, LAxis<2>>();
     b.mark();
     c.mark();
     d.mark();
@@ -320,24 +323,25 @@ fn test_sum_reduce() {
     cx.execute();
 
     let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([[[1., 2., 3.], [1., 2., 3.]], [[1., 2., 3.], [1., 2., 3.]]]);
-    let d_b = d_a.clone().sum::<_, dfdx::shapes::Axis<1>>();
-    let d_c = d_a.clone().sum::<_, dfdx::shapes::Axis<0>>();
-    let d_d = d_a.sum::<_, dfdx::shapes::Axis<2>>();
+    let d_a = d_dev.tensor_from_vec(data, (DConst::<1>, DConst::<1>, DConst::<4096>));
+    let d_b = d_a.clone().sum::<_, DAxis<1>>();
+    let d_c = d_a.clone().sum::<_, DAxis<0>>();
+    let d_d = d_a.sum::<_, DAxis<2>>();
 
-    assert_close_data(&b.data(), &d_b.as_vec());
-    assert_close_data(&c.data(), &d_c.as_vec());
-    assert_close_data(&d.data(), &d_d.as_vec());
+    assert_close(&b.data(), &d_b.as_vec());
+    assert_close(&c.data(), &d_c.as_vec());
+    assert_close(&d.data(), &d_d.as_vec());
 }
 
 #[test]
 fn test_max_reduce() {
     let mut cx = Graph::new();
+    let data = random_vec(12);
     let a = cx.new_tensor::<R3<2, 2, 3>>("Input");
-    a.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
-    let b = a.max_reduce::<_, crate::prelude::Axis<1>>();
-    let c = a.max_reduce::<_, crate::prelude::Axis<0>>();
-    let d = a.max_reduce::<_, crate::prelude::Axis<2>>();
+    a.set(data.clone());
+    let b = a.max_reduce::<_, LAxis<1>>();
+    let c = a.max_reduce::<_, LAxis<0>>();
+    let d = a.max_reduce::<_, LAxis<2>>();
     b.mark();
     c.mark();
     d.mark();
@@ -346,41 +350,43 @@ fn test_max_reduce() {
     cx.execute();
 
     let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([[[1., 2., 3.], [1., 2., 3.]], [[1., 2., 3.], [1., 2., 3.]]]);
-    let d_b = d_a.clone().max::<_, dfdx::shapes::Axis<1>>();
-    let d_c = d_a.clone().max::<_, dfdx::shapes::Axis<0>>();
-    let d_d = d_a.max::<_, dfdx::shapes::Axis<2>>();
+    let d_a = d_dev.tensor_from_vec(data, (DConst::<2>, DConst::<2>, DConst::<3>));
+    let d_b = d_a.clone().max::<_, DAxis<1>>();
+    let d_c = d_a.clone().max::<_, DAxis<0>>();
+    let d_d = d_a.max::<_, DAxis<2>>();
 
-    assert_close_data(&b.data(), &d_b.as_vec());
-    assert_close_data(&c.data(), &d_c.as_vec());
-    assert_close_data(&d.data(), &d_d.as_vec());
+    assert_close(&b.data(), &d_b.as_vec());
+    assert_close(&c.data(), &d_c.as_vec());
+    assert_close(&d.data(), &d_d.as_vec());
 }
 
 #[test]
 fn test_mean_reduce() {
+    let data = random_vec(40960);
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R2<2, 3>>("Input");
-    a.set(vec![1., 2., 3., 1., 2., 3.]);
-    let b = a.mean_reduce::<_, crate::prelude::Axis<1>>();
+    let a = cx.new_tensor::<R3<1, 10, 4096>>("Input");
+    a.set(data.clone());
+    let b = a.mean_reduce::<_, LAxis<2>>();
     b.mark();
 
     cx.optimize(CudaFp32Optimizer::default());
     cx.execute();
 
     let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
-    let d_b = d_a.mean::<_, dfdx::shapes::Axis<1>>();
-
-    assert_close_data(&b.data(), &d_b.as_vec());
+    let d_a = d_dev.tensor_from_vec(data, (DConst::<1>, DConst::<10>, DConst::<4096>));
+    let d_b = d_a.mean::<_, DAxis<2>>();
+    assert_close(&b.data(), &d_b.as_vec());
 }
 
 #[test]
 fn test_matmul() {
     let mut cx = Graph::new();
+    let a_data = random_vec(6);
+    let b_data = random_vec(12);
     let a = cx.new_tensor::<R2<2, 3>>("Input");
-    a.set(vec![1., 2., 3., 1., 2., 1.]);
+    a.set(a_data.clone());
     let b = cx.new_tensor::<R2<3, 4>>("Input");
-    b.set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
+    b.set(b_data.clone());
     let c = a.matmul(b);
     c.mark();
 
@@ -388,11 +394,11 @@ fn test_matmul() {
     cx.execute();
 
     let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 1.]]);
-    let d_b = d_dev.tensor([[1., 2., 3., 1.], [1., 2., 1., 2.], [-1., -2., 1., 2.]]);
+    let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<3>));
+    let d_b = d_dev.tensor_from_vec(b_data, (DConst::<3>, DConst::<4>));
     let d_c = d_a.matmul(d_b);
 
-    assert_close_data(&c.data(), &d_c.as_vec());
+    assert_close(&c.data(), &d_c.as_vec());
 }
 
 #[test]
@@ -413,7 +419,7 @@ fn test_batch_matmul() {
     let d_b = d_dev.tensor([[1., 2., 3., 1.], [1., 2., 1., 2.], [-1., -2., 1., 2.]]);
     let d_c = d_a.matmul(d_b);
 
-    assert_close_data(&c.data(), &d_c.as_vec());
+    assert_close(&c.data(), &d_c.as_vec());
 }
 
 #[test]
@@ -453,10 +459,10 @@ fn test_matmul_transpose() {
         .matmul(d_b.permute());
     let d_a_t_b_t = d_a_t.permute::<Rank2<2, 3>, _>().matmul(d_b_t);
 
-    assert_close_data(&a_b.data(), &d_a_b.as_vec());
-    assert_close_data(&a_b_t.data(), &d_a_b_t.as_vec());
-    assert_close_data(&a_t_b.data(), &d_a_t_b.as_vec());
-    assert_close_data(&a_t_b_t.data(), &d_a_t_b_t.as_vec());
+    assert_close(&a_b.data(), &d_a_b.as_vec());
+    assert_close(&a_b_t.data(), &d_a_b_t.as_vec());
+    assert_close(&a_t_b.data(), &d_a_t_b.as_vec());
+    assert_close(&a_t_b_t.data(), &d_a_t_b_t.as_vec());
 }
 
 #[test]
@@ -486,8 +492,8 @@ fn test_relu_and_linear() {
     cx.optimize(<(CudaFp32Optimizer, GenericOptimizer)>::default());
     cx.execute();
 
-    assert_close_data(&unoptimized_b, &b.data());
-    assert_close_data(&unoptimized_batch_out, &batch_out.data());
+    assert_close(&unoptimized_b, &b.data());
+    assert_close(&unoptimized_batch_out, &batch_out.data());
 
     // Test against dfdx
     let dev = Cpu::default();
@@ -512,7 +518,7 @@ fn test_relu_and_linear() {
     let a = dev.tensor_from_vec(vec![1.0, 2.0, 3.0], (dfdx::shapes::Const::<3>,));
     let out = model.forward(a);
 
-    assert_close_data(&unoptimized_b, &out.as_vec());
+    assert_close(&unoptimized_b, &out.as_vec());
 }
 
 #[test]
@@ -617,5 +623,5 @@ fn test_transformer_encoder_block() {
     );
     let d_b = d_model.forward(d_a);
 
-    assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
+    assert_close(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
 }

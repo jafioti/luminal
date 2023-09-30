@@ -143,9 +143,8 @@ impl<B: Dimension, S: Dimension, const DIM: usize> Module<GraphTensor<(B, S, Con
     type Output = GraphTensor<(B, S, Const<DIM>)>;
 
     fn forward(&self, input: GraphTensor<(B, S, Const<DIM>)>) -> Self::Output {
-        (input * input)
-            .mean_reduce::<_, Axis<2>>()
-            .add(1e-6)
+        let i = (input * input).mean_reduce::<_, Axis<2>>();
+        i.add(1e-6)
             .sqrt()
             .recip()
             .expand()
@@ -160,7 +159,7 @@ mod tests {
     use crate::{
         nn::linear::Linear,
         prelude::{Module, *},
-        tests::assert_close_data,
+        tests::assert_close,
     };
     use dfdx::prelude::{Module as DfdxModule, *};
 
@@ -192,8 +191,8 @@ mod tests {
         cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
         cx.execute();
 
-        assert_close_data(&unoptimized_b, &b.data());
-        assert_close_data(&unoptimized_batch_out, &batch_out.data());
+        assert_close(&unoptimized_b, &b.data());
+        assert_close(&unoptimized_batch_out, &batch_out.data());
 
         // Test against dfdx
         let dev = Cpu::default();
@@ -223,7 +222,7 @@ mod tests {
         let out = model.forward(a);
         let d_batch_out = model.forward(d_batch);
 
-        assert_close_data(&unoptimized_b, &out.as_vec());
-        assert_close_data(&unoptimized_batch_out, &d_batch_out.as_vec());
+        assert_close(&unoptimized_b, &out.as_vec());
+        assert_close(&unoptimized_batch_out, &d_batch_out.as_vec());
     }
 }

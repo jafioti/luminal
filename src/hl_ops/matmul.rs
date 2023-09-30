@@ -99,7 +99,7 @@ mod tests {
         let d_b = d_dev.tensor_from_vec(b_vec, (DConst::<3>, DConst::<2>));
         let d_c = d_a.matmul(d_b);
 
-        assert_close_data(&c.data(), &d_c.as_vec());
+        assert_close(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -120,7 +120,7 @@ mod tests {
         let d_b = d_dev.tensor_from_vec(b_data, (DConst::<3>, DConst::<3>));
         let d_c = d_a.matmul(d_b);
 
-        assert_close_data(&c.data(), &d_c.as_vec());
+        assert_close(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -141,7 +141,7 @@ mod tests {
         let d_b = d_dev.tensor_from_vec(b_data, (DConst::<2>, DConst::<4>));
         let d_c = d_a.matmul(d_b);
 
-        assert_close_data(&c.data(), &d_c.as_vec());
+        assert_close(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -162,7 +162,7 @@ mod tests {
         let d_b = d_dev.tensor_from_vec(b_data, (DConst::<1>, DConst::<2>, DConst::<3>));
         let d_c = d_a.matmul(d_b.permute::<Rank3<1, 3, 2>, DAxes3<0, 2, 1>>());
 
-        assert_close_data(&c.data(), &d_c.as_vec());
+        assert_close(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -184,6 +184,6 @@ mod tests {
         let d_b = d_dev.tensor_from_vec(b_data, (DConst::<1>, DConst::<2>, DConst::<3>));
         let d_c = d_a.matmul(d_b);
 
-        assert_close_data(&c.dyn_data(&cx.dyn_map), &d_c.as_vec());
+        assert_close(&c.dyn_data(&cx.dyn_map), &d_c.as_vec());
     }
 }

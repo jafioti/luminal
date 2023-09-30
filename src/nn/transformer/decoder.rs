@@ -182,7 +182,7 @@ mod tests {
 
     use crate::{
         prelude::{Module, *},
-        tests::assert_close_data,
+        tests::assert_close,
     };
 
     use super::TransformerDecoderBlock;
@@ -346,6 +346,6 @@ mod tests {
         );
         let d_b = d_model.forward((d_a, d_e));
 
-        assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
+        assert_close(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
     }
 }

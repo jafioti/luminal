@@ -235,7 +235,7 @@ impl<'a> std::convert::From<safetensors::tensor::TensorView<'a>> for Tensor {
 mod tests {
     use rand::{thread_rng, Rng};
 
-    use crate::{nn::transformer::Transformer, prelude::*, tests::assert_close_data};
+    use crate::{nn::transformer::Transformer, prelude::*, tests::assert_close};
 
     use super::*;
 
@@ -274,6 +274,6 @@ mod tests {
         cx.execute();
 
         let out2 = out2.data();
-        assert_close_data(&out1, &out2);
+        assert_close(&out1, &out2);
     }
 }

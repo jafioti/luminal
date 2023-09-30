@@ -155,7 +155,7 @@ mod tests {
         let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<3>));
         let d_b = d_a.exp();
 
-        assert_close_data(&b.data(), &d_b.as_vec());
+        assert_close(&b.data(), &d_b.as_vec());
     }
 
     #[test]
@@ -175,8 +175,8 @@ mod tests {
         let d_b = d_a.clone().normalize::<DAxis<0>>(1e-5);
         let d_c = d_a.normalize::<DAxis<1>>(1e-5);
 
-        assert_close_data(&b.data(), &d_b.as_vec());
-        assert_close_data(&c.data(), &d_c.as_vec());
+        assert_close(&b.data(), &d_b.as_vec());
+        assert_close(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -195,7 +195,7 @@ mod tests {
         let d_b = d_a.softmax::<DAxis<1>>();
 
         let r = b.data();
-        assert_close_data(&r, &d_b.as_vec());
+        assert_close(&r, &d_b.as_vec());
     }
 
     #[test]
@@ -214,7 +214,7 @@ mod tests {
         let d_b = d_a.sin();
 
         let r = b.data();
-        assert_close_data(&r, &d_b.as_vec());
+        assert_close(&r, &d_b.as_vec());
     }
 
     #[test]
@@ -231,7 +231,7 @@ mod tests {
         let d_dev = Cpu::default();
         let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<3>));
         let d_b = d_a.cos();
-        assert_close_data(&b.data(), &d_b.as_vec());
+        assert_close(&b.data(), &d_b.as_vec());
     }
 
     #[test]
@@ -248,7 +248,7 @@ mod tests {
         let d_dev = Cpu::default();
         let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<2>));
         let d_b = d_a.relu();
-        assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
+        assert_close(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
     }
 
     #[test]
@@ -265,7 +265,7 @@ mod tests {
         let d_dev = Cpu::default();
         let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<2>));
         let d_b = d_a.sigmoid();
-        assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
+        assert_close(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
     }
 
     #[test]
@@ -282,6 +282,6 @@ mod tests {
         let d_dev = Cpu::default();
         let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<2>));
         let d_b = d_a.tanh();
-        assert_close_data(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
+        assert_close(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
     }
 }

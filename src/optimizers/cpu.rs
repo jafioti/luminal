@@ -36,7 +36,7 @@ impl GraphOptimizer for MatMul2DOptimizer {
             0,
             s.op()
                 .ty::<SumReduce>()
-                .check(|o| o.is_equal(&SumReduce(0)))
+                .check(|o, _| o.is_equal(&SumReduce(0)))
                 .ptr(&mut sum_reduce),
         );
         for _ in s.search(graph) {
@@ -160,7 +160,7 @@ impl GraphOptimizer for BatchMatMul2DOptimizer {
             0,
             s.op()
                 .ty::<SumReduce>()
-                .check(|o| o.is_equal(&SumReduce(3)))
+                .check(|o, _| o.is_equal(&SumReduce(3)))
                 .ptr(&mut sum_reduce),
         );
         for _ in s.search(graph) {
@@ -374,7 +374,7 @@ impl Operator for FusedUnary {
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, tests::assert_close_data};
+    use crate::{prelude::*, tests::assert_close};
     #[test]
     fn test_cpu_matmul_2d() {
         let mut cx = Graph::new();
@@ -391,7 +391,7 @@ mod tests {
         cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
         cx.execute();
 
-        assert_close_data(&c.data(), &unoptimized_c);
+        assert_close(&c.data(), &unoptimized_c);
     }
 
     #[test]
@@ -410,7 +410,7 @@ mod tests {
         cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
         cx.execute();
 
-        assert_close_data(&c.data(), &unoptimized_c);
+        assert_close(&c.data(), &unoptimized_c);
     }
 
     #[test]
@@ -428,6 +428,6 @@ mod tests {
         let unoptimized_c = c.data();
         cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
         cx.execute();
-        assert_close_data(&c.data(), &unoptimized_c);
+        assert_close(&c.data(), &unoptimized_c);
     }
 }

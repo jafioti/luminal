@@ -123,7 +123,7 @@ mod tests {
 
     use crate::{
         prelude::{Module, *},
-        tests::assert_close_data,
+        tests::assert_close,
     };
 
     use super::Embedding;
@@ -165,7 +165,7 @@ mod tests {
         let d_b = d_model.forward(d_a);
         let d_batch_out = d_model.forward(d_batch);
 
-        assert_close_data(&b.data(), &d_b.as_vec());
-        assert_close_data(&batch_out.data(), &d_batch_out.as_vec());
+        assert_close(&b.data(), &d_b.as_vec());
+        assert_close(&batch_out.data(), &d_batch_out.as_vec());
     }
 }

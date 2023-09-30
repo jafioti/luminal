@@ -182,7 +182,7 @@ impl GraphOptimizer for CudaMatMulOptimizer {
             0,
             s.op()
                 .ty::<CudaSumReduce>()
-                .check(|o| {
+                .check(|o, _| {
                     if let Some(o) = o.as_any().downcast_ref::<CudaSumReduce>() {
                         o.2 == 2
                     } else {
@@ -263,7 +263,7 @@ impl GraphOptimizer for CudaMatMulOptimizer {
             0,
             s.op()
                 .ty::<CudaSumReduce>()
-                .check(|o| {
+                .check(|o, _| {
                     if let Some(o) = o.as_any().downcast_ref::<CudaSumReduce>() {
                         o.2 == 3
                     } else {

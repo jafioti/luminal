@@ -164,7 +164,7 @@ mod tests {
         tensor_ops::{RealizeTo, TryConcatAlong},
     };
 
-    use crate::{prelude::*, tests::assert_close_data};
+    use crate::{prelude::*, tests::assert_close};
 
     #[test]
     fn test_concat_1d() {
@@ -183,7 +183,7 @@ mod tests {
         let d_c = (d_a.realize::<(usize,)>(), d_b.realize::<(usize,)>())
             .concat_along(dfdx::shapes::Axis::<0>);
 
-        assert_close_data(&c.data(), &d_c.as_vec());
+        assert_close(&c.data(), &d_c.as_vec());
     }
 
     #[test]
@@ -219,8 +219,8 @@ mod tests {
         )
             .concat_along(dfdx::shapes::Axis::<0>);
 
-        assert_close_data(&c.data(), &d_c.as_vec());
-        assert_close_data(&d.data(), &d_d.as_vec());
+        assert_close(&c.data(), &d_c.as_vec());
+        assert_close(&d.data(), &d_d.as_vec());
     }
 
     #[test]
@@ -248,7 +248,7 @@ mod tests {
             .concat_along(dfdx::shapes::Axis::<1>)
             .realize::<Rank2<3, 4>>();
 
-        assert_close_data(&b.data(), &d_b.as_vec());
+        assert_close(&b.data(), &d_b.as_vec());
     }
 
     #[test]
@@ -267,7 +267,7 @@ mod tests {
         );
         let d_b = d_a.slice((.., ..1)).realize::<Rank2<3, 1>>();
 
-        assert_close_data(&b.data(), &d_b.as_vec());
+        assert_close(&b.data(), &d_b.as_vec());
     }
 
     #[test]
@@ -292,6 +292,6 @@ mod tests {
             .concat_along(dfdx::shapes::Axis::<1>)
             .realize::<Rank2<3, 2>>();
 
-        assert_close_data(&c.data(), &d_c.as_vec());
+        assert_close(&c.data(), &d_c.as_vec());
     }
 }

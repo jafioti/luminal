@@ -74,7 +74,7 @@ impl<const A: usize, const B: usize, C: Dimension, D: Dimension, E: Dimension>
 #[cfg(test)]
 mod tests {
     use super::Linear;
-    use crate::{prelude::*, tests::assert_close_data};
+    use crate::{prelude::*, tests::assert_close};
     #[test]
     fn test_linear() {
         let mut cx = Graph::new();
@@ -99,7 +99,7 @@ mod tests {
         cx.optimize(GenericOptimizer::default());
         cx.execute();
 
-        assert_close_data(&unoptimized_b, &b.data());
-        assert_close_data(&unoptimized_batch_out, &batch_out.data());
+        assert_close(&unoptimized_b, &b.data());
+        assert_close(&unoptimized_batch_out, &batch_out.data());
     }
 }

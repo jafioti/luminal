@@ -35,8 +35,8 @@ fn main() {
     cx.execute();
     let a = a.data();
     let d = d.data();
-    assert_close_data(&unoptimized_a, &a);
-    assert_close_data(&unoptimized_d, &d);
+    assert_close(&unoptimized_a, &a);
+    assert_close(&unoptimized_d, &d);
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn test_matmul() {
     cx.optimize(GenericOptimizer::default());
     cx.execute();
 
-    assert_close_data(&unoptimized_a, &a.data());
+    assert_close(&unoptimized_a, &a.data());
 }
 
 #[test]
@@ -72,11 +72,11 @@ fn test_shapes() {
 
     cx.execute();
 
-    assert_close_data(&b.data(), &[1., 3., 2., 4.]);
+    assert_close(&b.data(), &[1., 3., 2., 4.]);
 }
 
 /// Ensure two arrays are nearly equal
-pub fn assert_close_data(a: &[f32], b: &[f32]) {
+pub fn assert_close(a: &[f32], b: &[f32]) {
     assert_eq!(a.len(), b.len(), "Number of elements doesn't match");
     for (a, b) in a.iter().zip(b.iter()) {
         if (a - b).abs() > 1e-3 {
@@ -87,7 +87,7 @@ pub fn assert_close_data(a: &[f32], b: &[f32]) {
 
 pub fn random_vec(n: usize) -> Vec<f32> {
     let mut rng = thread_rng();
-    (0..n).map(|_| rng.gen()).collect()
+    (0..n).map(|_| rng.gen_range(-0.5..0.5)).collect()
 }
 
 #[macro_export]
@@ -104,7 +104,7 @@ macro_rules! test_imports {
                 Axes as LAxes, Axes2 as LAxes2, Axes3 as LAxes3, Axes4 as LAxes4, Axes5 as LAxes5,
                 Axis as LAxis, Const as LConst, *,
             },
-            tests::{assert_close_data, random_vec},
+            tests::{assert_close, random_vec},
         };
     };
 }

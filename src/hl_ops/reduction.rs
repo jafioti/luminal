@@ -48,26 +48,24 @@ impl<S: Shape> GraphTensor<S> {
         let mut shape = self.shape;
         let mut node_id = self.id;
         for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
-            // Create div tensor
-            // Create ones tensor and expand up to full tensor shape
-            let ones = self.graph().constant(1.0).id;
-            // Sum reduce on current dimension
-            let mut st = ShapeTracker::new(&[]);
-            st.expand(0, shape.shape()[dim as usize]);
-            let div_tensor = self
-                .graph()
-                .add_op(op::SumReduce(0))
-                .input(ones, 0, st)
-                .finish();
             // Sum reduce
             node_id = self
                 .graph()
                 .add_op(op::SumReduce(dim as usize))
                 .input(node_id, 0, shape)
                 .finish();
-            shape.remove_dim(dim as usize);
 
             // Divide by div tensor
+            // Create ones tensor and expand up to full tensor shape
+            let ones = self.graph().constant(1.0).id;
+            let mut st = ShapeTracker::new(&[]);
+            st.expand(0, shape.shape()[dim as usize]);
+            shape.remove_dim(dim as usize);
+            let div_tensor = self
+                .graph()
+                .add_op(op::SumReduce(0))
+                .input(ones, 0, st)
+                .finish();
             let mul_tensor = self
                 .graph()
                 .add_op(op::Recip)
@@ -103,7 +101,7 @@ mod tests {
         let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<3>));
         let d_b = d_a.sum::<_, DAxis<1>>();
 
-        assert_close_data(&b.data(), &d_b.as_vec());
+        assert_close(&b.data(), &d_b.as_vec());
     }
 
     #[test]
@@ -121,7 +119,7 @@ mod tests {
         let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<3>));
         let d_b = d_a.max::<_, DAxis<1>>();
 
-        assert_close_data(&b.data(), &d_b.as_vec());
+        assert_close(&b.data(), &d_b.as_vec());
     }
 
     #[test]
@@ -139,6 +137,6 @@ mod tests {
         let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<3>));
         let d_b = d_a.mean::<_, DAxis<1>>();
 
-        assert_close_data(&b.data(), &d_b.as_vec());
+        assert_close(&b.data(), &d_b.as_vec());
     }
 }

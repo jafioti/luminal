@@ -12,7 +12,8 @@ use cudarc::{
 };
 use half::f16;
 use itertools::Itertools;
-use petgraph::visit::EdgeRef;
+use num_traits::FromPrimitive;
+use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
 use crate::{op::*, prelude::*};
 
@@ -672,7 +673,7 @@ impl CudaMul {
 extern \"C\" __global__ void kernel(__half *out, const __half *inp_a, const __half *inp_b, int numel{}) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < numel) {{
-        out[idx] = __hmul(({a_valid_exp}) == 0 ? __float2half(0.0) : inp_a[{a_idx_exp}], ({b_valid_exp}) == 0 ? __float2half(0.0) : inp_b[{b_idx_exp}]);
+        out[idx] = (({a_valid_exp}) == 0 ? __float2half(0.0) : inp_a[{a_idx_exp}]) * (({b_valid_exp}) == 0 ? __float2half(0.0) : inp_b[{b_idx_exp}]);
     }}
 }}",
             a_shape
@@ -1029,7 +1030,7 @@ extern \"C\" __global__ void kernel(__half *out, const __half *inp, const int fr
             int idx = a_ * dim_size * back_size + c_ * back_size + b_;
             if (({valid_exp}) != 0) {{
                 int a_idx = {idx_exp};
-                reduce_value = __hadd(reduce_value, inp[a_idx]);
+                reduce_value = reduce_value + inp[a_idx];
             }}
         }}
         out[i_] = reduce_value;
@@ -1446,6 +1447,107 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
                 *op_ref = Box::new(CudaMaxReduce::new(*dim, src_shapes[0], dev.clone()));
             }
         }
+    }
+}
+
+/// In 16 bit, summing above 2048 doesn't work. This precludes the .expand(Dim).sum_reduce() pattern to get a dim size in a tensor, so we need to replace these fake reductions with an elementwise mul
+#[derive(Debug, Default)]
+pub struct FakeReductionOptimizer;
+
+impl GraphOptimizer for FakeReductionOptimizer {
+    fn optimize(&self, graph: &mut Graph) {
+        let s = GraphSelector::default();
+        let mut sum_reduce = NodeIndex::default();
+        s.op()
+            .ty::<CudaSumReduce>()
+            .check(|o, shapes| {
+                if let Some(o) = o.as_any().downcast_ref::<CudaSumReduce>() {
+                    shapes[0].fake[shapes[0].indexes[o.2]] // Ensure dimension we are reducing is fake
+                } else {
+                    false
+                }
+            })
+            .ptr(&mut sum_reduce);
+
+        for _ in s.search(graph) {
+            let op_ref = graph.graph.node_weight_mut(sum_reduce).unwrap();
+            let dim = op_ref.as_any().downcast_ref::<CudaSumReduce>().unwrap().2;
+            let dev = op_ref
+                .as_any()
+                .downcast_ref::<CudaSumReduce>()
+                .unwrap()
+                .1
+                .clone();
+            *op_ref = Box::new(FakeSumReduce::new(dev, dim));
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FakeSumReduce(CudaFunction, Arc<CudaDevice>, pub usize);
+impl PartialEq for FakeSumReduce {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl FakeSumReduce {
+    pub fn new(dev: Arc<CudaDevice>, dim: usize) -> Self {
+        let mut code = "#include \"cuda_fp16.h\"
+extern \"C\" __global__ void kernel(__half *out, const __half *inp, int numel, __half mul_factor) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < numel) {
+        out[i] = inp[i] * mul_factor;
+    }
+}"
+        .to_string();
+        let name = format!("kernel_{}", hash(&code));
+        code = code.replace("kernel", &name);
+        if !dev.has_func(&name, &name) {
+            dev.load_ptx(
+                compile_ptx_with_opts(
+                    code,
+                    CompileOptions {
+                        arch: Some("sm_75"),
+                        include_paths: vec!["/usr/local/cuda/include".to_string()],
+                        ..Default::default()
+                    },
+                )
+                .unwrap(),
+                &name,
+                &[&name],
+            )
+            .unwrap();
+        }
+        Self(dev.get_func(&name, &name).unwrap(), dev, dim)
+    }
+}
+
+impl Operator for FakeSumReduce {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let dim_size = f16::from_usize(tensors[0].1.shape()[self.2].to_usize().unwrap()).unwrap();
+        let inp = tensors[0]
+            .0
+            .borrowed()
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<f16>>()
+            .unwrap();
+        let inp_size = tensors[0].1.n_physical_elements();
+        let mut out = self.1.alloc_zeros::<f16>(inp_size).unwrap();
+        unsafe {
+            self.0
+                .clone()
+                .launch(
+                    LaunchConfig::for_num_elems(inp_size as u32),
+                    (&mut out, inp, inp_size, dim_size),
+                )
+                .unwrap();
+        }
+
+        vec![Tensor {
+            data: Box::new(out),
+        }]
     }
 }
 
