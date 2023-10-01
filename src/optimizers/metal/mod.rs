@@ -1,5 +1,7 @@
 mod fp32;
 pub use fp32::*;
+mod fp16;
+pub use fp16::*;
 use metal_rs::Buffer;
 
 use crate::prelude::Data;
