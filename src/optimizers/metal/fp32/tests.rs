@@ -380,11 +380,11 @@ fn test_mean_reduce() {
 #[test]
 fn test_matmul() {
     let mut cx = Graph::new();
-    let a_data = random_vec(6);
-    let b_data = random_vec(12);
-    let a = cx.new_tensor::<R2<2, 3>>("Input");
+    let a_data = random_vec(2 * 4096);
+    let b_data = random_vec(4096 * 4);
+    let a = cx.new_tensor::<R2<2, 4096>>("Input");
     a.set(a_data.clone());
-    let b = cx.new_tensor::<R2<3, 4>>("Input");
+    let b = cx.new_tensor::<R2<4096, 4>>("Input");
     b.set(b_data.clone());
     let c = a.matmul(b);
     c.mark();
@@ -393,8 +393,8 @@ fn test_matmul() {
     cx.execute();
 
     let d_dev = Cpu::default();
-    let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<3>));
-    let d_b = d_dev.tensor_from_vec(b_data, (DConst::<3>, DConst::<4>));
+    let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<4096>));
+    let d_b = d_dev.tensor_from_vec(b_data, (DConst::<4096>, DConst::<4>));
     let d_c = d_a.matmul(d_b);
 
     assert_close(&c.data(), &d_c.as_vec());

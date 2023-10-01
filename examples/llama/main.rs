@@ -43,7 +43,7 @@ fn main() {
         k.mark_no_delete();
         v.mark_no_delete();
     }
-    // cx1.optimize(<(CudaFp16Optimizer, GenericOptimizer)>::default());
+    // cx1.optimize(<(MetalFp32Optimizer, GenericOptimizer)>::default());
     cx1.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
 
     // Build KV cache forward graph
@@ -58,12 +58,12 @@ fn main() {
         k.mark_no_delete();
         v.mark_no_delete();
     }
-    // cx2.optimize(<(CudaFp16Optimizer, GenericOptimizer)>::default());
+    // cx2.optimize(<(MetalFp32Optimizer, GenericOptimizer)>::default());
     cx2.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
 
     println!("Inferencing...");
     // First pass
-    inp.set_dyn(input.clone(), vec![1, input.len()]);
+    inp.set_dyn(input.iter().map(|i| *i as f32).collect::<Vec<_>>(), vec![1, input.len()]);
     cx1.execute_debug();
 
     let out1 = out1.dyn_data(&cx1.dyn_map);
@@ -83,7 +83,7 @@ fn main() {
     drop(cx1);
 
     loop {
-        single_inp.set_dyn(vec![*input.last().unwrap()], vec![1, 1]);
+        single_inp.set_dyn(vec![*input.last().unwrap() as f32], vec![1, 1]);
         cx2.set_dyn_dim('p', input.len() - 1);
         cx2.set_dyn_dim('t', input.len());
 

@@ -12,7 +12,7 @@ use crate::{
     prelude::*,
 };
 use itertools::Itertools;
-use metal_rs::*;
+use metal_rs::{objc::rc::autoreleasepool, *};
 use petgraph::visit::EdgeRef;
 use regex::Regex;
 
@@ -60,13 +60,10 @@ impl PartialEq for MetalCopyFromDevice {
 
 impl Operator for MetalCopyFromDevice {
     fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        if inp[0].0.borrowed().data.as_any().is::<Vec<f32>>()
-            || inp[0].0.borrowed().data.as_any().is::<Vec<usize>>()
-        {
+        if inp[0].0.borrowed().data.as_any().is::<Vec<f32>>() {
             // Already off device
             return vec![inp.pop().unwrap().0.cloned()];
         }
-        let mut data = vec![0.0; inp[0].1.n_physical_elements()];
         let buffer = inp[0]
             .0
             .borrowed()
@@ -74,6 +71,7 @@ impl Operator for MetalCopyFromDevice {
             .as_any()
             .downcast_ref::<Buffer>()
             .unwrap();
+        let mut data = vec![0.0; buffer.length() as usize / std::mem::size_of::<f32>()];
         let ptr = buffer.contents() as *mut f32;
         for (i, d) in data.iter_mut().enumerate() {
             *d = unsafe { *ptr.add(i) };
@@ -122,44 +120,46 @@ kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(
 }
 impl Operator for MetalContiguous {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let res_shape = tensors[0].1.contiguous();
-        let inp_size = res_shape.n_elements();
+        autoreleasepool(|| {
+            let res_shape = tensors[0].1.contiguous();
+            let inp_size = res_shape.n_elements();
 
-        // Setup buffers
-        let a = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let out = self.1.new_buffer(
-            (inp_size * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::CPUCacheModeDefaultCache,
-        );
+            // Setup buffers
+            let a = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let out = self.1.new_buffer(
+                (inp_size * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::CPUCacheModeDefaultCache,
+            );
 
-        // Setup command queue / command buffer / encoder
-        let command_queue = self.1.new_command_queue();
-        let command_buffer = command_queue.new_command_buffer();
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
 
-        // Set inputs
-        encoder.set_buffer(0, Some(a), 0);
-        encoder.set_buffer(1, Some(&out), 0);
-        encoder.set_int(2, inp_size as u32);
-        input_dyn_dims(&[(self.2, tensors[0].1)], encoder, 3);
+            // Set inputs
+            encoder.set_buffer(0, Some(a), 0);
+            encoder.set_buffer(1, Some(&out), 0);
+            encoder.set_int(2, inp_size as u32);
+            input_dyn_dims(&[(self.2, tensors[0].1)], encoder, 3);
 
-        // Execute
-        encoder.dispatch_n_elements(&self.0, inp_size);
-        encoder.end_encoding();
-        command_buffer.commit();
-        command_buffer.wait_until_completed();
+            // Execute
+            encoder.dispatch_n_elements(inp_size);
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
 
-        vec![Tensor {
-            data: Box::new(out),
-        }]
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
     }
 }
 
@@ -192,42 +192,44 @@ kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(
 }
 impl Operator for MetalLog2 {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp_size = tensors[0].1.n_physical_elements();
+        autoreleasepool(|| {
+            let inp_size = tensors[0].1.n_physical_elements();
 
-        // Setup buffers
-        let a = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let out = self.1.new_buffer(
-            (inp_size * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::CPUCacheModeDefaultCache,
-        );
+            // Setup buffers
+            let a = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let out = self.1.new_buffer(
+                (inp_size * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::CPUCacheModeDefaultCache,
+            );
 
-        // Setup command queue / command buffer / encoder
-        let command_queue = self.1.new_command_queue();
-        let command_buffer = command_queue.new_command_buffer();
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
 
-        // Set inputs
-        encoder.set_buffer(0, Some(a), 0);
-        encoder.set_buffer(1, Some(&out), 0);
-        encoder.set_int(2, inp_size as u32);
+            // Set inputs
+            encoder.set_buffer(0, Some(a), 0);
+            encoder.set_buffer(1, Some(&out), 0);
+            encoder.set_int(2, inp_size as u32);
 
-        // Execute
-        encoder.dispatch_n_elements(&self.0, inp_size);
-        encoder.end_encoding();
-        command_buffer.commit();
-        command_buffer.wait_until_completed();
+            // Execute
+            encoder.dispatch_n_elements(inp_size);
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
 
-        vec![Tensor {
-            data: Box::new(out),
-        }]
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
     }
 }
 
@@ -260,42 +262,44 @@ kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(
 }
 impl Operator for MetalExp2 {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp_size = tensors[0].1.n_physical_elements();
+        autoreleasepool(|| {
+            let inp_size = tensors[0].1.n_physical_elements();
 
-        // Setup buffers
-        let a = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let out = self.1.new_buffer(
-            (inp_size * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::CPUCacheModeDefaultCache,
-        );
+            // Setup buffers
+            let a = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let out = self.1.new_buffer(
+                (inp_size * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::CPUCacheModeDefaultCache,
+            );
 
-        // Setup command queue / command buffer / encoder
-        let command_queue = self.1.new_command_queue();
-        let command_buffer = command_queue.new_command_buffer();
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
 
-        // Set inputs
-        encoder.set_buffer(0, Some(a), 0);
-        encoder.set_buffer(1, Some(&out), 0);
-        encoder.set_int(2, inp_size as u32);
+            // Set inputs
+            encoder.set_buffer(0, Some(a), 0);
+            encoder.set_buffer(1, Some(&out), 0);
+            encoder.set_int(2, inp_size as u32);
 
-        // Execute
-        encoder.dispatch_n_elements(&self.0, inp_size);
-        encoder.end_encoding();
-        command_buffer.commit();
-        command_buffer.wait_until_completed();
+            // Execute
+            encoder.dispatch_n_elements(inp_size);
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
 
-        vec![Tensor {
-            data: Box::new(out),
-        }]
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
     }
 }
 
@@ -328,42 +332,44 @@ kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(
 }
 impl Operator for MetalSin {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp_size = tensors[0].1.n_physical_elements();
+        autoreleasepool(|| {
+            let inp_size = tensors[0].1.n_physical_elements();
 
-        // Setup buffers
-        let a = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let out = self.1.new_buffer(
-            (inp_size * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::CPUCacheModeDefaultCache,
-        );
+            // Setup buffers
+            let a = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let out = self.1.new_buffer(
+                (inp_size * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::CPUCacheModeDefaultCache,
+            );
 
-        // Setup command queue / command buffer / encoder
-        let command_queue = self.1.new_command_queue();
-        let command_buffer = command_queue.new_command_buffer();
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
 
-        // Set inputs
-        encoder.set_buffer(0, Some(a), 0);
-        encoder.set_buffer(1, Some(&out), 0);
-        encoder.set_int(2, inp_size as u32);
+            // Set inputs
+            encoder.set_buffer(0, Some(a), 0);
+            encoder.set_buffer(1, Some(&out), 0);
+            encoder.set_int(2, inp_size as u32);
 
-        // Execute
-        encoder.dispatch_n_elements(&self.0, inp_size);
-        encoder.end_encoding();
-        command_buffer.commit();
-        command_buffer.wait_until_completed();
+            // Execute
+            encoder.dispatch_n_elements(inp_size);
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
 
-        vec![Tensor {
-            data: Box::new(out),
-        }]
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
     }
 }
 
@@ -396,42 +402,44 @@ kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(
 }
 impl Operator for MetalSqrt {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp_size = tensors[0].1.n_physical_elements();
+        autoreleasepool(|| {
+            let inp_size = tensors[0].1.n_physical_elements();
 
-        // Setup buffers
-        let a = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let out = self.1.new_buffer(
-            (inp_size * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::CPUCacheModeDefaultCache,
-        );
+            // Setup buffers
+            let a = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let out = self.1.new_buffer(
+                (inp_size * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::CPUCacheModeDefaultCache,
+            );
 
-        // Setup command queue / command buffer / encoder
-        let command_queue = self.1.new_command_queue();
-        let command_buffer = command_queue.new_command_buffer();
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
 
-        // Set inputs
-        encoder.set_buffer(0, Some(a), 0);
-        encoder.set_buffer(1, Some(&out), 0);
-        encoder.set_int(2, inp_size as u32);
+            // Set inputs
+            encoder.set_buffer(0, Some(a), 0);
+            encoder.set_buffer(1, Some(&out), 0);
+            encoder.set_int(2, inp_size as u32);
 
-        // Execute
-        encoder.dispatch_n_elements(&self.0, inp_size);
-        encoder.end_encoding();
-        command_buffer.commit();
-        command_buffer.wait_until_completed();
+            // Execute
+            encoder.dispatch_n_elements(inp_size);
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
 
-        vec![Tensor {
-            data: Box::new(out),
-        }]
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
     }
 }
 
@@ -464,42 +472,44 @@ kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(
 }
 impl Operator for MetalRecip {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp_size = tensors[0].1.n_physical_elements();
+        autoreleasepool(|| {
+            let inp_size = tensors[0].1.n_physical_elements();
 
-        // Setup buffers
-        let a = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let out = self.1.new_buffer(
-            (inp_size * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::CPUCacheModeDefaultCache,
-        );
+            // Setup buffers
+            let a = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let out = self.1.new_buffer(
+                (inp_size * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::CPUCacheModeDefaultCache,
+            );
 
-        // Setup command queue / command buffer / encoder
-        let command_queue = self.1.new_command_queue();
-        let command_buffer = command_queue.new_command_buffer();
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
 
-        // Set inputs
-        encoder.set_buffer(0, Some(a), 0);
-        encoder.set_buffer(1, Some(&out), 0);
-        encoder.set_int(2, inp_size as u32);
+            // Set inputs
+            encoder.set_buffer(0, Some(a), 0);
+            encoder.set_buffer(1, Some(&out), 0);
+            encoder.set_int(2, inp_size as u32);
 
-        // Execute
-        encoder.dispatch_n_elements(&self.0, inp_size);
-        encoder.end_encoding();
-        command_buffer.commit();
-        command_buffer.wait_until_completed();
+            // Execute
+            encoder.dispatch_n_elements(inp_size);
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
 
-        vec![Tensor {
-            data: Box::new(out),
-        }]
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
     }
 }
 
@@ -545,55 +555,57 @@ kernel void mkernel(device float *inp_a [[buffer(0)]], device float *inp_b [[buf
 }
 impl Operator for MetalAdd {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp_size = tensors[0].1.n_elements();
+        autoreleasepool(|| {
+            let inp_size = tensors[0].1.n_elements();
 
-        // Setup buffers
-        let a = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let b = tensors[1]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let out = self.1.new_buffer(
-            (inp_size * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::CPUCacheModeDefaultCache,
-        );
+            // Setup buffers
+            let a = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let b = tensors[1]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let out = self.1.new_buffer(
+                (inp_size * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::CPUCacheModeDefaultCache,
+            );
 
-        // Setup command queue / command buffer / encoder
-        let command_queue = self.1.new_command_queue();
-        let command_buffer = command_queue.new_command_buffer();
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
 
-        // Set inputs
-        encoder.set_buffer(0, Some(a), 0);
-        encoder.set_buffer(1, Some(b), 0);
-        encoder.set_buffer(2, Some(&out), 0);
-        encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(
-            &[(self.2, tensors[0].1), (self.3, tensors[1].1)],
-            encoder,
-            4,
-        );
+            // Set inputs
+            encoder.set_buffer(0, Some(a), 0);
+            encoder.set_buffer(1, Some(b), 0);
+            encoder.set_buffer(2, Some(&out), 0);
+            encoder.set_int(3, inp_size as u32);
+            input_dyn_dims(
+                &[(self.2, tensors[0].1), (self.3, tensors[1].1)],
+                encoder,
+                4,
+            );
 
-        // Execute
-        encoder.dispatch_n_elements(&self.0, inp_size);
-        encoder.end_encoding();
-        command_buffer.commit();
-        command_buffer.wait_until_completed();
+            // Execute
+            encoder.dispatch_n_elements(inp_size);
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
 
-        vec![Tensor {
-            data: Box::new(out),
-        }]
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
     }
 }
 
@@ -639,55 +651,57 @@ kernel void mkernel(device float *inp_a [[buffer(0)]], device float *inp_b [[buf
 }
 impl Operator for MetalMul {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp_size = tensors[0].1.n_elements();
+        autoreleasepool(|| {
+            let inp_size = tensors[0].1.n_elements();
 
-        // Setup buffers
-        let a = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let b = tensors[1]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let out = self.1.new_buffer(
-            (inp_size * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::CPUCacheModeDefaultCache,
-        );
+            // Setup buffers
+            let a = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let b = tensors[1]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let out = self.1.new_buffer(
+                (inp_size * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::CPUCacheModeDefaultCache,
+            );
 
-        // Setup command queue / command buffer / encoder
-        let command_queue = self.1.new_command_queue();
-        let command_buffer = command_queue.new_command_buffer();
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
 
-        // Set inputs
-        encoder.set_buffer(0, Some(a), 0);
-        encoder.set_buffer(1, Some(b), 0);
-        encoder.set_buffer(2, Some(&out), 0);
-        encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(
-            &[(self.2, tensors[0].1), (self.3, tensors[1].1)],
-            encoder,
-            4,
-        );
+            // Set inputs
+            encoder.set_buffer(0, Some(a), 0);
+            encoder.set_buffer(1, Some(b), 0);
+            encoder.set_buffer(2, Some(&out), 0);
+            encoder.set_int(3, inp_size as u32);
+            input_dyn_dims(
+                &[(self.2, tensors[0].1), (self.3, tensors[1].1)],
+                encoder,
+                4,
+            );
 
-        // Execute
-        encoder.dispatch_n_elements(&self.0, inp_size);
-        encoder.end_encoding();
-        command_buffer.commit();
-        command_buffer.wait_until_completed();
+            // Execute
+            encoder.dispatch_n_elements(inp_size);
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
 
-        vec![Tensor {
-            data: Box::new(out),
-        }]
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
     }
 }
 
@@ -743,55 +757,57 @@ kernel void mkernel(device float *inp_a [[buffer(0)]], device float *inp_b [[buf
 }
 impl Operator for MetalLessThan {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp_size = tensors[0].1.n_elements();
+        autoreleasepool(|| {
+            let inp_size = tensors[0].1.n_elements();
 
-        // Setup buffers
-        let a = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let b = tensors[1]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let out = self.1.new_buffer(
-            (inp_size * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::CPUCacheModeDefaultCache,
-        );
+            // Setup buffers
+            let a = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let b = tensors[1]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let out = self.1.new_buffer(
+                (inp_size * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::CPUCacheModeDefaultCache,
+            );
 
-        // Setup command queue / command buffer / encoder
-        let command_queue = self.1.new_command_queue();
-        let command_buffer = command_queue.new_command_buffer();
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
 
-        // Set inputs
-        encoder.set_buffer(0, Some(a), 0);
-        encoder.set_buffer(1, Some(b), 0);
-        encoder.set_buffer(2, Some(&out), 0);
-        encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(
-            &[(self.2, tensors[0].1), (self.3, tensors[1].1)],
-            encoder,
-            4,
-        );
+            // Set inputs
+            encoder.set_buffer(0, Some(a), 0);
+            encoder.set_buffer(1, Some(b), 0);
+            encoder.set_buffer(2, Some(&out), 0);
+            encoder.set_int(3, inp_size as u32);
+            input_dyn_dims(
+                &[(self.2, tensors[0].1), (self.3, tensors[1].1)],
+                encoder,
+                4,
+            );
 
-        // Execute
-        encoder.dispatch_n_elements(&self.0, inp_size);
-        encoder.end_encoding();
-        command_buffer.commit();
-        command_buffer.wait_until_completed();
+            // Execute
+            encoder.dispatch_n_elements(inp_size);
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
 
-        vec![Tensor {
-            data: Box::new(out),
-        }]
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
     }
 }
 
@@ -835,55 +851,57 @@ kernel void mkernel(device float *inp_a [[buffer(0)]], device float *inp_b [[buf
 }
 impl Operator for MetalMod {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp_size = tensors[0].1.n_elements();
+        autoreleasepool(|| {
+            let inp_size = tensors[0].1.n_elements();
 
-        // Setup buffers
-        let a = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let b = tensors[1]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let out = self.1.new_buffer(
-            (inp_size * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::CPUCacheModeDefaultCache,
-        );
+            // Setup buffers
+            let a = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let b = tensors[1]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let out = self.1.new_buffer(
+                (inp_size * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::CPUCacheModeDefaultCache,
+            );
 
-        // Setup command queue / command buffer / encoder
-        let command_queue = self.1.new_command_queue();
-        let command_buffer = command_queue.new_command_buffer();
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
 
-        // Set inputs
-        encoder.set_buffer(0, Some(a), 0);
-        encoder.set_buffer(1, Some(b), 0);
-        encoder.set_buffer(2, Some(&out), 0);
-        encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(
-            &[(self.2, tensors[0].1), (self.3, tensors[1].1)],
-            encoder,
-            4,
-        );
+            // Set inputs
+            encoder.set_buffer(0, Some(a), 0);
+            encoder.set_buffer(1, Some(b), 0);
+            encoder.set_buffer(2, Some(&out), 0);
+            encoder.set_int(3, inp_size as u32);
+            input_dyn_dims(
+                &[(self.2, tensors[0].1), (self.3, tensors[1].1)],
+                encoder,
+                4,
+            );
 
-        // Execute
-        encoder.dispatch_n_elements(&self.0, inp_size);
-        encoder.end_encoding();
-        command_buffer.commit();
-        command_buffer.wait_until_completed();
+            // Execute
+            encoder.dispatch_n_elements(inp_size);
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
 
-        vec![Tensor {
-            data: Box::new(out),
-        }]
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
     }
 }
 
@@ -910,14 +928,13 @@ impl MetalSumReduce {
 using namespace metal;
 kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], device uint& front_size [[buffer(3)]], device uint& back_size [[buffer(4)]], device uint& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
     if (i_ < n_elements) {{
-        int a_ = i_ / back_size;
-        int b_ = i_ % back_size;
+        uint a_ = i_ / back_size;
+        uint b_ = i_ % back_size;
         float reduce_value = 0.0;
-        for (int c_ = 0; c_ < dim_size; c_++) {{
-            int idx = a_ * dim_size * back_size + c_ * back_size + b_;
+        for (uint c_ = 0; c_ < dim_size; c_++) {{
+            uint idx = a_ * dim_size * back_size + c_ * back_size + b_;
             if (({valid_exp}) != 0) {{
-                int a_idx = {idx_exp};
-                reduce_value += inp[a_idx];
+                reduce_value += inp[{idx_exp}];
             }}
         }}
         out[i_] = reduce_value;
@@ -936,61 +953,65 @@ kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(
 }
 impl Operator for MetalSumReduce {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp_size = tensors[0].1.n_elements();
+        autoreleasepool(|| {
+            let mut sh = tensors[0].1;
+            sh.remove_dim(self.2);
+            let inp_size = sh.contiguous().n_elements();
 
-        // Setup buffers
-        let a = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let out = self.1.new_buffer(
-            (inp_size * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::CPUCacheModeDefaultCache,
-        );
-        let front_size: usize = tensors[0]
-            .1
-            .shape()
-            .iter()
-            .take(self.2)
-            .map(|i| i.to_usize().unwrap())
-            .product();
-        let back_size: usize = tensors[0]
-            .1
-            .shape()
-            .iter()
-            .skip(self.2 + 1)
-            .map(|i| i.to_usize().unwrap())
-            .product();
-        let dim_size = tensors[0].1.shape()[self.2].to_usize().unwrap();
+            // Setup buffers
+            let a = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let out = self.1.new_buffer(
+                (inp_size * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::CPUCacheModeDefaultCache,
+            );
+            let front_size: usize = tensors[0]
+                .1
+                .shape()
+                .iter()
+                .take(self.2)
+                .map(|i| i.to_usize().unwrap())
+                .product();
+            let back_size: usize = tensors[0]
+                .1
+                .shape()
+                .iter()
+                .skip(self.2 + 1)
+                .map(|i| i.to_usize().unwrap())
+                .product();
+            let dim_size = tensors[0].1.shape()[self.2].to_usize().unwrap();
 
-        // Setup command queue / command buffer / encoder
-        let command_queue = self.1.new_command_queue();
-        let command_buffer = command_queue.new_command_buffer();
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
 
-        // Set inputs
-        encoder.set_buffer(0, Some(a), 0);
-        encoder.set_buffer(1, Some(&out), 0);
-        encoder.set_int(2, inp_size as u32);
-        encoder.set_int(3, front_size as u32);
-        encoder.set_int(4, back_size as u32);
-        encoder.set_int(5, dim_size as u32);
-        input_dyn_dims(&[(self.3, tensors[0].1)], encoder, 6);
+            // Set inputs
+            encoder.set_buffer(0, Some(a), 0);
+            encoder.set_buffer(1, Some(&out), 0);
+            encoder.set_int(2, inp_size as u32);
+            encoder.set_int(3, front_size as u32);
+            encoder.set_int(4, back_size as u32);
+            encoder.set_int(5, dim_size as u32);
+            input_dyn_dims(&[(self.3, tensors[0].1)], encoder, 6);
 
-        // Execute
-        encoder.dispatch_n_elements(&self.0, inp_size);
-        encoder.end_encoding();
-        command_buffer.commit();
-        command_buffer.wait_until_completed();
+            // Execute
+            encoder.dispatch_n_elements(inp_size);
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
 
-        vec![Tensor {
-            data: Box::new(out),
-        }]
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
     }
 }
 
@@ -1017,11 +1038,11 @@ impl MetalMaxReduce {
 using namespace metal;
 kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], device uint& front_size [[buffer(3)]], device uint& back_size [[buffer(4)]], device uint& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
     if (i_ < n_elements) {{
-        int a_ = i_ / back_size;
-        int b_ = i_ % back_size;
+        uint a_ = i_ / back_size;
+        uint b_ = i_ % back_size;
         float reduce_value = -(float)0x7f800000;
-        for (int c_ = 0; c_ < dim_size; c_++) {{
-            int idx = a_ * dim_size * back_size + c_ * back_size + b_;
+        for (uint c_ = 0; c_ < dim_size; c_++) {{
+            uint idx = a_ * dim_size * back_size + c_ * back_size + b_;
             if (({valid_exp}) != 0) {{
                 int a_idx = {idx_exp};
                 reduce_value = max(reduce_value, inp[a_idx]);
@@ -1043,61 +1064,65 @@ kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(
 }
 impl Operator for MetalMaxReduce {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp_size = tensors[0].1.n_elements();
+        autoreleasepool(|| {
+            let mut sh = tensors[0].1;
+            sh.remove_dim(self.2);
+            let inp_size = sh.contiguous().n_elements();
 
-        // Setup buffers
-        let a = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let out = self.1.new_buffer(
-            (inp_size * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::CPUCacheModeDefaultCache,
-        );
-        let front_size: usize = tensors[0]
-            .1
-            .shape()
-            .iter()
-            .take(self.2)
-            .map(|i| i.to_usize().unwrap())
-            .product();
-        let back_size: usize = tensors[0]
-            .1
-            .shape()
-            .iter()
-            .skip(self.2 + 1)
-            .map(|i| i.to_usize().unwrap())
-            .product();
-        let dim_size = tensors[0].1.shape()[self.2].to_usize().unwrap();
+            // Setup buffers
+            let a = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let out = self.1.new_buffer(
+                (inp_size * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::CPUCacheModeDefaultCache,
+            );
+            let front_size: usize = tensors[0]
+                .1
+                .shape()
+                .iter()
+                .take(self.2)
+                .map(|i| i.to_usize().unwrap())
+                .product();
+            let back_size: usize = tensors[0]
+                .1
+                .shape()
+                .iter()
+                .skip(self.2 + 1)
+                .map(|i| i.to_usize().unwrap())
+                .product();
+            let dim_size = tensors[0].1.shape()[self.2].to_usize().unwrap();
 
-        // Setup command queue / command buffer / encoder
-        let command_queue = self.1.new_command_queue();
-        let command_buffer = command_queue.new_command_buffer();
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
 
-        // Set inputs
-        encoder.set_buffer(0, Some(a), 0);
-        encoder.set_buffer(1, Some(&out), 0);
-        encoder.set_int(2, inp_size as u32);
-        encoder.set_int(3, front_size as u32);
-        encoder.set_int(4, back_size as u32);
-        encoder.set_int(5, dim_size as u32);
-        input_dyn_dims(&[(self.3, tensors[0].1)], encoder, 6);
+            // Set inputs
+            encoder.set_buffer(0, Some(a), 0);
+            encoder.set_buffer(1, Some(&out), 0);
+            encoder.set_int(2, inp_size as u32);
+            encoder.set_int(3, front_size as u32);
+            encoder.set_int(4, back_size as u32);
+            encoder.set_int(5, dim_size as u32);
+            input_dyn_dims(&[(self.3, tensors[0].1)], encoder, 6);
 
-        // Execute
-        encoder.dispatch_n_elements(&self.0, inp_size);
-        encoder.end_encoding();
-        command_buffer.commit();
-        command_buffer.wait_until_completed();
+            // Execute
+            encoder.dispatch_n_elements(inp_size);
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
 
-        vec![Tensor {
-            data: Box::new(out),
-        }]
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
     }
 }
 
@@ -1351,20 +1376,20 @@ fn hash<T: Hash>(obj: T) -> u64 {
 }
 
 trait DispatchNElements {
-    fn dispatch_n_elements(&self, func: &ComputePipelineState, n: usize);
+    fn dispatch_n_elements(&self, n: usize);
 }
 
 impl DispatchNElements for ComputeCommandEncoderRef {
-    fn dispatch_n_elements(&self, func: &ComputePipelineState, n: usize) {
-        let num_threads = func.thread_execution_width();
+    fn dispatch_n_elements(&self, n: usize) {
+        let n_threads = (n + 32) / 32;
         self.dispatch_thread_groups(
             MTLSize {
-                width: ((n as NSUInteger + num_threads) / num_threads),
+                width: n_threads as NSUInteger,
                 height: 1,
                 depth: 1,
             },
             MTLSize {
-                width: num_threads,
+                width: 32,
                 height: 1,
                 depth: 1,
             },
