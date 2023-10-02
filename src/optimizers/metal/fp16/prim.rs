@@ -1,14 +1,11 @@
-use std::{
-    any::{Any, TypeId},
-    collections::{hash_map::DefaultHasher, HashMap, HashSet},
-    hash::{Hash, Hasher},
-};
+use std::collections::HashMap;
 
 use crate::{
     op::{
         Add, Contiguous, Exp2, Function as LFunction, InputTensor, LessThan, Log2, MaxReduce, Mod,
         Mul, Operator, Print, Recip, Sin, Sqrt, SumReduce,
     },
+    optimizers::metal::*,
     prelude::*,
 };
 use half::f16;
@@ -16,7 +13,6 @@ use itertools::Itertools;
 use metal_rs::{objc::rc::autoreleasepool, *};
 use num_traits::FromPrimitive;
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
-use regex::Regex;
 
 /// Copy a tensor to the GPU
 #[derive(Debug, Clone)]
@@ -47,7 +43,7 @@ impl Operator for MetalCopyToDevice {
         let buffer = self.0.new_buffer_with_data(
             unsafe { std::mem::transmute(data.as_ptr()) },
             (data.len() * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::CPUCacheModeDefaultCache,
+            MTLResourceOptions::StorageModeManaged,
         );
         vec![Tensor {
             data: Box::new(buffer),
@@ -140,7 +136,7 @@ impl Operator for MetalContiguous {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -211,7 +207,7 @@ impl Operator for MetalLog2 {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -281,7 +277,7 @@ impl Operator for MetalExp2 {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -351,7 +347,7 @@ impl Operator for MetalSin {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -421,7 +417,7 @@ impl Operator for MetalSqrt {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -491,7 +487,7 @@ impl Operator for MetalRecip {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -581,7 +577,7 @@ impl Operator for MetalAdd {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -677,7 +673,7 @@ impl Operator for MetalMul {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -783,7 +779,7 @@ impl Operator for MetalLessThan {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -877,7 +873,7 @@ impl Operator for MetalMod {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -912,7 +908,7 @@ impl Operator for MetalMod {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalSumReduce(ComputePipelineState, Device, usize, ShapeTracker);
+pub struct MetalSumReduce(ComputePipelineState, Device, pub usize, ShapeTracker);
 
 impl PartialEq for MetalSumReduce {
     fn eq(&self, _: &Self) -> bool {
@@ -974,7 +970,7 @@ impl Operator for MetalSumReduce {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
             let front_size: usize = tensors[0]
                 .1
@@ -1085,7 +1081,7 @@ impl Operator for MetalMaxReduce {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
             let front_size: usize = tensors[0]
                 .1
@@ -1375,6 +1371,7 @@ impl GraphOptimizer for FakeReductionOptimizer {
             })
             .ptr(&mut sum_reduce);
 
+        let mut compiled = None;
         for _ in s.search(graph) {
             let op_ref = graph.graph.node_weight_mut(sum_reduce).unwrap();
             let dim = op_ref.as_any().downcast_ref::<MetalSumReduce>().unwrap().2;
@@ -1384,7 +1381,10 @@ impl GraphOptimizer for FakeReductionOptimizer {
                 .unwrap()
                 .1
                 .clone();
-            *op_ref = Box::new(FakeSumReduce::new(dev, dim));
+            if compiled.is_none() {
+                compiled = Some(FakeSumReduce::compile(dev.clone()));
+            }
+            *op_ref = Box::new(FakeSumReduce(compiled.clone().unwrap(), dev, dim));
         }
     }
 }
@@ -1398,7 +1398,7 @@ impl PartialEq for FakeSumReduce {
 }
 
 impl FakeSumReduce {
-    pub fn new(dev: Device, dim: usize) -> Self {
+    pub fn compile(dev: Device) -> ComputePipelineState {
         let mut code = "#include <metal_stdlib>
 using namespace metal;
 kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]], device half& mul_factor [[buffer(3)]]) {{
@@ -1410,160 +1410,54 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("mkernel", &name);
 
-        Self(compile_function(&name, &code, &dev), dev, dim)
+        compile_function(&name, &code, &dev)
     }
 }
 
 impl Operator for FakeSumReduce {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let dim_size = f16::from_usize(tensors[0].1.shape()[self.2].to_usize().unwrap()).unwrap();
-        let inp = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
-        let inp_size = tensors[0].1.n_physical_elements();
-        let out = self.1.new_buffer(
-            (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::CPUCacheModeDefaultCache,
-        );
+        autoreleasepool(|| {
+            let dim_size =
+                f16::from_usize(tensors[0].1.shape()[self.2].to_usize().unwrap()).unwrap();
+            let inp = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let inp_size = tensors[0].1.n_physical_elements();
+            let out = self.1.new_buffer(
+                (inp_size * std::mem::size_of::<f16>()) as u64,
+                MTLResourceOptions::StorageModeManaged,
+            );
 
-        // Setup command queue / command buffer / encoder
-        let command_queue = self.1.new_command_queue();
-        let command_buffer = command_queue.new_command_buffer();
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
 
-        // Set inputs
-        encoder.set_buffer(0, Some(inp), 0);
-        encoder.set_buffer(1, Some(&out), 0);
-        encoder.set_int(2, inp_size as u32);
-        encoder.set_bytes(
-            3,
-            std::mem::size_of::<f16>() as u64,
-            &dim_size as *const f16 as *const _,
-        );
+            // Set inputs
+            encoder.set_buffer(0, Some(inp), 0);
+            encoder.set_buffer(1, Some(&out), 0);
+            encoder.set_int(2, inp_size as u32);
+            encoder.set_bytes(
+                3,
+                std::mem::size_of::<f16>() as u64,
+                &dim_size as *const f16 as *const _,
+            );
 
-        // Execute
-        encoder.dispatch_n_elements(inp_size);
-        encoder.end_encoding();
-        command_buffer.commit();
-        command_buffer.wait_until_completed();
+            // Execute
+            encoder.dispatch_n_elements(inp_size);
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
 
-        vec![Tensor {
-            data: Box::new(out),
-        }]
-    }
-}
-
-fn compile_function(name: &str, code: &str, device: &Device) -> ComputePipelineState {
-    let library = device
-        .new_library_with_source(code, &CompileOptions::new())
-        .unwrap();
-    let pipeline_state_descriptor = ComputePipelineDescriptor::new();
-    pipeline_state_descriptor
-        .set_compute_function(Some(&library.get_function(name, None).unwrap()));
-
-    device
-        .new_compute_pipeline_state_with_function(
-            pipeline_state_descriptor.compute_function().unwrap(),
-        )
-        .unwrap()
-}
-
-fn is<T: Any>(type_id: TypeId) -> bool {
-    type_id == TypeId::of::<T>()
-}
-
-fn hash<T: Hash>(obj: T) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    obj.hash(&mut hasher);
-    hasher.finish()
-}
-
-trait DispatchNElements {
-    fn dispatch_n_elements(&self, n: usize);
-}
-
-impl DispatchNElements for ComputeCommandEncoderRef {
-    fn dispatch_n_elements(&self, n: usize) {
-        let n_threads = (n + 32) / 32;
-        self.dispatch_thread_groups(
-            MTLSize {
-                width: n_threads as NSUInteger,
-                height: 1,
-                depth: 1,
-            },
-            MTLSize {
-                width: 32,
-                height: 1,
-                depth: 1,
-            },
-        );
-    }
-}
-
-trait SetInt {
-    fn set_int(&self, index: usize, value: u32);
-}
-
-impl SetInt for ComputeCommandEncoderRef {
-    fn set_int(&self, index: usize, value: u32) {
-        self.set_bytes(
-            index as u64,
-            std::mem::size_of::<u32>() as u64,
-            &value as *const u32 as *const _,
-        );
-    }
-}
-
-fn input_dyn_dims(
-    shapes: &[(ShapeTracker, ShapeTracker)],
-    encoder: &ComputeCommandEncoderRef,
-    offset: usize,
-) {
-    let mut added = HashSet::new();
-    for (d1, d2) in shapes
-        .iter()
-        .flat_map(|(a, b)| a.shape().into_iter().zip(b.shape()))
-    {
-        if let Dim::Unknown(c) = d1 {
-            if !added.contains(&c) {
-                encoder.set_int(offset + added.len(), d2.to_usize().unwrap() as u32);
-                added.insert(c);
-            }
-        }
-    }
-}
-
-fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> String {
-    shapes
-        .iter()
-        .flat_map(|st| st.shape())
-        .filter_map(|d| {
-            if let Dim::Unknown(c) = d {
-                Some(c)
-            } else {
-                None
-            }
+            vec![Tensor {
+                data: Box::new(out),
+            }]
         })
-        .unique()
-        .enumerate()
-        .map(|(i, c)| format!(", device uint& {c} [[buffer({})]]", i + offset))
-        .collect::<String>()
-}
-
-fn get_idx_valid_exps(shape: ShapeTracker) -> (String, String) {
-    let min_re = Regex::new(r"min\((.*?), (.*?)\)").unwrap();
-    let max_re = Regex::new(r"max\((.*?), (.*?)\)").unwrap();
-    let idx_exp = shape.index_expression().to_string();
-    let idx_exp = max_re.replace_all(&idx_exp, "max((uint)($1), (uint)($2))");
-    let idx_exp = min_re.replace_all(&idx_exp, "min((uint)($1), (uint)($2))");
-    let val_exp = shape.valid_expression().to_string();
-    let val_exp = max_re.replace_all(&val_exp, "max((uint)($1), (uint)($2))");
-    let val_exp = min_re.replace_all(&val_exp, "min((uint)($1), (uint)($2))");
-    (idx_exp.to_string(), val_exp.to_string())
+    }
 }

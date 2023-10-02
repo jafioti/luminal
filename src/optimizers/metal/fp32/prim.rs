@@ -1,20 +1,16 @@
-use std::{
-    any::{Any, TypeId},
-    collections::{hash_map::DefaultHasher, HashMap, HashSet},
-    hash::{Hash, Hasher},
-};
+use std::collections::HashMap;
 
 use crate::{
     op::{
         Add, Contiguous, Exp2, Function as LFunction, InputTensor, LessThan, Log2, MaxReduce, Mod,
         Mul, Operator, Print, Recip, Sin, Sqrt, SumReduce,
     },
+    optimizers::metal::*,
     prelude::*,
 };
 use itertools::Itertools;
 use metal_rs::{objc::rc::autoreleasepool, *};
 use petgraph::visit::EdgeRef;
-use regex::Regex;
 
 /// Copy a tensor to the GPU
 #[derive(Debug, Clone)]
@@ -41,7 +37,7 @@ impl Operator for MetalCopyToDevice {
         let buffer = self.0.new_buffer_with_data(
             unsafe { std::mem::transmute(data.as_ptr()) },
             (data.len() * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::CPUCacheModeDefaultCache,
+            MTLResourceOptions::StorageModeManaged,
         );
         vec![Tensor {
             data: Box::new(buffer),
@@ -134,7 +130,7 @@ impl Operator for MetalContiguous {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -205,7 +201,7 @@ impl Operator for MetalLog2 {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -275,7 +271,7 @@ impl Operator for MetalExp2 {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -345,7 +341,7 @@ impl Operator for MetalSin {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -415,7 +411,7 @@ impl Operator for MetalSqrt {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -485,7 +481,7 @@ impl Operator for MetalRecip {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -575,7 +571,7 @@ impl Operator for MetalAdd {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -671,7 +667,7 @@ impl Operator for MetalMul {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -777,7 +773,7 @@ impl Operator for MetalLessThan {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -871,7 +867,7 @@ impl Operator for MetalMod {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
@@ -906,7 +902,7 @@ impl Operator for MetalMod {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalSumReduce(ComputePipelineState, Device, usize, ShapeTracker);
+pub struct MetalSumReduce(ComputePipelineState, Device, pub usize, ShapeTracker);
 
 impl PartialEq for MetalSumReduce {
     fn eq(&self, _: &Self) -> bool {
@@ -968,7 +964,7 @@ impl Operator for MetalSumReduce {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
             let front_size: usize = tensors[0]
                 .1
@@ -1079,7 +1075,7 @@ impl Operator for MetalMaxReduce {
                 .unwrap();
             let out = self.1.new_buffer(
                 (inp_size * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::CPUCacheModeDefaultCache,
+                MTLResourceOptions::StorageModeManaged,
             );
             let front_size: usize = tensors[0]
                 .1
@@ -1348,113 +1344,4 @@ impl GraphOptimizer for PrimitiveOptimizer {
             }
         }
     }
-}
-
-fn compile_function(name: &str, code: &str, device: &Device) -> ComputePipelineState {
-    let library = device
-        .new_library_with_source(code, &CompileOptions::new())
-        .unwrap();
-    let pipeline_state_descriptor = ComputePipelineDescriptor::new();
-    pipeline_state_descriptor
-        .set_compute_function(Some(&library.get_function(name, None).unwrap()));
-
-    device
-        .new_compute_pipeline_state_with_function(
-            pipeline_state_descriptor.compute_function().unwrap(),
-        )
-        .unwrap()
-}
-
-fn is<T: Any>(type_id: TypeId) -> bool {
-    type_id == TypeId::of::<T>()
-}
-
-fn hash<T: Hash>(obj: T) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    obj.hash(&mut hasher);
-    hasher.finish()
-}
-
-trait DispatchNElements {
-    fn dispatch_n_elements(&self, n: usize);
-}
-
-impl DispatchNElements for ComputeCommandEncoderRef {
-    fn dispatch_n_elements(&self, n: usize) {
-        let n_threads = (n + 32) / 32;
-        self.dispatch_thread_groups(
-            MTLSize {
-                width: n_threads as NSUInteger,
-                height: 1,
-                depth: 1,
-            },
-            MTLSize {
-                width: 32,
-                height: 1,
-                depth: 1,
-            },
-        );
-    }
-}
-
-trait SetInt {
-    fn set_int(&self, index: usize, value: u32);
-}
-
-impl SetInt for ComputeCommandEncoderRef {
-    fn set_int(&self, index: usize, value: u32) {
-        self.set_bytes(
-            index as u64,
-            std::mem::size_of::<u32>() as u64,
-            &value as *const u32 as *const _,
-        );
-    }
-}
-
-fn input_dyn_dims(
-    shapes: &[(ShapeTracker, ShapeTracker)],
-    encoder: &ComputeCommandEncoderRef,
-    offset: usize,
-) {
-    let mut added = HashSet::new();
-    for (d1, d2) in shapes
-        .iter()
-        .flat_map(|(a, b)| a.shape().into_iter().zip(b.shape()))
-    {
-        if let Dim::Unknown(c) = d1 {
-            if !added.contains(&c) {
-                encoder.set_int(offset + added.len(), d2.to_usize().unwrap() as u32);
-                added.insert(c);
-            }
-        }
-    }
-}
-
-fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> String {
-    shapes
-        .iter()
-        .flat_map(|st| st.shape())
-        .filter_map(|d| {
-            if let Dim::Unknown(c) = d {
-                Some(c)
-            } else {
-                None
-            }
-        })
-        .unique()
-        .enumerate()
-        .map(|(i, c)| format!(", device uint& {c} [[buffer({})]]", i + offset))
-        .collect::<String>()
-}
-
-fn get_idx_valid_exps(shape: ShapeTracker) -> (String, String) {
-    let min_re = Regex::new(r"min\((.*?), (.*?)\)").unwrap();
-    let max_re = Regex::new(r"max\((.*?), (.*?)\)").unwrap();
-    let idx_exp = shape.index_expression().to_string();
-    let idx_exp = max_re.replace_all(&idx_exp, "max((uint)($1), (uint)($2))");
-    let idx_exp = min_re.replace_all(&idx_exp, "min((uint)($1), (uint)($2))");
-    let val_exp = shape.valid_expression().to_string();
-    let val_exp = max_re.replace_all(&val_exp, "max((uint)($1), (uint)($2))");
-    let val_exp = min_re.replace_all(&val_exp, "min((uint)($1), (uint)($2))");
-    (idx_exp.to_string(), val_exp.to_string())
 }

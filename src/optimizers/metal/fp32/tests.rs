@@ -418,6 +418,8 @@ fn test_batch_matmul() {
     let d_b = d_dev.tensor([[1., 2., 3., 1.], [1., 2., 1., 2.], [-1., -2., 1., 2.]]);
     let d_c = d_a.matmul(d_b);
 
+    println!("B: {:?}", c.data());
+    println!("D: {:?}", d_c.as_vec());
     assert_close(&c.data(), &d_c.as_vec());
 }
 
