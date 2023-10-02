@@ -8,7 +8,87 @@ use crate::{
 };
 
 use super::prim::{MetalMul, MetalSumReduce};
-use metal_rs::{objc::rc::autoreleasepool, *};
+use metal_rs::{
+    mps::{MPSDataType, Matrix, MatrixDescriptor, MatrixMultiplication},
+    objc::rc::autoreleasepool,
+    *,
+};
+
+/// Multiplies a MxK matrix with a KxN matrix, resulting in a MxN matrix
+#[derive(Debug, Clone)]
+pub struct MPSMatmul2D(Device);
+impl PartialEq for MPSMatmul2D {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+fn build_matrix(buffer: &BufferRef, rows: usize, columns: usize) -> Matrix {
+    let desc = {
+        MatrixDescriptor::new(
+            rows as u64,
+            columns as u64,
+            (columns * std::mem::size_of::<f16>()) as u64,
+            MPSDataType::Float16,
+        )
+    };
+
+    Matrix::init_with_buffer(buffer, desc).unwrap()
+}
+
+impl Operator for MPSMatmul2D {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        autoreleasepool(|| {
+            let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
+            let (m, k, n) = (
+                a_shape[0].to_usize().unwrap(),
+                a_shape[1].to_usize().unwrap(),
+                b_shape[1].to_usize().unwrap(),
+            );
+            let a = inp[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let b = inp[1]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+
+            let out = self.0.new_buffer(
+                (m * n * std::mem::size_of::<f16>()) as u64,
+                MTLResourceOptions::StorageModeManaged,
+            );
+
+            // Build matrices
+            let a_mat = build_matrix(a, m, k);
+            let b_mat = build_matrix(b, k, n);
+            let out_mat = build_matrix(&out, m, n);
+
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.0.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let matmul = MatrixMultiplication::init_with_detail(
+                &self.0, false, false, m as u64, n as u64, k as u64, 1.0, 0.0,
+            )
+            .unwrap();
+            matmul.encode_to_command_buffer(command_buffer, &a_mat, &b_mat, &out_mat);
+
+            // Execute
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
+
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
+    }
+}
 
 /// Multiplies a MxK matrix with a KxN matrix, resulting in a MxN matrix
 #[derive(Debug, Clone)]
@@ -240,6 +320,77 @@ pub struct MetalMatMulOptimizer;
 impl GraphOptimizer for MetalMatMulOptimizer {
     fn optimize(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
+
+        // Look for the mps matmul pattern
+        let s = GraphSelector::default();
+        let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
+        // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
+        // Actually starts at [A,B] | [B, C]
+        s.edge(
+            s.op()
+                .ty::<MetalMul>()
+                .shapes(vec![
+                    vec![Dim::Unknown('A'), Dim::Unknown('C'), Dim::Unknown('B')],
+                    vec![Dim::Unknown('A'), Dim::Unknown('C'), Dim::Unknown('B')],
+                ])
+                .check(|_, shapes| {
+                    shapes[0].indexes[0] < shapes[0].indexes[2]
+                        && shapes[1].indexes[1] > shapes[1].indexes[2]
+                })
+                .fakes(vec![vec![false, true, false], vec![true, false, false]])
+                .ptr(&mut mul),
+            0,
+            s.op()
+                .ty::<MetalSumReduce>()
+                .check(|o, _| {
+                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
+                        o.2 == 2
+                    } else {
+                        false
+                    }
+                })
+                .ptr(&mut sum_reduce),
+        );
+
+        for _ in s.search(graph) {
+            if graph.no_delete.contains(&mul) {
+                // The intermediate mul can't be deleted
+                continue;
+            }
+            // Insert MatMul2D op
+            let mut srcs = graph.get_sources(mul);
+            // Undo expansions and permute
+            srcs[0].1.remove_dim(1);
+            srcs[1].1.remove_dim(0);
+            srcs[1].1.permute(&[1, 0]);
+            let new_op = graph
+                .add_op(MPSMatmul2D(dev.clone()))
+                .input(srcs[0].0, 0, srcs[0].1)
+                .input(srcs[1].0, 0, srcs[1].1)
+                .finish();
+
+            // Create edges to dests
+            move_outgoing_edge(sum_reduce, new_op, &mut graph.graph);
+            move_references(
+                &mut graph.id_remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                sum_reduce,
+                new_op,
+            );
+            move_references(
+                &mut graph.id_remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                mul,
+                new_op,
+            );
+
+            // Remove the old ops
+            graph.graph.remove_node(mul);
+            graph.graph.remove_node(sum_reduce);
+        }
+
         let command_queue = dev.new_command_queue();
         // Look for the matmul pattern
         let s = GraphSelector::default();
