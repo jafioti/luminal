@@ -1,6 +1,6 @@
 #![allow(clippy::needless_range_loop)]
 
-use std::fmt::Debug;
+use std::{any::TypeId, fmt::Debug};
 
 use crate::{
     prelude::{
@@ -40,6 +40,7 @@ pub trait Operator: Debug + TraitObjEq {
 pub struct Function(
     pub String,
     pub Box<dyn Fn(Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor>>,
+    pub TypeId,
 );
 
 impl PartialEq for Function {
@@ -72,7 +73,7 @@ impl Operator for Print {
                 .as_any()
                 .downcast_ref::<Vec<f32>>()
                 .unwrap();
-            println!("{} Data: {:?}", i + 1, &d[..d.len().min(10)]);
+            println!("{} Data: {:?}", i + 1, &d[d.len().saturating_sub(10)..]);
             println!("{} Shape: {:?}", i + 1, tracker);
         }
         vec![Tensor {

@@ -76,6 +76,7 @@ impl Graph {
             id: self.graph.add_node(Box::new(op::Function(
                 format!("{name} Load"),
                 Box::new(|_| panic!("You must set a value for this tensor!")),
+                std::any::TypeId::of::<Vec<f32>>(),
             ))),
             graph_ref: self,
             shape: S::to_tracker(),

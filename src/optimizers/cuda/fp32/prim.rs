@@ -26,28 +26,20 @@ impl PartialEq for CudaCopyToDevice {
 
 impl Operator for CudaCopyToDevice {
     fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        if inp[0].0.borrowed().data.as_any().is::<CudaSlice<f32>>()
-            || inp[0].0.borrowed().data.as_any().is::<CudaSlice<usize>>()
-        {
+        if inp[0].0.borrowed().data.as_any().is::<CudaSlice<f32>>() {
             // Already on device
             return vec![inp.pop().unwrap().0.cloned()];
         }
-        if let Some(cpu_data) = inp[0].0.borrowed().data.as_any().downcast_ref::<Vec<f32>>() {
-            let mut a = unsafe { self.0.alloc::<f32>(cpu_data.len()).unwrap() };
-            self.0.htod_sync_copy_into(cpu_data, &mut a).unwrap();
-            vec![Tensor { data: Box::new(a) }]
-        } else {
-            let cpu_data = inp[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Vec<usize>>()
-                .unwrap();
-            let mut a = unsafe { self.0.alloc::<usize>(cpu_data.len()).unwrap() };
-            self.0.htod_sync_copy_into(cpu_data, &mut a).unwrap();
-            vec![Tensor { data: Box::new(a) }]
-        }
+        let cpu_data = inp[0]
+            .0
+            .borrowed()
+            .data
+            .as_any()
+            .downcast_ref::<Vec<f32>>()
+            .unwrap();
+        let mut a = unsafe { self.0.alloc::<f32>(cpu_data.len()).unwrap() };
+        self.0.htod_sync_copy_into(cpu_data, &mut a).unwrap();
+        vec![Tensor { data: Box::new(a) }]
     }
 }
 
@@ -62,34 +54,20 @@ impl PartialEq for CudaCopyFromDevice {
 
 impl Operator for CudaCopyFromDevice {
     fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        if inp[0].0.borrowed().data.as_any().is::<Vec<f32>>()
-            || inp[0].0.borrowed().data.as_any().is::<Vec<usize>>()
-        {
+        if inp[0].0.borrowed().data.as_any().is::<Vec<f32>>() {
             // Already off device
             return vec![inp.pop().unwrap().0.cloned()];
         }
-        if let Some(cuda_data) = inp[0]
+        let cuda_data = inp[0]
             .0
             .borrowed()
             .data
             .as_any()
             .downcast_ref::<CudaSlice<f32>>()
-        {
-            vec![Tensor {
-                data: Box::new(self.0.dtoh_sync_copy(cuda_data).unwrap()),
-            }]
-        } else {
-            let cuda_data = inp[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<CudaSlice<usize>>()
-                .unwrap();
-            vec![Tensor {
-                data: Box::new(self.0.dtoh_sync_copy(cuda_data).unwrap()),
-            }]
-        }
+            .unwrap();
+        vec![Tensor {
+            data: Box::new(self.0.dtoh_sync_copy(cuda_data).unwrap()),
+        }]
     }
 }
 

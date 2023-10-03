@@ -28,33 +28,25 @@ impl PartialEq for CudaCopyToDevice {
 
 impl Operator for CudaCopyToDevice {
     fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        if inp[0].0.borrowed().data.as_any().is::<CudaSlice<f16>>()
-            || inp[0].0.borrowed().data.as_any().is::<CudaSlice<usize>>()
-        {
+        if inp[0].0.borrowed().data.as_any().is::<CudaSlice<f16>>() {
             // Already on device
             return vec![inp.pop().unwrap().0.cloned()];
         }
-        if let Some(cpu_data) = inp[0].0.borrowed().data.as_any().downcast_ref::<Vec<f32>>() {
-            let vec = cpu_data
-                .iter()
-                .copied()
-                .map(f16::from_f32)
-                .collect::<Vec<_>>();
-            let mut a = unsafe { self.0.alloc::<f16>(vec.len()).unwrap() };
-            self.0.htod_copy_into(vec, &mut a).unwrap();
-            vec![Tensor { data: Box::new(a) }]
-        } else {
-            let cpu_data = inp[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Vec<usize>>()
-                .unwrap();
-            let mut a = unsafe { self.0.alloc::<usize>(cpu_data.len()).unwrap() };
-            self.0.htod_sync_copy_into(cpu_data, &mut a).unwrap();
-            vec![Tensor { data: Box::new(a) }]
-        }
+        let cpu_data = inp[0]
+            .0
+            .borrowed()
+            .data
+            .as_any()
+            .downcast_ref::<Vec<f32>>()
+            .unwrap();
+        let vec = cpu_data
+            .iter()
+            .copied()
+            .map(f16::from_f32)
+            .collect::<Vec<_>>();
+        let mut a = unsafe { self.0.alloc::<f16>(vec.len()).unwrap() };
+        self.0.htod_copy_into(vec, &mut a).unwrap();
+        vec![Tensor { data: Box::new(a) }]
     }
 }
 
@@ -69,41 +61,27 @@ impl PartialEq for CudaCopyFromDevice {
 
 impl Operator for CudaCopyFromDevice {
     fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        if inp[0].0.borrowed().data.as_any().is::<Vec<f32>>()
-            || inp[0].0.borrowed().data.as_any().is::<Vec<usize>>()
-        {
+        if inp[0].0.borrowed().data.as_any().is::<Vec<f32>>() {
             // Already off device
             return vec![inp.pop().unwrap().0.cloned()];
         }
-        if let Some(cuda_data) = inp[0]
+        let cuda_data = inp[0]
             .0
             .borrowed()
             .data
             .as_any()
             .downcast_ref::<CudaSlice<f16>>()
-        {
-            vec![Tensor {
-                data: Box::new(
-                    self.0
-                        .dtoh_sync_copy(cuda_data)
-                        .unwrap()
-                        .into_iter()
-                        .map(|i| i.to_f32())
-                        .collect::<Vec<_>>(),
-                ),
-            }]
-        } else {
-            let cuda_data = inp[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<CudaSlice<usize>>()
-                .unwrap();
-            vec![Tensor {
-                data: Box::new(self.0.dtoh_sync_copy(cuda_data).unwrap()),
-            }]
-        }
+            .unwrap();
+        vec![Tensor {
+            data: Box::new(
+                self.0
+                    .dtoh_sync_copy(cuda_data)
+                    .unwrap()
+                    .into_iter()
+                    .map(|i| i.to_f32())
+                    .collect::<Vec<_>>(),
+            ),
+        }]
     }
 }
 
@@ -1029,8 +1007,7 @@ extern \"C\" __global__ void kernel(__half *out, const __half *inp, const int fr
         for (int c_ = 0; c_ < dim_size; c_++) {{
             int idx = a_ * dim_size * back_size + c_ * back_size + b_;
             if (({valid_exp}) != 0) {{
-                int a_idx = {idx_exp};
-                reduce_value = reduce_value + inp[a_idx];
+                reduce_value = reduce_value + inp[{idx_exp}];
             }}
         }}
         out[i_] = reduce_value;
@@ -1125,7 +1102,6 @@ impl Operator for CudaSumReduce {
                 .launch_async_impl(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
                 .unwrap();
         }
-
         vec![Tensor {
             data: Box::new(out),
         }]
@@ -1281,42 +1257,53 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
             })
             .collect::<Vec<_>>()
         {
-            // Create copy node
-            let copy_node = graph
-                .add_op(CudaCopyToDevice(dev.clone()))
-                .input(function_node, 0, ShapeTracker::new(&[]))
-                .finish();
-
-            // Switch outgoing edges from input to copy_node
-            for (edge_id, weight, dest) in graph
-                .graph
-                .edges_directed(function_node, petgraph::Direction::Outgoing)
-                .map(|e| (e.id(), *e.weight(), e.target()))
-                .filter(|(_, _, trg)| *trg != copy_node)
-                .collect::<Vec<_>>()
-            {
-                graph.graph.add_edge(copy_node, dest, weight);
-                graph.graph.remove_edge(edge_id);
-            }
-
-            if graph.to_retrieve.contains(&function_node) {
-                graph.to_retrieve.insert(copy_node);
-            }
-
-            // If there are inputs to this function remap the function to the copy node
             if graph
                 .graph
-                .edges_directed(function_node, petgraph::Direction::Incoming)
-                .count()
-                != 0
+                .node_weight(function_node)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Function>()
+                .unwrap()
+                .2
+                == std::any::TypeId::of::<Vec<f32>>()
             {
-                move_references(
-                    &mut graph.id_remap,
-                    &mut graph.no_delete,
-                    &mut graph.to_retrieve,
-                    function_node,
-                    copy_node,
-                );
+                // Create copy node
+                let copy_node = graph
+                    .add_op(CudaCopyToDevice(dev.clone()))
+                    .input(function_node, 0, ShapeTracker::new(&[]))
+                    .finish();
+
+                // Switch outgoing edges from input to copy_node
+                for (edge_id, weight, dest) in graph
+                    .graph
+                    .edges_directed(function_node, petgraph::Direction::Outgoing)
+                    .map(|e| (e.id(), *e.weight(), e.target()))
+                    .filter(|(_, _, trg)| *trg != copy_node)
+                    .collect::<Vec<_>>()
+                {
+                    graph.graph.add_edge(copy_node, dest, weight);
+                    graph.graph.remove_edge(edge_id);
+                }
+
+                if graph.to_retrieve.contains(&function_node) {
+                    graph.to_retrieve.insert(copy_node);
+                }
+
+                // If there are inputs to this function remap the function to the copy node
+                if graph
+                    .graph
+                    .edges_directed(function_node, petgraph::Direction::Incoming)
+                    .count()
+                    != 0
+                {
+                    move_references(
+                        &mut graph.id_remap,
+                        &mut graph.no_delete,
+                        &mut graph.to_retrieve,
+                        function_node,
+                        copy_node,
+                    );
+                }
             }
 
             // Insert copy from device for function inputs
@@ -1548,6 +1535,82 @@ impl Operator for FakeSumReduce {
         vec![Tensor {
             data: Box::new(out),
         }]
+    }
+}
+
+/// Sometimes CopyTo -> CopyFrom and CopyFrom -> CopyTo patterns remain, so let's clean them up
+#[derive(Debug, Default)]
+pub struct CopyOptimizer;
+
+impl GraphOptimizer for CopyOptimizer {
+    fn optimize(&self, graph: &mut Graph) {
+        let (mut first, mut second) = (NodeIndex::default(), NodeIndex::default());
+        let s1 = GraphSelector::default();
+        s1.edge(
+            s1.op().ty::<CudaCopyToDevice>().ptr(&mut first),
+            0,
+            s1.op().ty::<CudaCopyFromDevice>().ptr(&mut second),
+        );
+        let s2 = GraphSelector::default();
+        s2.edge(
+            s2.op().ty::<CudaCopyFromDevice>().ptr(&mut first),
+            0,
+            s2.op().ty::<CudaCopyToDevice>().ptr(&mut second),
+        );
+
+        for _ in s1.search(graph).chain(s2.search(graph)) {
+            if graph
+                .graph
+                .edges_directed(first, petgraph::Direction::Outgoing)
+                .filter(|e| graph.graph.contains_node(e.target()))
+                .filter(|e| {
+                    !graph
+                        .graph
+                        .node_weight(e.target())
+                        .unwrap()
+                        .as_any()
+                        .is::<CudaCopyFromDevice>()
+                        && !graph
+                            .graph
+                            .node_weight(e.target())
+                            .unwrap()
+                            .as_any()
+                            .is::<CudaCopyToDevice>()
+                })
+                .count()
+                > 1
+                || graph.no_delete.contains(&first)
+            {
+                continue;
+            }
+            let source = graph.get_sources(first)[0];
+            move_outgoing_edge(second, source.0, &mut graph.graph);
+            move_references(
+                &mut graph.id_remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                second,
+                source.0,
+            );
+            graph.graph.remove_node(second);
+            for dest in graph
+                .get_dests(first)
+                .iter()
+                .map(|(i, _)| *i)
+                .collect::<Vec<_>>()
+            {
+                move_outgoing_edge(dest, source.0, &mut graph.graph);
+                move_references(
+                    &mut graph.id_remap,
+                    &mut graph.no_delete,
+                    &mut graph.to_retrieve,
+                    dest,
+                    source.0,
+                );
+                graph.graph.remove_node(dest);
+            }
+            graph.graph.remove_node(first);
+        }
     }
 }
 

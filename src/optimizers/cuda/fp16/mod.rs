@@ -15,6 +15,7 @@ pub type CudaFp16Optimizer = (
     prim::CudaPrimitiveOptimizer,
     prim::FakeReductionOptimizer,
     matmul::CudaMatMulOptimizer,
+    prim::CopyOptimizer,
 );
 
 impl Data for CudaSlice<f16> {

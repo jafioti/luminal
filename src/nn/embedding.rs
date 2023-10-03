@@ -1,19 +1,8 @@
-use std::any::Any;
-
 use rand::{thread_rng, Rng};
 
 use crate::{op, prelude::*};
 
 // This is a really shoddy way to do gathers TODO: Do something else
-
-impl Data for Vec<usize> {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-}
 
 // Gather batch of batches from 2D embedding matrix
 impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
@@ -31,7 +20,7 @@ impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
                         .borrowed()
                         .data
                         .as_any()
-                        .downcast_ref::<Vec<usize>>()
+                        .downcast_ref::<Vec<f32>>()
                         .unwrap();
                     let data = tensors[1]
                         .0
@@ -47,7 +36,7 @@ impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
                             res.append(&mut vec![0.; DIM]);
                             continue;
                         };
-                        let start = indexes[index_idx] * DIM;
+                        let start = indexes[index_idx] as usize * DIM;
                         for n in 0..DIM {
                             res.push(b_ind.index(start + n).map(|i| data[i]).unwrap_or_default());
                         }
@@ -56,6 +45,7 @@ impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
                         data: Box::new(res),
                     }]
                 }),
+                std::any::TypeId::of::<Vec<f32>>(),
             ))
             .input(indexes.id, 0, indexes.shape)
             .input(self.id, 0, self.shape) // Since indexes might have a 1 dimension we don't want getting changed, we feed it in as the first argument
@@ -145,8 +135,8 @@ mod tests {
         b.mark();
         a.mark();
         batch_out.mark();
-        a.set(vec![1, 0, 1]);
-        batch.set(vec![1, 0, 2, 1, 0, 1]);
+        a.set(vec![1., 0., 1.]);
+        batch.set(vec![1., 0., 2., 1., 0., 1.]);
 
         cx.execute();
 

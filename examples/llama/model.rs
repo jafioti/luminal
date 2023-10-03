@@ -122,6 +122,7 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
                         ),
                     }]
                 }),
+                std::any::TypeId::of::<Vec<f32>>(),
             ))
             .input(seq_tensor.id, 0, seq_tensor.shape);
         if has_cache {
@@ -411,11 +412,11 @@ impl<
             GraphTensor<(CurSeq, CurSeq)>,
         ),
     ) -> Self::Output {
-        let (y, cache) = self
-            .self_attn
-            .forward((self.input_layer_norm.forward(x), attn_mask));
+        let normed = self.input_layer_norm.forward(x);
+        let (y, cache) = self.self_attn.forward((normed, attn_mask));
         let x = x + y;
         let y = self.mlp.forward(self.post_attention_layer_norm.forward(x));
+        // let y = self.mlp.forward(x);
         (x + y, cache)
     }
 }
@@ -532,6 +533,7 @@ impl<
                             data: Box::new(data),
                         }]
                     }),
+                    std::any::TypeId::of::<Vec<f32>>(),
                 ))
                 .input(input.id, 0, input.shape)
                 .finish(),
@@ -540,6 +542,7 @@ impl<
         );
 
         let mut hidden_states = self.embed_tokens.forward(input);
+        hidden_states.debug("Input");
         let mut caches = vec![];
         for layer_i in &self.layers {
             let (new_hidden_states, (k_cache, v_cache)) =
@@ -548,6 +551,7 @@ impl<
             caches.push((k_cache.contiguous(), v_cache.contiguous()));
         }
         (self.norm.forward(hidden_states), caches)
+        // (hidden_states, caches)
     }
 }
 
