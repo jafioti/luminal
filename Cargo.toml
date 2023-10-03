@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 
 [features]
 #default = ["cuda"]
-#default= ["metal"]
+default = ["metal"]
 cuda = ["dep:cudarc"]
 metal = ["dep:metal-rs"]
 
@@ -22,16 +22,17 @@ urlencoding = "2.1.2"
 webbrowser = "0.8.10"
 dyn-clone = "1.0.12"
 cudarc = {path="./resources/cudarc", features=["cublas", "f16"], optional=true}
-metal-rs = {version="0.26.0", package="metal", optional=true}
+metal-rs = {version="0.26.0", package="metal", optional=true, features=["mps"]}
 safetensors = "0.3.1"
 memmap2 = "0.7.1"
-half = "2.3.1"
+half = {version="2.3.1", features = ["num-traits", "rand_distr"]}
 tinyvec = "1.6.0"
 term_size = "0.3.2"
 colored = "2.0.4"
 regex = "1.9.5"
 savage_core = {path="./resources/savage_core"}
 num = "0.4.1"
+gemm = "0.15.4"
 
 [dev-dependencies]
 dfdx = {version="0.13", features=["f16"]}

@@ -46,7 +46,8 @@ fn main() {
         k.mark_no_delete();
         v.mark_no_delete();
     }
-    cx1.optimize(<(CudaFp16Optimizer, GenericOptimizer)>::default());
+    cx1.optimize(<(MetalFp16Optimizer, GenericOptimizer)>::default());
+    // cx1.optimize(<(MetalFp32Optimizer, GenericOptimizer)>::default());
     // cx1.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
 
     // Build KV cache forward graph
@@ -65,7 +66,7 @@ fn main() {
         k.set_type(std::any::TypeId::of::<CudaSlice<f16>>());
         v.set_type(std::any::TypeId::of::<CudaSlice<f16>>());
     }
-    cx2.optimize(<(CudaFp16Optimizer, GenericOptimizer)>::default());
+    cx2.optimize(<(MetalFp16Optimizer, GenericOptimizer)>::default());
     // cx2.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
 
     println!("Inferencing...");

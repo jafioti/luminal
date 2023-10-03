@@ -104,7 +104,7 @@ impl<S: Shape> GraphTensor<S> {
         self / (self.abs() + 1e-10)
     }
 
-    // Approxamate, see full impl here: https://github.com/tinygrad/tinygrad/blob/a32c67760140dd26b60d7932268f2e62e96a66e0/tinygrad/tensor.py#L568
+    // Approximate, see full impl here: https://github.com/tinygrad/tinygrad/blob/a32c67760140dd26b60d7932268f2e62e96a66e0/tinygrad/tensor.py#L568
     pub fn pow(self, e: f32) -> GraphTensor<S> {
         self.abs().log().mul(e).exp()
     }

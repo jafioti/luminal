@@ -173,6 +173,7 @@ impl Iterator for GraphSearch {
                 self.already_returned.insert(node);
                 return Some(());
             }
+            used.clear();
         }
         None
     }
@@ -209,12 +210,7 @@ fn search(
         .sorted_by_key(|e| e.weight().0)
         .map(|e| e.weight().2)
         .collect::<Vec<_>>();
-    // Run check
-    if let Some(check) = &selector_weight.1 {
-        if !check(current_weight.as_ref(), &input_shapes) {
-            return false;
-        }
-    }
+
     // Test shape
     if let Some(shape) = &selector_weight.2 {
         let mut shape_map = HashMap::new();
@@ -255,6 +251,14 @@ fn search(
             }
         }
     }
+
+    // Run check
+    if let Some(check) = &selector_weight.1 {
+        if !check(current_weight.as_ref(), &input_shapes) {
+            return false;
+        }
+    }
+
     // Used is to make sure we don't use the same node from the source graph twice, which prevents cycles
     used.insert(graph_node);
     selector_used.insert(selector_node);

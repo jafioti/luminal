@@ -135,8 +135,8 @@ mod tests {
         b.mark();
         a.mark();
         batch_out.mark();
-        a.set(vec![1., 0., 1.]);
-        batch.set(vec![1., 0., 2., 1., 0., 1.]);
+        a.set(vec![1.0, 0.0, 1.0]);
+        batch.set(vec![1.0, 0.0, 2.0, 1.0, 0.0, 1.0]);
 
         cx.execute();
 

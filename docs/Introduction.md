@@ -23,7 +23,7 @@ c.mark();
 cx.execute();
 
 // Get result (5)
-println!("Result: {:?}", c.retrieve().unwrap().real_data(c.view().unwrap()).unwrap());
+println!("Result: {:?}", c.data());
 // Prints out [2.0, 4.0, 6.0]
 ```
 Wow! A lot is going on here just to add two tensors together. That's because luminal isn't really designed for such simple computation, and there's little benifit to using it here. But we'll see it pay off when we start doing more complex operations.
@@ -33,7 +33,7 @@ So what's happening here?
 2) Now we can start doing the thing we came here for: the addition. So we add two `GraphTensor`s together, and get a new `GraphTensor`. Notice this *does not* consume anything, and we're free to use a or b later on. This is because `GraphTensor` is a super lightweight tracking struct which implements copy. "But wait, we never set tbe values of a and b, how can we add them? **We aren't actually adding them here.** Instead, we're writing this addition to the graph, and getting out c, which points to the result when it's actually done.
 3) Then we set the data for these tensors. But if `GraphTensor` doesn't hold data, how can we set it? Well we aren't actually setting it *in* the tensor, just passing it through to the graph to say *once you run, set this tensor to this value.* We also need to mark the output we want to retrieve later. This is so that when the graph runs, it doesn't delete the data for c part-way through execution (a common optimization for unused tensors). Notice we're setting the sources *after* we define the computation. This is backward from a lot of other libs, but it means we can redefine the data and rerun everything without redefining the computation later on.
 4) Once we call `cx.execute()`, we've already set all our sources, so our addition actually gets ran and stored in c!
-5) Now since we're done computing c, we can fetch the data for c and see the result. *This API is likely to change, as it's very ugly.*
+5) Now since we're done computing c, we can fetch the data for c and see the result.
 
 Alright, that was a lot but now we've touched on all the main aspects of running a model in luminal.
 
@@ -65,4 +65,4 @@ impl<const A: usize, const B: usize> Module<GraphTensor<R1<A>>> for Linear<A, B>
 ```
 Here we see a single weight matrix as the internal state, of size AxB. We've written a single forward function for single input vectors of shape (A,) and matmul it by our weight matrix to get an output of shape (B,).
 
-Again, notice we're only dealing with `GraphTensor`s here, so when this code actually gets ran, **no computation happens, it just gets recorded to the graph.**
+Again, notice we're only dealing with `GraphTensor`s here, so when this code actually gets ran, **no computation happens, ops just get recorded to the graph.**

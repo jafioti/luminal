@@ -8,9 +8,11 @@ use crate::{
     optimizers::metal::*,
     prelude::*,
 };
+use half::f16;
 use itertools::Itertools;
 use metal_rs::{objc::rc::autoreleasepool, *};
-use petgraph::visit::EdgeRef;
+use num_traits::FromPrimitive;
+use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
 /// Copy a tensor to the GPU
 #[derive(Debug, Clone)]
@@ -33,10 +35,14 @@ impl Operator for MetalCopyToDevice {
             .data
             .as_any()
             .downcast_ref::<Vec<f32>>()
-            .unwrap();
+            .unwrap()
+            .iter()
+            .copied()
+            .map(f16::from_f32)
+            .collect::<Vec<_>>();
         let buffer = self.0.new_buffer_with_data(
             unsafe { std::mem::transmute(data.as_ptr()) },
-            (data.len() * std::mem::size_of::<f32>()) as u64,
+            (data.len() * std::mem::size_of::<f16>()) as u64,
             MTLResourceOptions::StorageModeManaged,
         );
         vec![Tensor {
@@ -67,10 +73,10 @@ impl Operator for MetalCopyFromDevice {
             .as_any()
             .downcast_ref::<Buffer>()
             .unwrap();
-        let mut data = vec![0.0; buffer.length() as usize / std::mem::size_of::<f32>()];
-        let ptr = buffer.contents() as *mut f32;
+        let mut data = vec![0.0; buffer.length() as usize / std::mem::size_of::<f16>()];
+        let ptr = buffer.contents() as *mut f16;
         for (i, d) in data.iter_mut().enumerate() {
-            *d = unsafe { *ptr.add(i) };
+            *d = unsafe { *ptr.add(i) }.to_f32();
         }
         vec![Tensor {
             data: Box::new(data),
@@ -98,7 +104,7 @@ impl MetalContiguous {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements && ({valid_exp} != 0)) {{
         out[idx] = inp[{idx_exp}];
     }}
@@ -129,7 +135,7 @@ impl Operator for MetalContiguous {
                 .downcast_ref::<Buffer>()
                 .unwrap();
             let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f32>()) as u64,
+                (inp_size * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
 
@@ -171,7 +177,7 @@ impl MetalLog2 {
     fn new(dev: Device, kernels: &mut HashMap<String, ComputePipelineState>) -> Self {
         let mut code = "#include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         out[idx] = log2(inp[idx]);
     }}
@@ -200,7 +206,7 @@ impl Operator for MetalLog2 {
                 .downcast_ref::<Buffer>()
                 .unwrap();
             let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f32>()) as u64,
+                (inp_size * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
 
@@ -241,7 +247,7 @@ impl MetalExp2 {
     fn new(dev: Device, kernels: &mut HashMap<String, ComputePipelineState>) -> Self {
         let mut code = "#include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         out[idx] = exp2(inp[idx]);
     }}
@@ -270,7 +276,7 @@ impl Operator for MetalExp2 {
                 .downcast_ref::<Buffer>()
                 .unwrap();
             let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f32>()) as u64,
+                (inp_size * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
 
@@ -311,7 +317,7 @@ impl MetalSin {
     fn new(dev: Device, kernels: &mut HashMap<String, ComputePipelineState>) -> Self {
         let mut code = "#include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         out[idx] = sin(inp[idx]);
     }}
@@ -340,7 +346,7 @@ impl Operator for MetalSin {
                 .downcast_ref::<Buffer>()
                 .unwrap();
             let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f32>()) as u64,
+                (inp_size * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
 
@@ -381,7 +387,7 @@ impl MetalSqrt {
     fn new(dev: Device, kernels: &mut HashMap<String, ComputePipelineState>) -> Self {
         let mut code = "#include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         out[idx] = sqrt(inp[idx]);
     }}
@@ -410,7 +416,7 @@ impl Operator for MetalSqrt {
                 .downcast_ref::<Buffer>()
                 .unwrap();
             let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f32>()) as u64,
+                (inp_size * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
 
@@ -451,7 +457,7 @@ impl MetalRecip {
     fn new(dev: Device, kernels: &mut HashMap<String, ComputePipelineState>) -> Self {
         let mut code = "#include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         out[idx] = 1.0 / inp[idx];
     }}
@@ -480,7 +486,7 @@ impl Operator for MetalRecip {
                 .downcast_ref::<Buffer>()
                 .unwrap();
             let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f32>()) as u64,
+                (inp_size * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
 
@@ -531,7 +537,7 @@ impl MetalAdd {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device float *inp_a [[buffer(0)]], device float *inp_b [[buffer(1)]], device float *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffer(1)]], device half *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
         out[idx] = 
             (({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}]) 
@@ -570,7 +576,7 @@ impl Operator for MetalAdd {
                 .downcast_ref::<Buffer>()
                 .unwrap();
             let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f32>()) as u64,
+                (inp_size * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
 
@@ -627,11 +633,11 @@ impl MetalMul {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device float *inp_a [[buffer(0)]], device float *inp_b [[buffer(1)]], device float *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffer(1)]], device half *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
         out[idx] = 
-            (({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}]) 
-            * (({b_valid_exp}) == 0 ? 0.0 : inp_b[{b_idx_exp}]);
+            (half)((({a_valid_exp}) == 0 ? 0.0 : (float)inp_a[{a_idx_exp}]) 
+            * (({b_valid_exp}) == 0 ? 0.0 : (float)inp_b[{b_idx_exp}]));
     }}
 }}
 ", render_dyn_dim_inputs(&[a_shape, b_shape], 4),
@@ -666,7 +672,7 @@ impl Operator for MetalMul {
                 .downcast_ref::<Buffer>()
                 .unwrap();
             let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f32>()) as u64,
+                (inp_size * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
 
@@ -723,10 +729,10 @@ impl MetalLessThan {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device float *inp_a [[buffer(0)]], device float *inp_b [[buffer(1)]], device float *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffer(1)]], device half *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
-        float a_t = 0.0;
-        float b_t = 0.0;
+        half a_t = 0.0;
+        half b_t = 0.0;
         if (({a_valid_exp}) != 0) {{
             a_t = inp_a[{a_idx_exp}];
         }}
@@ -772,7 +778,7 @@ impl Operator for MetalLessThan {
                 .downcast_ref::<Buffer>()
                 .unwrap();
             let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f32>()) as u64,
+                (inp_size * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
 
@@ -829,7 +835,7 @@ impl MetalMod {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device float *inp_a [[buffer(0)]], device float *inp_b [[buffer(1)]], device float *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffer(1)]], device half *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
         out[idx] = fmod(({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}], ({b_valid_exp}) == 0 ? 0.0 : inp_b[{b_idx_exp}]);
     }}
@@ -866,7 +872,7 @@ impl Operator for MetalMod {
                 .downcast_ref::<Buffer>()
                 .unwrap();
             let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f32>()) as u64,
+                (inp_size * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
 
@@ -922,11 +928,11 @@ impl MetalSumReduce {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], device uint& front_size [[buffer(3)]], device uint& back_size [[buffer(4)]], device uint& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], device uint& front_size [[buffer(3)]], device uint& back_size [[buffer(4)]], device uint& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
     if (i_ < n_elements) {{
         uint a_ = i_ / back_size;
         uint b_ = i_ % back_size;
-        float reduce_value = 0.0;
+        half reduce_value = 0.0;
         for (uint c_ = 0; c_ < dim_size; c_++) {{
             uint idx = a_ * dim_size * back_size + c_ * back_size + b_;
             if (({valid_exp}) != 0) {{
@@ -963,7 +969,7 @@ impl Operator for MetalSumReduce {
                 .downcast_ref::<Buffer>()
                 .unwrap();
             let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f32>()) as u64,
+                (inp_size * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
             let front_size: usize = tensors[0]
@@ -1032,11 +1038,11 @@ impl MetalMaxReduce {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device float *inp [[buffer(0)]], device float *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], device uint& front_size [[buffer(3)]], device uint& back_size [[buffer(4)]], device uint& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], device uint& front_size [[buffer(3)]], device uint& back_size [[buffer(4)]], device uint& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
     if (i_ < n_elements) {{
         uint a_ = i_ / back_size;
         uint b_ = i_ % back_size;
-        float reduce_value = -(float)0x7f800000;
+        half reduce_value = -MAXHALF;
         for (uint c_ = 0; c_ < dim_size; c_++) {{
             uint idx = a_ * dim_size * back_size + c_ * back_size + b_;
             if (({valid_exp}) != 0) {{
@@ -1074,7 +1080,7 @@ impl Operator for MetalMaxReduce {
                 .downcast_ref::<Buffer>()
                 .unwrap();
             let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f32>()) as u64,
+                (inp_size * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
             let front_size: usize = tensors[0]
@@ -1343,5 +1349,115 @@ impl GraphOptimizer for PrimitiveOptimizer {
                 ));
             }
         }
+    }
+}
+
+/// In 16 bit, summing above 2048 doesn't work. This precludes the .expand(Dim).sum_reduce() pattern to get a dim size in a tensor, so we need to replace these fake reductions with an elementwise mul
+#[derive(Debug, Default)]
+pub struct FakeReductionOptimizer;
+
+impl GraphOptimizer for FakeReductionOptimizer {
+    fn optimize(&self, graph: &mut Graph) {
+        let s = GraphSelector::default();
+        let mut sum_reduce = NodeIndex::default();
+        s.op()
+            .ty::<MetalSumReduce>()
+            .check(|o, shapes| {
+                if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
+                    shapes[0].fake[shapes[0].indexes[o.2]] // Ensure dimension we are reducing is fake
+                } else {
+                    false
+                }
+            })
+            .ptr(&mut sum_reduce);
+
+        let mut compiled = None;
+        for _ in s.search(graph) {
+            let op_ref = graph.graph.node_weight_mut(sum_reduce).unwrap();
+            let dim = op_ref.as_any().downcast_ref::<MetalSumReduce>().unwrap().2;
+            let dev = op_ref
+                .as_any()
+                .downcast_ref::<MetalSumReduce>()
+                .unwrap()
+                .1
+                .clone();
+            if compiled.is_none() {
+                compiled = Some(FakeSumReduce::compile(dev.clone()));
+            }
+            *op_ref = Box::new(FakeSumReduce(compiled.clone().unwrap(), dev, dim));
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FakeSumReduce(ComputePipelineState, Device, pub usize);
+impl PartialEq for FakeSumReduce {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl FakeSumReduce {
+    pub fn compile(dev: Device) -> ComputePipelineState {
+        let mut code = "#include <metal_stdlib>
+using namespace metal;
+kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]], device half& mul_factor [[buffer(3)]]) {{
+    if (idx < n_elements) {{
+        out[idx] = inp[idx] * mul_factor;
+    }}
+}}
+".to_string();
+        let name = format!("kernel_{}", hash(&code));
+        code = code.replace("mkernel", &name);
+
+        compile_function(&name, &code, &dev)
+    }
+}
+
+impl Operator for FakeSumReduce {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        autoreleasepool(|| {
+            let dim_size =
+                f16::from_usize(tensors[0].1.shape()[self.2].to_usize().unwrap()).unwrap();
+            let inp = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let inp_size = tensors[0].1.n_physical_elements();
+            let out = self.1.new_buffer(
+                (inp_size * std::mem::size_of::<f16>()) as u64,
+                MTLResourceOptions::StorageModeManaged,
+            );
+
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
+
+            // Set inputs
+            encoder.set_buffer(0, Some(inp), 0);
+            encoder.set_buffer(1, Some(&out), 0);
+            encoder.set_int(2, inp_size as u32);
+            encoder.set_bytes(
+                3,
+                std::mem::size_of::<f16>() as u64,
+                &dim_size as *const f16 as *const _,
+            );
+
+            // Execute
+            encoder.dispatch_n_elements(inp_size);
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
+
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
     }
 }
