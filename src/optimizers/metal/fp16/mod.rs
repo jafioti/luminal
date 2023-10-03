@@ -9,6 +9,7 @@ pub type MetalFp16Optimizer = (
     matmul::MetalMatMulOptimizer,
     mean_reduce::MeanReduceOptimizer,
     rms_norm::RMSNormOptimizer,
+    prim::CopyOptimizer,
 );
 
 #[cfg(test)]

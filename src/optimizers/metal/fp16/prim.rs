@@ -1149,42 +1149,53 @@ impl GraphOptimizer for PrimitiveOptimizer {
             })
             .collect::<Vec<_>>()
         {
-            // Create copy node
-            let copy_node = graph
-                .add_op(MetalCopyToDevice(dev.clone()))
-                .input(function_node, 0, ShapeTracker::new(&[]))
-                .finish();
-
-            // Switch outgoing edges from input to copy_node
-            for (edge_id, weight, dest) in graph
-                .graph
-                .edges_directed(function_node, petgraph::Direction::Outgoing)
-                .map(|e| (e.id(), *e.weight(), e.target()))
-                .filter(|(_, _, trg)| *trg != copy_node)
-                .collect::<Vec<_>>()
-            {
-                graph.graph.add_edge(copy_node, dest, weight);
-                graph.graph.remove_edge(edge_id);
-            }
-
-            if graph.to_retrieve.contains(&function_node) {
-                graph.to_retrieve.insert(copy_node);
-            }
-
-            // If there are inputs to this function remap the function to the copy node
             if graph
                 .graph
-                .edges_directed(function_node, petgraph::Direction::Incoming)
-                .count()
-                != 0
+                .node_weight(function_node)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<crate::op::Function>()
+                .unwrap()
+                .2
+                == std::any::TypeId::of::<Vec<f32>>()
             {
-                move_references(
-                    &mut graph.id_remap,
-                    &mut graph.no_delete,
-                    &mut graph.to_retrieve,
-                    function_node,
-                    copy_node,
-                );
+                // Create copy node
+                let copy_node = graph
+                    .add_op(MetalCopyToDevice(dev.clone()))
+                    .input(function_node, 0, ShapeTracker::new(&[]))
+                    .finish();
+
+                // Switch outgoing edges from input to copy_node
+                for (edge_id, weight, dest) in graph
+                    .graph
+                    .edges_directed(function_node, petgraph::Direction::Outgoing)
+                    .map(|e| (e.id(), *e.weight(), e.target()))
+                    .filter(|(_, _, trg)| *trg != copy_node)
+                    .collect::<Vec<_>>()
+                {
+                    graph.graph.add_edge(copy_node, dest, weight);
+                    graph.graph.remove_edge(edge_id);
+                }
+
+                if graph.to_retrieve.contains(&function_node) {
+                    graph.to_retrieve.insert(copy_node);
+                }
+
+                // If there are inputs to this function remap the function to the copy node
+                if graph
+                    .graph
+                    .edges_directed(function_node, petgraph::Direction::Incoming)
+                    .count()
+                    != 0
+                {
+                    move_references(
+                        &mut graph.id_remap,
+                        &mut graph.no_delete,
+                        &mut graph.to_retrieve,
+                        function_node,
+                        copy_node,
+                    );
+                }
             }
 
             // Insert copy from device for function inputs
@@ -1459,5 +1470,81 @@ impl Operator for FakeSumReduce {
                 data: Box::new(out),
             }]
         })
+    }
+}
+
+/// Sometimes CopyTo -> CopyFrom and CopyFrom -> CopyTo patterns remain, so let's clean them up
+#[derive(Debug, Default)]
+pub struct CopyOptimizer;
+
+impl GraphOptimizer for CopyOptimizer {
+    fn optimize(&self, graph: &mut Graph) {
+        let (mut first, mut second) = (NodeIndex::default(), NodeIndex::default());
+        let s1 = GraphSelector::default();
+        s1.edge(
+            s1.op().ty::<MetalCopyToDevice>().ptr(&mut first),
+            0,
+            s1.op().ty::<MetalCopyFromDevice>().ptr(&mut second),
+        );
+        let s2 = GraphSelector::default();
+        s2.edge(
+            s2.op().ty::<MetalCopyFromDevice>().ptr(&mut first),
+            0,
+            s2.op().ty::<MetalCopyToDevice>().ptr(&mut second),
+        );
+
+        for _ in s1.search(graph).chain(s2.search(graph)) {
+            if graph
+                .graph
+                .edges_directed(first, petgraph::Direction::Outgoing)
+                .filter(|e| graph.graph.contains_node(e.target()))
+                .filter(|e| {
+                    !graph
+                        .graph
+                        .node_weight(e.target())
+                        .unwrap()
+                        .as_any()
+                        .is::<MetalCopyFromDevice>()
+                        && !graph
+                            .graph
+                            .node_weight(e.target())
+                            .unwrap()
+                            .as_any()
+                            .is::<MetalCopyToDevice>()
+                })
+                .count()
+                > 1
+                || graph.no_delete.contains(&first)
+            {
+                continue;
+            }
+            let source = graph.get_sources(first)[0];
+            move_outgoing_edge(second, source.0, &mut graph.graph);
+            move_references(
+                &mut graph.id_remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                second,
+                source.0,
+            );
+            graph.graph.remove_node(second);
+            for dest in graph
+                .get_dests(first)
+                .iter()
+                .map(|(i, _)| *i)
+                .collect::<Vec<_>>()
+            {
+                move_outgoing_edge(dest, source.0, &mut graph.graph);
+                move_references(
+                    &mut graph.id_remap,
+                    &mut graph.no_delete,
+                    &mut graph.to_retrieve,
+                    dest,
+                    source.0,
+                );
+                graph.graph.remove_node(dest);
+            }
+            graph.graph.remove_node(first);
+        }
     }
 }

@@ -2,11 +2,8 @@ mod config;
 mod loader;
 mod model;
 
-use cudarc::driver::CudaSlice;
-use half::f16;
 use luminal::prelude::*;
 use model::LlamaForCausalLM;
-use petgraph::stable_graph::NodeIndex;
 use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
 
 type Model = LlamaForCausalLM<
@@ -46,9 +43,13 @@ fn main() {
         k.mark_no_delete();
         v.mark_no_delete();
     }
+    #[cfg(feature="metal")]
     cx1.optimize(<(MetalFp16Optimizer, GenericOptimizer)>::default());
-    // cx1.optimize(<(MetalFp32Optimizer, GenericOptimizer)>::default());
-    // cx1.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
+    #[cfg(feature="cuda")]
+    cx1.optimize(<(MetalFp32Optimizer, GenericOptimizer)>::default());
+    #[cfg(not(feature="cuda"))]
+    #[cfg(not(feature="metal"))]
+    cx1.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
 
     // Build KV cache forward graph
     let kv_model = Model::initialize(&mut cx2);
@@ -62,12 +63,23 @@ fn main() {
         k.mark_no_delete();
         v.mark_no_delete();
     }
+    #[cfg(feature="metal")]
     for (k, v) in &cache_src {
-        k.set_type(std::any::TypeId::of::<CudaSlice<f16>>());
-        v.set_type(std::any::TypeId::of::<CudaSlice<f16>>());
+        k.set_type(std::any::TypeId::of::<metal_rs::Buffer>());
+        v.set_type(std::any::TypeId::of::<metal_rs::Buffer>());
     }
+    #[cfg(feature="cuda")]
+    for (k, v) in &cache_src {
+        k.set_type(std::any::TypeId::of::<cudarc::driver::CudaSlice<half::f16>>());
+        v.set_type(std::any::TypeId::of::<cudarc::driver::CudaSlice<half::f16>>());
+    }
+    #[cfg(feature="metal")]
     cx2.optimize(<(MetalFp16Optimizer, GenericOptimizer)>::default());
-    // cx2.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
+    #[cfg(feature="cuda")]
+    cx2.optimize(<(MetalFp32Optimizer, GenericOptimizer)>::default());
+    #[cfg(not(feature="cuda"))]
+    #[cfg(not(feature="metal"))]
+    cx2.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
 
     println!("Inferencing...");
     // First pass
