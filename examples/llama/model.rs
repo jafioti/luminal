@@ -6,7 +6,6 @@ use luminal::{
     op::Function,
     prelude::*,
 };
-use rand::{thread_rng, Rng};
 
 // Full LLaMa model implementation, heavily based off of https://github.com/coreylowman/llama-dfdx/blob/main/src/modeling.rs
 
@@ -28,7 +27,7 @@ impl<const I: usize, const H: usize, B: Dimension, S: Dimension>
 
     fn forward(&self, input: GraphTensor<(B, S, Const<H>)>) -> Self::Output {
         let gate = input.matmul(self.gate_proj.permute());
-        let gate = gate.sigmoid() * gate;
+        let gate = gate.swish();
         let up = input.matmul(self.up_proj.permute()) * gate;
         up.matmul(self.down_proj.permute())
     }
@@ -150,17 +149,9 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> InitModule
     for RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
 {
     fn initialize(cx: &mut Graph) -> Self {
-        let s = Self {
+        Self {
             inv_freq: cx.new_tensor("Inv Freq"),
-        };
-        // Init weight as uniform(-1, 1)
-        let mut rng = thread_rng();
-        s.inv_freq.set(
-            (0..HEAD_DIM_OVER_2)
-                .map(|_| rng.gen_range(-1_f32..1_f32))
-                .collect::<Vec<_>>(),
-        );
-        s
+        }
     }
 }
 
@@ -411,11 +402,13 @@ impl<
             GraphTensor<(CurSeq, CurSeq)>,
         ),
     ) -> Self::Output {
-        let (y, cache) = self
-            .self_attn
-            .forward((self.input_layer_norm.forward(x), attn_mask));
+        x.debug("in");
+        let normed = self.input_layer_norm.forward(x);
+        normed.debug("normed");
+        let (y, cache) = self.self_attn.forward((normed, attn_mask));
         let x = x + y;
-        let y = self.mlp.forward(self.post_attention_layer_norm.forward(x));
+        // let y = self.mlp.forward(self.post_attention_layer_norm.forward(x));
+        let y = self.mlp.forward(x);
         (x + y, cache)
     }
 }
@@ -547,7 +540,8 @@ impl<
             hidden_states = new_hidden_states;
             caches.push((k_cache.contiguous(), v_cache.contiguous()));
         }
-        (self.norm.forward(hidden_states), caches)
+        // (self.norm.forward(hidden_states), caches)
+        (hidden_states, caches)
     }
 }
 

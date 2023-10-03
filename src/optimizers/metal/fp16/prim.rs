@@ -636,8 +636,8 @@ using namespace metal;
 kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffer(1)]], device half *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
         out[idx] = 
-            (({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}]) 
-            * (({b_valid_exp}) == 0 ? 0.0 : inp_b[{b_idx_exp}]);
+            (half)((({a_valid_exp}) == 0 ? 0.0 : (float)inp_a[{a_idx_exp}]) 
+            * (({b_valid_exp}) == 0 ? 0.0 : (float)inp_b[{b_idx_exp}]));
     }}
 }}
 ", render_dyn_dim_inputs(&[a_shape, b_shape], 4),

@@ -25,9 +25,10 @@ impl Data for Buffer {
 }
 
 fn compile_function(name: &str, code: &str, device: &Device) -> ComputePipelineState {
-    let library = device
-        .new_library_with_source(code, &CompileOptions::new())
-        .unwrap();
+    let opts = CompileOptions::new();
+    opts.set_fast_math_enabled(false);
+    opts.set_preserve_invariance(true);
+    let library = device.new_library_with_source(code, &opts).unwrap();
     let pipeline_state_descriptor = ComputePipelineDescriptor::new();
     pipeline_state_descriptor
         .set_compute_function(Some(&library.get_function(name, None).unwrap()));

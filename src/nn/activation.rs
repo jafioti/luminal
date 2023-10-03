@@ -143,8 +143,9 @@ impl<B: Dimension, S: Dimension, const DIM: usize> Module<GraphTensor<(B, S, Con
     type Output = GraphTensor<(B, S, Const<DIM>)>;
 
     fn forward(&self, input: GraphTensor<(B, S, Const<DIM>)>) -> Self::Output {
-        let i = (input * input).mean_reduce::<_, Axis<2>>();
-        i.add(1e-6)
+        (input * input)
+            .mean_reduce::<_, Axis<2>>()
+            .add(1e-6)
             .sqrt()
             .recip()
             .expand()

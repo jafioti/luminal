@@ -2,7 +2,7 @@ use dfdx::prelude::{Module as DfdxModule, *};
 use half::f16;
 use itertools::Itertools;
 use num_traits::Float;
-use rand::Rng;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 
 use super::MetalFp16Optimizer;
 use crate::{
@@ -317,15 +317,15 @@ fn test_mod() {
 
 #[test]
 fn test_sum_reduce() {
+    let data = random_vec(40960);
     let mut cx = Graph::new();
-    let data = random_vec(4096);
-    let a = cx.new_tensor::<R3<1, 1, 4096>>("Input");
+    let a = cx.new_tensor::<R3<1, 10, 4096>>("Input");
     a.set(data.clone());
-    let b = a.sum_reduce::<_, LAxis<1>>();
-    let c = a.sum_reduce::<_, LAxis<0>>();
-    let d = a.sum_reduce::<_, LAxis<2>>();
+    let b = a.sum_reduce::<_, LAxis<2>>();
     b.mark();
+    let c = a.sum_reduce::<_, LAxis<1>>();
     c.mark();
+    let d = a.sum_reduce::<_, LAxis<0>>();
     d.mark();
 
     cx.optimize(MetalFp16Optimizer::default());
@@ -333,12 +333,11 @@ fn test_sum_reduce() {
 
     let d_dev = Cpu::default();
     let d_a = d_dev
-        .tensor_from_vec(data, (DConst::<1>, DConst::<1>, DConst::<4096>))
+        .tensor_from_vec(data, (DConst::<1>, DConst::<10>, DConst::<4096>))
         .to_dtype::<f16>();
-    let d_b = d_a.clone().sum::<_, DAxis<1>>();
-    let d_c = d_a.clone().sum::<_, DAxis<0>>();
-    let d_d = d_a.sum::<_, DAxis<2>>();
-
+    let d_b = d_a.clone().sum::<_, DAxis<2>>();
+    let d_c = d_a.clone().sum::<_, DAxis<1>>();
+    let d_d = d_a.sum::<_, DAxis<0>>();
     assert_close(&b.data(), &d_b.to_dtype::<f32>().as_vec());
     assert_close(&c.data(), &d_c.to_dtype::<f32>().as_vec());
     assert_close(&d.data(), &d_d.to_dtype::<f32>().as_vec());
@@ -346,15 +345,15 @@ fn test_sum_reduce() {
 
 #[test]
 fn test_max_reduce() {
+    let data = random_vec(40960);
     let mut cx = Graph::new();
-    let data = random_vec(12);
-    let a = cx.new_tensor::<R3<2, 2, 3>>("Input");
+    let a = cx.new_tensor::<R3<1, 10, 4096>>("Input");
     a.set(data.clone());
-    let b = a.max_reduce::<_, LAxis<1>>();
-    let c = a.max_reduce::<_, LAxis<0>>();
-    let d = a.max_reduce::<_, LAxis<2>>();
+    let b = a.max_reduce::<_, LAxis<2>>();
     b.mark();
+    let c = a.max_reduce::<_, LAxis<1>>();
     c.mark();
+    let d = a.max_reduce::<_, LAxis<0>>();
     d.mark();
 
     cx.optimize(MetalFp16Optimizer::default());
@@ -362,12 +361,11 @@ fn test_max_reduce() {
 
     let d_dev = Cpu::default();
     let d_a = d_dev
-        .tensor_from_vec(data, (DConst::<2>, DConst::<2>, DConst::<3>))
+        .tensor_from_vec(data, (DConst::<1>, DConst::<10>, DConst::<4096>))
         .to_dtype::<f16>();
-    let d_b = d_a.clone().max::<_, DAxis<1>>();
-    let d_c = d_a.clone().max::<_, DAxis<0>>();
-    let d_d = d_a.max::<_, DAxis<2>>();
-
+    let d_b = d_a.clone().max::<_, DAxis<2>>();
+    let d_c = d_a.clone().max::<_, DAxis<1>>();
+    let d_d = d_a.max::<_, DAxis<0>>();
     assert_close(&b.data(), &d_b.to_dtype::<f32>().as_vec());
     assert_close(&c.data(), &d_c.to_dtype::<f32>().as_vec());
     assert_close(&d.data(), &d_d.to_dtype::<f32>().as_vec());
@@ -381,6 +379,10 @@ fn test_mean_reduce() {
     a.set(data.clone());
     let b = a.mean_reduce::<_, LAxis<2>>();
     b.mark();
+    let c = a.mean_reduce::<_, LAxis<1>>();
+    c.mark();
+    let d = a.mean_reduce::<_, LAxis<0>>();
+    d.mark();
 
     cx.optimize(MetalFp16Optimizer::default());
     cx.execute();
@@ -389,24 +391,30 @@ fn test_mean_reduce() {
     let d_a = d_dev
         .tensor_from_vec(data, (DConst::<1>, DConst::<10>, DConst::<4096>))
         .to_dtype::<f16>();
-    let d_b = d_a.mean::<_, DAxis<2>>();
+    let d_b = d_a.clone().mean::<_, DAxis<2>>();
+    let d_c = d_a.clone().mean::<_, DAxis<1>>();
+    let d_d = d_a.mean::<_, DAxis<0>>();
     assert_close(&b.data(), &d_b.to_dtype::<f32>().as_vec());
+    assert_close(&c.data(), &d_c.to_dtype::<f32>().as_vec());
+    assert_close(&d.data(), &d_d.to_dtype::<f32>().as_vec());
 }
 
 #[test]
 fn test_matmul() {
     let mut cx = Graph::new();
-    let a_data = random_vec(2 * 4096);
-    let b_data = random_vec(4096 * 4);
+    let mut rng = StdRng::seed_from_u64(0);
+    let a_data: Vec<f32> = (0..(2 * 4096)).map(|_| rng.gen_range(-0.5..0.5)).collect();
+    let b_data: Vec<f32> = (0..(4096 * 4)).map(|_| rng.gen_range(-0.5..0.5)).collect();
     let a = cx.new_tensor::<R2<2, 4096>>("Input");
     a.set(a_data.clone());
+    a.mark_no_delete();
     let b = cx.new_tensor::<R2<4096, 4>>("Input");
     b.set(b_data.clone());
+    b.mark_no_delete();
     let c = a.matmul(b);
     c.mark();
 
     cx.optimize(MetalFp16Optimizer::default());
-    // cx.display();
     cx.execute();
 
     let d_dev = Cpu::default();

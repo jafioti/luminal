@@ -173,6 +173,7 @@ impl Iterator for GraphSearch {
                 self.already_returned.insert(node);
                 return Some(());
             }
+            used.clear();
         }
         None
     }
@@ -302,8 +303,8 @@ fn search(
         .into_iter()
     {
         if let Some((target, _)) = graph
-            .edges_directed(graph_node, petgraph::Direction::Outgoing)
-            .map(|e| (e.target(), e.weight().1))
+            .edges_directed(graph_node, petgraph::Direction::Incoming)
+            .map(|e| (e.source(), e.weight().1))
             .filter(|i| !used.contains(&i.0) && i.1 == *select_output)
             .collect::<Vec<_>>()
             .into_iter()
