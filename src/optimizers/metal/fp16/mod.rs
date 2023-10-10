@@ -9,7 +9,6 @@ pub type MetalFp16Optimizer = (
     prim::FakeReductionOptimizer,
     other::MetalCosOptimizer,
     other::MetalExpOptimizer,
-    // other::MetalDivOptimizer,
     matmul::MetalMatMulOptimizer,
     mean_reduce::MeanReduceOptimizer,
     rms_norm::RMSNormOptimizer,

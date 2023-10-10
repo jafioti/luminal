@@ -145,9 +145,9 @@ impl Graph {
     /// Execute the graph.
     pub fn execute(&mut self) {
         // Track the number of views pointing to each tensor so we know when to clear
-        if self.linearized_graph.is_none() {
-            self.toposort();
-        }
+        // if self.linearized_graph.is_none() {
+        self.toposort();
+        // }
         let mut remaining_consumers: HashMap<(NodeIndex, u8), usize> = self
             .graph
             .node_indices()
@@ -214,9 +214,9 @@ impl Graph {
     /// Execute the graph with debug prints
     pub fn execute_debug(&mut self) {
         // Track the number of views pointing to each tensor so we know when to clear
-        if self.linearized_graph.is_none() {
-            self.toposort();
-        }
+        // if self.linearized_graph.is_none() {
+        self.toposort();
+        // }
         let mut remaining_consumers: HashMap<(NodeIndex, u8), usize> = self
             .graph
             .node_indices()
@@ -244,6 +244,10 @@ impl Graph {
             if self.tensors.contains_key(&(*node, 0)) {
                 continue;
             }
+            let op_name = op_regex
+                .replace_all(&format!("{:?}", self.graph.node_weight(*node).unwrap()), "")
+                .to_string();
+            print!("{}", op_name.bold().bright_green());
 
             // This needs to be done in a weird way with sperate queues to satisfy the borrow checker (all mutable calls to self.tensors happen before references are taken)
             let mut owned = VecDeque::default();
@@ -276,9 +280,6 @@ impl Graph {
             }
 
             // All sources are ready
-            let op_name = op_regex
-                .replace_all(&format!("{:?}", self.graph.node_weight(*node).unwrap()), "")
-                .to_string();
             let mut shapes_string = srcs
                 .iter()
                 .map(|(_, s)| {
@@ -294,7 +295,6 @@ impl Graph {
             if !shapes_string.is_empty() {
                 shapes_string = format!(" ({shapes_string})");
             }
-            print!("{}", op_name.bold().bright_green());
             print!("{shapes_string}");
             std::io::stdout().flush().unwrap();
             // Execute

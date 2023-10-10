@@ -34,7 +34,7 @@ fn main() {
     let mut cx1 = Graph::new();
     let mut cx2 = Graph::new();
     let model = Model::initialize(&mut cx1);
-    // mark_weights(&model, &mut cx1);
+    mark_weights(&model, &mut cx1);
     let inp = cx1.new_tensor::<(Dyn<'b'>, Dyn<'s'>)>("Input");
     let (out1, cache1) = model.forward(inp);
     out1.mark();
@@ -54,7 +54,7 @@ fn main() {
 
     // Build KV cache forward graph
     let kv_model = Model::initialize(&mut cx2);
-    // mark_weights(&kv_model, &mut cx2);
+    mark_weights(&kv_model, &mut cx2);
     let single_inp = cx2.new_tensor::<(Dyn<'b'>, Const<1>)>("Input");
     let cache_src = (0..config::LAYERS).map(|_| (cx2.new_tensor("Key Cache"), cx2.new_tensor("Value Cache"))).collect::<Vec<_>>();
     let (out, cache_dest)= kv_model.forward_kv::<_, _, Dyn<'p'>, Dyn<'t'>>((single_inp, cache_src.clone()));
@@ -81,6 +81,7 @@ fn main() {
     #[cfg(not(feature="cuda"))]
     #[cfg(not(feature="metal"))]
     cx2.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
+    delete_loads(&kv_model, &mut cx2);
 
     println!("Inferencing...");
     // First pass

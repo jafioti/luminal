@@ -1,3 +1,5 @@
+use petgraph::visit::EdgeRef;
+
 use crate::prelude::{remap_id, Graph, SerializeModule, Serializer};
 
 /// A module that can initialize it's variables on the graph
@@ -43,6 +45,25 @@ pub fn transfer_weights<M: SerializeModule>(
                 break;
             }
             output_num += 1;
+        }
+    }
+}
+
+/// Delete all incoming nodes to the states of the model
+pub fn delete_loads<M: SerializeModule>(model: &M, graph: &mut Graph) {
+    let mut s = Serializer::default();
+    model.serialize(&mut s);
+    for node in s.state.values() {
+        for e in graph
+            .graph
+            .edges_directed(
+                remap_id(*node, &graph.id_remap),
+                petgraph::Direction::Incoming,
+            )
+            .map(|e| e.source())
+            .collect::<Vec<_>>()
+        {
+            graph.graph.remove_node(e);
         }
     }
 }
