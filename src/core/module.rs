@@ -66,6 +66,7 @@ pub fn delete_loads<M: SerializeModule>(model: &M, graph: &mut Graph) {
             graph.graph.remove_node(e);
         }
     }
+    graph.toposort();
 }
 
 pub fn mark_weights<M: SerializeModule>(model: &M, graph: &mut Graph) {

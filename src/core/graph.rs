@@ -91,7 +91,7 @@ impl Graph {
     }
 
     /// Refresh the internally sorted graph
-    fn toposort(&mut self) {
+    pub(crate) fn toposort(&mut self) {
         // Depth-first toposort
         let mut visited = HashSet::default();
         let mut pre_sorted = petgraph::algo::toposort(&self.graph, None).unwrap();
@@ -145,9 +145,9 @@ impl Graph {
     /// Execute the graph.
     pub fn execute(&mut self) {
         // Track the number of views pointing to each tensor so we know when to clear
-        // if self.linearized_graph.is_none() {
-        self.toposort();
-        // }
+        if self.linearized_graph.is_none() {
+            self.toposort();
+        }
         let mut remaining_consumers: HashMap<(NodeIndex, u8), usize> = self
             .graph
             .node_indices()
@@ -214,9 +214,9 @@ impl Graph {
     /// Execute the graph with debug prints
     pub fn execute_debug(&mut self) {
         // Track the number of views pointing to each tensor so we know when to clear
-        // if self.linearized_graph.is_none() {
-        self.toposort();
-        // }
+        if self.linearized_graph.is_none() {
+            self.toposort();
+        }
         let mut remaining_consumers: HashMap<(NodeIndex, u8), usize> = self
             .graph
             .node_indices()
