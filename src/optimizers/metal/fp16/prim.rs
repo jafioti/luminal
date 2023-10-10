@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use crate::{
     op::{
-        Add, Contiguous, Exp2, Function as LFunction, InputTensor, LessThan, Log2, MaxReduce, Mod,
-        Mul, Operator, Print, Recip, Sin, Sqrt, SumReduce,
+        Add, Constant, Contiguous, Exp2, Function as LFunction, InputTensor, LessThan, Log2,
+        MaxReduce, Mod, Mul, Operator, Print, Recip, Sin, Sqrt, SumReduce,
     },
     optimizers::metal::*,
     prelude::*,
@@ -80,6 +80,26 @@ impl Operator for MetalCopyFromDevice {
         }
         vec![Tensor {
             data: Box::new(data),
+        }]
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MetalConstant(pub f16, Device);
+impl PartialEq for MetalConstant {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl Operator for MetalConstant {
+    fn process(&self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        vec![Tensor {
+            data: Box::new(self.1.new_buffer_with_data(
+                &self.0 as *const f16 as *const _,
+                std::mem::size_of::<f16>() as u64,
+                MTLResourceOptions::StorageModeManaged,
+            )),
         }]
     }
 }
@@ -319,7 +339,7 @@ impl MetalSin {
 using namespace metal;
 kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
-        out[idx] = sin(inp[idx]);
+        out[idx] = (half)sin((float)inp[idx]);
     }}
 }}
 ".to_string();
@@ -540,8 +560,8 @@ using namespace metal;
 kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffer(1)]], device half *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
         out[idx] = 
-            (({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}]) 
-            + (({b_valid_exp}) == 0 ? 0.0 : inp_b[{b_idx_exp}]);
+            (({a_valid_exp}) == 0 ? 0.0h : inp_a[{a_idx_exp}]) 
+            + (({b_valid_exp}) == 0 ? 0.0h : inp_b[{b_idx_exp}]);
     }}
 }}
 ", render_dyn_dim_inputs(&[a_shape, b_shape], 4),
@@ -636,8 +656,8 @@ using namespace metal;
 kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffer(1)]], device half *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
         out[idx] = 
-            (half)((({a_valid_exp}) == 0 ? 0.0 : (float)inp_a[{a_idx_exp}]) 
-            * (({b_valid_exp}) == 0 ? 0.0 : (float)inp_b[{b_idx_exp}]));
+            (({a_valid_exp}) == 0 ? 0.0h : inp_a[{a_idx_exp}]) 
+            * (({b_valid_exp}) == 0 ? 0.0h : inp_b[{b_idx_exp}]);
     }}
 }}
 ", render_dyn_dim_inputs(&[a_shape, b_shape], 4),
@@ -731,8 +751,8 @@ impl MetalLessThan {
 using namespace metal;
 kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffer(1)]], device half *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
-        half a_t = 0.0;
-        half b_t = 0.0;
+        half a_t = 0.0h;
+        half b_t = 0.0h;
         if (({a_valid_exp}) != 0) {{
             a_t = inp_a[{a_idx_exp}];
         }}
@@ -740,9 +760,9 @@ kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffe
             b_t = inp_b[{b_idx_exp}];
         }}
         if (a_t < b_t) {{
-            out[idx] = 1.0;
+            out[idx] = 1.0h;
         }} else {{
-            out[idx] = 0.0;
+            out[idx] = 0.0h;
         }}
     }}
 }}
@@ -1304,6 +1324,8 @@ impl GraphOptimizer for PrimitiveOptimizer {
                 *op_ref = Box::new(MetalLog2::new(dev.clone(), &mut kernels));
             } else if is::<Exp2>(op) {
                 *op_ref = Box::new(MetalExp2::new(dev.clone(), &mut kernels));
+            } else if let Some(c) = op_ref.as_any().downcast_ref::<Constant>() {
+                *op_ref = Box::new(MetalConstant(f16::from_f32(c.0), dev.clone()));
             } else if is::<Sin>(op) {
                 *op_ref = Box::new(MetalSin::new(dev.clone(), &mut kernels));
             } else if is::<Sqrt>(op) {
@@ -1513,7 +1535,7 @@ impl GraphOptimizer for CopyOptimizer {
                             .is::<MetalCopyToDevice>()
                 })
                 .count()
-                > 1
+                > 0
                 || graph.no_delete.contains(&first)
             {
                 continue;

@@ -259,82 +259,172 @@ impl Operator for MetalBatchMatmul2D {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            // let mut a_data = vec![f16::ZERO; a.length() as usize / std::mem::size_of::<f16>()];
-            // let ptr = a.contents() as *mut f16;
-            // for (i, d) in a_data.iter_mut().enumerate() {
-            //     *d = unsafe { *ptr.add(i) };
-            // }
-            // let mut b_data = vec![f16::ZERO; b.length() as usize / std::mem::size_of::<f16>()];
-            // let ptr = b.contents() as *mut f16;
-            // for (i, d) in b_data.iter_mut().enumerate() {
-            //     *d = unsafe { *ptr.add(i) };
-            // }
+            let mut a_data = vec![f16::ZERO; a.length() as usize / std::mem::size_of::<f16>()];
+            let ptr = a.contents() as *mut f16;
+            for (i, d) in a_data.iter_mut().enumerate() {
+                *d = unsafe { *ptr.add(i) };
+            }
+            let mut b_data = vec![f16::ZERO; b.length() as usize / std::mem::size_of::<f16>()];
+            let ptr = b.contents() as *mut f16;
+            for (i, d) in b_data.iter_mut().enumerate() {
+                *d = unsafe { *ptr.add(i) };
+            }
 
-            // let out = vec![f16::ZERO; batch_size * m * n];
+            let out = vec![f16::ZERO; batch_size * m * n];
 
-            // for i in 0..batch_size {
-            //     unsafe {
-            //         gemm::gemm(
-            //             m,
-            //             n,
-            //             k,
-            //             out.as_ptr().add(i * m * n) as *mut gemm::f16,
-            //             1,
-            //             n as isize,
-            //             false,
-            //             a_data.as_ptr().add(i * a_strides[0]) as *const gemm::f16,
-            //             a_strides[2] as isize,
-            //             a_strides[1] as isize,
-            //             b_data.as_ptr() as *const gemm::f16,
-            //             b_strides[1] as isize,
-            //             b_strides[0] as isize,
-            //             gemm::f16::ONE,
-            //             gemm::f16::ONE,
-            //             false,
-            //             false,
-            //             false,
-            //             gemm::Parallelism::None,
-            //         )
-            //     }
-            // }
+            for i in 0..batch_size {
+                unsafe {
+                    gemm::gemm(
+                        m,
+                        n,
+                        k,
+                        out.as_ptr().add(i * m * n) as *mut gemm::f16,
+                        1,
+                        n as isize,
+                        false,
+                        a_data.as_ptr().add(i * a_strides[0]) as *const gemm::f16,
+                        a_strides[2] as isize,
+                        a_strides[1] as isize,
+                        b_data.as_ptr() as *const gemm::f16,
+                        b_strides[1] as isize,
+                        b_strides[0] as isize,
+                        gemm::f16::ONE,
+                        gemm::f16::ONE,
+                        false,
+                        false,
+                        false,
+                        gemm::Parallelism::None,
+                    )
+                }
+            }
 
-            let out = self.1.new_buffer(
-                (batch_size * m * n * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
-
-            // Setup command queue / command buffer / encoder
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
-
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(b), 0);
-            encoder.set_buffer(2, Some(&out), 0);
-            encoder.set_int(3, batch_size as u32);
-            encoder.set_int(4, m as u32);
-            encoder.set_int(5, k as u32);
-            encoder.set_int(6, n as u32);
-            encoder.set_int(7, a_row_major as u32);
-            encoder.set_int(8, b_row_major as u32);
-            encoder.set_int(9, a_strides[0] as u32);
-            encoder.set_int(10, 0);
-            encoder.set_int(11, (m * n) as u32);
-
-            // Execute
-            encoder.dispatch_n_elements(batch_size * n * m);
-            encoder.end_encoding();
-            command_buffer.commit();
-            command_buffer.wait_until_completed();
-
-            // let out = self.2.new_buffer_with_data(
-            //     unsafe { std::mem::transmute(out.as_ptr()) },
-            //     (out.len() * std::mem::size_of::<f16>()) as u64,
+            // let out = self.1.new_buffer(
+            //     (batch_size * m * n * std::mem::size_of::<f16>()) as u64,
             //     MTLResourceOptions::StorageModeManaged,
             // );
+
+            // // Setup command queue / command buffer / encoder
+            // let command_queue = self.1.new_command_queue();
+            // let command_buffer = command_queue.new_command_buffer();
+            // let encoder = command_buffer
+            //     .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            // encoder.set_compute_pipeline_state(&self.0);
+
+            // // Set inputs
+            // encoder.set_buffer(0, Some(a), 0);
+            // encoder.set_buffer(1, Some(b), 0);
+            // encoder.set_buffer(2, Some(&out), 0);
+            // encoder.set_int(3, batch_size as u32);
+            // encoder.set_int(4, m as u32);
+            // encoder.set_int(5, k as u32);
+            // encoder.set_int(6, n as u32);
+            // encoder.set_int(7, a_row_major as u32);
+            // encoder.set_int(8, b_row_major as u32);
+            // encoder.set_int(9, a_strides[0] as u32);
+            // encoder.set_int(10, 0);
+            // encoder.set_int(11, (m * n) as u32);
+
+            // // Execute
+            // encoder.dispatch_n_elements(batch_size * n * m);
+            // encoder.end_encoding();
+            // command_buffer.commit();
+            // command_buffer.wait_until_completed();
+
+            let out = self.1.new_buffer_with_data(
+                unsafe { std::mem::transmute(out.as_ptr()) },
+                (out.len() * std::mem::size_of::<f16>()) as u64,
+                MTLResourceOptions::StorageModeManaged,
+            );
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
+    }
+}
+
+// ABCDxABDE -> ABCE
+#[derive(Debug, Clone)]
+pub struct MetalAttnMatmul2D(Device);
+impl PartialEq for MetalAttnMatmul2D {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl Operator for MetalAttnMatmul2D {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        autoreleasepool(|| {
+            let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
+            let (a_strides, b_strides) = (inp[0].1.strides(), inp[1].1.strides());
+            let (a, b, c, d, e) = (
+                a_shape[0].to_usize().unwrap(),
+                a_shape[1].to_usize().unwrap(),
+                a_shape[2].to_usize().unwrap(),
+                a_shape[3].to_usize().unwrap(),
+                b_shape[3].to_usize().unwrap(),
+            );
+            let a_inp = inp[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let b_inp = inp[1]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            let mut a_data = vec![f16::ZERO; a_inp.length() as usize / std::mem::size_of::<f16>()];
+            let ptr = a_inp.contents() as *mut f16;
+            for (i, d) in a_data.iter_mut().enumerate() {
+                *d = unsafe { *ptr.add(i) };
+            }
+            let mut b_data = vec![f16::ZERO; b_inp.length() as usize / std::mem::size_of::<f16>()];
+            let ptr = b_inp.contents() as *mut f16;
+            for (i, d) in b_data.iter_mut().enumerate() {
+                *d = unsafe { *ptr.add(i) };
+            }
+
+            let out = vec![f16::ZERO; a * b * c * e];
+
+            for i in 0..a {
+                for j in 0..b {
+                    unsafe {
+                        gemm::gemm(
+                            c,
+                            e,
+                            d,
+                            out.as_ptr().add(i * b * c * e + j * c * e) as *mut gemm::f16,
+                            1,
+                            e as isize,
+                            false,
+                            a_data.as_ptr().add(i * a_strides[0] + j * a_strides[1])
+                                as *const gemm::f16,
+                            a_strides[3] as isize,
+                            a_strides[2] as isize,
+                            b_data.as_ptr().add(i * b_strides[0] + j * b_strides[1])
+                                as *const gemm::f16,
+                            b_strides[3] as isize,
+                            b_strides[2] as isize,
+                            gemm::f16::ONE,
+                            gemm::f16::ONE,
+                            false,
+                            false,
+                            false,
+                            gemm::Parallelism::None,
+                        )
+                    }
+                }
+            }
+
+            let out = self.0.new_buffer_with_data(
+                unsafe { std::mem::transmute(out.as_ptr()) },
+                (out.len() * std::mem::size_of::<f16>()) as u64,
+                MTLResourceOptions::StorageModeManaged,
+            );
             vec![Tensor {
                 data: Box::new(out),
             }]
@@ -476,6 +566,79 @@ impl GraphOptimizer for MetalMatMulOptimizer {
                     batched_matmul.clone().unwrap(),
                     dev.clone(),
                 ))
+                .input(srcs[0].0, 0, srcs[0].1)
+                .input(srcs[1].0, 0, srcs[1].1)
+                .finish();
+
+            // Create edges to dests
+            move_outgoing_edge(sum_reduce, new_op, &mut graph.graph);
+            move_references(
+                &mut graph.id_remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                sum_reduce,
+                new_op,
+            );
+
+            // Remove the old ops
+            graph.graph.remove_node(mul);
+            graph.graph.remove_node(sum_reduce);
+        }
+
+        // Look for the attn matmul pattern
+        let s = GraphSelector::default();
+        let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
+        // Mul ([A, B, C, E(fake), D] | [A, B, C(fake), E, D]) -> SumReduce(2) -> [A, C]
+        // Actually starts at [A,B] | [B, C]
+        s.edge(
+            s.op()
+                .ty::<MetalMul>()
+                .shapes(vec![
+                    vec![
+                        Dim::Unknown('A'),
+                        Dim::Unknown('B'),
+                        Dim::Unknown('C'),
+                        Dim::Unknown('E'),
+                        Dim::Unknown('D'),
+                    ],
+                    vec![
+                        Dim::Unknown('A'),
+                        Dim::Unknown('B'),
+                        Dim::Unknown('C'),
+                        Dim::Unknown('E'),
+                        Dim::Unknown('D'),
+                    ],
+                ])
+                .fakes(vec![
+                    vec![false, false, false, true, false],
+                    vec![false, false, true, false, false],
+                ])
+                .ptr(&mut mul),
+            0,
+            s.op()
+                .ty::<MetalSumReduce>()
+                .check(|o, _| {
+                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
+                        o.2 == 4
+                    } else {
+                        false
+                    }
+                })
+                .ptr(&mut sum_reduce),
+        );
+        for _ in s.search(graph) {
+            if graph.no_delete.contains(&mul) {
+                // The intermediate mul can't be deleted
+                continue;
+            }
+            // Insert BatchMatMul2D op
+            let mut srcs = graph.get_sources(mul);
+            // Undo expansions and permute
+            srcs[0].1.remove_dim(3);
+            srcs[1].1.permute(&[0, 1, 2, 4, 3]);
+            srcs[1].1.remove_dim(2);
+            let new_op = graph
+                .add_op(MetalAttnMatmul2D(dev.clone()))
                 .input(srcs[0].0, 0, srcs[0].1)
                 .input(srcs[1].0, 0, srcs[1].1)
                 .finish();

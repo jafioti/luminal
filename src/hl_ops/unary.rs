@@ -91,9 +91,8 @@ impl<S: Shape> GraphTensor<S> {
                 .max_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
                 .expand();
         let exp = m.exp();
-        exp / exp
-            .sum_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
-            .expand()
+        let exp_sum = exp.sum_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>();
+        exp / exp_sum.expand()
     }
 
     pub fn abs(self) -> GraphTensor<S> {
@@ -118,7 +117,7 @@ impl<S: Shape> GraphTensor<S> {
     pub fn sigmoid(self) -> GraphTensor<S> {
         // Based on https://github.com/tinygrad/tinygrad/blob/9d142430cbe61121c864c0015f1de83c94a7d2c0/tinygrad/mlops.py#L70
         let one = self.graph().constant(1.0);
-        one.expand() / (one.expand() + (self * (-1. / 2_f32.ln())).exp_2())
+        one.expand() / (one.expand() + (-self).exp())
     }
 
     /// The swish activation function

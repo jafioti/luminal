@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use half::f16;
 use petgraph::stable_graph::NodeIndex;
 
@@ -9,49 +11,98 @@ use crate::{
 
 use super::{
     mean_reduce::MetalMeanReduce,
-    prim::{MetalAdd, MetalCopyToDevice, MetalMul, MetalRecip, MetalSqrt},
+    prim::{MetalAdd, MetalConstant, MetalMul, MetalRecip, MetalSqrt},
 };
 use metal_rs::{objc::rc::autoreleasepool, *};
 
-/// Special kernel for efficient mean reduction
+/// Special kernel for efficient rms norming
 #[derive(Debug, Clone)]
-pub struct MetalRMSNormPostMean(ComputePipelineState, Device, ShapeTracker, ShapeTracker);
-impl PartialEq for MetalRMSNormPostMean {
+pub struct MetalRMSNorm(
+    ComputePipelineState, // Square-Mean kernel
+    ComputePipelineState, // RMSNorm kernel
+    Device,
+    ShapeTracker, // Input shape
+);
+impl PartialEq for MetalRMSNorm {
     fn eq(&self, _: &Self) -> bool {
         false
     }
 }
 
-impl MetalRMSNormPostMean {
-    fn new(dev: Device, inp_shape: ShapeTracker, x_shape: ShapeTracker) -> Self {
-        let (inp_idx, _) = get_idx_valid_exps(inp_shape);
-        let (x_idx, _) = get_idx_valid_exps(x_shape);
-        let mut code = format!("
+impl MetalRMSNorm {
+    fn new(
+        dev: Device,
+        inp_shape: ShapeTracker,
+        kernels: &mut HashMap<String, ComputePipelineState>,
+    ) -> Self {
+        let (idx_exp, valid_exp) = get_idx_valid_exps(inp_shape);
+        let mut square_mean_code = format!(
+            "
+#include <metal_stdlib>
+using namespace metal;
+kernel void mkernel(device half *inp [[buffer(0)]], device float *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], device uint& front_size [[buffer(3)]], device uint& back_size [[buffer(4)]], device uint& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
+    if (i_ < n_elements) {{
+        uint a_ = i_ / back_size;
+        uint b_ = i_ % back_size;
+        float reduce_value = 0.0;
+        for (uint c_ = 0; c_ < dim_size; c_++) {{
+            uint idx = a_ * dim_size * back_size + c_ * back_size + b_;
+            if (({valid_exp}) != 0) {{
+                float val = (float)inp[{idx_exp}];
+                reduce_value += (val * val);
+            }}
+        }}
+        out[i_] = (reduce_value / (float)dim_size);
+    }}
+}}
+", render_dyn_dim_inputs(&[inp_shape], 6),
+        );
+        let square_mean_code_name = format!("kernel_{}", hash(&square_mean_code));
+        square_mean_code = square_mean_code.replace("mkernel", &square_mean_code_name);
+
+        if !kernels.contains_key(&square_mean_code_name) {
+            kernels.insert(
+                square_mean_code_name.clone(),
+                compile_function(&square_mean_code_name, &square_mean_code, &dev),
+            );
+        }
+        let mut meaned_shape = inp_shape;
+        let meaned_size = meaned_shape.remove_dim(meaned_shape.len() - 1);
+        meaned_shape.expand(meaned_shape.len(), meaned_size);
+        let (meaned_idx_exp, _) = get_idx_valid_exps(meaned_shape);
+        let mut rms_norm_code = format!("
 #include <metal_stdlib>
 using namespace metal;
 
-
-kernel void mkernel(device half *inp [[buffer(0)]], device half *x [[buffer(1)]], device half *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]], device half *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
-        out[idx] = (half)(1.0h / sqrt((float)inp[{inp_idx}] + 1e-6f) * (float)x[{x_idx}]);
+        float added = inp[{meaned_idx_exp}] + 1e-6f;
+        float sq = sqrt(added);
+        float recip = 1.0f / sq;
+        out[idx] = (half)(recip * (float)x[{idx_exp}]);
     }}
-}}", render_dyn_dim_inputs(&[inp_shape, x_shape], 4));
-        code = code.replace("mkernel", "kernel_rmsnorm_post_mean");
+}}", render_dyn_dim_inputs(&[inp_shape], 4));
+        let rms_norm_code_name = format!("kernel_{}", hash(&rms_norm_code));
+        rms_norm_code = rms_norm_code.replace("mkernel", &rms_norm_code_name);
 
+        if !kernels.contains_key(&rms_norm_code_name) {
+            kernels.insert(
+                rms_norm_code_name.clone(),
+                compile_function(&rms_norm_code_name, &rms_norm_code, &dev),
+            );
+        }
         Self(
-            compile_function("kernel_rmsnorm_post_mean", &code, &dev),
+            kernels[&square_mean_code_name].clone(),
+            kernels[&rms_norm_code_name].clone(),
             dev,
             inp_shape,
-            x_shape,
         )
     }
 }
 
-impl Operator for MetalRMSNormPostMean {
+impl Operator for MetalRMSNorm {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let inp_size = tensors[1].1.n_physical_elements();
-            // Setup buffers
             let a = tensors[0]
                 .0
                 .borrowed()
@@ -59,20 +110,25 @@ impl Operator for MetalRMSNormPostMean {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let x = tensors[1]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
+            let mut meaned_shape = tensors[0].1;
+            meaned_shape.remove_dim(meaned_shape.len() - 1);
+            // Setup buffers
+            let meaned = self.2.new_buffer(
+                (meaned_shape.n_elements() * std::mem::size_of::<f32>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
+            let front_size: usize = tensors[0]
+                .1
+                .shape()
+                .iter()
+                .take(meaned_shape.len())
+                .map(|i| i.to_usize().unwrap())
+                .product();
+            let back_size = 1;
+            let dim_size = tensors[0].1.shape()[meaned_shape.len()].to_usize().unwrap();
 
             // Setup command queue / command buffer / encoder
-            let command_queue = self.1.new_command_queue();
+            let command_queue = self.2.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
             let encoder = command_buffer
                 .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
@@ -80,17 +136,40 @@ impl Operator for MetalRMSNormPostMean {
 
             // Set inputs
             encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(x), 0);
-            encoder.set_buffer(2, Some(&out), 0);
-            encoder.set_int(3, inp_size as u32);
-            input_dyn_dims(
-                &[(self.2, tensors[0].1), (self.3, tensors[1].1)],
-                encoder,
-                4,
-            );
+            encoder.set_buffer(1, Some(&meaned), 0);
+            encoder.set_int(2, meaned_shape.n_elements() as u32);
+            encoder.set_int(3, front_size as u32);
+            encoder.set_int(4, back_size as u32);
+            encoder.set_int(5, dim_size as u32);
+            input_dyn_dims(&[(self.3, tensors[0].1)], encoder, 6);
 
             // Execute
-            encoder.dispatch_n_elements(inp_size);
+            encoder.dispatch_n_elements(meaned_shape.n_elements());
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
+
+            let out = self.2.new_buffer(
+                (tensors[0].1.n_elements() * std::mem::size_of::<f16>()) as u64,
+                MTLResourceOptions::StorageModeManaged,
+            );
+
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.2.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.1);
+
+            // Set inputs
+            encoder.set_buffer(0, Some(&meaned), 0);
+            encoder.set_buffer(1, Some(a), 0);
+            encoder.set_buffer(2, Some(&out), 0);
+            encoder.set_int(3, tensors[0].1.n_elements() as u32);
+            input_dyn_dims(&[(self.3, tensors[0].1)], encoder, 4);
+
+            // Execute
+            encoder.dispatch_n_elements(tensors[0].1.n_elements());
             encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
@@ -112,7 +191,7 @@ impl GraphOptimizer for RMSNormOptimizer {
         // Look for the RMSNorm pattern
         // mul(recip(sqrt(add(mean_reduce(mul(x, x)), 1e-6))), x)
         let s = GraphSelector::default();
-        let (mut og_mul, mut add, mut sqrt, mut recip, mut mul, mut epsilon, mut copy_to) = (
+        let (mut square, mut mean, mut add, mut sqrt, mut recip, mut mul, mut epsilon) = (
             NodeIndex::default(),
             NodeIndex::default(),
             NodeIndex::default(),
@@ -122,64 +201,64 @@ impl GraphOptimizer for RMSNormOptimizer {
             NodeIndex::default(),
         );
 
-        let x = s.op();
         s.edge(
-            x,
-            0,
             s.edge(
                 s.edge(
                     s.edge(
+                        s.op()
+                            .check(|op, _| {
+                                if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
+                                    c.0 == f16::from_f32(1e-6)
+                                } else {
+                                    false
+                                }
+                            })
+                            .ptr(&mut epsilon),
+                        0,
                         s.edge(
                             s.edge(
-                                s.op().ty::<crate::op::Function>().ptr(&mut epsilon),
+                                s.op().ty::<MetalMul>().ptr(&mut square),
                                 0,
-                                s.op().ty::<MetalCopyToDevice>().ptr(&mut copy_to),
+                                s.op().ty::<MetalMeanReduce>().ptr(&mut mean),
                             ),
                             0,
-                            s.edge(
-                                s.edge(
-                                    s.edge(
-                                        x,
-                                        0,
-                                        s.edge(x, 0, s.op().ty::<MetalMul>().ptr(&mut og_mul)),
-                                    ),
-                                    0,
-                                    s.op().ty::<MetalMeanReduce>(),
-                                ),
-                                0,
-                                s.op().ty::<MetalAdd>().ptr(&mut add),
-                            ),
+                            s.op().ty::<MetalAdd>().ptr(&mut add),
                         ),
-                        0,
-                        s.op().ty::<MetalSqrt>().ptr(&mut sqrt),
                     ),
                     0,
-                    s.op().ty::<MetalRecip>().ptr(&mut recip),
+                    s.op().ty::<MetalSqrt>().ptr(&mut sqrt),
                 ),
                 0,
-                s.op().ty::<MetalMul>().ptr(&mut mul),
+                s.op().ty::<MetalRecip>().ptr(&mut recip),
             ),
+            0,
+            s.op().ty::<MetalMul>().ptr(&mut mul),
         );
 
+        let mut kernels = HashMap::new();
         for _ in s.search(graph) {
             if graph.no_delete.contains(&add)
                 || graph.no_delete.contains(&sqrt)
                 || graph.no_delete.contains(&recip)
                 || graph.no_delete.contains(&mul)
                 || graph.no_delete.contains(&epsilon)
-                || graph.no_delete.contains(&copy_to)
+                || graph.no_delete.contains(&square)
+                || graph.no_delete.contains(&mean)
             {
                 // An intermediate node can't be deleted
                 continue;
             }
+            let x = graph.get_sources(square)[0];
+            if !graph.get_sources(square).iter().all(|(i, _)| *i == x.0) {
+                continue;
+            }
+            if !graph.get_sources(mul).iter().any(|(i, _)| *i == x.0) {
+                continue;
+            }
 
             // Insert RMSNorm op
-            let x = graph.get_sources(og_mul)[0];
-            graph.graph.remove_node(copy_to);
-            let meaned = graph.get_sources(add)[0];
             let rms_norm = graph
-                .add_op(MetalRMSNormPostMean::new(dev.clone(), meaned.1, x.1))
-                .input(meaned.0, 0, meaned.1)
+                .add_op(MetalRMSNorm::new(dev.clone(), x.1, &mut kernels))
                 .input(x.0, 0, x.1)
                 .finish();
 
@@ -199,6 +278,8 @@ impl GraphOptimizer for RMSNormOptimizer {
             graph.graph.remove_node(recip);
             graph.graph.remove_node(epsilon);
             graph.graph.remove_node(sqrt);
+            graph.graph.remove_node(square);
+            graph.graph.remove_node(mean);
         }
     }
 }

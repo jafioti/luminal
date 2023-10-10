@@ -72,15 +72,17 @@ impl ShapeTracker {
     }
 
     /// Remove a dimension
-    pub fn remove_dim(&mut self, axis: usize) {
+    pub fn remove_dim(&mut self, axis: usize) -> Dim {
         let index = self.indexes.remove(axis);
-        self.dims.remove(index);
         self.fake.remove(index);
         for i in self.indexes.iter_mut() {
             if *i > index {
                 *i -= 1;
             }
         }
+        self.slices.remove(index);
+        self.padding.remove(index);
+        self.dims.remove(index)
     }
 
     /// Permute the dimensions

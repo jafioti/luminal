@@ -2,6 +2,8 @@
 
 use std::{any::TypeId, fmt::Debug};
 
+use half::f16;
+
 use crate::{
     prelude::{
         tracker::{Dim, ShapeTracker},
@@ -73,11 +75,41 @@ impl Operator for Print {
                 .as_any()
                 .downcast_ref::<Vec<f32>>()
                 .unwrap();
-            println!("{} Data: {:?}", i + 1, &d[d.len().saturating_sub(10)..]);
+            println!("{} Data: {:?}", i + 1, &d[..10]);
             println!("{} Shape: {:?}", i + 1, tracker);
+            let out = std::fs::read("../../Desktop/llama-dfdx/out.bin")
+                .unwrap()
+                .chunks(2)
+                .map(|i| f16::from_ne_bytes([i[0], i[1]]).to_f32())
+                .collect::<Vec<_>>();
+            let mut data = vec![0.; d.len()];
+            let ind = tracker.indexer();
+            #[allow(unused_mut)]
+            for (i, mut r) in data.iter_mut().enumerate() {
+                if let Some(n) = ind.index(i) {
+                    *r = d[n];
+                }
+            }
+            assert_eq!(data.len(), out.len(), "Number of elements doesn't match");
+            for (a, b) in data.iter().zip(out.iter()) {
+                if a != b {
+                    panic!("{a} is not equal to {b}");
+                }
+            }
         }
         vec![Tensor {
             data: Box::<Vec<f32>>::default(),
+        }]
+    }
+}
+
+/// Produces a single number constant, known at compile time
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Constant(pub f32);
+impl Operator for Constant {
+    fn process(&self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        vec![Tensor {
+            data: Box::new(vec![self.0]),
         }]
     }
 }

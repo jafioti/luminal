@@ -1,5 +1,5 @@
 use crate::{
-    op::Function,
+    op::{Constant, Function},
     prelude::{tracker::Dim, *},
 };
 
@@ -76,12 +76,11 @@ impl<S: Shape> GraphTensor<S> {
 }
 
 impl Graph {
-    pub fn constant<T>(&mut self, i: T) -> GraphTensor<R0>
-    where
-        Vec<T>: Data + Clone,
-    {
-        let t = self.new_tensor("Const");
-        t.set(vec![i]);
-        t
+    pub fn constant(&mut self, i: f32) -> GraphTensor<R0> {
+        GraphTensor::from_id(
+            self.add_op(Constant(i)).finish(),
+            ShapeTracker::new(&[]),
+            self,
+        )
     }
 }

@@ -1,5 +1,7 @@
 mod dynamic;
 
+use std::fmt::Debug;
+
 use rand::{thread_rng, Rng};
 
 use crate::prelude::*;
@@ -93,6 +95,16 @@ pub fn assert_close(a_vec: &[f32], b_vec: &[f32]) {
     }
 }
 
+/// Ensure two arrays are exactly equal
+pub fn assert_exact<T: PartialEq + Debug>(a_vec: &[T], b_vec: &[T]) {
+    assert_eq!(a_vec.len(), b_vec.len(), "Number of elements doesn't match");
+    for (a, b) in a_vec.iter().zip(b_vec.iter()) {
+        if a != b {
+            panic!("{a:?} is not equal to {b:?}");
+        }
+    }
+}
+
 pub fn random_vec(n: usize) -> Vec<f32> {
     let mut rng = thread_rng();
     (0..n).map(|_| rng.gen_range(-0.5..0.5)).collect()
@@ -112,7 +124,7 @@ macro_rules! test_imports {
                 Axes as LAxes, Axes2 as LAxes2, Axes3 as LAxes3, Axes4 as LAxes4, Axes5 as LAxes5,
                 Axis as LAxis, Const as LConst, *,
             },
-            tests::{assert_close, random_vec},
+            tests::{assert_close, assert_exact, random_vec},
         };
     };
 }

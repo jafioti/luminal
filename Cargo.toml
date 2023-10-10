@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 
 [features]
 #default = ["cuda"]
-#default = ["metal"]
+default = ["metal"]
 cuda = ["dep:cudarc"]
 metal = ["dep:metal-rs"]
 

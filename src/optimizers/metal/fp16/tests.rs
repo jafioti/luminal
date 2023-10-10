@@ -6,7 +6,10 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 
 use super::MetalFp16Optimizer;
 use crate::{
-    nn::{activation::ReLU, linear::Linear},
+    nn::{
+        activation::{RMSNorm, ReLU},
+        linear::Linear,
+    },
     prelude::{Module, *},
 };
 
@@ -344,6 +347,36 @@ fn test_sum_reduce() {
 }
 
 #[test]
+fn test_sum_reduce2() {
+    let mut cx = Graph::new();
+    let data = random_vec(32 * 10 * 10 * 128);
+    let a = cx.new_tensor::<R5<1, 32, 10, 10, 128>>("Input");
+    a.set(data.clone());
+    let d = a.sum_reduce::<_, LAxis<2>>();
+    d.mark();
+
+    cx.optimize(MetalFp16Optimizer::default());
+    cx.execute();
+
+    let d_dev = Cpu::default();
+    let d_a = d_dev
+        .tensor_from_vec(
+            data,
+            (
+                DConst::<1>,
+                DConst::<32>,
+                DConst::<10>,
+                DConst::<10>,
+                DConst::<128>,
+            ),
+        )
+        .to_dtype::<f16>();
+    let d_d = d_a.sum::<_, DAxis<2>>();
+
+    assert_exact(&d.data(), &d_d.to_dtype::<f32>().as_vec());
+}
+
+#[test]
 fn test_max_reduce() {
     let data = random_vec(40960);
     let mut cx = Graph::new();
@@ -394,9 +427,9 @@ fn test_mean_reduce() {
     let d_b = d_a.clone().mean::<_, DAxis<2>>();
     let d_c = d_a.clone().mean::<_, DAxis<1>>();
     let d_d = d_a.mean::<_, DAxis<0>>();
-    assert_close(&b.data(), &d_b.to_dtype::<f32>().as_vec());
-    assert_close(&c.data(), &d_c.to_dtype::<f32>().as_vec());
-    assert_close(&d.data(), &d_d.to_dtype::<f32>().as_vec());
+    assert_exact(&b.data(), &d_b.to_dtype::<f32>().as_vec());
+    assert_exact(&c.data(), &d_c.to_dtype::<f32>().as_vec());
+    assert_exact(&d.data(), &d_d.to_dtype::<f32>().as_vec());
 }
 
 #[test]
@@ -424,26 +457,30 @@ fn test_matmul() {
     let d_b = d_dev
         .tensor_from_vec(b_data, (DConst::<4096>, DConst::<4>))
         .to_dtype::<f16>();
-    // let d_c =
-    //     d_a.broadcast::<Rank3<2, 4, 4096>, _>() * d_b.permute::<Rank2<4, 4096>, _>().broadcast();
-    // let d_c = d_c.sum::<_, DAxis<2>>();
     let d_c = d_a.matmul(d_b);
 
     println!("B: {:?}", c.data());
     println!("D: {:?}", d_c.clone().to_dtype::<f32>().as_vec());
-    assert_close(&c.data(), &d_c.to_dtype::<f32>().as_vec());
+    assert_exact(&c.data(), &d_c.to_dtype::<f32>().as_vec());
 }
 
 #[test]
-fn test_batch_matmul() {
+fn test_attn_matmul() {
     let mut cx = Graph::new();
-    let a_data = random_vec(12);
-    let b_data = random_vec(12);
-    let a = cx.new_tensor::<R3<2, 2, 3>>("Input");
+    let mut rng = StdRng::seed_from_u64(0);
+    let a_data: Vec<f32> = (0..(32 * 11 * 128))
+        .map(|_| rng.gen_range(-0.5..0.5))
+        .collect();
+    let b_data: Vec<f32> = (0..(32 * 11 * 128))
+        .map(|_| rng.gen_range(-0.5..0.5))
+        .collect();
+    let a = cx.new_tensor::<R4<1, 32, 11, 128>>("Input");
     a.set(a_data.clone());
-    let b = cx.new_tensor::<R2<3, 4>>("Input");
+    a.mark_no_delete();
+    let b = cx.new_tensor::<R4<1, 32, 128, 11>>("Input");
     b.set(b_data.clone());
-    let c = a.matmul(b);
+    b.mark_no_delete();
+    let c = a.batch_matmul(b);
     c.mark();
 
     cx.optimize(MetalFp16Optimizer::default());
@@ -451,14 +488,46 @@ fn test_batch_matmul() {
 
     let d_dev = Cpu::default();
     let d_a = d_dev
-        .tensor_from_vec(a_data, (DConst::<2>, DConst::<2>, DConst::<3>))
+        .tensor_from_vec(
+            a_data,
+            (DConst::<1>, DConst::<32>, DConst::<11>, DConst::<128>),
+        )
         .to_dtype::<f16>();
     let d_b = d_dev
-        .tensor_from_vec(b_data, (DConst::<3>, DConst::<4>))
+        .tensor_from_vec(
+            b_data,
+            (DConst::<1>, DConst::<32>, DConst::<128>, DConst::<11>),
+        )
         .to_dtype::<f16>();
     let d_c = d_a.matmul(d_b);
+    assert_exact(&c.data(), &d_c.to_dtype::<f32>().as_vec());
+}
 
-    assert_close(&c.data(), &d_c.to_dtype::<f32>().as_vec());
+#[test]
+fn test_batch_matmul() {
+    let mut cx = Graph::new();
+    let a_data = random_vec(10 * 4096);
+    let b_data = random_vec(4096 * 4096);
+    let a = cx.new_tensor::<R3<1, 10, 4096>>("Input");
+    a.set(a_data.clone());
+    let b = cx.new_tensor::<R2<4096, 4096>>("Input");
+    b.set(b_data.clone());
+    let c = a.matmul(b.permute::<_, LAxes2<1, 0>>());
+    c.mark();
+
+    cx.optimize(MetalFp16Optimizer::default());
+    cx.execute();
+
+    let d_dev = Cpu::default();
+    let d_a = d_dev
+        .tensor_from_vec(a_data, (DConst::<1>, DConst::<10>, DConst::<4096>))
+        .to_dtype::<f16>();
+    let d_b = d_dev
+        .tensor_from_vec(b_data, (DConst::<4096>, DConst::<4096>))
+        .to_dtype::<f16>();
+    let d_c = d_a.matmul(d_b.permute::<_, DAxes2<1, 0>>());
+
+    assert_exact(&c.data(), &d_c.to_dtype::<f32>().as_vec());
 }
 
 #[test]
@@ -564,6 +633,43 @@ fn test_relu_and_linear() {
     let out = model.forward(a);
 
     assert_close(&unoptimized_b, &out.as_vec());
+}
+
+#[test]
+fn test_rms_norm() {
+    // Test single and batch, unoptimized and optimized
+    let inp_data = random_vec(3 * 4);
+    let weight_data = random_vec(4);
+    let mut cx = Graph::new();
+    let a = cx.new_tensor::<R2<3, 4>>("Input");
+
+    let model = RMSNorm::<4>::initialize(&mut cx);
+    model.weight.set(weight_data.clone());
+    let b = model.forward(a);
+    a.set(inp_data.clone());
+    b.mark();
+
+    cx.optimize(<(MetalFp16Optimizer, GenericOptimizer)>::default());
+    cx.execute();
+
+    // Test against dfdx
+    let dev = Cpu::default();
+    let weight = dev
+        .tensor_from_vec(weight_data, (DConst::<4>,))
+        .to_dtype::<f16>();
+    let a = dev
+        .tensor_from_vec(inp_data, (DConst::<3>, DConst::<4>))
+        .to_dtype::<f16>()
+        .to_dtype::<f32>();
+    let var_f32 = a.clone().square().mean::<_, DAxis<1>>();
+    let inv_std_f32 = (var_f32 + 1e-6).sqrt().recip();
+    let x_f32 = inv_std_f32.broadcast() * a;
+    let out = weight.broadcast() * x_f32.to_dtype::<f16>();
+
+    assert_exact(
+        &b.data().into_iter().map(f16::from_f32).collect::<Vec<_>>(),
+        &out.as_vec(),
+    );
 }
 
 #[test]

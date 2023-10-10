@@ -7,7 +7,7 @@ use crate::{
     prelude::*,
 };
 
-use super::prim::{FakeSumReduce, MetalCopyToDevice, MetalMul, MetalRecip, MetalSumReduce};
+use super::prim::{FakeSumReduce, MetalConstant, MetalMul, MetalRecip, MetalSumReduce};
 use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Special kernel for efficient mean reduction
@@ -127,15 +127,7 @@ impl GraphOptimizer for MeanReduceOptimizer {
         // Look for the mean-reduce pattern
         // mul(recip(fake_sum_reduce(const_ones)), sum_reduce(x))
         let s = GraphSelector::default();
-        let (
-            mut const_copy_to,
-            mut one_const,
-            mut fake_sum_reduce,
-            mut recip,
-            mut mul,
-            mut sum_reduce,
-        ) = (
-            NodeIndex::default(),
+        let (mut one_const, mut fake_sum_reduce, mut recip, mut mul, mut sum_reduce) = (
             NodeIndex::default(),
             NodeIndex::default(),
             NodeIndex::default(),
@@ -149,12 +141,15 @@ impl GraphOptimizer for MeanReduceOptimizer {
             s.edge(
                 s.edge(
                     s.edge(
-                        s.edge(
-                            // Need a const primop here!
-                            s.op().ty::<crate::op::Function>().ptr(&mut one_const),
-                            0,
-                            s.op().ty::<MetalCopyToDevice>().ptr(&mut const_copy_to),
-                        ),
+                        s.op()
+                            .check(|op, _| {
+                                if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
+                                    c.0 == f16::ONE
+                                } else {
+                                    false
+                                }
+                            })
+                            .ptr(&mut one_const),
                         0,
                         s.op().ty::<FakeSumReduce>().ptr(&mut fake_sum_reduce),
                     ),
@@ -169,7 +164,6 @@ impl GraphOptimizer for MeanReduceOptimizer {
         for _ in s.search(graph) {
             if graph.no_delete.contains(&sum_reduce)
                 || graph.no_delete.contains(&one_const)
-                || graph.no_delete.contains(&const_copy_to)
                 || graph.no_delete.contains(&fake_sum_reduce)
                 || graph.no_delete.contains(&recip)
             {
@@ -207,7 +201,6 @@ impl GraphOptimizer for MeanReduceOptimizer {
             graph.graph.remove_node(recip);
             graph.graph.remove_node(one_const);
             graph.graph.remove_node(fake_sum_reduce);
-            graph.graph.remove_node(const_copy_to);
         }
     }
 }

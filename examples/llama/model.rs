@@ -1,6 +1,7 @@
 #![allow(clippy::type_complexity)]
 use std::ops::{Add, Mul};
 
+use half::f16;
 use luminal::{
     nn::{activation::RMSNorm, embedding::Embedding},
     op::Function,
@@ -203,7 +204,6 @@ fn attn_forward<
             Dim::Known(HEAD_DIM),
         ])
         .permute::<_, Axes4<0, 2, 1, 3>>();
-
     let k = x
         .matmul(attn.k_proj.permute())
         .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
@@ -262,11 +262,10 @@ impl<
             Option::<KVCache<_, Dyn<'s'>, NUM_HEADS, HEAD_DIM>>::None,
         );
 
-        let w = q
-            .batch_matmul(k.permute())
-            .mul((HEAD_DIM as f64).sqrt().recip() as f32)
-            .add(attn_mask.expand())
-            .softmax::<3>();
+        let w = q.batch_matmul(k.permute());
+        let w = w.mul((HEAD_DIM as f64).sqrt().recip() as f32);
+        let w = w.add(attn_mask.expand());
+        let w = w.softmax::<3>();
 
         let o = w
             .batch_matmul(v)
@@ -276,7 +275,6 @@ impl<
                 CurSeq::const_size(),
                 Dim::Known(HIDDEN),
             ]);
-
         (o.matmul(self.o_proj.permute()), (k, v))
     }
 }
@@ -403,8 +401,9 @@ impl<
             GraphTensor<(CurSeq, CurSeq)>,
         ),
     ) -> Self::Output {
-        let normed = self.input_layer_norm.forward(x);
-        let (y, cache) = self.self_attn.forward((normed, attn_mask));
+        let (y, cache) = self
+            .self_attn
+            .forward((self.input_layer_norm.forward(x), attn_mask));
         let x = x + y;
         let y = self.mlp.forward(self.post_attention_layer_norm.forward(x));
         (x + y, cache)
@@ -516,7 +515,7 @@ impl<
                         let mut data = vec![0.; seq_len * seq_len];
                         for i in 0..seq_len {
                             for j in (i + 1)..seq_len {
-                                data[i * seq_len + j] = f32::NEG_INFINITY;
+                                data[i * seq_len + j] = f16::MIN.to_f32();
                             }
                         }
                         vec![Tensor {
@@ -532,7 +531,6 @@ impl<
         );
 
         let mut hidden_states = self.embed_tokens.forward(input);
-        hidden_states.debug("Input");
         let mut caches = vec![];
         for layer_i in &self.layers {
             let (new_hidden_states, (k_cache, v_cache)) =
@@ -654,7 +652,8 @@ impl<
     );
     fn forward(&self, input: GraphTensor<(Batch, CurSeq)>) -> Self::Output {
         let (hidden_states, caches) = self.llama.forward(input);
-        (hidden_states.matmul(self.lm_head.permute()), caches)
+        let o = hidden_states.matmul(self.lm_head.permute());
+        (o, caches)
     }
 }
 
@@ -685,7 +684,8 @@ impl<
         Vec<KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>>,
     ) {
         let (hidden_states, caches) = self.llama.forward_kv((input, caches));
-        (hidden_states.matmul(self.lm_head.permute()), caches)
+        let o = hidden_states.matmul(self.lm_head.permute());
+        (o, caches)
     }
 }
 

@@ -51,6 +51,7 @@ fn main() {
     #[cfg(not(feature="metal"))]
     cx1.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
 
+
     // Build KV cache forward graph
     let kv_model = Model::initialize(&mut cx2);
     // mark_weights(&kv_model, &mut cx2);
