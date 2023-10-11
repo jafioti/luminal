@@ -142,7 +142,7 @@ impl<S: ConstShape> GraphTensor<S> {
         let node = self
             .graph()
             .graph
-            .node_weight_mut(self.id())
+            .node_weight_mut(self.id)
             .unwrap()
             .as_any_mut()
             .downcast_mut::<Function>()

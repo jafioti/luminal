@@ -85,6 +85,23 @@ impl Operator for CudaCopyFromDevice {
     }
 }
 
+/// Constant value on device
+#[derive(Debug, Clone)]
+pub struct CudaConstant(Arc<CudaDevice>, f16);
+impl PartialEq for CudaConstant {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl Operator for CudaConstant {
+    fn process(&self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let mut a = unsafe { self.0.alloc::<f16>(1).unwrap() };
+        self.0.htod_copy_into(vec![self.1], &mut a).unwrap();
+        vec![Tensor { data: Box::new(a) }]
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CudaContiguous(CudaFunction, Arc<CudaDevice>, ShapeTracker);
 
@@ -1289,21 +1306,13 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
                     graph.to_retrieve.insert(copy_node);
                 }
 
-                // If there are inputs to this function remap the function to the copy node
-                if graph
-                    .graph
-                    .edges_directed(function_node, petgraph::Direction::Incoming)
-                    .count()
-                    != 0
-                {
-                    move_references(
-                        &mut graph.id_remap,
-                        &mut graph.no_delete,
-                        &mut graph.to_retrieve,
-                        function_node,
-                        copy_node,
-                    );
-                }
+                move_references(
+                    &mut graph.id_remap,
+                    &mut graph.no_delete,
+                    &mut graph.to_retrieve,
+                    function_node,
+                    copy_node,
+                );
             }
 
             // Insert copy from device for function inputs
@@ -1415,6 +1424,8 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
                 *op_ref = Box::new(CudaSin::new(dev.clone()));
             } else if is::<Sqrt>(op) {
                 *op_ref = Box::new(CudaSqrt::new(dev.clone()));
+            } else if let Some(c) = op_ref.as_any().downcast_ref::<Constant>() {
+                *op_ref = Box::new(CudaConstant(dev.clone(), f16::from_f32(c.0)));
             } else if is::<Recip>(op) {
                 *op_ref = Box::new(CudaRecip::new(dev.clone()));
             } else if is::<Add>(op) {
