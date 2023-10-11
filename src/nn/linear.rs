@@ -67,7 +67,7 @@ impl<const A: usize, const B: usize, C: Dimension, D: Dimension, E: Dimension>
     type Output = GraphTensor<(C, D, E, Const<B>)>;
 
     fn forward(&self, input: GraphTensor<(C, D, E, Const<A>)>) -> Self::Output {
-        input.batch_matmul(self.weight.expand())
+        input.matmul(self.weight.expand())
     }
 }
 

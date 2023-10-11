@@ -173,12 +173,12 @@ impl<
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         let weights = queries
-            .batch_matmul(keys)
+            .matmul(keys)
             .mul((1.0 / ((K_DIM / HEADS) as f64).sqrt()) as f32)
             .softmax::<3>();
 
         let tokens: GraphTensor<(B, S2, Const<V_DIM>)> = weights
-            .batch_matmul(values)
+            .matmul(values)
             .permute::<_, Axes4<0, 2, 1, 3>>()
             .dyn_reshape(vec![B::const_size(), S2::const_size(), Dim::Known(V_DIM)]);
         self.w_o.forward(tokens)

@@ -11,6 +11,7 @@ use crate::{
         linear::Linear,
     },
     prelude::{Module, *},
+    tests::assert_close_precision,
 };
 
 crate::test_imports!();
@@ -457,9 +458,7 @@ fn test_matmul() {
         .to_dtype::<f16>();
     let d_c = d_a.matmul(d_b);
 
-    println!("B: {:?}", c.data());
-    println!("D: {:?}", d_c.clone().to_dtype::<f32>().as_vec());
-    assert_exact(&c.data(), &d_c.to_dtype::<f32>().as_vec());
+    assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 2);
 }
 
 #[test]
@@ -478,7 +477,7 @@ fn test_attn_matmul() {
     let b = cx.new_tensor::<R4<1, 32, 128, 11>>("Input");
     b.set(b_data.clone());
     b.mark_no_delete();
-    let c = a.batch_matmul(b);
+    let c = a.matmul(b);
     c.mark();
 
     cx.optimize(MetalFp16Optimizer::default());

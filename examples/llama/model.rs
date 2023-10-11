@@ -21,12 +21,14 @@ pub struct Mlp<const I: usize, const H: usize> {
     pub up_proj: GraphTensor<(Const<I>, Const<H>)>,
 }
 
-impl<const I: usize, const H: usize, B: Dimension, S: Dimension>
-    Module<GraphTensor<(B, S, Const<H>)>> for Mlp<I, H>
+impl<Sh: Shape, Im: Shape, const I: usize, const H: usize> Module<GraphTensor<Sh>> for Mlp<I, H>
+where
+    GraphTensor<Sh>: Matmul<R2<H, I>, Output = GraphTensor<Im>>,
+    GraphTensor<Im>: Matmul<R2<I, H>, Output = GraphTensor<Sh>>,
 {
-    type Output = GraphTensor<(B, S, Const<H>)>;
+    type Output = GraphTensor<Sh>;
 
-    fn forward(&self, input: GraphTensor<(B, S, Const<H>)>) -> Self::Output {
+    fn forward(&self, input: GraphTensor<Sh>) -> Self::Output {
         let gate = input.matmul(self.gate_proj.permute());
         let gate = gate.swish();
         let up = input.matmul(self.up_proj.permute()) * gate;
@@ -262,13 +264,13 @@ impl<
             Option::<KVCache<_, Dyn<'s'>, NUM_HEADS, HEAD_DIM>>::None,
         );
 
-        let w = q.batch_matmul(k.permute());
+        let w = q.matmul(k.permute());
         let w = w.mul((HEAD_DIM as f64).sqrt().recip() as f32);
         let w = w.add(attn_mask.expand());
         let w = w.softmax::<3>();
 
         let o = w
-            .batch_matmul(v)
+            .matmul(v)
             .permute::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>), _>()
             .dyn_reshape::<(Batch, CurSeq, Const<HIDDEN>)>(vec![
                 Batch::const_size(),
@@ -312,12 +314,12 @@ impl<
                 v.contiguous(),
             );
         let w = q
-            .batch_matmul(k.permute::<(Batch, Const<NUM_HEADS>, Const<HEAD_DIM>, TotSeq), _>())
+            .matmul(k.permute::<(Batch, Const<NUM_HEADS>, Const<HEAD_DIM>, TotSeq), _>())
             .mul((HEAD_DIM as f64).sqrt().recip() as f32) // Inv head scale
             .softmax::<3>();
 
         let o = w
-            .batch_matmul(v)
+            .matmul(v)
             .permute::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>), _>()
             .dyn_reshape::<(Batch, CurSeq, Const<HIDDEN>)>(vec![
                 Batch::const_size(),

@@ -1,8 +1,14 @@
 use crate::prelude::*;
 
+pub trait Matmul<S: Shape> {
+    type Output;
+    fn matmul(self, rhs: GraphTensor<S>) -> Self::Output;
+}
+
 // ABxBC -> AC
-impl<A: Dimension, B: Dimension> GraphTensor<(A, B)> {
-    pub fn matmul<C: Dimension>(self, rhs: GraphTensor<(B, C)>) -> GraphTensor<(A, C)> {
+impl<A: Dimension, B: Dimension, C: Dimension> Matmul<(B, C)> for GraphTensor<(A, B)> {
+    type Output = GraphTensor<(A, C)>;
+    fn matmul(self, rhs: GraphTensor<(B, C)>) -> Self::Output {
         // Broadcasted Multiply
         let mul = self.expand::<(A, C, B), _>()
             * rhs.permute::<_, Axes2<1, 0>>().expand::<(A, C, B), _>();
@@ -13,8 +19,9 @@ impl<A: Dimension, B: Dimension> GraphTensor<(A, B)> {
 }
 
 // AxAB -> B
-impl<A: Dimension> GraphTensor<(A,)> {
-    pub fn matmul<B: Dimension>(self, rhs: GraphTensor<(A, B)>) -> GraphTensor<(B,)> {
+impl<A: Dimension, B: Dimension> Matmul<(A, B)> for GraphTensor<(A,)> {
+    type Output = GraphTensor<(B,)>;
+    fn matmul(self, rhs: GraphTensor<(A, B)>) -> Self::Output {
         let s: GraphTensor<(Const<1>, A)> = self.expand();
 
         // Run normal matmul
@@ -26,8 +33,11 @@ impl<A: Dimension> GraphTensor<(A,)> {
 }
 
 // ABCxCD -> ABD
-impl<A: Dimension, B: Dimension, C: Dimension> GraphTensor<(A, B, C)> {
-    pub fn matmul<D: Dimension>(self, rhs: GraphTensor<(C, D)>) -> GraphTensor<(A, B, D)> {
+impl<A: Dimension, B: Dimension, C: Dimension, D: Dimension> Matmul<(C, D)>
+    for GraphTensor<(A, B, C)>
+{
+    type Output = GraphTensor<(A, B, D)>;
+    fn matmul(self, rhs: GraphTensor<(C, D)>) -> Self::Output {
         // Reshape
         let w: GraphTensor<(D, C)> = rhs.permute::<_, Axes2<1, 0>>();
 
@@ -40,8 +50,11 @@ impl<A: Dimension, B: Dimension, C: Dimension> GraphTensor<(A, B, C)> {
 }
 
 // ABCxACD -> ABD
-impl<A: Dimension, B: Dimension, C: Dimension> GraphTensor<(A, B, C)> {
-    pub fn batch_matmul<D: Dimension>(self, rhs: GraphTensor<(A, C, D)>) -> GraphTensor<(A, B, D)> {
+impl<A: Dimension, B: Dimension, C: Dimension, D: Dimension> Matmul<(A, C, D)>
+    for GraphTensor<(A, B, C)>
+{
+    type Output = GraphTensor<(A, B, D)>;
+    fn matmul(self, rhs: GraphTensor<(A, C, D)>) -> Self::Output {
         // Reshape
         let w: GraphTensor<(A, D, C)> = rhs.permute::<_, Axes3<0, 2, 1>>();
 
@@ -54,11 +67,11 @@ impl<A: Dimension, B: Dimension, C: Dimension> GraphTensor<(A, B, C)> {
 }
 
 // ABCDxABDE -> ABCE
-impl<A: Dimension, B: Dimension, C: Dimension, D: Dimension> GraphTensor<(A, B, C, D)> {
-    pub fn batch_matmul<E: Dimension>(
-        self,
-        rhs: GraphTensor<(A, B, D, E)>,
-    ) -> GraphTensor<(A, B, C, E)> {
+impl<A: Dimension, B: Dimension, C: Dimension, D: Dimension, E: Dimension> Matmul<(A, B, D, E)>
+    for GraphTensor<(A, B, C, D)>
+{
+    type Output = GraphTensor<(A, B, C, E)>;
+    fn matmul(self, rhs: GraphTensor<(A, B, D, E)>) -> Self::Output {
         // Reshape
         let w: GraphTensor<(A, B, E, D)> = rhs.permute::<_, Axes4<0, 1, 3, 2>>();
 
@@ -152,7 +165,7 @@ mod tests {
         a.set(a_data.clone());
         let b = cx.new_tensor::<R3<1, 2, 3>>("Input");
         b.set(b_data.clone());
-        let c = a.batch_matmul(b.permute());
+        let c: GraphTensor<R3<1, 2, 2>> = a.matmul(b.permute::<R3<1, 3, 2>, _>());
         c.mark();
 
         cx.execute();
@@ -174,7 +187,7 @@ mod tests {
         let a = a.expand::<(LConst<1>, Dyn<'a'>, Dyn<'b'>), _>();
         let b = cx.new_tensor::<(LConst<1>, Dyn<'b'>, LConst<3>)>("Input");
         b.set_dyn(b_data.clone(), vec![1, 2, 3]);
-        let c = a.batch_matmul(b);
+        let c = a.matmul(b);
         c.mark();
 
         cx.execute();
