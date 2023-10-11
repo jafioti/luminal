@@ -440,10 +440,8 @@ fn test_matmul() {
     let b_data: Vec<f32> = (0..(4096 * 4)).map(|_| rng.gen_range(-0.5..0.5)).collect();
     let a = cx.new_tensor::<R2<2, 4096>>("Input");
     a.set(a_data.clone());
-    a.mark_no_delete();
     let b = cx.new_tensor::<R2<4096, 4>>("Input");
     b.set(b_data.clone());
-    b.mark_no_delete();
     let c = a.matmul(b);
     c.mark();
 

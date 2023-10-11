@@ -39,11 +39,11 @@ kernel void mkernel(
     uint column = tid % N;
 
     if(row < M && column < N) {
-        float value = 0.0;
+        float value = 0.0f;
         for(int i = 0; i < K; ++i) {
             uint A_index = A_major ? (row * K + i) : (i * M + row); // Row Major vs Column Major
             uint B_index = B_major ? (i * N + column) : (column * K + i); // Row Major vs Column Major
-            value += (float)A[A_index] * (float)B[B_index];
+            value = value + (float)A[A_index] * (float)B[B_index];
         }
         C[row * N + column] = (half)value;
     }
@@ -83,97 +83,33 @@ impl Operator for MetalMatmul2D {
                 .downcast_ref::<Buffer>()
                 .unwrap();
 
-            let mut a_data = vec![f16::ZERO; a.length() as usize / std::mem::size_of::<f16>()];
-            let ptr = a.contents() as *mut f16;
-            for (i, d) in a_data.iter_mut().enumerate() {
-                *d = unsafe { *ptr.add(i) };
-            }
-            let mut b_data = vec![f16::ZERO; b.length() as usize / std::mem::size_of::<f16>()];
-            let ptr = b.contents() as *mut f16;
-            for (i, d) in b_data.iter_mut().enumerate() {
-                *d = unsafe { *ptr.add(i) };
-            }
-
-            let out = vec![f16::ZERO; m * n];
-            // for tid in 0..(m * n) {
-            //     let row = tid / n;
-            //     let column = tid % n;
-
-            //     if (row < m && column < n) {
-            //         let mut value = 0.0;
-            //         for i in 0..k {
-            //             let A_index = if a_row_major {
-            //                 (row * k + i)
-            //             } else {
-            //                 (i * m + row)
-            //             }; // Row Major vs Column Major
-            //             let B_index = if b_row_major {
-            //                 (i * n + column)
-            //             } else {
-            //                 (column * k + i)
-            //             }; // Row Major vs Column Major
-            //             value += a_data[A_index] * b_data[B_index];
-            //         }
-            //         out[row * n + column] = f16::from_f32(value);
-            //     }
-            // }
-            unsafe {
-                gemm::gemm(
-                    m,
-                    n,
-                    k,
-                    out.as_ptr() as *mut gemm::f16,
-                    1,
-                    n as isize,
-                    false,
-                    a_data.as_ptr() as *const gemm::f16,
-                    a_strides[1] as isize,
-                    a_strides[0] as isize,
-                    b_data.as_ptr() as *const gemm::f16,
-                    b_strides[1] as isize,
-                    b_strides[0] as isize,
-                    gemm::f16::ONE,
-                    gemm::f16::ONE,
-                    false,
-                    false,
-                    false,
-                    gemm::Parallelism::None,
-                )
-            }
-
-            // let out = self.2.new_buffer(
-            //     (m * n * std::mem::size_of::<f16>()) as u64,
-            //     MTLResourceOptions::StorageModeManaged,
-            // );
-
-            // // Setup command queue / command buffer / encoder
-            // let command_buffer = self.1.new_command_buffer();
-            // let encoder = command_buffer
-            //     .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            // encoder.set_compute_pipeline_state(&self.0);
-
-            // // Set inputs
-            // encoder.set_buffer(0, Some(a), 0);
-            // encoder.set_buffer(1, Some(b), 0);
-            // encoder.set_buffer(2, Some(&out), 0);
-            // encoder.set_int(3, m as u32);
-            // encoder.set_int(4, k as u32);
-            // encoder.set_int(5, n as u32);
-            // encoder.set_int(6, a_row_major as u32);
-            // encoder.set_int(7, b_row_major as u32);
-
-            // // Execute
-            // encoder.dispatch_n_elements(n * m);
-            // encoder.end_encoding();
-            // command_buffer.commit();
-            // command_buffer.wait_until_completed();
-
-            // let out = out.into_iter().map(f16::from_f32).collect::<Vec<_>>();
-            let out = self.2.new_buffer_with_data(
-                unsafe { std::mem::transmute(out.as_ptr()) },
-                (out.len() * std::mem::size_of::<f16>()) as u64,
+            let out = self.2.new_buffer(
+                (m * n * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
+
+            // Setup command queue / command buffer / encoder
+            let command_buffer = self.1.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
+
+            // Set inputs
+            encoder.set_buffer(0, Some(a), 0);
+            encoder.set_buffer(1, Some(b), 0);
+            encoder.set_buffer(2, Some(&out), 0);
+            encoder.set_int(3, m as u32);
+            encoder.set_int(4, k as u32);
+            encoder.set_int(5, n as u32);
+            encoder.set_int(6, a_row_major as u32);
+            encoder.set_int(7, b_row_major as u32);
+
+            // Execute
+            encoder.dispatch_n_elements(n * m);
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
+
             vec![Tensor {
                 data: Box::new(out),
             }]
@@ -215,13 +151,13 @@ kernel void mkernel(
     uint column = (tid % (M * N)) % N;
 
     if(batch < Batch && row < M && column < N) {
-        half value = (half)0.0;
+        float value = 0.0f;
         for(uint i = 0; i < K; ++i) {
             uint A_index = batch * A_batch_stride + (A_major ? (row * K + i) : (i * M + row)); // Row Major vs Column Major
             uint B_index = batch * B_batch_stride + (B_major ? (i * N + column) : (column * K + i)); // Row Major vs Column Major
-            value += A[A_index] * B[B_index];
+            value += (float)A[A_index] * (float)B[B_index];
         }
-        C[batch * C_batch_stride + row * N + column] = value;
+        C[batch * C_batch_stride + row * N + column] = (half)value;
     }
 }
 "
@@ -259,82 +195,39 @@ impl Operator for MetalBatchMatmul2D {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let mut a_data = vec![f16::ZERO; a.length() as usize / std::mem::size_of::<f16>()];
-            let ptr = a.contents() as *mut f16;
-            for (i, d) in a_data.iter_mut().enumerate() {
-                *d = unsafe { *ptr.add(i) };
-            }
-            let mut b_data = vec![f16::ZERO; b.length() as usize / std::mem::size_of::<f16>()];
-            let ptr = b.contents() as *mut f16;
-            for (i, d) in b_data.iter_mut().enumerate() {
-                *d = unsafe { *ptr.add(i) };
-            }
 
-            let out = vec![f16::ZERO; batch_size * m * n];
-
-            for i in 0..batch_size {
-                unsafe {
-                    gemm::gemm(
-                        m,
-                        n,
-                        k,
-                        out.as_ptr().add(i * m * n) as *mut gemm::f16,
-                        1,
-                        n as isize,
-                        false,
-                        a_data.as_ptr().add(i * a_strides[0]) as *const gemm::f16,
-                        a_strides[2] as isize,
-                        a_strides[1] as isize,
-                        b_data.as_ptr() as *const gemm::f16,
-                        b_strides[1] as isize,
-                        b_strides[0] as isize,
-                        gemm::f16::ONE,
-                        gemm::f16::ONE,
-                        false,
-                        false,
-                        false,
-                        gemm::Parallelism::None,
-                    )
-                }
-            }
-
-            // let out = self.1.new_buffer(
-            //     (batch_size * m * n * std::mem::size_of::<f16>()) as u64,
-            //     MTLResourceOptions::StorageModeManaged,
-            // );
-
-            // // Setup command queue / command buffer / encoder
-            // let command_queue = self.1.new_command_queue();
-            // let command_buffer = command_queue.new_command_buffer();
-            // let encoder = command_buffer
-            //     .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            // encoder.set_compute_pipeline_state(&self.0);
-
-            // // Set inputs
-            // encoder.set_buffer(0, Some(a), 0);
-            // encoder.set_buffer(1, Some(b), 0);
-            // encoder.set_buffer(2, Some(&out), 0);
-            // encoder.set_int(3, batch_size as u32);
-            // encoder.set_int(4, m as u32);
-            // encoder.set_int(5, k as u32);
-            // encoder.set_int(6, n as u32);
-            // encoder.set_int(7, a_row_major as u32);
-            // encoder.set_int(8, b_row_major as u32);
-            // encoder.set_int(9, a_strides[0] as u32);
-            // encoder.set_int(10, 0);
-            // encoder.set_int(11, (m * n) as u32);
-
-            // // Execute
-            // encoder.dispatch_n_elements(batch_size * n * m);
-            // encoder.end_encoding();
-            // command_buffer.commit();
-            // command_buffer.wait_until_completed();
-
-            let out = self.1.new_buffer_with_data(
-                unsafe { std::mem::transmute(out.as_ptr()) },
-                (out.len() * std::mem::size_of::<f16>()) as u64,
+            let out = self.1.new_buffer(
+                (batch_size * m * n * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
+
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
+
+            // Set inputs
+            encoder.set_buffer(0, Some(a), 0);
+            encoder.set_buffer(1, Some(b), 0);
+            encoder.set_buffer(2, Some(&out), 0);
+            encoder.set_int(3, batch_size as u32);
+            encoder.set_int(4, m as u32);
+            encoder.set_int(5, k as u32);
+            encoder.set_int(6, n as u32);
+            encoder.set_int(7, a_row_major as u32);
+            encoder.set_int(8, b_row_major as u32);
+            encoder.set_int(9, a_strides[0] as u32);
+            encoder.set_int(10, 0);
+            encoder.set_int(11, (m * n) as u32);
+
+            // Execute
+            encoder.dispatch_n_elements(batch_size * n * m);
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
+
             vec![Tensor {
                 data: Box::new(out),
             }]
