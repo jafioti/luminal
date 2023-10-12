@@ -127,7 +127,7 @@ impl PartialEq for MetalBatchMatmul2D {
 }
 
 impl MetalBatchMatmul2D {
-    fn compile(dev: &Device, shape: ShapeTracker) -> ComputePipelineState {
+    fn compile(dev: &Device) -> ComputePipelineState {
         let mut code = "#include <metal_stdlib>
 using namespace metal;
 
@@ -142,67 +142,26 @@ kernel void mkernel(
     device uint& A_major [[buffer(7)]],
     device uint& B_major [[buffer(8)]],
     device uint& A_batch_stride [[buffer(9)]],
-    device uint& B_batch_stride [[buffer(10)]],
-    device uint& C_batch_stride [[buffer(11)]],
     uint tid [[thread_position_in_grid]]
 ) {
-    uint batch = tid / (M * N);
-    uint row = (tid % (M * N)) / N;
-    uint column = (tid % (M * N)) % N;
+    uint mat_size = M * N;
+    uint mod_ = tid % mat_size;
+    uint batch = tid / mat_size;
+    uint row = mod_ / N;
+    uint column = mod_ % N;
 
     if(batch < Batch && row < M && column < N) {
         float value = 0.0f;
         for(uint i = 0; i < K; ++i) {
             uint A_index = batch * A_batch_stride + (A_major ? (row * K + i) : (i * M + row)); // Row Major vs Column Major
-            uint B_index = batch * B_batch_stride + (B_major ? (i * N + column) : (column * K + i)); // Row Major vs Column Major
+            uint B_index = B_major ? (i * N + column) : (column * K + i); // Row Major vs Column Major
             value += (float)A[A_index] * (float)B[B_index];
         }
-        C[batch * C_batch_stride + row * N + column] = (half)value;
+        C[batch * mat_size + row * N + column] = (half)value;
     }
 }
 "
         .to_string();
-        //         if let Dim::Known(k) = shape.shape()[2] {
-        //             if k % 2 == 0 {
-        //                 code = "#include <metal_stdlib>
-        // using namespace metal;
-
-        // struct Pair {
-        //     half a;
-        //     half b;
-        // };
-
-        // kernel void mkernel(
-        //     constant Pair *A [[buffer(0)]],
-        //     constant Pair *B [[buffer(1)]],
-        //     device half *C [[buffer(2)]],
-        //     device uint& Batch [[buffer(3)]],
-        //     device uint& M [[buffer(4)]],
-        //     device uint& K [[buffer(5)]],
-        //     device uint& N [[buffer(6)]],
-        //     device uint& A_major [[buffer(7)]],
-        //     device uint& B_major [[buffer(8)]],
-        //     device uint& A_batch_stride [[buffer(9)]],
-        //     device uint& B_batch_stride [[buffer(10)]],
-        //     device uint& C_batch_stride [[buffer(11)]],
-        //     uint tid [[thread_position_in_grid]]
-        // ) {
-        //     uint batch = tid / (M * N);
-        //     uint row = (tid % (M * N)) / N;
-        //     uint column = (tid % (M * N)) % N;
-
-        //     if(batch < Batch && row < M && column < N) {
-        //         half2 acc = half2(0.0h, 0.0h);
-        //         for(uint i = 0; i < K; i+=2) {
-        //             uint A_index = batch * A_batch_stride + (A_major ? (row * K + i) : (i * M + row)); // Row Major vs Column Major
-        //             uint B_index = batch * B_batch_stride + (B_major ? (i * N + column) : (column * K + i)); // Row Major vs Column Major
-        //             acc += (half2)(A[A_index].a, A[A_index].b) * (half2)(B[B_index].a, B[B_index].b);
-        //         }
-        //         C[batch * C_batch_stride + row * N + column] = acc.x + acc.y;
-        //     }
-        // }".to_string();
-        //             }
-        //         }
         code = code.replace("mkernel", "kernel_batch_matmul_2d");
 
         compile_function("kernel_batch_matmul_2d", &code, dev)
@@ -260,8 +219,6 @@ impl Operator for MetalBatchMatmul2D {
             encoder.set_int(7, a_row_major as u32);
             encoder.set_int(8, b_row_major as u32);
             encoder.set_int(9, a_strides[0] as u32);
-            encoder.set_int(10, 0);
-            encoder.set_int(11, (m * n) as u32);
 
             // Execute
             encoder.dispatch_n_elements(batch_size * n * m);
@@ -493,7 +450,7 @@ impl GraphOptimizer for MetalMatMulOptimizer {
             srcs[1].1.remove_dim(0);
             srcs[1].1.permute(&[1, 0]);
             if batched_matmul.is_none() {
-                batched_matmul = Some(MetalBatchMatmul2D::compile(&dev, srcs[0].1));
+                batched_matmul = Some(MetalBatchMatmul2D::compile(&dev));
             }
             let new_op = graph
                 .add_op(MetalBatchMatmul2D(
