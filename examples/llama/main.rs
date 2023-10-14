@@ -43,7 +43,7 @@ fn main() {
         k.mark_no_delete();
         v.mark_no_delete();
     }
-    #[cfg(all(feature="metal", target_arch = "aarch64"))]
+    #[cfg(feature="metal")]
     cx1.optimize(<(MetalFp16Optimizer, GenericOptimizer)>::default());
     #[cfg(feature="cuda")]
     cx1.optimize(<(CudaFp16Optimizer, GenericOptimizer)>::default());
@@ -63,7 +63,7 @@ fn main() {
         k.mark_no_delete();
         v.mark_no_delete();
     }
-    #[cfg(all(feature="metal", target_arch = "aarch64"))]
+    #[cfg(feature="metal")]
     for (k, v) in &cache_src {
         k.set_type(std::any::TypeId::of::<metal_rs::Buffer>());
         v.set_type(std::any::TypeId::of::<metal_rs::Buffer>());
@@ -73,7 +73,7 @@ fn main() {
         k.set_type(std::any::TypeId::of::<cudarc::driver::CudaSlice<half::f16>>());
         v.set_type(std::any::TypeId::of::<cudarc::driver::CudaSlice<half::f16>>());
     }
-    #[cfg(all(feature="metal", target_arch = "aarch64"))]
+    #[cfg(feature="metal")]
     cx2.optimize(<(MetalFp16Optimizer, GenericOptimizer)>::default());
     #[cfg(feature="cuda")]
     cx2.optimize(<(CudaFp16Optimizer, GenericOptimizer)>::default());
