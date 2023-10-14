@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 mod dynamic;
 
 use std::fmt::Debug;

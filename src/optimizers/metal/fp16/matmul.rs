@@ -117,6 +117,113 @@ impl Operator for MetalMatmul2D {
     }
 }
 
+// /// Multiplies a MxK matrix with a KxN matrix, resulting in a MxN matrix
+// #[derive(Debug, Clone)]
+// pub struct MetalMatmul2D(ComputePipelineState, CommandQueue, Device);
+// impl PartialEq for MetalMatmul2D {
+//     fn eq(&self, _: &Self) -> bool {
+//         false
+//     }
+// }
+
+// impl MetalMatmul2D {
+//     fn compile(dev: &Device) -> ComputePipelineState {
+//         let mut code = "#include <metal_stdlib>
+// using namespace metal;
+
+// kernel void mkernel(
+//     device half *A [[buffer(0)]],
+//     device half *B [[buffer(1)]],
+//     device half *C [[buffer(2)]],
+//     device uint& M [[buffer(3)]],
+//     device uint& K [[buffer(4)]],
+//     device uint& N [[buffer(5)]],
+//     device uint& A_major [[buffer(6)]],
+//     device uint& B_major [[buffer(7)]],
+//     uint tid [[thread_position_in_grid]]
+// ) {
+//     uint row = tid / N;
+//     uint column = tid % N;
+
+//     if(row < M && column < N) {
+//         float value = 0.0f;
+//         for(int i = 0; i < K; ++i) {
+//             uint A_index = A_major ? (row * K + i) : (i * M + row); // Row Major vs Column Major
+//             uint B_index = B_major ? (i * N + column) : (column * K + i); // Row Major vs Column Major
+//             value += (float)A[A_index] * (float)B[B_index];
+//         }
+//         C[row * N + column] = (half)value;
+//     }
+// }
+// "
+//         .to_string();
+//         code = code.replace("mkernel", "kernel_matmul_2d");
+
+//         compile_function("kernel_matmul_2d", &code, dev)
+//     }
+// }
+
+// impl Operator for MetalMatmul2D {
+//     fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+//         autoreleasepool(|| {
+//             let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
+//             let (a_strides, b_strides) = (inp[0].1.strides(), inp[1].1.strides());
+//             let (a_row_major, b_row_major) =
+//                 (a_strides[0] > a_strides[1], b_strides[0] > b_strides[1]);
+//             let (m, k, n) = (
+//                 a_shape[0].to_usize().unwrap(),
+//                 a_shape[1].to_usize().unwrap(),
+//                 b_shape[1].to_usize().unwrap(),
+//             );
+//             let a = inp[0]
+//                 .0
+//                 .borrowed()
+//                 .data
+//                 .as_any()
+//                 .downcast_ref::<Buffer>()
+//                 .unwrap();
+//             let b = inp[1]
+//                 .0
+//                 .borrowed()
+//                 .data
+//                 .as_any()
+//                 .downcast_ref::<Buffer>()
+//                 .unwrap();
+
+//             let out = self.2.new_buffer(
+//                 (m * n * std::mem::size_of::<f16>()) as u64,
+//                 MTLResourceOptions::StorageModeManaged,
+//             );
+
+//             // Setup command queue / command buffer / encoder
+//             let command_buffer = self.1.new_command_buffer();
+//             let encoder = command_buffer
+//                 .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+//             encoder.set_compute_pipeline_state(&self.0);
+
+//             // Set inputs
+//             encoder.set_buffer(0, Some(a), 0);
+//             encoder.set_buffer(1, Some(b), 0);
+//             encoder.set_buffer(2, Some(&out), 0);
+//             encoder.set_int(3, m as u32);
+//             encoder.set_int(4, k as u32);
+//             encoder.set_int(5, n as u32);
+//             encoder.set_int(6, a_row_major as u32);
+//             encoder.set_int(7, b_row_major as u32);
+
+//             // Execute
+//             encoder.dispatch_n_elements(n * m);
+//             encoder.end_encoding();
+//             command_buffer.commit();
+//             command_buffer.wait_until_completed();
+
+//             vec![Tensor {
+//                 data: Box::new(out),
+//             }]
+//         })
+//     }
+// }
+
 /// Multiplies a BxMxK matrix with a BxKxN matrix, resulting in a BxMxN matrix
 #[derive(Debug, Clone)]
 pub struct MetalBatchMatmul2D(ComputePipelineState, Device);

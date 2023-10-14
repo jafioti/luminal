@@ -1455,16 +1455,26 @@ impl GraphOptimizer for FakeReductionOptimizer {
     fn optimize(&self, graph: &mut Graph) {
         let s = GraphSelector::default();
         let mut sum_reduce = NodeIndex::default();
-        s.op()
-            .ty::<CudaSumReduce>()
-            .check(|o, shapes| {
-                if let Some(o) = o.as_any().downcast_ref::<CudaSumReduce>() {
-                    shapes[0].fake[shapes[0].indexes[o.2]] // Ensure dimension we are reducing is fake
+        s.edge(
+            s.op().check(|o, _| {
+                if let Some(c) = o.as_any().downcast_ref::<CudaConstant>() {
+                    c.0 == f16::ONE
                 } else {
                     false
                 }
-            })
-            .ptr(&mut sum_reduce);
+            }),
+            0,
+            s.op()
+                .ty::<MetalSumReduce>()
+                .check(|o, shapes| {
+                    if let Some(o) = o.as_any().downcast_ref::<CudaSumReduce>() {
+                        shapes[0].fake[shapes[0].indexes[o.2]] // Ensure dimension we are reducing is fake
+                    } else {
+                        false
+                    }
+                })
+                .ptr(&mut sum_reduce),
+        );
 
         for _ in s.search(graph) {
             let op_ref = graph.graph.node_weight_mut(sum_reduce).unwrap();
