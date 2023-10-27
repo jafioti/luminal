@@ -14,6 +14,15 @@ use metal_rs::{objc::rc::autoreleasepool, *};
 use num_traits::FromPrimitive;
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
+pub trait MetalKernelForward {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer>;
+}
+
 /// Copy a tensor to the GPU
 #[derive(Debug, Clone)]
 pub struct MetalCopyToDevice(Device);
@@ -140,12 +149,42 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         Self(kernels[&name].clone(), dev, shape)
     }
 }
+
+impl MetalKernelForward for MetalContiguous {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let res_shape = inputs[0].1.contiguous();
+        let inp_size = res_shape.n_elements();
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(&out), 0);
+        encoder.set_int(2, inp_size as u32);
+        input_dyn_dims(&[(self.2, inputs[0].1)], encoder, 3);
+
+        // Execute
+        encoder.dispatch_n_elements(inp_size);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalContiguous {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let res_shape = tensors[0].1.contiguous();
-            let inp_size = res_shape.n_elements();
-
             // Setup buffers
             let a = tensors[0]
                 .0
@@ -154,27 +193,16 @@ impl Operator for MetalContiguous {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
 
             // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(&out), 0);
-            encoder.set_int(2, inp_size as u32);
-            input_dyn_dims(&[(self.2, tensors[0].1)], encoder, 3);
+            let out = self
+                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .pop()
+                .unwrap();
 
-            // Execute
-            encoder.dispatch_n_elements(inp_size);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -186,7 +214,7 @@ impl Operator for MetalContiguous {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalLog2(ComputePipelineState, Device);
+pub struct MetalLog2(pub ComputePipelineState, Device);
 impl PartialEq for MetalLog2 {
     fn eq(&self, _: &Self) -> bool {
         false
@@ -212,12 +240,40 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         Self(kernels[&name].clone(), dev)
     }
 }
+
+impl MetalKernelForward for MetalLog2 {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let inp_size = inputs[0].1.n_physical_elements();
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set function inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(&out), 0);
+        encoder.set_int(2, inp_size as u32);
+
+        // Execute
+        encoder.dispatch_n_elements(inp_size);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalLog2 {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let inp_size = tensors[0].1.n_physical_elements();
-
-            // Setup buffers
             let a = tensors[0]
                 .0
                 .borrowed()
@@ -225,26 +281,15 @@ impl Operator for MetalLog2 {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
 
-            // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(&out), 0);
-            encoder.set_int(2, inp_size as u32);
+            let out = self
+                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .pop()
+                .unwrap();
 
-            // Execute
-            encoder.dispatch_n_elements(inp_size);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -256,7 +301,7 @@ impl Operator for MetalLog2 {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalExp2(ComputePipelineState, Device);
+pub struct MetalExp2(pub ComputePipelineState, Device);
 impl PartialEq for MetalExp2 {
     fn eq(&self, _: &Self) -> bool {
         false
@@ -282,12 +327,39 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         Self(kernels[&name].clone(), dev)
     }
 }
+impl MetalKernelForward for MetalExp2 {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let inp_size = inputs[0].1.n_physical_elements();
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set function inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(&out), 0);
+        encoder.set_int(2, inp_size as u32);
+
+        // Execute
+        encoder.dispatch_n_elements(inp_size);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalExp2 {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let inp_size = tensors[0].1.n_physical_elements();
-
-            // Setup buffers
             let a = tensors[0]
                 .0
                 .borrowed()
@@ -295,26 +367,15 @@ impl Operator for MetalExp2 {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
 
-            // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(&out), 0);
-            encoder.set_int(2, inp_size as u32);
+            let out = self
+                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .pop()
+                .unwrap();
 
-            // Execute
-            encoder.dispatch_n_elements(inp_size);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -326,7 +387,7 @@ impl Operator for MetalExp2 {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalSin(ComputePipelineState, Device);
+pub struct MetalSin(pub ComputePipelineState, Device);
 impl PartialEq for MetalSin {
     fn eq(&self, _: &Self) -> bool {
         false
@@ -352,12 +413,39 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         Self(kernels[&name].clone(), dev)
     }
 }
+impl MetalKernelForward for MetalSin {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let inp_size = inputs[0].1.n_physical_elements();
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set function inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(&out), 0);
+        encoder.set_int(2, inp_size as u32);
+
+        // Execute
+        encoder.dispatch_n_elements(inp_size);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalSin {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let inp_size = tensors[0].1.n_physical_elements();
-
-            // Setup buffers
             let a = tensors[0]
                 .0
                 .borrowed()
@@ -365,26 +453,15 @@ impl Operator for MetalSin {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
 
-            // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(&out), 0);
-            encoder.set_int(2, inp_size as u32);
+            let out = self
+                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .pop()
+                .unwrap();
 
-            // Execute
-            encoder.dispatch_n_elements(inp_size);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -396,7 +473,7 @@ impl Operator for MetalSin {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalSqrt(ComputePipelineState, Device);
+pub struct MetalSqrt(pub ComputePipelineState, Device);
 impl PartialEq for MetalSqrt {
     fn eq(&self, _: &Self) -> bool {
         false
@@ -422,12 +499,39 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         Self(kernels[&name].clone(), dev)
     }
 }
+impl MetalKernelForward for MetalSqrt {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let inp_size = inputs[0].1.n_physical_elements();
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set function inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(&out), 0);
+        encoder.set_int(2, inp_size as u32);
+
+        // Execute
+        encoder.dispatch_n_elements(inp_size);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalSqrt {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let inp_size = tensors[0].1.n_physical_elements();
-
-            // Setup buffers
             let a = tensors[0]
                 .0
                 .borrowed()
@@ -435,26 +539,15 @@ impl Operator for MetalSqrt {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
 
-            // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(&out), 0);
-            encoder.set_int(2, inp_size as u32);
+            let out = self
+                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .pop()
+                .unwrap();
 
-            // Execute
-            encoder.dispatch_n_elements(inp_size);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -466,7 +559,7 @@ impl Operator for MetalSqrt {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalRecip(ComputePipelineState, Device);
+pub struct MetalRecip(pub ComputePipelineState, Device);
 impl PartialEq for MetalRecip {
     fn eq(&self, _: &Self) -> bool {
         false
@@ -492,12 +585,39 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         Self(kernels[&name].clone(), dev)
     }
 }
+impl MetalKernelForward for MetalRecip {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let inp_size = inputs[0].1.n_physical_elements();
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set function inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(&out), 0);
+        encoder.set_int(2, inp_size as u32);
+
+        // Execute
+        encoder.dispatch_n_elements(inp_size);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalRecip {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let inp_size = tensors[0].1.n_physical_elements();
-
-            // Setup buffers
             let a = tensors[0]
                 .0
                 .borrowed()
@@ -505,26 +625,15 @@ impl Operator for MetalRecip {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
 
-            // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(&out), 0);
-            encoder.set_int(2, inp_size as u32);
+            let out = self
+                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .pop()
+                .unwrap();
 
-            // Execute
-            encoder.dispatch_n_elements(inp_size);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -575,12 +684,42 @@ kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffe
         Self(kernels[&name].clone(), dev, a_shape, b_shape)
     }
 }
+
+impl MetalKernelForward for MetalAdd {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let inp_size = inputs[0].1.n_elements();
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(inputs[0].0), 0);
+        encoder.set_buffer(2, Some(&out), 0);
+        encoder.set_int(3, inp_size as u32);
+        input_dyn_dims(&[(self.2, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
+
+        // Execute
+        encoder.dispatch_n_elements(inp_size);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalAdd {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let inp_size = tensors[0].1.n_elements();
-
-            // Setup buffers
             let a = tensors[0]
                 .0
                 .borrowed()
@@ -595,32 +734,19 @@ impl Operator for MetalAdd {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
 
-            // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(b), 0);
-            encoder.set_buffer(2, Some(&out), 0);
-            encoder.set_int(3, inp_size as u32);
-            input_dyn_dims(
-                &[(self.2, tensors[0].1), (self.3, tensors[1].1)],
-                encoder,
-                4,
-            );
+            let out = self
+                .metal_forward(
+                    &[(a, tensors[0].1), (b, tensors[1].1)],
+                    &self.1,
+                    command_buffer,
+                )
+                .pop()
+                .unwrap();
 
-            // Execute
-            encoder.dispatch_n_elements(inp_size);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -671,12 +797,41 @@ kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffe
         Self(kernels[&name].clone(), dev, a_shape, b_shape)
     }
 }
+impl MetalKernelForward for MetalMul {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let inp_size = inputs[0].1.n_elements();
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(inputs[0].0), 0);
+        encoder.set_buffer(2, Some(&out), 0);
+        encoder.set_int(3, inp_size as u32);
+        input_dyn_dims(&[(self.2, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
+
+        // Execute
+        encoder.dispatch_n_elements(inp_size);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalMul {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let inp_size = tensors[0].1.n_elements();
-
-            // Setup buffers
             let a = tensors[0]
                 .0
                 .borrowed()
@@ -691,32 +846,19 @@ impl Operator for MetalMul {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
 
-            // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(b), 0);
-            encoder.set_buffer(2, Some(&out), 0);
-            encoder.set_int(3, inp_size as u32);
-            input_dyn_dims(
-                &[(self.2, tensors[0].1), (self.3, tensors[1].1)],
-                encoder,
-                4,
-            );
+            let out = self
+                .metal_forward(
+                    &[(a, tensors[0].1), (b, tensors[1].1)],
+                    &self.1,
+                    command_buffer,
+                )
+                .pop()
+                .unwrap();
 
-            // Execute
-            encoder.dispatch_n_elements(inp_size);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -777,12 +919,42 @@ kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffe
         Self(kernels[&name].clone(), dev, a_shape, b_shape)
     }
 }
+
+impl MetalKernelForward for MetalLessThan {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let inp_size = inputs[0].1.n_elements();
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(inputs[0].0), 0);
+        encoder.set_buffer(2, Some(&out), 0);
+        encoder.set_int(3, inp_size as u32);
+        input_dyn_dims(&[(self.2, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
+
+        // Execute
+        encoder.dispatch_n_elements(inp_size);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalLessThan {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let inp_size = tensors[0].1.n_elements();
-
-            // Setup buffers
             let a = tensors[0]
                 .0
                 .borrowed()
@@ -797,32 +969,19 @@ impl Operator for MetalLessThan {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
 
-            // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(b), 0);
-            encoder.set_buffer(2, Some(&out), 0);
-            encoder.set_int(3, inp_size as u32);
-            input_dyn_dims(
-                &[(self.2, tensors[0].1), (self.3, tensors[1].1)],
-                encoder,
-                4,
-            );
+            let out = self
+                .metal_forward(
+                    &[(a, tensors[0].1), (b, tensors[1].1)],
+                    &self.1,
+                    command_buffer,
+                )
+                .pop()
+                .unwrap();
 
-            // Execute
-            encoder.dispatch_n_elements(inp_size);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -871,12 +1030,41 @@ kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffe
         Self(kernels[&name].clone(), dev, a_shape, b_shape)
     }
 }
+impl MetalKernelForward for MetalMod {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let inp_size = inputs[0].1.n_elements();
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(inputs[0].0), 0);
+        encoder.set_buffer(2, Some(&out), 0);
+        encoder.set_int(3, inp_size as u32);
+        input_dyn_dims(&[(self.2, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
+
+        // Execute
+        encoder.dispatch_n_elements(inp_size);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalMod {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let inp_size = tensors[0].1.n_elements();
-
-            // Setup buffers
             let a = tensors[0]
                 .0
                 .borrowed()
@@ -891,32 +1079,19 @@ impl Operator for MetalMod {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
 
-            // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(b), 0);
-            encoder.set_buffer(2, Some(&out), 0);
-            encoder.set_int(3, inp_size as u32);
-            input_dyn_dims(
-                &[(self.2, tensors[0].1), (self.3, tensors[1].1)],
-                encoder,
-                4,
-            );
+            let out = self
+                .metal_forward(
+                    &[(a, tensors[0].1), (b, tensors[1].1)],
+                    &self.1,
+                    command_buffer,
+                )
+                .pop()
+                .unwrap();
 
-            // Execute
-            encoder.dispatch_n_elements(inp_size);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -973,14 +1148,62 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         Self(kernels[&name].clone(), dev, dim, shape)
     }
 }
+
+impl MetalKernelForward for MetalSumReduce {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let mut sh = inputs[0].1;
+        sh.remove_dim(self.2);
+        let inp_size = sh.contiguous().n_elements();
+
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+        let front_size: usize = inputs[0]
+            .1
+            .shape()
+            .iter()
+            .take(self.2)
+            .map(|i| i.to_usize().unwrap())
+            .product();
+        let back_size: usize = inputs[0]
+            .1
+            .shape()
+            .iter()
+            .skip(self.2 + 1)
+            .map(|i| i.to_usize().unwrap())
+            .product();
+        let dim_size = inputs[0].1.shape()[self.2].to_usize().unwrap();
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(&out), 0);
+        encoder.set_int(2, inp_size as u32);
+        encoder.set_int(3, front_size as u32);
+        encoder.set_int(4, back_size as u32);
+        encoder.set_int(5, dim_size as u32);
+        input_dyn_dims(&[(self.3, inputs[0].1)], encoder, 6);
+
+        // Execute
+        encoder.dispatch_n_elements(inp_size);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalSumReduce {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let mut sh = tensors[0].1;
-            sh.remove_dim(self.2);
-            let inp_size = sh.contiguous().n_elements();
-
-            // Setup buffers
             let a = tensors[0]
                 .0
                 .borrowed()
@@ -988,45 +1211,16 @@ impl Operator for MetalSumReduce {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
-            let front_size: usize = tensors[0]
-                .1
-                .shape()
-                .iter()
-                .take(self.2)
-                .map(|i| i.to_usize().unwrap())
-                .product();
-            let back_size: usize = tensors[0]
-                .1
-                .shape()
-                .iter()
-                .skip(self.2 + 1)
-                .map(|i| i.to_usize().unwrap())
-                .product();
-            let dim_size = tensors[0].1.shape()[self.2].to_usize().unwrap();
 
             // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(&out), 0);
-            encoder.set_int(2, inp_size as u32);
-            encoder.set_int(3, front_size as u32);
-            encoder.set_int(4, back_size as u32);
-            encoder.set_int(5, dim_size as u32);
-            input_dyn_dims(&[(self.3, tensors[0].1)], encoder, 6);
+            let out = self
+                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .pop()
+                .unwrap();
 
-            // Execute
-            encoder.dispatch_n_elements(inp_size);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -1084,14 +1278,61 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         Self(kernels[&name].clone(), dev, dim, shape)
     }
 }
+impl MetalKernelForward for MetalMaxReduce {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let mut sh = inputs[0].1;
+        sh.remove_dim(self.2);
+        let inp_size = sh.contiguous().n_elements();
+
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+        let front_size: usize = inputs[0]
+            .1
+            .shape()
+            .iter()
+            .take(self.2)
+            .map(|i| i.to_usize().unwrap())
+            .product();
+        let back_size: usize = inputs[0]
+            .1
+            .shape()
+            .iter()
+            .skip(self.2 + 1)
+            .map(|i| i.to_usize().unwrap())
+            .product();
+        let dim_size = inputs[0].1.shape()[self.2].to_usize().unwrap();
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(&out), 0);
+        encoder.set_int(2, inp_size as u32);
+        encoder.set_int(3, front_size as u32);
+        encoder.set_int(4, back_size as u32);
+        encoder.set_int(5, dim_size as u32);
+        input_dyn_dims(&[(self.3, inputs[0].1)], encoder, 6);
+
+        // Execute
+        encoder.dispatch_n_elements(inp_size);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalMaxReduce {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let mut sh = tensors[0].1;
-            sh.remove_dim(self.2);
-            let inp_size = sh.contiguous().n_elements();
-
-            // Setup buffers
             let a = tensors[0]
                 .0
                 .borrowed()
@@ -1099,45 +1340,16 @@ impl Operator for MetalMaxReduce {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
-            let front_size: usize = tensors[0]
-                .1
-                .shape()
-                .iter()
-                .take(self.2)
-                .map(|i| i.to_usize().unwrap())
-                .product();
-            let back_size: usize = tensors[0]
-                .1
-                .shape()
-                .iter()
-                .skip(self.2 + 1)
-                .map(|i| i.to_usize().unwrap())
-                .product();
-            let dim_size = tensors[0].1.shape()[self.2].to_usize().unwrap();
 
             // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(&out), 0);
-            encoder.set_int(2, inp_size as u32);
-            encoder.set_int(3, front_size as u32);
-            encoder.set_int(4, back_size as u32);
-            encoder.set_int(5, dim_size as u32);
-            input_dyn_dims(&[(self.3, tensors[0].1)], encoder, 6);
+            let out = self
+                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .pop()
+                .unwrap();
 
-            // Execute
-            encoder.dispatch_n_elements(inp_size);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 

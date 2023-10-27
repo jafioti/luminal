@@ -12,56 +12,6 @@ use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Multiplies a MxK matrix with a KxN matrix, resulting in a MxN matrix
 #[derive(Debug, Clone)]
-pub struct MetalRowMajorMatmul2D(ComputePipelineState, Device);
-impl PartialEq for MetalRowMajorMatmul2D {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
-
-impl MetalRowMajorMatmul2D {
-    fn compile(dev: &Device) -> ComputePipelineState {
-        let mut code = "#include <metal_stdlib>
-using namespace metal;
-
-kernel void mkernel(
-    device half *A [[buffer(0)]],
-    device half *B [[buffer(1)]],
-    device half *C [[buffer(2)]],
-    device uint& M [[buffer(3)]],
-    device uint& K [[buffer(4)]],
-    device uint& N [[buffer(5)]],
-    device uint& A_major [[buffer(6)]],
-    device uint& B_major [[buffer(7)]],
-    uint tid [[thread_position_in_grid]]
-) { 
-    uint row = tid / N;
-    uint column = tid % N;
-
-    if(row < M && column < N) {
-        float value = 0.0f;
-        for(int i = 0; i < K; ++i) {
-            uint A_index = A_major ? (row * K + i) : (i * M + row); // Row Major vs Column Major
-            uint B_index = B_major ? (i * N + column) : (column * K + i); // Row Major vs Column Major
-            value += (float)A[A_index] * (float)B[B_index];
-        }
-        C[row * N + column] = (half)value;
-    }
-}
-"
-        .to_string();
-        code = code.replace("mkernel", "kernel_matmul_2d");
-
-        compile_function("kernel_matmul_2d", &code, dev)
-    }
-}
-
-impl Operator for MetalRowMajorMatmul2D {
-    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {}
-}
-
-/// Multiplies a MxK matrix with a KxN matrix, resulting in a MxN matrix
-#[derive(Debug, Clone)]
 pub struct MetalMatmul2D(ComputePipelineState, Device);
 impl PartialEq for MetalMatmul2D {
     fn eq(&self, _: &Self) -> bool {
@@ -93,7 +43,7 @@ kernel void mkernel(
         for(int i = 0; i < K; ++i) {
             uint A_index = A_major ? (row * K + i) : (i * M + row); // Row Major vs Column Major
             uint B_index = B_major ? (i * N + column) : (column * K + i); // Row Major vs Column Major
-            value += (float)A[A_index] * (float)B[B_index];
+            value = fast::fma((float)A[A_index], (float)B[B_index], value);
         }
         C[row * N + column] = (half)value;
     }
@@ -206,7 +156,7 @@ kernel void mkernel(
         for(uint i = 0; i < K; ++i) {
             uint A_index = batch * A_batch_stride + (A_major ? (row * K + i) : (i * M + row)); // Row Major vs Column Major
             uint B_index = B_major ? (i * N + column) : (column * K + i); // Row Major vs Column Major
-            value += (float)A[A_index] * (float)B[B_index];
+            value = fast::fma((float)A[A_index], (float)B[B_index], value);
         }
         C[batch * mat_size + row * N + column] = (half)value;
     }
@@ -380,76 +330,6 @@ pub struct MetalMatMulOptimizer;
 impl GraphOptimizer for MetalMatMulOptimizer {
     fn optimize(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
-        // Look for the matmul pattern
-        let s = GraphSelector::default();
-        let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
-        // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
-        // Actually starts at [A,B] | [B, C]
-        s.edge(
-            s.op()
-                .ty::<MetalMul>()
-                .shapes(vec![
-                    vec![Dim::Unknown('A'), Dim::Unknown('C'), Dim::Unknown('B')],
-                    vec![Dim::Unknown('A'), Dim::Unknown('C'), Dim::Unknown('B')],
-                ])
-                // Ensure both are row-major (contiguous; since second input has been permuted, it should be contiguous after we permute it back)
-                .check(|_, shapes| {
-                    let mut shapes = shapes.to_vec();
-                    shapes[0].1.remove_dim(1);
-                    shapes[1].1.remove_dim(0);
-                    shapes[1].1.permute(&[1, 0]);
-                    shapes[0].is_contiguous() && shapes[1].is_contiguous()
-                })
-                .fakes(vec![vec![false, true, false], vec![true, false, false]])
-                .ptr(&mut mul),
-            0,
-            s.op()
-                .ty::<MetalSumReduce>()
-                .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
-                        o.2 == 2
-                    } else {
-                        false
-                    }
-                })
-                .ptr(&mut sum_reduce),
-        );
-
-        let mut matmul = None;
-        for _ in s.search(graph) {
-            if graph.no_delete.contains(&mul) {
-                // The intermediate mul can't be deleted
-                continue;
-            }
-            // Insert MatMul2D op
-            let mut srcs = graph.get_sources(mul);
-            // Undo expansions and permute
-            srcs[0].1.remove_dim(1);
-            srcs[1].1.remove_dim(0);
-            srcs[1].1.permute(&[1, 0]);
-            if matmul.is_none() {
-                matmul = Some(MetalRowMajorMatmul2D::compile(&dev));
-            }
-            let new_op = graph
-                .add_op(MetalRowMajorMatmul2D(matmul.clone().unwrap(), dev.clone()))
-                .input(srcs[0].0, 0, srcs[0].1)
-                .input(srcs[1].0, 0, srcs[1].1)
-                .finish();
-
-            // Create edges to dests
-            move_outgoing_edge(sum_reduce, new_op, &mut graph.graph);
-            move_references(
-                &mut graph.id_remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                sum_reduce,
-                new_op,
-            );
-
-            // Remove the old ops
-            graph.graph.remove_node(mul);
-            graph.graph.remove_node(sum_reduce);
-        }
         // Look for the matmul pattern
         let s = GraphSelector::default();
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());

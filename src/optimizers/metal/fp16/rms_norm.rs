@@ -103,6 +103,8 @@ kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]
 impl Operator for MetalRMSNorm {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
+            let command_queue = self.2.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
             let a = tensors[0]
                 .0
                 .borrowed()
@@ -127,9 +129,6 @@ impl Operator for MetalRMSNorm {
             let back_size = 1;
             let dim_size = tensors[0].1.shape()[meaned_shape.len()].to_usize().unwrap();
 
-            // Setup command queue / command buffer / encoder
-            let command_queue = self.2.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
             let encoder = command_buffer
                 .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
             encoder.set_compute_pipeline_state(&self.0);
@@ -143,20 +142,14 @@ impl Operator for MetalRMSNorm {
             encoder.set_int(5, dim_size as u32);
             input_dyn_dims(&[(self.3, tensors[0].1)], encoder, 6);
 
-            // Execute
             encoder.dispatch_n_elements(meaned_shape.n_elements());
             encoder.end_encoding();
-            command_buffer.commit();
-            command_buffer.wait_until_completed();
 
             let out = self.2.new_buffer(
                 (tensors[0].1.n_elements() * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
 
-            // Setup command queue / command buffer / encoder
-            let command_queue = self.2.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
             let encoder = command_buffer
                 .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
             encoder.set_compute_pipeline_state(&self.1);
