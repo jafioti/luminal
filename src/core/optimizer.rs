@@ -95,6 +95,21 @@ pub fn move_outgoing_edge<N, E: Clone>(
     }
 }
 
+pub fn move_incoming_edge<N, E: Clone>(
+    from: NodeIndex,
+    to: NodeIndex,
+    graph: &mut StableGraph<N, E>,
+) {
+    // Carry over incoming edges from node to other_node
+    for (weight, source) in graph
+        .edges_directed(from, petgraph::Direction::Incoming)
+        .map(|e| (e.weight().clone(), e.source()))
+        .collect::<Vec<_>>()
+    {
+        graph.add_edge(source, to, weight);
+    }
+}
+
 pub trait TraitObjEq {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;

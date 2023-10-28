@@ -795,3 +795,16 @@ fn test_transformer_encoder_block() {
     println!("D: {:?}", d_b.clone().to_dtype::<f32>().as_vec());
     assert_close(&b.dyn_data(&cx.dyn_map), &d_b.to_dtype::<f32>().as_vec());
 }
+
+#[test]
+fn test_common_buffer() {
+    let data = random_vec(32);
+    let mut cx = Graph::new();
+    let a = cx.new_tensor::<R1<32>>("Input");
+    a.set(data.clone());
+    let b = a.exp_2().log_2();
+    b.mark();
+
+    cx.optimize(MetalFp16Optimizer::default());
+    cx.execute();
+}

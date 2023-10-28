@@ -1,6 +1,9 @@
 #![allow(clippy::needless_range_loop)]
 
-use std::{any::TypeId, fmt::Debug};
+use std::{
+    any::{Any, TypeId},
+    fmt::Debug,
+};
 
 use half::f16;
 
@@ -35,6 +38,10 @@ impl<'a> InputTensor<'a> {
 
 pub trait Operator: Debug + TraitObjEq {
     fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor>;
+    #[allow(unused)]
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        None
+    }
 }
 
 /// An opaque function running on CPU that takes in tensor references and outputs a new tensor

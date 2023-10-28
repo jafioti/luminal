@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
 
 use crate::{
     op::{
@@ -14,7 +14,7 @@ use metal_rs::{objc::rc::autoreleasepool, *};
 use num_traits::FromPrimitive;
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
-pub trait MetalKernelForward {
+pub trait MetalKernelForward: Debug {
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
@@ -22,6 +22,9 @@ pub trait MetalKernelForward {
         command_buffer: &CommandBufferRef,
     ) -> Vec<Buffer>;
 }
+
+#[derive(Debug)]
+pub struct MetalKernelWrapper(pub Box<dyn MetalKernelForward>);
 
 /// Copy a tensor to the GPU
 #[derive(Debug, Clone)]
@@ -211,6 +214,13 @@ impl Operator for MetalContiguous {
             }]
         })
     }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -298,6 +308,13 @@ impl Operator for MetalLog2 {
             }]
         })
     }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -383,6 +400,13 @@ impl Operator for MetalExp2 {
                 data: Box::new(out),
             }]
         })
+    }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+        }
+        None
     }
 }
 
@@ -470,6 +494,13 @@ impl Operator for MetalSin {
             }]
         })
     }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -556,6 +587,13 @@ impl Operator for MetalSqrt {
             }]
         })
     }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -641,6 +679,13 @@ impl Operator for MetalRecip {
                 data: Box::new(out),
             }]
         })
+    }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+        }
+        None
     }
 }
 
@@ -755,6 +800,13 @@ impl Operator for MetalAdd {
             }]
         })
     }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -866,6 +918,13 @@ impl Operator for MetalMul {
                 data: Box::new(out),
             }]
         })
+    }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+        }
+        None
     }
 }
 
@@ -990,6 +1049,13 @@ impl Operator for MetalLessThan {
             }]
         })
     }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1099,6 +1165,13 @@ impl Operator for MetalMod {
                 data: Box::new(out),
             }]
         })
+    }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+        }
+        None
     }
 }
 
@@ -1229,6 +1302,13 @@ impl Operator for MetalSumReduce {
             }]
         })
     }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1357,6 +1437,13 @@ impl Operator for MetalMaxReduce {
                 data: Box::new(out),
             }]
         })
+    }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+        }
+        None
     }
 }
 
