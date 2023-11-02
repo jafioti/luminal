@@ -87,7 +87,7 @@ impl Graph {
     /// Run the full suite of optimizations
     pub fn optimize<O: GraphOptimizer>(&mut self, optimizer: O) {
         optimizer.optimize(self);
-        self.toposort();
+        // self.toposort();
     }
 
     /// Refresh the internally sorted graph
@@ -409,6 +409,10 @@ impl Graph {
         }
 
         for node in self.graph.node_indices() {
+            new_graph
+                .node_weight_mut(id_map[&node])
+                .unwrap()
+                .push_str(&format!("{:?}", node));
             for edge in self
                 .graph
                 .edges_directed(node, petgraph::Direction::Outgoing)

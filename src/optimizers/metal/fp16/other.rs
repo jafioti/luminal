@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use half::f16;
 use petgraph::stable_graph::NodeIndex;
 
@@ -7,7 +9,7 @@ use crate::{
     prelude::*,
 };
 
-use super::prim::{MetalAdd, MetalMul, MetalSin, MetalConstant, MetalExp2};
+use super::prim::{MetalAdd, MetalMul, MetalSin, MetalConstant, MetalExp2, MetalKernelForward, MetalKernelWrapper};
 use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Special kernel for efficient mean reduction
@@ -37,12 +39,39 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
     }
 }
 
+impl MetalKernelForward for MetalCos {
+    fn metal_forward(
+            &self,
+            inputs: &[(&Buffer, ShapeTracker)],
+            dev: &Device,
+            command_buffer: &CommandBufferRef,
+        ) -> Vec<Buffer> {
+            let inp_size = inputs[0].1.n_physical_elements();
+            let encoder = command_buffer
+            .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+
+        // Set inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(&out), 0);
+        encoder.set_int(2, inp_size as u32);
+
+        // Execute
+        encoder.dispatch_n_elements(inp_size);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalCos {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let inp_size = tensors[0].1.n_physical_elements();
-
-            // Setup buffers
             let a = tensors[0]
                 .0
                 .borrowed()
@@ -50,26 +79,12 @@ impl Operator for MetalCos {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
-
             // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(&out), 0);
-            encoder.set_int(2, inp_size as u32);
-
-            // Execute
-            encoder.dispatch_n_elements(inp_size);
-            encoder.end_encoding();
+            let out = self.metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer).pop().unwrap();
+            
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -77,6 +92,15 @@ impl Operator for MetalCos {
                 data: Box::new(out),
             }]
         })
+    }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
+        }
+        None
     }
 }
 
@@ -111,24 +135,19 @@ impl GraphOptimizer for MetalCosOptimizer {
                 s.op().check(|op, _| if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
                     c.0 == (f16::PI / f16::from_f32(2.))
                 } else {false}).ptr(&mut const_pi),
-                0,
                 s.edge(
                     s.edge(
                         s.op().ptr(&mut x),
-                        0,
                         s.edge(
                                 s.op().check(|op, _| if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
                                     c.0 == f16::NEG_ONE
                                 } else {false}).ptr(&mut const_neg_one),
-                            0,
                             s.op().ty::<MetalMul>().ptr(&mut mul),
                         ),
                     ),
-                    0,
                     s.op().ty::<MetalAdd>().ptr(&mut add),
                 ),
             ),
-            0,
             s.op().ty::<MetalSin>().ptr(&mut sin),
         );
         for _ in s.search(graph) {
@@ -195,11 +214,40 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
     }
 }
 
+impl MetalKernelForward for MetalExp {
+    fn metal_forward(
+            &self,
+            inputs: &[(&Buffer, ShapeTracker)],
+            dev: &Device,
+            command_buffer: &CommandBufferRef,
+        ) -> Vec<Buffer> {
+        let inp_size = inputs[0].1.n_physical_elements();
+
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+
+        let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
+
+            // Set inputs
+            encoder.set_buffer(0, Some(inputs[0].0), 0);
+            encoder.set_buffer(1, Some(&out), 0);
+            encoder.set_int(2, inp_size as u32);
+
+            // Execute
+            encoder.dispatch_n_elements(inp_size);
+            encoder.end_encoding();
+
+            vec![out]
+    }
+}
+
 impl Operator for MetalExp {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let inp_size = tensors[0].1.n_physical_elements();
-
             // Setup buffers
             let a_inp = tensors[0]
                 .0
@@ -208,26 +256,14 @@ impl Operator for MetalExp {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
+            
 
             // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a_inp), 0);
-            encoder.set_buffer(1, Some(&out), 0);
-            encoder.set_int(2, inp_size as u32);
-
-            // Execute
-            encoder.dispatch_n_elements(inp_size);
-            encoder.end_encoding();
+            let out = self.metal_forward(&[(a_inp, tensors[0].1)], &self.1, command_buffer).pop().unwrap();
+            
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -235,6 +271,15 @@ impl Operator for MetalExp {
                 data: Box::new(out),
             }]
         })
+    }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
+        }
+        None
     }
 }
 
@@ -260,7 +305,7 @@ impl GraphOptimizer for MetalExpOptimizer {
 
         s.edge(s.edge(s.op().check(|op, _| if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
             c.0 == f16::from_f32(1.0 / f32::ln(2.))
-        } else {false}).ptr(&mut constant), 0, s.op().ty::<MetalMul>().ptr(&mut mul)), 0, s.op().ty::<MetalExp2>().ptr(&mut exp2));
+        } else {false}).ptr(&mut constant), s.op().ty::<MetalMul>().ptr(&mut mul)), s.op().ty::<MetalExp2>().ptr(&mut exp2));
 
         for _ in s.search(graph) {
             if graph.no_delete.contains(&constant)

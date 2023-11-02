@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use half::f16;
 use petgraph::stable_graph::NodeIndex;
 
@@ -7,7 +9,10 @@ use crate::{
     prelude::*,
 };
 
-use super::prim::{FakeSumReduce, MetalConstant, MetalMul, MetalRecip, MetalSumReduce};
+use super::prim::{
+    FakeSumReduce, MetalConstant, MetalKernelForward, MetalKernelWrapper, MetalMul, MetalRecip,
+    MetalSumReduce,
+};
 use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Special kernel for efficient mean reduction
@@ -42,10 +47,10 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
 }}
 ", render_dyn_dim_inputs(&[shape], 6),
         );
-        code = code.replace("mkernel", "kernel_matmul_2d");
+        code = code.replace("mkernel", "kernel_mean_reduce");
 
         Self(
-            compile_function("kernel_matmul_2d", &code, &dev),
+            compile_function("kernel_mean_reduce", &code, &dev),
             dev,
             dim,
             shape,
@@ -53,13 +58,61 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
     }
 }
 
+impl MetalKernelForward for MetalMeanReduce {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let mut sh = inputs[0].1;
+        sh.remove_dim(self.2);
+        let inp_size = sh.contiguous().n_elements();
+
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+        let front_size: usize = inputs[0]
+            .1
+            .shape()
+            .iter()
+            .take(self.2)
+            .map(|i| i.to_usize().unwrap())
+            .product();
+        let back_size: usize = inputs[0]
+            .1
+            .shape()
+            .iter()
+            .skip(self.2 + 1)
+            .map(|i| i.to_usize().unwrap())
+            .product();
+        let dim_size = inputs[0].1.shape()[self.2].to_usize().unwrap();
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(&out), 0);
+        encoder.set_int(2, inp_size as u32);
+        encoder.set_int(3, front_size as u32);
+        encoder.set_int(4, back_size as u32);
+        encoder.set_int(5, dim_size as u32);
+        input_dyn_dims(&[(self.3, inputs[0].1)], encoder, 6);
+
+        // Execute
+        encoder.dispatch_n_elements(inp_size);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalMeanReduce {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let mut sh = tensors[0].1;
-            sh.remove_dim(self.2);
-            let inp_size = sh.contiguous().n_elements();
-
             // Setup buffers
             let a = tensors[0]
                 .0
@@ -68,45 +121,16 @@ impl Operator for MetalMeanReduce {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
-            let front_size: usize = tensors[0]
-                .1
-                .shape()
-                .iter()
-                .take(self.2)
-                .map(|i| i.to_usize().unwrap())
-                .product();
-            let back_size: usize = tensors[0]
-                .1
-                .shape()
-                .iter()
-                .skip(self.2 + 1)
-                .map(|i| i.to_usize().unwrap())
-                .product();
-            let dim_size = tensors[0].1.shape()[self.2].to_usize().unwrap();
 
             // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(&out), 0);
-            encoder.set_int(2, inp_size as u32);
-            encoder.set_int(3, front_size as u32);
-            encoder.set_int(4, back_size as u32);
-            encoder.set_int(5, dim_size as u32);
-            input_dyn_dims(&[(self.3, tensors[0].1)], encoder, 6);
+            let out = self
+                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .pop()
+                .unwrap();
 
-            // Execute
-            encoder.dispatch_n_elements(inp_size);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -114,6 +138,15 @@ impl Operator for MetalMeanReduce {
                 data: Box::new(out),
             }]
         })
+    }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
+        }
+        None
     }
 }
 
@@ -137,7 +170,6 @@ impl GraphOptimizer for MeanReduceOptimizer {
 
         s.edge(
             s.op().ty::<MetalSumReduce>().ptr(&mut sum_reduce),
-            0,
             s.edge(
                 s.edge(
                     s.edge(
@@ -150,13 +182,10 @@ impl GraphOptimizer for MeanReduceOptimizer {
                                 }
                             })
                             .ptr(&mut one_const),
-                        0,
                         s.op().ty::<FakeSumReduce>().ptr(&mut fake_sum_reduce),
                     ),
-                    0,
                     s.op().ty::<MetalRecip>().ptr(&mut recip),
                 ),
-                0,
                 s.op().ty::<MetalMul>().ptr(&mut mul),
             ),
         );

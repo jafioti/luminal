@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use half::f16;
 use petgraph::stable_graph::NodeIndex;
 
@@ -7,7 +9,7 @@ use crate::{
     prelude::*,
 };
 
-use super::prim::{MetalMul, MetalSumReduce};
+use super::prim::{MetalKernelForward, MetalKernelWrapper, MetalMul, MetalSumReduce};
 use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Multiplies a MxK matrix with a KxN matrix, resulting in a MxN matrix
@@ -56,18 +58,52 @@ kernel void mkernel(
     }
 }
 
+impl MetalKernelForward for MetalMatmul2D {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let (a_shape, b_shape) = (inputs[0].1.shape(), inputs[1].1.shape());
+        let (a_strides, b_strides) = (inputs[0].1.strides(), inputs[1].1.strides());
+        let (a_row_major, b_row_major) = (a_strides[0] > a_strides[1], b_strides[0] > b_strides[1]);
+        let (m, k, n) = (
+            a_shape[0].to_usize().unwrap(),
+            a_shape[1].to_usize().unwrap(),
+            b_shape[1].to_usize().unwrap(),
+        );
+
+        let out = dev.new_buffer(
+            (m * n * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(inputs[1].0), 0);
+        encoder.set_buffer(2, Some(&out), 0);
+        encoder.set_int(3, m as u32);
+        encoder.set_int(4, k as u32);
+        encoder.set_int(5, n as u32);
+        encoder.set_int(6, a_row_major as u32);
+        encoder.set_int(7, b_row_major as u32);
+
+        // Execute
+        encoder.dispatch_n_elements(n * m);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalMatmul2D {
     fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
-            let (a_strides, b_strides) = (inp[0].1.strides(), inp[1].1.strides());
-            let (a_row_major, b_row_major) =
-                (a_strides[0] > a_strides[1], b_strides[0] > b_strides[1]);
-            let (m, k, n) = (
-                a_shape[0].to_usize().unwrap(),
-                a_shape[1].to_usize().unwrap(),
-                b_shape[1].to_usize().unwrap(),
-            );
             let a = inp[0]
                 .0
                 .borrowed()
@@ -83,31 +119,15 @@ impl Operator for MetalMatmul2D {
                 .downcast_ref::<Buffer>()
                 .unwrap();
 
-            let out = self.1.new_buffer(
-                (m * n * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
-
             // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(b), 0);
-            encoder.set_buffer(2, Some(&out), 0);
-            encoder.set_int(3, m as u32);
-            encoder.set_int(4, k as u32);
-            encoder.set_int(5, n as u32);
-            encoder.set_int(6, a_row_major as u32);
-            encoder.set_int(7, b_row_major as u32);
+            let out = self
+                .metal_forward(&[(a, inp[0].1), (b, inp[1].1)], &self.1, command_buffer)
+                .pop()
+                .unwrap();
 
-            // Execute
-            encoder.dispatch_n_elements(n * m);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -115,6 +135,15 @@ impl Operator for MetalMatmul2D {
                 data: Box::new(out),
             }]
         })
+    }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
+        }
+        None
     }
 }
 
@@ -169,19 +198,57 @@ kernel void mkernel(
     }
 }
 
+impl MetalKernelForward for MetalBatchMatmul2D {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        println!("Shape: {:?}", inputs[0].1.shape());
+        println!("Len: {:?}", inputs[0].0.length() / 2);
+        let (a_shape, b_shape) = (inputs[0].1.shape(), inputs[1].1.shape());
+        let (a_strides, b_strides) = (inputs[0].1.strides(), inputs[1].1.strides());
+        let (a_row_major, b_row_major) = (a_strides[1] > a_strides[2], b_strides[0] > b_strides[1]);
+        let (batch_size, m, k, n) = (
+            a_shape[0].to_usize().unwrap(),
+            a_shape[1].to_usize().unwrap(),
+            a_shape[2].to_usize().unwrap(),
+            b_shape[1].to_usize().unwrap(),
+        );
+
+        let out = dev.new_buffer(
+            (batch_size * m * n * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(inputs[1].0), 0);
+        encoder.set_buffer(2, Some(&out), 0);
+        encoder.set_int(3, batch_size as u32);
+        encoder.set_int(4, m as u32);
+        encoder.set_int(5, k as u32);
+        encoder.set_int(6, n as u32);
+        encoder.set_int(7, a_row_major as u32);
+        encoder.set_int(8, b_row_major as u32);
+        encoder.set_int(9, a_strides[0] as u32);
+
+        // Execute
+        encoder.dispatch_n_elements(batch_size * n * m);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalBatchMatmul2D {
     fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
-            let (a_strides, b_strides) = (inp[0].1.strides(), inp[1].1.strides());
-            let (a_row_major, b_row_major) =
-                (a_strides[1] > a_strides[2], b_strides[0] > b_strides[1]);
-            let (batch_size, m, k, n) = (
-                a_shape[0].to_usize().unwrap(),
-                a_shape[1].to_usize().unwrap(),
-                a_shape[2].to_usize().unwrap(),
-                b_shape[1].to_usize().unwrap(),
-            );
             let a = inp[0]
                 .0
                 .borrowed()
@@ -197,33 +264,15 @@ impl Operator for MetalBatchMatmul2D {
                 .downcast_ref::<Buffer>()
                 .unwrap();
 
-            let out = self.1.new_buffer(
-                (batch_size * m * n * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
-
             // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(b), 0);
-            encoder.set_buffer(2, Some(&out), 0);
-            encoder.set_int(3, batch_size as u32);
-            encoder.set_int(4, m as u32);
-            encoder.set_int(5, k as u32);
-            encoder.set_int(6, n as u32);
-            encoder.set_int(7, a_row_major as u32);
-            encoder.set_int(8, b_row_major as u32);
-            encoder.set_int(9, a_strides[0] as u32);
+            let out = self
+                .metal_forward(&[(a, inp[0].1), (b, inp[1].1)], &self.1, command_buffer)
+                .pop()
+                .unwrap();
 
-            // Execute
-            encoder.dispatch_n_elements(batch_size * n * m);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -231,6 +280,15 @@ impl Operator for MetalBatchMatmul2D {
                 data: Box::new(out),
             }]
         })
+    }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
+        }
+        None
     }
 }
 
@@ -322,6 +380,15 @@ impl Operator for MetalAttnMatmul2D {
             }]
         })
     }
+
+    // fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+    //     if key == "metal" {
+    //         return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+    //             self.clone(),
+    //         )))));
+    //     }
+    //     None
+    // }
 }
 
 #[derive(Default)]
@@ -344,7 +411,6 @@ impl GraphOptimizer for MetalMatMulOptimizer {
                 ])
                 .fakes(vec![vec![false, true, false], vec![true, false, false]])
                 .ptr(&mut mul),
-            0,
             s.op()
                 .ty::<MetalSumReduce>()
                 .check(|o, _| {
@@ -420,7 +486,6 @@ impl GraphOptimizer for MetalMatMulOptimizer {
                     vec![true, true, false, false],
                 ])
                 .ptr(&mut mul),
-            0,
             s.op()
                 .ty::<MetalSumReduce>()
                 .check(|o, _| {
@@ -501,7 +566,6 @@ impl GraphOptimizer for MetalMatMulOptimizer {
                     vec![false, false, true, false, false],
                 ])
                 .ptr(&mut mul),
-            0,
             s.op()
                 .ty::<MetalSumReduce>()
                 .check(|o, _| {

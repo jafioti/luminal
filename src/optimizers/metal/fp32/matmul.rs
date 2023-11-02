@@ -257,7 +257,6 @@ impl GraphOptimizer for MetalMatMulOptimizer {
                 ])
                 .fakes(vec![vec![false, true, false], vec![true, false, false]])
                 .ptr(&mut mul),
-            0,
             s.op()
                 .ty::<MetalSumReduce>()
                 .check(|o, _| {
@@ -340,7 +339,6 @@ impl GraphOptimizer for MetalMatMulOptimizer {
                     vec![true, true, false, false],
                 ])
                 .ptr(&mut mul),
-            0,
             s.op()
                 .ty::<MetalSumReduce>()
                 .check(|o, _| {

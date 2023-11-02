@@ -45,6 +45,7 @@ fn test_log2() {
     let b = a.log_2();
     b.mark();
 
+    cx.display();
     cx.optimize(MetalFp16Optimizer::default());
     cx.execute();
 
@@ -802,8 +803,13 @@ fn test_common_buffer() {
     let mut cx = Graph::new();
     let a = cx.new_tensor::<R1<32>>("Input");
     a.set(data.clone());
-    let b = a.exp_2().log_2();
+    let a1 = cx.new_tensor::<R1<32>>("Input1");
+    a1.set(data.clone());
+    let exped = a * a1;
+    let b = exped.log_2();
+    let c = exped.sin();
     b.mark();
+    c.mark();
 
     cx.optimize(MetalFp16Optimizer::default());
     cx.execute();

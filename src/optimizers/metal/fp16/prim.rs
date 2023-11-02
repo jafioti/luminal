@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug};
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
 use crate::{
     op::{
@@ -23,8 +23,25 @@ pub trait MetalKernelForward: Debug {
     ) -> Vec<Buffer>;
 }
 
-#[derive(Debug)]
-pub struct MetalKernelWrapper(pub Box<dyn MetalKernelForward>);
+#[derive(Debug, Clone)]
+pub struct MetalKernelWrapper(pub Arc<Box<dyn MetalKernelForward>>);
+
+impl Default for MetalKernelWrapper {
+    fn default() -> Self {
+        Self(Arc::new(Box::new(())))
+    }
+}
+
+impl MetalKernelForward for () {
+    fn metal_forward(
+        &self,
+        _: &[(&Buffer, ShapeTracker)],
+        _: &Device,
+        _: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        vec![]
+    }
+}
 
 /// Copy a tensor to the GPU
 #[derive(Debug, Clone)]
@@ -217,7 +234,9 @@ impl Operator for MetalContiguous {
 
     fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
         if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
         }
         None
     }
@@ -311,7 +330,9 @@ impl Operator for MetalLog2 {
 
     fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
         if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
         }
         None
     }
@@ -404,7 +425,9 @@ impl Operator for MetalExp2 {
 
     fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
         if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
         }
         None
     }
@@ -497,7 +520,9 @@ impl Operator for MetalSin {
 
     fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
         if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
         }
         None
     }
@@ -590,7 +615,9 @@ impl Operator for MetalSqrt {
 
     fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
         if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
         }
         None
     }
@@ -683,7 +710,9 @@ impl Operator for MetalRecip {
 
     fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
         if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
         }
         None
     }
@@ -803,7 +832,9 @@ impl Operator for MetalAdd {
 
     fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
         if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
         }
         None
     }
@@ -922,7 +953,9 @@ impl Operator for MetalMul {
 
     fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
         if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
         }
         None
     }
@@ -1052,7 +1085,9 @@ impl Operator for MetalLessThan {
 
     fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
         if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
         }
         None
     }
@@ -1169,7 +1204,9 @@ impl Operator for MetalMod {
 
     fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
         if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
         }
         None
     }
@@ -1305,7 +1342,9 @@ impl Operator for MetalSumReduce {
 
     fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
         if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
         }
         None
     }
@@ -1441,7 +1480,9 @@ impl Operator for MetalMaxReduce {
 
     fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
         if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Box::new(self.clone()))));
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
         }
         None
     }
@@ -1700,7 +1741,6 @@ impl GraphOptimizer for FakeReductionOptimizer {
                     false
                 }
             }),
-            0,
             s.op()
                 .ty::<MetalSumReduce>()
                 .check(|o, shapes| {
@@ -1756,11 +1796,45 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
     }
 }
 
+impl MetalKernelForward for FakeSumReduce {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let dim_size = f16::from_usize(inputs[0].1.shape()[self.2].to_usize().unwrap()).unwrap();
+        let inp_size = inputs[0].1.n_physical_elements();
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(&out), 0);
+        encoder.set_int(2, inp_size as u32);
+        encoder.set_bytes(
+            3,
+            std::mem::size_of::<f16>() as u64,
+            &dim_size as *const f16 as *const _,
+        );
+
+        // Execute
+        encoder.dispatch_n_elements(inp_size);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for FakeSumReduce {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let dim_size =
-                f16::from_usize(tensors[0].1.shape()[self.2].to_usize().unwrap()).unwrap();
             let inp = tensors[0]
                 .0
                 .borrowed()
@@ -1768,32 +1842,16 @@ impl Operator for FakeSumReduce {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let inp_size = tensors[0].1.n_physical_elements();
-            let out = self.1.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
 
             // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
-            // Set inputs
-            encoder.set_buffer(0, Some(inp), 0);
-            encoder.set_buffer(1, Some(&out), 0);
-            encoder.set_int(2, inp_size as u32);
-            encoder.set_bytes(
-                3,
-                std::mem::size_of::<f16>() as u64,
-                &dim_size as *const f16 as *const _,
-            );
+            let out = self
+                .metal_forward(&[(inp, tensors[0].1)], &self.1, command_buffer)
+                .pop()
+                .unwrap();
 
-            // Execute
-            encoder.dispatch_n_elements(inp_size);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -1801,6 +1859,15 @@ impl Operator for FakeSumReduce {
                 data: Box::new(out),
             }]
         })
+    }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
+        }
+        None
     }
 }
 
@@ -1814,13 +1881,11 @@ impl GraphOptimizer for CopyOptimizer {
         let s1 = GraphSelector::default();
         s1.edge(
             s1.op().ty::<MetalCopyToDevice>().ptr(&mut first),
-            0,
             s1.op().ty::<MetalCopyFromDevice>().ptr(&mut second),
         );
         let s2 = GraphSelector::default();
         s2.edge(
             s2.op().ty::<MetalCopyFromDevice>().ptr(&mut first),
-            0,
             s2.op().ty::<MetalCopyToDevice>().ptr(&mut second),
         );
 

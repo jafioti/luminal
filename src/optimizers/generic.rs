@@ -30,13 +30,11 @@ impl GraphOptimizer for UnarySequentialOpt {
                 let a = GraphSelector::default();
                 a.edge(
                     a.op().type_id(f).ptr(&mut first),
-                    0,
                     a.op().type_id(l).ptr(&mut last),
                 );
                 let b = GraphSelector::default();
                 b.edge(
                     b.op().type_id(l).ptr(&mut first),
-                    0,
                     b.op().type_id(f).ptr(&mut last),
                 );
                 [a, b]
@@ -158,11 +156,7 @@ pub struct RemoveUnusedNodes;
 impl GraphOptimizer for RemoveUnusedNodes {
     fn optimize(&self, graph: &mut Graph) {
         // Reverse topo sort
-        for node in petgraph::algo::toposort(&graph.graph, None)
-            .unwrap()
-            .into_iter()
-            .rev()
-        {
+        for node in graph.graph.node_indices().collect::<Vec<_>>() {
             if graph
                 .graph
                 .edges_directed(node, petgraph::Direction::Outgoing)

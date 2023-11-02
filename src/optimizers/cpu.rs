@@ -33,7 +33,6 @@ impl GraphOptimizer for MatMul2DOptimizer {
                 ])
                 .fakes(vec![vec![false, true, false], vec![true, false, false]])
                 .ptr(&mut mul),
-            0,
             s.op()
                 .ty::<SumReduce>()
                 .check(|o, _| o.is_equal(&SumReduce(0)))
@@ -157,7 +156,6 @@ impl GraphOptimizer for BatchMatMul2DOptimizer {
                     vec![true, true, false, false],
                 ])
                 .ptr(&mut mul),
-            0,
             s.op()
                 .ty::<SumReduce>()
                 .check(|o, _| o.is_equal(&SumReduce(3)))

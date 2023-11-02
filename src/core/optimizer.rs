@@ -150,7 +150,7 @@ pub struct GraphSelector {
                     Option<Vec<Vec<bool>>>,                             // Fake constraint
                     Vec<*mut NodeIndex>,                                // Pointers
                 ),
-                u8,
+                Option<u8>,
             >,
         >,
     >,
@@ -205,7 +205,7 @@ fn search(
             Option<Vec<Vec<bool>>>,                             // Fake constraint
             Vec<*mut NodeIndex>,                                // Pointers
         ),
-        u8,
+        Option<u8>,
     >,
     graph_node: petgraph::stable_graph::NodeIndex,
     graph: &StableGraph<Box<dyn Operator>, (u8, u8, crate::core::shape::tracker::ShapeTracker)>,
@@ -288,7 +288,14 @@ fn search(
         if let Some((target, _)) = graph
             .edges_directed(graph_node, petgraph::Direction::Outgoing)
             .map(|e| (e.target(), e.weight().1))
-            .filter(|i| !used.contains(&i.0) && i.1 == *select_output)
+            .filter(|i| {
+                !used.contains(&i.0)
+                    && if let Some(out) = select_output {
+                        i.1 == *out
+                    } else {
+                        true
+                    }
+            })
             .collect::<Vec<_>>()
             .into_iter()
             .find(|i| {
@@ -320,7 +327,14 @@ fn search(
         if let Some((target, _)) = graph
             .edges_directed(graph_node, petgraph::Direction::Incoming)
             .map(|e| (e.source(), e.weight().1))
-            .filter(|i| !used.contains(&i.0) && i.1 == *select_output)
+            .filter(|i| {
+                !used.contains(&i.0)
+                    && if let Some(out) = select_output {
+                        i.1 == *out
+                    } else {
+                        true
+                    }
+            })
             .collect::<Vec<_>>()
             .into_iter()
             .find(|i| {
@@ -359,9 +373,16 @@ impl GraphSelector {
     }
 
     /// Specify an edge between ops
-    pub fn edge(&self, o1: OpSelector, output: u8, o2: OpSelector) -> OpSelector {
+    pub fn edge(&self, o1: OpSelector, o2: OpSelector) -> OpSelector {
         let mut m_self = self.graph.lock().unwrap();
-        m_self.add_edge(o1.id, o2.id, output);
+        m_self.add_edge(o1.id, o2.id, None);
+        o2
+    }
+
+    /// Specify an edge between ops with a specified output
+    pub fn edge_output(&self, o1: OpSelector, output: u8, o2: OpSelector) -> OpSelector {
+        let mut m_self = self.graph.lock().unwrap();
+        m_self.add_edge(o1.id, o2.id, Some(output));
         o2
     }
 
@@ -445,13 +466,11 @@ mod tests {
         let selector1 = GraphSelector::default();
         selector1.edge(
             selector1.op().ty::<Log2>().ptr(&mut log),
-            0,
             selector1.op().ty::<Exp2>().ptr(&mut exp),
         );
         let selector2 = GraphSelector::default();
         selector2.edge(
             selector2.op().ty::<Exp2>().ptr(&mut exp),
-            0,
             selector2.op().ty::<Log2>().ptr(&mut log),
         );
 
@@ -462,7 +481,7 @@ mod tests {
 
         // Matmul
         let s = GraphSelector::default();
-        s.edge(s.op().ty::<Mul>(), 0, s.op().ty::<SumReduce>());
+        s.edge(s.op().ty::<Mul>(), s.op().ty::<SumReduce>());
 
         assert_eq!(s.search(&cx).next(), None);
     }

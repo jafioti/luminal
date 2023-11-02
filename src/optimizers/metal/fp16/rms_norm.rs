@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use half::f16;
 use petgraph::stable_graph::NodeIndex;
@@ -11,7 +11,10 @@ use crate::{
 
 use super::{
     mean_reduce::MetalMeanReduce,
-    prim::{MetalAdd, MetalConstant, MetalMul, MetalRecip, MetalSqrt},
+    prim::{
+        MetalAdd, MetalConstant, MetalKernelForward, MetalKernelWrapper, MetalMul, MetalRecip,
+        MetalSqrt,
+    },
 };
 use metal_rs::{objc::rc::autoreleasepool, *};
 
@@ -100,6 +103,70 @@ kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]
     }
 }
 
+impl MetalKernelForward for MetalRMSNorm {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let mut meaned_shape = inputs[0].1;
+        meaned_shape.remove_dim(meaned_shape.len() - 1);
+        // Setup buffers
+        let meaned = dev.new_buffer(
+            (meaned_shape.n_elements() * std::mem::size_of::<f32>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+        let front_size: usize = inputs[0]
+            .1
+            .shape()
+            .iter()
+            .take(meaned_shape.len())
+            .map(|i| i.to_usize().unwrap())
+            .product();
+        let back_size = 1;
+        let dim_size = inputs[0].1.shape()[meaned_shape.len()].to_usize().unwrap();
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(&meaned), 0);
+        encoder.set_int(2, meaned_shape.n_elements() as u32);
+        encoder.set_int(3, front_size as u32);
+        encoder.set_int(4, back_size as u32);
+        encoder.set_int(5, dim_size as u32);
+        input_dyn_dims(&[(self.3, inputs[0].1)], encoder, 6);
+
+        encoder.dispatch_n_elements(meaned_shape.n_elements());
+        encoder.end_encoding();
+
+        let out = dev.new_buffer(
+            (inputs[0].1.n_elements() * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeManaged,
+        );
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.1);
+
+        // Set inputs
+        encoder.set_buffer(0, Some(&meaned), 0);
+        encoder.set_buffer(1, Some(inputs[0].0), 0);
+        encoder.set_buffer(2, Some(&out), 0);
+        encoder.set_int(3, inputs[0].1.n_elements() as u32);
+        input_dyn_dims(&[(self.3, inputs[0].1)], encoder, 4);
+
+        // Execute
+        encoder.dispatch_n_elements(inputs[0].1.n_elements());
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
 impl Operator for MetalRMSNorm {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
@@ -112,58 +179,12 @@ impl Operator for MetalRMSNorm {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
-            let mut meaned_shape = tensors[0].1;
-            meaned_shape.remove_dim(meaned_shape.len() - 1);
-            // Setup buffers
-            let meaned = self.2.new_buffer(
-                (meaned_shape.n_elements() * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
-            let front_size: usize = tensors[0]
-                .1
-                .shape()
-                .iter()
-                .take(meaned_shape.len())
-                .map(|i| i.to_usize().unwrap())
-                .product();
-            let back_size = 1;
-            let dim_size = tensors[0].1.shape()[meaned_shape.len()].to_usize().unwrap();
 
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
+            let out = self
+                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
+                .pop()
+                .unwrap();
 
-            // Set inputs
-            encoder.set_buffer(0, Some(a), 0);
-            encoder.set_buffer(1, Some(&meaned), 0);
-            encoder.set_int(2, meaned_shape.n_elements() as u32);
-            encoder.set_int(3, front_size as u32);
-            encoder.set_int(4, back_size as u32);
-            encoder.set_int(5, dim_size as u32);
-            input_dyn_dims(&[(self.3, tensors[0].1)], encoder, 6);
-
-            encoder.dispatch_n_elements(meaned_shape.n_elements());
-            encoder.end_encoding();
-
-            let out = self.2.new_buffer(
-                (tensors[0].1.n_elements() * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
-            );
-
-            let encoder = command_buffer
-                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.1);
-
-            // Set inputs
-            encoder.set_buffer(0, Some(&meaned), 0);
-            encoder.set_buffer(1, Some(a), 0);
-            encoder.set_buffer(2, Some(&out), 0);
-            encoder.set_int(3, tensors[0].1.n_elements() as u32);
-            input_dyn_dims(&[(self.3, tensors[0].1)], encoder, 4);
-
-            // Execute
-            encoder.dispatch_n_elements(tensors[0].1.n_elements());
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -171,6 +192,15 @@ impl Operator for MetalRMSNorm {
                 data: Box::new(out),
             }]
         })
+    }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
+        }
+        None
     }
 }
 
@@ -207,24 +237,18 @@ impl GraphOptimizer for RMSNormOptimizer {
                                 }
                             })
                             .ptr(&mut epsilon),
-                        0,
                         s.edge(
                             s.edge(
                                 s.op().ty::<MetalMul>().ptr(&mut square),
-                                0,
                                 s.op().ty::<MetalMeanReduce>().ptr(&mut mean),
                             ),
-                            0,
                             s.op().ty::<MetalAdd>().ptr(&mut add),
                         ),
                     ),
-                    0,
                     s.op().ty::<MetalSqrt>().ptr(&mut sqrt),
                 ),
-                0,
                 s.op().ty::<MetalRecip>().ptr(&mut recip),
             ),
-            0,
             s.op().ty::<MetalMul>().ptr(&mut mul),
         );
 
