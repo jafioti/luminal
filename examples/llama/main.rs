@@ -44,15 +44,13 @@ fn main() {
         k.mark_no_delete();
         v.mark_no_delete();
     }
-    // cx1.display();
+
     #[cfg(feature="metal")]
-    cx1.optimize(<(MetalFp16Optimizer, GenericOptimizer)>::default());
+    cx1.optimize(<(MetalFp16Optimizer,)>::default());
     #[cfg(feature="cuda")]
     cx1.optimize(<(CudaFp16Optimizer, GenericOptimizer)>::default());
     #[cfg(all(not(feature="cuda"), not(feature="metal")))]
     cx1.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
-
-    cx1.display();
 
     // Build KV cache forward graph
     let kv_model = Model::initialize(&mut cx2);
@@ -83,6 +81,8 @@ fn main() {
     #[cfg(all(not(feature="cuda"), not(feature="metal")))]
     cx2.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
     delete_loads(&kv_model, &mut cx2);
+
+    // cx1.display();
 
     println!("Inferencing...");
     // First pass

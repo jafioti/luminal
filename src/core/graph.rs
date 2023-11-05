@@ -23,18 +23,45 @@ pub struct Graph {
     pub id_remap: HashMap<NodeIndex, NodeIndex>,
     pub dyn_map: HashMap<char, usize>,
     /// Edge weights: (Input index, Output index, Input shape)
-    pub graph: StableGraph<Box<dyn Operator>, (u8, u8, crate::core::shape::tracker::ShapeTracker)>,
+    pub graph: StableGraph<Box<dyn Operator>, Dependency>,
     pub no_delete: HashSet<NodeIndex>,
     /// Mark tensors that need to be retrieved later (mostly for optimizers to insert copy back calls, the graph itself doesn't treat these differently)
     pub to_retrieve: HashSet<NodeIndex>,
     /// A list of current node to run, source nodes, and view nodes to delete after execution.
     #[allow(clippy::type_complexity)]
-    pub(crate) linearized_graph: Option<
-        Vec<(
-            NodeIndex,
-            Vec<((NodeIndex, u8), crate::core::shape::tracker::ShapeTracker)>,
-        )>,
-    >,
+    pub(crate) linearized_graph: Option<Vec<(NodeIndex, Vec<((NodeIndex, u8), ShapeTracker)>)>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(clippy::large_enum_variant)]
+pub enum Dependency {
+    /// Actual data dependency
+    Data {
+        input_order: u8,
+        output_order: u8,
+        shape: ShapeTracker,
+    },
+    /// Implicit dependency for ordering
+    Schedule,
+}
+
+impl Dependency {
+    pub fn as_data(self) -> Option<(u8, u8, ShapeTracker)> {
+        if let Self::Data {
+            input_order,
+            output_order,
+            shape,
+        } = self
+        {
+            Some((input_order, output_order, shape))
+        } else {
+            None
+        }
+    }
+
+    pub fn is_schedule(&self) -> bool {
+        matches!(self, Self::Schedule)
+    }
 }
 
 impl Graph {
@@ -93,26 +120,14 @@ impl Graph {
     /// Refresh the internally sorted graph
     pub(crate) fn toposort(&mut self) {
         // Depth-first toposort
-        let mut visited = HashSet::default();
-        let mut pre_sorted = petgraph::algo::toposort(&self.graph, None).unwrap();
-        pre_sorted.reverse();
-        let mut stacks = vec![];
-        for node in pre_sorted {
-            if !visited.contains(&node) {
-                stacks.push(toposort(node, &self.graph, &mut visited));
-            }
-        }
-        let mut nodes = vec![];
-        for (mut stack, _, _) in stacks.into_iter().sorted_by_key(|(_, _, b)| !*b) {
-            nodes.append(&mut stack);
-        }
-        let mut v = Vec::with_capacity(nodes.len());
-        for node in nodes {
+        let mut v = Vec::with_capacity(self.graph.node_count());
+        for node in petgraph::algo::toposort(&self.graph, None).unwrap() {
             let src_ids = self
                 .graph
                 .edges_directed(node, Direction::Incoming)
-                .sorted_by_key(|e| e.weight().0)
-                .map(|i| ((i.source(), i.weight().1), i.weight().2))
+                .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i)))
+                .sorted_by_key(|(_, (i, _, _))| *i)
+                .map(|(a, (_, b, c))| ((a, b), c))
                 .collect_vec();
             v.push((node, src_ids));
         }
@@ -142,24 +157,28 @@ impl Graph {
         }
     }
 
+    fn create_remaining_customers_map(&self) -> HashMap<(NodeIndex, u8), usize> {
+        self.graph
+            .node_indices()
+            .flat_map(|i| {
+                self.graph
+                    .edges_directed(i, Direction::Outgoing)
+                    .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i)))
+                    .group_by(|(_, (_, i, _))| *i)
+                    .into_iter()
+                    .map(|(ind, g)| ((i, ind), g.count()))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
     /// Execute the graph.
     pub fn execute(&mut self) {
         // Track the number of views pointing to each tensor so we know when to clear
         if self.linearized_graph.is_none() {
             self.toposort();
         }
-        let mut remaining_consumers: HashMap<(NodeIndex, u8), usize> = self
-            .graph
-            .node_indices()
-            .flat_map(|i| {
-                self.graph
-                    .edges_directed(i, Direction::Outgoing)
-                    .group_by(|k| k.weight().1)
-                    .into_iter()
-                    .map(|k| ((i, k.0), k.1.count()))
-                    .collect::<Vec<_>>()
-            })
-            .collect();
+        let mut remaining_consumers = self.create_remaining_customers_map();
 
         for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
             if self.tensors.contains_key(&(*node, 0)) {
@@ -217,18 +236,7 @@ impl Graph {
         if self.linearized_graph.is_none() {
             self.toposort();
         }
-        let mut remaining_consumers: HashMap<(NodeIndex, u8), usize> = self
-            .graph
-            .node_indices()
-            .flat_map(|i| {
-                self.graph
-                    .edges_directed(i, Direction::Outgoing)
-                    .group_by(|k| k.weight().1)
-                    .into_iter()
-                    .map(|k| ((i, k.0), k.1.count()))
-                    .collect::<Vec<_>>()
-            })
-            .collect();
+        let mut remaining_consumers = self.create_remaining_customers_map();
         let mut op_times = HashMap::new();
         // Very janky way of extracting the type name only from an op, stripping out the struct contents
         let op_regex = Regex::new(r"(?s)\{.*|\(.*").unwrap();
@@ -409,28 +417,32 @@ impl Graph {
         }
 
         for node in self.graph.node_indices() {
-            new_graph
-                .node_weight_mut(id_map[&node])
-                .unwrap()
-                .push_str(&format!("{:?}", node));
+            // new_graph
+            //     .node_weight_mut(id_map[&node])
+            //     .unwrap()
+            //     .push_str(&node.index().to_string());
             for edge in self
                 .graph
-                .edges_directed(node, petgraph::Direction::Outgoing)
-                .sorted_by_key(|e| e.weight().0)
+                .edges_directed(node, Direction::Outgoing)
+                .filter(|e| !e.weight().is_schedule())
+                .sorted_by_key(|e| e.weight().as_data().unwrap().0)
             {
                 new_graph.add_edge(
                     id_map[&edge.source()],
                     id_map[&edge.target()],
-                    edge.weight().0,
+                    edge.weight().as_data().unwrap().0,
                 );
                 if show_shapes
                     && new_graph.contains_node(id_map[&edge.target()])
-                    && !edge.weight().2.shape().is_empty()
+                    && !edge.weight().as_data().unwrap().2.shape().is_empty()
                 {
                     new_graph
                         .node_weight_mut(id_map[&edge.target()])
                         .unwrap()
-                        .push_str(&format!(" | {:?}", edge.weight().2.shape()));
+                        .push_str(&format!(
+                            " | {:?}",
+                            edge.weight().as_data().unwrap().2.shape()
+                        ));
                 }
             }
         }
@@ -451,8 +463,9 @@ impl Graph {
     pub fn get_sources(&self, node_id: NodeIndex) -> Vec<(NodeIndex, ShapeTracker)> {
         self.graph
             .edges_directed(node_id, Direction::Incoming)
-            .sorted_by_key(|e| e.weight().0)
-            .map(|e| (e.source(), e.weight().2))
+            .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i)))
+            .sorted_by_key(|(_, (i, _, _))| *i)
+            .map(|(a, (_, _, b))| (a, b))
             .collect()
     }
 
@@ -461,9 +474,9 @@ impl Graph {
     pub fn get_dests(&self, node_id: NodeIndex) -> Vec<(NodeIndex, &Box<dyn Operator>)> {
         self.graph
             .edges_directed(node_id, Direction::Outgoing)
-            .sorted_by_key(|e| e.weight().0)
-            .map(|e| e.target())
-            .map(|n| (n, self.graph.node_weight(n).unwrap()))
+            .filter_map(|e| e.weight().as_data().map(|i| (e.target(), i)))
+            .sorted_by_key(|(_, (i, _, _))| *i)
+            .map(|(a, _)| (a, self.graph.node_weight(a).unwrap()))
             .collect()
     }
 }
@@ -527,16 +540,15 @@ impl<'a> NewOp<'a> {
         self.new_op_id
     }
 
-    pub fn input(
-        mut self,
-        id: NodeIndex,
-        from_output: u8,
-        shape: crate::core::shape::tracker::ShapeTracker,
-    ) -> Self {
+    pub fn input(mut self, id: NodeIndex, from_output: u8, shape: ShapeTracker) -> Self {
         self.graph_ref.graph.add_edge(
             remap_id(id, &self.graph_ref.id_remap),
             self.new_op_id,
-            (self.num_srcs, from_output, shape),
+            Dependency::Data {
+                input_order: self.num_srcs,
+                output_order: from_output,
+                shape,
+            },
         );
         self.num_srcs += 1;
         self
@@ -552,32 +564,4 @@ pub(crate) fn remap_id(
         id = *new_id;
     }
     id
-}
-
-fn toposort(
-    id: NodeIndex,
-    graph: &StableGraph<Box<dyn Operator>, (u8, u8, crate::core::shape::tracker::ShapeTracker)>,
-    visited: &mut HashSet<NodeIndex>,
-) -> (Vec<NodeIndex>, usize, bool) {
-    if visited.contains(&id) {
-        return (vec![], 0, false);
-    }
-    // Loop through node sources
-    let stacks = graph
-        .edges_directed(id, Direction::Incoming)
-        .sorted_by_key(|e| e.source())
-        .map(|e| toposort(e.source(), graph, visited))
-        .collect::<Vec<_>>();
-    let num_stacks = stacks.len();
-
-    let mut final_stack = vec![];
-    let mut complete = true;
-    for (mut stack, _, c) in stacks.into_iter().sorted_by_key(|(_, _, b)| !*b) {
-        final_stack.append(&mut stack);
-        complete &= c;
-    }
-    final_stack.push(id);
-    visited.insert(id);
-
-    (final_stack, num_stacks, complete)
 }

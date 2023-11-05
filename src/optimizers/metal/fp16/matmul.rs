@@ -205,8 +205,6 @@ impl MetalKernelForward for MetalBatchMatmul2D {
         dev: &Device,
         command_buffer: &CommandBufferRef,
     ) -> Vec<Buffer> {
-        println!("Shape: {:?}", inputs[0].1.shape());
-        println!("Len: {:?}", inputs[0].0.length() / 2);
         let (a_shape, b_shape) = (inputs[0].1.shape(), inputs[1].1.shape());
         let (a_strides, b_strides) = (inputs[0].1.strides(), inputs[1].1.strides());
         let (a_row_major, b_row_major) = (a_strides[1] > a_strides[2], b_strides[0] > b_strides[1]);

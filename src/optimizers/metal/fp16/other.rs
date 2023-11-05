@@ -161,7 +161,7 @@ impl GraphOptimizer for MetalCosOptimizer {
             }
 
             // Insert cos op
-            let shape = graph.graph.edges_directed(mul, petgraph::Direction::Incoming).next().unwrap().weight().2;
+            let shape = graph.graph.edges_directed(mul, petgraph::Direction::Incoming).find_map(|e| e.weight().as_data()).unwrap().2;
             let cos = graph
                 .add_op(MetalCos::new(dev.clone()))
                 .input(x, 0, shape)

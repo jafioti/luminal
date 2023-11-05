@@ -1,4 +1,4 @@
-mod common_buffer;
+// mod common_buffer;
 mod matmul;
 mod mean_reduce;
 mod other;
@@ -14,7 +14,7 @@ pub type MetalFp16Optimizer = (
     mean_reduce::MeanReduceOptimizer,
     rms_norm::RMSNormOptimizer,
     prim::CopyOptimizer,
-    common_buffer::CommonBufferOptimizer,
+    // common_buffer::CommonBufferOptimizer,
 );
 
 #[cfg(test)]

@@ -49,9 +49,18 @@ impl GraphOptimizer for CommonBufferOptimizer {
                     dyn_map: &graph.dyn_map,
                     input_map: HashMap::from([(
                         node,
-                        inputs.iter().map(|(_, i)| (i.0, i.0, i.2)).collect(),
+                        inputs
+                            .iter()
+                            .filter_map(|i| i.1.as_data())
+                            .map(|(a, _, b)| (a, a, b))
+                            .collect(),
                     )]),
-                    outputs: (0..=outputs.iter().map(|(_, i)| i.1).max().unwrap_or_default())
+                    outputs: (0..=outputs
+                        .iter()
+                        .filter_map(|i| i.1.as_data())
+                        .map(|(_, i, _)| i)
+                        .max()
+                        .unwrap_or_default())
                         .map(|i| (node, i))
                         .collect(),
                 })
@@ -77,7 +86,7 @@ impl GraphOptimizer for CommonBufferOptimizer {
             s.op().ty::<CommandBufferOp>().ptr(&mut op1),
             s.op().ty::<CommandBufferOp>().ptr(&mut op2),
         );
-        for _ in s.search(graph) {
+        for _ in s.clone().search(graph) {
             // Make sure all non-direct outputs of op1 don't reach op2
             if graph
                 .graph
@@ -292,6 +301,21 @@ fn merge_command_buffer_ops(op1: NodeIndex, op2: NodeIndex, graph: &mut Graph) {
         .downcast_ref::<CommandBufferOp>()
         .unwrap())
     .clone();
+    // if graph_1.internal_graph.node_indices().count() > 2
+    //     || graph
+    //         .graph
+    //         .node_weight_mut(op2)
+    //         .unwrap()
+    //         .as_any_mut()
+    //         .downcast_mut::<CommandBufferOp>()
+    //         .unwrap()
+    //         .internal_graph
+    //         .node_indices()
+    //         .count()
+    //         > 2
+    // {
+    //     return;
+    // }
     let old_to_new = merge_nodes(
         &graph_1,
         graph
@@ -463,7 +487,7 @@ impl Operator for CommandBufferOp {
                                 .as_any()
                                 .downcast_ref::<Buffer>()
                                 .unwrap(),
-                            inp[inputs[j].1 as usize].1,
+                            inputs[j].2,
                         ));
                         j += 1;
                     }

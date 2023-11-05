@@ -27,11 +27,11 @@ impl Default for Dim {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShapeTracker {
-    pub dims: ArrayVec<[Dim; 10]>,
-    pub indexes: ArrayVec<[usize; 10]>,
-    pub fake: ArrayVec<[bool; 10]>,
-    pub slices: ArrayVec<[(usize, usize); 10]>,
-    pub padding: ArrayVec<[(usize, usize); 10]>,
+    pub dims: ArrayVec<[Dim; 6]>,
+    pub indexes: ArrayVec<[usize; 6]>,
+    pub fake: ArrayVec<[bool; 6]>,
+    pub slices: ArrayVec<[(usize, usize); 6]>,
+    pub padding: ArrayVec<[(usize, usize); 6]>,
 }
 
 impl ShapeTracker {
@@ -372,7 +372,7 @@ pub fn resolve_local_dyn_dims(a: &mut ShapeTracker, b: &mut ShapeTracker, defaul
 
 pub struct Indexer {
     #[allow(clippy::type_complexity)]
-    data: ArrayVec<[(usize, usize, (usize, usize), (usize, usize), bool); 10]>,
+    data: ArrayVec<[(usize, usize, (usize, usize), (usize, usize), bool); 6]>,
 }
 
 impl Indexer {

@@ -24,8 +24,8 @@ impl Loader for DfdxDeferredLoader {
             let Some(n_elements) = graph
                 .graph
                 .edges_directed(n, petgraph::Direction::Outgoing)
-                .next()
-                .map(|e| e.weight().2.n_physical_elements())
+                .find_map(|e| e.weight().as_data())
+                .map(|(_, _, s)| s.n_physical_elements())
             else {
                 continue;
             };

@@ -1595,7 +1595,8 @@ impl GraphOptimizer for PrimitiveOptimizer {
                     graph
                         .graph
                         .edges_directed(*n, petgraph::Direction::Incoming)
-                        .map(|i| i.weight().2)
+                        .filter_map(|e| e.weight().as_data())
+                        .map(|i| i.2)
                         .max_by_key(|s| s.n_physical_elements())
                         .unwrap(),
                 )
@@ -1629,7 +1630,7 @@ impl GraphOptimizer for PrimitiveOptimizer {
                     graph
                         .graph
                         .edges_directed(n, petgraph::Direction::Incoming)
-                        .next()
+                        .find(|e| !e.weight().is_schedule())
                         .unwrap()
                         .id(),
                 )
@@ -1639,13 +1640,21 @@ impl GraphOptimizer for PrimitiveOptimizer {
             // Create copy node
             let (source, shape) = (
                 graph.graph.edge_endpoints(edge).unwrap().0,
-                graph.graph.edge_weight(edge).unwrap().2,
+                graph.graph.edge_weight(edge).unwrap().as_data().unwrap().2,
             );
             let copy_node = graph
                 .add_op(MetalCopyFromDevice(dev.clone()))
                 .input(source, 0, shape)
                 .finish();
-            graph.graph.add_edge(copy_node, output_node, (0, 0, shape));
+            graph.graph.add_edge(
+                copy_node,
+                output_node,
+                Dependency::Data {
+                    input_order: 0,
+                    output_order: 0,
+                    shape,
+                },
+            );
             graph.graph.remove_edge(edge);
         }
 
@@ -1655,8 +1664,9 @@ impl GraphOptimizer for PrimitiveOptimizer {
             let src_shapes = graph
                 .graph
                 .edges_directed(id, petgraph::Direction::Incoming)
-                .sorted_by_key(|e| e.weight().0)
-                .map(|e| e.weight().2)
+                .filter_map(|e| e.weight().as_data())
+                .sorted_by_key(|e| e.0)
+                .map(|e| e.2)
                 .collect::<Vec<_>>();
             let op = graph.graph.node_weight(id).unwrap().as_any().type_id();
             let op_ref = graph.graph.node_weight_mut(id).unwrap();
@@ -1889,7 +1899,7 @@ impl GraphOptimizer for CopyOptimizer {
             s2.op().ty::<MetalCopyToDevice>().ptr(&mut second),
         );
 
-        for _ in s1.search(graph).chain(s2.search(graph)) {
+        for _ in s1.clone().search(graph).chain(s2.clone().search(graph)) {
             if graph
                 .graph
                 .edges_directed(first, petgraph::Direction::Outgoing)

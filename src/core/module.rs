@@ -73,6 +73,7 @@ pub fn mark_weights<M: SerializeModule>(model: &M, graph: &mut Graph) {
     let mut s = Serializer::default();
     model.serialize(&mut s);
     for node in s.state.values() {
-        graph.no_delete.insert(*node);
+        let id = remap_id(*node, &graph.id_remap);
+        graph.no_delete.insert(id);
     }
 }
