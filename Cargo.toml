@@ -33,6 +33,7 @@ regex = "1.9.5"
 savage_core = {path="./resources/savage_core"}
 num = "0.4.1"
 gemm = "0.15.4"
+objc = "0.2.7"
 
 [dev-dependencies]
 dfdx = {version="0.13", features=["f16"]}

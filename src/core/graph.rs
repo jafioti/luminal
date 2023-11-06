@@ -105,7 +105,7 @@ impl Graph {
     /// Compile the graph using the given compiler
     pub fn compile<C: Compiler>(&mut self, compiler: C) {
         compiler.compile(self);
-        self.toposort();
+        // self.toposort();
     }
 
     /// Refresh the internally sorted graph

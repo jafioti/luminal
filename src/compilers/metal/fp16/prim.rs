@@ -26,6 +26,12 @@ pub trait MetalKernelForward: Debug {
 #[derive(Debug, Clone)]
 pub struct MetalKernelWrapper(pub Arc<Box<dyn MetalKernelForward>>);
 
+impl PartialEq for MetalKernelWrapper {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
 impl Default for MetalKernelWrapper {
     fn default() -> Self {
         Self(Arc::new(Box::new(())))
@@ -1489,9 +1495,9 @@ impl Operator for MetalMaxReduce {
 }
 
 #[derive(Default)]
-pub struct PrimitiveOptimizer;
+pub struct PrimitiveCompiler;
 
-impl Compiler for PrimitiveOptimizer {
+impl Compiler for PrimitiveCompiler {
     fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         // Go through the graph and insert copy ops
@@ -1737,9 +1743,9 @@ impl Compiler for PrimitiveOptimizer {
 
 /// In 16 bit, summing above 2048 doesn't work. This precludes the .expand(Dim).sum_reduce() pattern to get a dim size in a tensor, so we need to replace these fake reductions with an elementwise mul
 #[derive(Debug, Default)]
-pub struct FakeReductionOptimizer;
+pub struct FakeReductionCompiler;
 
-impl Compiler for FakeReductionOptimizer {
+impl Compiler for FakeReductionCompiler {
     fn compile(&self, graph: &mut Graph) {
         let s = GraphSelector::default();
         let mut sum_reduce = NodeIndex::default();
@@ -1883,9 +1889,9 @@ impl Operator for FakeSumReduce {
 
 /// Sometimes CopyTo -> CopyFrom and CopyFrom -> CopyTo patterns remain, so let's clean them up
 #[derive(Debug, Default)]
-pub struct CopyOptimizer;
+pub struct CopyCompiler;
 
-impl Compiler for CopyOptimizer {
+impl Compiler for CopyCompiler {
     fn compile(&self, graph: &mut Graph) {
         let (mut first, mut second) = (NodeIndex::default(), NodeIndex::default());
         let s1 = GraphSelector::default();

@@ -104,11 +104,11 @@ impl Operator for MetalCos {
     }
 }
 
-/// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceOptimizer.
+/// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceCompiler.
 #[derive(Default)]
-pub struct MetalCosOptimizer;
+pub struct MetalCosCompiler;
 
-impl Compiler for MetalCosOptimizer {
+impl Compiler for MetalCosCompiler {
     fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         // Look for the mean-reduce pattern
@@ -283,11 +283,11 @@ impl Operator for MetalExp {
     }
 }
 
-/// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceOptimizer.
+/// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceCompiler.
 #[derive(Default)]
-pub struct MetalExpOptimizer;
+pub struct MetalExpCompiler;
 
-impl Compiler for MetalExpOptimizer {
+impl Compiler for MetalExpCompiler {
     fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         // Look for the exp pattern

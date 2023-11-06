@@ -150,11 +150,11 @@ impl Operator for MetalMeanReduce {
     }
 }
 
-/// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceOptimizer.
+/// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceCompiler.
 #[derive(Default)]
-pub struct MeanReduceOptimizer;
+pub struct MeanReduceCompiler;
 
-impl Compiler for MeanReduceOptimizer {
+impl Compiler for MeanReduceCompiler {
     fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         // Look for the mean-reduce pattern

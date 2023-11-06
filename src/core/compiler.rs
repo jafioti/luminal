@@ -10,7 +10,7 @@ use std::{
 
 use itertools::Itertools;
 use petgraph::{
-    stable_graph::{NodeIndex, StableGraph},
+    stable_graph::{EdgeIndex, NodeIndex, StableGraph},
     visit::EdgeRef,
     Direction,
 };
@@ -81,7 +81,10 @@ impl Graph {
     pub fn debug_graph(
         &self,
         show_shapes: bool,
-    ) -> petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32> {
+    ) -> (
+        petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32>,
+        Vec<EdgeIndex>,
+    ) {
         let mut new_graph = petgraph::stable_graph::StableGraph::default();
         let mut id_map = HashMap::new();
         let op_regex = Regex::new(r"(?s)\{.*|\(.*").unwrap();
@@ -92,6 +95,7 @@ impl Graph {
             );
         }
 
+        let mut schedule_edges = vec![];
         for node in self.graph.node_indices() {
             // new_graph
             //     .node_weight_mut(id_map[&node])
@@ -100,14 +104,26 @@ impl Graph {
             for edge in self
                 .graph
                 .edges_directed(node, Direction::Outgoing)
-                .filter(|e| !e.weight().is_schedule())
-                .sorted_by_key(|e| e.weight().as_data().unwrap().0)
+                .sorted_by_key(|e| {
+                    if let Some(d) = e.weight().as_data() {
+                        d.0
+                    } else {
+                        0
+                    }
+                })
             {
-                new_graph.add_edge(
+                let new_edge = new_graph.add_edge(
                     id_map[&edge.source()],
                     id_map[&edge.target()],
-                    edge.weight().as_data().unwrap().0,
+                    if let Some(d) = edge.weight().as_data() {
+                        d.0
+                    } else {
+                        0
+                    },
                 );
+                if edge.weight().is_schedule() {
+                    schedule_edges.push(new_edge);
+                }
                 if show_shapes
                     && new_graph.contains_node(id_map[&edge.target()])
                     && !edge.weight().as_data().unwrap().2.shape().is_empty()
@@ -123,15 +139,17 @@ impl Graph {
             }
         }
 
-        new_graph
+        (new_graph, schedule_edges)
     }
 
     pub fn display(&self) {
-        display_graph(&self.debug_graph(false));
+        let (g, e) = self.debug_graph(false);
+        display_graph(&g, &e);
     }
 
     pub fn display_shapes(&self) {
-        display_graph(&self.debug_graph(true));
+        let (g, e) = self.debug_graph(true);
+        display_graph(&g, &e);
     }
 
     /// Get the sources of a node given it's id
@@ -160,13 +178,21 @@ impl Graph {
 /// View a debug graph in the browser
 pub fn display_graph(
     graph: &petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32>,
+    schedule_edges: &[EdgeIndex],
 ) {
+    let mut graph_string =
+        petgraph::dot::Dot::with_config(&graph, &[petgraph::dot::Config::EdgeIndexLabel])
+            .to_string();
+    let re = Regex::new(r#"label\s*=\s*"\d+""#).unwrap();
+    for e in schedule_edges {
+        graph_string =
+            graph_string.replace(&format!("label = \"{}\"", e.index()), "color=\"green\"");
+    }
+    graph_string = re.replace_all(&graph_string, "").to_string();
+
     let url = format!(
         "https://dreampuf.github.io/GraphvizOnline/#{}",
-        urlencoding::encode(
-            &petgraph::dot::Dot::with_config(&graph, &[petgraph::dot::Config::EdgeNoLabel,])
-                .to_string()
-        )
+        urlencoding::encode(&graph_string)
     );
     if let Err(e) = webbrowser::open(&url) {
         panic!("Error displaying graph: {:?}", e);

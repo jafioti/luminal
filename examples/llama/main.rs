@@ -46,11 +46,12 @@ fn main() {
     }
 
     #[cfg(feature="metal")]
-    cx1.compile(<(GenericCompiler, MetalFp16Optimizer, DepthFirst)>::default());
+    cx1.compile(<(GenericCompiler, MetalFp16Compiler)>::default());
     #[cfg(feature="cuda")]
     cx1.compile(<(CudaFp16Optimizer, GenericCompiler)>::default());
     #[cfg(all(not(feature="cuda"), not(feature="metal")))]
-    cx1.compile(<(GenericCompiler, CPUOptimizer)>::default());
+    cx1.compile(<(GenericCompiler, CPUCompiler)>::default());
+
 
     // Build KV cache forward graph
     let kv_model = Model::initialize(&mut cx2);
@@ -75,11 +76,11 @@ fn main() {
         v.set_type(std::any::TypeId::of::<cudarc::driver::CudaSlice<half::f16>>());
     }
     #[cfg(feature="metal")]
-    cx2.compile(<(GenericCompiler, MetalFp16Optimizer, DepthFirst)>::default());
+    cx2.compile(<(GenericCompiler, MetalFp16Compiler)>::default());
     #[cfg(feature="cuda")]
     cx2.compile(<(GenericCompiler, CudaFp16Optimizer)>::default());
     #[cfg(all(not(feature="cuda"), not(feature="metal")))]
-    cx2.compile(<(GenericCompiler, CPUOptimizer)>::default());
+    cx2.compile(<(GenericCompiler, CPUCompiler)>::default());
     delete_loads(&kv_model, &mut cx2);
 
     // cx1.display();

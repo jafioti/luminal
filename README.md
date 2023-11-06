@@ -2,7 +2,7 @@
 ![image](https://raw.githubusercontent.com/jafioti/luminal/main/resources/dag.jpeg)
 **Deep learning at the speed of light.**
 
-Luminal is a deep learning library that prioritizes **static computation** and **operator fusion** to achieve high performance.
+Luminal is a deep learning library that prioritizes **compilers** to achieve high performance.
 
 ```rust
 use luminal::prelude::*;
@@ -20,8 +20,8 @@ a.set(vec![1.0, 2.0, 3.0]);
 b.set(vec![1.0, 2.0, 3.0, 3.0]);
 c.mark();
 
-// Optimize and run graph
-cx.optimize(GenericOptimizer::default());
+// Compile and run graph
+cx.compile(GenericCompiler::default());
 cx.execute();
 
 // Get result
@@ -42,41 +42,42 @@ However, this isn't great for performance. What makes sense for a developer does
 If these other libraries are interpreted, luminal is compiled. Luminal takes an approach more similar to [XLA](https://www.tensorflow.org/xla), and [tinygrad](https://github.com/tinygrad/tinygrad). Everything's static here. When you write out an expression like `x + y`, no actual computation happens. The operation is recorded to a directed acyclic computation graph for execution later. Only once `graph.execute()` is ran does the computation happen. *But isn't that just lazy execution?* Yes it is! But in luminal **everything is done this way**. All neural networks are built up as one or a few static computation graphs, and executed later. 
 
 ## But Why?
-A consequence of this is that the actual computation that gets ran can be radically different than the code that was written. Since we have an entire neural network fully represented in a compute graph, our optimizers have global knowledge and can do much more aggressive optimization **without any sync points**.
+A consequence of this is that the actual computation that gets ran can be radically different than the code that was written. Since we have an entire neural network fully represented in a compute graph, our compilers have global knowledge and can do much more aggressive optimization **without any sync points**.
 
 Of course, we can still split the network into multiple seperate graphs if we want to insert dynamic control flow part-way through, which means this method doesn't preclude optimizations like KV caching, because the KV cached forward pass is just a seperate graph! See `examples/llama` for an example of a KV cache.
 
 Some huge benefits are now unlocked:
 - Aggressive kernel fusion
 - Shape-specific kernels compiled at runtime
-- Devices and Dtypes are handled through optimizers (just run the CUDA optimizer to convert the graph to use CUDA kernels, then the fp16 optimizer to convert to half-precision kernels)
+- Devices and Dtypes are handled through compilers (just run the CUDA compiler to convert the graph to use CUDA kernels, then the fp16 compiler to convert to half-precision kernels)
 - Networks can be written in generic code, but compiled and ran fast on hyper-specific architectures (try writing a PyTorch network that works with both TF32 dtypes and TPUs; get ready for if statement hell...)
 
 ## RISC-style architecture
-Luminal can be ran on new accelerators by implementing 12 primitive ops. Take a look at `src/optimizers/cuda/prim.rs` to see 1-to-1 CUDA translations of the primops.
+Luminal can be ran on new accelerators by implementing 12 primitive ops. Take a look at `src/compilers/cuda/prim.rs` to see 1-to-1 CUDA translations of the primops.
 
-Accelerators are free to implement their own custom ops, and their own optimizers to convert luminal primitive ops to bespoke ops.
+Accelerators are free to implement their own custom ops, and their own compilers to convert luminal primitive ops to bespoke ops.
 
 ## Compile-time Shape Checks
 All operations are shape checked at compile time, so no more shape mismatches! All credit for this goes to [dfdx](https://github.com/coreylowman/dfdx).
 
 ## View the Graph
-Once you've written all your computation code, run `cx.display_graph()` to see the entire computation graph in all it's glory. Pretty messy looking! Now run `cx.optimize(GeneralOptimizer::default())` and display the graph again. Much better.
+Once you've written all your computation code, run `cx.display()` to see the entire computation graph in all it's glory. Pretty messy looking! Now run `cx.compile(GenericCompiler::default())` and display the graph again. Much better.
 
 ## Where are we?
 Currently luminal is extremely alpha. Please don't use this in prod.
 
-- Llama 1 is implemented in `examples/llama`. You'll need to follow the instructions in [llama-dfdx](https://github.com/coreylowman/llama-dfdx) to download and convert the llama weights, and point this example loading path at them.
+- Metal and Cuda are supported for running models on Macs and Nvidia GPUs respectively, in both full and half precision.
+- Llama 1 is implemented in `examples/llama`. See instructions above for running.
 - The llama example shows how to implement a loader for a custom format. Safetensors loaders are already implemented, and are the recommended way to load a model.
 - We have a small library of NN modules in `nn`, including transformers.
 - A signifigant amount of high-level ops are implemented in `hl_ops`. We are aiming to match the tinygrad ops set.
-- Currently there are very few optimizers, so primops are mostly used to run these models, which are very slow.
-- Next release will bring a signifigant amount of optimizers which should fuse primops into much faster ops. The aim for 0.2 is to be usably fast, not SOTA yet.
+- Next release will bring a signifigant amount of compilers which should fuse primops into much faster ops. The aim for 0.3 is to be usably fast, not SOTA yet.
+- The aim for 0.4 is to achieve SOTA performance on macs, and near SOTA on single nvidia gpus, as well as support all mainstream models (Stable Diffusion, Whisper, Flamingo, etc.)
 
 Some things on the roadmap:
-- Write common sense cuda ops and optimizer (matmuls, mul-add, etc.)
+- Optimize cuda and metal matmul kernels
 - Build benchmarking suite to test against other libs
-- Write specialized CUDA kernels for full transformer architecture (FlashAttention, etc.)
+- Write specialized Cuda and Metal kernels for full transformer architecture (FlashAttention, etc.)
 - Automatic differentiation of graphs
 - Beat PT 2.0 perf on LLM training
 - Build dyson swarm
