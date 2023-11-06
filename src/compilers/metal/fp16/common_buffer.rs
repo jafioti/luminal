@@ -218,12 +218,9 @@ impl PartialEq for SetupMetalKernels {
 
 impl Operator for SetupMetalKernels {
     fn process(&self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        // println!("Setting up");
         let mut buffer = self.buffer.lock().unwrap();
         // buffer.2 = unsafe { objc_autoreleasePoolPush() };
-        // buffer.1 = self.dev.new_command_queue();
         buffer.0 = buffer.1.new_command_buffer();
-        // println!("Setup");
         vec![]
     }
 }
@@ -266,20 +263,20 @@ impl PartialEq for MetalKernelOperation {
 
 impl Operator for MetalKernelOperation {
     fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let data = self.buffer.lock().unwrap();
-        let buff = unsafe { data.0.as_ref().unwrap() };
-        let inputs = inp
-            .iter()
-            .map(|(t, sh)| {
-                (
-                    t.borrowed().data.as_any().downcast_ref::<Buffer>().unwrap(),
-                    *sh,
-                )
-            })
-            .collect::<Vec<_>>();
         self.wrapper
             .0
-            .metal_forward(&inputs, &self.dev, buff)
+            .metal_forward(
+                &inp.iter()
+                    .map(|(t, sh)| {
+                        (
+                            t.borrowed().data.as_any().downcast_ref::<Buffer>().unwrap(),
+                            *sh,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+                &self.dev,
+                unsafe { self.buffer.lock().unwrap().0.as_ref().unwrap() },
+            )
             .into_iter()
             .map(|b| Tensor { data: Box::new(b) })
             .collect()

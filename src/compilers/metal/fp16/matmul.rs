@@ -14,7 +14,7 @@ use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Multiplies a MxK matrix with a KxN matrix, resulting in a MxN matrix
 #[derive(Debug, Clone)]
-pub struct MetalMatmul2D(ComputePipelineState, Device);
+pub struct MetalMatmul2D(ComputePipelineState, CommandQueue, Device);
 impl PartialEq for MetalMatmul2D {
     fn eq(&self, _: &Self) -> bool {
         false
@@ -120,11 +120,10 @@ impl Operator for MetalMatmul2D {
                 .unwrap();
 
             // Setup command queue / command buffer / encoder
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, inp[0].1), (b, inp[1].1)], &self.1, command_buffer)
+                .metal_forward(&[(a, inp[0].1), (b, inp[1].1)], &self.2, command_buffer)
                 .pop()
                 .unwrap();
 
@@ -149,7 +148,7 @@ impl Operator for MetalMatmul2D {
 
 /// Multiplies a BxMxK matrix with a BxKxN matrix, resulting in a BxMxN matrix
 #[derive(Debug, Clone)]
-pub struct MetalBatchMatmul2D(ComputePipelineState, Device);
+pub struct MetalBatchMatmul2D(ComputePipelineState, CommandQueue, Device);
 impl PartialEq for MetalBatchMatmul2D {
     fn eq(&self, _: &Self) -> bool {
         false
@@ -263,11 +262,10 @@ impl Operator for MetalBatchMatmul2D {
                 .unwrap();
 
             // Setup command queue / command buffer / encoder
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, inp[0].1), (b, inp[1].1)], &self.1, command_buffer)
+                .metal_forward(&[(a, inp[0].1), (b, inp[1].1)], &self.2, command_buffer)
                 .pop()
                 .unwrap();
 
@@ -292,7 +290,7 @@ impl Operator for MetalBatchMatmul2D {
 
 // ABCDxABDE -> ABCE
 #[derive(Debug, Clone)]
-pub struct MetalAttnMatmul2D(Device);
+pub struct MetalAttnMatmul2D(Device, CommandQueue);
 impl PartialEq for MetalAttnMatmul2D {
     fn eq(&self, _: &Self) -> bool {
         false
@@ -395,6 +393,7 @@ pub struct MetalMatMulCompiler;
 impl Compiler for MetalMatMulCompiler {
     fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
+        let queue = dev.new_command_queue();
         // Look for the matmul pattern
         let s = GraphSelector::default();
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
@@ -413,7 +412,7 @@ impl Compiler for MetalMatMulCompiler {
                 .ty::<MetalSumReduce>()
                 .check(|o, _| {
                     if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
-                        o.2 == 2
+                        o.3 == 2
                     } else {
                         false
                     }
@@ -437,7 +436,11 @@ impl Compiler for MetalMatMulCompiler {
                 matmul = Some(MetalMatmul2D::compile(&dev));
             }
             let new_op = graph
-                .add_op(MetalMatmul2D(matmul.clone().unwrap(), dev.clone()))
+                .add_op(MetalMatmul2D(
+                    matmul.clone().unwrap(),
+                    queue.clone(),
+                    dev.clone(),
+                ))
                 .input(srcs[0].0, 0, srcs[0].1)
                 .input(srcs[1].0, 0, srcs[1].1)
                 .finish();
@@ -488,7 +491,7 @@ impl Compiler for MetalMatMulCompiler {
                 .ty::<MetalSumReduce>()
                 .check(|o, _| {
                     if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
-                        o.2 == 3
+                        o.3 == 3
                     } else {
                         false
                     }
@@ -514,6 +517,7 @@ impl Compiler for MetalMatMulCompiler {
             let new_op = graph
                 .add_op(MetalBatchMatmul2D(
                     batched_matmul.clone().unwrap(),
+                    queue.clone(),
                     dev.clone(),
                 ))
                 .input(srcs[0].0, 0, srcs[0].1)
@@ -568,7 +572,7 @@ impl Compiler for MetalMatMulCompiler {
                 .ty::<MetalSumReduce>()
                 .check(|o, _| {
                     if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
-                        o.2 == 4
+                        o.3 == 4
                     } else {
                         false
                     }
@@ -587,7 +591,7 @@ impl Compiler for MetalMatMulCompiler {
             srcs[1].1.permute(&[0, 1, 2, 4, 3]);
             srcs[1].1.remove_dim(2);
             let new_op = graph
-                .add_op(MetalAttnMatmul2D(dev.clone()))
+                .add_op(MetalAttnMatmul2D(dev.clone(), queue.clone()))
                 .input(srcs[0].0, 0, srcs[0].1)
                 .input(srcs[1].0, 0, srcs[1].1)
                 .finish();

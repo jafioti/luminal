@@ -249,7 +249,7 @@ impl Operator for MetalContiguous {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalLog2(pub ComputePipelineState, Device);
+pub struct MetalLog2(pub ComputePipelineState, CommandQueue, Device);
 impl PartialEq for MetalLog2 {
     fn eq(&self, _: &Self) -> bool {
         false
@@ -257,7 +257,11 @@ impl PartialEq for MetalLog2 {
 }
 
 impl MetalLog2 {
-    fn new(dev: Device, kernels: &mut HashMap<String, ComputePipelineState>) -> Self {
+    fn new(
+        dev: Device,
+        queue: CommandQueue,
+        kernels: &mut HashMap<String, ComputePipelineState>,
+    ) -> Self {
         let mut code = "#include <metal_stdlib>
 using namespace metal;
 kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
@@ -272,7 +276,7 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         if !kernels.contains_key(&name) {
             kernels.insert(name.clone(), compile_function(&name, &code, &dev));
         }
-        Self(kernels[&name].clone(), dev)
+        Self(kernels[&name].clone(), queue, dev)
     }
 }
 
@@ -317,11 +321,10 @@ impl Operator for MetalLog2 {
                 .downcast_ref::<Buffer>()
                 .unwrap();
 
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
                 .pop()
                 .unwrap();
 
@@ -345,7 +348,7 @@ impl Operator for MetalLog2 {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalExp2(pub ComputePipelineState, Device);
+pub struct MetalExp2(pub ComputePipelineState, CommandQueue, Device);
 impl PartialEq for MetalExp2 {
     fn eq(&self, _: &Self) -> bool {
         false
@@ -353,7 +356,11 @@ impl PartialEq for MetalExp2 {
 }
 
 impl MetalExp2 {
-    fn new(dev: Device, kernels: &mut HashMap<String, ComputePipelineState>) -> Self {
+    fn new(
+        dev: Device,
+        queue: CommandQueue,
+        kernels: &mut HashMap<String, ComputePipelineState>,
+    ) -> Self {
         let mut code = "#include <metal_stdlib>
 using namespace metal;
 kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
@@ -368,7 +375,7 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         if !kernels.contains_key(&name) {
             kernels.insert(name.clone(), compile_function(&name, &code, &dev));
         }
-        Self(kernels[&name].clone(), dev)
+        Self(kernels[&name].clone(), queue, dev)
     }
 }
 impl MetalKernelForward for MetalExp2 {
@@ -412,11 +419,10 @@ impl Operator for MetalExp2 {
                 .downcast_ref::<Buffer>()
                 .unwrap();
 
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
                 .pop()
                 .unwrap();
 
@@ -440,7 +446,7 @@ impl Operator for MetalExp2 {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalSin(pub ComputePipelineState, Device);
+pub struct MetalSin(pub ComputePipelineState, CommandQueue, Device);
 impl PartialEq for MetalSin {
     fn eq(&self, _: &Self) -> bool {
         false
@@ -448,7 +454,11 @@ impl PartialEq for MetalSin {
 }
 
 impl MetalSin {
-    fn new(dev: Device, kernels: &mut HashMap<String, ComputePipelineState>) -> Self {
+    fn new(
+        dev: Device,
+        queue: CommandQueue,
+        kernels: &mut HashMap<String, ComputePipelineState>,
+    ) -> Self {
         let mut code = "#include <metal_stdlib>
 using namespace metal;
 kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
@@ -463,7 +473,7 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         if !kernels.contains_key(&name) {
             kernels.insert(name.clone(), compile_function(&name, &code, &dev));
         }
-        Self(kernels[&name].clone(), dev)
+        Self(kernels[&name].clone(), queue, dev)
     }
 }
 impl MetalKernelForward for MetalSin {
@@ -507,11 +517,10 @@ impl Operator for MetalSin {
                 .downcast_ref::<Buffer>()
                 .unwrap();
 
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
                 .pop()
                 .unwrap();
 
@@ -535,7 +544,7 @@ impl Operator for MetalSin {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalSqrt(pub ComputePipelineState, Device);
+pub struct MetalSqrt(pub ComputePipelineState, CommandQueue, Device);
 impl PartialEq for MetalSqrt {
     fn eq(&self, _: &Self) -> bool {
         false
@@ -543,7 +552,11 @@ impl PartialEq for MetalSqrt {
 }
 
 impl MetalSqrt {
-    fn new(dev: Device, kernels: &mut HashMap<String, ComputePipelineState>) -> Self {
+    fn new(
+        dev: Device,
+        queue: CommandQueue,
+        kernels: &mut HashMap<String, ComputePipelineState>,
+    ) -> Self {
         let mut code = "#include <metal_stdlib>
 using namespace metal;
 kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
@@ -558,7 +571,7 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         if !kernels.contains_key(&name) {
             kernels.insert(name.clone(), compile_function(&name, &code, &dev));
         }
-        Self(kernels[&name].clone(), dev)
+        Self(kernels[&name].clone(), queue, dev)
     }
 }
 impl MetalKernelForward for MetalSqrt {
@@ -602,11 +615,10 @@ impl Operator for MetalSqrt {
                 .downcast_ref::<Buffer>()
                 .unwrap();
 
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
                 .pop()
                 .unwrap();
 
@@ -630,7 +642,7 @@ impl Operator for MetalSqrt {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalRecip(pub ComputePipelineState, Device);
+pub struct MetalRecip(pub ComputePipelineState, CommandQueue, Device);
 impl PartialEq for MetalRecip {
     fn eq(&self, _: &Self) -> bool {
         false
@@ -638,7 +650,11 @@ impl PartialEq for MetalRecip {
 }
 
 impl MetalRecip {
-    fn new(dev: Device, kernels: &mut HashMap<String, ComputePipelineState>) -> Self {
+    fn new(
+        dev: Device,
+        queue: CommandQueue,
+        kernels: &mut HashMap<String, ComputePipelineState>,
+    ) -> Self {
         let mut code = "#include <metal_stdlib>
 using namespace metal;
 kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
@@ -653,7 +669,7 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         if !kernels.contains_key(&name) {
             kernels.insert(name.clone(), compile_function(&name, &code, &dev));
         }
-        Self(kernels[&name].clone(), dev)
+        Self(kernels[&name].clone(), queue, dev)
     }
 }
 impl MetalKernelForward for MetalRecip {
@@ -697,11 +713,10 @@ impl Operator for MetalRecip {
                 .downcast_ref::<Buffer>()
                 .unwrap();
 
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
                 .pop()
                 .unwrap();
 
@@ -725,7 +740,13 @@ impl Operator for MetalRecip {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalAdd(ComputePipelineState, Device, ShapeTracker, ShapeTracker);
+pub struct MetalAdd(
+    ComputePipelineState,
+    CommandQueue,
+    Device,
+    ShapeTracker,
+    ShapeTracker,
+);
 
 impl PartialEq for MetalAdd {
     fn eq(&self, _: &Self) -> bool {
@@ -738,6 +759,7 @@ impl MetalAdd {
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
         dev: Device,
+        queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
@@ -761,7 +783,7 @@ kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffe
         if !kernels.contains_key(&name) {
             kernels.insert(name.clone(), compile_function(&name, &code, &dev));
         }
-        Self(kernels[&name].clone(), dev, a_shape, b_shape)
+        Self(kernels[&name].clone(), queue, dev, a_shape, b_shape)
     }
 }
 
@@ -787,7 +809,7 @@ impl MetalKernelForward for MetalAdd {
         encoder.set_buffer(1, Some(inputs[0].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(&[(self.2, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
+        input_dyn_dims(&[(self.3, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
 
         // Execute
         encoder.dispatch_n_elements(inp_size);
@@ -815,13 +837,12 @@ impl Operator for MetalAdd {
                 .downcast_ref::<Buffer>()
                 .unwrap();
 
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            let command_buffer = self.1.new_command_buffer();
 
             let out = self
                 .metal_forward(
                     &[(a, tensors[0].1), (b, tensors[1].1)],
-                    &self.1,
+                    &self.2,
                     command_buffer,
                 )
                 .pop()
@@ -847,7 +868,13 @@ impl Operator for MetalAdd {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalMul(ComputePipelineState, Device, ShapeTracker, ShapeTracker);
+pub struct MetalMul(
+    ComputePipelineState,
+    CommandQueue,
+    Device,
+    ShapeTracker,
+    ShapeTracker,
+);
 
 impl PartialEq for MetalMul {
     fn eq(&self, _: &Self) -> bool {
@@ -860,6 +887,7 @@ impl MetalMul {
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
         dev: Device,
+        queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
@@ -883,7 +911,7 @@ kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffe
         if !kernels.contains_key(&name) {
             kernels.insert(name.clone(), compile_function(&name, &code, &dev));
         }
-        Self(kernels[&name].clone(), dev, a_shape, b_shape)
+        Self(kernels[&name].clone(), queue, dev, a_shape, b_shape)
     }
 }
 impl MetalKernelForward for MetalMul {
@@ -908,7 +936,7 @@ impl MetalKernelForward for MetalMul {
         encoder.set_buffer(1, Some(inputs[0].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(&[(self.2, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
+        input_dyn_dims(&[(self.3, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
 
         // Execute
         encoder.dispatch_n_elements(inp_size);
@@ -936,13 +964,12 @@ impl Operator for MetalMul {
                 .downcast_ref::<Buffer>()
                 .unwrap();
 
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            let command_buffer = self.1.new_command_buffer();
 
             let out = self
                 .metal_forward(
                     &[(a, tensors[0].1), (b, tensors[1].1)],
-                    &self.1,
+                    &self.2,
                     command_buffer,
                 )
                 .pop()
@@ -968,7 +995,13 @@ impl Operator for MetalMul {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalLessThan(ComputePipelineState, Device, ShapeTracker, ShapeTracker);
+pub struct MetalLessThan(
+    ComputePipelineState,
+    CommandQueue,
+    Device,
+    ShapeTracker,
+    ShapeTracker,
+);
 
 impl PartialEq for MetalLessThan {
     fn eq(&self, _: &Self) -> bool {
@@ -981,6 +1014,7 @@ impl MetalLessThan {
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
         dev: Device,
+        queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
@@ -1014,7 +1048,7 @@ kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffe
         if !kernels.contains_key(&name) {
             kernels.insert(name.clone(), compile_function(&name, &code, &dev));
         }
-        Self(kernels[&name].clone(), dev, a_shape, b_shape)
+        Self(kernels[&name].clone(), queue, dev, a_shape, b_shape)
     }
 }
 
@@ -1040,7 +1074,7 @@ impl MetalKernelForward for MetalLessThan {
         encoder.set_buffer(1, Some(inputs[0].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(&[(self.2, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
+        input_dyn_dims(&[(self.3, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
 
         // Execute
         encoder.dispatch_n_elements(inp_size);
@@ -1068,13 +1102,12 @@ impl Operator for MetalLessThan {
                 .downcast_ref::<Buffer>()
                 .unwrap();
 
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            let command_buffer = self.1.new_command_buffer();
 
             let out = self
                 .metal_forward(
                     &[(a, tensors[0].1), (b, tensors[1].1)],
-                    &self.1,
+                    &self.2,
                     command_buffer,
                 )
                 .pop()
@@ -1100,7 +1133,13 @@ impl Operator for MetalLessThan {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalMod(ComputePipelineState, Device, ShapeTracker, ShapeTracker);
+pub struct MetalMod(
+    ComputePipelineState,
+    CommandQueue,
+    Device,
+    ShapeTracker,
+    ShapeTracker,
+);
 
 impl PartialEq for MetalMod {
     fn eq(&self, _: &Self) -> bool {
@@ -1113,6 +1152,7 @@ impl MetalMod {
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
         dev: Device,
+        queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
@@ -1134,7 +1174,7 @@ kernel void mkernel(device half *inp_a [[buffer(0)]], device half *inp_b [[buffe
         if !kernels.contains_key(&name) {
             kernels.insert(name.clone(), compile_function(&name, &code, &dev));
         }
-        Self(kernels[&name].clone(), dev, a_shape, b_shape)
+        Self(kernels[&name].clone(), queue, dev, a_shape, b_shape)
     }
 }
 impl MetalKernelForward for MetalMod {
@@ -1159,7 +1199,7 @@ impl MetalKernelForward for MetalMod {
         encoder.set_buffer(1, Some(inputs[0].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(&[(self.2, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
+        input_dyn_dims(&[(self.3, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
 
         // Execute
         encoder.dispatch_n_elements(inp_size);
@@ -1187,13 +1227,12 @@ impl Operator for MetalMod {
                 .downcast_ref::<Buffer>()
                 .unwrap();
 
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            let command_buffer = self.1.new_command_buffer();
 
             let out = self
                 .metal_forward(
                     &[(a, tensors[0].1), (b, tensors[1].1)],
-                    &self.1,
+                    &self.2,
                     command_buffer,
                 )
                 .pop()
@@ -1219,7 +1258,13 @@ impl Operator for MetalMod {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalSumReduce(ComputePipelineState, Device, pub usize, ShapeTracker);
+pub struct MetalSumReduce(
+    ComputePipelineState,
+    CommandQueue,
+    Device,
+    pub usize,
+    ShapeTracker,
+);
 
 impl PartialEq for MetalSumReduce {
     fn eq(&self, _: &Self) -> bool {
@@ -1232,6 +1277,7 @@ impl MetalSumReduce {
         shape: ShapeTracker,
         dim: usize,
         dev: Device,
+        queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
@@ -1261,7 +1307,7 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         if !kernels.contains_key(&name) {
             kernels.insert(name.clone(), compile_function(&name, &code, &dev));
         }
-        Self(kernels[&name].clone(), dev, dim, shape)
+        Self(kernels[&name].clone(), queue, dev, dim, shape)
     }
 }
 
@@ -1273,7 +1319,7 @@ impl MetalKernelForward for MetalSumReduce {
         command_buffer: &CommandBufferRef,
     ) -> Vec<Buffer> {
         let mut sh = inputs[0].1;
-        sh.remove_dim(self.2);
+        sh.remove_dim(self.3);
         let inp_size = sh.contiguous().n_elements();
 
         let out = dev.new_buffer(
@@ -1284,17 +1330,17 @@ impl MetalKernelForward for MetalSumReduce {
             .1
             .shape()
             .iter()
-            .take(self.2)
+            .take(self.3)
             .map(|i| i.to_usize().unwrap())
             .product();
         let back_size: usize = inputs[0]
             .1
             .shape()
             .iter()
-            .skip(self.2 + 1)
+            .skip(self.3 + 1)
             .map(|i| i.to_usize().unwrap())
             .product();
-        let dim_size = inputs[0].1.shape()[self.2].to_usize().unwrap();
+        let dim_size = inputs[0].1.shape()[self.3].to_usize().unwrap();
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
@@ -1307,7 +1353,7 @@ impl MetalKernelForward for MetalSumReduce {
         encoder.set_int(3, front_size as u32);
         encoder.set_int(4, back_size as u32);
         encoder.set_int(5, dim_size as u32);
-        input_dyn_dims(&[(self.3, inputs[0].1)], encoder, 6);
+        input_dyn_dims(&[(self.4, inputs[0].1)], encoder, 6);
 
         // Execute
         encoder.dispatch_n_elements(inp_size);
@@ -1329,11 +1375,10 @@ impl Operator for MetalSumReduce {
                 .unwrap();
 
             // Setup command queue / command buffer / encoder
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
                 .pop()
                 .unwrap();
 
@@ -1357,7 +1402,13 @@ impl Operator for MetalSumReduce {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetalMaxReduce(ComputePipelineState, Device, usize, ShapeTracker);
+pub struct MetalMaxReduce(
+    ComputePipelineState,
+    CommandQueue,
+    Device,
+    usize,
+    ShapeTracker,
+);
 
 impl PartialEq for MetalMaxReduce {
     fn eq(&self, _: &Self) -> bool {
@@ -1370,6 +1421,7 @@ impl MetalMaxReduce {
         shape: ShapeTracker,
         dim: usize,
         dev: Device,
+        queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
@@ -1400,7 +1452,7 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         if !kernels.contains_key(&name) {
             kernels.insert(name.clone(), compile_function(&name, &code, &dev));
         }
-        Self(kernels[&name].clone(), dev, dim, shape)
+        Self(kernels[&name].clone(), queue, dev, dim, shape)
     }
 }
 impl MetalKernelForward for MetalMaxReduce {
@@ -1411,7 +1463,7 @@ impl MetalKernelForward for MetalMaxReduce {
         command_buffer: &CommandBufferRef,
     ) -> Vec<Buffer> {
         let mut sh = inputs[0].1;
-        sh.remove_dim(self.2);
+        sh.remove_dim(self.3);
         let inp_size = sh.contiguous().n_elements();
 
         let out = dev.new_buffer(
@@ -1422,17 +1474,17 @@ impl MetalKernelForward for MetalMaxReduce {
             .1
             .shape()
             .iter()
-            .take(self.2)
+            .take(self.3)
             .map(|i| i.to_usize().unwrap())
             .product();
         let back_size: usize = inputs[0]
             .1
             .shape()
             .iter()
-            .skip(self.2 + 1)
+            .skip(self.3 + 1)
             .map(|i| i.to_usize().unwrap())
             .product();
-        let dim_size = inputs[0].1.shape()[self.2].to_usize().unwrap();
+        let dim_size = inputs[0].1.shape()[self.3].to_usize().unwrap();
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
@@ -1445,7 +1497,7 @@ impl MetalKernelForward for MetalMaxReduce {
         encoder.set_int(3, front_size as u32);
         encoder.set_int(4, back_size as u32);
         encoder.set_int(5, dim_size as u32);
-        input_dyn_dims(&[(self.3, inputs[0].1)], encoder, 6);
+        input_dyn_dims(&[(self.4, inputs[0].1)], encoder, 6);
 
         // Execute
         encoder.dispatch_n_elements(inp_size);
@@ -1467,11 +1519,10 @@ impl Operator for MetalMaxReduce {
                 .unwrap();
 
             // Setup command queue / command buffer / encoder
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
                 .pop()
                 .unwrap();
 
@@ -1500,6 +1551,7 @@ pub struct PrimitiveCompiler;
 impl Compiler for PrimitiveCompiler {
     fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
+        let queue = dev.new_command_queue();
         // Go through the graph and insert copy ops
         // Copy function output to device and input from device
         for function_node in graph
@@ -1677,22 +1729,23 @@ impl Compiler for PrimitiveCompiler {
             let op = graph.graph.node_weight(id).unwrap().as_any().type_id();
             let op_ref = graph.graph.node_weight_mut(id).unwrap();
             if is::<Log2>(op) {
-                *op_ref = Box::new(MetalLog2::new(dev.clone(), &mut kernels));
+                *op_ref = Box::new(MetalLog2::new(dev.clone(), queue.clone(), &mut kernels));
             } else if is::<Exp2>(op) {
-                *op_ref = Box::new(MetalExp2::new(dev.clone(), &mut kernels));
+                *op_ref = Box::new(MetalExp2::new(dev.clone(), queue.clone(), &mut kernels));
             } else if let Some(c) = op_ref.as_any().downcast_ref::<Constant>() {
                 *op_ref = Box::new(MetalConstant(f16::from_f32(c.0), dev.clone()));
             } else if is::<Sin>(op) {
-                *op_ref = Box::new(MetalSin::new(dev.clone(), &mut kernels));
+                *op_ref = Box::new(MetalSin::new(dev.clone(), queue.clone(), &mut kernels));
             } else if is::<Sqrt>(op) {
-                *op_ref = Box::new(MetalSqrt::new(dev.clone(), &mut kernels));
+                *op_ref = Box::new(MetalSqrt::new(dev.clone(), queue.clone(), &mut kernels));
             } else if is::<Recip>(op) {
-                *op_ref = Box::new(MetalRecip::new(dev.clone(), &mut kernels));
+                *op_ref = Box::new(MetalRecip::new(dev.clone(), queue.clone(), &mut kernels));
             } else if is::<Add>(op) {
                 *op_ref = Box::new(MetalAdd::new(
                     src_shapes[0],
                     src_shapes[1],
                     dev.clone(),
+                    queue.clone(),
                     &mut kernels,
                 ));
             } else if is::<Mul>(op) {
@@ -1700,6 +1753,7 @@ impl Compiler for PrimitiveCompiler {
                     src_shapes[0],
                     src_shapes[1],
                     dev.clone(),
+                    queue.clone(),
                     &mut kernels,
                 ));
             } else if is::<LessThan>(op) {
@@ -1707,6 +1761,7 @@ impl Compiler for PrimitiveCompiler {
                     src_shapes[0],
                     src_shapes[1],
                     dev.clone(),
+                    queue.clone(),
                     &mut kernels,
                 ));
             } else if is::<Mod>(op) {
@@ -1714,6 +1769,7 @@ impl Compiler for PrimitiveCompiler {
                     src_shapes[0],
                     src_shapes[1],
                     dev.clone(),
+                    queue.clone(),
                     &mut kernels,
                 ));
             } else if let Some(SumReduce(dim)) = op_ref.as_any().downcast_ref() {
@@ -1721,6 +1777,7 @@ impl Compiler for PrimitiveCompiler {
                     src_shapes[0],
                     *dim,
                     dev.clone(),
+                    queue.clone(),
                     &mut kernels,
                 ));
             } else if let Some(MaxReduce(dim)) = op_ref.as_any().downcast_ref() {
@@ -1728,6 +1785,7 @@ impl Compiler for PrimitiveCompiler {
                     src_shapes[0],
                     *dim,
                     dev.clone(),
+                    queue.clone(),
                     &mut kernels,
                 ));
             } else if is::<Contiguous>(op) {
@@ -1761,7 +1819,7 @@ impl Compiler for FakeReductionCompiler {
                 .ty::<MetalSumReduce>()
                 .check(|o, shapes| {
                     if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
-                        shapes[0].fake[shapes[0].indexes[o.2]] // Ensure dimension we are reducing is fake
+                        shapes[0].fake[shapes[0].indexes[o.3]] // Ensure dimension we are reducing is fake
                     } else {
                         false
                     }
@@ -1772,12 +1830,12 @@ impl Compiler for FakeReductionCompiler {
         let mut compiled = None;
         for _ in s.search(graph) {
             let op_ref = graph.graph.node_weight_mut(sum_reduce).unwrap();
-            let dim = op_ref.as_any().downcast_ref::<MetalSumReduce>().unwrap().2;
+            let dim = op_ref.as_any().downcast_ref::<MetalSumReduce>().unwrap().3;
             let dev = op_ref
                 .as_any()
                 .downcast_ref::<MetalSumReduce>()
                 .unwrap()
-                .1
+                .2
                 .clone();
             if compiled.is_none() {
                 compiled = Some(FakeSumReduce::compile(dev.clone()));

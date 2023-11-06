@@ -17,7 +17,13 @@ use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Special kernel for efficient mean reduction
 #[derive(Debug, Clone)]
-pub struct MetalMeanReduce(ComputePipelineState, Device, usize, ShapeTracker);
+pub struct MetalMeanReduce(
+    ComputePipelineState,
+    CommandQueue,
+    Device,
+    usize,
+    ShapeTracker,
+);
 impl PartialEq for MetalMeanReduce {
     fn eq(&self, _: &Self) -> bool {
         false
@@ -25,7 +31,7 @@ impl PartialEq for MetalMeanReduce {
 }
 
 impl MetalMeanReduce {
-    fn new(dev: Device, dim: usize, shape: ShapeTracker) -> Self {
+    fn new(dev: Device, queue: CommandQueue, dim: usize, shape: ShapeTracker) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
         let mut code = format!(
             "
@@ -51,6 +57,7 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
 
         Self(
             compile_function("kernel_mean_reduce", &code, &dev),
+            queue,
             dev,
             dim,
             shape,
@@ -66,7 +73,7 @@ impl MetalKernelForward for MetalMeanReduce {
         command_buffer: &CommandBufferRef,
     ) -> Vec<Buffer> {
         let mut sh = inputs[0].1;
-        sh.remove_dim(self.2);
+        sh.remove_dim(self.3);
         let inp_size = sh.contiguous().n_elements();
 
         let out = dev.new_buffer(
@@ -77,17 +84,17 @@ impl MetalKernelForward for MetalMeanReduce {
             .1
             .shape()
             .iter()
-            .take(self.2)
+            .take(self.3)
             .map(|i| i.to_usize().unwrap())
             .product();
         let back_size: usize = inputs[0]
             .1
             .shape()
             .iter()
-            .skip(self.2 + 1)
+            .skip(self.3 + 1)
             .map(|i| i.to_usize().unwrap())
             .product();
-        let dim_size = inputs[0].1.shape()[self.2].to_usize().unwrap();
+        let dim_size = inputs[0].1.shape()[self.3].to_usize().unwrap();
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
@@ -100,7 +107,7 @@ impl MetalKernelForward for MetalMeanReduce {
         encoder.set_int(3, front_size as u32);
         encoder.set_int(4, back_size as u32);
         encoder.set_int(5, dim_size as u32);
-        input_dyn_dims(&[(self.3, inputs[0].1)], encoder, 6);
+        input_dyn_dims(&[(self.4, inputs[0].1)], encoder, 6);
 
         // Execute
         encoder.dispatch_n_elements(inp_size);
@@ -123,11 +130,10 @@ impl Operator for MetalMeanReduce {
                 .unwrap();
 
             // Setup command queue / command buffer / encoder
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
                 .pop()
                 .unwrap();
 
@@ -157,6 +163,7 @@ pub struct MeanReduceCompiler;
 impl Compiler for MeanReduceCompiler {
     fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
+        let queue = dev.new_command_queue();
         // Look for the mean-reduce pattern
         // mul(recip(fake_sum_reduce(const_ones)), sum_reduce(x))
         let s = GraphSelector::default();
@@ -206,11 +213,11 @@ impl Compiler for MeanReduceCompiler {
                 .as_any()
                 .downcast_ref::<MetalSumReduce>()
                 .unwrap()
-                .2;
+                .3;
             // Insert MeanReduce op
             let src = graph.get_sources(sum_reduce)[0];
             let mean_reduce = graph
-                .add_op(MetalMeanReduce::new(dev.clone(), dim, src.1))
+                .add_op(MetalMeanReduce::new(dev.clone(), queue.clone(), dim, src.1))
                 .input(src.0, 0, src.1)
                 .finish();
 
