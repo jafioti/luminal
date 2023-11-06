@@ -5,7 +5,7 @@ use petgraph::stable_graph::NodeIndex;
 
 use crate::{
     op::{InputTensor, Operator},
-    optimizers::metal::*,
+    compilers::metal::*,
     prelude::*,
 };
 
@@ -108,8 +108,8 @@ impl Operator for MetalCos {
 #[derive(Default)]
 pub struct MetalCosOptimizer;
 
-impl GraphOptimizer for MetalCosOptimizer {
-    fn optimize(&self, graph: &mut Graph) {
+impl Compiler for MetalCosOptimizer {
+    fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         // Look for the mean-reduce pattern
         // sin(add(mul(const_neg_one, x), const_pi_over_2))
@@ -287,8 +287,8 @@ impl Operator for MetalExp {
 #[derive(Default)]
 pub struct MetalExpOptimizer;
 
-impl GraphOptimizer for MetalExpOptimizer {
-    fn optimize(&self, graph: &mut Graph) {
+impl Compiler for MetalExpOptimizer {
+    fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         // Look for the exp pattern
         // exp2(mul(x, const))

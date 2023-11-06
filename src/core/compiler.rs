@@ -14,30 +14,31 @@ use petgraph::{
     visit::EdgeRef,
     Direction,
 };
+use regex::Regex;
 
 use crate::{
     graph::Graph,
     op::Operator,
-    prelude::{Dependency, Dim, ShapeTracker},
+    prelude::{remap_id, Dependency, Dim, ShapeTracker},
 };
 
-pub trait GraphOptimizer {
-    /// Run an optimization pass
-    fn optimize(&self, graph: &mut Graph);
+pub trait Compiler {
+    /// Run a compilation pass
+    fn compile(&self, graph: &mut Graph);
 }
 
-impl GraphOptimizer for () {
-    fn optimize(&self, _: &mut Graph) {}
+impl Compiler for () {
+    fn compile(&self, _: &mut Graph) {}
 }
 
 macro_rules! tuple_impls {
     ([$($name:ident),+] , [$($idx:tt),+]) => {
         impl<
         $($name:
-            GraphOptimizer, )+
-        > GraphOptimizer for ($($name,)+) {
-            fn optimize(&self, graph: &mut Graph) {
-                $(self.$idx.optimize(graph);)+
+            Compiler, )+
+        > Compiler for ($($name,)+) {
+            fn compile(&self, graph: &mut Graph) {
+                $(self.$idx.compile(graph);)+
             }
         }
     };
@@ -61,6 +62,174 @@ tuple_impls!(
 );
 
 // Helpers
+
+impl Graph {
+    pub fn add_op<O: Operator + 'static>(&mut self, op: O) -> NewOp {
+        self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
+        NewOp {
+            new_op_id: self.graph.add_node(Box::new(op)),
+            graph_ref: self,
+            num_srcs: 0,
+        }
+    }
+    /// Create a schedule dependency between a and b
+    pub fn add_schedule_dependency(&mut self, a: NodeIndex, b: NodeIndex) {
+        self.graph.add_edge(a, b, Dependency::Schedule);
+    }
+
+    /// Convert to debug-viewable graph
+    pub fn debug_graph(
+        &self,
+        show_shapes: bool,
+    ) -> petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32> {
+        let mut new_graph = petgraph::stable_graph::StableGraph::default();
+        let mut id_map = HashMap::new();
+        let op_regex = Regex::new(r"(?s)\{.*|\(.*").unwrap();
+        for (id, node) in self.graph.node_indices().zip(self.graph.node_weights()) {
+            id_map.insert(
+                id,
+                new_graph.add_node(op_regex.replace_all(&format!("{node:?}"), "").to_string()),
+            );
+        }
+
+        for node in self.graph.node_indices() {
+            // new_graph
+            //     .node_weight_mut(id_map[&node])
+            //     .unwrap()
+            //     .push_str(&node.index().to_string());
+            for edge in self
+                .graph
+                .edges_directed(node, Direction::Outgoing)
+                .filter(|e| !e.weight().is_schedule())
+                .sorted_by_key(|e| e.weight().as_data().unwrap().0)
+            {
+                new_graph.add_edge(
+                    id_map[&edge.source()],
+                    id_map[&edge.target()],
+                    edge.weight().as_data().unwrap().0,
+                );
+                if show_shapes
+                    && new_graph.contains_node(id_map[&edge.target()])
+                    && !edge.weight().as_data().unwrap().2.shape().is_empty()
+                {
+                    new_graph
+                        .node_weight_mut(id_map[&edge.target()])
+                        .unwrap()
+                        .push_str(&format!(
+                            " | {:?}",
+                            edge.weight().as_data().unwrap().2.shape()
+                        ));
+                }
+            }
+        }
+
+        new_graph
+    }
+
+    pub fn display(&self) {
+        display_graph(&self.debug_graph(false));
+    }
+
+    pub fn display_shapes(&self) {
+        display_graph(&self.debug_graph(true));
+    }
+
+    /// Get the sources of a node given it's id
+    #[allow(clippy::type_complexity, clippy::borrowed_box)]
+    pub fn get_sources(&self, node_id: NodeIndex) -> Vec<(NodeIndex, ShapeTracker)> {
+        self.graph
+            .edges_directed(node_id, Direction::Incoming)
+            .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i)))
+            .sorted_by_key(|(_, (i, _, _))| *i)
+            .map(|(a, (_, _, b))| (a, b))
+            .collect()
+    }
+
+    /// Get the dests of a node given it's id
+    #[allow(clippy::type_complexity, clippy::borrowed_box)]
+    pub fn get_dests(&self, node_id: NodeIndex) -> Vec<(NodeIndex, &Box<dyn Operator>)> {
+        self.graph
+            .edges_directed(node_id, Direction::Outgoing)
+            .filter_map(|e| e.weight().as_data().map(|i| (e.target(), i)))
+            .sorted_by_key(|(_, (i, _, _))| *i)
+            .map(|(a, _)| (a, self.graph.node_weight(a).unwrap()))
+            .collect()
+    }
+}
+
+/// View a debug graph in the browser
+pub fn display_graph(
+    graph: &petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32>,
+) {
+    let url = format!(
+        "https://dreampuf.github.io/GraphvizOnline/#{}",
+        urlencoding::encode(
+            &petgraph::dot::Dot::with_config(&graph, &[petgraph::dot::Config::EdgeNoLabel,])
+                .to_string()
+        )
+    );
+    if let Err(e) = webbrowser::open(&url) {
+        panic!("Error displaying graph: {:?}", e);
+    }
+}
+
+pub trait JoinGraph {
+    fn join(
+        self,
+        rhs: &petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32>,
+    ) -> Self;
+}
+
+impl JoinGraph for petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32> {
+    /// Join two debug graphs together
+    fn join(
+        mut self,
+        rhs: &petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32>,
+    ) -> Self {
+        let mut id_map = HashMap::new(); // We track the node id remapping here so they don't overlap
+        for (index, node) in rhs.node_indices().zip(rhs.node_weights()) {
+            id_map.insert(index, self.add_node(node.clone()));
+        }
+
+        for node in rhs.node_indices() {
+            for edge in rhs.edges_directed(node, petgraph::Direction::Outgoing) {
+                self.add_edge(
+                    id_map[&edge.source()],
+                    id_map[&edge.target()],
+                    *edge.weight(),
+                );
+            }
+        }
+
+        self
+    }
+}
+
+pub struct NewOp<'a> {
+    new_op_id: NodeIndex,
+    graph_ref: &'a mut Graph,
+    num_srcs: u8,
+}
+
+impl<'a> NewOp<'a> {
+    pub fn finish(self) -> NodeIndex {
+        self.new_op_id
+    }
+
+    pub fn input(mut self, id: NodeIndex, from_output: u8, shape: ShapeTracker) -> Self {
+        self.graph_ref.graph.add_edge(
+            remap_id(id, &self.graph_ref.id_remap),
+            self.new_op_id,
+            Dependency::Data {
+                input_order: self.num_srcs,
+                output_order: from_output,
+                shape,
+            },
+        );
+        self.num_srcs += 1;
+        self
+    }
+}
 
 /// Transfer all external references from one node to another (this may happen because one node is about to be removed / merged into another)
 pub fn move_references(

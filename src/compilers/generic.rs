@@ -1,22 +1,29 @@
-use std::{any::TypeId, collections::HashMap};
+use std::{
+    any::TypeId,
+    collections::{HashMap, HashSet},
+};
 
 use itertools::Itertools;
-use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
+use petgraph::{
+    stable_graph::{NodeIndex, StableGraph},
+    visit::EdgeRef,
+    Direction,
+};
 
 use crate::{
-    op::{Exp2, Function, Log2, Recip},
+    op::{Exp2, Function, Log2, Operator, Recip},
     prelude::*,
 };
 
 /// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
-pub type GenericOptimizer = (UnarySequentialOpt, RemoveUnusedNodes, CSE);
+pub type GenericCompiler = (UnarySequentialElimination, RemoveUnusedNodes, CSE);
 
 /// Eliminate complementary unary sequential operations like `x.log().exp()`
 #[derive(Default)]
-pub struct UnarySequentialOpt;
+pub struct UnarySequentialElimination;
 
-impl GraphOptimizer for UnarySequentialOpt {
-    fn optimize(&self, graph: &mut Graph) {
+impl Compiler for UnarySequentialElimination {
+    fn compile(&self, graph: &mut Graph) {
         // Here are all the complementary ops that should be removed
         let sequences = [
             (TypeId::of::<Log2>(), TypeId::of::<Exp2>()),
@@ -79,8 +86,8 @@ impl GraphOptimizer for UnarySequentialOpt {
 #[derive(Default)]
 pub struct CSE;
 
-impl GraphOptimizer for CSE {
-    fn optimize(&self, graph: &mut Graph) {
+impl Compiler for CSE {
+    fn compile(&self, graph: &mut Graph) {
         // Look for nodes that have the exact same srcs
         // Loop cause I'm lazy
         loop {
@@ -153,8 +160,8 @@ impl GraphOptimizer for CSE {
 #[derive(Default)]
 pub struct RemoveUnusedNodes;
 
-impl GraphOptimizer for RemoveUnusedNodes {
-    fn optimize(&self, graph: &mut Graph) {
+impl Compiler for RemoveUnusedNodes {
+    fn compile(&self, graph: &mut Graph) {
         // Reverse topo sort
         for node in graph.graph.node_indices().collect::<Vec<_>>() {
             if graph
@@ -171,6 +178,61 @@ impl GraphOptimizer for RemoveUnusedNodes {
     }
 }
 
+#[derive(Default)]
+pub struct DepthFirst;
+
+impl Compiler for DepthFirst {
+    fn compile(&self, graph: &mut Graph) {
+        fn toposort(
+            id: NodeIndex,
+            graph: &StableGraph<Box<dyn Operator>, Dependency>,
+            visited: &mut HashSet<NodeIndex>,
+        ) -> (Vec<NodeIndex>, usize, bool) {
+            if visited.contains(&id) {
+                return (vec![], 0, false);
+            }
+            // Loop through node sources
+            let stacks = graph
+                .edges_directed(id, Direction::Incoming)
+                .sorted_by_key(|e| e.source())
+                .map(|e| toposort(e.source(), graph, visited))
+                .collect::<Vec<_>>();
+            let num_stacks = stacks.len();
+
+            let mut final_stack = vec![];
+            let mut complete = true;
+            for (mut stack, _, c) in stacks.into_iter().sorted_by_key(|(_, _, b)| !*b) {
+                final_stack.append(&mut stack);
+                complete &= c;
+            }
+            final_stack.push(id);
+            visited.insert(id);
+
+            (final_stack, num_stacks, complete)
+        }
+
+        // Depth-first toposort
+        let mut visited = HashSet::default();
+        let mut pre_sorted = petgraph::algo::toposort(&graph.graph, None).unwrap();
+        pre_sorted.reverse();
+        let mut stacks = vec![];
+        for node in pre_sorted {
+            if !visited.contains(&node) {
+                stacks.push(toposort(node, &graph.graph, &mut visited));
+            }
+        }
+        let mut nodes = vec![];
+        for (mut stack, _, _) in stacks.into_iter().sorted_by_key(|(_, _, b)| !*b) {
+            nodes.append(&mut stack);
+        }
+
+        // Insert schedule deps
+        for i in 0..nodes.len() - 1 {
+            graph.add_schedule_dependency(nodes[i], nodes[i + 1]);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::prelude::*;
@@ -181,7 +243,7 @@ mod tests {
         let b = a.log_2().exp_2();
         b.mark();
 
-        cx.optimize(GenericOptimizer::default());
+        cx.compile(GenericCompiler::default());
         assert_eq!(cx.graph.node_count(), 1);
     }
 }

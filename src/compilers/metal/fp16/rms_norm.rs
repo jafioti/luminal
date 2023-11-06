@@ -4,8 +4,8 @@ use half::f16;
 use petgraph::stable_graph::NodeIndex;
 
 use crate::{
+    compilers::metal::*,
     op::{InputTensor, Operator},
-    optimizers::metal::*,
     prelude::*,
 };
 
@@ -208,8 +208,8 @@ impl Operator for MetalRMSNorm {
 #[derive(Default)]
 pub struct RMSNormOptimizer;
 
-impl GraphOptimizer for RMSNormOptimizer {
-    fn optimize(&self, graph: &mut Graph) {
+impl Compiler for RMSNormOptimizer {
+    fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         // Look for the RMSNorm pattern
         // mul(recip(sqrt(add(mean_reduce(mul(x, x)), 1e-6))), x)

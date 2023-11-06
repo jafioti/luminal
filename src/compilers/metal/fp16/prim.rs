@@ -1,11 +1,11 @@
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
 use crate::{
+    compilers::metal::*,
     op::{
         Add, Constant, Contiguous, Exp2, Function as LFunction, InputTensor, LessThan, Log2,
         MaxReduce, Mod, Mul, Operator, Print, Recip, Sin, Sqrt, SumReduce,
     },
-    optimizers::metal::*,
     prelude::*,
 };
 use half::f16;
@@ -1491,8 +1491,8 @@ impl Operator for MetalMaxReduce {
 #[derive(Default)]
 pub struct PrimitiveOptimizer;
 
-impl GraphOptimizer for PrimitiveOptimizer {
-    fn optimize(&self, graph: &mut Graph) {
+impl Compiler for PrimitiveOptimizer {
+    fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         // Go through the graph and insert copy ops
         // Copy function output to device and input from device
@@ -1739,8 +1739,8 @@ impl GraphOptimizer for PrimitiveOptimizer {
 #[derive(Debug, Default)]
 pub struct FakeReductionOptimizer;
 
-impl GraphOptimizer for FakeReductionOptimizer {
-    fn optimize(&self, graph: &mut Graph) {
+impl Compiler for FakeReductionOptimizer {
+    fn compile(&self, graph: &mut Graph) {
         let s = GraphSelector::default();
         let mut sum_reduce = NodeIndex::default();
         s.edge(
@@ -1885,8 +1885,8 @@ impl Operator for FakeSumReduce {
 #[derive(Debug, Default)]
 pub struct CopyOptimizer;
 
-impl GraphOptimizer for CopyOptimizer {
-    fn optimize(&self, graph: &mut Graph) {
+impl Compiler for CopyOptimizer {
+    fn compile(&self, graph: &mut Graph) {
         let (mut first, mut second) = (NodeIndex::default(), NodeIndex::default());
         let s1 = GraphSelector::default();
         s1.edge(

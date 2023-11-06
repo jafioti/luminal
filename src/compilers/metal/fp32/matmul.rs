@@ -1,8 +1,8 @@
 use petgraph::stable_graph::NodeIndex;
 
 use crate::{
+    compilers::metal::*,
     op::{InputTensor, Operator},
-    optimizers::metal::*,
     prelude::*,
 };
 
@@ -240,8 +240,8 @@ impl Operator for MetalBatchMatmul2D {
 #[derive(Default)]
 pub struct MetalMatMulOptimizer;
 
-impl GraphOptimizer for MetalMatMulOptimizer {
-    fn optimize(&self, graph: &mut Graph) {
+impl Compiler for MetalMatMulOptimizer {
+    fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         // Look for the matmul pattern
         let s = GraphSelector::default();

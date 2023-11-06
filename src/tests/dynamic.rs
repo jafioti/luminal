@@ -109,7 +109,7 @@ fn test_feedforward() {
     let unoptimized_batch_out = batch_out.dyn_data(&cx.dyn_map);
     batch_out.drop();
 
-    cx.optimize(<CPUOptimizer>::default());
+    cx.compile(<CPUCompiler>::default());
     cx.execute();
     assert_close(&unoptimized_batch_out, &batch_out.dyn_data(&cx.dyn_map));
 

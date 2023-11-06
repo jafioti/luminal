@@ -4,8 +4,8 @@ use half::f16;
 use petgraph::stable_graph::NodeIndex;
 
 use crate::{
+    compilers::metal::*,
     op::{InputTensor, Operator},
-    optimizers::metal::*,
     prelude::*,
 };
 
@@ -154,8 +154,8 @@ impl Operator for MetalMeanReduce {
 #[derive(Default)]
 pub struct MeanReduceOptimizer;
 
-impl GraphOptimizer for MeanReduceOptimizer {
-    fn optimize(&self, graph: &mut Graph) {
+impl Compiler for MeanReduceOptimizer {
+    fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         // Look for the mean-reduce pattern
         // mul(recip(fake_sum_reduce(const_ones)), sum_reduce(x))

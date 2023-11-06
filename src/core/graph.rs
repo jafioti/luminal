@@ -1,9 +1,9 @@
 #![allow(clippy::needless_range_loop)]
 
 use crate::{
+    compiler::Compiler,
     graph_tensor::GraphTensor,
     op::{self, InputTensor, Operator},
-    optimizer::GraphOptimizer,
     shape::*,
     tensor::Tensor,
 };
@@ -69,15 +69,6 @@ impl Graph {
         Graph::default()
     }
 
-    pub fn add_op<O: Operator + 'static>(&mut self, op: O) -> NewOp {
-        self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
-        NewOp {
-            new_op_id: self.graph.add_node(Box::new(op)),
-            graph_ref: self,
-            num_srcs: 0,
-        }
-    }
-
     pub fn get_tensor(&mut self, id: NodeIndex, ind: u8) -> Option<Tensor> {
         // Walk through remap
         self.tensors.remove(&(remap_id(id, &self.id_remap), ind))
@@ -111,27 +102,31 @@ impl Graph {
         }
     }
 
-    /// Run the full suite of optimizations
-    pub fn optimize<O: GraphOptimizer>(&mut self, optimizer: O) {
-        optimizer.optimize(self);
-        // self.toposort();
+    /// Compile the graph using the given compiler
+    pub fn compile<C: Compiler>(&mut self, compiler: C) {
+        compiler.compile(self);
+        self.toposort();
     }
 
     /// Refresh the internally sorted graph
     pub(crate) fn toposort(&mut self) {
-        // Depth-first toposort
-        let mut v = Vec::with_capacity(self.graph.node_count());
-        for node in petgraph::algo::toposort(&self.graph, None).unwrap() {
-            let src_ids = self
-                .graph
-                .edges_directed(node, Direction::Incoming)
-                .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i)))
-                .sorted_by_key(|(_, (i, _, _))| *i)
-                .map(|(a, (_, b, c))| ((a, b), c))
-                .collect_vec();
-            v.push((node, src_ids));
-        }
-        self.linearized_graph = Some(v);
+        self.linearized_graph = Some(
+            petgraph::algo::toposort(&self.graph, None)
+                .unwrap()
+                .into_iter()
+                .map(|node| {
+                    (
+                        node,
+                        self.graph
+                            .edges_directed(node, Direction::Incoming)
+                            .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i)))
+                            .sorted_by_key(|(_, (i, _, _))| *i)
+                            .map(|(a, (_, b, c))| ((a, b), c))
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect(),
+        );
     }
 
     /// Clear any remaining tensors that may be around from old executions
@@ -185,37 +180,18 @@ impl Graph {
                 continue;
             }
 
-            // This needs to be done in a weird way with sperate queues to satisfy the borrow checker (all mutable calls to self.tensors happen before references are taken)
-            let mut owned = VecDeque::default();
-            let mut refs = VecDeque::default();
-            for (i, (id, _)) in src_ids.iter().enumerate() {
-                if remaining_consumers[id] == 1 && !self.no_delete.contains(&id.0) {
-                    owned.push_back((InputTensor::Owned(self.tensors.remove(id).unwrap()), i));
-                }
-            }
-            for (i, (id, _)) in src_ids.iter().enumerate() {
-                if remaining_consumers[id] != 1 || self.no_delete.contains(&id.0) {
-                    refs.push_back((InputTensor::Borrowed(self.tensors.get(id).unwrap()), i));
-                }
-            }
-            let mut srcs = vec![];
-            for (i, (_, st)) in src_ids.iter().enumerate() {
-                srcs.push((
-                    if owned.front().map(|(_, ind)| *ind == i).unwrap_or_default() {
-                        owned.pop_front().unwrap().0
-                    } else {
-                        refs.pop_front().unwrap().0
-                    },
-                    *st,
-                ));
-            }
+            let mut srcs = get_source_tensors(
+                &self.no_delete,
+                &mut self.tensors,
+                src_ids,
+                &remaining_consumers,
+            );
 
             // Substitute in the dyn dims
             for (_, st) in srcs.iter_mut() {
                 *st = st.resolve_global_dyn_dims(&self.dyn_map);
             }
 
-            // All sources are ready
             // Execute
             let tensors = self.graph.node_weight(*node).unwrap().process(srcs);
             for (i, tensor) in tensors.into_iter().enumerate() {
@@ -257,30 +233,12 @@ impl Graph {
                 .to_string();
             print!("{}", op_name.bold().bright_green());
 
-            // This needs to be done in a weird way with sperate queues to satisfy the borrow checker (all mutable calls to self.tensors happen before references are taken)
-            let mut owned = VecDeque::default();
-            let mut refs = VecDeque::default();
-            for (i, (id, _)) in src_ids.iter().enumerate() {
-                if remaining_consumers[id] == 1 && !self.no_delete.contains(&id.0) {
-                    owned.push_back((InputTensor::Owned(self.tensors.remove(id).unwrap()), i));
-                }
-            }
-            for (i, (id, _)) in src_ids.iter().enumerate() {
-                if remaining_consumers[id] != 1 || self.no_delete.contains(&(id.0)) {
-                    refs.push_back((InputTensor::Borrowed(self.tensors.get(id).unwrap()), i));
-                }
-            }
-            let mut srcs = vec![];
-            for (i, (_, st)) in src_ids.iter().enumerate() {
-                srcs.push((
-                    if owned.front().map(|(_, ind)| *ind == i).unwrap_or_default() {
-                        owned.pop_front().unwrap().0
-                    } else {
-                        refs.pop_front().unwrap().0
-                    },
-                    *st,
-                ));
-            }
+            let mut srcs = get_source_tensors(
+                &self.no_delete,
+                &mut self.tensors,
+                src_ids,
+                &remaining_consumers,
+            );
 
             // Substitute in the dyn dims
             for (_, st) in srcs.iter_mut() {
@@ -400,159 +358,39 @@ impl Graph {
             }
         }
     }
+}
 
-    /// Convert to debug-viewable graph
-    pub fn debug_graph(
-        &self,
-        show_shapes: bool,
-    ) -> petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32> {
-        let mut new_graph = petgraph::stable_graph::StableGraph::default();
-        let mut id_map = HashMap::new();
-        let op_regex = Regex::new(r"(?s)\{.*|\(.*").unwrap();
-        for (id, node) in self.graph.node_indices().zip(self.graph.node_weights()) {
-            id_map.insert(
-                id,
-                new_graph.add_node(op_regex.replace_all(&format!("{node:?}"), "").to_string()),
-            );
+fn get_source_tensors<'a>(
+    no_delete: &HashSet<NodeIndex>,
+    tensors: &'a mut HashMap<(NodeIndex, u8), Tensor>,
+    src_ids: &[((NodeIndex, u8), ShapeTracker)],
+    remaining_consumers: &HashMap<(NodeIndex, u8), usize>,
+) -> Vec<(InputTensor<'a>, ShapeTracker)> {
+    // This needs to be done in a weird way with sperate queues to satisfy the borrow checker (all mutable calls to self.tensors happen before references are taken)
+    let mut owned = VecDeque::default();
+    let mut refs = VecDeque::default();
+    for (i, (id, _)) in src_ids.iter().enumerate() {
+        if remaining_consumers[id] == 1 && !no_delete.contains(&id.0) {
+            owned.push_back((InputTensor::Owned(tensors.remove(id).unwrap()), i));
         }
-
-        for node in self.graph.node_indices() {
-            // new_graph
-            //     .node_weight_mut(id_map[&node])
-            //     .unwrap()
-            //     .push_str(&node.index().to_string());
-            for edge in self
-                .graph
-                .edges_directed(node, Direction::Outgoing)
-                .filter(|e| !e.weight().is_schedule())
-                .sorted_by_key(|e| e.weight().as_data().unwrap().0)
-            {
-                new_graph.add_edge(
-                    id_map[&edge.source()],
-                    id_map[&edge.target()],
-                    edge.weight().as_data().unwrap().0,
-                );
-                if show_shapes
-                    && new_graph.contains_node(id_map[&edge.target()])
-                    && !edge.weight().as_data().unwrap().2.shape().is_empty()
-                {
-                    new_graph
-                        .node_weight_mut(id_map[&edge.target()])
-                        .unwrap()
-                        .push_str(&format!(
-                            " | {:?}",
-                            edge.weight().as_data().unwrap().2.shape()
-                        ));
-                }
-            }
+    }
+    for (i, (id, _)) in src_ids.iter().enumerate() {
+        if remaining_consumers[id] != 1 || no_delete.contains(&id.0) {
+            refs.push_back((InputTensor::Borrowed(tensors.get(id).unwrap()), i));
         }
-
-        new_graph
     }
-
-    pub fn display(&self) {
-        display_graph(&self.debug_graph(false));
-    }
-
-    pub fn display_shapes(&self) {
-        display_graph(&self.debug_graph(true));
-    }
-
-    /// Get the sources of a node given it's id
-    #[allow(clippy::type_complexity, clippy::borrowed_box)]
-    pub fn get_sources(&self, node_id: NodeIndex) -> Vec<(NodeIndex, ShapeTracker)> {
-        self.graph
-            .edges_directed(node_id, Direction::Incoming)
-            .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i)))
-            .sorted_by_key(|(_, (i, _, _))| *i)
-            .map(|(a, (_, _, b))| (a, b))
-            .collect()
-    }
-
-    /// Get the dests of a node given it's id
-    #[allow(clippy::type_complexity, clippy::borrowed_box)]
-    pub fn get_dests(&self, node_id: NodeIndex) -> Vec<(NodeIndex, &Box<dyn Operator>)> {
-        self.graph
-            .edges_directed(node_id, Direction::Outgoing)
-            .filter_map(|e| e.weight().as_data().map(|i| (e.target(), i)))
-            .sorted_by_key(|(_, (i, _, _))| *i)
-            .map(|(a, _)| (a, self.graph.node_weight(a).unwrap()))
-            .collect()
-    }
-}
-
-/// View a debug graph in the browser
-pub fn display_graph(
-    graph: &petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32>,
-) {
-    let url = format!(
-        "https://dreampuf.github.io/GraphvizOnline/#{}",
-        urlencoding::encode(
-            &petgraph::dot::Dot::with_config(&graph, &[petgraph::dot::Config::EdgeNoLabel,])
-                .to_string()
-        )
-    );
-    if let Err(e) = webbrowser::open(&url) {
-        panic!("Error displaying graph: {:?}", e);
-    }
-}
-
-pub trait JoinGraph {
-    fn join(
-        self,
-        rhs: &petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32>,
-    ) -> Self;
-}
-
-impl JoinGraph for petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32> {
-    /// Join two debug graphs together
-    fn join(
-        mut self,
-        rhs: &petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32>,
-    ) -> Self {
-        let mut id_map = HashMap::new(); // We track the node id remapping here so they don't overlap
-        for (index, node) in rhs.node_indices().zip(rhs.node_weights()) {
-            id_map.insert(index, self.add_node(node.clone()));
-        }
-
-        for node in rhs.node_indices() {
-            for edge in rhs.edges_directed(node, petgraph::Direction::Outgoing) {
-                self.add_edge(
-                    id_map[&edge.source()],
-                    id_map[&edge.target()],
-                    *edge.weight(),
-                );
-            }
-        }
-
-        self
-    }
-}
-
-pub struct NewOp<'a> {
-    new_op_id: NodeIndex,
-    graph_ref: &'a mut Graph,
-    num_srcs: u8,
-}
-
-impl<'a> NewOp<'a> {
-    pub fn finish(self) -> NodeIndex {
-        self.new_op_id
-    }
-
-    pub fn input(mut self, id: NodeIndex, from_output: u8, shape: ShapeTracker) -> Self {
-        self.graph_ref.graph.add_edge(
-            remap_id(id, &self.graph_ref.id_remap),
-            self.new_op_id,
-            Dependency::Data {
-                input_order: self.num_srcs,
-                output_order: from_output,
-                shape,
+    let mut srcs = vec![];
+    for (i, (_, st)) in src_ids.iter().enumerate() {
+        srcs.push((
+            if owned.front().map(|(_, ind)| *ind == i).unwrap_or_default() {
+                owned.pop_front().unwrap().0
+            } else {
+                refs.pop_front().unwrap().0
             },
-        );
-        self.num_srcs += 1;
-        self
+            *st,
+        ));
     }
+    srcs
 }
 
 /// Walk through remap to get new id

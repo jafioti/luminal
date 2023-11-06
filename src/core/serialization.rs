@@ -270,7 +270,7 @@ mod tests {
         trg.set(trg_data);
         out2.mark();
 
-        cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
+        cx.compile(<(CPUCompiler, GenericCompiler)>::default());
         cx.execute();
 
         let out2 = out2.data();

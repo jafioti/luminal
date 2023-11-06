@@ -8,17 +8,17 @@ use crate::{
     prelude::*,
 };
 
-// Ops and optimizers specific to CPU execution
+// Ops and compilers specific to CPU execution
 
-pub type CPUOptimizer = (MatMulOptimizer, UnaryFusionOptimizer);
+pub type CPUCompiler = (MatMulCompiler, UnaryFusionCompiler);
 
-pub type MatMulOptimizer = (MatMul2DOptimizer, BatchMatMul2DOptimizer);
+pub type MatMulCompiler = (MatMul2DCompiler, BatchMatMul2DCompiler);
 
 #[derive(Debug, Default)]
-pub struct MatMul2DOptimizer;
+pub struct MatMul2DCompiler;
 
-impl GraphOptimizer for MatMul2DOptimizer {
-    fn optimize(&self, graph: &mut Graph) {
+impl Compiler for MatMul2DCompiler {
+    fn compile(&self, graph: &mut Graph) {
         // Look for the matmul pattern
         let s = GraphSelector::default();
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
@@ -125,10 +125,10 @@ impl Operator for MatMul2D {
 }
 
 #[derive(Debug, Default)]
-pub struct BatchMatMul2DOptimizer;
+pub struct BatchMatMul2DCompiler;
 
-impl GraphOptimizer for BatchMatMul2DOptimizer {
-    fn optimize(&self, graph: &mut Graph) {
+impl Compiler for BatchMatMul2DCompiler {
+    fn compile(&self, graph: &mut Graph) {
         // Look for the matmul pattern
         let s = GraphSelector::default();
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
@@ -264,10 +264,10 @@ impl Operator for BatchedMatMul2D {
 
 /// Apply multiple unary ops in sequence, without having to reindex / rewrite to memory between each
 #[derive(Debug, Default)]
-pub struct UnaryFusionOptimizer;
+pub struct UnaryFusionCompiler;
 
-impl GraphOptimizer for UnaryFusionOptimizer {
-    fn optimize(&self, graph: &mut Graph) {
+impl Compiler for UnaryFusionCompiler {
+    fn compile(&self, graph: &mut Graph) {
         fn is_unary(op: &dyn Any) -> Option<fn(f32) -> f32> {
             if op.is::<Exp2>() {
                 Some(|i| i.exp2())
@@ -386,7 +386,7 @@ mod tests {
         cx.execute();
 
         let unoptimized_c = c.data();
-        cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
+        cx.compile(<(CPUCompiler, GenericCompiler)>::default());
         cx.execute();
 
         assert_close(&c.data(), &unoptimized_c);
@@ -405,7 +405,7 @@ mod tests {
         cx.execute();
 
         let unoptimized_c = c.data();
-        cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
+        cx.compile(<(CPUCompiler, GenericCompiler)>::default());
         cx.execute();
 
         assert_close(&c.data(), &unoptimized_c);
@@ -424,7 +424,7 @@ mod tests {
         cx.execute();
 
         let unoptimized_c = c.data();
-        cx.optimize(<(CPUOptimizer, GenericOptimizer)>::default());
+        cx.compile(<(CPUCompiler, GenericCompiler)>::default());
         cx.execute();
         assert_close(&c.data(), &unoptimized_c);
     }

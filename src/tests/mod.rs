@@ -34,7 +34,7 @@ fn main() {
     let unoptimized_a = a.data();
     let unoptimized_d = d.data();
 
-    cx.optimize(GenericOptimizer::default());
+    cx.compile(GenericCompiler::default());
 
     cx.execute();
     let a = a.data();
@@ -59,7 +59,7 @@ fn test_matmul() {
 
     let unoptimized_a = a.data();
 
-    cx.optimize(GenericOptimizer::default());
+    cx.compile(GenericCompiler::default());
     cx.execute();
 
     assert_close(&unoptimized_a, &a.data());
