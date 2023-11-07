@@ -46,12 +46,11 @@ fn main() {
     }
 
     #[cfg(feature="metal")]
-    cx1.compile(<(GenericCompiler, MetalFp16Compiler)>::default());
+    cx1.compile(<(GenericCompiler, MetalFp16Compiler, DepthFirst)>::default());
     #[cfg(feature="cuda")]
     cx1.compile(<(CudaFp16Optimizer, GenericCompiler)>::default());
     #[cfg(all(not(feature="cuda"), not(feature="metal")))]
     cx1.compile(<(GenericCompiler, CPUCompiler)>::default());
-
 
     // Build KV cache forward graph
     let kv_model = Model::initialize(&mut cx2);
@@ -76,19 +75,17 @@ fn main() {
         v.set_type(std::any::TypeId::of::<cudarc::driver::CudaSlice<half::f16>>());
     }
     #[cfg(feature="metal")]
-    cx2.compile(<(GenericCompiler, MetalFp16Compiler)>::default());
+    cx2.compile(<(GenericCompiler, MetalFp16Compiler, DepthFirst)>::default());
     #[cfg(feature="cuda")]
     cx2.compile(<(GenericCompiler, CudaFp16Optimizer)>::default());
     #[cfg(all(not(feature="cuda"), not(feature="metal")))]
     cx2.compile(<(GenericCompiler, CPUCompiler)>::default());
     delete_loads(&kv_model, &mut cx2);
 
-    // cx1.display();
-
     println!("Inferencing...");
     // First pass
     inp.set_dyn(input.iter().map(|i| *i as f32).collect::<Vec<_>>(), vec![1, input.len()]);
-    cx1.execute();
+    cx1.execute_debug();
 
     let out1 = out1.dyn_data(&cx1.dyn_map);
     input.push(sample_index(&out1[out1.len() - 32_000..]));

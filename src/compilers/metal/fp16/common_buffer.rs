@@ -5,6 +5,7 @@ use std::{
 
 use metal_rs::{Buffer, CommandBufferRef, CommandQueue, Device};
 use petgraph::{
+    algo::is_cyclic_directed,
     stable_graph::NodeIndex,
     visit::EdgeRef,
     Direction::{self},
@@ -24,7 +25,6 @@ impl Compiler for CommonBufferCompiler {
     fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         let mut already_added_nodes = HashSet::new();
-        let mut create = vec![];
         for node in graph.graph.node_indices().collect::<Vec<_>>() {
             if !already_added_nodes.contains(&node)
                 && graph
@@ -39,8 +39,13 @@ impl Compiler for CommonBufferCompiler {
                     std::ptr::null::<CommandBufferRef>(),
                     dev.new_command_queue(),
                 )));
+                let setup = graph
+                    .add_op(SetupMetalKernels { buffer: b.clone() })
+                    .finish();
+                let exec = graph
+                    .add_op(ExecuteMetalKernels { buffer: b.clone() })
+                    .finish();
                 let mut current_set = HashSet::new();
-                current_set.insert(node);
                 build_set_from_node(
                     node,
                     b.clone(),
@@ -48,40 +53,33 @@ impl Compiler for CommonBufferCompiler {
                     &mut current_set,
                     &mut already_added_nodes,
                     graph,
+                    setup,
+                    exec,
                 );
                 // Add execute op
-                let mut outside_nodes = HashSet::new();
-                for node in &current_set {
-                    outside_nodes.extend(
-                        graph
+                for node in current_set.clone() {
+                    for outside_node in graph
+                        .graph
+                        .edges_directed(node, Direction::Outgoing)
+                        .filter(|e| !e.weight().is_schedule())
+                        .map(|e| e.target())
+                        .filter(|n| !current_set.contains(n))
+                        .collect::<Vec<_>>()
+                    {
+                        let edge = graph
                             .graph
-                            .edges_directed(*node, Direction::Outgoing)
-                            .map(|e| e.target())
-                            .filter(|n| !current_set.contains(n)),
-                    );
+                            .add_edge(exec, outside_node, Dependency::Schedule);
+                        if is_cyclic_directed(&graph.graph) {
+                            graph.graph.remove_edge(edge);
+                        }
+                    }
                 }
-                create.push((
-                    SetupMetalKernels { buffer: b.clone() },
-                    ExecuteMetalKernels { buffer: b },
-                    current_set,
-                    outside_nodes,
-                ));
-            }
-        }
-        for (setup, exec, current, outside) in create {
-            let setup = graph.add_op(setup).finish();
-            let exec = graph.add_op(exec).finish();
-            for node in current {
-                graph.add_schedule_dependency(setup, node);
-                graph.add_schedule_dependency(node, exec);
-            }
-            for outside_node in outside {
-                graph.add_schedule_dependency(exec, outside_node);
             }
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_set_from_node(
     node: NodeIndex,
     buffer: Arc<Mutex<(*const CommandBufferRef, CommandQueue)>>,
@@ -89,25 +87,15 @@ fn build_set_from_node(
     current_set: &mut HashSet<NodeIndex>,
     already_added_nodes: &mut HashSet<NodeIndex>,
     graph: &mut Graph,
+    setup_node: NodeIndex,
+    exec_node: NodeIndex,
 ) {
-    // Check if this has any incoming or outgoing nodes that aren't metal nodes that eventually connect back to the set
-    for node in graph
-        .graph
-        .edges_directed(node, Direction::Incoming)
-        .map(|e| e.source())
-    {
-        if check_if_reaches(graph, node, current_set, Direction::Outgoing, false) {
-            return;
-        }
-    }
-    for node in graph
-        .graph
-        .edges_directed(node, Direction::Outgoing)
-        .map(|e| e.target())
-    {
-        if check_if_reaches(graph, node, current_set, Direction::Incoming, false) {
-            return;
-        }
+    let edge1 = graph.graph.add_edge(node, exec_node, Dependency::Schedule);
+    let edge2 = graph.graph.add_edge(setup_node, node, Dependency::Schedule);
+    if is_cyclic_directed(&graph.graph) {
+        graph.graph.remove_edge(edge1);
+        graph.graph.remove_edge(edge2);
+        return;
     }
     // Wrap current node
     let wrapper = graph
@@ -129,6 +117,7 @@ fn build_set_from_node(
     for node in graph
         .graph
         .edges_directed(node, Direction::Incoming)
+        .filter(|e| !e.weight().is_schedule())
         .map(|e| e.source())
         .filter(|n| !already_added_nodes.contains(n))
         .collect::<Vec<_>>()
@@ -147,6 +136,8 @@ fn build_set_from_node(
                 current_set,
                 already_added_nodes,
                 graph,
+                setup_node,
+                exec_node,
             );
         }
     }
@@ -154,6 +145,7 @@ fn build_set_from_node(
     for node in graph
         .graph
         .edges_directed(node, Direction::Outgoing)
+        .filter(|e| !e.weight().is_schedule())
         .map(|e| e.target())
         .filter(|n| !already_added_nodes.contains(n))
         .collect::<Vec<_>>()
@@ -172,37 +164,11 @@ fn build_set_from_node(
                 current_set,
                 already_added_nodes,
                 graph,
+                setup_node,
+                exec_node,
             );
         }
     }
-}
-
-fn check_if_reaches(
-    graph: &Graph,
-    start: NodeIndex,
-    set: &HashSet<NodeIndex>,
-    dir: Direction,
-    passed_non_metal: bool,
-) -> bool {
-    for e in graph.graph.edges_directed(start, dir) {
-        let next_node = match dir {
-            Direction::Incoming => e.source(),
-            Direction::Outgoing => e.target(),
-        };
-        if set.contains(&next_node) {
-            return passed_non_metal;
-        }
-        let non_metal = graph
-            .graph
-            .node_weight(next_node)
-            .unwrap()
-            .custom("metal")
-            .is_none();
-        if check_if_reaches(graph, next_node, set, dir, non_metal | passed_non_metal) {
-            return true;
-        }
-    }
-    false
 }
 
 #[derive(Debug)]
