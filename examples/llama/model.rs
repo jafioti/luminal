@@ -403,9 +403,8 @@ impl<
             GraphTensor<(CurSeq, CurSeq)>,
         ),
     ) -> Self::Output {
-        let (y, cache) = self
-            .self_attn
-            .forward((self.input_layer_norm.forward(x), attn_mask));
+        let normed = self.input_layer_norm.forward(x);
+        let (y, cache) = self.self_attn.forward((normed, attn_mask));
         let x = x + y;
         let y = self.mlp.forward(self.post_attention_layer_norm.forward(x));
         (x + y, cache)

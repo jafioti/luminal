@@ -45,7 +45,6 @@ fn test_log2() {
     let b = a.log_2();
     b.mark();
 
-    cx.display();
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
 
@@ -792,8 +791,6 @@ fn test_transformer_encoder_block() {
         .to_dtype::<f16>();
     let d_b = d_model.forward(d_a);
 
-    println!("B: {:?}", b.dyn_data(&cx.dyn_map));
-    println!("D: {:?}", d_b.clone().to_dtype::<f32>().as_vec());
     assert_close(&b.dyn_data(&cx.dyn_map), &d_b.to_dtype::<f32>().as_vec());
 }
 

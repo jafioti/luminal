@@ -9,7 +9,7 @@ mod hl_ops;
 mod tests;
 
 pub mod prelude {
-    pub use crate::compiler::*;
+    pub use crate::compiler_utils::*;
     pub use crate::compilers::*;
     pub use crate::graph::*;
     pub use crate::graph_tensor::*;

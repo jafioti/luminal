@@ -2,7 +2,7 @@
 ![image](https://raw.githubusercontent.com/jafioti/luminal/main/resources/dag.jpeg)
 **Deep learning at the speed of light.**
 
-Luminal is a deep learning library that prioritizes **compilers** to achieve high performance.
+Luminal is a deep learning library that uses **composable compilers** to achieve high performance.
 
 ```rust
 use luminal::prelude::*;

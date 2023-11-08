@@ -105,7 +105,7 @@ impl Operator for MetalCos {
 }
 
 /// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceCompiler.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct MetalCosCompiler;
 
 impl Compiler for MetalCosCompiler {
@@ -284,7 +284,7 @@ impl Operator for MetalExp {
 }
 
 /// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceCompiler.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct MetalExpCompiler;
 
 impl Compiler for MetalExpCompiler {

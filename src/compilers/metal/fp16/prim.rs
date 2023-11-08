@@ -101,13 +101,7 @@ impl Operator for MetalCopyFromDevice {
             // Already off device
             return vec![inp.pop().unwrap().0.cloned()];
         }
-        let buffer = inp[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Buffer>()
-            .unwrap();
+        let buffer = get_buffer_from_tensor(&inp[0].0);
         let mut data = vec![0.0; buffer.length() as usize / std::mem::size_of::<f16>()];
         let ptr = buffer.contents() as *mut f16;
         for (i, d) in data.iter_mut().enumerate() {
@@ -211,21 +205,16 @@ impl MetalKernelForward for MetalContiguous {
 impl Operator for MetalContiguous {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            // Setup buffers
-            let a = tensors[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-
             // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer)
+                .metal_forward(
+                    &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
+                    &self.1,
+                    command_buffer,
+                )
                 .pop()
                 .unwrap();
 
@@ -313,18 +302,14 @@ impl MetalKernelForward for MetalLog2 {
 impl Operator for MetalLog2 {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let a = tensors[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-
             let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
+                .metal_forward(
+                    &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
+                    &self.2,
+                    command_buffer,
+                )
                 .pop()
                 .unwrap();
 
@@ -411,18 +396,14 @@ impl MetalKernelForward for MetalExp2 {
 impl Operator for MetalExp2 {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let a = tensors[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-
             let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
+                .metal_forward(
+                    &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
+                    &self.2,
+                    command_buffer,
+                )
                 .pop()
                 .unwrap();
 
@@ -509,18 +490,14 @@ impl MetalKernelForward for MetalSin {
 impl Operator for MetalSin {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let a = tensors[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-
             let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
+                .metal_forward(
+                    &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
+                    &self.2,
+                    command_buffer,
+                )
                 .pop()
                 .unwrap();
 
@@ -607,18 +584,14 @@ impl MetalKernelForward for MetalSqrt {
 impl Operator for MetalSqrt {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let a = tensors[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-
             let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
+                .metal_forward(
+                    &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
+                    &self.2,
+                    command_buffer,
+                )
                 .pop()
                 .unwrap();
 
@@ -705,18 +678,14 @@ impl MetalKernelForward for MetalRecip {
 impl Operator for MetalRecip {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let a = tensors[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-
             let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
+                .metal_forward(
+                    &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
+                    &self.2,
+                    command_buffer,
+                )
                 .pop()
                 .unwrap();
 
@@ -806,7 +775,7 @@ impl MetalKernelForward for MetalAdd {
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
-        encoder.set_buffer(1, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inp_size as u32);
         input_dyn_dims(&[(self.3, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
@@ -822,26 +791,14 @@ impl MetalKernelForward for MetalAdd {
 impl Operator for MetalAdd {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let a = tensors[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-            let b = tensors[1]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-
             let command_buffer = self.1.new_command_buffer();
 
             let out = self
                 .metal_forward(
-                    &[(a, tensors[0].1), (b, tensors[1].1)],
+                    &[
+                        (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
+                        (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
+                    ],
                     &self.2,
                     command_buffer,
                 )
@@ -933,7 +890,7 @@ impl MetalKernelForward for MetalMul {
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
-        encoder.set_buffer(1, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inp_size as u32);
         input_dyn_dims(&[(self.3, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
@@ -949,26 +906,14 @@ impl MetalKernelForward for MetalMul {
 impl Operator for MetalMul {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let a = tensors[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-            let b = tensors[1]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-
             let command_buffer = self.1.new_command_buffer();
 
             let out = self
                 .metal_forward(
-                    &[(a, tensors[0].1), (b, tensors[1].1)],
+                    &[
+                        (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
+                        (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
+                    ],
                     &self.2,
                     command_buffer,
                 )
@@ -1071,7 +1016,7 @@ impl MetalKernelForward for MetalLessThan {
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
-        encoder.set_buffer(1, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inp_size as u32);
         input_dyn_dims(&[(self.3, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
@@ -1087,26 +1032,14 @@ impl MetalKernelForward for MetalLessThan {
 impl Operator for MetalLessThan {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let a = tensors[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-            let b = tensors[1]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-
             let command_buffer = self.1.new_command_buffer();
 
             let out = self
                 .metal_forward(
-                    &[(a, tensors[0].1), (b, tensors[1].1)],
+                    &[
+                        (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
+                        (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
+                    ],
                     &self.2,
                     command_buffer,
                 )
@@ -1196,7 +1129,7 @@ impl MetalKernelForward for MetalMod {
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
-        encoder.set_buffer(1, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inp_size as u32);
         input_dyn_dims(&[(self.3, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
@@ -1212,26 +1145,14 @@ impl MetalKernelForward for MetalMod {
 impl Operator for MetalMod {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let a = tensors[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-            let b = tensors[1]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-
             let command_buffer = self.1.new_command_buffer();
 
             let out = self
                 .metal_forward(
-                    &[(a, tensors[0].1), (b, tensors[1].1)],
+                    &[
+                        (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
+                        (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
+                    ],
                     &self.2,
                     command_buffer,
                 )
@@ -1366,19 +1287,15 @@ impl MetalKernelForward for MetalSumReduce {
 impl Operator for MetalSumReduce {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let a = tensors[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-
             // Setup command queue / command buffer / encoder
             let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
+                .metal_forward(
+                    &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
+                    &self.2,
+                    command_buffer,
+                )
                 .pop()
                 .unwrap();
 
@@ -1545,7 +1462,7 @@ impl Operator for MetalMaxReduce {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct PrimitiveCompiler;
 
 impl Compiler for PrimitiveCompiler {
@@ -1599,7 +1516,7 @@ impl Compiler for PrimitiveCompiler {
                     graph.to_retrieve.insert(copy_node);
                 }
 
-                // // If there are inputs to this function remap the function to the copy node
+                // If there are inputs to this function remap the function to the copy node
                 // if graph
                 //     .graph
                 //     .edges_directed(function_node, petgraph::Direction::Incoming)
@@ -1830,17 +1747,15 @@ impl Compiler for FakeReductionCompiler {
         let mut compiled = None;
         for _ in s.search(graph) {
             let op_ref = graph.graph.node_weight_mut(sum_reduce).unwrap();
-            let dim = op_ref.as_any().downcast_ref::<MetalSumReduce>().unwrap().3;
-            let dev = op_ref
-                .as_any()
-                .downcast_ref::<MetalSumReduce>()
-                .unwrap()
-                .2
-                .clone();
+            let sum_reduce = op_ref.as_any().downcast_ref::<MetalSumReduce>().unwrap();
             if compiled.is_none() {
-                compiled = Some(FakeSumReduce::compile(dev.clone()));
+                compiled = Some(FakeSumReduce::compile(sum_reduce.2.clone()));
             }
-            *op_ref = Box::new(FakeSumReduce(compiled.clone().unwrap(), dev, dim));
+            *op_ref = Box::new(FakeSumReduce(
+                compiled.clone().unwrap(),
+                sum_reduce.2.clone(),
+                sum_reduce.3,
+            ));
         }
     }
 }
@@ -2017,4 +1932,13 @@ impl Compiler for CopyCompiler {
             graph.graph.remove_node(first);
         }
     }
+}
+
+fn get_buffer_from_tensor<'a>(tensor: &'a InputTensor) -> &'a Buffer {
+    tensor
+        .borrowed()
+        .data
+        .as_any()
+        .downcast_ref::<Buffer>()
+        .unwrap()
 }

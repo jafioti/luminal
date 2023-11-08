@@ -10,6 +10,6 @@ mod cuda;
 pub use cuda::*;
 
 #[cfg(feature = "metal")]
-mod metal;
+pub mod metal;
 #[cfg(feature = "metal")]
 pub use metal::*;

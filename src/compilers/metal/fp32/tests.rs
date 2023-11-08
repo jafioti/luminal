@@ -3,7 +3,7 @@ use half::f16;
 use itertools::Itertools;
 use rand::Rng;
 
-use super::MetalFp32Optimizer;
+use super::MetalFp32Compiler;
 use crate::{
     nn::{activation::ReLU, linear::Linear},
     prelude::{Module, *},
@@ -19,7 +19,7 @@ fn test_contiguous() {
     a.set(data.clone());
     let b = a.permute::<R2<4, 3>, _>().reshape::<R2<12, 1>>();
     b.mark();
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -38,7 +38,7 @@ fn test_log2() {
     let b = a.log_2();
     b.mark();
 
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     assert_close(
@@ -56,7 +56,7 @@ fn test_exp2() {
     let b = a.exp_2();
     b.mark();
 
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     assert_close(
@@ -72,7 +72,7 @@ fn test_recip() {
     a.set(vec![1., 2., 4096.]);
     let b = a.recip();
     b.mark();
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -89,7 +89,7 @@ fn test_sin() {
     a.set(vec![1., 2., 3.]);
     let b = a.sin();
     b.mark();
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -106,7 +106,7 @@ fn test_sqrt() {
     a.set(vec![1., 2., 3.]);
     let b = a.sqrt();
     b.mark();
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -126,7 +126,7 @@ fn test_add() {
     let c = a + b;
     c.mark();
 
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -147,7 +147,7 @@ fn test_sub() {
     let c = a - b;
     c.mark();
 
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -170,7 +170,7 @@ fn test_square() {
     let b = a * a;
     b.mark();
 
-    cx.compile(<(MetalFp32Optimizer, GenericCompiler)>::default());
+    cx.compile(<(MetalFp32Compiler, GenericCompiler)>::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -197,7 +197,7 @@ fn test_mul() {
     let c = a * b;
     c.mark();
 
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -223,7 +223,7 @@ fn test_mul2() {
     let c = a * b.expand();
     c.mark();
 
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -244,7 +244,7 @@ fn test_div() {
     let c = a / b;
     c.mark();
 
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -265,7 +265,7 @@ fn test_max() {
     let c = a.max(b);
     c.mark();
 
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -288,7 +288,7 @@ fn test_mod() {
     let c = a % b;
     c.mark();
 
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     // No dfdx equivalent
@@ -318,7 +318,7 @@ fn test_sum_reduce() {
     c.mark();
     d.mark();
 
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -345,7 +345,7 @@ fn test_max_reduce() {
     c.mark();
     d.mark();
 
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -368,7 +368,7 @@ fn test_mean_reduce() {
     let b = a.mean_reduce::<_, LAxis<2>>();
     b.mark();
 
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -389,7 +389,7 @@ fn test_matmul() {
     let c = a.matmul(b);
     c.mark();
 
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -410,7 +410,7 @@ fn test_batch_matmul() {
     let c = a.matmul(b);
     c.mark();
 
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -418,8 +418,6 @@ fn test_batch_matmul() {
     let d_b = d_dev.tensor([[1., 2., 3., 1.], [1., 2., 1., 2.], [-1., -2., 1., 2.]]);
     let d_c = d_a.matmul(d_b);
 
-    println!("B: {:?}", c.data());
-    println!("D: {:?}", d_c.as_vec());
     assert_close(&c.data(), &d_c.as_vec());
 }
 
@@ -444,7 +442,7 @@ fn test_matmul_transpose() {
     a_t_b.mark();
     a_t_b_t.mark();
 
-    cx.compile(MetalFp32Optimizer::default());
+    cx.compile(MetalFp32Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -490,7 +488,7 @@ fn test_relu_and_linear() {
 
     let unoptimized_b = b.data();
     let unoptimized_batch_out = batch_out.data();
-    cx.compile(<(MetalFp32Optimizer, GenericCompiler)>::default());
+    cx.compile(<(MetalFp32Compiler, GenericCompiler)>::default());
     cx.execute();
 
     assert_close(&unoptimized_b, &b.data());
@@ -564,7 +562,7 @@ fn test_transformer_encoder_block() {
     a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![1, 2, 3]);
     b.mark();
 
-    cx.compile(<(MetalFp32Optimizer, GenericCompiler)>::default());
+    cx.compile(<(MetalFp32Compiler, GenericCompiler)>::default());
     cx.execute();
 
     let d_dev = Cpu::default();

@@ -1,25 +1,23 @@
 use std::{
     any::{Any, TypeId},
-    collections::{
-        hash_map::{DefaultHasher, Entry},
-        HashMap, HashSet, VecDeque,
-    },
-    hash::Hasher,
+    collections::{hash_map::Entry, HashMap, HashSet},
+    fmt::Debug,
     sync::{Arc, Mutex},
 };
 
 use itertools::Itertools;
 use petgraph::{
+    algo::toposort,
     stable_graph::{EdgeIndex, NodeIndex, StableGraph},
     visit::EdgeRef,
-    Direction,
+    Directed, Direction,
 };
 use regex::Regex;
 
 use crate::{
     graph::Graph,
     op::Operator,
-    prelude::{remap_id, Dependency, Dim, ShapeTracker},
+    prelude::{remap_id, Dependency, Dim, MainGraph, ShapeTracker},
 };
 
 pub trait Compiler {
@@ -29,6 +27,23 @@ pub trait Compiler {
 
 impl Compiler for () {
     fn compile(&self, _: &mut Graph) {}
+}
+
+pub struct TimedCompiler<C>(C);
+
+impl<C: Compiler + Debug> Compiler for TimedCompiler<C> {
+    fn compile(&self, graph: &mut Graph) {
+        println!("Starting {:?}", self.0);
+        let start = std::time::Instant::now();
+        self.0.compile(graph);
+        println!("Finished {:?} in {}ms", self.0, start.elapsed().as_millis());
+    }
+}
+
+impl<C: Default> Default for TimedCompiler<C> {
+    fn default() -> Self {
+        Self(C::default())
+    }
 }
 
 macro_rules! tuple_impls {
@@ -81,11 +96,8 @@ impl Graph {
     pub fn debug_graph(
         &self,
         show_shapes: bool,
-    ) -> (
-        petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32>,
-        Vec<EdgeIndex>,
-    ) {
-        let mut new_graph = petgraph::stable_graph::StableGraph::default();
+    ) -> (StableGraph<String, u8, Directed, u32>, Vec<EdgeIndex>) {
+        let mut new_graph = StableGraph::default();
         let mut id_map = HashMap::new();
         let op_regex = Regex::new(r"(?s)\{.*|\(.*").unwrap();
         for (id, node) in self.graph.node_indices().zip(self.graph.node_weights()) {
@@ -349,33 +361,51 @@ type SelectionGraph = petgraph::Graph<SelectorWeight, Option<u8>>;
 // Graph Selector
 #[derive(Default, Clone)]
 pub struct GraphSelector {
-    #[allow(clippy::type_complexity)]
     graph: Arc<Mutex<SelectionGraph>>,
 }
+
+// pub struct GraphSearch {
+//     selector: GraphSelector,
+//     already_returned: HashSet<NodeIndex>,
+//     graph: *const Graph,
+// }
+
+// impl Iterator for GraphSearch {
+//     type Item = ();
+
+//     fn next(&mut self) -> Option<Self::Item> {
+//         // Look through graph for pattern from selector
+//         let Some(select_start) = self.selector.graph.lock().unwrap().node_indices().next() else {
+//             return None;
+//         };
+//         let graph = unsafe { self.graph.as_ref().unwrap() };
+//         let mut used = HashSet::new();
+//         let mut selector_used = HashSet::new();
+//         for node in graph.graph.node_indices() {
+//             if self.already_returned.contains(&node) {
+//                 continue;
+//             }
+//             if search(
+//                 select_start,
+//                 &self.selector.graph.lock().unwrap(),
+//                 node,
+//                 &graph.graph,
+//                 &mut used,
+//                 &mut selector_used,
+//             ) {
+//                 self.already_returned.insert(node);
+//                 return Some(());
+//             }
+//             used.clear();
+//         }
+//         None
+//     }
+// }
 
 pub struct GraphSearch {
     selector: GraphSelector,
     graph: *const Graph,
     already_returned: HashSet<Vec<(NodeIndex, NodeIndex)>>,
-    found: VecDeque<HashMap<NodeIndex, NodeIndex>>, // Queue of found patterns
-    graph_hash: u64,
-}
-
-fn calculate_hash<T: std::hash::Hash>(t: &T) -> u64 {
-    let mut s = DefaultHasher::new();
-    t.hash(&mut s);
-    s.finish()
-}
-
-fn hash_graph(graph: &Graph) -> u64 {
-    calculate_hash(&(
-        graph.graph.node_indices().collect::<Vec<_>>(),
-        graph
-            .graph
-            .edge_indices()
-            .map(|e| graph.graph.edge_endpoints(e))
-            .collect::<Vec<_>>(),
-    ))
 }
 
 impl Iterator for GraphSearch {
@@ -384,154 +414,304 @@ impl Iterator for GraphSearch {
     fn next(&mut self) -> Option<Self::Item> {
         // Look through graph for pattern from selector
         let graph = unsafe { self.graph.as_ref().unwrap() };
-        let graph_hash = hash_graph(graph);
-        if graph_hash != self.graph_hash {
-            self.graph_hash = graph_hash;
-            self.found.clear();
-        }
-        if self.found.is_empty() {
-            let Some(select_start) = petgraph::algo::toposort(&*self.selector.graph.lock().unwrap(), None).unwrap().pop() else {
-                return None;
-            };
-            for node in graph.graph.node_indices() {
-                for m in search_new(
-                    select_start,
-                    &self.selector.graph.lock().unwrap(),
-                    node,
-                    &graph.graph,
-                    &mut HashSet::new(),
-                    &mut HashMap::default(),
-                ) {
-                    let key = m
-                        .iter()
-                        .sorted_by_key(|(i, _)| **i)
-                        .map(|(a, b)| (*a, *b))
-                        .collect::<Vec<_>>();
-                    if !self.already_returned.contains(&key) {
-                        self.found.push_back(m);
-                    }
-                }
-            }
-        }
+        let mut mapping = HashMap::new();
+        let mut visited = HashSet::new();
+        let selector_graph = self.selector.graph.lock().unwrap();
 
-        match self.found.pop_front() {
-            Some(pattern) => {
-                self.already_returned.insert(
-                    pattern
-                        .iter()
-                        .sorted_by_key(|(i, _)| **i)
-                        .map(|(a, b)| (*a, *b))
-                        .collect(),
-                );
-                // Apply pattern to ptrs
-                let selector_graph = self.selector.graph.lock().unwrap();
-                for (selector_node, ptr) in selector_graph.node_indices().flat_map(|n| {
-                    selector_graph
-                        .node_weight(n)
-                        .unwrap()
-                        .4
-                        .iter()
-                        .map(move |i| (n, *i))
-                }) {
-                    unsafe {
-                        *ptr = pattern[&selector_node];
-                    }
+        if let Some(map) = match_nodes(
+            &graph.graph,
+            &selector_graph,
+            &mut mapping,
+            &mut visited,
+            &self.already_returned,
+        ) {
+            self.already_returned.insert(
+                map.iter()
+                    .sorted_by_key(|(i, _)| **i)
+                    .map(|(a, b)| (*a, *b))
+                    .collect::<Vec<_>>(),
+            );
+            // Apply pattern to ptrs
+            for (selector_node, ptr) in selector_graph.node_indices().flat_map(|n| {
+                selector_graph
+                    .node_weight(n)
+                    .unwrap()
+                    .4
+                    .iter()
+                    .map(move |i| (n, *i))
+            }) {
+                unsafe {
+                    *ptr = map[&selector_node];
                 }
-                Some(())
             }
-            None => None,
+            return Some(());
         }
+        None
     }
 }
 
-/// Find all matching patterns
-fn search_new(
+#[allow(clippy::type_complexity)]
+fn search(
     selector_node: NodeIndex,
     selector_graph: &SelectionGraph,
-    graph_node: NodeIndex,
-    graph: &StableGraph<Box<dyn Operator>, Dependency>,
+    graph_node: petgraph::stable_graph::NodeIndex,
+    graph: &MainGraph,
     used: &mut HashSet<NodeIndex>,
-    selector_used: &mut HashMap<NodeIndex, NodeIndex>,
-) -> Vec<HashMap<NodeIndex, NodeIndex>> {
-    if !test_node(
-        selector_graph.node_weight(selector_node).unwrap(),
-        graph,
-        graph_node,
-    ) {
-        return vec![];
+    selector_used: &mut HashSet<NodeIndex>,
+) -> bool {
+    let selector_weight = selector_graph.node_weight(selector_node).unwrap();
+    let current_weight = graph.node_weight(graph_node).unwrap();
+    // Test type
+    if let Some(ty) = &selector_weight.0 {
+        if current_weight.as_any().type_id() != *ty {
+            return false;
+        }
+    }
+    let input_shapes = graph
+        .edges_directed(graph_node, petgraph::Direction::Incoming)
+        .filter_map(|e| e.weight().as_data())
+        .sorted_by_key(|e| e.0)
+        .map(|e| e.2)
+        .collect::<Vec<_>>();
+
+    // Test shape
+    if let Some(shape) = &selector_weight.2 {
+        let mut shape_map = HashMap::new();
+        if shape.len() != input_shapes.len() {
+            return false;
+        }
+        for (a_sh, b_sh) in shape.iter().zip(input_shapes.iter()) {
+            if a_sh.len() != b_sh.dims.len() {
+                return false;
+            }
+            for (a, b) in a_sh.iter().zip(b_sh.shape().iter()) {
+                match a {
+                    Dim::Known(n) => {
+                        if *b != Dim::Known(*n) {
+                            return false;
+                        }
+                    }
+                    Dim::Unknown(c) => {
+                        if let Some(expected) = shape_map.get(c) {
+                            if b != expected {
+                                return false;
+                            }
+                        } else {
+                            shape_map.insert(*c, *b);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Test fakes
+    if let Some(fakes) = &selector_weight.3 {
+        for (a_sh, b_sh) in fakes.iter().zip(input_shapes.iter()) {
+            for (a, b) in a_sh.iter().zip(b_sh.indexes.iter().map(|i| b_sh.fake[*i])) {
+                if *a != b {
+                    return false;
+                }
+            }
+        }
     }
 
-    selector_used.insert(selector_node, graph_node);
+    // Run check
+    if let Some(check) = &selector_weight.1 {
+        if !check(current_weight.as_ref(), &input_shapes) {
+            return false;
+        }
+    }
+
+    // Used is to make sure we don't use the same node from the source graph twice, which prevents cycles
     used.insert(graph_node);
-
-    if selector_used.len() == selector_graph.node_count() {
-        let m = selector_used.clone();
-        used.remove(&graph_node);
-        selector_used.remove(&selector_node);
-        return vec![m];
-    }
-
-    let mut new_matches = vec![];
-    // Loop through outgoing edges
-    for graph_target in graph
-        .edges_directed(graph_node, Direction::Outgoing)
-        .map(|e| e.target())
-        .filter(|e| !used.contains(e))
+    selector_used.insert(selector_node);
+    // Match outgoing
+    for (select_outgoing, select_output) in selector_graph
+        .edges_directed(selector_node, petgraph::Direction::Outgoing)
+        .map(|e| (e.target(), e.weight()))
+        .filter(|i| !selector_used.contains(&i.0))
         .collect::<Vec<_>>()
+        .into_iter()
     {
-        for selector_target in selector_graph
-            .edges_directed(selector_node, Direction::Outgoing)
-            .map(|e| e.target())
-            .filter(|e| !selector_used.contains_key(e))
+        if let Some((target, _)) = graph
+            .edges_directed(graph_node, petgraph::Direction::Outgoing)
+            .filter_map(|e| e.weight().as_data().map(|i| (e.target(), i)))
+            .map(|e| (e.0, e.1 .1))
+            .filter(|i| {
+                !used.contains(&i.0)
+                    && if let Some(o) = select_output {
+                        i.1 == *o
+                    } else {
+                        true
+                    }
+            })
             .collect::<Vec<_>>()
+            .into_iter()
+            .find(|i| {
+                search(
+                    select_outgoing,
+                    selector_graph,
+                    i.0,
+                    graph,
+                    used,
+                    selector_used,
+                )
+            })
         {
-            let matches = search_new(
-                selector_target,
-                selector_graph,
-                graph_target,
-                graph,
-                used,
-                selector_used,
-            );
-            new_matches.extend(matches);
+            used.insert(target);
+        } else {
+            used.remove(&graph_node);
+            selector_used.remove(&selector_node);
+            return false;
         }
     }
-
-    // Loop through incoming edges
-    for graph_source in graph
-        .edges_directed(graph_node, Direction::Incoming)
-        .map(|e| e.source())
-        .filter(|e| !used.contains(e))
+    // Match incoming
+    for (select_incoming, select_output) in selector_graph
+        .edges_directed(selector_node, petgraph::Direction::Incoming)
+        .map(|e| (e.source(), e.weight()))
+        .filter(|i| !selector_used.contains(&i.0))
         .collect::<Vec<_>>()
+        .into_iter()
     {
-        for selector_source in selector_graph
-            .edges_directed(selector_node, Direction::Incoming)
-            .map(|e| e.source())
-            .filter(|e| !selector_used.contains_key(e))
+        if let Some((target, _)) = graph
+            .edges_directed(graph_node, petgraph::Direction::Incoming)
+            .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i.1)))
+            .filter(|i| {
+                !used.contains(&i.0)
+                    && if let Some(o) = select_output {
+                        i.1 == *o
+                    } else {
+                        true
+                    }
+            })
             .collect::<Vec<_>>()
+            .into_iter()
+            .find(|i| {
+                search(
+                    select_incoming,
+                    selector_graph,
+                    i.0,
+                    graph,
+                    used,
+                    selector_used,
+                )
+            })
         {
-            let matches = search_new(
-                selector_source,
-                selector_graph,
-                graph_source,
-                graph,
-                used,
-                selector_used,
-            );
-            new_matches.extend(matches);
+            used.insert(target);
+        } else {
+            used.remove(&graph_node);
+            selector_used.remove(&selector_node);
+            return false;
         }
     }
+    // All checks out
+    for ptr in &selector_weight.4 {
+        unsafe {
+            **ptr = graph_node;
+        }
+    }
+    true
+}
 
-    // Reset used maps
-    used.remove(&graph_node);
-    selector_used.remove(&selector_node);
+fn match_nodes(
+    g0: &MainGraph,
+    g1: &SelectionGraph,
+    mapping: &mut HashMap<NodeIndex, NodeIndex>,
+    visited: &mut HashSet<NodeIndex>,
+    already_returned: &HashSet<Vec<(NodeIndex, NodeIndex)>>,
+) -> Option<HashMap<NodeIndex, NodeIndex>> {
+    let mut predecessors_cache: HashMap<NodeIndex, Vec<NodeIndex>> = HashMap::new();
 
-    new_matches
+    if let Ok(topo_order) = toposort(g1, None) {
+        match_nodes_topo(
+            g0,
+            g1,
+            &topo_order,
+            mapping,
+            visited,
+            &mut predecessors_cache,
+            0,
+            already_returned,
+        )
+    } else {
+        None
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn match_nodes_topo(
+    g0: &MainGraph,
+    g1: &SelectionGraph,
+    topo_order: &[NodeIndex],
+    mapping: &mut HashMap<NodeIndex, NodeIndex>,
+    visited: &mut HashSet<NodeIndex>,
+    predecessors_cache: &mut HashMap<NodeIndex, Vec<NodeIndex>>,
+    current_index: usize,
+    already_returned: &HashSet<Vec<(NodeIndex, NodeIndex)>>,
+) -> Option<HashMap<NodeIndex, NodeIndex>> {
+    if mapping.len() == g1.node_count() {
+        let key = mapping
+            .iter()
+            .sorted_by_key(|(i, _)| **i)
+            .map(|(a, b)| (*a, *b))
+            .collect::<Vec<_>>();
+        if !already_returned.contains(&key) {
+            return Some(mapping.clone());
+        }
+        return None;
+    }
+
+    if current_index >= topo_order.len() {
+        return None;
+    }
+
+    let node_g1 = topo_order[current_index];
+
+    for node_g0 in g0.node_indices() {
+        if !visited.contains(&node_g0) && test_node(g1.node_weight(node_g1).unwrap(), g0, node_g0) {
+            let predecessors = predecessors_cache.entry(node_g0).or_insert_with(|| {
+                g0.neighbors_directed(node_g0, Direction::Incoming)
+                    .collect()
+            });
+
+            let predecessors_match =
+                g1.neighbors_directed(node_g1, Direction::Incoming)
+                    .all(|pred_g1| {
+                        if let Some(&pred_g0) = mapping.get(&pred_g1) {
+                            predecessors.iter().any(|p| p == &pred_g0)
+                        } else {
+                            false
+                        }
+                    });
+
+            if predecessors_match {
+                visited.insert(node_g0);
+                mapping.insert(node_g1, node_g0);
+
+                if let Some(m) = match_nodes_topo(
+                    g0,
+                    g1,
+                    topo_order,
+                    mapping,
+                    visited,
+                    predecessors_cache,
+                    current_index + 1,
+                    already_returned,
+                ) {
+                    return Some(m);
+                }
+
+                visited.remove(&node_g0);
+                mapping.remove(&node_g1);
+            }
+        }
+    }
+    None
 }
 
 fn test_node(
     (type_id, check, shape, fakes, _): &SelectorWeight,
-    graph: &StableGraph<Box<dyn Operator>, Dependency>,
+    graph: &MainGraph,
     graph_node: NodeIndex,
 ) -> bool {
     let current_weight = graph.node_weight(graph_node).unwrap();
@@ -598,104 +778,6 @@ fn test_node(
     true
 }
 
-// #[allow(clippy::type_complexity)]
-// fn search(
-//     selector_node: NodeIndex,
-//     selector_graph: &SelectionGraph,
-//     graph_node: NodeIndex,
-//     graph: &StableGraph<Box<dyn Operator>, (u8, u8, ShapeTracker)>,
-//     used: &mut HashSet<NodeIndex>,
-//     selector_used: &mut HashSet<NodeIndex>,
-//     assignment_order: &mut Vec<NodeIndex>,
-// ) -> bool {
-//     let selector_weight = selector_graph.node_weight(selector_node).unwrap();
-//     if !test_node(
-//         selector_graph.node_weight(selector_node).unwrap(),
-//         graph,
-//         graph_node,
-//     ) {
-//         return false;
-//     }
-
-//     // Used is to make sure we don't use the same node from the source graph twice, which prevents cycles
-//     used.insert(graph_node);
-//     selector_used.insert(selector_node);
-//     // Match outgoing
-//     for (select_outgoing, select_output) in selector_graph
-//         .edges_directed(selector_node, Direction::Outgoing)
-//         .map(|e| (e.target(), e.weight()))
-//         .filter(|i| !selector_used.contains(&i.0))
-//         .collect::<Vec<_>>()
-//         .into_iter()
-//     {
-//         if let Some((target, _)) = graph
-//             .edges_directed(graph_node, Direction::Outgoing)
-//             .map(|e| (e.target(), e.weight().1))
-//             .filter(|i| !used.contains(&i.0) && select_output.map(|o| i.1 == o).unwrap_or(true))
-//             .collect::<Vec<_>>()
-//             .into_iter()
-//             .find(|(i, _)| {
-//                 search(
-//                     select_outgoing,
-//                     selector_graph,
-//                     *i,
-//                     graph,
-//                     used,
-//                     selector_used,
-//                     assignment_order,
-//                 )
-//             })
-//         {
-//             used.insert(target);
-//         } else {
-//             used.remove(&graph_node);
-//             selector_used.remove(&selector_node);
-//             return false;
-//         }
-//     }
-//     // Match incoming
-//     for (select_incoming, select_output) in selector_graph
-//         .edges_directed(selector_node, Direction::Incoming)
-//         .map(|e| (e.source(), e.weight()))
-//         .filter(|i| !selector_used.contains(&i.0))
-//         .collect::<Vec<_>>()
-//         .into_iter()
-//     {
-//         if let Some((target, _)) = graph
-//             .edges_directed(graph_node, Direction::Incoming)
-//             .map(|e| (e.source(), e.weight().1))
-//             .filter(|i| !used.contains(&i.0) && select_output.map(|o| i.1 == o).unwrap_or(true))
-//             .collect::<Vec<_>>()
-//             .into_iter()
-//             .find(|i| {
-//                 search(
-//                     select_incoming,
-//                     selector_graph,
-//                     i.0,
-//                     graph,
-//                     used,
-//                     selector_used,
-//                     assignment_order,
-//                 )
-//             })
-//         {
-//             used.insert(target);
-//         } else {
-//             used.remove(&graph_node);
-//             selector_used.remove(&selector_node);
-//             return false;
-//         }
-//     }
-//     // All checks out
-//     for ptr in &selector_weight.4 {
-//         unsafe {
-//             **ptr = graph_node;
-//         }
-//     }
-//     assignment_order.push(graph_node);
-//     true
-// }
-
 impl GraphSelector {
     /// Create a new op to select
     pub fn op(&self) -> OpSelector {
@@ -723,8 +805,6 @@ impl GraphSelector {
         GraphSearch {
             selector: self,
             already_returned: HashSet::default(),
-            found: VecDeque::default(),
-            graph_hash: hash_graph(graph),
             graph,
         }
     }

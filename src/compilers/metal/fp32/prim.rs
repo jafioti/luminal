@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crate::{
     compilers::metal::*,
     op::{
-        Add, Contiguous, Exp2, Function as LFunction, InputTensor, LessThan, Log2, MaxReduce, Mod,
-        Mul, Operator, Print, Recip, Sin, Sqrt, SumReduce,
+        Add, Constant, Contiguous, Exp2, Function as LFunction, InputTensor, LessThan, Log2,
+        MaxReduce, Mod, Mul, Operator, Print, Recip, Sin, Sqrt, SumReduce,
     },
     prelude::*,
 };
@@ -74,6 +74,26 @@ impl Operator for MetalCopyFromDevice {
         }
         vec![Tensor {
             data: Box::new(data),
+        }]
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MetalConstant(pub f32, Device);
+impl PartialEq for MetalConstant {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl Operator for MetalConstant {
+    fn process(&self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        vec![Tensor {
+            data: Box::new(self.1.new_buffer_with_data(
+                &self.0 as *const f32 as *const _,
+                std::mem::size_of::<f32>() as u64,
+                MTLResourceOptions::StorageModeManaged,
+            )),
         }]
     }
 }
@@ -1123,9 +1143,9 @@ impl Operator for MetalMaxReduce {
 }
 
 #[derive(Default)]
-pub struct PrimitiveOptimizer;
+pub struct PrimitiveCompiler;
 
-impl Compiler for PrimitiveOptimizer {
+impl Compiler for PrimitiveCompiler {
     fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         // Go through the graph and insert copy ops
@@ -1143,42 +1163,53 @@ impl Compiler for PrimitiveOptimizer {
             })
             .collect::<Vec<_>>()
         {
-            // Create copy node
-            let copy_node = graph
-                .add_op(MetalCopyToDevice(dev.clone()))
-                .input(function_node, 0, ShapeTracker::new(&[]))
-                .finish();
-
-            // Switch outgoing edges from input to copy_node
-            for (edge_id, weight, dest) in graph
-                .graph
-                .edges_directed(function_node, petgraph::Direction::Outgoing)
-                .map(|e| (e.id(), *e.weight(), e.target()))
-                .filter(|(_, _, trg)| *trg != copy_node)
-                .collect::<Vec<_>>()
-            {
-                graph.graph.add_edge(copy_node, dest, weight);
-                graph.graph.remove_edge(edge_id);
-            }
-
-            if graph.to_retrieve.contains(&function_node) {
-                graph.to_retrieve.insert(copy_node);
-            }
-
-            // If there are inputs to this function remap the function to the copy node
             if graph
                 .graph
-                .edges_directed(function_node, petgraph::Direction::Incoming)
-                .count()
-                != 0
+                .node_weight(function_node)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<LFunction>()
+                .unwrap()
+                .2
+                == std::any::TypeId::of::<Vec<f32>>()
             {
-                move_references(
-                    &mut graph.id_remap,
-                    &mut graph.no_delete,
-                    &mut graph.to_retrieve,
-                    function_node,
-                    copy_node,
-                );
+                // Create copy node
+                let copy_node = graph
+                    .add_op(MetalCopyToDevice(dev.clone()))
+                    .input(function_node, 0, ShapeTracker::new(&[]))
+                    .finish();
+
+                // Switch outgoing edges from input to copy_node
+                for (edge_id, weight, dest) in graph
+                    .graph
+                    .edges_directed(function_node, petgraph::Direction::Outgoing)
+                    .map(|e| (e.id(), *e.weight(), e.target()))
+                    .filter(|(_, _, trg)| *trg != copy_node)
+                    .collect::<Vec<_>>()
+                {
+                    graph.graph.add_edge(copy_node, dest, weight);
+                    graph.graph.remove_edge(edge_id);
+                }
+
+                if graph.to_retrieve.contains(&function_node) {
+                    graph.to_retrieve.insert(copy_node);
+                }
+
+                // If there are inputs to this function remap the function to the copy node
+                if graph
+                    .graph
+                    .edges_directed(function_node, petgraph::Direction::Incoming)
+                    .count()
+                    != 0
+                {
+                    move_references(
+                        &mut graph.id_remap,
+                        &mut graph.no_delete,
+                        &mut graph.to_retrieve,
+                        function_node,
+                        copy_node,
+                    );
+                }
             }
 
             // Insert copy from device for function inputs
@@ -1218,8 +1249,7 @@ impl Compiler for PrimitiveOptimizer {
                     graph
                         .graph
                         .edges_directed(*n, petgraph::Direction::Incoming)
-                        .filter_map(|e| e.weight().as_data())
-                        .map(|i| i.2)
+                        .filter_map(|i| i.weight().as_data().map(|i| i.2))
                         .max_by_key(|s| s.n_physical_elements())
                         .unwrap(),
                 )
@@ -1253,7 +1283,7 @@ impl Compiler for PrimitiveOptimizer {
                     graph
                         .graph
                         .edges_directed(n, petgraph::Direction::Incoming)
-                        .next()
+                        .find(|e| !e.weight().is_schedule())
                         .unwrap()
                         .id(),
                 )
@@ -1295,6 +1325,8 @@ impl Compiler for PrimitiveOptimizer {
             let op_ref = graph.graph.node_weight_mut(id).unwrap();
             if is::<Log2>(op) {
                 *op_ref = Box::new(MetalLog2::new(dev.clone(), &mut kernels));
+            } else if let Some(c) = op_ref.as_any().downcast_ref::<Constant>() {
+                *op_ref = Box::new(MetalConstant(c.0, dev.clone()));
             } else if is::<Exp2>(op) {
                 *op_ref = Box::new(MetalExp2::new(dev.clone(), &mut kernels));
             } else if is::<Sin>(op) {

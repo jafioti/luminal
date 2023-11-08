@@ -46,7 +46,7 @@ fn main() {
     }
 
     #[cfg(feature="metal")]
-    cx1.compile(<(GenericCompiler, MetalFp16Compiler, DepthFirst)>::default());
+    cx1.compile(<(MetalFp16Compiler, GenericCompiler, DepthFirst)>::default());
     #[cfg(feature="cuda")]
     cx1.compile(<(CudaFp16Optimizer, GenericCompiler)>::default());
     #[cfg(all(not(feature="cuda"), not(feature="metal")))]
@@ -59,7 +59,6 @@ fn main() {
     let cache_src = (0..config::LAYERS).map(|_| (cx2.new_tensor("Key Cache"), cx2.new_tensor("Value Cache"))).collect::<Vec<_>>();
     let (out, cache_dest)= kv_model.forward_kv::<_, _, Dyn<'p'>, Dyn<'t'>>((single_inp, cache_src.clone()));
     out.mark();
-    loader::DfdxDeferredLoader::new("./examples/llama/setup/llama-7b-hf").load(&kv_model, &mut cx2);
     for (k, v) in &cache_dest {
         k.mark_no_delete();
         v.mark_no_delete();
@@ -75,7 +74,7 @@ fn main() {
         v.set_type(std::any::TypeId::of::<cudarc::driver::CudaSlice<half::f16>>());
     }
     #[cfg(feature="metal")]
-    cx2.compile(<(GenericCompiler, MetalFp16Compiler, DepthFirst)>::default());
+    cx2.compile(<(MetalFp16Compiler, GenericCompiler, DepthFirst)>::default());
     #[cfg(feature="cuda")]
     cx2.compile(<(GenericCompiler, CudaFp16Optimizer)>::default());
     #[cfg(all(not(feature="cuda"), not(feature="metal")))]
@@ -101,7 +100,6 @@ fn main() {
 
     // Move weights over
     transfer_weights(&model, &mut cx1, &kv_model, &mut cx2);
-    drop(cx1);
 
     loop {
         single_inp.set_dyn(vec![*input.last().unwrap() as f32], vec![1, 1]);

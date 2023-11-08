@@ -238,9 +238,9 @@ impl Operator for MetalBatchMatmul2D {
 }
 
 #[derive(Default)]
-pub struct MetalMatMulOptimizer;
+pub struct MetalMatMulCompiler;
 
-impl Compiler for MetalMatMulOptimizer {
+impl Compiler for MetalMatMulCompiler {
     fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         // Look for the matmul pattern

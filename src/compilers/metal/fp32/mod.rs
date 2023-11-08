@@ -1,7 +1,7 @@
 mod matmul;
 mod prim;
 
-pub type MetalFp32Optimizer = (prim::PrimitiveOptimizer, matmul::MetalMatMulOptimizer);
+pub type MetalFp32Compiler = (prim::PrimitiveCompiler, matmul::MetalMatMulCompiler);
 
 #[cfg(test)]
 mod tests;

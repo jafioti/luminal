@@ -60,6 +60,7 @@ pub fn delete_loads<M: SerializeModule>(model: &M, graph: &mut Graph) {
                 remap_id(*node, &graph.id_remap),
                 petgraph::Direction::Incoming,
             )
+            .filter(|e| !e.weight().is_schedule())
             .map(|e| e.source())
             .collect::<Vec<_>>()
         {

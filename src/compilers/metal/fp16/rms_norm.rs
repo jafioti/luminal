@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use half::f16;
 use petgraph::stable_graph::NodeIndex;
@@ -33,11 +33,7 @@ impl PartialEq for MetalRMSNorm {
 }
 
 impl MetalRMSNorm {
-    fn new(
-        dev: Device,
-        inp_shape: ShapeTracker,
-        kernels: &mut HashMap<String, ComputePipelineState>,
-    ) -> Self {
+    fn new(dev: Device, inp_shape: ShapeTracker) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(inp_shape);
         let mut square_mean_code = format!(
             "
@@ -63,12 +59,6 @@ kernel void mkernel(device half *inp [[buffer(0)]], device float *out [[buffer(1
         let square_mean_code_name = format!("kernel_{}", hash(&square_mean_code));
         square_mean_code = square_mean_code.replace("mkernel", &square_mean_code_name);
 
-        if !kernels.contains_key(&square_mean_code_name) {
-            kernels.insert(
-                square_mean_code_name.clone(),
-                compile_function(&square_mean_code_name, &square_mean_code, &dev),
-            );
-        }
         let mut meaned_shape = inp_shape;
         let meaned_size = meaned_shape.remove_dim(meaned_shape.len() - 1);
         meaned_shape.expand(meaned_shape.len(), meaned_size);
@@ -88,15 +78,9 @@ kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]
         let rms_norm_code_name = format!("kernel_{}", hash(&rms_norm_code));
         rms_norm_code = rms_norm_code.replace("mkernel", &rms_norm_code_name);
 
-        if !kernels.contains_key(&rms_norm_code_name) {
-            kernels.insert(
-                rms_norm_code_name.clone(),
-                compile_function(&rms_norm_code_name, &rms_norm_code, &dev),
-            );
-        }
         Self(
-            kernels[&square_mean_code_name].clone(),
-            kernels[&rms_norm_code_name].clone(),
+            compile_function(&square_mean_code_name, &square_mean_code, &dev),
+            compile_function(&rms_norm_code_name, &rms_norm_code, &dev),
             dev,
             inp_shape,
         )
@@ -252,7 +236,6 @@ impl Compiler for RMSNormCompiler {
             s.op().ty::<MetalMul>().ptr(&mut mul),
         );
 
-        let mut kernels = HashMap::new();
         for _ in s.search(graph) {
             if graph.no_delete.contains(&add)
                 || graph.no_delete.contains(&sqrt)
@@ -275,7 +258,7 @@ impl Compiler for RMSNormCompiler {
 
             // Insert RMSNorm op
             let rms_norm = graph
-                .add_op(MetalRMSNorm::new(dev.clone(), x.1, &mut kernels))
+                .add_op(MetalRMSNorm::new(dev.clone(), x.1))
                 .input(x.0, 0, x.1)
                 .finish();
 

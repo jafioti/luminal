@@ -1,7 +1,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use crate::{
-    compiler::Compiler,
+    compiler_utils::Compiler,
     graph_tensor::GraphTensor,
     op::{self, InputTensor, Operator},
     shape::*,
@@ -17,13 +17,15 @@ use itertools::Itertools;
 use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Direction};
 use regex::Regex;
 
+pub type MainGraph = StableGraph<Box<dyn Operator>, Dependency>;
+
 #[derive(Debug, Default)]
 pub struct Graph {
     pub tensors: HashMap<(NodeIndex, u8), Tensor>,
     pub id_remap: HashMap<NodeIndex, NodeIndex>,
     pub dyn_map: HashMap<char, usize>,
     /// Edge weights: (Input index, Output index, Input shape)
-    pub graph: StableGraph<Box<dyn Operator>, Dependency>,
+    pub graph: MainGraph,
     pub no_delete: HashSet<NodeIndex>,
     /// Mark tensors that need to be retrieved later (mostly for optimizers to insert copy back calls, the graph itself doesn't treat these differently)
     pub to_retrieve: HashSet<NodeIndex>,
@@ -105,7 +107,7 @@ impl Graph {
     /// Compile the graph using the given compiler
     pub fn compile<C: Compiler>(&mut self, compiler: C) {
         compiler.compile(self);
-        // self.toposort();
+        self.toposort();
     }
 
     /// Refresh the internally sorted graph

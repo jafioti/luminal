@@ -1,12 +1,12 @@
-mod fp32;
 use std::{
     any::{Any, TypeId},
     collections::{hash_map::DefaultHasher, HashSet},
     hash::{Hash, Hasher},
 };
 
+mod fp32;
 pub use fp32::*;
-mod fp16;
+pub mod fp16;
 pub use fp16::*;
 use itertools::Itertools;
 use metal_rs::*;
