@@ -172,12 +172,14 @@ impl Graph {
     /// Execute the graph.
     pub fn execute(&mut self) {
         // Track the number of views pointing to each tensor so we know when to clear
+        self.linearized_graph = None;
         if self.linearized_graph.is_none() {
             self.toposort();
         }
         let mut remaining_consumers = self.create_remaining_customers_map();
 
-        for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
+        for (i, (node, src_ids)) in self.linearized_graph.as_ref().unwrap().iter().enumerate() {
+            // println!("OP {i}");
             if self.tensors.contains_key(&(*node, 0)) {
                 continue;
             }

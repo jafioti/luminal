@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use metal_rs::{Buffer, CommandBufferRef, CommandQueue, Device};
+use metal_rs::{Buffer, CommandBuffer, CommandQueue, Device};
 use petgraph::{
     algo::is_cyclic_directed,
     stable_graph::NodeIndex,
@@ -18,13 +18,17 @@ use crate::{
 
 use super::prim::MetalKernelWrapper;
 
-#[derive(Default)]
+type State = Arc<Mutex<Option<CommandBuffer>>>;
+
+#[derive(Default, Debug)]
 pub struct CommonBufferCompiler;
 
 impl Compiler for CommonBufferCompiler {
     fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         let mut already_added_nodes = HashSet::new();
+        let mut queue = dev.new_command_queue();
+        let mut num_buffers_on_queue = 0;
         for node in graph.graph.node_indices().collect::<Vec<_>>() {
             if !already_added_nodes.contains(&node)
                 && graph
@@ -35,12 +39,18 @@ impl Compiler for CommonBufferCompiler {
                     .is_some()
             {
                 // Start a set from this node
-                let b = Arc::new(Mutex::new((
-                    std::ptr::null::<CommandBufferRef>(),
-                    dev.new_command_queue(),
-                )));
+                if num_buffers_on_queue >= 63 {
+                    num_buffers_on_queue = 0;
+                    queue = dev.new_command_queue();
+                } else {
+                    num_buffers_on_queue += 1;
+                }
+                let b = Arc::new(Mutex::new(None));
                 let setup = graph
-                    .add_op(SetupMetalKernels { buffer: b.clone() })
+                    .add_op(SetupMetalKernels {
+                        buffer: b.clone(),
+                        queue: queue.clone(),
+                    })
                     .finish();
                 let exec = graph
                     .add_op(ExecuteMetalKernels { buffer: b.clone() })
@@ -82,7 +92,7 @@ impl Compiler for CommonBufferCompiler {
 #[allow(clippy::too_many_arguments)]
 fn build_set_from_node(
     node: NodeIndex,
-    buffer: Arc<Mutex<(*const CommandBufferRef, CommandQueue)>>,
+    buffer: State,
     dev: &Device,
     current_set: &mut HashSet<NodeIndex>,
     already_added_nodes: &mut HashSet<NodeIndex>,
@@ -113,67 +123,68 @@ fn build_set_from_node(
     });
     current_set.insert(node);
     already_added_nodes.insert(node);
-    // Add incoming
-    for node in graph
-        .graph
-        .edges_directed(node, Direction::Incoming)
-        .filter(|e| !e.weight().is_schedule())
-        .map(|e| e.source())
-        .filter(|n| !already_added_nodes.contains(n))
-        .collect::<Vec<_>>()
-    {
-        if graph
-            .graph
-            .node_weight(node)
-            .unwrap()
-            .custom("metal")
-            .is_some()
-        {
-            build_set_from_node(
-                node,
-                buffer.clone(),
-                dev,
-                current_set,
-                already_added_nodes,
-                graph,
-                setup_node,
-                exec_node,
-            );
-        }
-    }
-    // Add outgoing
-    for node in graph
-        .graph
-        .edges_directed(node, Direction::Outgoing)
-        .filter(|e| !e.weight().is_schedule())
-        .map(|e| e.target())
-        .filter(|n| !already_added_nodes.contains(n))
-        .collect::<Vec<_>>()
-    {
-        if graph
-            .graph
-            .node_weight(node)
-            .unwrap()
-            .custom("metal")
-            .is_some()
-        {
-            build_set_from_node(
-                node,
-                buffer.clone(),
-                dev,
-                current_set,
-                already_added_nodes,
-                graph,
-                setup_node,
-                exec_node,
-            );
-        }
-    }
+    // // Add incoming
+    // for node in graph
+    //     .graph
+    //     .edges_directed(node, Direction::Incoming)
+    //     .filter(|e| !e.weight().is_schedule())
+    //     .map(|e| e.source())
+    //     .filter(|n| !already_added_nodes.contains(n))
+    //     .collect::<Vec<_>>()
+    // {
+    //     if graph
+    //         .graph
+    //         .node_weight(node)
+    //         .unwrap()
+    //         .custom("metal")
+    //         .is_some()
+    //     {
+    //         build_set_from_node(
+    //             node,
+    //             buffer.clone(),
+    //             dev,
+    //             current_set,
+    //             already_added_nodes,
+    //             graph,
+    //             setup_node,
+    //             exec_node,
+    //         );
+    //     }
+    // }
+    // // Add outgoing
+    // for node in graph
+    //     .graph
+    //     .edges_directed(node, Direction::Outgoing)
+    //     .filter(|e| !e.weight().is_schedule())
+    //     .map(|e| e.target())
+    //     .filter(|n| !already_added_nodes.contains(n))
+    //     .collect::<Vec<_>>()
+    // {
+    //     if graph
+    //         .graph
+    //         .node_weight(node)
+    //         .unwrap()
+    //         .custom("metal")
+    //         .is_some()
+    //     {
+    //         build_set_from_node(
+    //             node,
+    //             buffer.clone(),
+    //             dev,
+    //             current_set,
+    //             already_added_nodes,
+    //             graph,
+    //             setup_node,
+    //             exec_node,
+    //         );
+    //     }
+    // }
 }
 
 #[derive(Debug)]
 struct SetupMetalKernels {
-    buffer: Arc<Mutex<(*const CommandBufferRef, CommandQueue)>>,
+    queue: CommandQueue,
+    buffer: State,
 }
 
 impl PartialEq for SetupMetalKernels {
@@ -185,15 +196,14 @@ impl PartialEq for SetupMetalKernels {
 impl Operator for SetupMetalKernels {
     fn process(&self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let mut buffer = self.buffer.lock().unwrap();
-        // buffer.2 = unsafe { objc_autoreleasePoolPush() };
-        buffer.0 = buffer.1.new_command_buffer();
+        *buffer = Some(self.queue.new_command_buffer().to_owned());
         vec![]
     }
 }
 
 #[derive(Debug)]
 struct ExecuteMetalKernels {
-    buffer: Arc<Mutex<(*const CommandBufferRef, CommandQueue)>>,
+    buffer: State,
 }
 
 impl PartialEq for ExecuteMetalKernels {
@@ -204,12 +214,10 @@ impl PartialEq for ExecuteMetalKernels {
 
 impl Operator for ExecuteMetalKernels {
     fn process(&self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let buffer = self.buffer.lock().unwrap();
-        unsafe {
-            buffer.0.as_ref().unwrap().commit();
-            buffer.0.as_ref().unwrap().wait_until_completed();
-            // objc_autoreleasePoolPop(buffer.2); // Don't know why, but this causes a segfault (I think it frees the command buffer before use or something)
-        };
+        let mut buffer = self.buffer.lock().unwrap();
+        buffer.as_ref().unwrap().commit();
+        buffer.as_ref().unwrap().wait_until_completed();
+        drop(buffer.take());
         vec![]
     }
 }
@@ -218,7 +226,7 @@ impl Operator for ExecuteMetalKernels {
 struct MetalKernelOperation {
     wrapper: Box<MetalKernelWrapper>,
     dev: Device,
-    buffer: Arc<Mutex<(*const CommandBufferRef, CommandQueue)>>,
+    buffer: State,
 }
 
 impl PartialEq for MetalKernelOperation {
@@ -241,7 +249,7 @@ impl Operator for MetalKernelOperation {
                     })
                     .collect::<Vec<_>>(),
                 &self.dev,
-                unsafe { self.buffer.lock().unwrap().0.as_ref().unwrap() },
+                self.buffer.lock().unwrap().as_ref().unwrap(),
             )
             .into_iter()
             .map(|b| Tensor { data: Box::new(b) })

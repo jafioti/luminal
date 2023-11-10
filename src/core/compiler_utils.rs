@@ -29,7 +29,8 @@ impl Compiler for () {
     fn compile(&self, _: &mut Graph) {}
 }
 
-pub struct TimedCompiler<C>(C);
+/// Wrap this around a compiler to measure the time it takes to compile
+pub struct TimedCompiler<C: Compiler + Debug>(C);
 
 impl<C: Compiler + Debug> Compiler for TimedCompiler<C> {
     fn compile(&self, graph: &mut Graph) {
@@ -40,7 +41,7 @@ impl<C: Compiler + Debug> Compiler for TimedCompiler<C> {
     }
 }
 
-impl<C: Default> Default for TimedCompiler<C> {
+impl<C: Default + Compiler + Debug> Default for TimedCompiler<C> {
     fn default() -> Self {
         Self(C::default())
     }

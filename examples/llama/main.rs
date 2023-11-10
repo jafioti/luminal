@@ -46,7 +46,7 @@ fn main() {
     }
 
     #[cfg(feature="metal")]
-    cx1.compile(<(MetalFp16Compiler, GenericCompiler, DepthFirst)>::default());
+    cx1.compile(<(MetalFp16Compiler, GenericCompiler,)>::default());
     #[cfg(feature="cuda")]
     cx1.compile(<(CudaFp16Optimizer, GenericCompiler)>::default());
     #[cfg(all(not(feature="cuda"), not(feature="metal")))]
@@ -74,12 +74,14 @@ fn main() {
         v.set_type(std::any::TypeId::of::<cudarc::driver::CudaSlice<half::f16>>());
     }
     #[cfg(feature="metal")]
-    cx2.compile(<(MetalFp16Compiler, GenericCompiler, DepthFirst)>::default());
+    cx2.compile(<(MetalFp16Compiler, GenericCompiler,)>::default());
     #[cfg(feature="cuda")]
     cx2.compile(<(GenericCompiler, CudaFp16Optimizer)>::default());
     #[cfg(all(not(feature="cuda"), not(feature="metal")))]
     cx2.compile(<(GenericCompiler, CPUCompiler)>::default());
     delete_loads(&kv_model, &mut cx2);
+
+    // cx2.display();
 
     println!("Inferencing...");
     // First pass
