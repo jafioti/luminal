@@ -82,12 +82,9 @@ mod tests {
         let a = cx.new_tensor::<R1<3>>("Input");
 
         let model: Linear<3, 4> = Linear::initialize(&mut cx);
-        let b = model.forward(a);
-        let batch_out = model.forward(batch);
+        let b = model.forward(a).retrieve();
+        let batch_out = model.forward(batch).retrieve();
 
-        b.mark();
-        a.mark();
-        batch_out.mark();
         a.set(vec![1.0, 2.0, 3.0]);
         batch.set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
 

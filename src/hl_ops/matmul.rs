@@ -103,7 +103,7 @@ mod tests {
         let b = cx.new_tensor::<R2<3, 2>>("Input");
         b.set(b_vec.clone());
         let c = a.matmul(b);
-        c.mark();
+        c.retrieve();
 
         cx.execute();
 
@@ -124,7 +124,7 @@ mod tests {
         let b = cx.new_tensor::<R2<3, 3>>("Input");
         b.set(b_data.clone());
         let c = a.matmul(b);
-        c.mark();
+        c.retrieve();
 
         cx.execute();
 
@@ -145,7 +145,7 @@ mod tests {
         let b = cx.new_tensor::<R2<2, 4>>("Input");
         b.set(b_data.clone());
         let c = a.matmul(b);
-        c.mark();
+        c.retrieve();
 
         cx.execute();
 
@@ -166,7 +166,7 @@ mod tests {
         let b = cx.new_tensor::<R3<1, 2, 3>>("Input");
         b.set(b_data.clone());
         let c: GraphTensor<R3<1, 2, 2>> = a.matmul(b.permute::<R3<1, 3, 2>, _>());
-        c.mark();
+        c.retrieve();
 
         cx.execute();
 
@@ -188,7 +188,7 @@ mod tests {
         let b = cx.new_tensor::<(LConst<1>, Dyn<'b'>, LConst<3>)>("Input");
         b.set_dyn(b_data.clone(), vec![1, 2, 3]);
         let c = a.matmul(b);
-        c.mark();
+        c.retrieve();
 
         cx.execute();
 

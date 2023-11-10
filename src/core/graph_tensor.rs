@@ -31,14 +31,22 @@ impl<S: Shape> GraphTensor<S> {
         }
     }
 
+    /// Get remapped graph id of this node
     pub fn id(&self) -> NodeIndex {
         remap_id(self.id, &self.graph().id_remap)
     }
 
-    /// Mark this tensor to be retrieved later
-    pub fn mark(&self) {
+    /// Mark this tensor to not be deleted
+    pub fn keep(self) -> Self {
         self.graph().no_delete.insert(self.id());
+        self
+    }
+
+    /// Mark this tensor to be retrieved later
+    pub fn retrieve(self) -> Self {
+        self.keep();
         self.graph().to_retrieve.insert(self.id());
+        self
     }
 
     /// Remove this tensor's data from the graph.
@@ -46,15 +54,10 @@ impl<S: Shape> GraphTensor<S> {
         self.graph().tensors.remove(&(self.id(), 0));
     }
 
-    /// Mark this tensor to not be deleted, but not retrieved either
-    pub fn mark_no_delete(&self) {
-        self.graph().no_delete.insert(self.id());
-    }
-
-    /// Get the value of the tensor (if the graph was executed)
-    pub fn retrieve(&self) -> Option<&Tensor> {
-        self.graph().get_tensor_ref(self.id, 0)
-    }
+    // /// Get the value of the tensor (if the graph was executed)
+    // pub fn retrieve(&self) -> Option<&Tensor> {
+    //     self.graph().get_tensor_ref(self.id, 0)
+    // }
 
     #[allow(clippy::mut_from_ref)]
     pub fn graph(&self) -> &mut Graph {
@@ -62,7 +65,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Set the value of the tensor, with dynamic dimensions.
-    pub fn set_dyn<T: Data + Clone>(&self, data: T, shape: Vec<usize>) {
+    pub fn set_dyn<T: Data + Clone>(self, data: T, shape: Vec<usize>) -> Self {
         // Report dyn dim values to graph dyn map
         for (d, s) in S::realized_shape().iter().zip(shape.iter()) {
             if let Dim::Unknown(c) = d {
@@ -83,6 +86,7 @@ impl<S: Shape> GraphTensor<S> {
                 data: Box::new(data.clone()),
             }]
         });
+        self
     }
 
     /// Set the name of a tensor
@@ -122,7 +126,7 @@ impl<S: Shape> GraphTensor<S> {
 
     pub fn dyn_data(&self, dyn_dim_map: &HashMap<char, usize>) -> Vec<f32> {
         let st = self.shape.resolve_global_dyn_dims(dyn_dim_map);
-        let tensor = self.retrieve().unwrap();
+        let tensor = self.graph().get_tensor_ref(self.id, 0).unwrap();
         let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; st.n_elements()];
         let ind = st.indexer();
@@ -138,7 +142,7 @@ impl<S: Shape> GraphTensor<S> {
 
 impl<S: ConstShape> GraphTensor<S> {
     /// Set the value of the tensor matching the constant shape
-    pub fn set<T: Data + Clone>(&self, data: T) {
+    pub fn set<T: Data + Clone>(self, data: T) -> Self {
         let node = self
             .graph()
             .graph
@@ -153,11 +157,12 @@ impl<S: ConstShape> GraphTensor<S> {
                 data: Box::new(data.clone()),
             }]
         });
+        self
     }
 
     /// Get the contiguous data of the tensor
-    pub fn data(self) -> Vec<f32> {
-        let tensor = self.retrieve().unwrap();
+    pub fn data(&self) -> Vec<f32> {
+        let tensor = self.graph().get_tensor_ref(self.id, 0).unwrap();
         let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; self.shape.n_elements()];
         let ind = self.shape.indexer();

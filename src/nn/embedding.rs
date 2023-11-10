@@ -132,9 +132,9 @@ mod tests {
         let b = model.forward(a);
         let batch_out = model.forward(batch);
 
-        b.mark();
-        a.mark();
-        batch_out.mark();
+        b.retrieve();
+        a.retrieve();
+        batch_out.retrieve();
         a.set(vec![1.0, 0.0, 1.0]);
         batch.set(vec![1.0, 0.0, 2.0, 1.0, 0.0, 1.0]);
 

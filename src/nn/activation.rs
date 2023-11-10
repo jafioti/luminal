@@ -182,8 +182,8 @@ mod tests {
 
         a.set(vec![1.0, 2.0, 3.0]);
         batch.set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
-        b.mark();
-        batch_out.mark();
+        b.retrieve();
+        batch_out.retrieve();
         cx.execute();
 
         let unoptimized_b = b.data();

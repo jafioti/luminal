@@ -178,8 +178,7 @@ impl Graph {
         }
         let mut remaining_consumers = self.create_remaining_customers_map();
 
-        for (i, (node, src_ids)) in self.linearized_graph.as_ref().unwrap().iter().enumerate() {
-            // println!("OP {i}");
+        for (node, src_ids) in self.linearized_graph.as_ref().unwrap() {
             if self.tensors.contains_key(&(*node, 0)) {
                 continue;
             }

@@ -488,7 +488,7 @@ mod tests {
         let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(vec![1., 2., 3., 1., 2., 3.]);
         let b = a.reshape::<R1<6>>();
-        b.mark();
+        b.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -504,7 +504,7 @@ mod tests {
         let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(vec![1., 2., 3., 1., 2., 3.]);
         let b: GraphTensor<R2<3, 2>> = a.permute();
-        b.mark();
+        b.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -520,7 +520,7 @@ mod tests {
         let a = cx.new_tensor::<R1<3>>("Input");
         a.set(vec![1., 2., 3.]);
         let b: GraphTensor<R2<3, 2>> = a.expand();
-        b.mark();
+        b.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -536,7 +536,7 @@ mod tests {
         let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(vec![1., 2., 3., 1., 2., 3.]);
         let b = a.slice((1.., ..));
-        b.mark();
+        b.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -555,7 +555,7 @@ mod tests {
         let a = cx.new_tensor::<R1<3>>("Input");
         a.set(vec![1., 2., 3.]);
         let b = a.log_2();
-        b.mark();
+        b.retrieve();
         cx.execute();
 
         assert_close(
@@ -574,7 +574,7 @@ mod tests {
         let a = cx.new_tensor::<R1<3>>("Input");
         a.set(vec![1., 2., 3.]);
         let b = a.exp_2();
-        b.mark();
+        b.retrieve();
         cx.execute();
 
         assert_close(
@@ -592,7 +592,7 @@ mod tests {
         let a = cx.new_tensor::<R1<3>>("Input");
         a.set(vec![1., 2., 3.]);
         let b = a.recip();
-        b.mark();
+        b.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -608,7 +608,7 @@ mod tests {
         let a = cx.new_tensor::<R1<3>>("Input");
         a.set(vec![1., 2., 3.]);
         let b = a.sin();
-        b.mark();
+        b.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -624,7 +624,7 @@ mod tests {
         let a = cx.new_tensor::<R1<3>>("Input");
         a.set(vec![1., 2., 3.]);
         let b = a.sqrt();
-        b.mark();
+        b.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -644,7 +644,7 @@ mod tests {
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![1., 2., 3.]);
         let c = a + b;
-        c.mark();
+        c.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -663,7 +663,7 @@ mod tests {
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![1., 2., 3.]);
         let c = a - b;
-        c.mark();
+        c.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -682,7 +682,7 @@ mod tests {
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![1., 2., 3.]);
         let c = a * b;
-        c.mark();
+        c.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -702,7 +702,7 @@ mod tests {
         b.set(vec![1., 2., 3., -1., 3., 0.]);
         let c = a.expand::<R3<3, 2, 3>, crate::prelude::Axis<2>>()
             * b.expand::<R3<3, 2, 3>, crate::prelude::Axis<2>>();
-        c.mark();
+        c.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -722,7 +722,7 @@ mod tests {
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![1., 2., 3.]);
         let c = a / b;
-        c.mark();
+        c.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -741,7 +741,7 @@ mod tests {
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![1., 2., -2.]);
         let c = a.max(b);
-        c.mark();
+        c.retrieve();
 
         cx.execute();
 
@@ -761,7 +761,7 @@ mod tests {
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![1., 2., 3.]);
         let c = a % b;
-        c.mark();
+        c.retrieve();
         cx.execute();
 
         // No dfdx equivalent
@@ -786,9 +786,9 @@ mod tests {
         let b = a.sum_reduce::<_, crate::prelude::Axis<1>>();
         let c = a.sum_reduce::<_, crate::prelude::Axis<0>>();
         let d = a.sum_reduce::<_, crate::prelude::Axis<2>>();
-        b.mark();
-        c.mark();
-        d.mark();
+        b.retrieve();
+        c.retrieve();
+        d.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -810,7 +810,7 @@ mod tests {
             34.4, -96.0, 144.0, 43.0, 560.0, 180.0, 39.6, -120.0, 180.0, 49.5, 700.0, 225.0,
         ]);
         let b = a.sum_reduce::<_, crate::prelude::Axis<3>>();
-        b.mark();
+        b.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -838,9 +838,9 @@ mod tests {
         let b = a.max_reduce::<_, crate::prelude::Axis<1>>();
         let c = a.max_reduce::<_, crate::prelude::Axis<0>>();
         let d = a.max_reduce::<_, crate::prelude::Axis<2>>();
-        b.mark();
-        c.mark();
-        d.mark();
+        b.retrieve();
+        c.retrieve();
+        d.retrieve();
 
         cx.execute();
 

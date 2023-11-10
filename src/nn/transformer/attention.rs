@@ -229,7 +229,7 @@ mod tests {
             vec![-1.0, 2.0, 3.0, 3.0, 3.0, -1.0, -1.0, 2.0, 3.0],
             vec![3, 3],
         );
-        b.mark();
+        b.retrieve();
 
         cx.execute();
 

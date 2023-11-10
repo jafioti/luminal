@@ -18,16 +18,17 @@ use super::assert_close;
 #[test]
 fn test_movement() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<(Const<3>, Dyn<'a'>, Const<2>)>("Input");
+    let a = cx
+        .new_tensor::<(Const<3>, Dyn<'a'>, Const<2>)>("Input")
+        .set_dyn(
+            vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.],
+            vec![3, 2, 2],
+        );
     let b = a
         .reshape::<(Const<6>, Dyn<'a'>)>()
-        .permute::<_, Axes2<1, 0>>();
-
-    a.set_dyn(
-        vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.],
-        vec![3, 2, 2],
-    );
-    b.mark();
+        .permute::<_, Axes2<1, 0>>()
+        .keep()
+        .retrieve();
 
     cx.execute();
 
@@ -45,12 +46,13 @@ fn test_movement() {
 #[test]
 fn test_matmul() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<(Dyn<'a'>, Const<3>)>("Input");
-    a.set_dyn(vec![1., 2., 3., 1., 2., 3.], vec![2, 3]);
-    let b = cx.new_tensor::<R2<3, 3>>("Input");
-    b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
-    let c = a.matmul(b);
-    c.mark();
+    let a = cx
+        .new_tensor::<(Dyn<'a'>, Const<3>)>("Input")
+        .set_dyn(vec![1., 2., 3., 1., 2., 3.], vec![2, 3]);
+    let b = cx
+        .new_tensor::<R2<3, 3>>("Input")
+        .set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
+    let c = a.matmul(b).retrieve();
 
     cx.execute();
 
@@ -66,15 +68,16 @@ fn test_matmul() {
 #[test]
 fn test_batch_matmul() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<(Dyn<'a'>, Dyn<'b'>, Const<2>)>("Input");
-    a.set_dyn(
-        vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.],
-        vec![2, 3, 2],
-    );
-    let b = cx.new_tensor::<R2<2, 4>>("Input");
-    b.set(vec![1., 2., 3., 1., 1., 2., 3., 1.]);
-    let c = a.matmul(b);
-    c.mark();
+    let a = cx
+        .new_tensor::<(Dyn<'a'>, Dyn<'b'>, Const<2>)>("Input")
+        .set_dyn(
+            vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.],
+            vec![2, 3, 2],
+        );
+    let b = cx
+        .new_tensor::<R2<2, 4>>("Input")
+        .set(vec![1., 2., 3., 1., 1., 2., 3., 1.]);
+    let c = a.matmul(b).retrieve();
 
     cx.execute();
 
@@ -93,17 +96,17 @@ fn test_batch_matmul() {
 fn test_feedforward() {
     // Test single and batch, unoptimized and optimized
     let mut cx = Graph::new();
-    let batch = cx.new_tensor::<(Dyn<'a'>, Const<3>)>("Input");
+    let batch = cx
+        .new_tensor::<(Dyn<'a'>, Const<3>)>("Input")
+        .set_dyn(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0], vec![2, 3]);
     let model: (Linear<3, 4>, ReLU, Linear<4, 2>) = InitModule::initialize(&mut cx);
     model
         .0
         .weight
         .set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
     model.2.weight.set(vec![1., 2., 3., 1., 2., 3., 1., 2.]);
-    let batch_out = model.forward(batch);
+    let batch_out = model.forward(batch).retrieve();
 
-    batch.set_dyn(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0], vec![2, 3]);
-    batch_out.mark();
     cx.execute();
 
     let unoptimized_batch_out = batch_out.dyn_data(&cx.dyn_map);

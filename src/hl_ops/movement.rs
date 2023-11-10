@@ -175,7 +175,7 @@ mod tests {
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![2.30434, 2.2343113, 1.4393]);
         let c = a.concat_along::<R1<7>, crate::prelude::Axis<0>, _>(b);
-        c.mark();
+        c.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -196,8 +196,8 @@ mod tests {
         b.set(vec![2.30434, 2.2343113, 1.4393, 482.4312, 8.1234, 54.2054]);
         let c = a.concat_along::<R2<3, 4>, Axis<1>, _>(b);
         let d = a.concat_along::<R2<6, 2>, Axis<0>, _>(b);
-        c.mark();
-        d.mark();
+        c.retrieve();
+        d.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -230,7 +230,7 @@ mod tests {
         let a = cx.new_tensor::<R2<3, 2>>("Input");
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
         let b = a.pad::<R2<3, 4>>(vec![(0, 0), (0, 2)]);
-        b.mark();
+        b.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -258,7 +258,7 @@ mod tests {
         let a = cx.new_tensor::<R2<3, 2>>("Input");
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
         let b = a.slice((.., ..1)).realize::<R2<3, 1>>();
-        b.mark();
+        b.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -279,7 +279,7 @@ mod tests {
         let x1 = a.slice((.., ..1)).contiguous();
         let x2 = a.slice((.., 1..)).contiguous();
         let c = (-x2).concat_along::<R2<3, 2>, Axis<1>, _>(x1);
-        c.mark();
+        c.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();

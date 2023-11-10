@@ -93,7 +93,7 @@ mod tests {
         let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(a_data.clone());
         let b = a.sum_reduce::<_, LAxis<1>>();
-        b.mark();
+        b.retrieve();
 
         cx.execute();
 
@@ -111,7 +111,7 @@ mod tests {
         let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(a_data.clone());
         let b = a.max_reduce::<_, LAxis<1>>();
-        b.mark();
+        b.retrieve();
 
         cx.execute();
 
@@ -129,7 +129,7 @@ mod tests {
         let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(a_data.clone());
         let b = a.mean_reduce::<_, LAxis<1>>();
-        b.mark();
+        b.retrieve();
 
         cx.execute();
 

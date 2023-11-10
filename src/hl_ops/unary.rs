@@ -147,7 +147,7 @@ mod tests {
         let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(a_data.clone());
         let b = a.exp();
-        b.mark();
+        b.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -165,8 +165,8 @@ mod tests {
         a.set(a_data.clone());
         let b = a.layer_norm::<0>();
         let c = a.layer_norm::<1>();
-        b.mark();
-        c.mark();
+        b.retrieve();
+        c.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -185,7 +185,7 @@ mod tests {
         let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(a_data.clone());
         let b = a.softmax::<1>();
-        b.mark();
+        b.retrieve();
 
         cx.execute();
 
@@ -204,7 +204,7 @@ mod tests {
         let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(a_data.clone());
         let b = a.sin();
-        b.mark();
+        b.retrieve();
 
         cx.execute();
 
@@ -223,7 +223,7 @@ mod tests {
         let a = cx.new_tensor::<R2<2, 3>>("Input");
         a.set(a_data.clone());
         let b = a.cos();
-        b.mark();
+        b.retrieve();
 
         cx.execute();
 
@@ -240,7 +240,7 @@ mod tests {
         let a = cx.new_tensor::<(Dyn<'a'>, Dyn<'b'>)>("Input");
         a.set_dyn(a_data.clone(), vec![2, 2]);
         let b = a.relu();
-        b.mark();
+        b.retrieve();
 
         cx.execute();
 
@@ -257,7 +257,7 @@ mod tests {
         let a = cx.new_tensor::<(Dyn<'a'>, Dyn<'b'>)>("Input");
         a.set_dyn(a_data.clone(), vec![2, 2]);
         let b = a.sigmoid();
-        b.mark();
+        b.retrieve();
 
         cx.execute();
 
@@ -274,7 +274,7 @@ mod tests {
         let a = cx.new_tensor::<(Dyn<'a'>, Dyn<'b'>)>("Input");
         a.set_dyn(a_data.clone(), vec![2, 2]);
         let b = a.tanh();
-        b.mark();
+        b.retrieve();
 
         cx.execute();
 

@@ -252,7 +252,7 @@ mod tests {
         let trg_data = (0..(20 * 32)).map(|_| rng.gen()).collect::<Vec<f32>>();
         enc.set(enc_data.clone());
         trg.set(trg_data.clone());
-        out1.mark();
+        out1.retrieve();
 
         cx.execute_no_delete();
 
@@ -268,7 +268,7 @@ mod tests {
 
         enc.set(enc_data);
         trg.set(trg_data);
-        out2.mark();
+        out2.retrieve();
 
         cx.compile(<(CPUCompiler, GenericCompiler)>::default());
         cx.execute();

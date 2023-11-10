@@ -18,8 +18,6 @@ use crate::{
 
 use super::prim::MetalKernelWrapper;
 
-type State = Arc<Mutex<Option<CommandBuffer>>>;
-
 #[derive(Default, Debug)]
 pub struct CommonBufferCompiler;
 
@@ -92,7 +90,7 @@ impl Compiler for CommonBufferCompiler {
 #[allow(clippy::too_many_arguments)]
 fn build_set_from_node(
     node: NodeIndex,
-    buffer: State,
+    buffer: Arc<Mutex<Option<CommandBuffer>>>,
     dev: &Device,
     current_set: &mut HashSet<NodeIndex>,
     already_added_nodes: &mut HashSet<NodeIndex>,
@@ -184,7 +182,7 @@ fn build_set_from_node(
 #[derive(Debug)]
 struct SetupMetalKernels {
     queue: CommandQueue,
-    buffer: State,
+    buffer: Arc<Mutex<Option<CommandBuffer>>>,
 }
 
 impl PartialEq for SetupMetalKernels {
@@ -203,7 +201,7 @@ impl Operator for SetupMetalKernels {
 
 #[derive(Debug)]
 struct ExecuteMetalKernels {
-    buffer: State,
+    buffer: Arc<Mutex<Option<CommandBuffer>>>,
 }
 
 impl PartialEq for ExecuteMetalKernels {
@@ -226,7 +224,7 @@ impl Operator for ExecuteMetalKernels {
 struct MetalKernelOperation {
     wrapper: Box<MetalKernelWrapper>,
     dev: Device,
-    buffer: State,
+    buffer: Arc<Mutex<Option<CommandBuffer>>>,
 }
 
 impl PartialEq for MetalKernelOperation {

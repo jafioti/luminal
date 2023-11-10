@@ -119,7 +119,7 @@ mod tests {
         let b = model.forward(a);
 
         a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![2, 3]);
-        b.mark();
+        b.retrieve();
 
         cx.execute();
 

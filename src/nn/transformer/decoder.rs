@@ -247,7 +247,7 @@ mod tests {
 
         a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![2, 3]);
         e.set_dyn(vec![-1., 2., 3., 3., 3., -1., -1., 2., 3.], vec![3, 3]);
-        b.mark();
+        b.retrieve();
 
         cx.execute();
 

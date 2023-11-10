@@ -7,7 +7,7 @@ fn main() {
     let b = model.forward(a);
 
     a.set(vec![1., 2., 3., 4.]);
-    b.mark();
+    b.keep().retrieve();
     cx.execute_debug();
 
     println!("B: {:?}", b.data());
