@@ -184,7 +184,7 @@ fn test_square() {
     );
     let d_b = d_a.clone() * d_a;
 
-    assert_close(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
+    assert_close(&b.data(), &d_b.as_vec());
 }
 
 #[test]
@@ -231,7 +231,7 @@ fn test_mul2() {
     let d_b = d_dev.tensor(0.57735026);
     let d_c = d_a * d_b.broadcast::<_, dfdx::shapes::Axes4<0, 1, 2, 3>>();
 
-    assert_close(&c.dyn_data(&cx.dyn_map), &d_c.as_vec());
+    assert_close(&c.data(), &d_c.as_vec());
 }
 
 #[test]
@@ -622,5 +622,5 @@ fn test_transformer_encoder_block() {
     );
     let d_b = d_model.forward(d_a);
 
-    assert_close(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
+    assert_close(&b.data(), &d_b.as_vec());
 }

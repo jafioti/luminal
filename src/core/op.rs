@@ -543,7 +543,7 @@ mod tests {
         let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 3.]]);
         let d_b = d_a.slice((1.., ..));
 
-        assert_close(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
+        assert_close(&b.data(), &d_b.as_vec());
     }
 
     // Unary op tests

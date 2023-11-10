@@ -40,7 +40,7 @@ fn test_movement() {
     ]);
     let d_b = d_a.reshape::<Rank2<6, 2>>().permute::<Rank2<2, 6>, _>();
 
-    assert_close(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
+    assert_close(&b.data(), &d_b.as_vec());
 }
 
 #[test]
@@ -61,7 +61,7 @@ fn test_matmul() {
     let d_b = d_dev.tensor([[1., 2., 3.], [1., 2., 3.], [1., 2., 3.]]);
     let d_c = d_a.matmul(d_b);
 
-    let r = c.dyn_data(&cx.dyn_map);
+    let r = c.data();
     assert_close(&r, &d_c.as_vec());
 }
 
@@ -89,7 +89,7 @@ fn test_batch_matmul() {
     let d_b = d_dev.tensor([[1., 2., 3., 1.], [1., 2., 3., 1.]]);
     let d_c = d_a.matmul(d_b);
 
-    assert_close(&c.dyn_data(&cx.dyn_map), &d_c.as_vec());
+    assert_close(&c.data(), &d_c.as_vec());
 }
 
 #[test]
@@ -109,12 +109,12 @@ fn test_feedforward() {
 
     cx.execute();
 
-    let unoptimized_batch_out = batch_out.dyn_data(&cx.dyn_map);
+    let unoptimized_batch_out = batch_out.data();
     batch_out.drop();
 
     cx.compile(<CPUCompiler>::default());
     cx.execute();
-    assert_close(&unoptimized_batch_out, &batch_out.dyn_data(&cx.dyn_map));
+    assert_close(&unoptimized_batch_out, &batch_out.data());
 
     // Test against dfdx
     let dev = Cpu::default();

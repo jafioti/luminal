@@ -5,7 +5,7 @@ use crate::{
     shape::*,
     tensor::Tensor,
 };
-use std::{any::TypeId, collections::HashMap, marker::PhantomData};
+use std::{any::TypeId, marker::PhantomData};
 
 use petgraph::graph::NodeIndex;
 
@@ -53,11 +53,6 @@ impl<S: Shape> GraphTensor<S> {
     pub fn drop(&self) {
         self.graph().tensors.remove(&(self.id(), 0));
     }
-
-    // /// Get the value of the tensor (if the graph was executed)
-    // pub fn retrieve(&self) -> Option<&Tensor> {
-    //     self.graph().get_tensor_ref(self.id, 0)
-    // }
 
     #[allow(clippy::mut_from_ref)]
     pub fn graph(&self) -> &mut Graph {
@@ -124,8 +119,9 @@ impl<S: Shape> GraphTensor<S> {
         self.graph().no_delete.insert(id);
     }
 
-    pub fn dyn_data(&self, dyn_dim_map: &HashMap<char, usize>) -> Vec<f32> {
-        let st = self.shape.resolve_global_dyn_dims(dyn_dim_map);
+    /// Get the contiguous data of the tensor
+    pub fn data(&self) -> Vec<f32> {
+        let st = self.shape.resolve_global_dyn_dims(&self.graph().dyn_map);
         let tensor = self.graph().get_tensor_ref(self.id, 0).unwrap();
         let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; st.n_elements()];
@@ -158,20 +154,5 @@ impl<S: ConstShape> GraphTensor<S> {
             }]
         });
         self
-    }
-
-    /// Get the contiguous data of the tensor
-    pub fn data(&self) -> Vec<f32> {
-        let tensor = self.graph().get_tensor_ref(self.id, 0).unwrap();
-        let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let mut data = vec![0.; self.shape.n_elements()];
-        let ind = self.shape.indexer();
-        #[allow(unused_mut)]
-        for (i, mut r) in data.iter_mut().enumerate() {
-            if let Some(n) = ind.index(i) {
-                *r = orig_data[n];
-            }
-        }
-        data
     }
 }

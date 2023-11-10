@@ -276,6 +276,6 @@ mod tests {
         );
         let d_b = d_model.forward((d_a, d_e.clone(), d_e));
 
-        assert_close(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
+        assert_close(&b.data(), &d_b.as_vec());
     }
 }

@@ -197,6 +197,6 @@ mod tests {
         let d_b = d_dev.tensor_from_vec(b_data, (DConst::<1>, DConst::<2>, DConst::<3>));
         let d_c = d_a.matmul(d_b);
 
-        assert_close(&c.dyn_data(&cx.dyn_map), &d_c.as_vec());
+        assert_close(&c.data(), &d_c.as_vec());
     }
 }

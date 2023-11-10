@@ -94,7 +94,7 @@ fn main() {
     // First pass
     cx1.execute_debug();
 
-    let out1 = out1.dyn_data(&cx1.dyn_map);
+    let out1 = out1.data();
     input.push(sample_index(&out1[out1.len() - 32_000..]));
     println!(
         "{}",
@@ -127,7 +127,7 @@ fn main() {
         cx2.execute();
         println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
 
-        let o = out.dyn_data(&cx2.dyn_map);
+        let o = out.data();
         out.drop();
         // Sample tokens
         input.push(sample_index(&o));

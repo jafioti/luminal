@@ -247,7 +247,7 @@ mod tests {
         let d_dev = Cpu::default();
         let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<2>));
         let d_b = d_a.relu();
-        assert_close(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
+        assert_close(&b.data(), &d_b.as_vec());
     }
 
     #[test]
@@ -264,7 +264,7 @@ mod tests {
         let d_dev = Cpu::default();
         let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<2>));
         let d_b = d_a.sigmoid();
-        assert_close(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
+        assert_close(&b.data(), &d_b.as_vec());
     }
 
     #[test]
@@ -281,6 +281,6 @@ mod tests {
         let d_dev = Cpu::default();
         let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<2>));
         let d_b = d_a.tanh();
-        assert_close(&b.dyn_data(&cx.dyn_map), &d_b.as_vec());
+        assert_close(&b.data(), &d_b.as_vec());
     }
 }
