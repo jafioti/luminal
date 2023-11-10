@@ -381,7 +381,7 @@ mod tests {
         let b = cx.new_tensor::<R2<3, 3>>("Input");
         b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
         let c = a.matmul(b);
-        c.keep().retrieve();
+        c.retrieve();
 
         cx.execute();
 
@@ -400,7 +400,7 @@ mod tests {
         let b = cx.new_tensor::<R2<3, 3>>("Input");
         b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
         let c = a.matmul(b);
-        c.keep().retrieve();
+        c.retrieve();
 
         cx.execute();
 
@@ -419,7 +419,7 @@ mod tests {
         let b = cx.new_tensor::<R2<3, 4>>("Input");
         b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
         let c = a.matmul(b);
-        c.keep().retrieve();
+        c.retrieve();
 
         cx.execute();
 

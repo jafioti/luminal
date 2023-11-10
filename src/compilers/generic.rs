@@ -241,7 +241,7 @@ mod tests {
         let mut cx = Graph::new();
         let a = cx.new_tensor::<R0>("I");
         let b = a.log_2().exp_2();
-        b.keep().retrieve();
+        b.retrieve();
 
         cx.compile(GenericCompiler::default());
         assert_eq!(cx.graph.node_count(), 1);

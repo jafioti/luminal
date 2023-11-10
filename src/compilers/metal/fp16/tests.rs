@@ -23,7 +23,7 @@ fn test_contiguous() {
     let a = cx.new_tensor::<R2<3, 4>>("Input");
     a.set(data.clone());
     let b = a.permute::<R2<4, 3>, _>().reshape::<R2<12, 1>>();
-    b.keep().retrieve();
+    b.retrieve();
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
 
@@ -43,7 +43,7 @@ fn test_log2() {
     let a = cx.new_tensor::<R1<3>>("Input");
     a.set(data.clone());
     let b = a.log_2();
-    b.keep().retrieve();
+    b.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -64,7 +64,7 @@ fn test_exp2() {
     let a = cx.new_tensor::<R1<3>>("Input");
     a.set(data.clone());
     let b = a.exp_2();
-    b.keep().retrieve();
+    b.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -81,7 +81,7 @@ fn test_recip() {
     let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 4096.]);
     let b = a.recip();
-    b.keep().retrieve();
+    b.retrieve();
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
 
@@ -98,7 +98,7 @@ fn test_sin() {
     let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 3.]);
     let b = a.sin();
-    b.keep().retrieve();
+    b.retrieve();
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
 
@@ -115,7 +115,7 @@ fn test_sqrt() {
     let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 3.]);
     let b = a.sqrt();
-    b.keep().retrieve();
+    b.retrieve();
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
 
@@ -134,7 +134,7 @@ fn test_add() {
     let b = cx.new_tensor::<R1<3>>("Input");
     b.set(vec![1., 2., 3.]);
     let c = a + b;
-    c.keep().retrieve();
+    c.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -155,7 +155,7 @@ fn test_sub() {
     let b = cx.new_tensor::<R1<3>>("Input");
     b.set(vec![1., 2., 3.]);
     let c = a - b;
-    c.keep().retrieve();
+    c.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -178,7 +178,7 @@ fn test_square() {
         .collect::<Vec<f32>>();
     a.set_dyn(data.clone(), vec![1, 10, 4096]);
     let b = a * a;
-    b.keep().retrieve();
+    b.retrieve();
 
     cx.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
     cx.execute();
@@ -207,7 +207,7 @@ fn test_mul() {
     let b = cx.new_tensor::<R1<3>>("Input");
     b.set(vec![1., 2., 3.]);
     let c = a * b;
-    c.keep().retrieve();
+    c.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -233,7 +233,7 @@ fn test_mul2() {
     let b = cx.new_tensor::<R0>("Input");
     b.set(vec![0.57735026]);
     let c = a * b.expand();
-    c.keep().retrieve();
+    c.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -256,7 +256,7 @@ fn test_div() {
     let b = cx.new_tensor::<R1<3>>("Input");
     b.set(vec![1., 2., 3.]);
     let c = a / b;
-    c.keep().retrieve();
+    c.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -277,7 +277,7 @@ fn test_max() {
     let b = cx.new_tensor::<R1<3>>("Input");
     b.set(vec![1., 2., 3.]);
     let c = a.max(b);
-    c.keep().retrieve();
+    c.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -300,7 +300,7 @@ fn test_mod() {
     let b = cx.new_tensor::<R1<3>>("Input");
     b.set(b_data.clone());
     let c = a % b;
-    c.keep().retrieve();
+    c.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -326,11 +326,11 @@ fn test_sum_reduce() {
     let a = cx.new_tensor::<R3<1, 10, 4096>>("Input");
     a.set(data.clone());
     let b = a.sum_reduce::<_, LAxis<2>>();
-    b.keep().retrieve();
+    b.retrieve();
     let c = a.sum_reduce::<_, LAxis<1>>();
-    c.keep().retrieve();
+    c.retrieve();
     let d = a.sum_reduce::<_, LAxis<0>>();
-    d.keep().retrieve();
+    d.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -354,7 +354,7 @@ fn test_sum_reduce2() {
     let a = cx.new_tensor::<R5<1, 32, 10, 10, 128>>("Input");
     a.set(data.clone());
     let d = a.sum_reduce::<_, LAxis<2>>();
-    d.keep().retrieve();
+    d.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -384,11 +384,11 @@ fn test_max_reduce() {
     let a = cx.new_tensor::<R3<1, 10, 4096>>("Input");
     a.set(data.clone());
     let b = a.max_reduce::<_, LAxis<2>>();
-    b.keep().retrieve();
+    b.retrieve();
     let c = a.max_reduce::<_, LAxis<1>>();
-    c.keep().retrieve();
+    c.retrieve();
     let d = a.max_reduce::<_, LAxis<0>>();
-    d.keep().retrieve();
+    d.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -412,11 +412,11 @@ fn test_mean_reduce() {
     let a = cx.new_tensor::<R3<1, 10, 4096>>("Input");
     a.set(data.clone());
     let b = a.mean_reduce::<_, LAxis<2>>();
-    b.keep().retrieve();
+    b.retrieve();
     let c = a.mean_reduce::<_, LAxis<1>>();
-    c.keep().retrieve();
+    c.retrieve();
     let d = a.mean_reduce::<_, LAxis<0>>();
-    d.keep().retrieve();
+    d.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -444,7 +444,7 @@ fn test_matmul() {
     let b = cx.new_tensor::<R2<4096, 4>>("Input");
     b.set(b_data.clone());
     let c = a.matmul(b);
-    c.keep().retrieve();
+    c.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -478,7 +478,7 @@ fn test_attn_matmul() {
     b.set(b_data.clone());
     b.keep();
     let c = a.matmul(b);
-    c.keep().retrieve();
+    c.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -510,7 +510,7 @@ fn test_batch_matmul() {
     let b = cx.new_tensor::<R2<4096, 4096>>("Input");
     b.set(b_data.clone());
     let c = a.matmul(b.permute::<_, LAxes2<1, 0>>());
-    c.keep().retrieve();
+    c.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -543,10 +543,10 @@ fn test_matmul_transpose() {
     let a_b_t = a.matmul(b_t);
     let a_t_b = a_t.permute::<R2<2, 3>, _>().matmul(b.permute());
     let a_t_b_t = a_t.permute::<R2<2, 3>, _>().matmul(b_t);
-    a_b.keep().retrieve();
-    a_b_t.keep().retrieve();
-    a_t_b.keep().retrieve();
-    a_t_b_t.keep().retrieve();
+    a_b.retrieve();
+    a_b_t.retrieve();
+    a_t_b.retrieve();
+    a_t_b_t.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -594,8 +594,8 @@ fn test_relu_and_linear() {
 
     a.set(vec![1.0, 2.0, 3.0]);
     batch.set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
-    b.keep().retrieve();
-    batch_out.keep().retrieve();
+    b.retrieve();
+    batch_out.retrieve();
     cx.execute();
 
     let unoptimized_b = b.data();
@@ -644,7 +644,7 @@ fn test_rms_norm() {
     model.weight.set(weight_data.clone());
     let b = model.forward(a);
     a.set(inp_data.clone());
-    b.keep().retrieve();
+    b.retrieve();
 
     cx.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
     cx.execute();
@@ -709,7 +709,7 @@ fn test_transformer_encoder_block() {
     let b = model.forward(a);
 
     a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![1, 2, 3]);
-    b.keep().retrieve();
+    b.retrieve();
 
     cx.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
     cx.execute();
@@ -805,8 +805,8 @@ fn test_common_buffer() {
     let exped = a * a1;
     let b = exped.log_2();
     let c = exped.sin();
-    b.keep().retrieve();
-    c.keep().retrieve();
+    b.retrieve();
+    c.retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
