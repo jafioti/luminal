@@ -1,6 +1,7 @@
 use std::{
     any::{Any, TypeId},
     collections::{hash_map::DefaultHasher, HashSet},
+    fmt::Write,
     hash::{Hash, Hasher},
 };
 
@@ -116,8 +117,10 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> String {
         })
         .unique()
         .enumerate()
-        .map(|(i, c)| format!(", device uint& {c} [[buffer({})]]", i + offset))
-        .collect::<String>()
+        .fold(String::default(), |mut acc, (i, c)| {
+            write!(&mut acc, ", device uint& {c} [[buffer({})]]", i + offset).unwrap();
+            acc
+        })
 }
 
 fn get_idx_valid_exps(shape: ShapeTracker) -> (String, String) {

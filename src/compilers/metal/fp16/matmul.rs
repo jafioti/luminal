@@ -347,12 +347,10 @@ impl Operator for MetalAttnMatmul2D {
                             1,
                             e as isize,
                             false,
-                            a_data.as_ptr().add(i * a_strides[0] + j * a_strides[1])
-                                as *const gemm::f16,
+                            a_data.as_ptr().add(i * a_strides[0] + j * a_strides[1]),
                             a_strides[3] as isize,
                             a_strides[2] as isize,
-                            b_data.as_ptr().add(i * b_strides[0] + j * b_strides[1])
-                                as *const gemm::f16,
+                            b_data.as_ptr().add(i * b_strides[0] + j * b_strides[1]),
                             b_strides[3] as isize,
                             b_strides[2] as isize,
                             gemm::f16::ONE,
