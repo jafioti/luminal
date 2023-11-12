@@ -437,14 +437,12 @@ fn test_mean_reduce() {
 fn test_matmul() {
     let mut cx = Graph::new();
     let mut rng = StdRng::seed_from_u64(0);
-    let a_data: Vec<f32> = (0..(2 * 4096)).map(|_| rng.gen_range(-0.5..0.5)).collect();
-    let b_data: Vec<f32> = (0..(4096 * 4)).map(|_| rng.gen_range(-0.5..0.5)).collect();
-    let a = cx.new_tensor::<R2<2, 4096>>("Input");
-    a.set(a_data.clone());
-    let b = cx.new_tensor::<R2<4096, 4>>("Input");
-    b.set(b_data.clone());
-    let c = a.matmul(b);
-    c.retrieve();
+
+    let a_data = random_vec_rng(2 * 4096, &mut rng);
+    let b_data = random_vec_rng(4 * 4096, &mut rng);
+    let a = cx.new_tensor::<R2<2, 4096>>("Input").set(a_data.clone());
+    let b = cx.new_tensor::<R2<4096, 4>>("Input").set(b_data.clone());
+    let c = a.matmul(b).retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
