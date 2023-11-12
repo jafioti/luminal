@@ -129,8 +129,6 @@ fn main() {
         cx2.execute();
         println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
 
-        println!("ID: {:?}", out.id());
-
         let o = out.data();
         out.drop();
         // Sample tokens

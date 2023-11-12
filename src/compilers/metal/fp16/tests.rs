@@ -2,7 +2,7 @@ use dfdx::prelude::{Module as DfdxModule, *};
 use half::f16;
 use itertools::Itertools;
 use num_traits::Float;
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, SeedableRng};
 
 use super::MetalFp16Compiler;
 use crate::{
@@ -173,9 +173,7 @@ fn test_square() {
     let mut cx = Graph::new();
     let a = cx.new_tensor::<(Dyn<'b'>, Dyn<'s'>, crate::prelude::Const<4096>)>("Input");
     let mut rng = rand::thread_rng();
-    let data = (0..40960)
-        .map(|_| rng.gen_range(-0.01..0.01))
-        .collect::<Vec<f32>>();
+    let data = random_vec_rng(40960, &mut rng);
     a.set_dyn(data.clone(), vec![1, 10, 4096]);
     let b = a * a;
     b.retrieve();
@@ -223,12 +221,7 @@ fn test_mul() {
 #[test]
 fn test_mul2() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<(
-        crate::prelude::Const<1>,
-        crate::prelude::Const<1>,
-        Dyn<'a'>,
-        Dyn<'a'>,
-    )>("Input");
+    let a = cx.new_tensor::<(LConst<1>, LConst<1>, Dyn<'a'>, Dyn<'a'>)>("Input");
     a.set_dyn(vec![82.4, 783.0, 99.6, 974.5], vec![1, 1, 2, 2]);
     let b = cx.new_tensor::<R0>("Input");
     b.set(vec![0.57735026]);
@@ -463,12 +456,8 @@ fn test_matmul() {
 fn test_attn_matmul() {
     let mut cx = Graph::new();
     let mut rng = StdRng::seed_from_u64(0);
-    let a_data: Vec<f32> = (0..(32 * 11 * 128))
-        .map(|_| rng.gen_range(-0.5..0.5))
-        .collect();
-    let b_data: Vec<f32> = (0..(32 * 11 * 128))
-        .map(|_| rng.gen_range(-0.5..0.5))
-        .collect();
+    let a_data = random_vec_rng(32 * 11 * 128, &mut rng);
+    let b_data = random_vec_rng(32 * 11 * 128, &mut rng);
     let a = cx.new_tensor::<R4<1, 32, 11, 128>>("Input");
     a.set(a_data.clone());
     a.keep();
