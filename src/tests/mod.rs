@@ -1,10 +1,12 @@
 #![allow(unused)]
 
 mod dynamic;
+pub mod harness;
+pub mod test_graphs;
 
 use std::fmt::Debug;
 
-use rand::{thread_rng, Rng};
+use rand::{distributions::uniform::SampleRange, thread_rng, Rng};
 
 use crate::prelude::*;
 
@@ -121,6 +123,10 @@ pub fn random_vec(n: usize) -> Vec<f32> {
     (0..n).map(|_| rng.gen_range(-0.5..0.5)).collect()
 }
 
+pub fn random_vec_rng<R: Rng>(n: usize, rng: &mut R) -> Vec<f32> {
+    (0..n).map(|_| rng.gen_range(-0.5..0.5)).collect()
+}
+
 #[macro_export]
 macro_rules! test_imports {
     () => {
@@ -135,7 +141,11 @@ macro_rules! test_imports {
                 Axes as LAxes, Axes2 as LAxes2, Axes3 as LAxes3, Axes4 as LAxes4, Axes5 as LAxes5,
                 Axis as LAxis, Const as LConst, *,
             },
-            tests::{assert_close, assert_exact, random_vec},
+            tests::{
+                assert_close, assert_exact,
+                harness::{test_compilers_close, test_compilers_exact},
+                random_vec, random_vec_rng, test_graphs,
+            },
         };
     };
 }

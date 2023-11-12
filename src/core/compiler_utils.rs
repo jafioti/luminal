@@ -110,10 +110,10 @@ impl Graph {
 
         let mut schedule_edges = vec![];
         for node in self.graph.node_indices() {
-            // new_graph
-            //     .node_weight_mut(id_map[&node])
-            //     .unwrap()
-            //     .push_str(&node.index().to_string());
+            new_graph
+                .node_weight_mut(id_map[&node])
+                .unwrap()
+                .push_str(&node.index().to_string());
             for edge in self
                 .graph
                 .edges_directed(node, Direction::Outgoing)

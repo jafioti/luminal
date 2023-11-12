@@ -110,13 +110,17 @@ impl<S: Shape> GraphTensor<S> {
         node.2 = type_id;
     }
 
-    pub fn debug(&self, message: &str) {
+    pub fn print(&self, message: &str) {
         let id = self
             .graph()
             .add_op(op::Print(message.to_string()))
             .input(self.id, 0, self.shape)
             .finish();
         self.graph().no_delete.insert(id);
+    }
+
+    pub fn no_shape(self) -> GraphTensor<()> {
+        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
     /// Get the contiguous data of the tensor

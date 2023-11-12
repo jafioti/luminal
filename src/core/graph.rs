@@ -172,7 +172,6 @@ impl Graph {
     /// Execute the graph.
     pub fn execute(&mut self) {
         // Track the number of views pointing to each tensor so we know when to clear
-        self.linearized_graph = None;
         if self.linearized_graph.is_none() {
             self.toposort();
         }

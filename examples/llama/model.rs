@@ -430,9 +430,8 @@ impl<
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
         KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>,
     ) {
-        let (y, cache) = self
-            .self_attn
-            .forward_kv((self.input_layer_norm.forward(x), cache));
+        let normed = self.input_layer_norm.forward(x);
+        let (y, cache) = self.self_attn.forward_kv((normed, cache));
         let x = x + y;
         let y = self.mlp.forward(self.post_attention_layer_norm.forward(x));
         (x + y, cache)

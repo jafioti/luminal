@@ -16,7 +16,10 @@ use crate::{
     prelude::*,
 };
 
-use super::prim::MetalKernelWrapper;
+use super::{
+    matmul::MetalBatchMatmul2D,
+    prim::{MetalKernelWrapper, MetalMul},
+};
 
 #[derive(Default, Debug)]
 pub struct CommonBufferCompiler;
@@ -43,15 +46,12 @@ impl Compiler for CommonBufferCompiler {
                 } else {
                     num_buffers_on_queue += 1;
                 }
-                let b = Arc::new(Mutex::new(None));
-                let setup = graph
-                    .add_op(SetupMetalKernels {
-                        buffer: b.clone(),
-                        queue: queue.clone(),
-                    })
-                    .finish();
+                let b = Arc::new(Mutex::new(Some(queue.new_command_buffer().to_owned())));
                 let exec = graph
-                    .add_op(ExecuteMetalKernels { buffer: b.clone() })
+                    .add_op(ExecuteMetalKernels {
+                        queue: queue.clone(),
+                        buffer: b.clone(),
+                    })
                     .finish();
                 let mut current_set = HashSet::new();
                 build_set_from_node(
@@ -61,7 +61,6 @@ impl Compiler for CommonBufferCompiler {
                     &mut current_set,
                     &mut already_added_nodes,
                     graph,
-                    setup,
                     exec,
                 );
                 // Add execute op
@@ -83,6 +82,9 @@ impl Compiler for CommonBufferCompiler {
                     }
                 }
             }
+            // if already_added_nodes.len() > 38 {
+            //     break;
+            // }
         }
     }
 }
@@ -95,14 +97,29 @@ fn build_set_from_node(
     current_set: &mut HashSet<NodeIndex>,
     already_added_nodes: &mut HashSet<NodeIndex>,
     graph: &mut Graph,
-    setup_node: NodeIndex,
     exec_node: NodeIndex,
 ) {
+    if current_set.len() > 1 {
+        return;
+    }
+    if graph
+        .graph
+        .node_weight(node)
+        .unwrap()
+        .as_any()
+        .is::<MetalMul>()
+        || graph
+            .graph
+            .node_weight(node)
+            .unwrap()
+            .as_any()
+            .is::<MetalBatchMatmul2D>()
+    {
+        return;
+    }
     let edge1 = graph.graph.add_edge(node, exec_node, Dependency::Schedule);
-    let edge2 = graph.graph.add_edge(setup_node, node, Dependency::Schedule);
     if is_cyclic_directed(&graph.graph) {
         graph.graph.remove_edge(edge1);
-        graph.graph.remove_edge(edge2);
         return;
     }
     // Wrap current node
@@ -121,62 +138,60 @@ fn build_set_from_node(
     });
     current_set.insert(node);
     already_added_nodes.insert(node);
-    // // Add incoming
-    // for node in graph
-    //     .graph
-    //     .edges_directed(node, Direction::Incoming)
-    //     .filter(|e| !e.weight().is_schedule())
-    //     .map(|e| e.source())
-    //     .filter(|n| !already_added_nodes.contains(n))
-    //     .collect::<Vec<_>>()
-    // {
-    //     if graph
-    //         .graph
-    //         .node_weight(node)
-    //         .unwrap()
-    //         .custom("metal")
-    //         .is_some()
-    //     {
-    //         build_set_from_node(
-    //             node,
-    //             buffer.clone(),
-    //             dev,
-    //             current_set,
-    //             already_added_nodes,
-    //             graph,
-    //             setup_node,
-    //             exec_node,
-    //         );
-    //     }
-    // }
-    // // Add outgoing
-    // for node in graph
-    //     .graph
-    //     .edges_directed(node, Direction::Outgoing)
-    //     .filter(|e| !e.weight().is_schedule())
-    //     .map(|e| e.target())
-    //     .filter(|n| !already_added_nodes.contains(n))
-    //     .collect::<Vec<_>>()
-    // {
-    //     if graph
-    //         .graph
-    //         .node_weight(node)
-    //         .unwrap()
-    //         .custom("metal")
-    //         .is_some()
-    //     {
-    //         build_set_from_node(
-    //             node,
-    //             buffer.clone(),
-    //             dev,
-    //             current_set,
-    //             already_added_nodes,
-    //             graph,
-    //             setup_node,
-    //             exec_node,
-    //         );
-    //     }
-    // }
+    // Add incoming
+    for node in graph
+        .graph
+        .edges_directed(node, Direction::Incoming)
+        .filter(|e| !e.weight().is_schedule())
+        .map(|e| e.source())
+        .filter(|n| !already_added_nodes.contains(n))
+        .collect::<Vec<_>>()
+    {
+        if graph
+            .graph
+            .node_weight(node)
+            .unwrap()
+            .custom("metal")
+            .is_some()
+        {
+            build_set_from_node(
+                node,
+                buffer.clone(),
+                dev,
+                current_set,
+                already_added_nodes,
+                graph,
+                exec_node,
+            );
+        }
+    }
+    // Add outgoing
+    for node in graph
+        .graph
+        .edges_directed(node, Direction::Outgoing)
+        .filter(|e| !e.weight().is_schedule())
+        .map(|e| e.target())
+        .filter(|n| !already_added_nodes.contains(n))
+        .collect::<Vec<_>>()
+    {
+        if graph
+            .graph
+            .node_weight(node)
+            .unwrap()
+            .custom("metal")
+            .is_some()
+        {
+            build_set_from_node(
+                node,
+                buffer.clone(),
+                dev,
+                current_set,
+                already_added_nodes,
+                graph,
+                exec_node,
+            );
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -201,6 +216,7 @@ impl Operator for SetupMetalKernels {
 
 #[derive(Debug)]
 struct ExecuteMetalKernels {
+    queue: CommandQueue,
     buffer: Arc<Mutex<Option<CommandBuffer>>>,
 }
 
@@ -215,7 +231,7 @@ impl Operator for ExecuteMetalKernels {
         let mut buffer = self.buffer.lock().unwrap();
         buffer.as_ref().unwrap().commit();
         buffer.as_ref().unwrap().wait_until_completed();
-        drop(buffer.take());
+        *buffer = Some(self.queue.new_command_buffer().to_owned());
         vec![]
     }
 }
@@ -253,4 +269,23 @@ impl Operator for MetalKernelOperation {
             .map(|b| Tensor { data: Box::new(b) })
             .collect()
     }
+}
+
+#[test]
+fn test_common_buffer() {
+    crate::test_imports!();
+    let mut cx = Graph::new();
+    let a = cx.new_tensor::<R1<5>>("").set(random_vec(5)).keep();
+    let b = cx.new_tensor::<R1<5>>("").set(random_vec(5)).keep();
+    let c = cx.new_tensor::<R1<5>>("").set(random_vec(5)).keep();
+    let d = ((a + b) * c).retrieve();
+
+    cx.execute();
+    let d_unopt = d.data();
+    d.drop();
+
+    cx.compile(MetalFp16Compiler::default());
+    cx.execute();
+
+    assert_close(&d.data(), &d_unopt);
 }

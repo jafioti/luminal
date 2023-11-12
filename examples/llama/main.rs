@@ -90,6 +90,8 @@ fn main() {
     cx2.compile(<(GenericCompiler, CPUCompiler)>::default());
     delete_loads(&kv_model, &mut cx2);
 
+    // cx2.display();
+
     println!("Inferencing...");
     // First pass
     cx1.execute_debug();
@@ -127,9 +129,12 @@ fn main() {
         cx2.execute();
         println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
 
+        println!("ID: {:?}", out.id());
+
         let o = out.data();
         out.drop();
         // Sample tokens
+        println!("Out: {:?}", &o[..10]);
         input.push(sample_index(&o));
         println!(
             "{}",
@@ -143,12 +148,10 @@ fn main() {
         );
 
         // Swap caches
-        for ((src_k, src_v), (dest_k, dest_v)) in
-            cache_src.iter().copied().zip(cache_dest.iter().copied())
-        {
+        for ((src_k, src_v), (dest_k, dest_v)) in cache_src.iter().zip(cache_dest.iter()) {
             // Move dest caches to src
-            cx2.swap_tensors(src_k, dest_k);
-            cx2.swap_tensors(src_v, dest_v);
+            cx2.swap_tensors(*src_k, *dest_k);
+            cx2.swap_tensors(*src_v, *dest_v);
             // Drop dest caches
             dest_k.drop();
             dest_v.drop();

@@ -107,14 +107,14 @@ impl Operator for MatMul2D {
                 a_shape[1].to_usize().unwrap(),
                 b_shape[1].to_usize().unwrap(),
                 1.0,
-                &a_data[0],
+                a_data.as_ptr(),
                 a_strides[0] as isize,
                 a_strides[1] as isize,
-                &b_data[0],
+                b_data.as_ptr(),
                 b_strides[0] as isize,
                 b_strides[1] as isize,
                 0.0,
-                &mut c[0],
+                c.as_mut_ptr(),
                 b_shape[1].to_usize().unwrap() as isize,
                 1,
             );
@@ -232,11 +232,7 @@ impl Operator for BatchedMatMul2D {
                 * b_shape[1].to_usize().unwrap()
         ];
 
-        let logical_batch_size = a_shape
-            .iter()
-            .skip(1)
-            .map(|i| i.to_usize().unwrap())
-            .product::<usize>();
+        let mat_size = a_shape[1].to_usize().unwrap() * b_shape[1].to_usize().unwrap();
         for i in 0..a_shape[0].to_usize().unwrap() {
             unsafe {
                 matrixmultiply::sgemm(
@@ -244,14 +240,14 @@ impl Operator for BatchedMatMul2D {
                     a_shape[2].to_usize().unwrap(),
                     b_shape[1].to_usize().unwrap(),
                     1.0,
-                    &a_data[i * a_strides[0]],
+                    a_data.as_ptr().add(i * a_strides[0]),
                     a_strides[1] as isize,
                     a_strides[2] as isize,
-                    &b_data[0],
+                    b_data.as_ptr(),
                     b_strides[0] as isize,
                     b_strides[1] as isize,
                     0.0,
-                    &mut c[i * logical_batch_size],
+                    c.as_mut_ptr().add(i * mat_size),
                     b_shape[1].to_usize().unwrap() as isize,
                     1,
                 );
@@ -372,43 +368,39 @@ impl Operator for FusedUnary {
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, tests::assert_close};
+    use crate::prelude::*;
+    crate::test_imports!();
+
     #[test]
-    fn test_cpu_matmul_2d() {
-        let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<2, 3>>("Input");
-        a.set(vec![1., 2., 3., 1., 2., 3.]);
-        let b = cx.new_tensor::<R2<3, 3>>("Input");
-        b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
-        let c = a.matmul(b);
-        c.retrieve();
-
-        cx.execute();
-
-        let unoptimized_c = c.data();
-        cx.compile(<(CPUCompiler, GenericCompiler)>::default());
-        cx.execute();
-
-        assert_close(&c.data(), &unoptimized_c);
+    fn matmul() {
+        test_compilers_close(
+            &[test_graphs::matmul],
+            &[Box::<(CPUCompiler, GenericCompiler)>::default()],
+        );
     }
 
     #[test]
-    fn test_cpu_batch_matmul_2d() {
-        let mut cx = Graph::new();
-        let a = cx.new_tensor::<R3<2, 2, 3>>("Input");
-        a.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
-        let b = cx.new_tensor::<R2<3, 3>>("Input");
-        b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
-        let c = a.matmul(b);
-        c.retrieve();
+    fn batch_matmul() {
+        test_compilers_close(
+            &[test_graphs::batch_matmul],
+            &[Box::<(CPUCompiler, GenericCompiler)>::default()],
+        );
+    }
 
-        cx.execute();
+    #[test]
+    fn feedforward() {
+        test_compilers_close(
+            &[test_graphs::feedforward],
+            &[Box::<(CPUCompiler, GenericCompiler)>::default()],
+        );
+    }
 
-        let unoptimized_c = c.data();
-        cx.compile(<(CPUCompiler, GenericCompiler)>::default());
-        cx.execute();
-
-        assert_close(&c.data(), &unoptimized_c);
+    #[test]
+    fn transformer() {
+        test_compilers_close(
+            &[test_graphs::transformer],
+            &[Box::<(CPUCompiler, GenericCompiler)>::default()],
+        );
     }
 
     #[test]
