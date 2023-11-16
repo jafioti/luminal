@@ -197,7 +197,6 @@ impl Compiler for RMSNormCompiler {
         let dev = Device::system_default().unwrap();
         // Look for the RMSNorm pattern
         // mul(recip(sqrt(add(mean_reduce(mul(x, x)), 1e-6))), x)
-        let s = GraphSelector::default();
         let (mut square, mut mean, mut add, mut sqrt, mut recip, mut mul, mut epsilon) = (
             NodeIndex::default(),
             NodeIndex::default(),
@@ -208,11 +207,11 @@ impl Compiler for RMSNormCompiler {
             NodeIndex::default(),
         );
 
-        s.edge(
-            s.edge(
-                s.edge(
-                    s.edge(
-                        s.op()
+        let s = SelectEdge::new(
+            SelectEdge::new(
+                SelectEdge::new(
+                    SelectEdge::new(
+                        SelectOp::new()
                             .check(|op, _| {
                                 if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
                                     c.0 == f16::from_f32(1e-6)
@@ -221,19 +220,19 @@ impl Compiler for RMSNormCompiler {
                                 }
                             })
                             .ptr(&mut epsilon),
-                        s.edge(
-                            s.edge(
-                                s.op().ty::<MetalMul>().ptr(&mut square),
-                                s.op().ty::<MetalMeanReduce>().ptr(&mut mean),
+                        SelectEdge::new(
+                            SelectEdge::new(
+                                SelectOp::new().ty::<MetalMul>().ptr(&mut square),
+                                SelectOp::new().ty::<MetalMeanReduce>().ptr(&mut mean),
                             ),
-                            s.op().ty::<MetalAdd>().ptr(&mut add),
+                            SelectOp::new().ty::<MetalAdd>().ptr(&mut add),
                         ),
                     ),
-                    s.op().ty::<MetalSqrt>().ptr(&mut sqrt),
+                    SelectOp::new().ty::<MetalSqrt>().ptr(&mut sqrt),
                 ),
-                s.op().ty::<MetalRecip>().ptr(&mut recip),
+                SelectOp::new().ty::<MetalRecip>().ptr(&mut recip),
             ),
-            s.op().ty::<MetalMul>().ptr(&mut mul),
+            SelectOp::new().ty::<MetalMul>().ptr(&mut mul),
         );
 
         for _ in s.search(graph) {

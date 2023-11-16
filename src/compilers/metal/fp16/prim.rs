@@ -1722,17 +1722,16 @@ pub struct FakeReductionCompiler;
 
 impl Compiler for FakeReductionCompiler {
     fn compile(&self, graph: &mut Graph) {
-        let s = GraphSelector::default();
         let mut sum_reduce = NodeIndex::default();
-        s.edge(
-            s.op().check(|o, _| {
+        let s = SelectEdge::new(
+            SelectOp::new().check(|o, _| {
                 if let Some(c) = o.as_any().downcast_ref::<MetalConstant>() {
                     c.0 == f16::ONE
                 } else {
                     false
                 }
             }),
-            s.op()
+            SelectOp::new()
                 .ty::<MetalSumReduce>()
                 .check(|o, shapes| {
                     if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
@@ -1743,7 +1742,6 @@ impl Compiler for FakeReductionCompiler {
                 })
                 .ptr(&mut sum_reduce),
         );
-
         let mut compiled = None;
         for _ in s.search(graph) {
             let op_ref = graph.graph.node_weight_mut(sum_reduce).unwrap();
@@ -1867,15 +1865,13 @@ pub struct CopyCompiler;
 impl Compiler for CopyCompiler {
     fn compile(&self, graph: &mut Graph) {
         let (mut first, mut second) = (NodeIndex::default(), NodeIndex::default());
-        let s1 = GraphSelector::default();
-        s1.edge(
-            s1.op().ty::<MetalCopyToDevice>().ptr(&mut first),
-            s1.op().ty::<MetalCopyFromDevice>().ptr(&mut second),
+        let s1 = SelectEdge::new(
+            SelectOp::new().ty::<MetalCopyToDevice>().ptr(&mut first),
+            SelectOp::new().ty::<MetalCopyFromDevice>().ptr(&mut second),
         );
-        let s2 = GraphSelector::default();
-        s2.edge(
-            s2.op().ty::<MetalCopyFromDevice>().ptr(&mut first),
-            s2.op().ty::<MetalCopyToDevice>().ptr(&mut second),
+        let s2 = SelectEdge::new(
+            SelectOp::new().ty::<MetalCopyFromDevice>().ptr(&mut first),
+            SelectOp::new().ty::<MetalCopyToDevice>().ptr(&mut second),
         );
 
         for _ in s1.clone().search(graph).chain(s2.clone().search(graph)) {

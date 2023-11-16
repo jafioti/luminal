@@ -20,12 +20,11 @@ pub struct MatMul2DCompiler;
 impl Compiler for MatMul2DCompiler {
     fn compile(&self, graph: &mut Graph) {
         // Look for the matmul pattern
-        let s = GraphSelector::default();
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        s.edge(
-            s.op()
+        let s = SelectEdge::new(
+            SelectOp::new()
                 .ty::<Mul>()
                 .shapes(vec![
                     vec![Dim::Unknown('A'), Dim::Unknown('C'), Dim::Unknown('B')],
@@ -33,7 +32,7 @@ impl Compiler for MatMul2DCompiler {
                 ])
                 .fakes(vec![vec![false, true, false], vec![true, false, false]])
                 .ptr(&mut mul),
-            s.op()
+            SelectOp::new()
                 .ty::<SumReduce>()
                 .check(|o, _| o.is_equal(&SumReduce(0)))
                 .ptr(&mut sum_reduce),
@@ -130,12 +129,11 @@ pub struct BatchMatMul2DCompiler;
 impl Compiler for BatchMatMul2DCompiler {
     fn compile(&self, graph: &mut Graph) {
         // Look for the matmul pattern
-        let s = GraphSelector::default();
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        s.edge(
-            s.op()
+        let s = SelectEdge::new(
+            SelectOp::new()
                 .ty::<Mul>()
                 .shapes(vec![
                     vec![
@@ -156,7 +154,7 @@ impl Compiler for BatchMatMul2DCompiler {
                     vec![true, true, false, false],
                 ])
                 .ptr(&mut mul),
-            s.op()
+            SelectOp::new()
                 .ty::<SumReduce>()
                 .check(|o, _| o.is_equal(&SumReduce(3)))
                 .ptr(&mut sum_reduce),

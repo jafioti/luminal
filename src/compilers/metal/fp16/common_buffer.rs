@@ -67,7 +67,7 @@ impl Compiler for CommonBufferCompiler {
                     &is_metal,
                     &get_lower_nodes(&graph.graph, node),
                 );
-                // Add execute op
+                // Add deps from execute op to consumers
                 for node in &current_set {
                     is_metal.remove(node);
                     for outside_node in graph

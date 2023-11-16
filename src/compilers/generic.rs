@@ -38,15 +38,13 @@ impl Compiler for UnarySequentialElimination {
             .into_iter()
             .flat_map(|(f, l)| {
                 // Construct two searches: in order and reversed
-                let a = GraphSelector::default();
-                a.edge(
-                    a.op().type_id(f).ptr(&mut first),
-                    a.op().type_id(l).ptr(&mut last),
+                let a = SelectEdge::new(
+                    SelectOp::new().type_id(f).ptr(&mut first),
+                    SelectOp::new().type_id(l).ptr(&mut last),
                 );
-                let b = GraphSelector::default();
-                b.edge(
-                    b.op().type_id(l).ptr(&mut first),
-                    b.op().type_id(f).ptr(&mut last),
+                let b = SelectEdge::new(
+                    SelectOp::new().type_id(l).ptr(&mut first),
+                    SelectOp::new().type_id(f).ptr(&mut last),
                 );
                 [a, b]
             })

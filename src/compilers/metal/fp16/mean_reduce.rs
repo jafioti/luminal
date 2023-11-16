@@ -166,7 +166,6 @@ impl Compiler for MeanReduceCompiler {
         let queue = dev.new_command_queue();
         // Look for the mean-reduce pattern
         // mul(recip(fake_sum_reduce(const_ones)), sum_reduce(x))
-        let s = GraphSelector::default();
         let (mut one_const, mut fake_sum_reduce, mut recip, mut mul, mut sum_reduce) = (
             NodeIndex::default(),
             NodeIndex::default(),
@@ -175,12 +174,12 @@ impl Compiler for MeanReduceCompiler {
             NodeIndex::default(),
         );
 
-        s.edge(
-            s.op().ty::<MetalSumReduce>().ptr(&mut sum_reduce),
-            s.edge(
-                s.edge(
-                    s.edge(
-                        s.op()
+        let s = SelectEdge::new(
+            SelectOp::new().ty::<MetalSumReduce>().ptr(&mut sum_reduce),
+            SelectEdge::new(
+                SelectEdge::new(
+                    SelectEdge::new(
+                        SelectOp::new()
                             .check(|op, _| {
                                 if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
                                     c.0 == f16::ONE
@@ -189,11 +188,13 @@ impl Compiler for MeanReduceCompiler {
                                 }
                             })
                             .ptr(&mut one_const),
-                        s.op().ty::<FakeSumReduce>().ptr(&mut fake_sum_reduce),
+                        SelectOp::new()
+                            .ty::<FakeSumReduce>()
+                            .ptr(&mut fake_sum_reduce),
                     ),
-                    s.op().ty::<MetalRecip>().ptr(&mut recip),
+                    SelectOp::new().ty::<MetalRecip>().ptr(&mut recip),
                 ),
-                s.op().ty::<MetalMul>().ptr(&mut mul),
+                SelectOp::new().ty::<MetalMul>().ptr(&mut mul),
             ),
         );
 

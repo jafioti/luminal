@@ -90,8 +90,6 @@ fn main() {
     cx2.compile(<(GenericCompiler, CPUCompiler)>::default());
     delete_loads(&kv_model, &mut cx2);
 
-    // cx1.display();
-
     println!("Inferencing...");
     // First pass
     cx1.execute_debug();

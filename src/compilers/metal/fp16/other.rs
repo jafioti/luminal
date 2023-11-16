@@ -113,7 +113,6 @@ impl Compiler for MetalCosCompiler {
         let dev = Device::system_default().unwrap();
         // Look for the mean-reduce pattern
         // sin(add(mul(const_neg_one, x), const_pi_over_2))
-        let s = GraphSelector::default();
         let (
             mut const_neg_one,
             mut const_pi,
@@ -130,25 +129,25 @@ impl Compiler for MetalCosCompiler {
             NodeIndex::default(),
         );
 
-        s.edge(
-            s.edge(
-                s.op().check(|op, _| if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
+        let s = SelectEdge::new(
+            SelectEdge::new(
+                SelectOp::new().check(|op, _| if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
                     c.0 == (f16::PI / f16::from_f32(2.))
                 } else {false}).ptr(&mut const_pi),
-                s.edge(
-                    s.edge(
-                        s.op().ptr(&mut x),
-                        s.edge(
-                                s.op().check(|op, _| if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
+                SelectEdge::new(
+                    SelectEdge::new(
+                        SelectOp::new().ptr(&mut x),
+                        SelectEdge::new(
+                                SelectOp::new().check(|op, _| if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
                                     c.0 == f16::NEG_ONE
                                 } else {false}).ptr(&mut const_neg_one),
-                            s.op().ty::<MetalMul>().ptr(&mut mul),
+                            SelectOp::new().ty::<MetalMul>().ptr(&mut mul),
                         ),
                     ),
-                    s.op().ty::<MetalAdd>().ptr(&mut add),
+                    SelectOp::new().ty::<MetalAdd>().ptr(&mut add),
                 ),
             ),
-            s.op().ty::<MetalSin>().ptr(&mut sin),
+            SelectOp::new().ty::<MetalSin>().ptr(&mut sin),
         );
         for _ in s.search(graph) {
             if graph.no_delete.contains(&const_neg_one)
@@ -292,7 +291,6 @@ impl Compiler for MetalExpCompiler {
         let dev = Device::system_default().unwrap();
         // Look for the exp pattern
         // exp2(mul(x, const))
-        let s = GraphSelector::default();
         let (
             mut constant,
             mut mul,
@@ -303,9 +301,17 @@ impl Compiler for MetalExpCompiler {
             NodeIndex::default(),
         );
 
-        s.edge(s.edge(s.op().check(|op, _| if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
-            c.0 == f16::from_f32(1.0 / f32::ln(2.))
-        } else {false}).ptr(&mut constant), s.op().ty::<MetalMul>().ptr(&mut mul)), s.op().ty::<MetalExp2>().ptr(&mut exp2));
+        let s = 
+        SelectEdge::new(
+            SelectEdge::new(
+                SelectOp::new()
+                    .check(|op, _| if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
+                            c.0 == f16::from_f32(1.0 / f32::ln(2.))
+                        } else {false}
+                    ).ptr(&mut constant), 
+                SelectOp::new().ty::<MetalMul>().ptr(&mut mul)), 
+            SelectOp::new().ty::<MetalExp2>().ptr(&mut exp2)
+        );
 
         for _ in s.search(graph) {
             if graph.no_delete.contains(&constant)

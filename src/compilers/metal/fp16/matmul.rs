@@ -393,12 +393,11 @@ impl Compiler for MetalMatMulCompiler {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         // Look for the matmul pattern
-        let s = GraphSelector::default();
-        let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        s.edge(
-            s.op()
+        let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
+        let s = SelectEdge::new(
+            SelectOp::new()
                 .ty::<MetalMul>()
                 .shapes(vec![
                     vec![Dim::Unknown('A'), Dim::Unknown('C'), Dim::Unknown('B')],
@@ -406,7 +405,7 @@ impl Compiler for MetalMatMulCompiler {
                 ])
                 .fakes(vec![vec![false, true, false], vec![true, false, false]])
                 .ptr(&mut mul),
-            s.op()
+            SelectOp::new()
                 .ty::<MetalSumReduce>()
                 .check(|o, _| {
                     if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
@@ -459,12 +458,11 @@ impl Compiler for MetalMatMulCompiler {
         }
 
         // Look for the batch matmul pattern
-        let s = GraphSelector::default();
-        let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        s.edge(
-            s.op()
+        let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
+        let s = SelectEdge::new(
+            SelectOp::new()
                 .ty::<MetalMul>()
                 .shapes(vec![
                     vec![
@@ -485,7 +483,7 @@ impl Compiler for MetalMatMulCompiler {
                     vec![true, true, false, false],
                 ])
                 .ptr(&mut mul),
-            s.op()
+            SelectOp::new()
                 .ty::<MetalSumReduce>()
                 .check(|o, _| {
                     if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
@@ -538,12 +536,11 @@ impl Compiler for MetalMatMulCompiler {
         }
 
         // Look for the attn matmul pattern
-        let s = GraphSelector::default();
-        let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         // Mul ([A, B, C, E(fake), D] | [A, B, C(fake), E, D]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        s.edge(
-            s.op()
+        let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
+        let s = SelectEdge::new(
+            SelectOp::new()
                 .ty::<MetalMul>()
                 .shapes(vec![
                     vec![
@@ -566,7 +563,7 @@ impl Compiler for MetalMatMulCompiler {
                     vec![false, false, true, false, false],
                 ])
                 .ptr(&mut mul),
-            s.op()
+            SelectOp::new()
                 .ty::<MetalSumReduce>()
                 .check(|o, _| {
                     if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
