@@ -5,8 +5,6 @@ use std::{
     fmt::Debug,
 };
 
-use half::f16;
-
 use crate::{
     prelude::{
         tracker::{Dim, ShapeTracker},
@@ -70,8 +68,15 @@ impl Debug for Function {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub struct Print(pub String);
+
+impl Debug for Print {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Print-{}", self.0)
+    }
+}
+
 impl Operator for Print {
     fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         for (i, (tensor, tracker)) in inp.iter().enumerate() {
@@ -84,25 +89,32 @@ impl Operator for Print {
                 .unwrap();
             println!("{} Data: {:?}", i + 1, &d[..10]);
             println!("{} Shape: {:?}", i + 1, tracker);
-            let out = std::fs::read("../../Desktop/llama-dfdx/out.bin")
-                .unwrap()
-                .chunks(2)
-                .map(|i| f16::from_ne_bytes([i[0], i[1]]).to_f32())
-                .collect::<Vec<_>>();
-            let mut data = vec![0.; d.len()];
-            let ind = tracker.indexer();
-            #[allow(unused_mut)]
-            for (i, mut r) in data.iter_mut().enumerate() {
-                if let Some(n) = ind.index(i) {
-                    *r = d[n];
-                }
-            }
-            assert_eq!(data.len(), out.len(), "Number of elements doesn't match");
-            for (a, b) in data.iter().zip(out.iter()) {
-                if a != b {
-                    panic!("{a} is not equal to {b}");
-                }
-            }
+            // let mut data = vec![0.; d.len()];
+            // let ind = tracker.indexer();
+            // #[allow(unused_mut)]
+            // for (i, mut r) in data.iter_mut().enumerate() {
+            //     if let Some(n) = ind.index(i) {
+            //         *r = d[n];
+            //     }
+            // }
+            // std::fs::write(
+            //     "../../Desktop/llama-dfdx/out.bin",
+            //     data.iter()
+            //         .flat_map(|i| i.to_ne_bytes())
+            //         .collect::<Vec<_>>(),
+            // )
+            // .unwrap();
+            // let out = std::fs::read("../../Desktop/llama-dfdx/out.bin")
+            //     .unwrap()
+            //     .chunks(4)
+            //     .map(|i| f32::from_ne_bytes([i[0], i[1], i[2], i[3]]))
+            //     .collect::<Vec<_>>();
+            // assert_eq!(data.len(), out.len(), "Number of elements doesn't match");
+            // for (i, (a, b)) in data.iter().zip(out.iter()).enumerate() {
+            //     if *a != *b {
+            //         panic!("{} is not equal to {}, index {i}", *a, *b);
+            //     }
+            // }
         }
         vec![Tensor {
             data: Box::<Vec<f32>>::default(),

@@ -16,7 +16,11 @@ use crate::{
 };
 
 /// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
-pub type GenericCompiler = (UnarySequentialElimination, RemoveUnusedNodes, CSE);
+pub type GenericCompiler = (
+    UnarySequentialElimination,
+    // RemoveUnusedNodes, // Broken right now, unclear why
+    CSE,
+);
 
 /// Eliminate complementary unary sequential operations like `x.log().exp()`
 #[derive(Default)]
@@ -171,7 +175,7 @@ impl Compiler for RemoveUnusedNodes {
                 == 0
                 && !graph.no_delete.contains(&node)
             {
-                // No dependencies and not marked for retrieval, so remove
+                // No dependencies and not marked for no_delete, so remove
                 graph.graph.remove_node(node);
             }
         }

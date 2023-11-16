@@ -23,7 +23,7 @@ pub trait MetalKernelForward: Debug {
     ) -> Vec<Buffer>;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MetalKernelWrapper(pub Arc<Box<dyn MetalKernelForward>>);
 
 impl PartialEq for MetalKernelWrapper {
@@ -78,7 +78,7 @@ impl Operator for MetalCopyToDevice {
         let buffer = self.0.new_buffer_with_data(
             unsafe { std::mem::transmute(data.as_ptr()) },
             (data.len() * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
         vec![Tensor {
             data: Box::new(buffer),
@@ -127,7 +127,7 @@ impl Operator for MetalConstant {
             data: Box::new(self.1.new_buffer_with_data(
                 &self.0 as *const f16 as *const _,
                 std::mem::size_of::<f16>() as u64,
-                MTLResourceOptions::StorageModeManaged,
+                MTLResourceOptions::StorageModeShared,
             )),
         }]
     }
@@ -181,7 +181,7 @@ impl MetalKernelForward for MetalContiguous {
         let inp_size = res_shape.n_elements();
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =
@@ -279,7 +279,7 @@ impl MetalKernelForward for MetalLog2 {
         let inp_size = inputs[0].1.n_physical_elements();
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =
@@ -373,7 +373,7 @@ impl MetalKernelForward for MetalExp2 {
         let inp_size = inputs[0].1.n_physical_elements();
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =
@@ -467,7 +467,7 @@ impl MetalKernelForward for MetalSin {
         let inp_size = inputs[0].1.n_physical_elements();
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =
@@ -561,7 +561,7 @@ impl MetalKernelForward for MetalSqrt {
         let inp_size = inputs[0].1.n_physical_elements();
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =
@@ -655,7 +655,7 @@ impl MetalKernelForward for MetalRecip {
         let inp_size = inputs[0].1.n_physical_elements();
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =
@@ -766,7 +766,7 @@ impl MetalKernelForward for MetalAdd {
         let inp_size = inputs[0].1.n_elements();
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =
@@ -881,7 +881,7 @@ impl MetalKernelForward for MetalMul {
         let inp_size = inputs[0].1.n_elements();
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =
@@ -1007,7 +1007,7 @@ impl MetalKernelForward for MetalLessThan {
         let inp_size = inputs[0].1.n_elements();
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =
@@ -1120,7 +1120,7 @@ impl MetalKernelForward for MetalMod {
         let inp_size = inputs[0].1.n_elements();
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =
@@ -1245,7 +1245,7 @@ impl MetalKernelForward for MetalSumReduce {
 
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
         let front_size: usize = inputs[0]
             .1
@@ -1385,7 +1385,7 @@ impl MetalKernelForward for MetalMaxReduce {
 
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
         let front_size: usize = inputs[0]
             .1
@@ -1796,7 +1796,7 @@ impl MetalKernelForward for FakeSumReduce {
         let inp_size = inputs[0].1.n_physical_elements();
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =

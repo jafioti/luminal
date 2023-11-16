@@ -44,7 +44,7 @@ fn main() {
         vec![1, input.len()],
     );
     let (out1, cache1) = model.forward(inp);
-    out1.keep().retrieve();
+    out1.retrieve();
     for (k, v) in &cache1 {
         k.keep();
         v.keep();
@@ -67,7 +67,7 @@ fn main() {
         .collect::<Vec<_>>();
     let (out, cache_dest) =
         kv_model.forward_kv::<_, _, Dyn<'p'>, Dyn<'t'>>((single_inp, cache_src.clone()));
-    out.keep().retrieve();
+    out.retrieve();
     for (k, v) in &cache_dest {
         k.keep();
         v.keep();
@@ -83,14 +83,14 @@ fn main() {
         v.set_type(std::any::TypeId::of::<cudarc::driver::CudaSlice<half::f16>>());
     }
     #[cfg(feature = "metal")]
-    cx2.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
+    cx2.compile(<(MetalFp16Compiler,)>::default());
     #[cfg(feature = "cuda")]
     cx2.compile(<(GenericCompiler, CudaFp16Optimizer)>::default());
     #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
     cx2.compile(<(GenericCompiler, CPUCompiler)>::default());
     delete_loads(&kv_model, &mut cx2);
 
-    // cx2.display();
+    // cx1.display();
 
     println!("Inferencing...");
     // First pass
@@ -132,7 +132,6 @@ fn main() {
         let o = out.data();
         out.drop();
         // Sample tokens
-        println!("Out: {:?}", &o[..10]);
         input.push(sample_index(&o));
         println!(
             "{}",

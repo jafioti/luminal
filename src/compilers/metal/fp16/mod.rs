@@ -14,7 +14,7 @@ pub type MetalFp16Compiler = (
     mean_reduce::MeanReduceCompiler,
     rms_norm::RMSNormCompiler,
     prim::CopyCompiler,
-    // common_buffer::CommonBufferCompiler,
+    common_buffer::CommonBufferCompiler,
 );
 
 #[cfg(test)]

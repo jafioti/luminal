@@ -88,7 +88,7 @@ impl SetInt for ComputeCommandEncoderRef {
 fn input_dyn_dims(
     shapes: &[(ShapeTracker, ShapeTracker)],
     encoder: &ComputeCommandEncoderRef,
-    offset: usize,
+    index: usize,
 ) {
     let mut added = HashSet::new();
     for (d1, d2) in shapes
@@ -97,7 +97,7 @@ fn input_dyn_dims(
     {
         if let Dim::Unknown(c) = d1 {
             if !added.contains(&c) {
-                encoder.set_int(offset + added.len(), d2.to_usize().unwrap() as u32);
+                encoder.set_int(index + added.len(), d2.to_usize().unwrap() as u32);
                 added.insert(c);
             }
         }

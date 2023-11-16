@@ -76,7 +76,7 @@ impl MetalKernelForward for MetalMatmul2D {
 
         let out = dev.new_buffer(
             (m * n * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =
@@ -216,7 +216,7 @@ impl MetalKernelForward for MetalBatchMatmul2D {
 
         let out = dev.new_buffer(
             (batch_size * m * n * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =
@@ -367,7 +367,7 @@ impl Operator for MetalAttnMatmul2D {
             let out = self.0.new_buffer_with_data(
                 unsafe { std::mem::transmute(out.as_ptr()) },
                 (out.len() * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
+                MTLResourceOptions::StorageModeShared,
             );
             vec![Tensor {
                 data: Box::new(out),
