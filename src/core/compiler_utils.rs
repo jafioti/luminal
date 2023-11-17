@@ -1,6 +1,6 @@
 use std::{
     any::{Any, TypeId},
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{hash_map::Entry, BTreeMap, HashMap, HashSet},
     fmt::Debug,
 };
 
@@ -353,7 +353,7 @@ type SelectionGraph = petgraph::Graph<SelectOp, Option<u8>>;
 pub struct GraphSearch {
     selector: SelectionGraph,
     graph: *const Graph,
-    already_returned: HashSet<Vec<(NodeIndex, NodeIndex)>>,
+    already_returned: HashSet<BTreeMap<NodeIndex, NodeIndex>>,
 }
 
 impl Iterator for GraphSearch {
@@ -362,22 +362,16 @@ impl Iterator for GraphSearch {
     fn next(&mut self) -> Option<Self::Item> {
         // Look through graph for pattern from selector
         let graph = unsafe { self.graph.as_ref().unwrap() };
-        let mut mapping = HashMap::new();
+        let mut mapping = BTreeMap::new();
         let mut visited = HashSet::new();
 
-        if let Some(map) = match_nodes(
+        if match_nodes(
             &graph.graph,
             &self.selector,
             &mut mapping,
             &mut visited,
             &self.already_returned,
         ) {
-            self.already_returned.insert(
-                map.iter()
-                    .sorted_by_key(|(i, _)| **i)
-                    .map(|(a, b)| (*a, *b))
-                    .collect::<Vec<_>>(),
-            );
             // Apply pattern to ptrs
             for (selector_node, ptr) in self.selector.node_indices().flat_map(|n| {
                 self.selector
@@ -388,9 +382,10 @@ impl Iterator for GraphSearch {
                     .map(move |i| (n, *i))
             }) {
                 unsafe {
-                    *ptr = map[&selector_node];
+                    *ptr = mapping[&selector_node];
                 }
             }
+            self.already_returned.insert(mapping);
             return Some(());
         }
         None
@@ -400,10 +395,10 @@ impl Iterator for GraphSearch {
 fn match_nodes(
     g0: &MainGraph,
     g1: &SelectionGraph,
-    mapping: &mut HashMap<NodeIndex, NodeIndex>,
+    mapping: &mut BTreeMap<NodeIndex, NodeIndex>,
     visited: &mut HashSet<NodeIndex>,
-    already_returned: &HashSet<Vec<(NodeIndex, NodeIndex)>>,
-) -> Option<HashMap<NodeIndex, NodeIndex>> {
+    already_returned: &HashSet<BTreeMap<NodeIndex, NodeIndex>>,
+) -> bool {
     let mut predecessors_cache: HashMap<NodeIndex, Vec<NodeIndex>> = HashMap::new();
 
     if let Ok(topo_order) = toposort(g1, None) {
@@ -418,7 +413,7 @@ fn match_nodes(
             already_returned,
         )
     } else {
-        None
+        false
     }
 }
 
@@ -427,26 +422,21 @@ fn match_nodes_topo(
     g0: &MainGraph,
     g1: &SelectionGraph,
     topo_order: &[NodeIndex],
-    mapping: &mut HashMap<NodeIndex, NodeIndex>,
+    mapping: &mut BTreeMap<NodeIndex, NodeIndex>,
     visited: &mut HashSet<NodeIndex>,
     predecessors_cache: &mut HashMap<NodeIndex, Vec<NodeIndex>>,
     current_index: usize,
-    already_returned: &HashSet<Vec<(NodeIndex, NodeIndex)>>,
-) -> Option<HashMap<NodeIndex, NodeIndex>> {
+    already_returned: &HashSet<BTreeMap<NodeIndex, NodeIndex>>,
+) -> bool {
     if mapping.len() == g1.node_count() {
-        let key = mapping
-            .iter()
-            .sorted_by_key(|(i, _)| **i)
-            .map(|(a, b)| (*a, *b))
-            .collect::<Vec<_>>();
-        if !already_returned.contains(&key) {
-            return Some(mapping.clone());
+        if !already_returned.contains(mapping) {
+            return true;
         }
-        return None;
+        return false;
     }
 
     if current_index >= topo_order.len() {
-        return None;
+        return false;
     }
 
     let node_g1 = topo_order[current_index];
@@ -472,7 +462,7 @@ fn match_nodes_topo(
                 visited.insert(node_g0);
                 mapping.insert(node_g1, node_g0);
 
-                if let Some(m) = match_nodes_topo(
+                if match_nodes_topo(
                     g0,
                     g1,
                     topo_order,
@@ -482,7 +472,7 @@ fn match_nodes_topo(
                     current_index + 1,
                     already_returned,
                 ) {
-                    return Some(m);
+                    return true;
                 }
 
                 visited.remove(&node_g0);
@@ -490,7 +480,7 @@ fn match_nodes_topo(
             }
         }
     }
-    None
+    false
 }
 
 fn test_node(
