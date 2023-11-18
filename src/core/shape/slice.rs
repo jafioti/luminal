@@ -1,19 +1,31 @@
 use super::*;
 use std::ops::{Bound, Range, RangeBounds, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 
-fn get_start_bound(bound: Bound<&usize>) -> usize {
+fn get_start_bound<D: Into<Dim> + Copy>(bound: Bound<D>) -> Dim {
     match bound {
-        Bound::Included(x) => *x,
-        Bound::Excluded(x) => x + 1,
-        Bound::Unbounded => 0,
+        Bound::Included(x) => x.into(),
+        Bound::Excluded(x) => {
+            if let Dim::Known(n) = x.into() {
+                Dim::Known(n + 1)
+            } else {
+                x.into()
+            }
+        }
+        Bound::Unbounded => Dim::Known(0),
     }
 }
 
-fn get_end_bound(bound: Bound<&usize>, size: usize) -> usize {
+fn get_end_bound<D: Into<Dim> + Copy, S: Into<Dim>>(bound: Bound<D>, size: S) -> Dim {
     match bound {
-        Bound::Excluded(x) => *x,
-        Bound::Included(x) => x + 1,
-        Bound::Unbounded => size,
+        Bound::Excluded(x) => x.into(),
+        Bound::Included(x) => {
+            if let Dim::Known(n) = x.into() {
+                Dim::Known(n + 1)
+            } else {
+                x.into()
+            }
+        }
+        Bound::Unbounded => size.into(),
     }
 }
 
@@ -41,25 +53,37 @@ impl<D: Dimension> RangeToDim<D> for RangeToInclusive<usize> {
 impl<D: Dimension> RangeToDim<D> for Range<usize> {
     type Dimension = Dyn<'-'>;
 }
+impl<D: Dimension> RangeToDim<D> for RangeFrom<Dim> {
+    type Dimension = Dyn<'-'>;
+}
+impl<D: Dimension> RangeToDim<D> for RangeTo<Dim> {
+    type Dimension = Dyn<'-'>;
+}
+impl<D: Dimension> RangeToDim<D> for RangeToInclusive<Dim> {
+    type Dimension = Dyn<'-'>;
+}
+impl<D: Dimension> RangeToDim<D> for Range<Dim> {
+    type Dimension = Dyn<'-'>;
+}
 impl<D: Dimension> RangeToDim<D> for RangeFull {
     type Dimension = D;
 }
 
 pub trait SliceOfShape<S: Shape> {
     type OutputShape: Shape;
-    fn to_range_vec(&self) -> Vec<(usize, usize)>;
+    fn to_range_vec(&self) -> Vec<(Dim, Dim)>;
 }
 
 impl SliceOfShape<R0> for () {
     type OutputShape = R0;
-    fn to_range_vec(&self) -> Vec<(usize, usize)> {
+    fn to_range_vec(&self) -> Vec<(Dim, Dim)> {
         vec![]
     }
 }
 
 impl<A: Dimension, R: RangeBounds<usize> + RangeToDim<A>> SliceOfShape<(A,)> for (R,) {
     type OutputShape = (R::Dimension,);
-    fn to_range_vec(&self) -> Vec<(usize, usize)> {
+    fn to_range_vec(&self) -> Vec<(Dim, Dim)> {
         vec![(
             get_start_bound(self.0.start_bound()),
             get_end_bound(self.0.end_bound(), dim_to_size(A::const_size())),
@@ -75,7 +99,7 @@ impl<
     > SliceOfShape<(A, B)> for (R1, R2)
 {
     type OutputShape = (R1::Dimension, R2::Dimension);
-    fn to_range_vec(&self) -> Vec<(usize, usize)> {
+    fn to_range_vec(&self) -> Vec<(Dim, Dim)> {
         vec![
             (
                 get_start_bound(self.0.start_bound()),
@@ -99,7 +123,7 @@ impl<
     > SliceOfShape<(A, B, C)> for (R1, R2, R3)
 {
     type OutputShape = (R1::Dimension, R2::Dimension, R3::Dimension);
-    fn to_range_vec(&self) -> Vec<(usize, usize)> {
+    fn to_range_vec(&self) -> Vec<(Dim, Dim)> {
         vec![
             (
                 get_start_bound(self.0.start_bound()),
@@ -129,7 +153,7 @@ impl<
     > SliceOfShape<(A, B, C, D)> for (R1, R2, R3, R4)
 {
     type OutputShape = (R1::Dimension, R2::Dimension, R3::Dimension, R4::Dimension);
-    fn to_range_vec(&self) -> Vec<(usize, usize)> {
+    fn to_range_vec(&self) -> Vec<(Dim, Dim)> {
         vec![
             (
                 get_start_bound(self.0.start_bound()),
@@ -171,7 +195,7 @@ impl<
         R4::Dimension,
         R5::Dimension,
     );
-    fn to_range_vec(&self) -> Vec<(usize, usize)> {
+    fn to_range_vec(&self) -> Vec<(Dim, Dim)> {
         vec![
             (
                 get_start_bound(self.0.start_bound()),

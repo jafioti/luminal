@@ -10,6 +10,17 @@ pub enum Dim {
     Unknown(char),
 }
 
+impl From<usize> for Dim {
+    fn from(value: usize) -> Self {
+        Dim::Known(value)
+    }
+}
+impl From<&usize> for Dim {
+    fn from(value: &usize) -> Self {
+        Dim::Known(*value)
+    }
+}
+
 impl Dim {
     pub fn to_usize(self) -> Option<usize> {
         match self {
@@ -30,8 +41,8 @@ pub struct ShapeTracker {
     pub dims: ArrayVec<[Dim; 6]>,
     pub indexes: ArrayVec<[usize; 6]>,
     pub fake: ArrayVec<[bool; 6]>,
-    pub slices: ArrayVec<[(usize, usize); 6]>,
-    pub padding: ArrayVec<[(usize, usize); 6]>,
+    pub slices: ArrayVec<[(Dim, Dim); 6]>,
+    pub padding: ArrayVec<[(Dim, Dim); 6]>,
 }
 
 impl ShapeTracker {
@@ -47,8 +58,9 @@ impl ShapeTracker {
             s.dims.push(*d);
             s.indexes.push(i);
             s.fake.push(false);
-            s.slices.push((0, i32::MAX as usize)); // Unset upper bound slices are i32::MAX
-            s.padding.push((0, 0));
+            s.slices
+                .push((Dim::Known(0), Dim::Known(i32::MAX as usize))); // Unset upper bound slices are i32::MAX
+            s.padding.push((Dim::Known(0), Dim::Known(0)));
         }
         s
     }
@@ -67,8 +79,9 @@ impl ShapeTracker {
         self.indexes.insert(axis, self.dims.len());
         self.dims.push(dim);
         self.fake.push(true);
-        self.slices.push((0, i32::MAX as usize));
-        self.padding.push((0, 0));
+        self.slices
+            .push((Dim::Known(0), Dim::Known(i32::MAX as usize)));
+        self.padding.push((Dim::Known(0), Dim::Known(0)));
     }
 
     /// Remove a dimension
@@ -130,8 +143,14 @@ impl ShapeTracker {
                     (
                         self.dims[i].to_usize().unwrap(),
                         strides[i],
-                        self.padding[i],
-                        self.slices[i],
+                        (
+                            self.padding[i].0.to_usize().unwrap(),
+                            self.padding[i].1.to_usize().unwrap(),
+                        ),
+                        (
+                            self.slices[i].0.to_usize().unwrap(),
+                            self.slices[i].1.to_usize().unwrap(),
+                        ),
                         self.fake[i],
                     )
                 })
@@ -172,15 +191,50 @@ impl ShapeTracker {
                 self.fake[i],
             )
         }) {
-            let logical_sh = (sh
-                + Expression::Integer(BigInt::from(padding.0))
-                + Expression::Integer(BigInt::from(padding.1)))
-            .min(Expression::Integer(BigInt::from(slice.1)))
-                - Expression::Integer(BigInt::from(slice.0));
+            let logical_sh =
+                (sh + Expression::Integer(BigInt::from(
+                    padding
+                        .0
+                        .to_usize()
+                        .expect("All dimensions must be known before indexing!"),
+                )) + Expression::Integer(BigInt::from(
+                    padding
+                        .1
+                        .to_usize()
+                        .expect("All dimensions must be known before indexing!"),
+                )))
+                .min(Expression::Integer(BigInt::from(
+                    slice
+                        .1
+                        .to_usize()
+                        .expect("All dimensions must be known before indexing!"),
+                ))) - Expression::Integer(BigInt::from(
+                    slice
+                        .0
+                        .to_usize()
+                        .expect("All dimensions must be known before indexing!"),
+                ));
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
-                ret += (dim_ind - Expression::Integer(BigInt::from(padding.0))
-                    + Expression::Integer(BigInt::from(slice.0.saturating_sub(padding.0))))
+                ret += (dim_ind
+                    - Expression::Integer(BigInt::from(
+                        padding
+                            .0
+                            .to_usize()
+                            .expect("All dimensions must be known before indexing!"),
+                    ))
+                    + Expression::Integer(BigInt::from(
+                        slice
+                            .0
+                            .to_usize()
+                            .expect("All dimensions must be known before indexing!")
+                            .saturating_sub(
+                                padding
+                                    .0
+                                    .to_usize()
+                                    .expect("All dimensions must be known before indexing!"),
+                            ),
+                    )))
                     * stride;
             }
             acc *= logical_sh;
@@ -205,17 +259,48 @@ impl ShapeTracker {
             )
         }) {
             let logical_sh = (sh.clone()
-                + Expression::Integer(BigInt::from(padding.0))
-                + Expression::Integer(BigInt::from(padding.1)))
-            .min(Expression::Integer(BigInt::from(slice.1)))
-                - Expression::Integer(BigInt::from(slice.0));
+                + Expression::Integer(BigInt::from(
+                    padding
+                        .0
+                        .to_usize()
+                        .expect("All dimensions must be known before indexing!"),
+                ))
+                + Expression::Integer(BigInt::from(
+                    padding
+                        .1
+                        .to_usize()
+                        .expect("All dimensions must be known before indexing!"),
+                )))
+            .min(Expression::Integer(BigInt::from(
+                slice
+                    .1
+                    .to_usize()
+                    .expect("All dimensions must be known before indexing!"),
+            ))) - Expression::Integer(BigInt::from(
+                slice
+                    .0
+                    .to_usize()
+                    .expect("All dimensions must be known before indexing!"),
+            ));
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
                 ret = Expression::And(
                     ret.into(),
                     Expression::GreaterThanOrEqual(
                         dim_ind.clone().into(),
-                        Expression::Integer(BigInt::from(padding.0.saturating_sub(slice.0))).into(),
+                        Expression::Integer(BigInt::from(
+                            padding
+                                .0
+                                .to_usize()
+                                .expect("All dimensions must be known before indexing!")
+                                .saturating_sub(
+                                    slice
+                                        .0
+                                        .to_usize()
+                                        .expect("All dimensions must be known before indexing!"),
+                                ),
+                        ))
+                        .into(),
                     )
                     .into(),
                 );
@@ -223,9 +308,19 @@ impl ShapeTracker {
                     ret.into(),
                     Expression::LessThan(
                         dim_ind.clone().into(),
-                        (sh + Expression::Integer(BigInt::from(padding.0)))
-                            .min(Expression::Integer(BigInt::from(slice.1)))
-                            .into(),
+                        (sh + Expression::Integer(BigInt::from(
+                            padding
+                                .0
+                                .to_usize()
+                                .expect("All dimensions must be known before indexing!"),
+                        )))
+                        .min(Expression::Integer(BigInt::from(
+                            slice
+                                .1
+                                .to_usize()
+                                .expect("All dimensions must be known before indexing!"),
+                        )))
+                        .into(),
                     )
                     .into(),
                 );
@@ -248,9 +343,18 @@ impl ShapeTracker {
                 }
             })
             // Add pads
-            .map(|(ind, dim)| (ind, dim + self.padding[ind].0 + self.padding[ind].1))
+            .map(|(ind, dim)| {
+                (
+                    ind,
+                    dim + self.padding[ind].0.to_usize().unwrap_or_default()
+                        + self.padding[ind].1.to_usize().unwrap_or_default(),
+                )
+            })
             // Slice
-            .map(|(ind, dim)| dim.min(self.slices[ind].1) - self.slices[ind].0)
+            .map(|(ind, dim)| {
+                dim.min(self.slices[ind].1.to_usize().unwrap_or(i32::MAX as usize))
+                    - self.slices[ind].0.to_usize().unwrap_or_default()
+            })
             .product()
     }
 
@@ -287,7 +391,10 @@ impl ShapeTracker {
             .indexes
             .into_iter()
             .map(|i| match self.dims[i] {
-                Dim::Known(n) => Dim::Known(n.min(self.slices[i].1 - self.slices[i].0)),
+                Dim::Known(n) => Dim::Known(n.min(
+                    self.slices[i].1.to_usize().unwrap_or(i32::MAX as usize)
+                        - self.slices[i].0.to_usize().unwrap_or_default(),
+                )),
                 Dim::Unknown(c) => Dim::Unknown(c),
             })
             .collect::<Vec<_>>();
@@ -305,28 +412,70 @@ impl ShapeTracker {
     }
 
     /// Take a slice
-    pub fn slice(&mut self, slices: &[(usize, usize)]) {
+    pub fn slice(&mut self, slices: &[(Dim, Dim)]) {
         for (i, (s, e)) in slices.iter().enumerate() {
             // If we are slicing into a padded dim, remove as much padding as possible
-            let mut s = *s;
-            if self.padding[self.indexes[i]].0 != 0 {
-                let padding = self.padding[self.indexes[i]].0;
-                self.padding[self.indexes[i]].0 = self.padding[self.indexes[i]].0.saturating_sub(s);
-                s = s.saturating_sub(padding);
+            if let Dim::Known(mut s) = s {
+                if self.padding[self.indexes[i]]
+                    .0
+                    .to_usize()
+                    .map(|n| n != 0)
+                    .unwrap_or_default()
+                {
+                    let padding = self.padding[self.indexes[i]].0.to_usize().unwrap();
+                    self.padding[self.indexes[i]].0 = Dim::Known(padding.saturating_sub(s));
+                    s = s.saturating_sub(padding);
+                }
+                if let Dim::Known(a) = self.slices[self.indexes[i]].0 {
+                    self.slices[self.indexes[i]].0 = Dim::Known(a + s);
+                } else {
+                    self.slices[self.indexes[i]].0 = Dim::Known(s);
+                }
+            } else {
+                self.slices[self.indexes[i]].0 = *s;
             }
-            self.slices[self.indexes[i]].0 += s;
-            self.slices[self.indexes[i]].1 = self.slices[self.indexes[i]].1.min(*e);
+            if let Dim::Known(a) = self.slices[self.indexes[i]].1 {
+                if let Dim::Known(e) = e {
+                    self.slices[self.indexes[i]].1 = Dim::Known(a.min(*e));
+                } else {
+                    self.slices[self.indexes[i]].1 = *e;
+                }
+            } else {
+                self.slices[self.indexes[i]].1 = *e;
+            }
         }
     }
 
     /// Add padding
-    pub fn pad(&mut self, padding: &[(usize, usize)]) {
+    pub fn pad(&mut self, padding: &[(Dim, Dim)]) {
         for (i, (s, e)) in padding.iter().enumerate() {
-            self.padding[self.indexes[i]].0 += *s;
-            if *e != 0 && self.slices[self.indexes[i]].1 as i32 != i32::MAX {
+            if let Dim::Known(a) = self.padding[self.indexes[i]].0 {
+                if let Dim::Known(s) = s {
+                    self.padding[self.indexes[i]].0 = Dim::Known(a + *s);
+                } else {
+                    self.padding[self.indexes[i]].0 = *s;
+                }
+            } else {
+                self.padding[self.indexes[i]].0 = *s;
+            }
+            if e.to_usize().map(|n| n != 0).unwrap_or_default()
+                && self.slices[self.indexes[i]]
+                    .1
+                    .to_usize()
+                    .map(|n| n as i32 != i32::MAX)
+                    .unwrap_or_default()
+            {
                 panic!("Adding padding to a slice isn't supported")
             }
-            self.padding[self.indexes[i]].1 += *e;
+            if let Dim::Known(a) = self.padding[self.indexes[i]].1 {
+                if let Dim::Known(e) = e {
+                    self.padding[self.indexes[i]].1 = Dim::Known(a + *e);
+                } else {
+                    self.padding[self.indexes[i]].1 = *e;
+                }
+            } else {
+                self.padding[self.indexes[i]].1 = *e;
+            }
         }
     }
 
@@ -343,7 +492,7 @@ impl ShapeTracker {
     pub fn is_sliced(&self) -> bool {
         self.slices
             .iter()
-            .any(|(b, e)| *b != 0 || *e as i32 != i32::MAX)
+            .any(|(b, e)| if let Dim::Known(n) = b {*n != 0} else {true} || if let Dim::Known(n) = e {*n as i32 != i32::MAX} else {false})
     }
 }
 

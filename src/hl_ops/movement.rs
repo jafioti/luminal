@@ -92,8 +92,16 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
-    pub fn pad<Dst: Shape>(mut self, ranges: Vec<(usize, usize)>) -> GraphTensor<Dst> {
-        self.shape.pad(&ranges);
+    pub fn pad<Dst: Shape, Start: Into<Dim> + Copy, End: Into<Dim> + Copy>(
+        mut self,
+        ranges: &[(Start, End)],
+    ) -> GraphTensor<Dst> {
+        self.shape.pad(
+            &ranges
+                .iter()
+                .map(|i| (i.0.into(), i.1.into()))
+                .collect::<Vec<_>>(),
+        );
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
@@ -107,15 +115,19 @@ impl<S: Shape> GraphTensor<S> {
             .add_op(op::Function(
                 "Concat".to_string(),
                 Box::new(move |mut inps| {
-                    let mut pad_shape = vec![(0, 0); S::NUM_DIMS];
-                    pad_shape[dim].1 = inps[1].1.shape()[dim]
-                        .to_usize()
-                        .expect("Tried to concat on a dim with an unknown size");
+                    let mut pad_shape = vec![(Dim::Known(0), Dim::Known(0)); S::NUM_DIMS];
+                    pad_shape[dim].1 = Dim::Known(
+                        inps[1].1.shape()[dim]
+                            .to_usize()
+                            .expect("Tried to concat on a dim with an unknown size"),
+                    );
                     inps[0].1.pad(&pad_shape);
-                    let mut pad_shape = vec![(0, 0); S::NUM_DIMS];
-                    pad_shape[dim].0 = inps[0].1.shape()[dim]
-                        .to_usize()
-                        .expect("Tried to concat on a dim with an unknown size");
+                    let mut pad_shape = vec![(Dim::Known(0), Dim::Known(0)); S::NUM_DIMS];
+                    pad_shape[dim].0 = Dim::Known(
+                        inps[0].1.shape()[dim]
+                            .to_usize()
+                            .expect("Tried to concat on a dim with an unknown size"),
+                    );
                     inps[1].1.pad(&pad_shape);
                     let (a_data, b_data) = (
                         inps[0]
@@ -229,7 +241,7 @@ mod tests {
         let mut cx = Graph::new();
         let a = cx.new_tensor::<R2<3, 2>>("Input");
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
-        let b = a.pad::<R2<3, 4>>(vec![(0, 0), (0, 2)]);
+        let b = a.pad::<R2<3, 4>, usize, usize>(&[(0, 0), (0, 2)]);
         b.retrieve();
         cx.execute();
 
