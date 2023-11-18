@@ -138,7 +138,8 @@ impl Expression {
                 | GreaterThanOrEqual(_, _)
                 | And(_, _)
                 | Or(_, _)
-                | Min(_, _),
+                | Min(_, _)
+                | Max(_, _),
                 _,
             ) => unreachable!(),
         }
@@ -172,6 +173,7 @@ impl Expression {
             (
                 Sum(_, _)
                 | Min(_, _)
+                | Max(_, _)
                 | Difference(_, _)
                 | Product(_, _)
                 | Quotient(_, _)
@@ -196,6 +198,7 @@ impl Expression {
             (
                 Sum(_, _)
                 | Min(_, _)
+                | Max(_, _)
                 | Difference(_, _)
                 | Product(_, _)
                 | Quotient(_, _)
@@ -218,12 +221,12 @@ impl Expression {
             }),
 
             (
-                Sum(_, _) | Min(_, _) | Difference(_, _) | Equal(_, _) | NotEqual(_, _),
+                Sum(_, _) | Min(_, _) | Max(_, _) | Difference(_, _) | Equal(_, _) | NotEqual(_, _),
                 Num(_, _),
                 Mat(_),
             )
             | (
-                Sum(_, _) | Min(_, _) | Difference(_, _) | Equal(_, _) | NotEqual(_, _),
+                Sum(_, _) | Min(_, _) | Max(_, _) | Difference(_, _) | Equal(_, _) | NotEqual(_, _),
                 Mat(_),
                 Num(_, _),
             )
@@ -239,6 +242,7 @@ impl Expression {
             (
                 Sum(_, _)
                 | Min(_, _)
+                | Max(_, _)
                 | Difference(_, _)
                 | Product(_, _)
                 | Quotient(_, _)
@@ -257,7 +261,7 @@ impl Expression {
 
                 match self {
                     Sum(_, _) => Ok(Complex(a + b, representation)),
-                    Min(_, _) => unreachable!(),
+                    Min(_, _) | Max(_, _) => unreachable!(),
                     Difference(_, _) => Ok(Complex(a - b, representation)),
                     Product(_, _) => Ok(Complex(a * b, representation)),
                     Quotient(_, _) | Remainder(_, _) => {
@@ -328,7 +332,7 @@ impl Expression {
                 }
             }
 
-            (Sum(_, _) | Min(_, _) | Difference(_, _), Mat(a), Mat(b)) => {
+            (Sum(_, _) | Min(_, _) | Max(_, _) | Difference(_, _), Mat(a), Mat(b)) => {
                 if a.shape() == b.shape() {
                     Ok(Matrix(match self {
                         Sum(_, _) => a + b,
@@ -377,6 +381,7 @@ impl Expression {
 
             (Sum(_, _), _, _) => Ok(Sum(Box::new(a), Box::new(b))), // TODO
             (Min(_, _), _, _) => Ok(Min(Box::new(a), Box::new(b))), // TODO
+            (Max(_, _), _, _) => Ok(Max(Box::new(a), Box::new(b))), // TODO
             (Difference(_, _), _, _) => Ok(Difference(Box::new(a), Box::new(b))), // TODO
             (Product(_, _), _, _) => Ok(Product(Box::new(a), Box::new(b))), // TODO
             (Quotient(_, _), _, _) => Ok(Quotient(Box::new(a), Box::new(b))), // TODO
@@ -601,6 +606,7 @@ impl Expression {
             Not(a) => expression.evaluate_step_unary(a, context),
             Sum(a, b) => expression.evaluate_step_binary(a, b, context),
             Min(a, b) => expression.evaluate_step_binary(a, b, context),
+            Max(a, b) => expression.evaluate_step_binary(a, b, context),
             Difference(a, b) => expression.evaluate_step_binary(a, b, context),
             Product(a, b) => expression.evaluate_step_binary(a, b, context),
             Quotient(a, b) => expression.evaluate_step_binary(a, b, context),

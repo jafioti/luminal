@@ -116,6 +116,7 @@ pub enum Expression {
     /// Logical disjunction (OR) of two expressions.
     Or(Box<Self>, Box<Self>),
     Min(Box<Self>, Box<Self>),
+    Max(Box<Self>, Box<Self>),
 }
 
 /// Basic expression type designed to make evaluating expressions easier.
@@ -189,6 +190,7 @@ impl Expression {
             And(_, _) => Bool(None),
             Or(_, _) => Bool(None),
             Min(_, _) => Arithmetic,
+            Max(_, _) => Arithmetic,
         }
     }
 
@@ -244,6 +246,7 @@ impl Expression {
             Not(_) => (3, Associative),
             Sum(_, _) => (1, Associative),
             Min(_, _) => (0, Associative),
+            Max(_, _) => (0, Associative),
             Difference(_, _) => (1, LeftAssociative),
             Product(_, _) => (2, Associative),
             Quotient(_, _) => (2, LeftAssociative),
@@ -330,7 +333,8 @@ impl Expression {
             | GreaterThanOrEqual(a, b)
             | And(a, b)
             | Or(a, b)
-            | Min(a, b) => {
+            | Min(a, b)
+            | Max(a, b) => {
                 parts.append(&mut a.parts());
                 parts.append(&mut b.parts());
             }

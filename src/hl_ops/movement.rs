@@ -110,62 +110,69 @@ impl<S: Shape> GraphTensor<S> {
         rhs: GraphTensor<Rhs>,
     ) -> GraphTensor<Dst> {
         let dim = Ax::as_array()[0] as usize;
-        let fin = self
-            .graph()
-            .add_op(op::Function(
-                "Concat".to_string(),
-                Box::new(move |mut inps| {
-                    let mut pad_shape = vec![(Dim::Known(0), Dim::Known(0)); S::NUM_DIMS];
-                    pad_shape[dim].1 = Dim::Known(
-                        inps[1].1.shape()[dim]
-                            .to_usize()
-                            .expect("Tried to concat on a dim with an unknown size"),
-                    );
-                    inps[0].1.pad(&pad_shape);
-                    let mut pad_shape = vec![(Dim::Known(0), Dim::Known(0)); S::NUM_DIMS];
-                    pad_shape[dim].0 = Dim::Known(
-                        inps[0].1.shape()[dim]
-                            .to_usize()
-                            .expect("Tried to concat on a dim with an unknown size"),
-                    );
-                    inps[1].1.pad(&pad_shape);
-                    let (a_data, b_data) = (
-                        inps[0]
-                            .0
-                            .borrowed()
-                            .data
-                            .as_any()
-                            .downcast_ref::<Vec<f32>>()
-                            .unwrap(),
-                        inps[1]
-                            .0
-                            .borrowed()
-                            .data
-                            .as_any()
-                            .downcast_ref::<Vec<f32>>()
-                            .unwrap(),
-                    );
-                    // Each input is already padded, so the final answer will be the same size as each input
-                    let mut data = vec![0.; inps[0].1.n_elements()];
-                    let (a_ind, b_ind) = (inps[0].1.indexer(), inps[1].1.indexer());
-                    for (i, d) in data.iter_mut().enumerate() {
-                        *d = a_ind.index(i).map(|i| a_data[i]).unwrap_or_default()
-                            + b_ind.index(i).map(|i| b_data[i]).unwrap_or_default()
-                    }
-                    vec![Tensor {
-                        data: Box::new(data),
-                    }]
-                }),
-                std::any::TypeId::of::<Vec<f32>>(),
-            ))
-            .input(self.id, 0, self.shape)
-            .input(rhs.id, 0, rhs.shape)
-            .finish();
-        GraphTensor::from_id(
-            fin,
-            ShapeTracker::new(&Dst::realized_shape()),
-            self.graph_ref,
-        )
+        let mut a_shape = vec![(Dim::Known(0), Dim::Known(0)); self.shape.shape().len()];
+        a_shape[dim].1 = rhs.shape.shape()[dim];
+        let lhs = self.pad(&a_shape);
+        let mut b_shape = vec![(Dim::Known(0), Dim::Known(0)); rhs.shape.shape().len()];
+        b_shape[dim].1 = self.shape.shape()[dim];
+        let rhs = rhs.pad(&b_shape);
+        lhs + rhs
+        // let fin = self
+        //     .graph()
+        //     .add_op(op::Function(
+        //         "Concat".to_string(),
+        //         Box::new(move |mut inps| {
+        //             let mut pad_shape = vec![(Dim::Known(0), Dim::Known(0)); S::NUM_DIMS];
+        //             pad_shape[dim].1 = Dim::Known(
+        //                 inps[1].1.shape()[dim]
+        //                     .to_usize()
+        //                     .expect("Tried to concat on a dim with an unknown size"),
+        //             );
+        //             inps[0].1.pad(&pad_shape);
+        //             let mut pad_shape = vec![(Dim::Known(0), Dim::Known(0)); S::NUM_DIMS];
+        //             pad_shape[dim].0 = Dim::Known(
+        //                 inps[0].1.shape()[dim]
+        //                     .to_usize()
+        //                     .expect("Tried to concat on a dim with an unknown size"),
+        //             );
+        //             inps[1].1.pad(&pad_shape);
+        //             let (a_data, b_data) = (
+        //                 inps[0]
+        //                     .0
+        //                     .borrowed()
+        //                     .data
+        //                     .as_any()
+        //                     .downcast_ref::<Vec<f32>>()
+        //                     .unwrap(),
+        //                 inps[1]
+        //                     .0
+        //                     .borrowed()
+        //                     .data
+        //                     .as_any()
+        //                     .downcast_ref::<Vec<f32>>()
+        //                     .unwrap(),
+        //             );
+        //             // Each input is already padded, so the final answer will be the same size as each input
+        //             let mut data = vec![0.; inps[0].1.n_elements()];
+        //             let (a_ind, b_ind) = (inps[0].1.indexer(), inps[1].1.indexer());
+        //             for (i, d) in data.iter_mut().enumerate() {
+        //                 *d = a_ind.index(i).map(|i| a_data[i]).unwrap_or_default()
+        //                     + b_ind.index(i).map(|i| b_data[i]).unwrap_or_default()
+        //             }
+        //             vec![Tensor {
+        //                 data: Box::new(data),
+        //             }]
+        //         }),
+        //         std::any::TypeId::of::<Vec<f32>>(),
+        //     ))
+        //     .input(self.id, 0, self.shape)
+        //     .input(rhs.id, 0, rhs.shape)
+        //     .finish();
+        // GraphTensor::from_id(
+        //     fin,
+        //     ShapeTracker::new(&Dst::realized_shape()),
+        //     self.graph_ref,
+        // )
     }
 }
 

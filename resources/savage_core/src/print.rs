@@ -220,6 +220,7 @@ impl Display for Expression {
             Not(a) => self.fmt_prefix(f, "!", a),
             Sum(a, b) => self.fmt_infix(f, "+", a, b),
             Min(a, b) => write!(f, "min({a}, {b})"),
+            Max(a, b) => write!(f, "max({a}, {b})"),
             Difference(a, b) => self.fmt_infix(f, "-", a, b),
             Product(a, b) => self.fmt_infix(f, "*", a, b),
             Quotient(a, b) => self.fmt_infix(f, "/", a, b),

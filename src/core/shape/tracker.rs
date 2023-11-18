@@ -167,10 +167,7 @@ impl ShapeTracker {
             .scan(Expression::Integer(BigInt::from(1)), |state, (i, x)| {
                 let ret = state.clone();
                 if !self.fake[i] {
-                    *state *= match x {
-                        Dim::Known(n) => Expression::Integer(BigInt::from(*n)),
-                        Dim::Unknown(c) => Expression::Variable(c.to_string()),
-                    };
+                    *state *= dim_to_expression(*x);
                 }
                 Some(ret)
             })
@@ -181,60 +178,20 @@ impl ShapeTracker {
         let logical = Expression::Variable("idx".to_string());
         for (sh, stride, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
             (
-                match self.dims[i] {
-                    Dim::Known(n) => Expression::Integer(BigInt::from(n)),
-                    Dim::Unknown(c) => Expression::Variable(c.to_string()),
-                },
+                dim_to_expression(self.dims[i]),
                 strides[i].clone(),
                 self.padding[i],
                 self.slices[i],
                 self.fake[i],
             )
         }) {
-            let logical_sh =
-                (sh + Expression::Integer(BigInt::from(
-                    padding
-                        .0
-                        .to_usize()
-                        .expect("All dimensions must be known before indexing!"),
-                )) + Expression::Integer(BigInt::from(
-                    padding
-                        .1
-                        .to_usize()
-                        .expect("All dimensions must be known before indexing!"),
-                )))
-                .min(Expression::Integer(BigInt::from(
-                    slice
-                        .1
-                        .to_usize()
-                        .expect("All dimensions must be known before indexing!"),
-                ))) - Expression::Integer(BigInt::from(
-                    slice
-                        .0
-                        .to_usize()
-                        .expect("All dimensions must be known before indexing!"),
-                ));
+            let logical_sh = (sh + dim_to_expression(padding.0) + dim_to_expression(padding.1))
+                .min(dim_to_expression(slice.1))
+                - dim_to_expression(slice.0);
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
-                ret += (dim_ind
-                    - Expression::Integer(BigInt::from(
-                        padding
-                            .0
-                            .to_usize()
-                            .expect("All dimensions must be known before indexing!"),
-                    ))
-                    + Expression::Integer(BigInt::from(
-                        slice
-                            .0
-                            .to_usize()
-                            .expect("All dimensions must be known before indexing!")
-                            .saturating_sub(
-                                padding
-                                    .0
-                                    .to_usize()
-                                    .expect("All dimensions must be known before indexing!"),
-                            ),
-                    )))
+                ret += (dim_ind - dim_to_expression(padding.0) + dim_to_expression(slice.0)
+                    - dim_to_expression(padding.0))
                     * stride;
             }
             acc *= logical_sh;
@@ -249,58 +206,23 @@ impl ShapeTracker {
         let logical = Expression::Variable("idx".to_string());
         for (sh, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
             (
-                match self.dims[i] {
-                    Dim::Known(n) => Expression::Integer(BigInt::from(n)),
-                    Dim::Unknown(c) => Expression::Variable(c.to_string()),
-                },
+                dim_to_expression(self.dims[i]),
                 self.padding[i],
                 self.slices[i],
                 self.fake[i],
             )
         }) {
-            let logical_sh = (sh.clone()
-                + Expression::Integer(BigInt::from(
-                    padding
-                        .0
-                        .to_usize()
-                        .expect("All dimensions must be known before indexing!"),
-                ))
-                + Expression::Integer(BigInt::from(
-                    padding
-                        .1
-                        .to_usize()
-                        .expect("All dimensions must be known before indexing!"),
-                )))
-            .min(Expression::Integer(BigInt::from(
-                slice
-                    .1
-                    .to_usize()
-                    .expect("All dimensions must be known before indexing!"),
-            ))) - Expression::Integer(BigInt::from(
-                slice
-                    .0
-                    .to_usize()
-                    .expect("All dimensions must be known before indexing!"),
-            ));
+            let logical_sh =
+                (sh.clone() + dim_to_expression(padding.0) + dim_to_expression(padding.1))
+                    .min(dim_to_expression(slice.1))
+                    - dim_to_expression(slice.0);
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
                 ret = Expression::And(
                     ret.into(),
                     Expression::GreaterThanOrEqual(
                         dim_ind.clone().into(),
-                        Expression::Integer(BigInt::from(
-                            padding
-                                .0
-                                .to_usize()
-                                .expect("All dimensions must be known before indexing!")
-                                .saturating_sub(
-                                    slice
-                                        .0
-                                        .to_usize()
-                                        .expect("All dimensions must be known before indexing!"),
-                                ),
-                        ))
-                        .into(),
+                        (dim_to_expression(padding.0) - dim_to_expression(slice.0)).into(),
                     )
                     .into(),
                 );
@@ -308,19 +230,9 @@ impl ShapeTracker {
                     ret.into(),
                     Expression::LessThan(
                         dim_ind.clone().into(),
-                        (sh + Expression::Integer(BigInt::from(
-                            padding
-                                .0
-                                .to_usize()
-                                .expect("All dimensions must be known before indexing!"),
-                        )))
-                        .min(Expression::Integer(BigInt::from(
-                            slice
-                                .1
-                                .to_usize()
-                                .expect("All dimensions must be known before indexing!"),
-                        )))
-                        .into(),
+                        (sh + dim_to_expression(padding.0))
+                            .min(dim_to_expression(slice.1))
+                            .into(),
                     )
                     .into(),
                 );
@@ -544,5 +456,12 @@ impl Indexer {
             acc *= logical_sh;
         }
         Some(ret)
+    }
+}
+
+fn dim_to_expression(d: Dim) -> Expression {
+    match d {
+        Dim::Known(n) => Expression::Integer(BigInt::from(n)),
+        Dim::Unknown(c) => Expression::Variable(c.to_string()),
     }
 }
