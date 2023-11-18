@@ -9,16 +9,13 @@ use luminal::prelude::*;
 
 // Setup graph and tensors
 let mut cx = Graph::new();
-let a = cx.new_tensor::<R2<3, 1>>("A");
-let b = cx.new_tensor::<R2<1, 4>>("B");
+let a = cx.new_tensor::<R2<3, 1>>("A")
+    .set(vec![1.0, 2.0, 3.0]);
+let b = cx.new_tensor::<R2<1, 4>>("B")
+    .set(vec![1.0, 2.0, 3.0, 4.0]);
 
 // Do stuff...
-let c = a.matmul(b);
-
-// Set inputs and mark outputs
-a.set(vec![1.0, 2.0, 3.0]);
-b.set(vec![1.0, 2.0, 3.0, 3.0]);
-c.mark();
+let c = a.matmul(b).retrieve();
 
 // Compile and run graph
 cx.compile(GenericCompiler::default());
