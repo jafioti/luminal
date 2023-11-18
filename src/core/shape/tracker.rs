@@ -222,7 +222,9 @@ impl ShapeTracker {
                     ret.into(),
                     Expression::GreaterThanOrEqual(
                         dim_ind.clone().into(),
-                        (dim_to_expression(padding.0) - dim_to_expression(slice.0)).into(),
+                        (dim_to_expression(padding.0)
+                            - dim_to_expression(slice.0).min(dim_to_expression(padding.0)))
+                        .into(),
                     )
                     .into(),
                 );

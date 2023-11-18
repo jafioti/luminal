@@ -91,10 +91,19 @@ fn input_dyn_dims(
     index: usize,
 ) {
     let mut added = HashSet::new();
-    for (d1, d2) in shapes
-        .iter()
-        .flat_map(|(a, b)| a.shape().into_iter().zip(b.shape()))
-    {
+    for (d1, d2) in shapes.iter().flat_map(|(a, b)| {
+        let a_dims = a
+            .shape()
+            .into_iter()
+            .chain(a.padding.into_iter().flat_map(|i| [i.0, i.1]))
+            .chain(a.slices.into_iter().flat_map(|i| [i.0, i.1]));
+        let b_dims = b
+            .shape()
+            .into_iter()
+            .chain(b.padding.into_iter().flat_map(|i| [i.0, i.1]))
+            .chain(b.slices.into_iter().flat_map(|i| [i.0, i.1]));
+        a_dims.zip(b_dims)
+    }) {
         if let Dim::Unknown(c) = d1 {
             if !added.contains(&c) {
                 encoder.set_int(index + added.len(), d2.to_usize().unwrap() as u32);
@@ -107,7 +116,12 @@ fn input_dyn_dims(
 fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> String {
     shapes
         .iter()
-        .flat_map(|st| st.shape())
+        .flat_map(|st| {
+            st.shape()
+                .into_iter()
+                .chain(st.padding.into_iter().flat_map(|i| [i.0, i.1]))
+                .chain(st.slices.into_iter().flat_map(|i| [i.0, i.1]))
+        })
         .filter_map(|d| {
             if let Dim::Unknown(c) = d {
                 Some(c)
