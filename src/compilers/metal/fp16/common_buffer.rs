@@ -56,17 +56,36 @@ impl Compiler for CommonBufferCompiler {
                     })
                     .finish();
                 let mut current_set = HashSet::new();
-                build_set_from_node(
+                build_set(
                     node,
-                    b,
+                    b.clone(),
                     &dev,
                     &mut current_set,
                     &mut already_added_nodes,
                     graph,
                     exec,
                     &is_metal,
-                    &get_lower_nodes(&graph.graph, node),
+                    &get_nodes_in_dir(&graph.graph, node, Direction::Outgoing),
+                    Direction::Outgoing,
                 );
+                let upper_nodes = current_set
+                    .iter()
+                    .flat_map(|n| get_nodes_in_dir(&graph.graph, *n, Direction::Outgoing))
+                    .collect();
+                for node in current_set.clone() {
+                    build_set(
+                        node,
+                        b.clone(),
+                        &dev,
+                        &mut current_set,
+                        &mut already_added_nodes,
+                        graph,
+                        exec,
+                        &is_metal,
+                        &upper_nodes,
+                        Direction::Incoming,
+                    );
+                }
                 // Add deps from execute op to consumers
                 for node in &current_set {
                     is_metal.remove(node);
@@ -87,7 +106,7 @@ impl Compiler for CommonBufferCompiler {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build_set_from_node(
+fn build_set(
     node: NodeIndex,
     buffer: Arc<Mutex<CommandBuffer>>,
     dev: &Device,
@@ -96,29 +115,32 @@ fn build_set_from_node(
     graph: &mut Graph,
     exec_node: NodeIndex,
     is_metal: &HashSet<NodeIndex>,
-    lower_nodes: &HashSet<NodeIndex>,
+    valid_nodes: &HashSet<NodeIndex>,
+    direction: Direction,
 ) {
-    graph.add_schedule_dependency(node, exec_node);
-    // Wrap current node
-    let wrapper = graph
-        .graph
-        .node_weight(node)
-        .unwrap()
-        .custom("metal")
-        .unwrap()
-        .downcast::<MetalKernelWrapper>()
-        .unwrap();
-    *graph.graph.node_weight_mut(node).unwrap() = Box::new(MetalKernelOperation {
-        wrapper,
-        dev: dev.clone(),
-        buffer: buffer.clone(),
-    });
-    current_set.insert(node);
-    already_added_nodes.insert(node);
+    if !current_set.contains(&node) {
+        graph.add_schedule_dependency(node, exec_node);
+        // Wrap current node
+        let wrapper = graph
+            .graph
+            .node_weight(node)
+            .unwrap()
+            .custom("metal")
+            .unwrap()
+            .downcast::<MetalKernelWrapper>()
+            .unwrap();
+        *graph.graph.node_weight_mut(node).unwrap() = Box::new(MetalKernelOperation {
+            wrapper,
+            dev: dev.clone(),
+            buffer: buffer.clone(),
+        });
+        current_set.insert(node);
+        already_added_nodes.insert(node);
+    }
     // Add outgoing
     for node in graph
         .graph
-        .edges_directed(node, Direction::Outgoing)
+        .edges_directed(node, direction)
         .filter(|e| !e.weight().is_schedule())
         .map(|e| e.target())
         .unique()
@@ -126,9 +148,19 @@ fn build_set_from_node(
     {
         if !already_added_nodes.contains(&node)
             && is_metal.contains(&node)
-            && !reverse_dfs(&graph.graph, is_metal, current_set, node, lower_nodes)
+            && !dfs(
+                &graph.graph,
+                is_metal,
+                current_set,
+                node,
+                valid_nodes,
+                match direction {
+                    Direction::Outgoing => Direction::Incoming,
+                    Direction::Incoming => Direction::Outgoing,
+                },
+            )
         {
-            build_set_from_node(
+            build_set(
                 node,
                 buffer.clone(),
                 dev,
@@ -137,13 +169,18 @@ fn build_set_from_node(
                 graph,
                 exec_node,
                 is_metal,
-                lower_nodes,
+                valid_nodes,
+                direction,
             );
         }
     }
 }
 
-fn get_lower_nodes(graph: &MainGraph, start_from: NodeIndex) -> HashSet<NodeIndex> {
+fn get_nodes_in_dir(
+    graph: &MainGraph,
+    start_from: NodeIndex,
+    direction: Direction,
+) -> HashSet<NodeIndex> {
     let mut stack = VecDeque::new();
     let mut seen = HashSet::new();
 
@@ -154,7 +191,7 @@ fn get_lower_nodes(graph: &MainGraph, start_from: NodeIndex) -> HashSet<NodeInde
         }
         seen.insert(node);
         for neighbor in graph
-            .edges_directed(node, Direction::Outgoing)
+            .edges_directed(node, direction)
             .filter(|e| !e.weight().is_schedule())
             .map(|e| e.target())
         {
@@ -164,12 +201,13 @@ fn get_lower_nodes(graph: &MainGraph, start_from: NodeIndex) -> HashSet<NodeInde
     seen
 }
 
-fn reverse_dfs(
+fn dfs(
     graph: &MainGraph,
     is_metal: &HashSet<NodeIndex>,
     set: &HashSet<NodeIndex>,
     start_from: NodeIndex,
-    lower_nodes: &HashSet<NodeIndex>,
+    valid_nodes: &HashSet<NodeIndex>,
+    direction: Direction,
 ) -> bool {
     let mut stack = VecDeque::new();
 
@@ -186,10 +224,10 @@ fn reverse_dfs(
             if passed_non_metal {
                 return true;
             }
-        } else if lower_nodes.contains(&node) {
+        } else if valid_nodes.contains(&node) {
             // Iterate over all neighbors by incoming edges (reversed).
             for neighbor in graph
-                .edges_directed(node, Direction::Incoming)
+                .edges_directed(node, direction)
                 .filter(|e| !e.weight().is_schedule())
                 .map(|e| e.source())
             {

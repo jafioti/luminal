@@ -29,7 +29,7 @@ impl MetalCos {
 using namespace metal;
 kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint i_ [[thread_position_in_grid]]) {{
     if (i_ < n_elements) {{
-        out[i_] = (half)cos((float)inp[i_]);
+        out[i_] = cos(inp[i_]);
     }}
 }}
 ".to_string();
@@ -46,8 +46,8 @@ impl MetalKernelForward for MetalCos {
             dev: &Device,
             command_buffer: &CommandBufferRef,
         ) -> Vec<Buffer> {
-            let inp_size = inputs[0].1.n_physical_elements();
-            let encoder = command_buffer
+        let inp_size = inputs[0].1.n_physical_elements();
+        let encoder = command_buffer
             .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
         encoder.set_compute_pipeline_state(&self.0);
 
@@ -111,7 +111,7 @@ pub struct MetalCosCompiler;
 impl Compiler for MetalCosCompiler {
     fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
-        // Look for the mean-reduce pattern
+        // Look for the cos pattern
         // sin(add(mul(const_neg_one, x), const_pi_over_2))
         let (
             mut const_neg_one,
@@ -132,7 +132,7 @@ impl Compiler for MetalCosCompiler {
         let s = SelectEdge::new(
             SelectEdge::new(
                 SelectOp::new().check(|op, _| if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
-                    c.0 == (f16::PI / f16::from_f32(2.))
+                    c.0 == f16::PI / f16::from_f32(2.)
                 } else {false}).ptr(&mut const_pi),
                 SelectEdge::new(
                     SelectEdge::new(

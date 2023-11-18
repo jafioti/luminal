@@ -1,6 +1,6 @@
 use std::{
     any::{Any, TypeId},
-    collections::{hash_map::Entry, BTreeMap, HashMap, HashSet},
+    collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     fmt::Debug,
 };
 
@@ -362,16 +362,8 @@ impl Iterator for GraphSearch {
     fn next(&mut self) -> Option<Self::Item> {
         // Look through graph for pattern from selector
         let graph = unsafe { self.graph.as_ref().unwrap() };
-        let mut mapping = BTreeMap::new();
-        let mut visited = HashSet::new();
 
-        if match_nodes(
-            &graph.graph,
-            &self.selector,
-            &mut mapping,
-            &mut visited,
-            &self.already_returned,
-        ) {
+        if let Some(mapping) = match_nodes(&graph.graph, &self.selector, &self.already_returned) {
             // Apply pattern to ptrs
             for (selector_node, ptr) in self.selector.node_indices().flat_map(|n| {
                 self.selector
@@ -395,92 +387,63 @@ impl Iterator for GraphSearch {
 fn match_nodes(
     g0: &MainGraph,
     g1: &SelectionGraph,
-    mapping: &mut BTreeMap<NodeIndex, NodeIndex>,
-    visited: &mut HashSet<NodeIndex>,
     already_returned: &HashSet<BTreeMap<NodeIndex, NodeIndex>>,
-) -> bool {
-    let mut predecessors_cache: HashMap<NodeIndex, Vec<NodeIndex>> = HashMap::new();
-
-    if let Ok(topo_order) = toposort(g1, None) {
-        match_nodes_topo(
-            g0,
-            g1,
-            &topo_order,
-            mapping,
-            visited,
-            &mut predecessors_cache,
-            0,
-            already_returned,
-        )
-    } else {
-        false
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn match_nodes_topo(
-    g0: &MainGraph,
-    g1: &SelectionGraph,
-    topo_order: &[NodeIndex],
-    mapping: &mut BTreeMap<NodeIndex, NodeIndex>,
-    visited: &mut HashSet<NodeIndex>,
-    predecessors_cache: &mut HashMap<NodeIndex, Vec<NodeIndex>>,
-    current_index: usize,
-    already_returned: &HashSet<BTreeMap<NodeIndex, NodeIndex>>,
-) -> bool {
-    if mapping.len() == g1.node_count() {
-        if !already_returned.contains(mapping) {
-            return true;
+) -> Option<BTreeMap<NodeIndex, NodeIndex>> {
+    let Ok(topo_order) = toposort(g1, None) else {
+        return None;
+    };
+    let g1_nodes = g1.node_count();
+    let predecessors_map = g0
+        .node_indices()
+        .map(|node| {
+            (
+                node,
+                g0.neighbors_directed(node, Direction::Incoming)
+                    .collect::<BTreeSet<_>>(),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let mut stack = VecDeque::new();
+    stack.push_back((0, BTreeMap::new(), HashSet::<NodeIndex>::default()));
+    while let Some((current_index, mut mapping, mut visited)) = stack.pop_back() {
+        if mapping.len() == g1_nodes && !already_returned.contains(&mapping) {
+            return Some(mapping);
         }
-        return false;
-    }
+        if current_index >= topo_order.len() {
+            return None;
+        }
+        let node_g1 = topo_order[current_index];
+        for node_g0 in g0.node_indices() {
+            if !visited.contains(&node_g0) {
+                // Get predecesors in g0
+                let predecessors = &predecessors_map[&node_g0];
 
-    if current_index >= topo_order.len() {
-        return false;
-    }
+                // Check if all g1 predecessors are present in g0
+                let predecessors_match =
+                    g1.neighbors_directed(node_g1, Direction::Incoming)
+                        .all(|pred_g1| {
+                            mapping
+                                .get(&pred_g1)
+                                .map(|i| predecessors.contains(i))
+                                .unwrap_or_default()
+                        });
 
-    let node_g1 = topo_order[current_index];
+                // If so, record this node as visited, map it and take a step down the toposort
+                if predecessors_match && test_node(g1.node_weight(node_g1).unwrap(), g0, node_g0) {
+                    visited.insert(node_g0);
+                    mapping.insert(node_g1, node_g0);
 
-    for node_g0 in g0.node_indices() {
-        if !visited.contains(&node_g0) && test_node(g1.node_weight(node_g1).unwrap(), g0, node_g0) {
-            let predecessors = predecessors_cache.entry(node_g0).or_insert_with(|| {
-                g0.neighbors_directed(node_g0, Direction::Incoming)
-                    .collect()
-            });
+                    stack.push_back((current_index + 1, mapping.clone(), visited.clone()));
 
-            let predecessors_match =
-                g1.neighbors_directed(node_g1, Direction::Incoming)
-                    .all(|pred_g1| {
-                        if let Some(&pred_g0) = mapping.get(&pred_g1) {
-                            predecessors.iter().any(|p| p == &pred_g0)
-                        } else {
-                            false
-                        }
-                    });
-
-            if predecessors_match {
-                visited.insert(node_g0);
-                mapping.insert(node_g1, node_g0);
-
-                if match_nodes_topo(
-                    g0,
-                    g1,
-                    topo_order,
-                    mapping,
-                    visited,
-                    predecessors_cache,
-                    current_index + 1,
-                    already_returned,
-                ) {
-                    return true;
+                    // Couldnt find a downstream match, unmark and unmap this node
+                    visited.remove(&node_g0);
+                    mapping.remove(&node_g1);
                 }
-
-                visited.remove(&node_g0);
-                mapping.remove(&node_g1);
             }
         }
     }
-    false
+
+    None
 }
 
 fn test_node(
