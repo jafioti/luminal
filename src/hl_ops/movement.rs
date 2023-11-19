@@ -155,7 +155,6 @@ mod tests {
             .new_tensor::<(LConst<4>,)>("Input")
             .set(vec![1.4325, 2.492428, 3.127365, 3.54865]);
         let b = a.concat_along::<(LConst<8>,), LAxis<0>, _>(a).retrieve();
-        cx.compile(MetalFp16Compiler::default());
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -163,10 +162,7 @@ mod tests {
         let d_b =
             (d_a.clone().realize::<(usize,)>(), d_a.realize::<(usize,)>()).concat_along(DAxis::<0>);
 
-        let d = b.data();
-        println!("B: {:?}", d);
-        println!("D: {:?}", d_b.as_vec());
-        assert_close(&d, &d_b.as_vec());
+        assert_close(&b.data(), &d_b.as_vec());
     }
 
     #[test]

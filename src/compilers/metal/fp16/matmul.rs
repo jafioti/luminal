@@ -23,10 +23,11 @@ impl PartialEq for MetalMatmul2D {
 
 impl MetalMatmul2D {
     fn compile(dev: &Device) -> ComputePipelineState {
-        let mut code = "#include <metal_stdlib>
+        compile_function("kernel_matmul_2d", "
+#include <metal_stdlib>
 using namespace metal;
 
-kernel void mkernel(
+kernel void kernel_matmul_2d(
     device half *A [[buffer(0)]],
     device half *B [[buffer(1)]],
     device half *C [[buffer(2)]],
@@ -50,11 +51,7 @@ kernel void mkernel(
         C[row * N + column] = (half)value;
     }
 }
-"
-        .to_string();
-        code = code.replace("mkernel", "kernel_matmul_2d");
-
-        compile_function("kernel_matmul_2d", &code, dev)
+", dev)
     }
 }
 
@@ -157,10 +154,11 @@ impl PartialEq for MetalBatchMatmul2D {
 
 impl MetalBatchMatmul2D {
     fn compile(dev: &Device) -> ComputePipelineState {
-        let mut code = "#include <metal_stdlib>
+        compile_function("kernel_batch_matmul_2d", "
+#include <metal_stdlib>
 using namespace metal;
 
-kernel void mkernel(
+kernel void kernel_batch_matmul_2d(
     device half *A [[buffer(0)]],
     device half *B [[buffer(1)]],
     device half *C [[buffer(2)]],
@@ -188,12 +186,7 @@ kernel void mkernel(
         }
         C[batch * mat_size + row * N + column] = (half)value;
     }
-}
-"
-        .to_string();
-        code = code.replace("mkernel", "kernel_batch_matmul_2d");
-
-        compile_function("kernel_batch_matmul_2d", &code, dev)
+}", dev)
     }
 }
 
