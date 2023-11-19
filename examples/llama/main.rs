@@ -82,7 +82,8 @@ fn main() {
     cx2.compile(<(GenericCompiler, CudaFp16Optimizer)>::default());
     #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
     cx2.compile(<(GenericCompiler, CPUCompiler)>::default());
-    delete_loads(&kv_model, &mut cx2);
+    // Delete weight loading nodes
+    delete_inputs(&kv_model, &mut cx2);
 
     println!("Inferencing...");
     // First pass

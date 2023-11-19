@@ -50,7 +50,7 @@ pub fn transfer_weights<M: SerializeModule>(
 }
 
 /// Delete all incoming nodes to the states of the model
-pub fn delete_loads<M: SerializeModule>(model: &M, graph: &mut Graph) {
+pub fn delete_inputs<M: SerializeModule>(model: &M, graph: &mut Graph) {
     let mut s = Serializer::default();
     model.serialize(&mut s);
     for node in s.state.values() {
