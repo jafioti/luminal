@@ -160,3 +160,80 @@ impl<S: ConstShape> GraphTensor<S> {
         self
     }
 }
+
+pub trait MarkTensors {
+    /// Mark all tensors in this collection to be kept
+    fn keep(&self);
+    /// Mark all tensors in this collection to be retrieved
+    fn retrieve(&self);
+}
+
+impl<S: Shape> MarkTensors for GraphTensor<S> {
+    fn keep(&self) {
+        GraphTensor::keep(*self);
+    }
+
+    fn retrieve(&self) {
+        GraphTensor::retrieve(*self);
+    }
+}
+
+impl<S: MarkTensors> MarkTensors for Vec<S> {
+    fn keep(&self) {
+        for t in self {
+            t.keep();
+        }
+    }
+
+    fn retrieve(&self) {
+        for t in self {
+            t.retrieve();
+        }
+    }
+}
+impl<S: MarkTensors> MarkTensors for &[S] {
+    fn keep(&self) {
+        for t in *self {
+            t.keep();
+        }
+    }
+
+    fn retrieve(&self) {
+        for t in *self {
+            t.retrieve();
+        }
+    }
+}
+
+macro_rules! tuple_impls {
+    ([$($name:ident),+] , [$($idx:tt),+]) => {
+        impl<
+        $($name:
+            MarkTensors, )+
+        > MarkTensors for ($($name,)+) {
+            fn keep(&self) {
+                $(self.$idx.keep();)+
+            }
+            fn retrieve(&self) {
+                $(self.$idx.retrieve();)+
+            }
+        }
+    };
+}
+
+tuple_impls!([M1], [0]);
+tuple_impls!([M1, M2], [0, 1]);
+tuple_impls!([M1, M2, M3], [0, 1, 2]);
+tuple_impls!([M1, M2, M3, M4], [0, 1, 2, 3]);
+tuple_impls!([M1, M2, M3, M4, M5], [0, 1, 2, 3, 4]);
+tuple_impls!([M1, M2, M3, M4, M5, M6], [0, 1, 2, 3, 4, 5]);
+tuple_impls!([M1, M2, M3, M4, M5, M6, M7], [0, 1, 2, 3, 4, 5, 6]);
+tuple_impls!([M1, M2, M3, M4, M5, M6, M7, M8], [0, 1, 2, 3, 4, 5, 6, 7]);
+tuple_impls!(
+    [M1, M2, M3, M4, M5, M6, M7, M8, M9],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8]
+);
+tuple_impls!(
+    [M1, M2, M3, M4, M5, M6, M7, M8, M9, M10],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+);

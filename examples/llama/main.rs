@@ -45,10 +45,7 @@ fn main() {
     );
     let (out1, cache1) = model.forward(inp);
     out1.retrieve();
-    for (k, v) in &cache1 {
-        k.keep();
-        v.keep();
-    }
+    cache1.keep();
     loader::DfdxDeferredLoader::new("./examples/llama/setup/llama-7b-hf").load(&model, &mut cx1);
 
     #[cfg(feature = "metal")]
@@ -68,10 +65,7 @@ fn main() {
     let (out, cache_dest) =
         kv_model.forward_kv::<_, _, Dyn<'p'>, Dyn<'t'>>((single_inp, cache_src.clone()));
     out.retrieve();
-    for (k, v) in &cache_dest {
-        k.keep();
-        v.keep();
-    }
+    cache_dest.keep();
     #[cfg(feature = "metal")]
     for (k, v) in &cache_src {
         k.set_type(std::any::TypeId::of::<metal_rs::Buffer>());
@@ -89,8 +83,6 @@ fn main() {
     #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
     cx2.compile(<(GenericCompiler, CPUCompiler)>::default());
     delete_loads(&kv_model, &mut cx2);
-
-    // cx1.display();
 
     println!("Inferencing...");
     // First pass
