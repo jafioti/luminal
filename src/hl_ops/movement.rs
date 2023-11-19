@@ -110,69 +110,12 @@ impl<S: Shape> GraphTensor<S> {
         rhs: GraphTensor<Rhs>,
     ) -> GraphTensor<Dst> {
         let dim = Ax::as_array()[0] as usize;
-        let mut a_shape = vec![(Dim::Known(0), Dim::Known(0)); self.shape.shape().len()];
-        a_shape[dim].1 = rhs.shape.shape()[dim];
-        let lhs = self.pad(&a_shape);
-        let mut b_shape = vec![(Dim::Known(0), Dim::Known(0)); rhs.shape.shape().len()];
-        b_shape[dim].1 = self.shape.shape()[dim];
-        let rhs = rhs.pad(&b_shape);
-        lhs + rhs
-        // let fin = self
-        //     .graph()
-        //     .add_op(op::Function(
-        //         "Concat".to_string(),
-        //         Box::new(move |mut inps| {
-        //             let mut pad_shape = vec![(Dim::Known(0), Dim::Known(0)); S::NUM_DIMS];
-        //             pad_shape[dim].1 = Dim::Known(
-        //                 inps[1].1.shape()[dim]
-        //                     .to_usize()
-        //                     .expect("Tried to concat on a dim with an unknown size"),
-        //             );
-        //             inps[0].1.pad(&pad_shape);
-        //             let mut pad_shape = vec![(Dim::Known(0), Dim::Known(0)); S::NUM_DIMS];
-        //             pad_shape[dim].0 = Dim::Known(
-        //                 inps[0].1.shape()[dim]
-        //                     .to_usize()
-        //                     .expect("Tried to concat on a dim with an unknown size"),
-        //             );
-        //             inps[1].1.pad(&pad_shape);
-        //             let (a_data, b_data) = (
-        //                 inps[0]
-        //                     .0
-        //                     .borrowed()
-        //                     .data
-        //                     .as_any()
-        //                     .downcast_ref::<Vec<f32>>()
-        //                     .unwrap(),
-        //                 inps[1]
-        //                     .0
-        //                     .borrowed()
-        //                     .data
-        //                     .as_any()
-        //                     .downcast_ref::<Vec<f32>>()
-        //                     .unwrap(),
-        //             );
-        //             // Each input is already padded, so the final answer will be the same size as each input
-        //             let mut data = vec![0.; inps[0].1.n_elements()];
-        //             let (a_ind, b_ind) = (inps[0].1.indexer(), inps[1].1.indexer());
-        //             for (i, d) in data.iter_mut().enumerate() {
-        //                 *d = a_ind.index(i).map(|i| a_data[i]).unwrap_or_default()
-        //                     + b_ind.index(i).map(|i| b_data[i]).unwrap_or_default()
-        //             }
-        //             vec![Tensor {
-        //                 data: Box::new(data),
-        //             }]
-        //         }),
-        //         std::any::TypeId::of::<Vec<f32>>(),
-        //     ))
-        //     .input(self.id, 0, self.shape)
-        //     .input(rhs.id, 0, rhs.shape)
-        //     .finish();
-        // GraphTensor::from_id(
-        //     fin,
-        //     ShapeTracker::new(&Dst::realized_shape()),
-        //     self.graph_ref,
-        // )
+        let mut a_padding = self.shape.padding;
+        a_padding[dim].1 = rhs.shape.shape()[dim];
+        let mut b_padding = rhs.shape.padding;
+        b_padding[dim].0 = self.shape.shape()[dim];
+        let lhs = self.pad(&a_padding);
+        lhs + rhs.pad(&b_padding)
     }
 }
 
@@ -184,7 +127,7 @@ mod tests {
         tensor_ops::{RealizeTo, TryConcatAlong},
     };
 
-    use crate::{prelude::*, tests::assert_close};
+    crate::test_imports!();
 
     #[test]
     fn test_concat_1d() {
@@ -193,17 +136,37 @@ mod tests {
         a.set(vec![1.4325, 2.492428, 3.127365, 3.54865]);
         let b = cx.new_tensor::<R1<3>>("Input");
         b.set(vec![2.30434, 2.2343113, 1.4393]);
-        let c = a.concat_along::<R1<7>, crate::prelude::Axis<0>, _>(b);
+        let c = a.concat_along::<R1<7>, LAxis<0>, _>(b);
         c.retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
         let d_a = d_dev.tensor([1.4325, 2.492428, 3.127365, 3.54865]);
         let d_b = d_dev.tensor([2.30434, 2.2343113, 1.4393]);
-        let d_c = (d_a.realize::<(usize,)>(), d_b.realize::<(usize,)>())
-            .concat_along(dfdx::shapes::Axis::<0>);
+        let d_c = (d_a.realize::<(usize,)>(), d_b.realize::<(usize,)>()).concat_along(DAxis::<0>);
 
         assert_close(&c.data(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_concat_self() {
+        let mut cx = Graph::new();
+        let a = cx
+            .new_tensor::<(LConst<4>,)>("Input")
+            .set(vec![1.4325, 2.492428, 3.127365, 3.54865]);
+        let b = a.concat_along::<(LConst<8>,), LAxis<0>, _>(a).retrieve();
+        cx.compile(MetalFp16Compiler::default());
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([1.4325, 2.492428, 3.127365, 3.54865]);
+        let d_b =
+            (d_a.clone().realize::<(usize,)>(), d_a.realize::<(usize,)>()).concat_along(DAxis::<0>);
+
+        let d = b.data();
+        println!("B: {:?}", d);
+        println!("D: {:?}", d_b.as_vec());
+        assert_close(&d, &d_b.as_vec());
     }
 
     #[test]
@@ -213,8 +176,8 @@ mod tests {
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
         let b = cx.new_tensor::<R2<3, 2>>("Input");
         b.set(vec![2.30434, 2.2343113, 1.4393, 482.4312, 8.1234, 54.2054]);
-        let c = a.concat_along::<R2<3, 4>, Axis<1>, _>(b);
-        let d = a.concat_along::<R2<6, 2>, Axis<0>, _>(b);
+        let c = a.concat_along::<R2<3, 4>, LAxis<1>, _>(b);
+        let d = a.concat_along::<R2<6, 2>, LAxis<0>, _>(b);
         c.retrieve();
         d.retrieve();
         cx.execute();
@@ -297,7 +260,7 @@ mod tests {
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
         let x1 = a.slice((.., ..1)).contiguous();
         let x2 = a.slice((.., 1..)).contiguous();
-        let c = (-x2).concat_along::<R2<3, 2>, Axis<1>, _>(x1);
+        let c = (-x2).concat_along::<R2<3, 2>, LAxis<1>, _>(x1);
         c.retrieve();
         cx.execute();
 

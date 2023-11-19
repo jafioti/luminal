@@ -38,7 +38,7 @@ fn main() {
     let mut cx1 = Graph::new();
     let mut cx2 = Graph::new();
     let model = Model::initialize(&mut cx1);
-    mark_weights(&model, &mut cx1);
+    keep_weights(&model, &mut cx1);
     let inp = cx1.new_tensor::<(Dyn<'b'>, Dyn<'s'>)>("Input").set_dyn(
         input.iter().map(|i| *i as f32).collect::<Vec<_>>(),
         vec![1, input.len()],
@@ -60,7 +60,7 @@ fn main() {
 
     // Build KV cache forward graph
     let kv_model = Model::initialize(&mut cx2);
-    mark_weights(&kv_model, &mut cx2);
+    keep_weights(&kv_model, &mut cx2);
     let single_inp = cx2.new_tensor::<(Dyn<'b'>, Const<1>)>("Input");
     let cache_src = (0..config::LAYERS)
         .map(|_| (cx2.new_tensor("Key Cache"), cx2.new_tensor("Value Cache")))
@@ -83,12 +83,14 @@ fn main() {
         v.set_type(std::any::TypeId::of::<cudarc::driver::CudaSlice<half::f16>>());
     }
     #[cfg(feature = "metal")]
-    cx2.compile(<(MetalFp16Compiler,)>::default());
+    cx2.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
     #[cfg(feature = "cuda")]
     cx2.compile(<(GenericCompiler, CudaFp16Optimizer)>::default());
     #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
     cx2.compile(<(GenericCompiler, CPUCompiler)>::default());
     delete_loads(&kv_model, &mut cx2);
+
+    // cx1.display();
 
     println!("Inferencing...");
     // First pass

@@ -86,10 +86,8 @@ impl<
         ),
     ) -> Self::Output {
         let (sin, cos) = self.get_sincos::<Batch, NUM_HEADS, Seq, PrevSeq>(q, cache);
-        let sin = sin.expand();
-        let cos = cos.expand();
-        let q_embed = (Self::rotate_half(q) * sin) + (q * cos);
-        let k_embed = (Self::rotate_half(k) * sin) + (k * cos);
+        let q_embed = (Self::rotate_half(q) * sin.expand()) + (q * cos.expand());
+        let k_embed = (Self::rotate_half(k) * sin.expand()) + (k * cos.expand());
         (q_embed, k_embed)
     }
 }

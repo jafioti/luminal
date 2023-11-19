@@ -70,7 +70,7 @@ pub fn delete_loads<M: SerializeModule>(model: &M, graph: &mut Graph) {
     graph.toposort();
 }
 
-pub fn mark_weights<M: SerializeModule>(model: &M, graph: &mut Graph) {
+pub fn keep_weights<M: SerializeModule>(model: &M, graph: &mut Graph) {
     let mut s = Serializer::default();
     model.serialize(&mut s);
     for node in s.state.values() {

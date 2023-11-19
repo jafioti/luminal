@@ -4,6 +4,7 @@ use std::{
     fmt::Debug,
 };
 
+use colored::Colorize;
 use itertools::Itertools;
 use petgraph::{
     algo::toposort,
@@ -33,10 +34,14 @@ pub struct TimedCompiler<C: Compiler + Debug>(C);
 
 impl<C: Compiler + Debug> Compiler for TimedCompiler<C> {
     fn compile(&self, graph: &mut Graph) {
-        println!("Starting {:?}", self.0);
+        let compiler_name = format!("{:?}", self.0).bold();
+        println!("Starting {compiler_name}");
         let start = std::time::Instant::now();
         self.0.compile(graph);
-        println!("Finished {:?} in {}ms", self.0, start.elapsed().as_millis());
+        println!(
+            "Finished {compiler_name} in {}",
+            format!("{:?}ms", start.elapsed().as_millis()).bold(),
+        );
     }
 }
 
@@ -109,10 +114,10 @@ impl Graph {
 
         let mut schedule_edges = vec![];
         for node in self.graph.node_indices() {
-            new_graph
-                .node_weight_mut(id_map[&node])
-                .unwrap()
-                .push_str(&node.index().to_string());
+            // new_graph
+            //     .node_weight_mut(id_map[&node])
+            //     .unwrap()
+            //     .push_str(&node.index().to_string());
             for edge in self
                 .graph
                 .edges_directed(node, Direction::Outgoing)

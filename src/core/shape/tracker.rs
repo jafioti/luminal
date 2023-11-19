@@ -190,8 +190,9 @@ impl ShapeTracker {
                 - dim_to_expression(slice.0);
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
-                ret += (dim_ind - dim_to_expression(padding.0) + dim_to_expression(slice.0)
-                    - dim_to_expression(padding.0))
+                ret += (dim_ind - dim_to_expression(padding.0)
+                    + (dim_to_expression(slice.0)
+                        - dim_to_expression(padding.0).min(dim_to_expression(slice.0))))
                     * stride;
             }
             acc *= logical_sh;
@@ -260,8 +261,10 @@ impl ShapeTracker {
             .map(|(ind, dim)| {
                 (
                     ind,
-                    dim + self.padding[ind].0.to_usize().unwrap_or_default()
-                        + self.padding[ind].1.to_usize().unwrap_or_default(),
+                    // dim + self.padding[ind].0.to_usize().unwrap_or_default()
+                    //     + self.padding[ind].1.to_usize().unwrap_or_default(),
+                    dim + self.padding[ind].0.to_usize().unwrap()
+                        + self.padding[ind].1.to_usize().unwrap(),
                 )
             })
             // Slice
@@ -305,10 +308,13 @@ impl ShapeTracker {
             .indexes
             .into_iter()
             .map(|i| match self.dims[i] {
-                Dim::Known(n) => Dim::Known(n.min(
-                    self.slices[i].1.to_usize().unwrap_or(i32::MAX as usize)
-                        - self.slices[i].0.to_usize().unwrap_or_default(),
-                )),
+                Dim::Known(n) => Dim::Known(
+                    n.min(
+                        self.slices[i].1.to_usize().unwrap_or(i32::MAX as usize)
+                            - self.slices[i].0.to_usize().unwrap_or_default(),
+                    ) + self.padding[i].0.to_usize().unwrap_or_default()
+                        + self.padding[i].1.to_usize().unwrap_or_default(),
+                ),
                 Dim::Unknown(c) => Dim::Unknown(c),
             })
             .collect::<Vec<_>>();
@@ -398,6 +404,22 @@ impl ShapeTracker {
         for d in self.dims.iter_mut() {
             if let Dim::Unknown(u) = *d {
                 *d = Dim::Known(dyn_dim_map[&u]);
+            }
+        }
+        for (a, b) in self.padding.iter_mut() {
+            if let Dim::Unknown(u) = *a {
+                *a = Dim::Known(dyn_dim_map[&u]);
+            }
+            if let Dim::Unknown(u) = *b {
+                *b = Dim::Known(dyn_dim_map[&u]);
+            }
+        }
+        for (a, b) in self.slices.iter_mut() {
+            if let Dim::Unknown(u) = *a {
+                *a = Dim::Known(dyn_dim_map[&u]);
+            }
+            if let Dim::Unknown(u) = *b {
+                *b = Dim::Known(dyn_dim_map[&u]);
             }
         }
         self

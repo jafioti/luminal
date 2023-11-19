@@ -7,13 +7,15 @@ impl<S: Shape> Add<GraphTensor<S>> for GraphTensor<S> {
 
     fn add(mut self, mut rhs: GraphTensor<S>) -> Self::Output {
         resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
+        let mut new_shape = ShapeTracker::new(&S::realized_shape());
+        resolve_local_dyn_dims(&mut new_shape, &mut rhs.shape, false);
         let new_id = self
             .graph()
             .add_op(op::Add)
             .input(self.id, 0, self.shape)
             .input(rhs.id, 0, rhs.shape)
             .finish();
-        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
+        GraphTensor::from_id(new_id, new_shape, self.graph_ref)
     }
 }
 
@@ -30,13 +32,15 @@ impl<S: Shape> Mul<GraphTensor<S>> for GraphTensor<S> {
 
     fn mul(mut self, mut rhs: GraphTensor<S>) -> Self::Output {
         resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
+        let mut new_shape = ShapeTracker::new(&S::realized_shape());
+        resolve_local_dyn_dims(&mut new_shape, &mut rhs.shape, false);
         let new_id = self
             .graph()
             .add_op(op::Mul)
             .input(self.id, 0, self.shape)
             .input(rhs.id, 0, rhs.shape)
             .finish();
-        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
+        GraphTensor::from_id(new_id, new_shape, self.graph_ref)
     }
 }
 
@@ -54,13 +58,15 @@ impl<S: Shape> Rem<GraphTensor<S>> for GraphTensor<S> {
 
     fn rem(mut self, mut rhs: GraphTensor<S>) -> Self::Output {
         resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
+        let mut new_shape = ShapeTracker::new(&S::realized_shape());
+        resolve_local_dyn_dims(&mut new_shape, &mut rhs.shape, false);
         let new_id = self
             .graph()
             .add_op(op::Mod)
             .input(self.id, 0, self.shape)
             .input(rhs.id, 0, rhs.shape)
             .finish();
-        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
+        GraphTensor::from_id(new_id, new_shape, self.graph_ref)
     }
 }
 
@@ -116,13 +122,15 @@ impl<S: Shape> Rem<f32> for GraphTensor<S> {
 impl<S: Shape> GraphTensor<S> {
     pub fn less_than(mut self, mut rhs: GraphTensor<S>) -> GraphTensor<S> {
         resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
+        let mut new_shape = ShapeTracker::new(&S::realized_shape());
+        resolve_local_dyn_dims(&mut new_shape, &mut rhs.shape, false);
         let new_id = self
             .graph()
             .add_op(op::LessThan)
             .input(self.id, 0, self.shape)
             .input(rhs.id, 0, rhs.shape)
             .finish();
-        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
+        GraphTensor::from_id(new_id, new_shape, self.graph_ref)
     }
 
     pub fn greater_than(self, rhs: GraphTensor<S>) -> GraphTensor<S> {

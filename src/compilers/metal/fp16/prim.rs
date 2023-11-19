@@ -778,7 +778,7 @@ impl MetalKernelForward for MetalAdd {
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(&[(self.3, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
+        input_dyn_dims(&[(self.3, inputs[0].1), (self.4, inputs[1].1)], encoder, 4);
 
         // Execute
         encoder.dispatch_n_elements(inp_size);
@@ -893,7 +893,7 @@ impl MetalKernelForward for MetalMul {
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(&[(self.3, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
+        input_dyn_dims(&[(self.3, inputs[0].1), (self.4, inputs[1].1)], encoder, 4);
 
         // Execute
         encoder.dispatch_n_elements(inp_size);
@@ -1019,7 +1019,7 @@ impl MetalKernelForward for MetalLessThan {
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(&[(self.3, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
+        input_dyn_dims(&[(self.3, inputs[0].1), (self.4, inputs[1].1)], encoder, 4);
 
         // Execute
         encoder.dispatch_n_elements(inp_size);
@@ -1132,7 +1132,7 @@ impl MetalKernelForward for MetalMod {
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(&[(self.3, inputs[0].1), (self.3, inputs[1].1)], encoder, 4);
+        input_dyn_dims(&[(self.3, inputs[0].1), (self.4, inputs[1].1)], encoder, 4);
 
         // Execute
         encoder.dispatch_n_elements(inp_size);
@@ -1864,17 +1864,40 @@ pub struct CopyCompiler;
 
 impl Compiler for CopyCompiler {
     fn compile(&self, graph: &mut Graph) {
-        let (mut first, mut second) = (NodeIndex::default(), NodeIndex::default());
-        let s1 = SelectEdge::new(
-            SelectOp::new().ty::<MetalCopyToDevice>().ptr(&mut first),
-            SelectOp::new().ty::<MetalCopyFromDevice>().ptr(&mut second),
-        );
-        let s2 = SelectEdge::new(
-            SelectOp::new().ty::<MetalCopyFromDevice>().ptr(&mut first),
-            SelectOp::new().ty::<MetalCopyToDevice>().ptr(&mut second),
-        );
-
-        for _ in s1.clone().search(graph).chain(s2.clone().search(graph)) {
+        for (first, second) in graph
+            .graph
+            .edge_indices()
+            .filter_map(|e| graph.graph.edge_endpoints(e))
+            .filter(|(a, b)| {
+                (graph
+                    .graph
+                    .node_weight(*a)
+                    .unwrap()
+                    .as_any()
+                    .is::<MetalCopyToDevice>()
+                    && graph
+                        .graph
+                        .node_weight(*b)
+                        .unwrap()
+                        .as_any()
+                        .is::<MetalCopyFromDevice>())
+                    || (graph
+                        .graph
+                        .node_weight(*a)
+                        .unwrap()
+                        .as_any()
+                        .is::<MetalCopyFromDevice>()
+                        && graph
+                            .graph
+                            .node_weight(*b)
+                            .unwrap()
+                            .as_any()
+                            .is::<MetalCopyToDevice>())
+            })
+            .unique_by(|n| n.0)
+            .unique_by(|n| n.1)
+            .collect::<Vec<_>>()
+        {
             if graph
                 .graph
                 .edges_directed(first, petgraph::Direction::Outgoing)
