@@ -11,11 +11,11 @@ use crate::prelude::*;
 
 // Ops and optimizers specific to CUDA execution
 
-pub type CudaFp16Optimizer = (
-    prim::CudaPrimitiveOptimizer,
-    prim::FakeReductionOptimizer,
-    matmul::CudaMatMulOptimizer,
-    prim::CopyOptimizer,
+pub type CudaFp16Compiler = (
+    prim::CudaPrimitiveCompiler,
+    prim::FakeReductionCompiler,
+    matmul::CudaMatMulCompiler,
+    prim::CopyCompiler,
 );
 
 impl Data for CudaSlice<f16> {

@@ -51,7 +51,7 @@ fn main() {
     #[cfg(feature = "metal")]
     cx1.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
     #[cfg(feature = "cuda")]
-    cx1.compile(<(CudaFp16Optimizer, GenericCompiler)>::default());
+    cx1.compile(<(CudaFp16Compiler, GenericCompiler)>::default());
     #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
     cx1.compile(<(GenericCompiler, CPUCompiler)>::default());
 
@@ -79,7 +79,7 @@ fn main() {
     #[cfg(feature = "metal")]
     cx2.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
     #[cfg(feature = "cuda")]
-    cx2.compile(<(GenericCompiler, CudaFp16Optimizer)>::default());
+    cx2.compile(<(CudaFp16Compiler, GenericCompiler)>::default());
     #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
     cx2.compile(<(GenericCompiler, CPUCompiler)>::default());
     // Delete weight loading nodes

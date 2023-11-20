@@ -10,7 +10,7 @@ use crate::prelude::*;
 
 // Ops and optimizers specific to CUDA execution
 
-pub type CudaFp32Optimizer = (prim::CudaPrimitiveOptimizer, matmul::CudaMatMulOptimizer);
+pub type CudaFp32Compiler = (prim::CudaPrimitiveCompiler, matmul::CudaMatMulCompiler);
 
 impl Data for CudaSlice<f32> {
     fn as_any(&self) -> &dyn std::any::Any {

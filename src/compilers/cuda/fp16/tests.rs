@@ -3,7 +3,7 @@ use half::f16;
 use itertools::Itertools;
 use rand::Rng;
 
-use super::CudaFp16Optimizer;
+use super::CudaFp16Compiler;
 use crate::{
     nn::{activation::ReLU, linear::Linear},
     prelude::{Module, *},
@@ -18,9 +18,9 @@ fn test_log2() {
     let a = cx.new_tensor::<R1<3>>("Input");
     a.set(data.clone());
     let b = a.log_2();
-    b.mark();
+    b.retrieve();
 
-    cx.optimize(CudaFp16Optimizer::default());
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     assert_close(
@@ -36,9 +36,9 @@ fn test_exp2() {
     let a = cx.new_tensor::<R1<3>>("Input");
     a.set(data.clone());
     let b = a.exp_2();
-    b.mark();
+    b.retrieve();
 
-    cx.optimize(CudaFp16Optimizer::default());
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     assert_close(
@@ -52,12 +52,10 @@ fn test_log2exp2() {
     // We can't use dfdx because it doesn't implement this op
     let mut cx = Graph::new();
     let data = random_vec(3);
-    let a = cx.new_tensor::<R1<3>>("Input");
-    a.set(data.clone());
-    let b = a.exp_2().log_2();
-    b.mark();
+    let a = cx.new_tensor::<R1<3>>("Input").set(data.clone());
+    let b = a.exp_2().log_2().retrieve();
 
-    cx.optimize(<(GenericOptimizer, CudaFp16Optimizer)>::default());
+    cx.compile(<(GenericCompiler, CudaFp16Compiler)>::default());
     cx.execute();
 
     assert_close(&b.data(), &data);
@@ -69,8 +67,8 @@ fn test_recip() {
     let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 4096.]);
     let b = a.recip();
-    b.mark();
-    cx.optimize(CudaFp16Optimizer::default());
+    b.retrieve();
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -86,8 +84,8 @@ fn test_sin() {
     let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 3.]);
     let b = a.sin();
-    b.mark();
-    cx.optimize(CudaFp16Optimizer::default());
+    b.retrieve();
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -103,8 +101,8 @@ fn test_sqrt() {
     let a = cx.new_tensor::<R1<3>>("Input");
     a.set(vec![1., 2., 3.]);
     let b = a.sqrt();
-    b.mark();
-    cx.optimize(CudaFp16Optimizer::default());
+    b.retrieve();
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -122,9 +120,9 @@ fn test_add() {
     let b = cx.new_tensor::<R1<3>>("Input");
     b.set(vec![1., 2., 3.]);
     let c = a + b;
-    c.mark();
+    c.retrieve();
 
-    cx.optimize(CudaFp16Optimizer::default());
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -143,9 +141,9 @@ fn test_sub() {
     let b = cx.new_tensor::<R1<3>>("Input");
     b.set(vec![1., 2., 3.]);
     let c = a - b;
-    c.mark();
+    c.retrieve();
 
-    cx.optimize(CudaFp16Optimizer::default());
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -166,9 +164,9 @@ fn test_square() {
         .collect::<Vec<f32>>();
     a.set_dyn(data.clone(), vec![1, 10, 4096]);
     let b = a * a;
-    b.mark();
+    b.retrieve();
 
-    cx.optimize(<(CudaFp16Optimizer, GenericOptimizer)>::default());
+    cx.compile(<(CudaFp16Compiler, GenericCompiler)>::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -184,7 +182,7 @@ fn test_square() {
         .to_dtype::<f16>();
     let d_b = d_a.clone() * d_a;
 
-    assert_close(&b.dyn_data(&cx.dyn_map), &d_b.to_dtype::<f32>().as_vec());
+    assert_close(&b.data(), &d_b.to_dtype::<f32>().as_vec());
 }
 
 #[test]
@@ -197,9 +195,9 @@ fn test_mul() {
     let b = cx.new_tensor::<R1<3>>("Input");
     b.set(b_data.clone());
     let c = a * b;
-    c.mark();
+    c.retrieve();
 
-    cx.optimize(CudaFp16Optimizer::default());
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -227,9 +225,9 @@ fn test_mul2() {
     let b = cx.new_tensor::<R0>("Input");
     b.set(vec![0.57735026]);
     let c = a * b.expand();
-    c.mark();
+    c.retrieve();
 
-    cx.optimize(CudaFp16Optimizer::default());
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -238,7 +236,7 @@ fn test_mul2() {
     let d_b = d_dev.tensor(0.57735026).to_dtype();
     let d_c = d_a * d_b.broadcast::<_, dfdx::shapes::Axes4<0, 1, 2, 3>>();
 
-    assert_close(&c.dyn_data(&cx.dyn_map), &d_c.to_dtype::<f32>().as_vec());
+    assert_close(&c.data(), &d_c.to_dtype::<f32>().as_vec());
 }
 
 #[test]
@@ -249,9 +247,9 @@ fn test_div() {
     let b = cx.new_tensor::<R1<3>>("Input");
     b.set(vec![1., 2., 3.]);
     let c = a / b;
-    c.mark();
+    c.retrieve();
 
-    cx.optimize(CudaFp16Optimizer::default());
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -270,9 +268,9 @@ fn test_max() {
     let b = cx.new_tensor::<R1<3>>("Input");
     b.set(vec![1., 2., 3.]);
     let c = a.max(b);
-    c.mark();
+    c.retrieve();
 
-    cx.optimize(CudaFp16Optimizer::default());
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -293,9 +291,9 @@ fn test_mod() {
     let b = cx.new_tensor::<R1<3>>("Input");
     b.set(b_data.clone());
     let c = a % b;
-    c.mark();
+    c.retrieve();
 
-    cx.optimize(CudaFp16Optimizer::default());
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     // No dfdx equivalent
@@ -321,11 +319,11 @@ fn test_sum_reduce() {
     let b = a.sum_reduce::<_, LAxis<1>>();
     let c = a.sum_reduce::<_, LAxis<0>>();
     let d = a.sum_reduce::<_, LAxis<2>>();
-    b.mark();
-    c.mark();
-    d.mark();
+    b.retrieve();
+    c.retrieve();
+    d.retrieve();
 
-    cx.optimize(CudaFp16Optimizer::default());
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -350,11 +348,11 @@ fn test_max_reduce() {
     let b = a.max_reduce::<_, LAxis<1>>();
     let c = a.max_reduce::<_, LAxis<0>>();
     let d = a.max_reduce::<_, LAxis<2>>();
-    b.mark();
-    c.mark();
-    d.mark();
+    b.retrieve();
+    c.retrieve();
+    d.retrieve();
 
-    cx.optimize(CudaFp16Optimizer::default());
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -377,9 +375,9 @@ fn test_mean_reduce() {
     let a = cx.new_tensor::<R3<1, 10, 4096>>("Input");
     a.set(data.clone());
     let b = a.mean_reduce::<_, LAxis<2>>();
-    b.mark();
+    b.retrieve();
 
-    cx.optimize(CudaFp16Optimizer::default());
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -400,9 +398,9 @@ fn test_matmul() {
     let b = cx.new_tensor::<R2<3, 4>>("Input");
     b.set(b_data.clone());
     let c = a.matmul(b);
-    c.mark();
+    c.retrieve();
 
-    cx.optimize(CudaFp16Optimizer::default());
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -425,9 +423,9 @@ fn test_batch_matmul() {
     let b = cx.new_tensor::<R2<3, 4>>("Input");
     b.set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
     let c = a.matmul(b);
-    c.mark();
+    c.retrieve();
 
-    cx.optimize(CudaFp16Optimizer::default());
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -458,12 +456,12 @@ fn test_matmul_transpose() {
     let a_b_t = a.matmul(b_t);
     let a_t_b = a_t.permute::<R2<2, 3>, _>().matmul(b.permute());
     let a_t_b_t = a_t.permute::<R2<2, 3>, _>().matmul(b_t);
-    a_b.mark();
-    a_b_t.mark();
-    a_t_b.mark();
-    a_t_b_t.mark();
+    a_b.retrieve();
+    a_b_t.retrieve();
+    a_t_b.retrieve();
+    a_t_b_t.retrieve();
 
-    cx.optimize(CudaFp16Optimizer::default());
+    cx.compile(CudaFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -493,7 +491,7 @@ fn test_matmul_transpose() {
 
 #[test]
 fn test_relu_and_linear() {
-    // Test single and batch, unoptimized and optimized
+    // Test single and batch, uncompiled and compiled
     let mut cx = Graph::new();
     let data = random_vec(3);
     let batch = cx.new_tensor::<R2<2, 3>>("Input");
@@ -510,17 +508,17 @@ fn test_relu_and_linear() {
 
     a.set(data.clone());
     batch.set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
-    b.mark();
-    batch_out.mark();
+    b.retrieve();
+    batch_out.retrieve();
     cx.execute();
 
-    let unoptimized_b = b.data();
-    let unoptimized_batch_out = batch_out.data();
-    cx.optimize(<(CudaFp16Optimizer, GenericOptimizer)>::default());
+    let uncompiled_b = b.data();
+    let uncompiled_batch_out = batch_out.data();
+    cx.compile(<(CudaFp16Compiler, GenericCompiler)>::default());
     cx.execute();
 
-    assert_close(&unoptimized_b, &b.data());
-    assert_close(&unoptimized_batch_out, &batch_out.data());
+    assert_close(&uncompiled_b, &b.data());
+    assert_close(&uncompiled_batch_out, &batch_out.data());
 
     // Test against dfdx
     let dev = Cpu::default();
@@ -592,9 +590,9 @@ fn test_transformer_encoder_block() {
     let b = model.forward(a);
 
     a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![1, 2, 3]);
-    b.mark();
+    b.retrieve();
 
-    cx.optimize(<(CudaFp16Optimizer, GenericOptimizer)>::default());
+    cx.compile(<(CudaFp16Compiler, GenericCompiler)>::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -695,5 +693,5 @@ fn test_transformer_encoder_block() {
         .to_dtype();
     let d_b = d_model.forward(d_a);
 
-    assert_close(&b.dyn_data(&cx.dyn_map), &d_b.to_dtype::<f32>().as_vec());
+    assert_close(&b.data(), &d_b.to_dtype::<f32>().as_vec());
 }

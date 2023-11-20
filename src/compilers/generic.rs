@@ -23,7 +23,7 @@ pub type GenericCompiler = (
 );
 
 /// Eliminate complementary unary sequential operations like `x.log().exp()`
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct UnarySequentialElimination;
 
 impl Compiler for UnarySequentialElimination {

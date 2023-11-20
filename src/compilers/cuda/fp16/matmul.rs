@@ -155,18 +155,17 @@ impl Operator for CudaBatchMatmul2D {
 }
 
 #[derive(Default)]
-pub struct CudaMatMulOptimizer;
+pub struct CudaMatMulCompiler;
 
-impl GraphOptimizer for CudaMatMulOptimizer {
-    fn optimize(&self, graph: &mut Graph) {
+impl Compiler for CudaMatMulCompiler {
+    fn compile(&self, graph: &mut Graph) {
         let dev = CudaDevice::new(0).unwrap();
         // Look for the matmul pattern
-        let s = GraphSelector::default();
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        s.edge(
-            s.op()
+        let s = SelectEdge::new(
+            SelectOp::new()
                 .ty::<CudaMul>()
                 .shapes(vec![
                     vec![Dim::Unknown('A'), Dim::Unknown('C'), Dim::Unknown('B')],
@@ -174,8 +173,7 @@ impl GraphOptimizer for CudaMatMulOptimizer {
                 ])
                 .fakes(vec![vec![false, true, false], vec![true, false, false]])
                 .ptr(&mut mul),
-            0,
-            s.op()
+            SelectOp::new()
                 .ty::<CudaSumReduce>()
                 .check(|o, _| {
                     if let Some(o) = o.as_any().downcast_ref::<CudaSumReduce>() {
@@ -229,12 +227,11 @@ impl GraphOptimizer for CudaMatMulOptimizer {
         }
 
         // Look for the batch matmul pattern
-        let s = GraphSelector::default();
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        s.edge(
-            s.op()
+        let s = SelectEdge::new(
+            SelectOp::new()
                 .ty::<CudaMul>()
                 .shapes(vec![
                     vec![
@@ -255,8 +252,7 @@ impl GraphOptimizer for CudaMatMulOptimizer {
                     vec![true, true, false, false],
                 ])
                 .ptr(&mut mul),
-            0,
-            s.op()
+            SelectOp::new()
                 .ty::<CudaSumReduce>()
                 .check(|o, _| {
                     if let Some(o) = o.as_any().downcast_ref::<CudaSumReduce>() {

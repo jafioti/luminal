@@ -1,6 +1,7 @@
 use std::{
     any::{Any, TypeId},
     collections::{hash_map::DefaultHasher, HashSet},
+    fmt::Write,
     hash::{Hash, Hasher},
     mem::size_of,
     sync::Arc,
@@ -132,8 +133,10 @@ extern \"C\" __global__ void kernel(__half *out, const __half *inp_a, int numel{
                     None
                 })
                 .unique()
-                .map(|c| format!(", int {c}"))
-                .collect::<String>()
+                .fold(String::default(), |mut acc, c| {
+                    write!(&mut acc, ", int {c}").unwrap();
+                    acc
+                })
         );
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("kernel", &name);
@@ -570,8 +573,10 @@ extern \"C\" __global__ void kernel(__half *out, const __half *inp_a, const __ha
                     None
                 })
                 .unique()
-                .map(|c| format!(", int {c}"))
-                .collect::<String>()
+                .fold(String::default(), |mut acc, c| {
+                    write!(&mut acc, ", int {c}").unwrap();
+                    acc
+                })
         );
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("kernel", &name);
@@ -681,8 +686,10 @@ extern \"C\" __global__ void kernel(__half *out, const __half *inp_a, const __ha
                     None
                 })
                 .unique()
-                .map(|c| format!(", int {c}"))
-                .collect::<String>()
+                .fold(String::default(), |mut acc, c| {
+                    write!(&mut acc, ", int {c}").unwrap();
+                    acc
+                })
         );
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("kernel", &name);
@@ -795,8 +802,10 @@ extern \"C\" __global__ void kernel(__half *out, const __half *inp_a, const __ha
                     None
                 })
                 .unique()
-                .map(|c| format!(", int {c}"))
-                .collect::<String>()
+                .fold(String::default(), |mut acc, c| {
+                    write!(&mut acc, ", int {c}").unwrap();
+                    acc
+                })
         );
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("kernel", &name);
@@ -918,8 +927,10 @@ extern \"C\" __global__ void kernel(__half *out, const __half *inp_a, const __ha
                     None
                 })
                 .unique()
-                .map(|c| format!(", int {c}"))
-                .collect::<String>()
+                .fold(String::default(), |mut acc, c| {
+                    write!(&mut acc, ", int {c}").unwrap();
+                    acc
+                })
         );
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("kernel", &name);
@@ -1039,8 +1050,10 @@ extern \"C\" __global__ void kernel(__half *out, const __half *inp, const int fr
                     None
                 })
                 .unique()
-                .map(|c| format!(", int {c}"))
-                .collect::<String>()
+                .fold(String::default(), |mut acc, c| {
+                    write!(&mut acc, ", int {c}").unwrap();
+                    acc
+                })
         );
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("kernel", &name);
@@ -1165,8 +1178,10 @@ extern \"C\" __global__ void kernel(__half *out, const __half *inp, const int fr
                     None
                 })
                 .unique()
-                .map(|c| format!(", int {c}"))
-                .collect::<String>()
+                .fold(String::default(), |mut acc, c| {
+                    write!(&mut acc, ", int {c}").unwrap();
+                    acc
+                })
         );
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("kernel", &name);
@@ -1254,10 +1269,10 @@ impl Operator for CudaMaxReduce {
 
 /// Convert all primitive ops to cuda primitive ops, and insert copy to and from device ops
 #[derive(Debug, Default)]
-pub struct CudaPrimitiveOptimizer;
+pub struct CudaPrimitiveCompiler;
 
-impl GraphOptimizer for CudaPrimitiveOptimizer {
-    fn optimize(&self, graph: &mut Graph) {
+impl Compiler for CudaPrimitiveCompiler {
+    fn compile(&self, graph: &mut Graph) {
         let dev = CudaDevice::new(0).unwrap();
         // Go through the graph and insert copy ops
         // Copy function output to device and input from device
@@ -1271,6 +1286,7 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
                     .unwrap()
                     .as_any()
                     .is::<Function>()
+                    && graph.graph.edges(*n).count() != 0
             })
             .collect::<Vec<_>>()
         {
@@ -1352,7 +1368,7 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
                     graph
                         .graph
                         .edges_directed(*n, petgraph::Direction::Incoming)
-                        .map(|i| i.weight().2)
+                        .flat_map(|i| i.weight().as_data().map(|i| i.2))
                         .max_by_key(|s| s.n_physical_elements())
                         .unwrap(),
                 )
@@ -1386,7 +1402,7 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
                     graph
                         .graph
                         .edges_directed(n, petgraph::Direction::Incoming)
-                        .next()
+                        .find(|i| !i.weight().is_schedule())
                         .unwrap()
                         .id(),
                 )
@@ -1396,13 +1412,21 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
             // Create copy node
             let (source, shape) = (
                 graph.graph.edge_endpoints(edge).unwrap().0,
-                graph.graph.edge_weight(edge).unwrap().2,
+                graph.graph.edge_weight(edge).unwrap().as_data().unwrap().2,
             );
             let copy_node = graph
                 .add_op(CudaCopyFromDevice(dev.clone()))
                 .input(source, 0, shape)
                 .finish();
-            graph.graph.add_edge(copy_node, output_node, (0, 0, shape));
+            graph.graph.add_edge(
+                copy_node,
+                output_node,
+                Dependency::Data {
+                    input_order: 0,
+                    output_order: 0,
+                    shape,
+                },
+            );
             graph.graph.remove_edge(edge);
         }
 
@@ -1411,8 +1435,9 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
             let src_shapes = graph
                 .graph
                 .edges_directed(id, petgraph::Direction::Incoming)
-                .sorted_by_key(|e| e.weight().0)
-                .map(|e| e.weight().2)
+                .filter_map(|e| e.weight().as_data())
+                .sorted_by_key(|e| e.0)
+                .map(|e| e.2)
                 .collect::<Vec<_>>();
             let op = graph.graph.node_weight(id).unwrap().as_any().type_id();
             let op_ref = graph.graph.node_weight_mut(id).unwrap();
@@ -1449,23 +1474,21 @@ impl GraphOptimizer for CudaPrimitiveOptimizer {
 
 /// In 16 bit, summing above 2048 doesn't work. This precludes the .expand(Dim).sum_reduce() pattern to get a dim size in a tensor, so we need to replace these fake reductions with an elementwise mul
 #[derive(Debug, Default)]
-pub struct FakeReductionOptimizer;
+pub struct FakeReductionCompiler;
 
-impl GraphOptimizer for FakeReductionOptimizer {
-    fn optimize(&self, graph: &mut Graph) {
-        let s = GraphSelector::default();
+impl Compiler for FakeReductionCompiler {
+    fn compile(&self, graph: &mut Graph) {
         let mut sum_reduce = NodeIndex::default();
-        s.edge(
-            s.op().check(|o, _| {
+        let s = SelectEdge::new(
+            SelectOp::new().check(|o, _| {
                 if let Some(c) = o.as_any().downcast_ref::<CudaConstant>() {
-                    c.0 == f16::ONE
+                    c.1 == f16::ONE
                 } else {
                     false
                 }
             }),
-            0,
-            s.op()
-                .ty::<MetalSumReduce>()
+            SelectOp::new()
+                .ty::<CudaSumReduce>()
                 .check(|o, shapes| {
                     if let Some(o) = o.as_any().downcast_ref::<CudaSumReduce>() {
                         shapes[0].fake[shapes[0].indexes[o.2]] // Ensure dimension we are reducing is fake
@@ -1558,27 +1581,46 @@ impl Operator for FakeSumReduce {
     }
 }
 
-/// Sometimes CopyTo -> CopyFrom and CopyFrom -> CopyTo patterns remain, so let's clean them up
+// Sometimes CopyTo -> CopyFrom and CopyFrom -> CopyTo patterns remain, so let's clean them up
 #[derive(Debug, Default)]
-pub struct CopyOptimizer;
+pub struct CopyCompiler;
 
-impl GraphOptimizer for CopyOptimizer {
-    fn optimize(&self, graph: &mut Graph) {
-        let (mut first, mut second) = (NodeIndex::default(), NodeIndex::default());
-        let s1 = GraphSelector::default();
-        s1.edge(
-            s1.op().ty::<CudaCopyToDevice>().ptr(&mut first),
-            0,
-            s1.op().ty::<CudaCopyFromDevice>().ptr(&mut second),
-        );
-        let s2 = GraphSelector::default();
-        s2.edge(
-            s2.op().ty::<CudaCopyFromDevice>().ptr(&mut first),
-            0,
-            s2.op().ty::<CudaCopyToDevice>().ptr(&mut second),
-        );
-
-        for _ in s1.search(graph).chain(s2.search(graph)) {
+impl Compiler for CopyCompiler {
+    fn compile(&self, graph: &mut Graph) {
+        for (first, second) in graph
+            .graph
+            .edge_indices()
+            .filter_map(|e| graph.graph.edge_endpoints(e))
+            .filter(|(a, b)| {
+                (graph
+                    .graph
+                    .node_weight(*a)
+                    .unwrap()
+                    .as_any()
+                    .is::<CudaCopyToDevice>()
+                    && graph
+                        .graph
+                        .node_weight(*b)
+                        .unwrap()
+                        .as_any()
+                        .is::<CudaCopyFromDevice>())
+                    || (graph
+                        .graph
+                        .node_weight(*a)
+                        .unwrap()
+                        .as_any()
+                        .is::<CudaCopyFromDevice>()
+                        && graph
+                            .graph
+                            .node_weight(*b)
+                            .unwrap()
+                            .as_any()
+                            .is::<CudaCopyToDevice>())
+            })
+            .unique_by(|n| n.0)
+            .unique_by(|n| n.1)
+            .collect::<Vec<_>>()
+        {
             if graph
                 .graph
                 .edges_directed(first, petgraph::Direction::Outgoing)
@@ -1598,7 +1640,7 @@ impl GraphOptimizer for CopyOptimizer {
                             .is::<CudaCopyToDevice>()
                 })
                 .count()
-                > 1
+                > 0
                 || graph.no_delete.contains(&first)
             {
                 continue;
