@@ -1,7 +1,7 @@
 use std::{
     any::{Any, TypeId},
     collections::{hash_map::DefaultHasher, HashSet},
-    fmt::Write,
+    fmt::{Debug, Write},
     hash::{Hash, Hasher},
     mem::size_of,
     sync::Arc,
@@ -17,74 +17,6 @@ use num_traits::FromPrimitive;
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
 use crate::{op::*, prelude::*};
-
-/// Copy a tensor to the GPU
-#[derive(Debug, Clone)]
-pub struct CudaCopyToDevice(Arc<CudaDevice>);
-impl PartialEq for CudaCopyToDevice {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
-
-impl Operator for CudaCopyToDevice {
-    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        if inp[0].0.borrowed().data.as_any().is::<CudaSlice<f16>>() {
-            // Already on device
-            return vec![inp.pop().unwrap().0.cloned()];
-        }
-        let cpu_data = inp[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Vec<f32>>()
-            .unwrap();
-        let vec = cpu_data
-            .iter()
-            .copied()
-            .map(f16::from_f32)
-            .collect::<Vec<_>>();
-        let mut a = unsafe { self.0.alloc::<f16>(vec.len()).unwrap() };
-        self.0.htod_copy_into(vec, &mut a).unwrap();
-        vec![Tensor { data: Box::new(a) }]
-    }
-}
-
-/// Copy a tensor from the GPU
-#[derive(Debug, Clone)]
-pub struct CudaCopyFromDevice(Arc<CudaDevice>);
-impl PartialEq for CudaCopyFromDevice {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
-
-impl Operator for CudaCopyFromDevice {
-    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        if inp[0].0.borrowed().data.as_any().is::<Vec<f32>>() {
-            // Already off device
-            return vec![inp.pop().unwrap().0.cloned()];
-        }
-        let cuda_data = inp[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<CudaSlice<f16>>()
-            .unwrap();
-        vec![Tensor {
-            data: Box::new(
-                self.0
-                    .dtoh_sync_copy(cuda_data)
-                    .unwrap()
-                    .into_iter()
-                    .map(|i| i.to_f32())
-                    .collect::<Vec<_>>(),
-            ),
-        }]
-    }
-}
 
 /// Constant value on device
 #[derive(Debug, Clone)]
@@ -1302,7 +1234,7 @@ impl Compiler for CudaPrimitiveCompiler {
             {
                 // Create copy node
                 let copy_node = graph
-                    .add_op(CudaCopyToDevice(dev.clone()))
+                    .add_op(CudaCopyToDevice::<f16>::new(dev.clone()))
                     .input(function_node, 0, ShapeTracker::new(&[]))
                     .finish();
 
@@ -1339,7 +1271,7 @@ impl Compiler for CudaPrimitiveCompiler {
                 .collect::<Vec<_>>()
             {
                 let copy_from_node = graph
-                    .add_op(CudaCopyFromDevice(dev.clone()))
+                    .add_op(CudaCopyFromDevice::<f16>::new(dev.clone()))
                     .input(source, 0, ShapeTracker::new(&[]))
                     .finish();
                 graph
@@ -1377,7 +1309,7 @@ impl Compiler for CudaPrimitiveCompiler {
         {
             // Create copy node
             let copy_node = graph
-                .add_op(CudaCopyFromDevice(dev.clone()))
+                .add_op(CudaCopyFromDevice::<f16>::new(dev.clone()))
                 .input(output_node, 0, output_shape)
                 .finish();
 
@@ -1415,7 +1347,7 @@ impl Compiler for CudaPrimitiveCompiler {
                 graph.graph.edge_weight(edge).unwrap().as_data().unwrap().2,
             );
             let copy_node = graph
-                .add_op(CudaCopyFromDevice(dev.clone()))
+                .add_op(CudaCopyFromDevice::<f16>::new(dev.clone()))
                 .input(source, 0, shape)
                 .finish();
             graph.graph.add_edge(
@@ -1597,25 +1529,25 @@ impl Compiler for CopyCompiler {
                     .node_weight(*a)
                     .unwrap()
                     .as_any()
-                    .is::<CudaCopyToDevice>()
+                    .is::<CudaCopyToDevice<f16>>()
                     && graph
                         .graph
                         .node_weight(*b)
                         .unwrap()
                         .as_any()
-                        .is::<CudaCopyFromDevice>())
+                        .is::<CudaCopyFromDevice<f16>>())
                     || (graph
                         .graph
                         .node_weight(*a)
                         .unwrap()
                         .as_any()
-                        .is::<CudaCopyFromDevice>()
+                        .is::<CudaCopyFromDevice<f16>>()
                         && graph
                             .graph
                             .node_weight(*b)
                             .unwrap()
                             .as_any()
-                            .is::<CudaCopyToDevice>())
+                            .is::<CudaCopyToDevice<f16>>())
             })
             .unique_by(|n| n.0)
             .unique_by(|n| n.1)
@@ -1631,13 +1563,13 @@ impl Compiler for CopyCompiler {
                         .node_weight(e.target())
                         .unwrap()
                         .as_any()
-                        .is::<CudaCopyFromDevice>()
+                        .is::<CudaCopyFromDevice<f16>>()
                         && !graph
                             .graph
                             .node_weight(e.target())
                             .unwrap()
                             .as_any()
-                            .is::<CudaCopyToDevice>()
+                            .is::<CudaCopyToDevice<f16>>()
                 })
                 .count()
                 > 0

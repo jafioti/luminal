@@ -119,8 +119,7 @@ fn test_add() {
     a.set(vec![1., 2., 3.]);
     let b = cx.new_tensor::<R1<3>>("Input");
     b.set(vec![1., 2., 3.]);
-    let c = a + b;
-    c.retrieve();
+    let c = (a + b).retrieve();
 
     cx.compile(CudaFp16Compiler::default());
     cx.execute();
