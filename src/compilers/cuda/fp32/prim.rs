@@ -1,14 +1,14 @@
 use std::{
     any::{Any, TypeId},
     collections::{hash_map::DefaultHasher, HashSet},
-    fmt::Write,
+    fmt::{Debug, Write},
     hash::{Hash, Hasher},
     mem::size_of,
     sync::Arc,
 };
 
 use cudarc::{
-    driver::{CudaDevice, CudaFunction, CudaSlice, DeviceRepr, LaunchAsync, LaunchConfig},
+    driver::{CudaDevice, CudaFunction, CudaSlice, DeviceRepr, LaunchConfig},
     nvrtc::compile_ptx,
 };
 use itertools::Itertools;
@@ -16,386 +16,7 @@ use petgraph::visit::EdgeRef;
 
 use crate::{op::*, prelude::*};
 
-/// Constant value on device
-#[derive(Debug, Clone)]
-pub struct CudaConstant(Arc<CudaDevice>, f32);
-impl PartialEq for CudaConstant {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
-
-impl Operator for CudaConstant {
-    fn process(&self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut a = unsafe { self.0.alloc::<f32>(1).unwrap() };
-        self.0.htod_copy_into(vec![self.1], &mut a).unwrap();
-        vec![Tensor { data: Box::new(a) }]
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct CudaContiguous(CudaFunction, Arc<CudaDevice>, ShapeTracker);
-
-impl PartialEq for CudaContiguous {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
-
-impl CudaContiguous {
-    fn new(shape: ShapeTracker, dev: Arc<CudaDevice>) -> Self {
-        let idx_exp = shape.index_expression();
-        let valid_exp = shape.valid_expression();
-        let mut code = format!(
-            "extern \"C\" __global__ void kernel(float *out, const float *inp_a, int numel{}) {{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < numel && ({valid_exp}) != 0) {{
-        out[idx] = inp_a[{idx_exp}];
-    }}
-}}",
-            shape
-                .shape()
-                .into_iter()
-                .filter_map(|d| if let Dim::Unknown(c) = d {
-                    Some(c)
-                } else {
-                    None
-                })
-                .unique()
-                .fold(String::default(), |mut acc, c| {
-                    write!(&mut acc, ", int {c}").unwrap();
-                    acc
-                })
-        );
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("kernel", &name);
-        if !dev.has_func(&name, &name) {
-            dev.load_ptx(compile_ptx(code).unwrap(), &name, &[&name])
-                .unwrap();
-        }
-        Self(dev.get_func(&name, &name).unwrap(), dev, shape)
-    }
-}
-impl Operator for CudaContiguous {
-    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let res_shape = tensors[0].1.contiguous();
-        let inp_size = res_shape.n_elements();
-        let a = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<CudaSlice<f32>>()
-            .unwrap();
-        let out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
-        let mut params = vec![
-            (&out).as_kernel_param(),
-            a.as_kernel_param(),
-            inp_size.as_kernel_param(),
-        ];
-        let mut added = HashSet::new();
-        let mut dims = [0; 10];
-        for (d1, d2) in self.2.shape().into_iter().zip(tensors[0].1.shape()) {
-            if let Dim::Unknown(c) = d1 {
-                if !added.contains(&c) {
-                    dims[added.len()] = d2.to_usize().unwrap() as i32;
-                    added.insert(c);
-                }
-            }
-        }
-        for i in 0..added.len() {
-            params.push(unsafe { dims[0].as_kernel_param().add(i * size_of::<i32>()) });
-        }
-        unsafe {
-            self.0
-                .clone()
-                .launch_async_impl(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
-                .unwrap();
-        }
-
-        vec![Tensor {
-            data: Box::new(out),
-        }]
-    }
-}
-
 // Unary Op (A -> A)
-
-#[derive(Debug, Clone)]
-pub struct CudaLog2(CudaFunction, Arc<CudaDevice>);
-
-impl PartialEq for CudaLog2 {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
-
-impl CudaLog2 {
-    pub fn new(dev: Arc<CudaDevice>) -> Self {
-        let mut code =
-            "extern \"C\" __global__ void kernel(float *out, const float *inp, int numel) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < numel) {
-        out[i] = log2(inp[i]);
-    }
-}"
-            .to_string();
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("kernel", &name);
-        if !dev.has_func(&name, &name) {
-            dev.load_ptx(compile_ptx(code).unwrap(), &name, &[&name])
-                .unwrap();
-        }
-        Self(dev.get_func(&name, &name).unwrap(), dev)
-    }
-}
-
-impl Operator for CudaLog2 {
-    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<CudaSlice<f32>>()
-            .unwrap();
-        let inp_size = tensors[0].1.n_physical_elements();
-        let mut out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
-        unsafe {
-            self.0
-                .clone()
-                .launch(
-                    LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
-                )
-                .unwrap();
-        }
-
-        vec![Tensor {
-            data: Box::new(out),
-        }]
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct CudaExp2(CudaFunction, Arc<CudaDevice>);
-impl PartialEq for CudaExp2 {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
-
-impl CudaExp2 {
-    pub fn new(dev: Arc<CudaDevice>) -> Self {
-        let mut code =
-            "extern \"C\" __global__ void kernel(float *out, const float *inp, int numel) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < numel) {
-        out[i] = exp2(inp[i]);
-    }
-}"
-            .to_string();
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("kernel", &name);
-        if !dev.has_func(&name, &name) {
-            dev.load_ptx(compile_ptx(code).unwrap(), &name, &[&name])
-                .unwrap();
-        }
-        Self(dev.get_func(&name, &name).unwrap(), dev)
-    }
-}
-
-impl Operator for CudaExp2 {
-    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<CudaSlice<f32>>()
-            .unwrap();
-        let inp_size = tensors[0].1.n_physical_elements();
-        let mut out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
-        unsafe {
-            self.0
-                .clone()
-                .launch(
-                    LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
-                )
-                .unwrap();
-        }
-
-        vec![Tensor {
-            data: Box::new(out),
-        }]
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct CudaSin(CudaFunction, Arc<CudaDevice>);
-impl PartialEq for CudaSin {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
-
-impl CudaSin {
-    pub fn new(dev: Arc<CudaDevice>) -> Self {
-        let mut code =
-            "extern \"C\" __global__ void kernel(float *out, const float *inp, int numel) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < numel) {
-        out[i] = sin(inp[i]);
-    }
-}"
-            .to_string();
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("kernel", &name);
-        if !dev.has_func(&name, &name) {
-            dev.load_ptx(compile_ptx(code).unwrap(), &name, &[&name])
-                .unwrap();
-        }
-        Self(dev.get_func(&name, &name).unwrap(), dev)
-    }
-}
-
-impl Operator for CudaSin {
-    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<CudaSlice<f32>>()
-            .unwrap();
-        let inp_size = tensors[0].1.n_physical_elements();
-        let mut out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
-        unsafe {
-            self.0
-                .clone()
-                .launch(
-                    LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
-                )
-                .unwrap();
-        }
-
-        vec![Tensor {
-            data: Box::new(out),
-        }]
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct CudaSqrt(CudaFunction, Arc<CudaDevice>);
-impl PartialEq for CudaSqrt {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
-
-impl CudaSqrt {
-    pub fn new(dev: Arc<CudaDevice>) -> Self {
-        let mut code =
-            "extern \"C\" __global__ void kernel(float *out, const float *inp, int numel) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < numel) {
-        out[i] = sqrt(inp[i]);
-    }
-}"
-            .to_string();
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("kernel", &name);
-        if !dev.has_func(&name, &name) {
-            dev.load_ptx(compile_ptx(code).unwrap(), &name, &[&name])
-                .unwrap();
-        }
-        Self(dev.get_func(&name, &name).unwrap(), dev)
-    }
-}
-
-impl Operator for CudaSqrt {
-    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<CudaSlice<f32>>()
-            .unwrap();
-        let inp_size = tensors[0].1.n_physical_elements();
-        let mut out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
-        unsafe {
-            self.0
-                .clone()
-                .launch(
-                    LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
-                )
-                .unwrap();
-        }
-
-        vec![Tensor {
-            data: Box::new(out),
-        }]
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct CudaRecip(CudaFunction, Arc<CudaDevice>);
-impl PartialEq for CudaRecip {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
-
-impl CudaRecip {
-    pub fn new(dev: Arc<CudaDevice>) -> Self {
-        let mut code =
-            "extern \"C\" __global__ void kernel(float *out, const float *inp, int numel) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < numel) {
-        out[i] = __frcp_rn(inp[i]);
-    }
-}"
-            .to_string();
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("kernel", &name);
-        if !dev.has_func(&name, &name) {
-            dev.load_ptx(compile_ptx(code).unwrap(), &name, &[&name])
-                .unwrap();
-        }
-        Self(dev.get_func(&name, &name).unwrap(), dev)
-    }
-}
-
-impl Operator for CudaRecip {
-    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<CudaSlice<f32>>()
-            .unwrap();
-        let inp_size = tensors[0].1.n_physical_elements();
-        let mut out = self.1.alloc_zeros::<f32>(inp_size).unwrap();
-        unsafe {
-            self.0
-                .clone()
-                .launch(
-                    LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
-                )
-                .unwrap();
-        }
-
-        vec![Tensor {
-            data: Box::new(out),
-        }]
-    }
-}
 
 // Binary Ops
 
@@ -1226,17 +847,17 @@ impl Compiler for CudaPrimitiveCompiler {
             let op = graph.graph.node_weight(id).unwrap().as_any().type_id();
             let op_ref = graph.graph.node_weight_mut(id).unwrap();
             if is::<Log2>(op) {
-                *op_ref = Box::new(CudaLog2::new(dev.clone()));
+                *op_ref = Box::new(CudaLog2::<f32>::new(dev.clone(), "float"));
             } else if is::<Exp2>(op) {
-                *op_ref = Box::new(CudaExp2::new(dev.clone()));
+                *op_ref = Box::new(CudaExp2::<f32>::new(dev.clone(), "float"));
             } else if is::<Sin>(op) {
-                *op_ref = Box::new(CudaSin::new(dev.clone()));
+                *op_ref = Box::new(CudaSin::<f32>::new(dev.clone(), "float"));
             } else if let Some(c) = op_ref.as_any().downcast_ref::<Constant>() {
-                *op_ref = Box::new(CudaConstant(dev.clone(), c.0));
+                *op_ref = Box::new(CudaConstant::<f32>::new(dev.clone(), c.0));
             } else if is::<Sqrt>(op) {
-                *op_ref = Box::new(CudaSqrt::new(dev.clone()));
+                *op_ref = Box::new(CudaSqrt::<f32>::new(dev.clone(), "float"));
             } else if is::<Recip>(op) {
-                *op_ref = Box::new(CudaRecip::new(dev.clone()));
+                *op_ref = Box::new(CudaRecip::<f32>::new(dev.clone(), "float"));
             } else if is::<Add>(op) {
                 *op_ref = Box::new(CudaAdd::new(src_shapes[0], src_shapes[1], dev.clone()));
             } else if is::<Mul>(op) {
@@ -1246,7 +867,11 @@ impl Compiler for CudaPrimitiveCompiler {
             } else if is::<LessThan>(op) {
                 *op_ref = Box::new(CudaLessThan::new(src_shapes[0], src_shapes[1], dev.clone()));
             } else if is::<Contiguous>(op) {
-                *op_ref = Box::new(CudaContiguous::new(src_shapes[0], dev.clone()));
+                *op_ref = Box::new(CudaContiguous::<f32>::new(
+                    src_shapes[0],
+                    dev.clone(),
+                    "float",
+                ));
             } else if let Some(SumReduce(dim)) = op_ref.as_any().downcast_ref() {
                 *op_ref = Box::new(CudaSumReduce::new(*dim, src_shapes[0], dev.clone()));
             } else if let Some(MaxReduce(dim)) = op_ref.as_any().downcast_ref() {

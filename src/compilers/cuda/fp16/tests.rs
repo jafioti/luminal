@@ -492,7 +492,6 @@ fn test_matmul_transpose() {
 fn test_relu_and_linear() {
     // Test single and batch, uncompiled and compiled
     let mut cx = Graph::new();
-    let data = random_vec(3);
     let batch = cx.new_tensor::<R2<2, 3>>("Input");
     let a = cx.new_tensor::<R1<3>>("Input");
 
@@ -505,10 +504,11 @@ fn test_relu_and_linear() {
     let b = model.forward(a);
     let batch_out = model.forward(batch);
 
-    a.set(data.clone());
+    a.set(vec![1.0, 2.0, 3.0]);
     batch.set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
     b.retrieve();
     batch_out.retrieve();
+
     cx.execute();
 
     let uncompiled_b = b.data();
@@ -542,11 +542,11 @@ fn test_relu_and_linear() {
         .to_dtype::<f16>()
         .permute();
     let a = dev
-        .tensor_from_vec(data, (dfdx::shapes::Const::<3>,))
+        .tensor_from_vec(vec![1.0, 2.0, 3.0], (dfdx::shapes::Const::<3>,))
         .to_dtype::<f16>();
     let out = model.forward(a);
 
-    assert_close(&b.data(), &out.to_dtype::<f32>().as_vec());
+    assert_close(&uncompiled_b, &out.to_dtype::<f32>().as_vec());
 }
 
 #[test]

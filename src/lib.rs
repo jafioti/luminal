@@ -18,4 +18,5 @@ pub mod prelude {
     pub use crate::serialization::*;
     pub use crate::shape::*;
     pub use crate::tensor::*;
+    pub use luminal_macro::*;
 }
