@@ -9,7 +9,6 @@ use crate::{
     prelude::*,
 };
 
-use super::prim::{MetalAdd, MetalMul, MetalSin, MetalConstant, MetalExp2, MetalKernelForward, MetalKernelWrapper};
 use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Special kernel for efficient mean reduction
@@ -131,23 +130,23 @@ impl Compiler for MetalCosCompiler {
 
         let s = SelectEdge::new(
             SelectEdge::new(
-                SelectOp::new().check(|op, _| if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
+                SelectOp::new().check(|op, _| if let Some(c) = op.as_any().downcast_ref::<MetalConstant<f16>>() {
                     c.0 == f16::PI / f16::from_f32(2.)
                 } else {false}).ptr(&mut const_pi),
                 SelectEdge::new(
                     SelectEdge::new(
                         SelectOp::new().ptr(&mut x),
                         SelectEdge::new(
-                                SelectOp::new().check(|op, _| if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
+                                SelectOp::new().check(|op, _| if let Some(c) = op.as_any().downcast_ref::<MetalConstant<f16>>() {
                                     c.0 == f16::NEG_ONE
                                 } else {false}).ptr(&mut const_neg_one),
-                            SelectOp::new().ty::<MetalMul>().ptr(&mut mul),
+                            SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul),
                         ),
                     ),
-                    SelectOp::new().ty::<MetalAdd>().ptr(&mut add),
+                    SelectOp::new().ty::<MetalAdd<f16>>().ptr(&mut add),
                 ),
             ),
-            SelectOp::new().ty::<MetalSin>().ptr(&mut sin),
+            SelectOp::new().ty::<MetalSin<f16>>().ptr(&mut sin),
         );
         for _ in s.search(graph) {
             if graph.no_delete.contains(&const_neg_one)
@@ -305,12 +304,12 @@ impl Compiler for MetalExpCompiler {
         SelectEdge::new(
             SelectEdge::new(
                 SelectOp::new()
-                    .check(|op, _| if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
+                    .check(|op, _| if let Some(c) = op.as_any().downcast_ref::<MetalConstant<f16>>() {
                             c.0 == f16::from_f32(1.0 / f32::ln(2.))
                         } else {false}
                     ).ptr(&mut constant), 
-                SelectOp::new().ty::<MetalMul>().ptr(&mut mul)), 
-            SelectOp::new().ty::<MetalExp2>().ptr(&mut exp2)
+                SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul)), 
+            SelectOp::new().ty::<MetalExp2<f16>>().ptr(&mut exp2)
         );
 
         for _ in s.search(graph) {

@@ -16,8 +16,6 @@ use crate::{
     prelude::*,
 };
 
-use super::prim::MetalKernelWrapper;
-
 #[derive(Default, Debug)]
 pub struct CommonBufferCompiler;
 

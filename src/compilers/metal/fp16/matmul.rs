@@ -9,7 +9,6 @@ use crate::{
     prelude::*,
 };
 
-use super::prim::{MetalKernelForward, MetalKernelWrapper, MetalMul, MetalSumReduce};
 use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Multiplies a MxK matrix with a KxN matrix, resulting in a MxN matrix
@@ -391,7 +390,7 @@ impl Compiler for MetalMatMulCompiler {
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         let s = SelectEdge::new(
             SelectOp::new()
-                .ty::<MetalMul>()
+                .ty::<MetalMul<f16>>()
                 .shapes(vec![
                     vec![Dim::Unknown('A'), Dim::Unknown('C'), Dim::Unknown('B')],
                     vec![Dim::Unknown('A'), Dim::Unknown('C'), Dim::Unknown('B')],
@@ -399,9 +398,9 @@ impl Compiler for MetalMatMulCompiler {
                 .fakes(vec![vec![false, true, false], vec![true, false, false]])
                 .ptr(&mut mul),
             SelectOp::new()
-                .ty::<MetalSumReduce>()
+                .ty::<MetalSumReduce<f16>>()
                 .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
+                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
                         o.3 == 2
                     } else {
                         false
@@ -456,7 +455,7 @@ impl Compiler for MetalMatMulCompiler {
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         let s = SelectEdge::new(
             SelectOp::new()
-                .ty::<MetalMul>()
+                .ty::<MetalMul<f16>>()
                 .shapes(vec![
                     vec![
                         Dim::Unknown('D'),
@@ -477,9 +476,9 @@ impl Compiler for MetalMatMulCompiler {
                 ])
                 .ptr(&mut mul),
             SelectOp::new()
-                .ty::<MetalSumReduce>()
+                .ty::<MetalSumReduce<f16>>()
                 .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
+                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
                         o.3 == 3
                     } else {
                         false
@@ -534,7 +533,7 @@ impl Compiler for MetalMatMulCompiler {
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         let s = SelectEdge::new(
             SelectOp::new()
-                .ty::<MetalMul>()
+                .ty::<MetalMul<f16>>()
                 .shapes(vec![
                     vec![
                         Dim::Unknown('A'),
@@ -557,9 +556,9 @@ impl Compiler for MetalMatMulCompiler {
                 ])
                 .ptr(&mut mul),
             SelectOp::new()
-                .ty::<MetalSumReduce>()
+                .ty::<MetalSumReduce<f16>>()
                 .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
+                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
                         o.3 == 4
                     } else {
                         false

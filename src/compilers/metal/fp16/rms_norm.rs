@@ -9,28 +9,17 @@ use crate::{
     prelude::*,
 };
 
-use super::{
-    mean_reduce::MetalMeanReduce,
-    prim::{
-        MetalAdd, MetalConstant, MetalKernelForward, MetalKernelWrapper, MetalMul, MetalRecip,
-        MetalSqrt,
-    },
-};
+use super::mean_reduce::MetalMeanReduce;
 use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Special kernel for efficient rms norming
-#[derive(Debug, Clone)]
+#[derive(LuminalEq, LuminalPrint, Clone)]
 pub struct MetalRMSNorm(
     ComputePipelineState, // Square-Mean kernel
     ComputePipelineState, // RMSNorm kernel
     Device,
     ShapeTracker, // Input shape
 );
-impl PartialEq for MetalRMSNorm {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
 
 impl MetalRMSNorm {
     fn new(dev: Device, inp_shape: ShapeTracker) -> Self {
@@ -213,7 +202,7 @@ impl Compiler for RMSNormCompiler {
                     SelectEdge::new(
                         SelectOp::new()
                             .check(|op, _| {
-                                if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
+                                if let Some(c) = op.as_any().downcast_ref::<MetalConstant<f16>>() {
                                     c.0 == f16::from_f32(1e-6)
                                 } else {
                                     false
@@ -222,17 +211,17 @@ impl Compiler for RMSNormCompiler {
                             .ptr(&mut epsilon),
                         SelectEdge::new(
                             SelectEdge::new(
-                                SelectOp::new().ty::<MetalMul>().ptr(&mut square),
+                                SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut square),
                                 SelectOp::new().ty::<MetalMeanReduce>().ptr(&mut mean),
                             ),
-                            SelectOp::new().ty::<MetalAdd>().ptr(&mut add),
+                            SelectOp::new().ty::<MetalAdd<f16>>().ptr(&mut add),
                         ),
                     ),
-                    SelectOp::new().ty::<MetalSqrt>().ptr(&mut sqrt),
+                    SelectOp::new().ty::<MetalSqrt<f16>>().ptr(&mut sqrt),
                 ),
-                SelectOp::new().ty::<MetalRecip>().ptr(&mut recip),
+                SelectOp::new().ty::<MetalRecip<f16>>().ptr(&mut recip),
             ),
-            SelectOp::new().ty::<MetalMul>().ptr(&mut mul),
+            SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul),
         );
 
         for _ in s.search(graph) {

@@ -6,7 +6,6 @@ use crate::{
     prelude::*,
 };
 
-use super::prim::{MetalMul, MetalSumReduce};
 use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Multiplies a MxK matrix with a KxN matrix, resulting in a MxN matrix
@@ -249,7 +248,7 @@ impl Compiler for MetalMatMulCompiler {
         // Actually starts at [A,B] | [B, C]
         let s = SelectEdge::new(
             SelectOp::new()
-                .ty::<MetalMul>()
+                .ty::<MetalMul<f32>>()
                 .shapes(vec![
                     vec![Dim::Unknown('A'), Dim::Unknown('C'), Dim::Unknown('B')],
                     vec![Dim::Unknown('A'), Dim::Unknown('C'), Dim::Unknown('B')],
@@ -257,10 +256,10 @@ impl Compiler for MetalMatMulCompiler {
                 .fakes(vec![vec![false, true, false], vec![true, false, false]])
                 .ptr(&mut mul),
             SelectOp::new()
-                .ty::<MetalSumReduce>()
+                .ty::<MetalSumReduce<f32>>()
                 .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
-                        o.2 == 2
+                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f32>>() {
+                        o.3 == 2
                     } else {
                         false
                     }
@@ -317,7 +316,7 @@ impl Compiler for MetalMatMulCompiler {
         // Actually starts at [A,B] | [B, C]
         let s = SelectEdge::new(
             SelectOp::new()
-                .ty::<MetalMul>()
+                .ty::<MetalMul<f32>>()
                 .shapes(vec![
                     vec![
                         Dim::Unknown('D'),
@@ -338,10 +337,10 @@ impl Compiler for MetalMatMulCompiler {
                 ])
                 .ptr(&mut mul),
             SelectOp::new()
-                .ty::<MetalSumReduce>()
+                .ty::<MetalSumReduce<f32>>()
                 .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce>() {
-                        o.2 == 3
+                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f32>>() {
+                        o.3 == 3
                     } else {
                         false
                     }

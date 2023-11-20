@@ -9,10 +9,7 @@ use crate::{
     prelude::*,
 };
 
-use super::prim::{
-    FakeSumReduce, MetalConstant, MetalKernelForward, MetalKernelWrapper, MetalMul, MetalRecip,
-    MetalSumReduce,
-};
+use super::prim::FakeSumReduce;
 use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Special kernel for efficient mean reduction
@@ -175,13 +172,15 @@ impl Compiler for MeanReduceCompiler {
         );
 
         let s = SelectEdge::new(
-            SelectOp::new().ty::<MetalSumReduce>().ptr(&mut sum_reduce),
+            SelectOp::new()
+                .ty::<MetalSumReduce<f16>>()
+                .ptr(&mut sum_reduce),
             SelectEdge::new(
                 SelectEdge::new(
                     SelectEdge::new(
                         SelectOp::new()
                             .check(|op, _| {
-                                if let Some(c) = op.as_any().downcast_ref::<MetalConstant>() {
+                                if let Some(c) = op.as_any().downcast_ref::<MetalConstant<f16>>() {
                                     c.0 == f16::ONE
                                 } else {
                                     false
@@ -192,9 +191,9 @@ impl Compiler for MeanReduceCompiler {
                             .ty::<FakeSumReduce>()
                             .ptr(&mut fake_sum_reduce),
                     ),
-                    SelectOp::new().ty::<MetalRecip>().ptr(&mut recip),
+                    SelectOp::new().ty::<MetalRecip<f16>>().ptr(&mut recip),
                 ),
-                SelectOp::new().ty::<MetalMul>().ptr(&mut mul),
+                SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul),
             ),
         );
 
@@ -212,7 +211,7 @@ impl Compiler for MeanReduceCompiler {
                 .node_weight(sum_reduce)
                 .unwrap()
                 .as_any()
-                .downcast_ref::<MetalSumReduce>()
+                .downcast_ref::<MetalSumReduce<f16>>()
                 .unwrap()
                 .3;
             // Insert MeanReduce op
