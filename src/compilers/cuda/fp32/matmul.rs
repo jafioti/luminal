@@ -11,8 +11,6 @@ use crate::{
     prelude::*,
 };
 
-use super::prim::{CudaMul, CudaSumReduce};
-
 /// Multiplies a MxK matrix with a KxN matrix, resulting in a MxN matrix
 #[derive(Debug, Clone)]
 pub struct CudaMatmul2D(CudaBlas, Arc<CudaDevice>);
@@ -171,7 +169,7 @@ impl Compiler for CudaMatMulCompiler {
         // Actually starts at [A,B] | [B, C]
         let s = SelectEdge::new(
             SelectOp::new()
-                .ty::<CudaMul>()
+                .ty::<CudaMul<f32>>()
                 .shapes(vec![
                     vec![Dim::Unknown('A'), Dim::Unknown('C'), Dim::Unknown('B')],
                     vec![Dim::Unknown('A'), Dim::Unknown('C'), Dim::Unknown('B')],
@@ -179,9 +177,9 @@ impl Compiler for CudaMatMulCompiler {
                 .fakes(vec![vec![false, true, false], vec![true, false, false]])
                 .ptr(&mut mul),
             SelectOp::new()
-                .ty::<CudaSumReduce>()
+                .ty::<CudaSumReduce<f32>>()
                 .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<CudaSumReduce>() {
+                    if let Some(o) = o.as_any().downcast_ref::<CudaSumReduce<f32>>() {
                         o.2 == 2
                     } else {
                         false
@@ -237,7 +235,7 @@ impl Compiler for CudaMatMulCompiler {
         // Actually starts at [A,B] | [B, C]
         let s = SelectEdge::new(
             SelectOp::new()
-                .ty::<CudaMul>()
+                .ty::<CudaMul<f32>>()
                 .shapes(vec![
                     vec![
                         Dim::Unknown('D'),
@@ -258,9 +256,9 @@ impl Compiler for CudaMatMulCompiler {
                 ])
                 .ptr(&mut mul),
             SelectOp::new()
-                .ty::<CudaSumReduce>()
+                .ty::<CudaSumReduce<f32>>()
                 .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<CudaSumReduce>() {
+                    if let Some(o) = o.as_any().downcast_ref::<CudaSumReduce<f32>>() {
                         o.2 == 3
                     } else {
                         false
