@@ -1,7 +1,8 @@
 use std::{
+    cell::UnsafeCell,
     collections::{HashSet, VecDeque},
     fmt::Debug,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use itertools::Itertools;
@@ -47,7 +48,8 @@ impl Compiler for CommonBufferCompiler {
                 } else {
                     num_buffers_on_queue += 1;
                 }
-                let b = Arc::new(Mutex::new(queue.new_command_buffer().to_owned()));
+                #[allow(clippy::arc_with_non_send_sync)]
+                let b = Arc::new(UnsafeCell::new(queue.new_command_buffer().to_owned()));
                 let exec = graph
                     .add_op(ExecuteMetalKernels {
                         queue: queue.clone(),
@@ -107,7 +109,7 @@ impl Compiler for CommonBufferCompiler {
 #[allow(clippy::too_many_arguments)]
 fn build_set(
     node: NodeIndex,
-    buffer: Arc<Mutex<CommandBuffer>>,
+    buffer: Arc<UnsafeCell<CommandBuffer>>,
     dev: &Device,
     current_set: &mut HashSet<NodeIndex>,
     already_added_nodes: &mut HashSet<NodeIndex>,
@@ -241,12 +243,12 @@ fn dfs(
 #[derive(LuminalEq, LuminalPrint)]
 struct ExecuteMetalKernels {
     queue: CommandQueue,
-    buffer: Arc<Mutex<CommandBuffer>>,
+    buffer: Arc<UnsafeCell<CommandBuffer>>,
 }
 
 impl Operator for ExecuteMetalKernels {
     fn process(&self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut buffer = self.buffer.lock().unwrap();
+        let buffer = unsafe { &mut *self.buffer.get() };
         buffer.commit();
         buffer.wait_until_completed();
         *buffer = self.queue.new_command_buffer().to_owned();
@@ -258,7 +260,7 @@ impl Operator for ExecuteMetalKernels {
 struct MetalKernelOperation {
     wrapper: Box<MetalKernelWrapper>,
     dev: Device,
-    buffer: Arc<Mutex<CommandBuffer>>,
+    buffer: Arc<UnsafeCell<CommandBuffer>>,
 }
 
 impl std::fmt::Debug for MetalKernelOperation {
@@ -281,7 +283,7 @@ impl Operator for MetalKernelOperation {
                     })
                     .collect::<Vec<_>>(),
                 &self.dev,
-                self.buffer.lock().unwrap().as_ref(),
+                unsafe { &*self.buffer.get() },
             )
             .into_iter()
             .map(|b| Tensor { data: Box::new(b) })
