@@ -263,7 +263,7 @@ struct MetalKernelOperation {
 
 impl std::fmt::Debug for MetalKernelOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MetalKernel-{:?}", self.wrapper.0)
+        write!(f, "MetalKernel({:?})", self.wrapper.0)
     }
 }
 

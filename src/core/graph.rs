@@ -15,7 +15,6 @@ use std::{
 use colored::Colorize;
 use itertools::Itertools;
 use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Direction};
-use regex::Regex;
 
 pub type MainGraph = StableGraph<Box<dyn Operator>, Dependency>;
 
@@ -216,8 +215,6 @@ impl Graph {
         }
         let mut remaining_consumers = self.create_remaining_customers_map();
         let mut op_times = HashMap::new();
-        // Very janky way of extracting the type name only from an op, stripping out the struct contents
-        let op_regex = Regex::new(r"(?s)\{.*|\(.*").unwrap();
 
         println!(
             "{:->2$} Executing {:->2$}",
@@ -230,9 +227,7 @@ impl Graph {
             if self.tensors.contains_key(&(*node, 0)) {
                 continue;
             }
-            let op_name = op_regex
-                .replace_all(&format!("{:?}", self.graph.node_weight(*node).unwrap()), "")
-                .to_string();
+            let op_name = format!("{:?}", self.graph.node_weight(*node).unwrap());
             print!("{}", op_name.bold().bright_green());
 
             let mut srcs = get_source_tensors(
