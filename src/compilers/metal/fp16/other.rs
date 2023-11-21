@@ -12,13 +12,8 @@ use crate::{
 use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Special kernel for efficient mean reduction
-#[derive(Debug, Clone)]
+#[derive(LuminalEq, LuminalPrint, Clone)]
 pub struct MetalCos(ComputePipelineState, Device);
-impl PartialEq for MetalCos {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
 
 impl MetalCos {
     fn new(dev: Device) -> Self {
@@ -185,14 +180,8 @@ impl Compiler for MetalCosCompiler {
     }
 }
 
-/// Special kernel for efficient mean reduction
-#[derive(Debug, Clone)]
+#[derive(LuminalEq, LuminalPrint, Clone)]
 pub struct MetalExp(ComputePipelineState, Device);
-impl PartialEq for MetalExp {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
 
 impl MetalExp {
     fn new(dev: Device) -> Self {
@@ -322,10 +311,10 @@ impl Compiler for MetalExpCompiler {
             }
 
             // Insert exp op
-            let src = graph.get_sources(mul).into_iter().find(|(i, _)| *i != constant).unwrap();
+            let src = graph.get_sources(mul).into_iter().find(|(i, _, _)| *i != constant).unwrap();
             let exp = graph
                 .add_op(MetalExp::new(dev.clone()))
-                .input(src.0, 0, src.1)
+                .input(src.0, 0, src.2)
                 .finish();
 
             // Create edges to dests
@@ -342,6 +331,149 @@ impl Compiler for MetalExpCompiler {
             graph.graph.remove_node(mul);
             graph.graph.remove_node(constant);
             graph.graph.remove_node(exp2);
+        }
+    }
+}
+
+#[derive(LuminalEq, LuminalPrint, Clone)]
+pub struct MetalGather(ComputePipelineState, Device, usize);
+
+impl MetalGather {
+    fn new(dev: Device, embed_dim: usize) -> Self {
+        Self(compile_function("metal_gather", "
+        #include <metal_stdlib>
+        using namespace metal;
+        kernel void metal_gather(device float *inp [[buffer(0)]], device half *weights [[buffer(1)]], device half *out [[buffer(2)]], device uint& n_embeddings [[buffer(3)]], device uint& embedding_dim [[buffer(4)]], uint2 i_ [[thread_position_in_grid]]) {
+            if (i_.x < n_embeddings && i_.y < embedding_dim) {
+                out[i_.x * embedding_dim + i_.y] = weights[(uint)inp[i_.x] * embedding_dim + i_.y];
+            }
+        }
+        ", &dev), dev, embed_dim)
+    }
+}
+
+impl Operator for MetalGather {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        autoreleasepool(|| {
+            // Setup buffers
+            let indexes = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Vec<f32>>()
+                .unwrap();
+            let index_buffer = self.1.new_buffer_with_data(
+                unsafe { std::mem::transmute(indexes.as_ptr()) },
+                (indexes.len() * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
+            let b_inp = tensors[1]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+            
+
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+
+            // Input 0 is indexes, input 1 is embedding weights
+            let n_embeddings = tensors[0].1.n_elements();
+
+            let out = self.1.new_buffer(
+                (n_embeddings * self.2 * std::mem::size_of::<f16>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
+
+            let encoder = command_buffer
+                    .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
+
+            // Set inputs
+            encoder.set_buffer(0, Some(&index_buffer), 0);
+            encoder.set_buffer(1, Some(b_inp), 0);
+            encoder.set_buffer(2, Some(&out), 0);
+            encoder.set_int(3, n_embeddings as u32);
+            encoder.set_int(4, self.2 as u32);
+
+            // Execute
+            encoder.dispatch_threads(MTLSize { width: n_embeddings as u64, height: self.2 as u64, depth: 1 }, MTLSize { width: 16, height: 16, depth: 1 });
+            encoder.end_encoding();
+
+            
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
+
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
+    }
+}
+
+/// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceCompiler.
+#[derive(Default, Debug)]
+pub struct MetalGatherCompiler;
+
+impl Compiler for MetalGatherCompiler {
+    fn compile(&self, graph: &mut Graph) {
+        let dev = Device::system_default().unwrap();
+        // Look for the exp pattern
+        // exp2(mul(x, const))
+        let mut gather = NodeIndex::default();
+
+        let s: SelectEdge = SelectOp::new().check(|op, _| if let Some(op) = op.as_any().downcast_ref::<crate::op::Function>() {
+            op.0 == "Gather"
+        } else {false}).ptr(&mut gather).into();
+        for _ in s.search(graph) {
+            let srcs = graph.get_sources(gather);
+            let (indexes, weights_copy_from) = (srcs[0], srcs[1]);
+            let copy_to = graph.get_dests(gather)[0].0;
+            if graph.no_delete.contains(&weights_copy_from.0) || graph.get_dests(gather).len() > 1 {
+                // An intermediate node can't be deleted
+                continue;
+            }
+
+            // Insert gather op
+            let weight_src = graph.get_sources(weights_copy_from.0)[0];
+            let new_gather = graph
+                .add_op(MetalGather::new(dev.clone(), weights_copy_from.2.shape()[1].to_usize().unwrap()))
+                .input(indexes.0, indexes.1, indexes.2)
+                .input(weight_src.0, weight_src.1, weights_copy_from.2)
+                .finish();
+
+            // Create edges to dests
+            move_outgoing_edge(copy_to, new_gather, &mut graph.graph);
+            move_references(
+                &mut graph.id_remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                gather,
+                new_gather,
+            );
+            move_references(
+                &mut graph.id_remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                weights_copy_from.0,
+                new_gather,
+            );
+            move_references(
+                &mut graph.id_remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                copy_to,
+                new_gather,
+            );
+
+            // Remove the old ops
+            graph.graph.remove_node(weights_copy_from.0);
+            graph.graph.remove_node(gather);
+            graph.graph.remove_node(copy_to);
         }
     }
 }

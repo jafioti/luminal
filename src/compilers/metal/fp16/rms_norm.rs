@@ -237,17 +237,17 @@ impl Compiler for RMSNormCompiler {
                 continue;
             }
             let x = graph.get_sources(square)[0];
-            if !graph.get_sources(square).iter().all(|(i, _)| *i == x.0) {
+            if !graph.get_sources(square).iter().all(|(i, _, _)| *i == x.0) {
                 continue;
             }
-            if !graph.get_sources(mul).iter().any(|(i, _)| *i == x.0) {
+            if !graph.get_sources(mul).iter().any(|(i, _, _)| *i == x.0) {
                 continue;
             }
 
             // Insert RMSNorm op
             let rms_norm = graph
-                .add_op(MetalRMSNorm::new(dev.clone(), x.1))
-                .input(x.0, 0, x.1)
+                .add_op(MetalRMSNorm::new(dev.clone(), x.2))
+                .input(x.0, 0, x.2)
                 .finish();
 
             // Create edges to dests

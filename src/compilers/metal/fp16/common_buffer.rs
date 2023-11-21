@@ -1,5 +1,6 @@
 use std::{
     collections::{HashSet, VecDeque},
+    fmt::Debug,
     sync::{Arc, Mutex},
 };
 
@@ -237,16 +238,10 @@ fn dfs(
     false
 }
 
-#[derive(Debug)]
+#[derive(LuminalEq, LuminalPrint)]
 struct ExecuteMetalKernels {
     queue: CommandQueue,
     buffer: Arc<Mutex<CommandBuffer>>,
-}
-
-impl PartialEq for ExecuteMetalKernels {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
 }
 
 impl Operator for ExecuteMetalKernels {
@@ -259,6 +254,7 @@ impl Operator for ExecuteMetalKernels {
     }
 }
 
+#[derive(LuminalEq)]
 struct MetalKernelOperation {
     wrapper: Box<MetalKernelWrapper>,
     dev: Device,
@@ -268,12 +264,6 @@ struct MetalKernelOperation {
 impl std::fmt::Debug for MetalKernelOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "MetalKernel-{:?}", self.wrapper.0)
-    }
-}
-
-impl PartialEq for MetalKernelOperation {
-    fn eq(&self, _: &Self) -> bool {
-        false
     }
 }
 

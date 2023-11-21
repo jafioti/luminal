@@ -13,7 +13,7 @@ use super::prim::FakeSumReduce;
 use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Special kernel for efficient mean reduction
-#[derive(Debug, Clone)]
+#[derive(LuminalEq, LuminalPrint, Clone)]
 pub struct MetalMeanReduce(
     ComputePipelineState,
     CommandQueue,
@@ -21,11 +21,6 @@ pub struct MetalMeanReduce(
     usize,
     ShapeTracker,
 );
-impl PartialEq for MetalMeanReduce {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
 
 impl MetalMeanReduce {
     fn new(dev: Device, queue: CommandQueue, dim: usize, shape: ShapeTracker) -> Self {
@@ -217,8 +212,8 @@ impl Compiler for MeanReduceCompiler {
             // Insert MeanReduce op
             let src = graph.get_sources(sum_reduce)[0];
             let mean_reduce = graph
-                .add_op(MetalMeanReduce::new(dev.clone(), queue.clone(), dim, src.1))
-                .input(src.0, 0, src.1)
+                .add_op(MetalMeanReduce::new(dev.clone(), queue.clone(), dim, src.2))
+                .input(src.0, 0, src.2)
                 .finish();
 
             // Create edges to dests

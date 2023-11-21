@@ -29,16 +29,16 @@ impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
                         .as_any()
                         .downcast_ref::<Vec<f32>>()
                         .unwrap();
-                    let mut res = Vec::with_capacity(indexes.len() * DIM);
+                    let mut res = vec![0.; indexes.len() * DIM];
                     let (a_ind, b_ind) = (tensors[0].1.indexer(), tensors[1].1.indexer());
                     for i in 0..indexes.len() {
                         let Some(index_idx) = a_ind.index(i) else {
-                            res.append(&mut vec![0.; DIM]);
                             continue;
                         };
                         let start = indexes[index_idx] as usize * DIM;
                         for n in 0..DIM {
-                            res.push(b_ind.index(start + n).map(|i| data[i]).unwrap_or_default());
+                            res[i * DIM + n] =
+                                b_ind.index(start + n).map(|i| data[i]).unwrap_or_default();
                         }
                     }
                     vec![Tensor {

@@ -45,13 +45,13 @@ impl Compiler for MatMul2DCompiler {
             // Insert MatMul2D op
             let mut srcs = graph.get_sources(mul);
             // Undo expansions and permute
-            srcs[0].1.remove_dim(1);
-            srcs[1].1.remove_dim(0);
-            srcs[1].1.permute(&[1, 0]);
+            srcs[0].2.remove_dim(1);
+            srcs[1].2.remove_dim(0);
+            srcs[1].2.permute(&[1, 0]);
             let new_op = graph
                 .add_op(MatMul2D)
-                .input(srcs[0].0, 0, srcs[0].1)
-                .input(srcs[1].0, 0, srcs[1].1)
+                .input(srcs[0].0, 0, srcs[0].2)
+                .input(srcs[1].0, 0, srcs[1].2)
                 .finish();
 
             // Create edges to dests
@@ -167,14 +167,14 @@ impl Compiler for BatchMatMul2DCompiler {
             // Insert MatMul2D op
             let mut srcs = graph.get_sources(mul);
             // Undo expansions and permute
-            srcs[0].1.remove_dim(2);
-            srcs[1].1.remove_dim(1);
-            srcs[1].1.remove_dim(0);
-            srcs[1].1.permute(&[1, 0]);
+            srcs[0].2.remove_dim(2);
+            srcs[1].2.remove_dim(1);
+            srcs[1].2.remove_dim(0);
+            srcs[1].2.permute(&[1, 0]);
             let new_op = graph
                 .add_op(BatchedMatMul2D)
-                .input(srcs[0].0, 0, srcs[0].1)
-                .input(srcs[1].0, 0, srcs[1].1)
+                .input(srcs[0].0, 0, srcs[0].2)
+                .input(srcs[1].0, 0, srcs[1].2)
                 .finish();
 
             // Create edges to dests

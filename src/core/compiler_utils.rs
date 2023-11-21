@@ -104,12 +104,8 @@ impl Graph {
     ) -> (StableGraph<String, u8, Directed, u32>, Vec<EdgeIndex>) {
         let mut new_graph = StableGraph::default();
         let mut id_map = HashMap::new();
-        let op_regex = Regex::new(r"(?s)\{.*|\(.*").unwrap();
         for (id, node) in self.graph.node_indices().zip(self.graph.node_weights()) {
-            id_map.insert(
-                id,
-                new_graph.add_node(op_regex.replace_all(&format!("{node:?}"), "").to_string()),
-            );
+            id_map.insert(id, new_graph.add_node(format!("{node:?}")));
         }
 
         let mut schedule_edges = vec![];
@@ -171,12 +167,12 @@ impl Graph {
 
     /// Get the sources of a node given it's id
     #[allow(clippy::type_complexity, clippy::borrowed_box)]
-    pub fn get_sources(&self, node_id: NodeIndex) -> Vec<(NodeIndex, ShapeTracker)> {
+    pub fn get_sources(&self, node_id: NodeIndex) -> Vec<(NodeIndex, u8, ShapeTracker)> {
         self.graph
             .edges_directed(node_id, Direction::Incoming)
             .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i)))
             .sorted_by_key(|(_, (i, _, _))| *i)
-            .map(|(a, (_, _, b))| (a, b))
+            .map(|(a, (_, c, b))| (a, c, b))
             .collect()
     }
 

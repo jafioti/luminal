@@ -497,7 +497,9 @@ impl Compiler for CopyCompiler {
             {
                 continue;
             }
-            let source = graph.get_sources(first)[0];
+            let Some(source) = graph.get_sources(first).pop() else {
+                continue;
+            };
             move_outgoing_edge(second, source.0, &mut graph.graph);
             move_references(
                 &mut graph.id_remap,

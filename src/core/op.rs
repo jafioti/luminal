@@ -89,14 +89,14 @@ impl Operator for Print {
                 .unwrap();
             println!("{} Data: {:?}", i + 1, &d[d.len().saturating_sub(10)..]);
             println!("{} Shape: {:?}", i + 1, tracker);
-            let mut data = vec![0.; d.len()];
-            let ind = tracker.indexer();
-            #[allow(unused_mut)]
-            for (i, mut r) in data.iter_mut().enumerate() {
-                if let Some(n) = ind.index(i) {
-                    *r = d[n];
-                }
-            }
+            // let mut data = vec![0.; d.len()];
+            // let ind = tracker.indexer();
+            // #[allow(unused_mut)]
+            // for (i, mut r) in data.iter_mut().enumerate() {
+            //     if let Some(n) = ind.index(i) {
+            //         *r = d[n];
+            //     }
+            // }
             // std::fs::write(
             //     "../../Desktop/llama-dfdx/out.bin",
             //     data.iter()

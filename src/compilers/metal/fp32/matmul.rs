@@ -9,13 +9,8 @@ use crate::{
 use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Multiplies a MxK matrix with a KxN matrix, resulting in a MxN matrix
-#[derive(Debug, Clone)]
+#[derive(LuminalEq, LuminalPrint, Clone)]
 pub struct MetalMatmul2D(ComputePipelineState, Device);
-impl PartialEq for MetalMatmul2D {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
 
 impl MetalMatmul2D {
     fn compile(dev: &Device) -> ComputePipelineState {
@@ -118,13 +113,8 @@ impl Operator for MetalMatmul2D {
 }
 
 /// Multiplies a BxMxK matrix with a BxKxN matrix, resulting in a BxMxN matrix
-#[derive(Debug, Clone)]
+#[derive(LuminalEq, LuminalPrint, Clone)]
 pub struct MetalBatchMatmul2D(ComputePipelineState, Device);
-impl PartialEq for MetalBatchMatmul2D {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
 
 impl MetalBatchMatmul2D {
     fn compile(dev: &Device) -> ComputePipelineState {
@@ -276,16 +266,16 @@ impl Compiler for MetalMatMulCompiler {
             // Insert MatMul2D op
             let mut srcs = graph.get_sources(mul);
             // Undo expansions and permute
-            srcs[0].1.remove_dim(1);
-            srcs[1].1.remove_dim(0);
-            srcs[1].1.permute(&[1, 0]);
+            srcs[0].2.remove_dim(1);
+            srcs[1].2.remove_dim(0);
+            srcs[1].2.permute(&[1, 0]);
             if matmul.is_none() {
                 matmul = Some(MetalMatmul2D::compile(&dev));
             }
             let new_op = graph
                 .add_op(MetalMatmul2D(matmul.clone().unwrap(), dev.clone()))
-                .input(srcs[0].0, 0, srcs[0].1)
-                .input(srcs[1].0, 0, srcs[1].1)
+                .input(srcs[0].0, 0, srcs[0].2)
+                .input(srcs[1].0, 0, srcs[1].2)
                 .finish();
 
             // Create edges to dests
@@ -356,10 +346,10 @@ impl Compiler for MetalMatMulCompiler {
             // Insert BatchMatMul2D op
             let mut srcs = graph.get_sources(mul);
             // Undo expansions and permute
-            srcs[0].1.remove_dim(2);
-            srcs[1].1.remove_dim(1);
-            srcs[1].1.remove_dim(0);
-            srcs[1].1.permute(&[1, 0]);
+            srcs[0].2.remove_dim(2);
+            srcs[1].2.remove_dim(1);
+            srcs[1].2.remove_dim(0);
+            srcs[1].2.permute(&[1, 0]);
             if batched_matmul.is_none() {
                 batched_matmul = Some(MetalBatchMatmul2D::compile(&dev));
             }
@@ -368,8 +358,8 @@ impl Compiler for MetalMatMulCompiler {
                     batched_matmul.clone().unwrap(),
                     dev.clone(),
                 ))
-                .input(srcs[0].0, 0, srcs[0].1)
-                .input(srcs[1].0, 0, srcs[1].1)
+                .input(srcs[0].0, 0, srcs[0].2)
+                .input(srcs[1].0, 0, srcs[1].2)
                 .finish();
 
             // Create edges to dests

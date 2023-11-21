@@ -122,12 +122,12 @@ impl Compiler for CSE {
                     let a_src_shapes = graph
                         .get_sources(node)
                         .into_iter()
-                        .map(|(_, a)| a)
+                        .map(|(_, _, a)| a)
                         .collect_vec();
                     let b_src_shapes = graph
                         .get_sources(*other_node)
                         .into_iter()
-                        .map(|(_, a)| a)
+                        .map(|(_, _, a)| a)
                         .collect_vec();
                     if a.as_any().type_id() == b.as_any().type_id() && a_src_shapes == b_src_shapes
                     // If the op, input shapes, and output shape is the same, we can combine them (UNCLEAR IF THIS IS TRUE, NEED PROPER PartialEq)

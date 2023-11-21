@@ -779,3 +779,44 @@ fn test_common_buffer() {
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
 }
+
+#[test]
+fn test_embedding() {
+    let mut cx = Graph::new();
+    let batch = cx
+        .new_tensor::<R2<2, 3>>("BatchInput")
+        .set(vec![1.0, 0.0, 2.0, 1.0, 0.0, 1.0])
+        .keep();
+    let a = cx
+        .new_tensor::<R1<3>>("Input")
+        .set(vec![1.0, 0.0, 1.0])
+        .keep();
+
+    let model: crate::nn::embedding::Embedding<3, 4> = InitModule::initialize(&mut cx);
+    model
+        .weight
+        .set(vec![1.1, 2., 3., 1., 2., 3., 14., 2., 33., 1., 2., 3.]);
+    let b = model.forward(a).retrieve();
+    let batch_out = model.forward(batch).retrieve();
+
+    cx.compile(MetalFp16Compiler::default());
+    cx.execute();
+
+    let d_dev = Cpu::default();
+    let mut d_model = <dfdx::nn::modules::builders::Embedding<3, 4>>::build_on_device(&d_dev);
+    d_model.weight = d_dev.tensor_from_vec(
+        vec![1.1, 2., 3., 1., 2., 3., 14., 2., 33., 1., 2., 3.],
+        (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<4>),
+    );
+    let d_a = d_dev.tensor_from_vec(vec![1, 0, 1], (dfdx::shapes::Const::<3>,));
+    let d_batch = d_dev.tensor_from_vec(
+        vec![1, 0, 2, 1, 0, 1],
+        (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<3>),
+    );
+
+    let d_b = d_model.forward(d_a);
+    let d_batch_out = d_model.forward(d_batch);
+
+    assert_close(&b.data(), &d_b.as_vec());
+    assert_close(&batch_out.data(), &d_batch_out.as_vec());
+}

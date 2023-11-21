@@ -8,8 +8,9 @@ mod rms_norm;
 pub type MetalFp16Compiler = (
     prim::PrimitiveCompiler,
     prim::FakeReductionCompiler,
-    // other::MetalCosCompiler, // Need faster graph selector to reenable this
+    // other::MetalCosCompiler, // For some reason doesn't produce the same outputs, need to test
     other::MetalExpCompiler,
+    other::MetalGatherCompiler,
     matmul::MetalMatMulCompiler,
     mean_reduce::MeanReduceCompiler,
     rms_norm::RMSNormCompiler,
