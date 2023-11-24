@@ -33,8 +33,9 @@ kernel void mkernel(device half *inp [[buffer(0)]], device float *out [[buffer(1
         uint a_ = i_ / back_size;
         uint b_ = i_ % back_size;
         float reduce_value = 0.0;
-        for (uint c_ = 0; c_ < dim_size; c_++) {{
-            uint idx = a_ * dim_size * back_size + c_ * back_size + b_;
+        uint add_factor = a_ * dim_size * back_size + b_;
+        for (uint c_ = 0; c_ < dim_size * back_size; c_ += back_size) {{
+            uint idx = add_factor + c_;
             if (({valid_exp}) != 0) {{
                 float val = (float)inp[{idx_exp}];
                 reduce_value += (val * val);
