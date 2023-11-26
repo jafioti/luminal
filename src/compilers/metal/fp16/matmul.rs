@@ -16,8 +16,11 @@ use metal_rs::{objc::rc::autoreleasepool, *};
 pub struct MetalMatmul2D(ComputePipelineState, CommandQueue, Device);
 
 impl MetalMatmul2D {
-    fn compile(dev: &Device) -> ComputePipelineState {
-        compile_function("kernel_matmul_2d", "
+    fn compile(dev: &Device, a_row_major: bool, b_row_major: bool) -> ComputePipelineState {
+        compile_function(
+            "kernel_matmul_2d",
+            &format!(
+                "
 #include <metal_stdlib>
 using namespace metal;
 
@@ -31,21 +34,33 @@ kernel void kernel_matmul_2d(
     device uint& A_major [[buffer(6)]],
     device uint& B_major [[buffer(7)]],
     uint tid [[thread_position_in_grid]]
-) {
+) {{
     uint row = tid / N;
     uint column = tid % N;
 
-    if(row < M && column < N) {
+    if(row < M && column < N) {{
         float value = 0.0f;
-        for(int i = 0; i < K; ++i) {
-            uint A_index = A_major ? (row * K + i) : (i * M + row); // Row Major vs Column Major
-            uint B_index = B_major ? (i * N + column) : (column * K + i); // Row Major vs Column Major
+        for(int i = 0; i < K; ++i) {{
+            uint A_index = {};
+            uint B_index = {};
             value = fast::fma((float)A[A_index], (float)B[B_index], value);
-        }
+        }}
         C[row * N + column] = (half)value;
-    }
-}
-", dev)
+    }}
+}}",
+                if a_row_major {
+                    "row * K + i"
+                } else {
+                    "i * M + row"
+                },
+                if b_row_major {
+                    "i * N + column"
+                } else {
+                    "column * K + i"
+                }
+            ),
+            dev,
+        )
     }
 }
 
@@ -83,9 +98,21 @@ impl MetalKernelForward for MetalMatmul2D {
         encoder.set_int(5, n as u32);
         encoder.set_int(6, a_row_major as u32);
         encoder.set_int(7, b_row_major as u32);
+        // encoder.set_threadgroup_memory_length(0, 16 * 16 * 4 * std::mem::size_of::<f32>() as u64);
 
         // Execute
-        encoder.dispatch_n_elements(n * m);
+        encoder.dispatch_threads(
+            MTLSize {
+                width: m as u64,
+                height: n as u64,
+                depth: 1,
+            },
+            MTLSize {
+                width: 16,
+                height: 16,
+                depth: 1,
+            },
+        );
         encoder.end_encoding();
 
         vec![out]
@@ -142,8 +169,11 @@ impl Operator for MetalMatmul2D {
 pub struct MetalBatchMatmul2D(ComputePipelineState, CommandQueue, Device);
 
 impl MetalBatchMatmul2D {
-    fn compile(dev: &Device) -> ComputePipelineState {
-        compile_function("kernel_batch_matmul_2d", "
+    fn compile(dev: &Device, a_row_major: bool, b_row_major: bool) -> ComputePipelineState {
+        compile_function(
+            "kernel_batch_matmul_2d",
+            &format!(
+                "
 #include <metal_stdlib>
 using namespace metal;
 
@@ -158,24 +188,35 @@ kernel void kernel_batch_matmul_2d(
     device uint& A_major [[buffer(7)]],
     device uint& B_major [[buffer(8)]],
     device uint& A_batch_stride [[buffer(9)]],
-    uint tid [[thread_position_in_grid]]
-) {
-    uint mat_size = M * N;
-    uint mod_ = tid % mat_size;
-    uint batch = tid / mat_size;
-    uint row = mod_ / N;
-    uint column = mod_ % N;
+    uint3 global_pos [[thread_position_in_grid]]
+) {{
+    uint batch = global_pos.z;
+    uint row = global_pos.x;
+    uint column = global_pos.y;
 
-    if(batch < Batch && row < M && column < N) {
+    if(batch < Batch && row < M && column < N) {{
         float value = 0.0f;
-        for(uint i = 0; i < K; ++i) {
-            uint A_index = batch * A_batch_stride + (A_major ? (row * K + i) : (i * M + row)); // Row Major vs Column Major
-            uint B_index = B_major ? (i * N + column) : (column * K + i); // Row Major vs Column Major
+        for(uint i = 0; i < K; ++i) {{
+            uint A_index = batch * A_batch_stride + {};
+            uint B_index = {};
             value = fast::fma((float)A[A_index], (float)B[B_index], value);
-        }
-        C[batch * mat_size + row * N + column] = (half)value;
-    }
-}", dev)
+        }}
+        C[batch * M * N + row * N + column] = (half)value;
+    }}
+}}",
+                if a_row_major {
+                    "row * K + i"
+                } else {
+                    "i * M + row"
+                },
+                if b_row_major {
+                    "i * N + column"
+                } else {
+                    "column * K + i"
+                }
+            ),
+            dev,
+        )
     }
 }
 
@@ -218,7 +259,18 @@ impl MetalKernelForward for MetalBatchMatmul2D {
         encoder.set_int(9, a_strides[0] as u32);
 
         // Execute
-        encoder.dispatch_n_elements(batch_size * n * m);
+        encoder.dispatch_threads(
+            MTLSize {
+                width: m as u64,
+                height: n as u64,
+                depth: batch_size as u64,
+            },
+            MTLSize {
+                width: 16,
+                height: 16,
+                depth: 1,
+            },
+        );
         encoder.end_encoding();
 
         vec![out]
@@ -315,7 +367,11 @@ impl Compiler for MetalMatMulCompiler {
             srcs[1].2.remove_dim(0);
             srcs[1].2.permute(&[1, 0]);
             if matmul.is_none() {
-                matmul = Some(MetalMatmul2D::compile(&dev));
+                matmul = Some(MetalMatmul2D::compile(
+                    &dev,
+                    srcs[0].2.indexes[0] < srcs[0].2.indexes[1],
+                    srcs[1].2.indexes[0] < srcs[1].2.indexes[1],
+                ));
             }
             let new_op = graph
                 .add_op(MetalMatmul2D(
@@ -393,7 +449,11 @@ impl Compiler for MetalMatMulCompiler {
             srcs[1].2.remove_dim(0);
             srcs[1].2.permute(&[1, 0]);
             if batched_matmul.is_none() {
-                batched_matmul = Some(MetalBatchMatmul2D::compile(&dev));
+                batched_matmul = Some(MetalBatchMatmul2D::compile(
+                    &dev,
+                    srcs[0].2.indexes[1] < srcs[0].2.indexes[2],
+                    srcs[1].2.indexes[0] < srcs[1].2.indexes[1],
+                ));
             }
             let new_op = graph
                 .add_op(MetalBatchMatmul2D(
