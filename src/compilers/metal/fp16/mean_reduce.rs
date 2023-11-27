@@ -102,7 +102,7 @@ impl MetalKernelForward for MetalMeanReduce {
         input_dyn_dims(&[(self.4, inputs[0].1)], encoder, 6);
 
         // Execute
-        encoder.dispatch_n_elements(inp_size);
+        encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
 
         vec![out]

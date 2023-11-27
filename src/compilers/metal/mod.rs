@@ -124,19 +124,19 @@ fn hash<T: Hash>(obj: T) -> u64 {
 }
 
 trait DispatchNElements {
-    fn dispatch_n_elements(&self, n: usize);
+    fn dispatch_1d(&self, n: usize);
 }
 
 impl DispatchNElements for ComputeCommandEncoderRef {
-    fn dispatch_n_elements(&self, n: usize) {
+    fn dispatch_1d(&self, n: usize) {
         self.dispatch_thread_groups(
             MTLSize {
-                width: (n as NSUInteger + 32) / 32,
+                width: n.div_ceil(256) as u64,
                 height: 1,
                 depth: 1,
             },
             MTLSize {
-                width: 32,
+                width: 256,
                 height: 1,
                 depth: 1,
             },
@@ -368,7 +368,7 @@ impl<T> MetalKernelForward for MetalContiguous<T> {
         input_dyn_dims(&[(self.2, inputs[0].1)], encoder, 3);
 
         // Execute
-        encoder.dispatch_n_elements(inp_size);
+        encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
 
         vec![out]
@@ -465,7 +465,7 @@ impl<T> MetalKernelForward for MetalLog2<T> {
         encoder.set_int(2, inp_size as u32);
 
         // Execute
-        encoder.dispatch_n_elements(inp_size);
+        encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
 
         vec![out]
@@ -559,7 +559,7 @@ impl<T> MetalKernelForward for MetalExp2<T> {
         encoder.set_int(2, inp_size as u32);
 
         // Execute
-        encoder.dispatch_n_elements(inp_size);
+        encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
 
         vec![out]
@@ -652,7 +652,7 @@ impl<T> MetalKernelForward for MetalSin<T> {
         encoder.set_int(2, inp_size as u32);
 
         // Execute
-        encoder.dispatch_n_elements(inp_size);
+        encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
 
         vec![out]
@@ -745,7 +745,7 @@ impl<T> MetalKernelForward for MetalSqrt<T> {
         encoder.set_int(2, inp_size as u32);
 
         // Execute
-        encoder.dispatch_n_elements(inp_size);
+        encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
 
         vec![out]
@@ -838,7 +838,7 @@ impl<T> MetalKernelForward for MetalRecip<T> {
         encoder.set_int(2, inp_size as u32);
 
         // Execute
-        encoder.dispatch_n_elements(inp_size);
+        encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
 
         vec![out]
@@ -953,7 +953,7 @@ impl<T> MetalKernelForward for MetalAdd<T> {
         input_dyn_dims(&[(self.3, inputs[0].1), (self.4, inputs[1].1)], encoder, 4);
 
         // Execute
-        encoder.dispatch_n_elements(inp_size);
+        encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
 
         vec![out]
@@ -1070,7 +1070,7 @@ impl<T> MetalKernelForward for MetalMul<T> {
         input_dyn_dims(&[(self.3, inputs[0].1), (self.4, inputs[1].1)], encoder, 4);
 
         // Execute
-        encoder.dispatch_n_elements(inp_size);
+        encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
 
         vec![out]
@@ -1199,7 +1199,7 @@ impl<T> MetalKernelForward for MetalLessThan<T> {
         input_dyn_dims(&[(self.3, inputs[0].1), (self.4, inputs[1].1)], encoder, 4);
 
         // Execute
-        encoder.dispatch_n_elements(inp_size);
+        encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
 
         vec![out]
@@ -1314,7 +1314,7 @@ impl<T> MetalKernelForward for MetalMod<T> {
         input_dyn_dims(&[(self.3, inputs[0].1), (self.4, inputs[1].1)], encoder, 4);
 
         // Execute
-        encoder.dispatch_n_elements(inp_size);
+        encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
 
         vec![out]
@@ -1458,7 +1458,7 @@ impl<T> MetalKernelForward for MetalSumReduce<T> {
         input_dyn_dims(&[(self.4, inputs[0].1)], encoder, 6);
 
         // Execute
-        encoder.dispatch_n_elements(inp_size);
+        encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
 
         vec![out]
@@ -1600,7 +1600,7 @@ impl<T> MetalKernelForward for MetalMaxReduce<T> {
         input_dyn_dims(&[(self.4, inputs[0].1)], encoder, 6);
 
         // Execute
-        encoder.dispatch_n_elements(inp_size);
+        encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
 
         vec![out]

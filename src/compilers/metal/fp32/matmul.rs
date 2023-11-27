@@ -100,7 +100,7 @@ impl Operator for MetalMatmul2D {
             encoder.set_int(7, b_row_major as u32);
 
             // Execute
-            encoder.dispatch_n_elements(n * m);
+            encoder.dispatch_1d(n * m);
             encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
@@ -214,7 +214,7 @@ impl Operator for MetalBatchMatmul2D {
             encoder.set_int(11, (m * n) as u32);
 
             // Execute
-            encoder.dispatch_n_elements(batch_size * n * m);
+            encoder.dispatch_1d(batch_size * n * m);
             encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();

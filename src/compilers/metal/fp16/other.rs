@@ -56,7 +56,7 @@ impl MetalKernelForward for MetalCos {
         encoder.set_int(2, inp_size as u32);
 
         // Execute
-        encoder.dispatch_n_elements(inp_size);
+        encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
 
         vec![out]
@@ -225,7 +225,7 @@ impl MetalKernelForward for MetalExp {
             encoder.set_int(2, inp_size as u32);
 
             // Execute
-            encoder.dispatch_n_elements(inp_size);
+            encoder.dispatch_1d(inp_size);
             encoder.end_encoding();
 
             vec![out]

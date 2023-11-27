@@ -387,7 +387,7 @@ impl MetalKernelForward for FakeSumReduce {
         );
 
         // Execute
-        encoder.dispatch_n_elements(inp_size);
+        encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
 
         vec![out]

@@ -114,7 +114,7 @@ impl MetalKernelForward for MetalRMSNorm {
         encoder.set_int(5, dim_size as u32);
         input_dyn_dims(&[(self.3, inputs[0].1)], encoder, 6);
 
-        encoder.dispatch_n_elements(meaned_shape.n_elements());
+        encoder.dispatch_1d(meaned_shape.n_elements());
         encoder.end_encoding();
 
         let out = dev.new_buffer(
@@ -134,7 +134,7 @@ impl MetalKernelForward for MetalRMSNorm {
         input_dyn_dims(&[(self.3, inputs[0].1)], encoder, 4);
 
         // Execute
-        encoder.dispatch_n_elements(inputs[0].1.n_elements());
+        encoder.dispatch_1d(inputs[0].1.n_elements());
         encoder.end_encoding();
 
         vec![out]
