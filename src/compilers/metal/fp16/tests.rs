@@ -491,21 +491,18 @@ fn test_attn_matmul() {
 fn test_batch_matmul() {
     let mut cx = Graph::new();
     let mut rng = StdRng::seed_from_u64(0);
-    let a_data = random_vec_rng(10 * 128, &mut rng);
+    let a_data = random_vec_rng(2 * 20 * 128, &mut rng);
     let b_data = random_vec_rng(128 * 128, &mut rng);
-    let a = cx.new_tensor::<R3<1, 10, 128>>("Input");
-    a.set(a_data.clone());
-    let b = cx.new_tensor::<R2<128, 128>>("Input");
-    b.set(b_data.clone());
-    let c = a.matmul(b);
-    c.retrieve();
+    let a = cx.new_tensor::<R3<2, 20, 128>>("Input").set(a_data.clone());
+    let b = cx.new_tensor::<R2<128, 128>>("Input").set(b_data.clone());
+    let c = a.matmul(b).retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
     let d_a = d_dev
-        .tensor_from_vec(a_data, (DConst::<1>, DConst::<10>, DConst::<128>))
+        .tensor_from_vec(a_data, (DConst::<2>, DConst::<20>, DConst::<128>))
         .to_dtype::<f16>();
     let d_b = d_dev
         .tensor_from_vec(b_data, (DConst::<128>, DConst::<128>))
@@ -513,6 +510,36 @@ fn test_batch_matmul() {
     let d_c = d_a.matmul(d_b);
 
     assert_exact(&c.data(), &d_c.to_dtype::<f32>().as_vec());
+}
+
+#[test]
+fn test_batch_matmul_transpose() {
+    let mut cx = Graph::new();
+    let mut rng = StdRng::seed_from_u64(0);
+    let a_data = random_vec_rng(2 * 10 * 128, &mut rng);
+    let b_data = random_vec_rng(128 * 128, &mut rng);
+    let a = cx.new_tensor::<R3<2, 10, 128>>("Input").set(a_data.clone());
+    let b = cx.new_tensor::<R2<128, 128>>("Input").set(b_data.clone());
+    let c = a
+        // .permute::<_, LAxes3<0, 2, 1>>()
+        .matmul(b.permute::<_, LAxes2<1, 0>>())
+        .retrieve();
+
+    cx.compile(MetalFp16Compiler::default());
+    cx.execute();
+
+    let d_dev = Cpu::default();
+    let d_a = d_dev
+        .tensor_from_vec(a_data, (DConst::<2>, DConst::<10>, DConst::<128>))
+        .to_dtype::<f16>();
+    let d_b = d_dev
+        .tensor_from_vec(b_data, (DConst::<128>, DConst::<128>))
+        .to_dtype::<f16>();
+    let d_c = d_a
+        // .permute::<_, DAxes3<0, 2, 1>>()
+        .matmul(d_b.permute::<_, DAxes2<1, 0>>());
+
+    assert_close(&c.data(), &d_c.to_dtype::<f32>().as_vec());
 }
 
 #[test]
