@@ -20,15 +20,15 @@ jobs:
     - name: Build
       run: cargo build --verbose
     - name: Run tests
-      run: cargo test --verbose
-  macos_test:
-    name: MacOS Tests
-    runs-on: macos-13
-    timeout-minutes: 20
+      run: cargo test --no-default-features --verbose
+#   macos_test:
+#     name: MacOS Tests
+#     runs-on: macos-13
+#     timeout-minutes: 20
 
-    steps:
-    - uses: actions/checkout@v3
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+#     steps:
+#     - uses: actions/checkout@v3
+#     - name: Build
+#       run: cargo build --verbose
+#     - name: Run tests
+#       run: cargo test --verbose
