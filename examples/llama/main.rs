@@ -20,7 +20,6 @@ type Model = LlamaForCausalLM<
 
 fn main() {
     let prompt = "Here is a python implementation of merge sort:";
-    // let prompt = "The you dog named toby ran across";
     let tokenizer = SentencePieceBpeTokenizer::from_file(
         "./examples/llama/setup/llama-7b-hf/tokenizer.model",
         false,

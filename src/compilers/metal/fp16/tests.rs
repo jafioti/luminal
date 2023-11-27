@@ -545,23 +545,23 @@ fn test_batch_matmul_transpose() {
 #[test]
 fn test_matmul_transpose() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R2<2, 3>>("Input");
-    a.set(vec![1., 2., 3., 1., 2., 1.]);
-    let b = cx.new_tensor::<R2<4, 3>>("Input");
-    b.set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
-    let a_t = cx.new_tensor::<R2<3, 2>>("Input");
-    a_t.set(vec![1., 2., 3., 1., 2., 1.]);
-    let b_t = cx.new_tensor::<R2<3, 4>>("Input");
-    b_t.set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
+    let a = cx
+        .new_tensor::<R2<2, 3>>("Input")
+        .set(vec![1., 2., 3., 1., 2., 1.]);
+    let b = cx
+        .new_tensor::<R2<4, 3>>("Input")
+        .set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
+    let a_t = cx
+        .new_tensor::<R2<3, 2>>("Input")
+        .set(vec![1., 2., 3., 1., 2., 1.]);
+    let b_t = cx
+        .new_tensor::<R2<3, 4>>("Input")
+        .set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
 
-    let a_b = a.matmul(b.permute());
-    let a_b_t = a.matmul(b_t);
-    let a_t_b = a_t.permute::<R2<2, 3>, _>().matmul(b.permute());
-    let a_t_b_t = a_t.permute::<R2<2, 3>, _>().matmul(b_t);
-    a_b.retrieve();
-    a_b_t.retrieve();
-    a_t_b.retrieve();
-    a_t_b_t.retrieve();
+    let a_b = a.matmul(b.permute()).retrieve();
+    let a_b_t = a.matmul(b_t).retrieve();
+    let a_t_b = a_t.permute::<R2<2, 3>, _>().matmul(b.permute()).retrieve();
+    let a_t_b_t = a_t.permute::<R2<2, 3>, _>().matmul(b_t).retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();

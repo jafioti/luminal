@@ -31,17 +31,15 @@ kernel void kernel_matmul_2d(
     device uint& M [[buffer(3)]],
     device uint& K [[buffer(4)]],
     device uint& N [[buffer(5)]],
-    uint tid [[thread_position_in_grid]]
+    uint3 global_pos [[thread_position_in_grid]]
 ) {{
-    uint row = tid / N;
-    uint column = tid % N;
+    uint row = global_pos.x;
+    uint column = global_pos.y;
 
     if(row < M && column < N) {{
         float value = 0.0f;
         for(int i = 0; i < K; ++i) {{
-            uint A_index = {};
-            uint B_index = {};
-            value = fast::fma((float)A[A_index], (float)B[B_index], value);
+            value = fast::fma((float)A[{}], (float)B[{}], value);
         }}
         C[row * N + column] = (half)value;
     }}
@@ -92,13 +90,12 @@ impl MetalKernelForward for MetalMatmul2D {
         encoder.set_int(3, m as u32);
         encoder.set_int(4, k as u32);
         encoder.set_int(5, n as u32);
-        // encoder.set_threadgroup_memory_length(0, 16 * 16 * 4 * std::mem::size_of::<f32>() as u64);
 
         // Execute
-        encoder.dispatch_threads(
+        encoder.dispatch_thread_groups(
             MTLSize {
-                width: m as u64,
-                height: n as u64,
+                width: (m as u64).div_ceil(16),
+                height: (n as u64).div_ceil(16),
                 depth: 1,
             },
             MTLSize {
@@ -344,7 +341,6 @@ impl Compiler for MetalMatMulCompiler {
                 .ptr(&mut sum_reduce),
         );
 
-        let mut matmul = None;
         for _ in s.search(graph) {
             if graph.no_delete.contains(&mul) {
                 // The intermediate mul can't be deleted
@@ -356,16 +352,13 @@ impl Compiler for MetalMatMulCompiler {
             srcs[0].2.remove_dim(1);
             srcs[1].2.remove_dim(0);
             srcs[1].2.permute(&[1, 0]);
-            if matmul.is_none() {
-                matmul = Some(MetalMatmul2D::compile(
-                    &dev,
-                    srcs[0].2.indexes[0] < srcs[0].2.indexes[1],
-                    srcs[1].2.indexes[0] < srcs[1].2.indexes[1],
-                ));
-            }
             let new_op = graph
                 .add_op(MetalMatmul2D(
-                    matmul.clone().unwrap(),
+                    MetalMatmul2D::compile(
+                        &dev,
+                        srcs[0].2.indexes[0] < srcs[0].2.indexes[1],
+                        srcs[1].2.indexes[0] < srcs[1].2.indexes[1],
+                    ),
                     queue.clone(),
                     dev.clone(),
                 ))
@@ -425,7 +418,6 @@ impl Compiler for MetalMatMulCompiler {
                 })
                 .ptr(&mut sum_reduce),
         );
-        let mut batched_matmul = None;
         for _ in s.search(graph) {
             if graph.no_delete.contains(&mul) {
                 // The intermediate mul can't be deleted
@@ -438,16 +430,13 @@ impl Compiler for MetalMatMulCompiler {
             srcs[1].2.remove_dim(1);
             srcs[1].2.remove_dim(0);
             srcs[1].2.permute(&[1, 0]);
-            if batched_matmul.is_none() {
-                batched_matmul = Some(MetalBatchMatmul2D::compile(
-                    &dev,
-                    srcs[0].2.indexes[1] < srcs[0].2.indexes[2],
-                    srcs[1].2.indexes[0] < srcs[1].2.indexes[1],
-                ));
-            }
             let new_op = graph
                 .add_op(MetalBatchMatmul2D(
-                    batched_matmul.clone().unwrap(),
+                    MetalBatchMatmul2D::compile(
+                        &dev,
+                        srcs[0].2.indexes[1] < srcs[0].2.indexes[2],
+                        srcs[1].2.indexes[0] < srcs[1].2.indexes[1],
+                    ),
                     queue.clone(),
                     dev.clone(),
                 ))
