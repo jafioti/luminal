@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn test_log_exp() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R0>("I");
+        let a = cx.tensor::<R0>();
         let b = a.log_2().exp_2();
         b.retrieve();
 

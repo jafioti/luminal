@@ -295,9 +295,9 @@ impl Operator for MetalKernelOperation {
 fn test_common_buffer() {
     crate::test_imports!();
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<5>>("").set(random_vec(5)).keep();
-    let b = cx.new_tensor::<R1<5>>("").set(random_vec(5)).keep();
-    let c = cx.new_tensor::<R1<5>>("").set(random_vec(5)).keep();
+    let a = cx.tensor::<R1<5>>().set(random_vec(5)).keep();
+    let b = cx.tensor::<R1<5>>().set(random_vec(5)).keep();
+    let c = cx.tensor::<R1<5>>().set(random_vec(5)).keep();
     let d = ((a + b) * c).retrieve();
 
     cx.execute();

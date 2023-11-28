@@ -404,9 +404,9 @@ mod tests {
     #[test]
     fn test_cpu_matmul_2d_2() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<2, 3>>("Input");
+        let a = cx.tensor::<R2<2, 3>>();
         a.set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
-        let b = cx.new_tensor::<R2<3, 4>>("Input");
+        let b = cx.tensor::<R2<3, 4>>();
         b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
         let c = a.matmul(b);
         c.retrieve();

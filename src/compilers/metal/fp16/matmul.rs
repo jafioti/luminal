@@ -19,42 +19,74 @@ impl MetalMatmul2D {
     fn compile(dev: &Device, a_row_major: bool, b_row_major: bool) -> ComputePipelineState {
         compile_function(
             "kernel_matmul_2d",
-            &format!(
-                "
+            "
 #include <metal_stdlib>
+#include <metal_simdgroup_matrix>
+#include <metal_simdgroup>
 using namespace metal;
 
 kernel void kernel_matmul_2d(
-    device half *A [[buffer(0)]],
-    device half *B [[buffer(1)]],
-    device half *C [[buffer(2)]],
+    device const half *data1 [[buffer(0)]],
+    device const half *data2 [[buffer(1)]],
+    device half *a [[buffer(2)]],
     device uint& M [[buffer(3)]],
-    device uint& K [[buffer(4)]],
-    device uint& N [[buffer(5)]],
-    uint3 global_pos [[thread_position_in_grid]]
+    device uint& N [[buffer(4)]],
+    device uint& K [[buffer(5)]],
+    uint3 gid [[threadgroup_position_in_grid]],
+    uint3 global_id [[thread_position_in_grid]],
+    uint3 block_size [[threads_per_threadgroup]]
 ) {{
-    uint row = global_pos.x;
-    uint column = global_pos.y;
+  a += gid.x * 32 * N + global_id.y * 32;
+  data1 += gid.x * 32 * K;
+  data2 += global_id.y * 32;
 
-    if(row < M && column < N) {{
-        float value = 0.0f;
-        for(int i = 0; i < K; ++i) {{
-            value = fast::fma((float)A[{}], (float)B[{}], value);
-        }}
-        C[row * N + column] = (half)value;
+  simdgroup_float8x8 acc[4][4];
+  #pragma unroll(4)
+  for (uint i = 0; i < 4; ++i) {{
+    #pragma unroll(4)
+    for (uint j = 0; j < 4; ++j) {{
+      acc[i][j] = simdgroup_float8x8(0);
     }}
+  }}
+
+  simdgroup_half8x8 A[4];
+  simdgroup_half8x8 B[4];
+  uint k8 = 8 * K;
+  for (uint k = 0; k < K; k+=8) {{
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    device const half *d1 = data1 + k;
+    #pragma unroll(4)
+    for (int i = 0; i < 4; ++i) {{
+        simdgroup_load(A[i], d1 + i * k8, K);
+    }}
+    device const half *d2 = data2 + k * N;
+    #pragma unroll(4)
+    for (int i = 0; i < 4; ++i) {{
+        simdgroup_load(B[i], 8 * i + d2, N);
+    }}
+
+    #pragma unroll(4)
+    for (int i = 0; i < 4; ++i) {{
+        #pragma unroll(4)
+        for (int j = 0; j < 4; ++j) {{
+            simdgroup_multiply_accumulate(acc[i][j], A[j], B[i], acc[i][j]);
+        }}
+    }}
+  }}
+
+  // We need this to convert from float to half results. Fml
+  simdgroup_half8x8 temp = simdgroup_half8x8(0);
+  simdgroup_half8x8 ident = simdgroup_half8x8(1);
+  #pragma unroll(4)
+  for (int i = 0; i < 4; ++i) {{
+    uint n8i = i * 8 * N;
+    #pragma unroll(4)
+    for (int j = 0; j < 4; ++j) {{
+        // simdgroup_multiply(temp, acc[j][i], ident);
+        simdgroup_store((simdgroup_half8x8)acc[j][i], a+(8*j+n8i), N);
+    }}
+  }}
 }}",
-                if a_row_major {
-                    "row * K + i"
-                } else {
-                    "i * M + row"
-                },
-                if b_row_major {
-                    "i * N + column"
-                } else {
-                    "column * K + i"
-                }
-            ),
             dev,
         )
     }
@@ -88,19 +120,19 @@ impl MetalKernelForward for MetalMatmul2D {
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, m as u32);
-        encoder.set_int(4, k as u32);
-        encoder.set_int(5, n as u32);
+        encoder.set_int(4, n as u32);
+        encoder.set_int(5, k as u32);
 
         // Execute
         encoder.dispatch_thread_groups(
             MTLSize {
-                width: (m as u64).div_ceil(16),
-                height: (n as u64).div_ceil(16),
+                width: (m as u64).div_ceil(32),
+                height: (n as u64).div_ceil(32 * 8),
                 depth: 1,
             },
             MTLSize {
-                width: 16,
-                height: 16,
+                width: 32,
+                height: 8,
                 depth: 1,
             },
         );

@@ -15,10 +15,10 @@ use crate::prelude::*;
 #[test]
 fn main() {
     let mut cx = Graph::new();
-    let b = cx.new_tensor::<R1<3>>("Input").set(vec![1.0, 2.0, 3.0]);
-    let c = cx.new_tensor::<R1<3>>("Input").set(vec![1.0, 2.0, 3.0]);
-    let g = cx.new_tensor::<R1<3>>("Input").set(vec![1.0, 2.0, 3.0]);
-    let e = cx.new_tensor::<R1<3>>("Input").set(vec![1.0, 2.0, 3.0]);
+    let b = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
+    let c = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
+    let g = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
+    let e = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
 
     let a = (b * c + g).retrieve();
     let d = (b * c / e).exp_2().log_2().retrieve();
@@ -40,10 +40,8 @@ fn main() {
 #[test]
 fn test_matmul() {
     let mut cx = Graph::new();
-    let b = cx.new_tensor::<R2<3, 1>>("Input").set(vec![1.0, 2.0, 3.0]);
-    let c = cx
-        .new_tensor::<R2<1, 4>>("Input")
-        .set(vec![1.0, 2.0, 3.0, 3.0]);
+    let b = cx.tensor::<R2<3, 1>>().set(vec![1.0, 2.0, 3.0]);
+    let c = cx.tensor::<R2<1, 4>>().set(vec![1.0, 2.0, 3.0, 3.0]);
 
     let a = b.matmul(c).retrieve();
 
@@ -60,7 +58,7 @@ fn test_matmul() {
 #[test]
 fn test_shapes() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<4>>("Input").set(vec![1., 2., 3., 4.]);
+    let a = cx.tensor::<R1<4>>().set(vec![1., 2., 3., 4.]);
 
     let b: GraphTensor<R2<2, 2>> = a
         .reshape::<R2<2, 2>>()

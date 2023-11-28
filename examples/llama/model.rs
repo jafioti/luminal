@@ -39,9 +39,9 @@ where
 impl<const I: usize, const H: usize> InitModule for Mlp<I, H> {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
-            gate_proj: cx.new_tensor("Gate Weight"),
-            up_proj: cx.new_tensor("Up Weight"),
-            down_proj: cx.new_tensor("Down Weight"),
+            gate_proj: cx.named_tensor("Gate Weight"),
+            up_proj: cx.named_tensor("Up Weight"),
+            down_proj: cx.named_tensor("Down Weight"),
         }
     }
 }
@@ -152,7 +152,7 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> InitModule
 {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
-            inv_freq: cx.new_tensor("Inv Freq"),
+            inv_freq: cx.named_tensor("Inv Freq"),
         }
     }
 }
@@ -338,10 +338,10 @@ impl<
 {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
-            q_proj: cx.new_tensor("Query Weight"),
-            k_proj: cx.new_tensor("Key Weight"),
-            v_proj: cx.new_tensor("Value Weight"),
-            o_proj: cx.new_tensor("Output Weight"),
+            q_proj: cx.named_tensor("Query Weight"),
+            k_proj: cx.named_tensor("Key Weight"),
+            v_proj: cx.named_tensor("Value Weight"),
+            o_proj: cx.named_tensor("Output Weight"),
             rotary_embed: InitModule::initialize(cx),
         }
     }
@@ -701,7 +701,7 @@ impl<
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             llama: InitModule::initialize(cx),
-            lm_head: cx.new_tensor("LM Head"),
+            lm_head: cx.named_tensor("LM Head"),
         }
     }
 }

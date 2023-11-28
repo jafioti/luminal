@@ -497,7 +497,7 @@ mod tests {
     #[test]
     fn test_reshape() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<2, 3>>("Input");
+        let a = cx.tensor::<R2<2, 3>>();
         a.set(vec![1., 2., 3., 1., 2., 3.]);
         let b = a.reshape::<R1<6>>();
         b.retrieve();
@@ -513,7 +513,7 @@ mod tests {
     #[test]
     fn test_permute() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<2, 3>>("Input");
+        let a = cx.tensor::<R2<2, 3>>();
         a.set(vec![1., 2., 3., 1., 2., 3.]);
         let b: GraphTensor<R2<3, 2>> = a.permute();
         b.retrieve();
@@ -529,7 +529,7 @@ mod tests {
     #[test]
     fn test_expand() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R1<3>>("Input");
+        let a = cx.tensor::<R1<3>>();
         a.set(vec![1., 2., 3.]);
         let b: GraphTensor<R2<3, 2>> = a.expand();
         b.retrieve();
@@ -545,7 +545,7 @@ mod tests {
     #[test]
     fn test_slice() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<2, 3>>("Input");
+        let a = cx.tensor::<R2<2, 3>>();
         a.set(vec![1., 2., 3., 1., 2., 3.]);
         let b = a.slice((1.., ..));
         b.retrieve();
@@ -564,7 +564,7 @@ mod tests {
     fn test_log2() {
         // We can't use dfdx because it doesn't implement this op
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R1<3>>("Input");
+        let a = cx.tensor::<R1<3>>();
         a.set(vec![1., 2., 3.]);
         let b = a.log_2();
         b.retrieve();
@@ -583,7 +583,7 @@ mod tests {
     fn test_exp2() {
         // We can't use dfdx because it doesn't implement this op
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R1<3>>("Input");
+        let a = cx.tensor::<R1<3>>();
         a.set(vec![1., 2., 3.]);
         let b = a.exp_2();
         b.retrieve();
@@ -601,7 +601,7 @@ mod tests {
     #[test]
     fn test_recip() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R1<3>>("Input");
+        let a = cx.tensor::<R1<3>>();
         a.set(vec![1., 2., 3.]);
         let b = a.recip();
         b.retrieve();
@@ -617,7 +617,7 @@ mod tests {
     #[test]
     fn test_sin() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R1<3>>("Input");
+        let a = cx.tensor::<R1<3>>();
         a.set(vec![1., 2., 3.]);
         let b = a.sin();
         b.retrieve();
@@ -633,7 +633,7 @@ mod tests {
     #[test]
     fn test_sqrt() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R1<3>>("Input");
+        let a = cx.tensor::<R1<3>>();
         a.set(vec![1., 2., 3.]);
         let b = a.sqrt();
         b.retrieve();
@@ -651,9 +651,9 @@ mod tests {
     #[test]
     fn test_add() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R1<3>>("Input");
+        let a = cx.tensor::<R1<3>>();
         a.set(vec![1., 2., 3.]);
-        let b = cx.new_tensor::<R1<3>>("Input");
+        let b = cx.tensor::<R1<3>>();
         b.set(vec![1., 2., 3.]);
         let c = a + b;
         c.retrieve();
@@ -670,9 +670,9 @@ mod tests {
     #[test]
     fn test_sub() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R1<3>>("Input");
+        let a = cx.tensor::<R1<3>>();
         a.set(vec![1., 2., 3.]);
-        let b = cx.new_tensor::<R1<3>>("Input");
+        let b = cx.tensor::<R1<3>>();
         b.set(vec![1., 2., 3.]);
         let c = a - b;
         c.retrieve();
@@ -689,9 +689,9 @@ mod tests {
     #[test]
     fn test_mul() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R1<3>>("Input");
+        let a = cx.tensor::<R1<3>>();
         a.set(vec![1., 2., 3.]);
-        let b = cx.new_tensor::<R1<3>>("Input");
+        let b = cx.tensor::<R1<3>>();
         b.set(vec![1., 2., 3.]);
         let c = a * b;
         c.retrieve();
@@ -708,9 +708,9 @@ mod tests {
     #[test]
     fn test_permute_mul() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<3, 2>>("Input");
+        let a = cx.tensor::<R2<3, 2>>();
         a.set(vec![1., 2., 3., 2., 3., 1.]);
-        let b = cx.new_tensor::<R2<3, 2>>("Input");
+        let b = cx.tensor::<R2<3, 2>>();
         b.set(vec![1., 2., 3., -1., 3., 0.]);
         let c = a.expand::<R3<3, 2, 3>, crate::prelude::Axis<2>>()
             * b.expand::<R3<3, 2, 3>, crate::prelude::Axis<2>>();
@@ -729,9 +729,9 @@ mod tests {
     #[test]
     fn test_div() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R1<3>>("Input");
+        let a = cx.tensor::<R1<3>>();
         a.set(vec![1., 2., 3.]);
-        let b = cx.new_tensor::<R1<3>>("Input");
+        let b = cx.tensor::<R1<3>>();
         b.set(vec![1., 2., 3.]);
         let c = a / b;
         c.retrieve();
@@ -748,9 +748,9 @@ mod tests {
     #[test]
     fn test_max() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R1<3>>("Input");
+        let a = cx.tensor::<R1<3>>();
         a.set(vec![1., 0., 3.]);
-        let b = cx.new_tensor::<R1<3>>("Input");
+        let b = cx.tensor::<R1<3>>();
         b.set(vec![1., 2., -2.]);
         let c = a.max(b);
         c.retrieve();
@@ -768,9 +768,9 @@ mod tests {
     #[test]
     fn test_mod() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R1<3>>("Input");
+        let a = cx.tensor::<R1<3>>();
         a.set(vec![1., 2., 3.]);
-        let b = cx.new_tensor::<R1<3>>("Input");
+        let b = cx.tensor::<R1<3>>();
         b.set(vec![1., 2., 3.]);
         let c = a % b;
         c.retrieve();
@@ -793,7 +793,7 @@ mod tests {
     #[test]
     fn test_sum_reduce() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R3<2, 2, 3>>("Input");
+        let a = cx.tensor::<R3<2, 2, 3>>();
         a.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
         let b = a.sum_reduce::<_, crate::prelude::Axis<1>>();
         let c = a.sum_reduce::<_, crate::prelude::Axis<0>>();
@@ -817,7 +817,7 @@ mod tests {
     #[test]
     fn test_sum_reduce2() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R4<1, 2, 2, 3>>("Input");
+        let a = cx.tensor::<R4<1, 2, 2, 3>>();
         a.set(vec![
             34.4, -96.0, 144.0, 43.0, 560.0, 180.0, 39.6, -120.0, 180.0, 49.5, 700.0, 225.0,
         ]);
@@ -845,7 +845,7 @@ mod tests {
     #[test]
     fn test_max_reduce() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R3<2, 2, 3>>("Input");
+        let a = cx.tensor::<R3<2, 2, 3>>();
         a.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
         let b = a.max_reduce::<_, crate::prelude::Axis<1>>();
         let c = a.max_reduce::<_, crate::prelude::Axis<0>>();

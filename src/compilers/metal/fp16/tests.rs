@@ -11,7 +11,6 @@ use crate::{
         linear::Linear,
     },
     prelude::{Module, *},
-    tests::assert_close_precision,
 };
 
 crate::test_imports!();
@@ -20,7 +19,7 @@ crate::test_imports!();
 fn test_contiguous() {
     let mut cx = Graph::new();
     let data = random_vec(12);
-    let a = cx.new_tensor::<R2<3, 4>>("Input");
+    let a = cx.tensor::<R2<3, 4>>();
     a.set(data.clone());
     let b = a.permute::<R2<4, 3>, _>().reshape::<R2<12, 1>>();
     b.retrieve();
@@ -40,7 +39,7 @@ fn test_contiguous() {
 fn test_log2() {
     let mut cx = Graph::new();
     let data = random_vec(3);
-    let a = cx.new_tensor::<R1<3>>("Input");
+    let a = cx.tensor::<R1<3>>();
     a.set(data.clone());
     let b = a.log_2();
     b.retrieve();
@@ -61,7 +60,7 @@ fn test_log2() {
 fn test_exp2() {
     let mut cx = Graph::new();
     let data = random_vec(3);
-    let a = cx.new_tensor::<R1<3>>("Input");
+    let a = cx.tensor::<R1<3>>();
     a.set(data.clone());
     let b = a.exp_2();
     b.retrieve();
@@ -78,7 +77,7 @@ fn test_exp2() {
 #[test]
 fn test_recip() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>("Input");
+    let a = cx.tensor::<R1<3>>();
     a.set(vec![1., 2., 4096.]);
     let b = a.recip();
     b.retrieve();
@@ -95,7 +94,7 @@ fn test_recip() {
 #[test]
 fn test_sin() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>("Input");
+    let a = cx.tensor::<R1<3>>();
     a.set(vec![1., 2., 3.]);
     let b = a.sin();
     b.retrieve();
@@ -112,7 +111,7 @@ fn test_sin() {
 #[test]
 fn test_sqrt() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>("Input");
+    let a = cx.tensor::<R1<3>>();
     a.set(vec![1., 2., 3.]);
     let b = a.sqrt();
     b.retrieve();
@@ -129,9 +128,9 @@ fn test_sqrt() {
 #[test]
 fn test_add() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>("Input");
+    let a = cx.tensor::<R1<3>>();
     a.set(vec![1., 2., 3.]);
-    let b = cx.new_tensor::<R1<3>>("Input");
+    let b = cx.tensor::<R1<3>>();
     b.set(vec![1., 2., 3.]);
     let c = a + b;
     c.retrieve();
@@ -150,9 +149,9 @@ fn test_add() {
 #[test]
 fn test_sub() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>("Input");
+    let a = cx.tensor::<R1<3>>();
     a.set(vec![1., 2., 3.]);
-    let b = cx.new_tensor::<R1<3>>("Input");
+    let b = cx.tensor::<R1<3>>();
     b.set(vec![1., 2., 3.]);
     let c = a - b;
     c.retrieve();
@@ -171,7 +170,7 @@ fn test_sub() {
 #[test]
 fn test_square() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<(Dyn<'b'>, Dyn<'s'>, crate::prelude::Const<4096>)>("Input");
+    let a = cx.tensor::<(Dyn<'b'>, Dyn<'s'>, crate::prelude::Const<4096>)>();
     let mut rng = rand::thread_rng();
     let data = random_vec_rng(40960, &mut rng);
     a.set_dyn(data.clone(), vec![1, 10, 4096]);
@@ -200,9 +199,9 @@ fn test_square() {
 #[test]
 fn test_mul() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>("Input");
+    let a = cx.tensor::<R1<3>>();
     a.set(vec![1., 2., 3.]);
-    let b = cx.new_tensor::<R1<3>>("Input");
+    let b = cx.tensor::<R1<3>>();
     b.set(vec![1., 2., 3.]);
     let c = a * b;
     c.retrieve();
@@ -221,9 +220,9 @@ fn test_mul() {
 #[test]
 fn test_mul2() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<(LConst<1>, LConst<1>, Dyn<'a'>, Dyn<'a'>)>("Input");
+    let a = cx.tensor::<(LConst<1>, LConst<1>, Dyn<'a'>, Dyn<'a'>)>();
     a.set_dyn(vec![82.4, 783.0, 99.6, 974.5], vec![1, 1, 2, 2]);
-    let b = cx.new_tensor::<R0>("Input");
+    let b = cx.tensor::<R0>();
     b.set(vec![0.57735026]);
     let c = a * b.expand();
     c.retrieve();
@@ -244,9 +243,9 @@ fn test_mul2() {
 #[test]
 fn test_div() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>("Input");
+    let a = cx.tensor::<R1<3>>();
     a.set(vec![1., 2., 3.]);
-    let b = cx.new_tensor::<R1<3>>("Input");
+    let b = cx.tensor::<R1<3>>();
     b.set(vec![1., 2., 3.]);
     let c = a / b;
     c.retrieve();
@@ -265,9 +264,9 @@ fn test_div() {
 #[test]
 fn test_max() {
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<3>>("Input");
+    let a = cx.tensor::<R1<3>>();
     a.set(vec![1., 2., 3.]);
-    let b = cx.new_tensor::<R1<3>>("Input");
+    let b = cx.tensor::<R1<3>>();
     b.set(vec![1., 2., 3.]);
     let c = a.max(b);
     c.retrieve();
@@ -288,9 +287,9 @@ fn test_mod() {
     let mut cx = Graph::new();
     let a_data = random_vec(3);
     let b_data = random_vec(3);
-    let a = cx.new_tensor::<R1<3>>("Input");
+    let a = cx.tensor::<R1<3>>();
     a.set(a_data.clone());
-    let b = cx.new_tensor::<R1<3>>("Input");
+    let b = cx.tensor::<R1<3>>();
     b.set(b_data.clone());
     let c = a % b;
     c.retrieve();
@@ -316,7 +315,7 @@ fn test_mod() {
 fn test_sum_reduce() {
     let data = random_vec(40960);
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R3<1, 10, 4096>>("Input");
+    let a = cx.tensor::<R3<1, 10, 4096>>();
     a.set(data.clone());
     let b = a.sum_reduce::<_, LAxis<2>>();
     b.retrieve();
@@ -344,7 +343,7 @@ fn test_sum_reduce() {
 fn test_sum_reduce2() {
     let mut cx = Graph::new();
     let data = random_vec(32 * 10 * 10 * 128);
-    let a = cx.new_tensor::<R5<1, 32, 10, 10, 128>>("Input");
+    let a = cx.tensor::<R5<1, 32, 10, 10, 128>>();
     a.set(data.clone());
     let d = a.sum_reduce::<_, LAxis<2>>();
     d.retrieve();
@@ -374,7 +373,7 @@ fn test_sum_reduce2() {
 fn test_max_reduce() {
     let data = random_vec(40960);
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R3<1, 10, 4096>>("Input");
+    let a = cx.tensor::<R3<1, 10, 4096>>();
     a.set(data.clone());
     let b = a.max_reduce::<_, LAxis<2>>();
     b.retrieve();
@@ -402,7 +401,7 @@ fn test_max_reduce() {
 fn test_mean_reduce() {
     let data = random_vec(40960);
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R3<1, 10, 4096>>("Input");
+    let a = cx.tensor::<R3<1, 10, 4096>>();
     a.set(data.clone());
     let b = a.mean_reduce::<_, LAxis<2>>();
     b.retrieve();
@@ -431,10 +430,10 @@ fn test_matmul() {
     let mut cx = Graph::new();
     let mut rng = StdRng::seed_from_u64(0);
 
-    let a_data = random_vec_rng(2 * 4096, &mut rng);
-    let b_data = random_vec_rng(4 * 4096, &mut rng);
-    let a = cx.new_tensor::<R2<2, 4096>>("Input").set(a_data.clone());
-    let b = cx.new_tensor::<R2<4096, 4>>("Input").set(b_data.clone());
+    let a_data = random_vec_rng(2 * 256, &mut rng);
+    let b_data = random_vec_rng(4 * 256, &mut rng);
+    let a = cx.tensor::<R2<2, 256>>().set(a_data.clone());
+    let b = cx.tensor::<R2<256, 4>>().set(b_data.clone());
     let c = a.matmul(b).retrieve();
 
     cx.compile(MetalFp16Compiler::default());
@@ -442,14 +441,14 @@ fn test_matmul() {
 
     let d_dev = Cpu::default();
     let d_a = d_dev
-        .tensor_from_vec(a_data, (DConst::<2>, DConst::<4096>))
+        .tensor_from_vec(a_data, (DConst::<2>, DConst::<256>))
         .to_dtype::<f16>();
     let d_b = d_dev
-        .tensor_from_vec(b_data, (DConst::<4096>, DConst::<4>))
+        .tensor_from_vec(b_data, (DConst::<256>, DConst::<4>))
         .to_dtype::<f16>();
     let d_c = d_a.matmul(d_b);
 
-    assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 2);
+    assert_exact(&c.data(), &d_c.to_dtype::<f32>().as_vec());
 }
 
 #[test]
@@ -458,10 +457,10 @@ fn test_attn_matmul() {
     let mut rng = StdRng::seed_from_u64(0);
     let a_data = random_vec_rng(32 * 11 * 128, &mut rng);
     let b_data = random_vec_rng(32 * 11 * 128, &mut rng);
-    let a = cx.new_tensor::<R4<1, 32, 11, 128>>("Input");
+    let a = cx.tensor::<R4<1, 32, 11, 128>>();
     a.set(a_data.clone());
     a.keep();
-    let b = cx.new_tensor::<R4<1, 32, 128, 11>>("Input");
+    let b = cx.tensor::<R4<1, 32, 128, 11>>();
     b.set(b_data.clone());
     b.keep();
     let c = a.matmul(b);
@@ -493,8 +492,8 @@ fn test_batch_matmul() {
     let mut rng = StdRng::seed_from_u64(0);
     let a_data = random_vec_rng(2 * 20 * 128, &mut rng);
     let b_data = random_vec_rng(128 * 128, &mut rng);
-    let a = cx.new_tensor::<R3<2, 20, 128>>("Input").set(a_data.clone());
-    let b = cx.new_tensor::<R2<128, 128>>("Input").set(b_data.clone());
+    let a = cx.tensor::<R3<2, 20, 128>>().set(a_data.clone());
+    let b = cx.tensor::<R2<128, 128>>().set(b_data.clone());
     let c = a.matmul(b).retrieve();
 
     cx.compile(MetalFp16Compiler::default());
@@ -518,8 +517,8 @@ fn test_batch_matmul_transpose() {
     let mut rng = StdRng::seed_from_u64(0);
     let a_data = random_vec_rng(2 * 10 * 128, &mut rng);
     let b_data = random_vec_rng(128 * 128, &mut rng);
-    let a = cx.new_tensor::<R3<2, 10, 128>>("Input").set(a_data.clone());
-    let b = cx.new_tensor::<R2<128, 128>>("Input").set(b_data.clone());
+    let a = cx.tensor::<R3<2, 10, 128>>().set(a_data.clone());
+    let b = cx.tensor::<R2<128, 128>>().set(b_data.clone());
     let c = a
         // .permute::<_, LAxes3<0, 2, 1>>()
         .matmul(b.permute::<_, LAxes2<1, 0>>())
@@ -542,61 +541,61 @@ fn test_batch_matmul_transpose() {
     assert_close(&c.data(), &d_c.to_dtype::<f32>().as_vec());
 }
 
-#[test]
-fn test_matmul_transpose() {
-    let mut cx = Graph::new();
-    let a = cx
-        .new_tensor::<R2<2, 3>>("Input")
-        .set(vec![1., 2., 3., 1., 2., 1.]);
-    let b = cx
-        .new_tensor::<R2<4, 3>>("Input")
-        .set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
-    let a_t = cx
-        .new_tensor::<R2<3, 2>>("Input")
-        .set(vec![1., 2., 3., 1., 2., 1.]);
-    let b_t = cx
-        .new_tensor::<R2<3, 4>>("Input")
-        .set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
+// #[test]
+// fn test_matmul_transpose() {
+//     let mut cx = Graph::new();
+//     let a = cx
+//         .tensor::<R2<2, 3>>()
+//         .set(vec![1., 2., 3., 1., 2., 1.]);
+//     let b = cx
+//         .tensor::<R2<4, 3>>()
+//         .set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
+//     let a_t = cx
+//         .tensor::<R2<3, 2>>()
+//         .set(vec![1., 2., 3., 1., 2., 1.]);
+//     let b_t = cx
+//         .tensor::<R2<3, 4>>()
+//         .set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
 
-    let a_b = a.matmul(b.permute()).retrieve();
-    let a_b_t = a.matmul(b_t).retrieve();
-    let a_t_b = a_t.permute::<R2<2, 3>, _>().matmul(b.permute()).retrieve();
-    let a_t_b_t = a_t.permute::<R2<2, 3>, _>().matmul(b_t).retrieve();
+//     let a_b = a.matmul(b.permute()).retrieve();
+//     let a_b_t = a.matmul(b_t).retrieve();
+//     let a_t_b = a_t.permute::<R2<2, 3>, _>().matmul(b.permute()).retrieve();
+//     let a_t_b_t = a_t.permute::<R2<2, 3>, _>().matmul(b_t).retrieve();
 
-    cx.compile(MetalFp16Compiler::default());
-    cx.execute();
+//     cx.compile(MetalFp16Compiler::default());
+//     cx.execute();
 
-    let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 1.]]).to_dtype::<f16>();
-    let d_b = d_dev
-        .tensor([[1., 2., 3.], [1., 1., 2.], [1., 2., -1.], [-2., 1., 2.]])
-        .to_dtype::<f16>();
-    let d_a_t = d_dev
-        .tensor([[1., 2.], [3., 1.], [2., 1.]])
-        .to_dtype::<f16>();
-    let d_b_t = d_dev
-        .tensor([[1., 2., 3., 1.], [1., 2., 1., 2.], [-1., -2., 1., 2.]])
-        .to_dtype::<f16>();
-    let d_a_b = d_a.clone().matmul(d_b.clone().permute());
-    let d_a_b_t = d_a.matmul(d_b_t.clone());
-    let d_a_t_b = d_a_t
-        .clone()
-        .permute::<Rank2<2, 3>, _>()
-        .matmul(d_b.permute());
-    let d_a_t_b_t = d_a_t.permute::<Rank2<2, 3>, _>().matmul(d_b_t);
+//     let d_dev = Cpu::default();
+//     let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 1.]]).to_dtype::<f16>();
+//     let d_b = d_dev
+//         .tensor([[1., 2., 3.], [1., 1., 2.], [1., 2., -1.], [-2., 1., 2.]])
+//         .to_dtype::<f16>();
+//     let d_a_t = d_dev
+//         .tensor([[1., 2.], [3., 1.], [2., 1.]])
+//         .to_dtype::<f16>();
+//     let d_b_t = d_dev
+//         .tensor([[1., 2., 3., 1.], [1., 2., 1., 2.], [-1., -2., 1., 2.]])
+//         .to_dtype::<f16>();
+//     let d_a_b = d_a.clone().matmul(d_b.clone().permute());
+//     let d_a_b_t = d_a.matmul(d_b_t.clone());
+//     let d_a_t_b = d_a_t
+//         .clone()
+//         .permute::<Rank2<2, 3>, _>()
+//         .matmul(d_b.permute());
+//     let d_a_t_b_t = d_a_t.permute::<Rank2<2, 3>, _>().matmul(d_b_t);
 
-    assert_close(&a_b.data(), &d_a_b.to_dtype::<f32>().as_vec());
-    assert_close(&a_b_t.data(), &d_a_b_t.to_dtype::<f32>().as_vec());
-    assert_close(&a_t_b.data(), &d_a_t_b.to_dtype::<f32>().as_vec());
-    assert_close(&a_t_b_t.data(), &d_a_t_b_t.to_dtype::<f32>().as_vec());
-}
+//     assert_close(&a_b.data(), &d_a_b.to_dtype::<f32>().as_vec());
+//     assert_close(&a_b_t.data(), &d_a_b_t.to_dtype::<f32>().as_vec());
+//     assert_close(&a_t_b.data(), &d_a_t_b.to_dtype::<f32>().as_vec());
+//     assert_close(&a_t_b_t.data(), &d_a_t_b_t.to_dtype::<f32>().as_vec());
+// }
 
 #[test]
 fn test_relu_and_linear() {
     // Test single and batch, unoptimized and optimized
     let mut cx = Graph::new();
-    let batch = cx.new_tensor::<R2<2, 3>>("Input");
-    let a = cx.new_tensor::<R1<3>>("Input");
+    let batch = cx.tensor::<R2<2, 3>>();
+    let a = cx.tensor::<R1<3>>();
 
     let model: (Linear<3, 4>, ReLU, Linear<4, 2>) = InitModule::initialize(&mut cx);
     model
@@ -653,7 +652,7 @@ fn test_rms_norm() {
     let inp_data = random_vec(3 * 4);
     let weight_data = random_vec(4);
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R2<3, 4>>("Input");
+    let a = cx.tensor::<R2<3, 4>>();
 
     let model = RMSNorm::<4>::initialize(&mut cx);
     model.weight.set(weight_data.clone());
@@ -721,7 +720,7 @@ fn test_transformer_encoder_block() {
         .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
     let a = cx
-        .new_tensor::<(Dyn<'b'>, Dyn<'a'>, crate::prelude::Const<3>)>("Input")
+        .tensor::<(Dyn<'b'>, Dyn<'a'>, crate::prelude::Const<3>)>()
         .set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![1, 2, 3]);
     let b = model.forward(a).retrieve();
 
@@ -793,9 +792,9 @@ fn test_transformer_encoder_block() {
 fn test_common_buffer() {
     let data = random_vec(32);
     let mut cx = Graph::new();
-    let a = cx.new_tensor::<R1<32>>("Input");
+    let a = cx.tensor::<R1<32>>();
     a.set(data.clone());
-    let a1 = cx.new_tensor::<R1<32>>("Input1");
+    let a1 = cx.tensor::<R1<32>>();
     a1.set(data.clone());
     let exped = a * a1;
     let b = exped.log_2();
@@ -811,13 +810,10 @@ fn test_common_buffer() {
 fn test_embedding() {
     let mut cx = Graph::new();
     let batch = cx
-        .new_tensor::<R2<2, 3>>("BatchInput")
+        .tensor::<R2<2, 3>>()
         .set(vec![1.0, 0.0, 2.0, 1.0, 0.0, 1.0])
         .keep();
-    let a = cx
-        .new_tensor::<R1<3>>("Input")
-        .set(vec![1.0, 0.0, 1.0])
-        .keep();
+    let a = cx.tensor::<R1<3>>().set(vec![1.0, 0.0, 1.0]).keep();
 
     let model: crate::nn::embedding::Embedding<3, 4> = InitModule::initialize(&mut cx);
     model

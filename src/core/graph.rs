@@ -89,7 +89,11 @@ impl Graph {
         self.dyn_map.insert(dim, val);
     }
 
-    pub fn new_tensor<S: Shape>(&mut self, name: &str) -> GraphTensor<S> {
+    pub fn tensor<S: Shape>(&mut self) -> GraphTensor<S> {
+        self.named_tensor("Tensor")
+    }
+
+    pub fn named_tensor<S: Shape>(&mut self, name: &str) -> GraphTensor<S> {
         self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
         GraphTensor {
             id: self.graph.add_node(Box::new(op::Function(

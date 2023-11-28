@@ -10,7 +10,7 @@ pub struct Linear<const A: usize, const B: usize> {
 impl<const A: usize, const B: usize> InitModule for Linear<A, B> {
     fn initialize(cx: &mut Graph) -> Self {
         let s = Self {
-            weight: cx.new_tensor("Weight"),
+            weight: cx.named_tensor("Weight"),
         };
         // Init weight as uniform(-1, 1)
         let mut rng = thread_rng();
@@ -78,8 +78,8 @@ mod tests {
     #[test]
     fn test_linear() {
         let mut cx = Graph::new();
-        let batch = cx.new_tensor::<R2<2, 3>>("Input");
-        let a = cx.new_tensor::<R1<3>>("Input");
+        let batch = cx.tensor::<R2<2, 3>>();
+        let a = cx.tensor::<R1<3>>();
 
         let model: Linear<3, 4> = Linear::initialize(&mut cx);
         let b = model.forward(a).retrieve();

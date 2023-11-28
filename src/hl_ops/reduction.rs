@@ -90,7 +90,7 @@ mod tests {
     fn test_sum_reduce() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.new_tensor::<R2<2, 3>>("Input");
+        let a = cx.tensor::<R2<2, 3>>();
         a.set(a_data.clone());
         let b = a.sum_reduce::<_, LAxis<1>>();
         b.retrieve();
@@ -108,7 +108,7 @@ mod tests {
     fn test_max_reduce() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.new_tensor::<R2<2, 3>>("Input");
+        let a = cx.tensor::<R2<2, 3>>();
         a.set(a_data.clone());
         let b = a.max_reduce::<_, LAxis<1>>();
         b.retrieve();
@@ -126,7 +126,7 @@ mod tests {
     fn test_mean_reduce() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.new_tensor::<R2<2, 3>>("Input");
+        let a = cx.tensor::<R2<2, 3>>();
         a.set(a_data.clone());
         let b = a.mean_reduce::<_, LAxis<1>>();
         b.retrieve();

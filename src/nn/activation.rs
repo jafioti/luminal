@@ -94,7 +94,7 @@ pub struct RMSNorm<const DIM: usize> {
 impl<const DIM: usize> InitModule for RMSNorm<DIM> {
     fn initialize(cx: &mut Graph) -> Self {
         let s = Self {
-            weight: cx.new_tensor("RMSNorm Weight"),
+            weight: cx.named_tensor("RMSNorm Weight"),
         };
         s.weight.set(vec![1.0; DIM]);
         s
@@ -168,8 +168,8 @@ mod tests {
     fn test_relu_and_linear() {
         // Test single and batch, unoptimized and optimized
         let mut cx = Graph::new();
-        let batch = cx.new_tensor::<R2<2, 3>>("Input");
-        let a = cx.new_tensor::<R1<3>>("Input");
+        let batch = cx.tensor::<R2<2, 3>>();
+        let a = cx.tensor::<R1<3>>();
 
         let model: (Linear<3, 4>, ReLU, Linear<4, 2>) = InitModule::initialize(&mut cx);
         model

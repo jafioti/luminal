@@ -11,11 +11,9 @@ pub fn matmul() -> (Graph, Vec<GraphTensor<()>>) {
     let mut rng = StdRng::seed_from_u64(0);
     let mut cx = Graph::new();
     let a = cx
-        .new_tensor::<(Dyn<'a'>, Const<3>)>("Input")
+        .tensor::<(Dyn<'a'>, Const<3>)>()
         .set_dyn(random_vec_rng(2 * 3, &mut rng), vec![2, 3]);
-    let b = cx
-        .new_tensor::<R2<3, 3>>("Input")
-        .set(random_vec_rng(3 * 3, &mut rng));
+    let b = cx.tensor::<R2<3, 3>>().set(random_vec_rng(3 * 3, &mut rng));
     let c = a.matmul(b).retrieve();
     (cx, vec![c.no_shape()])
 }
@@ -24,11 +22,9 @@ pub fn batch_matmul() -> (Graph, Vec<GraphTensor<()>>) {
     let mut rng = StdRng::seed_from_u64(0);
     let mut cx = Graph::new();
     let a = cx
-        .new_tensor::<(Dyn<'a'>, Dyn<'b'>, Const<2>)>("Input")
+        .tensor::<(Dyn<'a'>, Dyn<'b'>, Const<2>)>()
         .set_dyn(random_vec_rng(2 * 3 * 2, &mut rng), vec![2, 3, 2]);
-    let b = cx
-        .new_tensor::<R2<2, 4>>("Input")
-        .set(random_vec_rng(2 * 4, &mut rng));
+    let b = cx.tensor::<R2<2, 4>>().set(random_vec_rng(2 * 4, &mut rng));
     let c = a.matmul(b).retrieve();
     (cx, vec![c.no_shape()])
 }
@@ -38,7 +34,7 @@ pub fn feedforward() -> (Graph, Vec<GraphTensor<()>>) {
     // Test single and batch, unoptimized and optimized
     let mut cx = Graph::new();
     let batch = cx
-        .new_tensor::<(Dyn<'a'>, Const<3>)>("Input")
+        .tensor::<(Dyn<'a'>, Const<3>)>()
         .set_dyn(random_vec_rng(2 * 3, &mut rng), vec![2, 3]);
     let model: (Linear<3, 4>, ReLU, Linear<4, 2>) = InitModule::initialize(&mut cx);
     model.0.weight.set(random_vec_rng(3 * 4, &mut rng));
@@ -133,8 +129,8 @@ pub fn transformer() -> (Graph, Vec<GraphTensor<()>>) {
         .weight
         .set(random_vec_rng(3 * 4, &mut rng));
 
-    let a = cx.new_tensor::<(Dyn<'d'>, crate::shape::Const<3>)>("Input");
-    let e = cx.new_tensor::<(Dyn<'e'>, crate::shape::Const<3>)>("Input");
+    let a = cx.tensor::<(Dyn<'d'>, crate::shape::Const<3>)>();
+    let e = cx.tensor::<(Dyn<'e'>, crate::shape::Const<3>)>();
     let b = model.forward((a, e));
 
     a.set_dyn(random_vec_rng(2 * 3, &mut rng), vec![2, 3]);

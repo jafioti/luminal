@@ -241,8 +241,8 @@ mod tests {
             .weight
             .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
-        let a = cx.new_tensor::<(Dyn<'d'>, crate::shape::Const<3>)>("Input");
-        let e = cx.new_tensor::<(Dyn<'e'>, crate::shape::Const<3>)>("Input");
+        let a = cx.tensor::<(Dyn<'d'>, crate::shape::Const<3>)>();
+        let e = cx.tensor::<(Dyn<'e'>, crate::shape::Const<3>)>();
         let b = model.forward((a, e));
 
         a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![2, 3]);

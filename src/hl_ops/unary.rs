@@ -144,7 +144,7 @@ mod tests {
     fn test_exp() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.new_tensor::<R2<2, 3>>("Input");
+        let a = cx.tensor::<R2<2, 3>>();
         a.set(a_data.clone());
         let b = a.exp();
         b.retrieve();
@@ -161,7 +161,7 @@ mod tests {
     fn test_layer_norm() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.new_tensor::<R2<2, 3>>("Input");
+        let a = cx.tensor::<R2<2, 3>>();
         a.set(a_data.clone());
         let b = a.layer_norm::<0>();
         let c = a.layer_norm::<1>();
@@ -182,7 +182,7 @@ mod tests {
     fn test_softmax() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.new_tensor::<R2<2, 3>>("Input");
+        let a = cx.tensor::<R2<2, 3>>();
         a.set(a_data.clone());
         let b = a.softmax::<1>();
         b.retrieve();
@@ -201,7 +201,7 @@ mod tests {
     fn test_sin() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.new_tensor::<R2<2, 3>>("Input");
+        let a = cx.tensor::<R2<2, 3>>();
         a.set(a_data.clone());
         let b = a.sin();
         b.retrieve();
@@ -220,7 +220,7 @@ mod tests {
     fn test_cos() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.new_tensor::<R2<2, 3>>("Input");
+        let a = cx.tensor::<R2<2, 3>>();
         a.set(a_data.clone());
         let b = a.cos();
         b.retrieve();
@@ -237,7 +237,7 @@ mod tests {
     fn test_relu() {
         let mut cx = Graph::new();
         let a_data = random_vec(4);
-        let a = cx.new_tensor::<(Dyn<'a'>, Dyn<'b'>)>("Input");
+        let a = cx.tensor::<(Dyn<'a'>, Dyn<'b'>)>();
         a.set_dyn(a_data.clone(), vec![2, 2]);
         let b = a.relu();
         b.retrieve();
@@ -254,7 +254,7 @@ mod tests {
     fn test_sigmoid() {
         let mut cx = Graph::new();
         let a_data = random_vec(4);
-        let a = cx.new_tensor::<(Dyn<'a'>, Dyn<'b'>)>("Input");
+        let a = cx.tensor::<(Dyn<'a'>, Dyn<'b'>)>();
         a.set_dyn(a_data.clone(), vec![2, 2]);
         let b = a.sigmoid();
         b.retrieve();
@@ -271,7 +271,7 @@ mod tests {
     fn test_tanh() {
         let mut cx = Graph::new();
         let a_data = random_vec(4);
-        let a = cx.new_tensor::<(Dyn<'a'>, Dyn<'b'>)>("Input");
+        let a = cx.tensor::<(Dyn<'a'>, Dyn<'b'>)>();
         a.set_dyn(a_data.clone(), vec![2, 2]);
         let b = a.tanh();
         b.retrieve();

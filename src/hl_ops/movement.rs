@@ -132,9 +132,9 @@ mod tests {
     #[test]
     fn test_concat_1d() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R1<4>>("Input");
+        let a = cx.tensor::<R1<4>>();
         a.set(vec![1.4325, 2.492428, 3.127365, 3.54865]);
-        let b = cx.new_tensor::<R1<3>>("Input");
+        let b = cx.tensor::<R1<3>>();
         b.set(vec![2.30434, 2.2343113, 1.4393]);
         let c = a.concat_along::<R1<7>, LAxis<0>, _>(b);
         c.retrieve();
@@ -152,7 +152,7 @@ mod tests {
     fn test_concat_self() {
         let mut cx = Graph::new();
         let a = cx
-            .new_tensor::<(LConst<4>,)>("Input")
+            .tensor::<(LConst<4>,)>()
             .set(vec![1.4325, 2.492428, 3.127365, 3.54865]);
         let b = a.concat_along::<(LConst<8>,), LAxis<0>, _>(a).retrieve();
         cx.execute();
@@ -168,9 +168,9 @@ mod tests {
     #[test]
     fn test_concat_2d() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<3, 2>>("Input");
+        let a = cx.tensor::<R2<3, 2>>();
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
-        let b = cx.new_tensor::<R2<3, 2>>("Input");
+        let b = cx.tensor::<R2<3, 2>>();
         b.set(vec![2.30434, 2.2343113, 1.4393, 482.4312, 8.1234, 54.2054]);
         let c = a.concat_along::<R2<3, 4>, LAxis<1>, _>(b);
         let d = a.concat_along::<R2<6, 2>, LAxis<0>, _>(b);
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn test_pad_2d() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<3, 2>>("Input");
+        let a = cx.tensor::<R2<3, 2>>();
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
         let b = a.pad::<R2<3, 4>, usize, usize>(&[(0, 0), (0, 2)]);
         b.retrieve();
@@ -233,7 +233,7 @@ mod tests {
     #[test]
     fn test_slice_2d() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<3, 2>>("Input");
+        let a = cx.tensor::<R2<3, 2>>();
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
         let b = a.slice((.., ..1)).realize::<R2<3, 1>>();
         b.retrieve();
@@ -252,7 +252,7 @@ mod tests {
     #[test]
     fn test_rotate_half() {
         let mut cx = Graph::new();
-        let a = cx.new_tensor::<R2<3, 2>>("Input");
+        let a = cx.tensor::<R2<3, 2>>();
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
         let x1 = a.slice((.., ..1)).contiguous();
         let x2 = a.slice((.., 1..)).contiguous();

@@ -63,7 +63,7 @@ pub struct Embedding<const N: usize, const DIM: usize> {
 impl<const A: usize, const B: usize> InitModule for Embedding<A, B> {
     fn initialize(cx: &mut Graph) -> Self {
         let s = Self {
-            weight: cx.new_tensor("Embedding Weight"),
+            weight: cx.named_tensor("Embedding Weight"),
         };
         // Init weight as uniform(-1, 1)
         let mut rng = thread_rng();
@@ -122,8 +122,8 @@ mod tests {
     #[test]
     fn test_embedding() {
         let mut cx = Graph::new();
-        let batch = cx.new_tensor::<R2<2, 3>>("BatchInput");
-        let a = cx.new_tensor::<R1<3>>("Input");
+        let batch = cx.tensor::<R2<2, 3>>();
+        let a = cx.tensor::<R1<3>>();
 
         let model: Embedding<3, 4> = InitModule::initialize(&mut cx);
         model

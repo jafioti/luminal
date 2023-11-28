@@ -9,9 +9,9 @@ use luminal::prelude::*;
 
 // Setup graph and tensors
 let mut cx = Graph::new();
-let a = cx.new_tensor::<R2<3, 1>>("A")
+let a = cx.tensor::<R2<3, 1>>()
     .set(vec![1.0, 2.0, 3.0]);
-let b = cx.new_tensor::<R2<1, 4>>("B")
+let b = cx.tensor::<R2<1, 4>>()
     .set(vec![1.0, 2.0, 3.0, 4.0]);
 
 // Do stuff...
