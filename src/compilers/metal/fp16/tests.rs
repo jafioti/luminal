@@ -541,54 +541,61 @@ fn test_batch_matmul_transpose() {
     assert_close(&c.data(), &d_c.to_dtype::<f32>().as_vec());
 }
 
-// #[test]
-// fn test_matmul_transpose() {
-//     let mut cx = Graph::new();
-//     let a = cx
-//         .tensor::<R2<2, 3>>()
-//         .set(vec![1., 2., 3., 1., 2., 1.]);
-//     let b = cx
-//         .tensor::<R2<4, 3>>()
-//         .set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
-//     let a_t = cx
-//         .tensor::<R2<3, 2>>()
-//         .set(vec![1., 2., 3., 1., 2., 1.]);
-//     let b_t = cx
-//         .tensor::<R2<3, 4>>()
-//         .set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
+#[test]
+fn test_matmul_transpose() {
+    let mut cx = Graph::new();
+    let a = cx
+        .named_tensor::<R2<2, 3>>("A")
+        .set(vec![1., 2., 3., 1., 2., 1.]);
+    let b = cx
+        .named_tensor::<R2<4, 3>>("B")
+        .set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
+    let a_t = cx
+        .named_tensor::<R2<3, 2>>("A_T")
+        .set(vec![1., 2., 3., 1., 2., 1.]);
+    let b_t = cx
+        .named_tensor::<R2<3, 4>>("B_T")
+        .set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
 
-//     let a_b = a.matmul(b.permute()).retrieve();
-//     let a_b_t = a.matmul(b_t).retrieve();
-//     let a_t_b = a_t.permute::<R2<2, 3>, _>().matmul(b.permute()).retrieve();
-//     let a_t_b_t = a_t.permute::<R2<2, 3>, _>().matmul(b_t).retrieve();
+    let a_b = a.matmul(b.permute()).retrieve();
+    let a_b_t = a.matmul(b_t).retrieve();
+    let a_t_b = a_t.permute::<R2<2, 3>, _>().matmul(b.permute()).retrieve();
+    let a_t_b_t = a_t.permute::<R2<2, 3>, _>().matmul(b_t).retrieve();
 
-//     cx.compile(MetalFp16Compiler::default());
-//     cx.execute();
+    cx.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
+    //cx.display();
+    cx.execute_no_delete();
 
-//     let d_dev = Cpu::default();
-//     let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 1.]]).to_dtype::<f16>();
-//     let d_b = d_dev
-//         .tensor([[1., 2., 3.], [1., 1., 2.], [1., 2., -1.], [-2., 1., 2.]])
-//         .to_dtype::<f16>();
-//     let d_a_t = d_dev
-//         .tensor([[1., 2.], [3., 1.], [2., 1.]])
-//         .to_dtype::<f16>();
-//     let d_b_t = d_dev
-//         .tensor([[1., 2., 3., 1.], [1., 2., 1., 2.], [-1., -2., 1., 2.]])
-//         .to_dtype::<f16>();
-//     let d_a_b = d_a.clone().matmul(d_b.clone().permute());
-//     let d_a_b_t = d_a.matmul(d_b_t.clone());
-//     let d_a_t_b = d_a_t
-//         .clone()
-//         .permute::<Rank2<2, 3>, _>()
-//         .matmul(d_b.permute());
-//     let d_a_t_b_t = d_a_t.permute::<Rank2<2, 3>, _>().matmul(d_b_t);
+    let d_dev = Cpu::default();
+    let d_a = d_dev.tensor([[1., 2., 3.], [1., 2., 1.]]).to_dtype::<f16>();
+    let d_b = d_dev
+        .tensor_from_vec(
+            vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.],
+            (DConst::<4>, DConst::<3>),
+        )
+        .to_dtype::<f16>();
+    let d_a_t = d_dev
+        .tensor([[1., 2.], [3., 1.], [2., 1.]])
+        .to_dtype::<f16>();
+    let d_b_t = d_dev
+        .tensor([[1., 2., 3., 1.], [1., 2., 1., 2.], [-1., -2., 1., 2.]])
+        .to_dtype::<f16>();
+    let d_a_b = d_a.clone().matmul(d_b.clone().permute());
+    let d_a_b_t = d_a.matmul(d_b_t.clone());
+    let d_a_t_b = d_a_t
+        .clone()
+        .permute::<Rank2<2, 3>, _>()
+        .matmul(d_b.permute());
+    let d_a_t_b_t = d_a_t.permute::<Rank2<2, 3>, _>().matmul(d_b_t);
 
-//     assert_close(&a_b.data(), &d_a_b.to_dtype::<f32>().as_vec());
-//     assert_close(&a_b_t.data(), &d_a_b_t.to_dtype::<f32>().as_vec());
-//     assert_close(&a_t_b.data(), &d_a_t_b.to_dtype::<f32>().as_vec());
-//     assert_close(&a_t_b_t.data(), &d_a_t_b_t.to_dtype::<f32>().as_vec());
-// }
+    let b = a_b.data();
+    println!("B: {:?}", b);
+    println!("D: {:?}", d_a_b.clone().to_dtype::<f32>().as_vec());
+    assert_close(&b, &d_a_b.to_dtype::<f32>().as_vec());
+    assert_close(&a_b_t.data(), &d_a_b_t.to_dtype::<f32>().as_vec());
+    assert_close(&a_t_b.data(), &d_a_t_b.to_dtype::<f32>().as_vec());
+    assert_close(&a_t_b_t.data(), &d_a_t_b_t.to_dtype::<f32>().as_vec());
+}
 
 #[test]
 fn test_relu_and_linear() {

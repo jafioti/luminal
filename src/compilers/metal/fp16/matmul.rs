@@ -16,7 +16,7 @@ use metal_rs::{objc::rc::autoreleasepool, *};
 pub struct MetalMatmul2D(ComputePipelineState, CommandQueue, Device);
 
 impl MetalMatmul2D {
-    fn compile(dev: &Device, a_row_major: bool, b_row_major: bool) -> ComputePipelineState {
+    fn compile(dev: &Device) -> ComputePipelineState {
         compile_function(
             "kernel_matmul_2d",
             "
@@ -32,61 +32,50 @@ kernel void kernel_matmul_2d(
     device uint& M [[buffer(3)]],
     device uint& N [[buffer(4)]],
     device uint& K [[buffer(5)]],
-    uint3 gid [[threadgroup_position_in_grid]],
-    uint3 global_id [[thread_position_in_grid]],
-    uint3 block_size [[threads_per_threadgroup]]
-) {{
-  a += gid.x * 32 * N + global_id.y * 32;
-  data1 += gid.x * 32 * K;
-  data2 += global_id.y * 32;
+    uint3 block_pos [[threadgroup_position_in_grid]],
+    uint3 global_pos [[thread_position_in_grid]]
+) {
+    a += block_pos.x * 32 * N + global_pos.y * 32;
+    data1 += block_pos.x * 32 * K;
+    data2 += global_pos.y * 32;
 
-  simdgroup_float8x8 acc[4][4];
-  #pragma unroll(4)
-  for (uint i = 0; i < 4; ++i) {{
-    #pragma unroll(4)
-    for (uint j = 0; j < 4; ++j) {{
-      acc[i][j] = simdgroup_float8x8(0);
-    }}
-  }}
+    simdgroup_float8x8 acc[4][4];
+    for (uint i = 0; i < 4; ++i) {
+        for (uint j = 0; j < 4; ++j) {
+        acc[i][j] = simdgroup_float8x8(0);
+        }
+    }
 
-  simdgroup_half8x8 A[4];
-  simdgroup_half8x8 B[4];
-  uint k8 = 8 * K;
-  for (uint k = 0; k < K; k+=8) {{
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    device const half *d1 = data1 + k;
-    #pragma unroll(4)
-    for (int i = 0; i < 4; ++i) {{
-        simdgroup_load(A[i], d1 + i * k8, K);
-    }}
-    device const half *d2 = data2 + k * N;
-    #pragma unroll(4)
-    for (int i = 0; i < 4; ++i) {{
-        simdgroup_load(B[i], 8 * i + d2, N);
-    }}
+    simdgroup_half8x8 A[4];
+    simdgroup_half8x8 B[4];
+    uint k8 = 8 * K;
+    for (uint k = 0; k < K; k+=8) {
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        device const half *d1 = data1 + k;
+        for (int i = 0; i < 4; ++i) {
+            simdgroup_load(A[i], d1 + i * k8, K);
+            simdgroup_load(B[i], data2 + k * N + i * 8, N);
+        }
 
-    #pragma unroll(4)
-    for (int i = 0; i < 4; ++i) {{
-        #pragma unroll(4)
-        for (int j = 0; j < 4; ++j) {{
-            simdgroup_multiply_accumulate(acc[i][j], A[j], B[i], acc[i][j]);
-        }}
-    }}
-  }}
+        for (int i = 0; i < 4; ++i) {
+            for (int j = 0; j < 4; ++j) {
+                simdgroup_multiply_accumulate(acc[i][j], A[j], B[i], acc[i][j]);
+            }
+        }
+    }
 
-  // We need this to convert from float to half results. Fml
-  simdgroup_half8x8 temp = simdgroup_half8x8(0);
-  simdgroup_half8x8 ident = simdgroup_half8x8(1);
-  #pragma unroll(4)
-  for (int i = 0; i < 4; ++i) {{
-    uint n8i = i * 8 * N;
-    #pragma unroll(4)
-    for (int j = 0; j < 4; ++j) {{
-        // simdgroup_multiply(temp, acc[j][i], ident);
-        simdgroup_store((simdgroup_half8x8)acc[j][i], a+(8*j+n8i), N);
-    }}
-  }}
-}}",
+    simdgroup_half8x8 temp = simdgroup_half8x8(0);
+    simdgroup_half8x8 ident = simdgroup_half8x8(1);
+    // Width
+    for (int i = 0; i < 4; ++i) {
+        uint n8i = i * 8 * N;
+        // Height
+        for (int j = 0; j < 4; ++j) {
+            simdgroup_multiply(temp, acc[j][i], ident);
+            simdgroup_store(temp, a+(8*j+n8i), N);
+        }
+    }
+}",
             dev,
         )
     }
@@ -99,6 +88,18 @@ impl MetalKernelForward for MetalMatmul2D {
         dev: &Device,
         command_buffer: &CommandBufferRef,
     ) -> Vec<Buffer> {
+        let mut data = vec![0.0; inputs[0].0.length() as usize / std::mem::size_of::<f16>()];
+        let ptr = inputs[0].0.contents() as *mut f16;
+        for (i, d) in data.iter_mut().enumerate() {
+            *d = unsafe { *ptr.add(i) }.to_f32();
+        }
+        println!("A: {:?} | {:?}", data, inputs[0].0.gpu_address());
+        let mut data = vec![0.0; inputs[1].0.length() as usize / std::mem::size_of::<f16>()];
+        let ptr = inputs[1].0.contents() as *mut f16;
+        for (i, d) in data.iter_mut().enumerate() {
+            *d = unsafe { *ptr.add(i) }.to_f32();
+        }
+        println!("B: {:?} | {:?}", data, inputs[1].0.gpu_address());
         let (a_shape, b_shape) = (inputs[0].1.shape(), inputs[1].1.shape());
         let (m, k, n) = (
             a_shape[0].to_usize().unwrap(),
@@ -379,23 +380,44 @@ impl Compiler for MetalMatMulCompiler {
                 continue;
             }
             // Insert MatMul2D op
-            let mut srcs = graph.get_sources(mul);
+            let srcs = graph.get_sources(mul);
+            let (mut src1, mut src1_shape) = (srcs[0].0, srcs[0].2);
+            let (mut src2, mut src2_shape) = (srcs[1].0, srcs[1].2);
             // Undo expansions and permute
-            srcs[0].2.remove_dim(1);
-            srcs[1].2.remove_dim(0);
-            srcs[1].2.permute(&[1, 0]);
+            src1_shape.remove_dim(1);
+            src2_shape.remove_dim(0);
+            src2_shape.permute(&[1, 0]);
+            // Add contiguous calls to put both inputs in row major
+            if !src1_shape.is_contiguous() {
+                src1 = graph
+                    .add_op(MetalContiguous::<f16>::new(
+                        src1_shape,
+                        dev.clone(),
+                        &mut HashMap::default(),
+                    ))
+                    .input(src1, 0, src1_shape)
+                    .finish();
+                src1_shape = src1_shape.contiguous();
+            }
+            if !src2_shape.is_contiguous() {
+                src2 = graph
+                    .add_op(MetalContiguous::<f16>::new(
+                        src2_shape,
+                        dev.clone(),
+                        &mut HashMap::default(),
+                    ))
+                    .input(src2, 0, src2_shape)
+                    .finish();
+                src2_shape = src2_shape.contiguous();
+            }
             let new_op = graph
                 .add_op(MetalMatmul2D(
-                    MetalMatmul2D::compile(
-                        &dev,
-                        srcs[0].2.indexes[0] < srcs[0].2.indexes[1],
-                        srcs[1].2.indexes[0] < srcs[1].2.indexes[1],
-                    ),
+                    MetalMatmul2D::compile(&dev),
                     queue.clone(),
                     dev.clone(),
                 ))
-                .input(srcs[0].0, 0, srcs[0].2)
-                .input(srcs[1].0, 0, srcs[1].2)
+                .input(src1, 0, src1_shape)
+                .input(src2, 0, src2_shape)
                 .finish();
 
             // Create edges to dests

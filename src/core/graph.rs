@@ -14,6 +14,7 @@ use std::{
 
 use colored::Colorize;
 use itertools::Itertools;
+use metal_rs::Buffer;
 use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Direction};
 
 pub type MainGraph = StableGraph<Box<dyn Operator>, Dependency>;
@@ -181,6 +182,11 @@ impl Graph {
         let mut remaining_consumers = self.create_remaining_customers_map();
 
         for (node, src_ids) in self.linearized_graph.as_ref().unwrap() {
+            // println!(
+            //     "N: {:?} Srcs: {:?}",
+            //     node,
+            //     src_ids.iter().map(|i| i.0).collect::<Vec<_>>()
+            // );
             if self.tensors.contains_key(&(*node, 0)) {
                 continue;
             }
@@ -203,12 +209,40 @@ impl Graph {
                 self.tensors.insert((*node, i as u8), tensor);
             }
 
-            // Check if we can delete the source tensors now
+            // Bookkeep remaining consumers
             for (source, _) in src_ids {
                 *remaining_consumers.get_mut(source).unwrap() -= 1;
             }
         }
         self.reset();
+    }
+
+    /// Execute the graph without deleting intermediate tensors
+    pub fn execute_no_delete(&mut self) {
+        // Track the number of views pointing to each tensor so we know when to clear;
+        if self.linearized_graph.is_none() {
+            self.toposort();
+        }
+        for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
+            if self.tensors.contains_key(&(*node, 0)) {
+                continue;
+            }
+            let mut srcs = src_ids
+                .iter()
+                .map(|(id, st)| (InputTensor::Borrowed(self.tensors.get(id).unwrap()), *st))
+                .collect_vec();
+
+            // Substitute in the dyn dims
+            for (_, st) in srcs.iter_mut() {
+                *st = st.resolve_global_dyn_dims(&self.dyn_map);
+            }
+
+            // All sources are ready, execute
+            let tensors = self.graph.node_weight(*node).unwrap().process(srcs);
+            for (i, tensor) in tensors.into_iter().enumerate() {
+                self.tensors.insert((*node, i as u8), tensor);
+            }
+        }
     }
 
     /// Execute the graph with debug prints
@@ -331,34 +365,6 @@ impl Graph {
         );
         self.reset();
     }
-
-    /// Execute the graph without deleting intermediate tensors
-    pub fn execute_no_delete(&mut self) {
-        // Track the number of views pointing to each tensor so we know when to clear;
-        if self.linearized_graph.is_none() {
-            self.toposort();
-        }
-        for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
-            if self.tensors.contains_key(&(*node, 0)) {
-                continue;
-            }
-            let mut srcs = src_ids
-                .iter()
-                .map(|(id, st)| (InputTensor::Borrowed(self.tensors.get(id).unwrap()), *st))
-                .collect_vec();
-
-            // Substitute in the dyn dims
-            for (_, st) in srcs.iter_mut() {
-                *st = st.resolve_global_dyn_dims(&self.dyn_map);
-            }
-
-            // All sources are ready, execute
-            let tensors = self.graph.node_weight(*node).unwrap().process(srcs);
-            for (i, tensor) in tensors.into_iter().enumerate() {
-                self.tensors.insert((*node, i as u8), tensor);
-            }
-        }
-    }
 }
 
 fn get_source_tensors<'a>(
@@ -372,6 +378,16 @@ fn get_source_tensors<'a>(
     let mut refs = VecDeque::default();
     for (i, (id, _)) in src_ids.iter().enumerate() {
         if remaining_consumers[id] == 1 && !no_delete.contains(&id.0) {
+            if let Some(buffer) = tensors[id].data.as_any().downcast_ref::<Buffer>() {
+                // println!("Removing {:?}", id);
+                let mut data =
+                    vec![0.0; buffer.length() as usize / std::mem::size_of::<half::f16>()];
+                let ptr = buffer.contents() as *mut half::f16;
+                for (i, d) in data.iter_mut().enumerate() {
+                    *d = unsafe { *ptr.add(i) }.to_f32();
+                }
+                // println!("{:?} | {:?}", data, buffer.gpu_address());
+            }
             owned.push_back((InputTensor::Owned(tensors.remove(id).unwrap()), i));
         }
     }

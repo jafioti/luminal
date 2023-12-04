@@ -366,7 +366,7 @@ impl Operator for MetalGather {
             let index_buffer = self.1.new_buffer_with_data(
                 unsafe { std::mem::transmute(indexes.as_ptr()) },
                 (indexes.len() * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::StorageModeShared,
+                MTLResourceOptions::StorageModeManaged,
             );
             let b_inp = tensors[1]
                 .0
@@ -386,7 +386,7 @@ impl Operator for MetalGather {
 
             let out = self.1.new_buffer(
                 (n_embeddings * self.2 * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeShared,
+                MTLResourceOptions::StorageModeManaged,
             );
 
             let encoder = command_buffer
