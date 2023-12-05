@@ -75,10 +75,10 @@ fn test_shapes() {
 /// Ensure two arrays are nearly equal
 pub fn assert_close(a_vec: &[f32], b_vec: &[f32]) {
     assert_eq!(a_vec.len(), b_vec.len(), "Number of elements doesn't match");
-    for (a, b) in a_vec.iter().zip(b_vec.iter()) {
+    for (i, (a, b)) in a_vec.iter().zip(b_vec.iter()).enumerate() {
         if (a - b).abs() > 1e-3 {
             panic!(
-                "{a} is not close to {b}, avg distance: {}",
+                "{a} is not close to {b}, avg distance: {}, index: {i}",
                 a_vec
                     .iter()
                     .zip(b_vec.iter())
