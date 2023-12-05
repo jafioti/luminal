@@ -306,7 +306,7 @@ impl<T: MetalFloat + 'static> Operator for MetalConstant<T> {
             data: Box::new(self.1.new_buffer_with_data(
                 &self.0 as *const T as *const _,
                 std::mem::size_of::<T>() as u64,
-                MTLResourceOptions::StorageModePrivate,
+                MTLResourceOptions::StorageModeShared,
             )),
         }]
     }
@@ -354,7 +354,7 @@ impl<T> MetalKernelForward for MetalContiguous<T> {
         let inp_size = res_shape.n_elements();
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<T>()) as u64,
-            MTLResourceOptions::StorageModePrivate,
+            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =

@@ -10,22 +10,84 @@ use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Multiplies a MxK matrix with a KxN matrix, resulting in a MxN matrix
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalMatmul2D(ComputePipelineState, Device);
+pub struct MetalMatmul2D {
+    naive_shader: ComputePipelineState,
+    simd_shader: ComputePipelineState,
+    device: Device,
+}
 
 impl MetalMatmul2D {
-    fn compile(dev: &Device) -> ComputePipelineState {
-        let mut code = "#include <metal_stdlib>
+    fn new(dev: &Device) -> Self {
+        let simd_shader = compile_function(
+            "kernel_matmul_2d",
+            "
+#include <metal_stdlib>
+#include <metal_simdgroup_matrix>
+#include <metal_simdgroup>
 using namespace metal;
 
-kernel void mkernel(
+kernel void kernel_matmul_2d(
+    device const float *data1 [[buffer(0)]],
+    device const float *data2 [[buffer(1)]],
+    device float *a [[buffer(2)]],
+    device uint& M [[buffer(3)]],
+    device uint& N [[buffer(4)]],
+    device uint& K [[buffer(5)]],
+    uint3 block_pos [[threadgroup_position_in_grid]],
+    uint3 global_pos [[thread_position_in_grid]]
+) {
+    a += block_pos.x * 32 * N + global_pos.y * 32;
+    data1 += block_pos.x * 32 * K;
+    data2 += global_pos.y * 32;
+
+    simdgroup_float8x8 acc[4][4];
+    for (uint i = 0; i < 4; ++i) {
+        for (uint j = 0; j < 4; ++j) {
+        acc[i][j] = simdgroup_float8x8(0);
+        }
+    }
+
+    simdgroup_float8x8 A[4];
+    simdgroup_float8x8 B[4];
+    uint k8 = 8 * K;
+    for (uint k = 0; k < K; k+=8) {
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        device const float *d1 = data1 + k;
+        for (int i = 0; i < 4; ++i) {
+            simdgroup_load(A[i], d1 + i * k8, K);
+            simdgroup_load(B[i], data2 + k * N + i * 8, N);
+        }
+
+        for (int i = 0; i < 4; ++i) {
+            for (int j = 0; j < 4; ++j) {
+                simdgroup_multiply_accumulate(acc[i][j], A[j], B[i], acc[i][j]);
+            }
+        }
+    }
+
+    // Width
+    for (int i = 0; i < 4; ++i) {
+        uint n8i = i * 8 * N;
+        // Height
+        for (int j = 0; j < 4; ++j) {
+            simdgroup_store(acc[j][i], a+(8*j+n8i), N);
+        }
+    }
+}",
+            dev,
+        );
+        let naive_shader = compile_function(
+            "kernel_matmul_2d_naive",
+            "#include <metal_stdlib>
+using namespace metal;
+
+kernel void kernel_matmul_2d_naive(
     device float *A [[buffer(0)]],
     device float *B [[buffer(1)]],
     device float *C [[buffer(2)]],
     device uint& M [[buffer(3)]],
-    device uint& K [[buffer(4)]],
-    device uint& N [[buffer(5)]],
-    device uint& A_major [[buffer(6)]],
-    device uint& B_major [[buffer(7)]],
+    device uint& N [[buffer(4)]],
+    device uint& K [[buffer(5)]],
     uint tid [[thread_position_in_grid]]
 ) {
     uint row = tid / N;
@@ -34,19 +96,21 @@ kernel void mkernel(
     if(row < M && column < N) {
         float value = 0.0f;
         for(int i = 0; i < K; ++i) {
-            uint A_index = A_major ? (row * K + i) : (i * M + row); // Row Major vs Column Major
-            uint B_index = B_major ? (i * N + column) : (column * K + i); // Row Major vs Column Major
+            uint A_index = row * K + i;
+            uint B_index = i * N + column;
             value += A[A_index] * B[B_index];
         }
         C[row * N + column] = value;
     }
-}
-"
-        .to_string();
-        let name = "kernel_matmul_2d".to_string();
-        code = code.replace("mkernel", "kernel_matmul_2d");
+}",
+            dev,
+        );
 
-        compile_function(&name, &code, dev)
+        Self {
+            naive_shader,
+            simd_shader,
+            device: dev.clone(),
+        }
     }
 }
 
@@ -54,9 +118,6 @@ impl Operator for MetalMatmul2D {
     fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
-            let (a_strides, b_strides) = (inp[0].1.strides(), inp[1].1.strides());
-            let (a_row_major, b_row_major) =
-                (a_strides[0] > a_strides[1], b_strides[0] > b_strides[1]);
             let (m, k, n) = (
                 a_shape[0].to_usize().unwrap(),
                 a_shape[1].to_usize().unwrap(),
@@ -77,31 +138,46 @@ impl Operator for MetalMatmul2D {
                 .downcast_ref::<Buffer>()
                 .unwrap();
 
-            let out = self.1.new_buffer(
+            let out = self.device.new_buffer(
                 (m * n * std::mem::size_of::<f32>()) as u64,
                 MTLResourceOptions::StorageModeManaged,
             );
 
             // Setup command queue / command buffer / encoder
-            let command_queue = self.1.new_command_queue();
+            let command_queue = self.device.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
             let encoder = command_buffer
                 .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
 
             // Set inputs
             encoder.set_buffer(0, Some(a), 0);
             encoder.set_buffer(1, Some(b), 0);
             encoder.set_buffer(2, Some(&out), 0);
             encoder.set_int(3, m as u32);
-            encoder.set_int(4, k as u32);
-            encoder.set_int(5, n as u32);
-            encoder.set_int(6, a_row_major as u32);
-            encoder.set_int(7, b_row_major as u32);
+            encoder.set_int(4, n as u32);
+            encoder.set_int(5, k as u32);
+
+            if k >= 16 && n >= 256 && ((n != 0) && (n & (n - 1)) == 0) {
+                encoder.set_compute_pipeline_state(&self.simd_shader);
+                encoder.dispatch_thread_groups(
+                    MTLSize {
+                        width: (m as u64).div_ceil(32),
+                        height: (n as u64).div_ceil(32 * 8),
+                        depth: 1,
+                    },
+                    MTLSize {
+                        width: 32,
+                        height: 8,
+                        depth: 1,
+                    },
+                );
+            } else {
+                encoder.set_compute_pipeline_state(&self.naive_shader);
+                encoder.dispatch_1d(n * m);
+            }
+            encoder.end_encoding();
 
             // Execute
-            encoder.dispatch_1d(n * m);
-            encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
@@ -257,25 +333,45 @@ impl Compiler for MetalMatMulCompiler {
                 .ptr(&mut sum_reduce),
         );
 
-        let mut matmul = None;
         for _ in s.search(graph) {
             if graph.no_delete.contains(&mul) {
                 // The intermediate mul can't be deleted
                 continue;
             }
             // Insert MatMul2D op
-            let mut srcs = graph.get_sources(mul);
+            let srcs = graph.get_sources(mul);
+            let (mut src1, mut src1_shape) = (srcs[0].0, srcs[0].2);
+            let (mut src2, mut src2_shape) = (srcs[1].0, srcs[1].2);
             // Undo expansions and permute
-            srcs[0].2.remove_dim(1);
-            srcs[1].2.remove_dim(0);
-            srcs[1].2.permute(&[1, 0]);
-            if matmul.is_none() {
-                matmul = Some(MetalMatmul2D::compile(&dev));
+            src1_shape.remove_dim(1);
+            src2_shape.remove_dim(0);
+            src2_shape.permute(&[1, 0]);
+            if !src1_shape.is_contiguous() {
+                src1 = graph
+                    .add_op(MetalContiguous::<f32>::new(
+                        src1_shape,
+                        dev.clone(),
+                        &mut HashMap::default(),
+                    ))
+                    .input(src1, 0, src1_shape)
+                    .finish();
+                src1_shape = src1_shape.contiguous();
+            }
+            if !src2_shape.is_contiguous() {
+                src2 = graph
+                    .add_op(MetalContiguous::<f32>::new(
+                        src2_shape,
+                        dev.clone(),
+                        &mut HashMap::default(),
+                    ))
+                    .input(src2, 0, src2_shape)
+                    .finish();
+                src2_shape = src2_shape.contiguous();
             }
             let new_op = graph
-                .add_op(MetalMatmul2D(matmul.clone().unwrap(), dev.clone()))
-                .input(srcs[0].0, 0, srcs[0].2)
-                .input(srcs[1].0, 0, srcs[1].2)
+                .add_op(MetalMatmul2D::new(&dev))
+                .input(src1, 0, src1_shape)
+                .input(src2, 0, src2_shape)
                 .finish();
 
             // Create edges to dests

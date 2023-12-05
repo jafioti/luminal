@@ -76,7 +76,7 @@ pub fn assert_close(a_vec: &[f32], b_vec: &[f32]) {
     for (i, (a, b)) in a_vec.iter().zip(b_vec.iter()).enumerate() {
         if (a - b).abs() > 1e-3 {
             panic!(
-                "{a} is not close to {b}, index {i}, avg distance: {}",
+                "{a} is not close to {b}, avg distance: {}, index: {i}",
                 a_vec
                     .iter()
                     .zip(b_vec.iter())
