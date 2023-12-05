@@ -14,7 +14,6 @@ use std::{
 
 use colored::Colorize;
 use itertools::Itertools;
-use metal_rs::Buffer;
 use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Direction};
 
 pub type MainGraph = StableGraph<Box<dyn Operator>, Dependency>;
@@ -182,11 +181,6 @@ impl Graph {
         let mut remaining_consumers = self.create_remaining_customers_map();
 
         for (node, src_ids) in self.linearized_graph.as_ref().unwrap() {
-            // println!(
-            //     "N: {:?} Srcs: {:?}",
-            //     node,
-            //     src_ids.iter().map(|i| i.0).collect::<Vec<_>>()
-            // );
             if self.tensors.contains_key(&(*node, 0)) {
                 continue;
             }
@@ -378,16 +372,6 @@ fn get_source_tensors<'a>(
     let mut refs = VecDeque::default();
     for (i, (id, _)) in src_ids.iter().enumerate() {
         if remaining_consumers[id] == 1 && !no_delete.contains(&id.0) {
-            if let Some(buffer) = tensors[id].data.as_any().downcast_ref::<Buffer>() {
-                // println!("Removing {:?}", id);
-                let mut data =
-                    vec![0.0; buffer.length() as usize / std::mem::size_of::<half::f16>()];
-                let ptr = buffer.contents() as *mut half::f16;
-                for (i, d) in data.iter_mut().enumerate() {
-                    *d = unsafe { *ptr.add(i) }.to_f32();
-                }
-                // println!("{:?} | {:?}", data, buffer.gpu_address());
-            }
             owned.push_back((InputTensor::Owned(tensors.remove(id).unwrap()), i));
         }
     }
