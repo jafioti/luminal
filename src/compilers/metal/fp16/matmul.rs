@@ -47,7 +47,7 @@ kernel void kernel_matmul_2d(
     simdgroup_float8x8 acc[4][4];
     for (uint i = 0; i < 4; ++i) {
         for (uint j = 0; j < 4; ++j) {
-        acc[i][j] = simdgroup_float8x8(0);
+            acc[i][j] = simdgroup_float8x8(0);
         }
     }
 
@@ -126,18 +126,6 @@ impl MetalKernelForward for MetalMatmul2D {
         dev: &Device,
         command_buffer: &CommandBufferRef,
     ) -> Vec<Buffer> {
-        let mut data = vec![0.0; inputs[0].0.length() as usize / std::mem::size_of::<f16>()];
-        let ptr = inputs[0].0.contents() as *mut f16;
-        for (i, d) in data.iter_mut().enumerate() {
-            *d = unsafe { *ptr.add(i) }.to_f32();
-        }
-        // println!("A: {:?} | {:?}", data, inputs[0].0.gpu_address());
-        let mut data = vec![0.0; inputs[1].0.length() as usize / std::mem::size_of::<f16>()];
-        let ptr = inputs[1].0.contents() as *mut f16;
-        for (i, d) in data.iter_mut().enumerate() {
-            *d = unsafe { *ptr.add(i) }.to_f32();
-        }
-        // println!("B: {:?} | {:?}", data, inputs[1].0.gpu_address());
         let (a_shape, b_shape) = (inputs[0].1.shape(), inputs[1].1.shape());
         let (m, k, n) = (
             a_shape[0].to_usize().unwrap(),

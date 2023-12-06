@@ -562,7 +562,7 @@ fn test_batch_matmul_transpose() {
 fn test_matmul_transpose() {
     const M: usize = 1024; // Any
     const K: usize = 16; // >= 16
-    const N: usize = 256; // >= 256, power of 2
+    const N: usize = 768; // >= 256, multiple of 256
     let mut cx = Graph::new();
     let mut rng = StdRng::seed_from_u64(0);
 

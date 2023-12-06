@@ -322,8 +322,7 @@ impl<T: MetalFloat> MetalContiguous<T> {
         kernels: &mut HashMap<String, ComputePipelineState>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
-        let mut code = format!(
-            "
+        let mut code = format!("
 #include <metal_stdlib>
 using namespace metal;
 kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]{}) {{
