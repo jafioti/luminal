@@ -437,7 +437,7 @@ impl Compiler for MetalMatMulCompiler {
                     .add_op(MetalContiguous::<f16>::new(
                         src1_shape,
                         dev.clone(),
-                        &mut HashMap::default(),
+                        &mut HashMap::new(),
                     ))
                     .input(src1, 0, src1_shape)
                     .finish();
@@ -448,26 +448,26 @@ impl Compiler for MetalMatMulCompiler {
                     .add_op(MetalContiguous::<f16>::new(
                         src2_shape,
                         dev.clone(),
-                        &mut HashMap::default(),
+                        &mut HashMap::new(),
                     ))
                     .input(src2, 0, src2_shape)
                     .finish();
                 src2_shape = src2_shape.contiguous();
             }
-            let new_op = graph
+            let matmul_op = graph
                 .add_op(MetalMatmul2D::new(&dev, queue.clone()))
                 .input(src1, 0, src1_shape)
                 .input(src2, 0, src2_shape)
                 .finish();
 
             // Create edges to dests
-            move_outgoing_edge(sum_reduce, new_op, &mut graph.graph);
+            move_outgoing_edge(sum_reduce, matmul_op, &mut graph.graph);
             move_references(
                 &mut graph.id_remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 sum_reduce,
-                new_op,
+                matmul_op,
             );
 
             // Remove the old ops

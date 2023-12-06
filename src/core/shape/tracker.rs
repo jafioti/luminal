@@ -430,6 +430,12 @@ impl ShapeTracker {
             .iter()
             .any(|(b, e)| if let Dim::Known(n) = b {*n != 0} else {true} || if let Dim::Known(n) = e {*n as i32 != i32::MAX} else {false})
     }
+
+    pub fn is_padded(&self) -> bool {
+        self.padding
+            .iter()
+            .any(|(b, e)| if let Dim::Known(n) = b {*n != 0} else {true} || if let Dim::Known(n) = e {*n != 0} else {true})
+    }
 }
 
 /// Resolve shapes between the two trackers to the best of our ability

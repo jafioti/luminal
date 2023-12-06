@@ -349,8 +349,7 @@ impl<T> MetalKernelForward for MetalContiguous<T> {
         dev: &Device,
         command_buffer: &CommandBufferRef,
     ) -> Vec<Buffer> {
-        let res_shape = inputs[0].1.contiguous();
-        let inp_size = res_shape.n_elements();
+        let inp_size = inputs[0].1.contiguous().n_elements();
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<T>()) as u64,
             MTLResourceOptions::StorageModeShared,

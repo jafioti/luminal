@@ -584,7 +584,6 @@ fn test_matmul_transpose() {
     let a_t_b_t = a_t.permute::<_, LAxes2<1, 0>>().matmul(b_t).retrieve();
 
     cx.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
-    //cx.display();
     cx.execute_no_delete();
 
     let d_dev = Cpu::default();
@@ -608,10 +607,7 @@ fn test_matmul_transpose() {
         .matmul(d_b.permute());
     let d_a_t_b_t = d_a_t.permute::<_, DAxes2<1, 0>>().matmul(d_b_t);
 
-    let b = a_b.data();
-    println!("B: {:?}", b);
-    println!("D: {:?}", d_a_b.clone().to_dtype::<f32>().as_vec());
-    assert_close(&b, &d_a_b.to_dtype::<f32>().as_vec());
+    assert_close(&a_b.data(), &d_a_b.to_dtype::<f32>().as_vec());
     assert_close(&a_b_t.data(), &d_a_b_t.to_dtype::<f32>().as_vec());
     assert_close(&a_t_b.data(), &d_a_t_b.to_dtype::<f32>().as_vec());
     assert_close(&a_t_b_t.data(), &d_a_t_b_t.to_dtype::<f32>().as_vec());
@@ -853,7 +849,8 @@ fn test_embedding() {
     cx.execute();
 
     let d_dev = Cpu::default();
-    let mut d_model = <dfdx::nn::modules::builders::Embedding<3, 4>>::build_on_device(&d_dev);
+    let mut d_model: modules::Embedding<3, 4, f32, Cpu> =
+        <dfdx::nn::modules::builders::Embedding<3, 4>>::build_on_device(&d_dev);
     d_model.weight = d_dev.tensor_from_vec(
         vec![1.1, 2., 3., 1., 2., 3., 14., 2., 33., 1., 2., 3.],
         (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<4>),
@@ -869,4 +866,66 @@ fn test_embedding() {
 
     assert_close(&b.data(), &d_b.as_vec());
     assert_close(&batch_out.data(), &d_batch_out.as_vec());
+}
+
+#[test]
+fn test_slice() {
+    let data = random_vec(32);
+    let mut cx = Graph::new();
+    let a = cx.tensor::<R1<32>>().set(data.clone());
+    let c: GraphTensor<R1<25>> = a.slice((..25,)).realize().contiguous().retrieve();
+
+    cx.compile(MetalFp16Compiler::default());
+    cx.execute();
+
+    let d_dev = Cpu::default();
+    let d_a = d_dev
+        .tensor_from_vec(data, (DConst::<32>,))
+        .to_dtype::<f16>();
+    let d_c = d_a.slice((..25,)).to_dtype::<f32>();
+
+    assert_exact(&c.data(), &d_c.as_vec());
+}
+
+#[test]
+fn test_pad() {
+    // Pad a 8x2 mat to 10x4
+    let data = random_vec(8 * 2);
+    let mut cx = Graph::new();
+    let a = cx.tensor::<R2<8, 2>>().set(data.clone());
+    let c = a
+        .pad::<R2<10, 4>, _, _>(&[(0, 2), (0, 2)])
+        .contiguous()
+        .retrieve();
+
+    cx.compile(MetalFp16Compiler::default());
+    cx.execute();
+
+    let d_dev = Cpu::default();
+    let d_a = d_dev.tensor_from_vec(data, (8, 2)).to_dtype::<f16>();
+    // There is no pad function in dfdx, so we concat with zero tensors
+    let d_b = (d_a, d_dev.zeros_like(&(2, 2))).concat_along(DAxis::<0>);
+    let d_c = (d_b, d_dev.zeros_like(&(10, 2))).concat_along(DAxis::<1>);
+
+    assert_exact(&c.data(), &d_c.to_dtype::<f32>().as_vec());
+}
+
+#[test]
+fn test_movement() {
+    let data = random_vec(32);
+    let mut cx = Graph::new();
+    let a = cx.tensor::<R1<32>>().set(data.clone());
+    let b: GraphTensor<R1<42>> = a.pad(&[(0, 10)]).contiguous().retrieve();
+    let c: GraphTensor<R1<25>> = b.slice((..25,)).realize().contiguous().retrieve();
+
+    cx.compile(MetalFp16Compiler::default());
+    cx.execute();
+
+    let d_dev = Cpu::default();
+    let d_a = d_dev
+        .tensor_from_vec(data, (DConst::<32>,))
+        .to_dtype::<f16>();
+    let d_c = d_a.slice((..25,)).to_dtype::<f32>();
+
+    assert_exact(&c.data(), &d_c.as_vec());
 }
