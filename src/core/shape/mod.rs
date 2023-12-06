@@ -3,6 +3,7 @@ mod broadcast;
 mod permute;
 mod realize;
 mod slice;
+pub mod symbolic;
 pub mod tracker;
 
 pub use realize::*;

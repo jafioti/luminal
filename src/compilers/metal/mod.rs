@@ -15,11 +15,13 @@ use half::f16;
 use itertools::Itertools;
 use metal_rs::*;
 use objc::rc::autoreleasepool;
-use regex::Regex;
 
 use crate::{
     op::{InputTensor, Operator},
-    prelude::*,
+    prelude::{
+        symbolic::{Expression, Term},
+        *,
+    },
 };
 
 impl Data for Buffer {
@@ -210,16 +212,35 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> String {
         })
 }
 
+fn expr_to_metal_string(expr: Expression) -> String {
+    let mut symbols = vec![];
+    for term in expr.terms {
+        if let Term::Num(n) = term {
+            symbols.push(n.to_string());
+        } else if let Term::Var(c) = term {
+            if c == 'z' {
+                symbols.push("idx".to_string());
+            } else {
+                symbols.push(c.to_string());
+            }
+        } else {
+            let left = symbols.pop().unwrap();
+            let right = symbols.pop().unwrap();
+            symbols.push(match term {
+                Term::Max => format!("max((uint){left}, (uint){right})"),
+                Term::Min => format!("min((uint){left}, (uint){right})"),
+                _ => format!("({left}{term:?}{right})"),
+            });
+        }
+    }
+    symbols.pop().unwrap()
+}
+
 fn get_idx_valid_exps(shape: ShapeTracker) -> (String, String) {
-    let min_re = Regex::new(r"min\((.*?), (.*?)\)").unwrap();
-    let max_re = Regex::new(r"max\((.*?), (.*?)\)").unwrap();
-    let idx_exp = shape.index_expression().to_string();
-    let idx_exp = max_re.replace_all(&idx_exp, "max((uint)($1), (uint)($2))");
-    let idx_exp = min_re.replace_all(&idx_exp, "min((uint)($1), (uint)($2))");
-    let val_exp = shape.valid_expression().to_string();
-    let val_exp = max_re.replace_all(&val_exp, "max((uint)($1), (uint)($2))");
-    let val_exp = min_re.replace_all(&val_exp, "min((uint)($1), (uint)($2))");
-    (idx_exp.to_string(), val_exp.to_string())
+    (
+        expr_to_metal_string(shape.index_expression()),
+        expr_to_metal_string(shape.valid_expression()),
+    )
 }
 
 fn get_buffer_from_tensor<'a>(tensor: &'a InputTensor) -> &'a Buffer {

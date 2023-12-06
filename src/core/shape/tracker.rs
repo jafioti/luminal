@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use num::BigInt;
-use savage_core::expression::Expression;
 use tinyvec::ArrayVec;
+
+use super::symbolic::{Expression, Term};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dim {
@@ -164,18 +164,18 @@ impl ShapeTracker {
             .iter()
             .enumerate()
             .rev()
-            .scan(Expression::Integer(BigInt::from(1)), |state, (i, x)| {
+            .scan(Term::Num(1).expr(), |state, (i, x)| {
                 let ret = state.clone();
                 if !self.fake[i] {
-                    *state *= dim_to_expression(*x);
+                    *state = state.clone() * dim_to_expression(*x);
                 }
                 Some(ret)
             })
             .collect::<Vec<_>>();
         strides.reverse();
-        let mut ret = Expression::Integer(BigInt::from(0));
-        let mut acc = Expression::Integer(BigInt::from(1));
-        let logical = Expression::Variable("idx".to_string());
+        let mut ret = Term::Num(0).expr();
+        let mut acc = Term::Num(1).expr();
+        let logical = Term::Var('z').expr();
         for (sh, stride, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
             (
                 dim_to_expression(self.dims[i]),
@@ -190,21 +190,22 @@ impl ShapeTracker {
                 - dim_to_expression(slice.0);
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
-                ret += (dim_ind - dim_to_expression(padding.0)
-                    + (dim_to_expression(slice.0)
-                        - dim_to_expression(padding.0).min(dim_to_expression(slice.0))))
-                    * stride;
+                ret = ret
+                    + (dim_ind - dim_to_expression(padding.0)
+                        + (dim_to_expression(slice.0)
+                            - dim_to_expression(padding.0).min(dim_to_expression(slice.0))))
+                        * stride;
             }
-            acc *= logical_sh;
+            acc = acc.clone() * logical_sh.clone();
         }
         ret
     }
 
     /// If this expression evaluates to 0, the logical index is invalid. Otherwise it is valid
     pub fn valid_expression(&self) -> Expression {
-        let mut ret = Expression::Integer(BigInt::from(1));
-        let mut acc = Expression::Integer(BigInt::from(1));
-        let logical = Expression::Variable("idx".to_string());
+        let mut ret = Term::Num(1).expr();
+        let mut acc = Term::Num(1).expr();
+        let logical = Term::Var('z').expr();
         for (sh, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
             (
                 dim_to_expression(self.dims[i]),
@@ -219,28 +220,16 @@ impl ShapeTracker {
                     - dim_to_expression(slice.0);
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
-                ret = Expression::And(
-                    ret.into(),
-                    Expression::GreaterThanOrEqual(
-                        dim_ind.clone().into(),
-                        (dim_to_expression(padding.0)
-                            - dim_to_expression(slice.0).min(dim_to_expression(padding.0)))
-                        .into(),
-                    )
-                    .into(),
-                );
-                ret = Expression::And(
-                    ret.into(),
-                    Expression::LessThan(
-                        dim_ind.clone().into(),
-                        (sh + dim_to_expression(padding.0))
-                            .min(dim_to_expression(slice.1))
-                            .into(),
-                    )
-                    .into(),
-                );
+                ret = ret
+                    & dim_ind.clone().gte(
+                        dim_to_expression(padding.0)
+                            - dim_to_expression(slice.0).min(dim_to_expression(padding.0)),
+                    );
+                ret = ret
+                    & dim_ind
+                        .lt((sh + dim_to_expression(padding.0)).min(dim_to_expression(slice.1)));
             }
-            acc *= logical_sh;
+            acc = acc * logical_sh;
         }
         ret
     }
@@ -491,7 +480,7 @@ impl Indexer {
 
 fn dim_to_expression(d: Dim) -> Expression {
     match d {
-        Dim::Known(n) => Expression::Integer(BigInt::from(n)),
-        Dim::Unknown(c) => Expression::Variable(c.to_string()),
+        Dim::Known(n) => Term::Num(n).expr(),
+        Dim::Unknown(c) => Term::Var(c).expr(),
     }
 }
