@@ -19,7 +19,7 @@ use objc::rc::autoreleasepool;
 use crate::{
     op::{InputTensor, Operator},
     prelude::{
-        symbolic::{Expression, Term},
+        symbolic::{BigExpression, Term},
         *,
     },
 };
@@ -212,7 +212,7 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> String {
         })
 }
 
-fn expr_to_metal_string(expr: Expression) -> String {
+fn expr_to_metal_string(expr: BigExpression) -> String {
     let mut symbols = vec![];
     for term in expr.terms {
         if let Term::Num(n) = term {
