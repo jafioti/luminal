@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use tinyvec::ArrayVec;
 
-use super::symbolic::{BigExpression, Term};
+use super::symbolic::{BigExprInterface, BigExpression};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dim {
@@ -164,7 +164,7 @@ impl ShapeTracker {
             .iter()
             .enumerate()
             .rev()
-            .scan(Term::Num(1).big_expr(), |state, (i, x)| {
+            .scan(1.big_expr(), |state, (i, x)| {
                 let ret = state.clone();
                 if !self.fake[i] {
                     *state = state.clone() * dim_to_expression(*x);
@@ -173,9 +173,9 @@ impl ShapeTracker {
             })
             .collect::<Vec<_>>();
         strides.reverse();
-        let mut ret = Term::Num(0).big_expr();
-        let mut acc = Term::Num(1).big_expr();
-        let logical = Term::Var('z').big_expr();
+        let mut ret = 0.big_expr();
+        let mut acc = 1.big_expr();
+        let logical = 'z'.big_expr();
         for (sh, stride, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
             (
                 dim_to_expression(self.dims[i]),
@@ -203,9 +203,9 @@ impl ShapeTracker {
 
     /// If this BigExpression evaluates to 0, the logical index is invalid. Otherwise it is valid
     pub fn valid_expression(&self) -> BigExpression {
-        let mut ret = Term::Num(1).big_expr();
-        let mut acc = Term::Num(1).big_expr();
-        let logical = Term::Var('z').big_expr();
+        let mut ret = 1.big_expr();
+        let mut acc = 1.big_expr();
+        let logical = 'z'.big_expr();
         for (sh, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
             (
                 dim_to_expression(self.dims[i]),
@@ -480,7 +480,7 @@ impl Indexer {
 
 fn dim_to_expression(d: Dim) -> BigExpression {
     match d {
-        Dim::Known(n) => Term::Num(n).big_expr(),
-        Dim::Unknown(c) => Term::Var(c).big_expr(),
+        Dim::Known(n) => n.big_expr(),
+        Dim::Unknown(c) => c.big_expr(),
     }
 }

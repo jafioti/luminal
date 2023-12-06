@@ -223,9 +223,47 @@ impl From<Term> for Expression {
     }
 }
 
-impl From<usize> for Term {
-    fn from(value: usize) -> Self {
-        Term::Num(value)
+pub trait ExprInterface {
+    fn expr(self) -> Expression;
+}
+
+impl ExprInterface for usize {
+    fn expr(self) -> Expression {
+        Term::Num(self).expr()
+    }
+}
+
+impl ExprInterface for char {
+    fn expr(self) -> Expression {
+        Term::Var(self).expr()
+    }
+}
+
+impl ExprInterface for i32 {
+    fn expr(self) -> Expression {
+        Term::Num(self as usize).expr()
+    }
+}
+
+pub trait BigExprInterface {
+    fn big_expr(self) -> BigExpression;
+}
+
+impl BigExprInterface for usize {
+    fn big_expr(self) -> BigExpression {
+        Term::Num(self).big_expr()
+    }
+}
+
+impl BigExprInterface for char {
+    fn big_expr(self) -> BigExpression {
+        Term::Var(self).big_expr()
+    }
+}
+
+impl BigExprInterface for i32 {
+    fn big_expr(self) -> BigExpression {
+        Term::Num(self as usize).big_expr()
     }
 }
 
