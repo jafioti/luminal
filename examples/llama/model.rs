@@ -6,7 +6,6 @@ use luminal::{
     nn::{activation::RMSNorm, embedding::Embedding},
     op::Function,
     prelude::*,
-    shape::symbolic::ExprInterface,
 };
 
 // Full LLaMa model implementation, heavily based off of https://github.com/coreylowman/llama-dfdx/blob/main/src/modeling.rs
@@ -201,8 +200,8 @@ fn attn_forward<
         .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
             Batch::const_size(),
             Seq::const_size(),
-            NUM_HEADS.expr(),
-            HEAD_DIM.expr(),
+            NUM_HEADS.into(),
+            HEAD_DIM.into(),
         ])
         .permute::<_, Axes4<0, 2, 1, 3>>();
     let k = x
@@ -210,8 +209,8 @@ fn attn_forward<
         .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
             Batch::const_size(),
             Seq::const_size(),
-            NUM_HEADS.expr(),
-            HEAD_DIM.expr(),
+            NUM_HEADS.into(),
+            HEAD_DIM.into(),
         ])
         .permute::<_, Axes4<0, 2, 1, 3>>();
     let v = x
@@ -219,8 +218,8 @@ fn attn_forward<
         .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
             Batch::const_size(),
             Seq::const_size(),
-            NUM_HEADS.expr(),
-            HEAD_DIM.expr(),
+            NUM_HEADS.into(),
+            HEAD_DIM.into(),
         ])
         .permute::<_, Axes4<0, 2, 1, 3>>();
     let (q, k) = attn.rotary_embed.forward((
@@ -274,7 +273,7 @@ impl<
             .dyn_reshape::<(Batch, CurSeq, Const<HIDDEN>)>(vec![
                 Batch::const_size(),
                 CurSeq::const_size(),
-                HIDDEN.expr(),
+                HIDDEN.into(),
             ]);
         (o.matmul(self.o_proj.permute()), (k, v))
     }
@@ -323,7 +322,7 @@ impl<
             .dyn_reshape::<(Batch, CurSeq, Const<HIDDEN>)>(vec![
                 Batch::const_size(),
                 CurSeq::const_size(),
-                HIDDEN.expr(),
+                HIDDEN.into(),
             ]);
 
         (o.matmul(self.o_proj.permute()), (k, v))

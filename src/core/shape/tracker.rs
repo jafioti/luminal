@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use tinyvec::ArrayVec;
 
-use super::symbolic::{BigExprInterface, BigExpression, ExprInterface, Expression};
+use super::symbolic::{BigExpression, Expression};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShapeTracker {
@@ -26,8 +26,8 @@ impl ShapeTracker {
             s.dims.push(*d);
             s.indexes.push(i);
             s.fake.push(false);
-            s.slices.push((0.expr(), i32::MAX.expr())); // Unset upper bound slices are i32::MAX
-            s.padding.push((0.expr(), 0.expr()));
+            s.slices.push((0.into(), i32::MAX.into())); // Unset upper bound slices are i32::MAX
+            s.padding.push((0.into(), 0.into()));
         }
         s
     }
@@ -46,8 +46,8 @@ impl ShapeTracker {
         self.indexes.insert(axis, self.dims.len());
         self.dims.push(dim);
         self.fake.push(true);
-        self.slices.push((0.expr(), i32::MAX.expr()));
-        self.padding.push((0.expr(), 0.expr()));
+        self.slices.push((0.into(), i32::MAX.into()));
+        self.padding.push((0.into(), 0.into()));
     }
 
     /// Remove a dimension
@@ -130,7 +130,7 @@ impl ShapeTracker {
             .iter()
             .enumerate()
             .rev()
-            .scan(1.big_expr(), |state, (i, x)| {
+            .scan(BigExpression::from(1), |state, (i, x)| {
                 let ret = state.clone();
                 if !self.fake[i] {
                     *state = state.clone() * *x;
@@ -139,9 +139,9 @@ impl ShapeTracker {
             })
             .collect::<Vec<_>>();
         strides.reverse();
-        let mut ret = 0.big_expr();
-        let mut acc = 1.big_expr();
-        let logical = 'z'.big_expr();
+        let mut ret = BigExpression::from(0);
+        let mut acc = BigExpression::from(1);
+        let logical = BigExpression::from('z');
         for (sh, stride, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
             (
                 self.dims[i],
@@ -151,7 +151,8 @@ impl ShapeTracker {
                 self.fake[i],
             )
         }) {
-            let logical_sh = (sh.big_expr() + padding.0 + padding.1).min(slice.1) - slice.0;
+            let logical_sh =
+                (BigExpression::from(sh) + padding.0 + padding.1).min(slice.1) - slice.0;
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
                 ret = ret + (dim_ind - padding.0 + (slice.0 - padding.0.min(slice.0))) * stride;
@@ -163,16 +164,17 @@ impl ShapeTracker {
 
     /// If this BigExpression evaluates to 0, the logical index is invalid. Otherwise it is valid
     pub fn valid_expression(&self) -> BigExpression {
-        let mut ret = 1.big_expr();
-        let mut acc = 1.big_expr();
-        let logical = 'z'.big_expr();
+        let mut ret = BigExpression::from(1);
+        let mut acc = BigExpression::from(1);
+        let logical = BigExpression::from('z');
         for (sh, padding, slice, fake) in self
             .indexes
             .into_iter()
             .rev()
             .map(|i| (self.dims[i], self.padding[i], self.slices[i], self.fake[i]))
         {
-            let logical_sh = (sh.big_expr() + padding.0 + padding.1).min(slice.1) - slice.0;
+            let logical_sh =
+                (BigExpression::from(sh) + padding.0 + padding.1).min(slice.1) - slice.0;
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
                 ret = ret & dim_ind.clone().gte(padding.0 - slice.0.min(padding.0));
@@ -286,15 +288,15 @@ impl ShapeTracker {
     /// Given a dyn dim map, resolve global dyn dims into known dims
     pub fn resolve_global_dyn_dims(mut self, dyn_dim_map: &HashMap<char, usize>) -> Self {
         for d in self.dims.iter_mut() {
-            *d = d.exec(dyn_dim_map).unwrap().expr();
+            *d = d.exec(dyn_dim_map).unwrap().into();
         }
         for (a, b) in self.padding.iter_mut() {
-            *a = a.exec(dyn_dim_map).unwrap().expr();
-            *b = b.exec(dyn_dim_map).unwrap().expr();
+            *a = a.exec(dyn_dim_map).unwrap().into();
+            *b = b.exec(dyn_dim_map).unwrap().into();
         }
         for (a, b) in self.slices.iter_mut() {
-            *a = a.exec(dyn_dim_map).unwrap().expr();
-            *b = b.exec(dyn_dim_map).unwrap().expr();
+            *a = a.exec(dyn_dim_map).unwrap().into();
+            *b = b.exec(dyn_dim_map).unwrap().into();
         }
         self
     }
@@ -321,7 +323,7 @@ pub fn resolve_local_dyn_dims(a: &mut ShapeTracker, b: &mut ShapeTracker, defaul
         if a.dims[a.indexes[i]].is_unknown() {
             a.dims[a.indexes[i]] = b.dims[b.indexes[i]];
             if a.dims[a.indexes[i]].is_unknown() && default_to_one {
-                a.dims[a.indexes[i]] = 1.expr();
+                a.dims[a.indexes[i]] = 1.into();
             }
         }
     }
@@ -331,7 +333,7 @@ pub fn resolve_local_dyn_dims(a: &mut ShapeTracker, b: &mut ShapeTracker, defaul
         if b.dims[b.indexes[i]].is_unknown() {
             b.dims[b.indexes[i]] = a.dims[a.indexes[i]];
             if b.dims[b.indexes[i]].is_unknown() && default_to_one {
-                b.dims[b.indexes[i]] = 1.expr();
+                b.dims[b.indexes[i]] = 1.into();
             }
         }
     }

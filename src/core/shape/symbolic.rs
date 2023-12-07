@@ -275,71 +275,51 @@ impl From<Term> for Expression {
     }
 }
 
-pub trait ExprInterface {
-    fn expr(self) -> Expression;
-}
-
-impl ExprInterface for usize {
-    fn expr(self) -> Expression {
-        Term::Num(self).expr()
+impl From<char> for Expression {
+    fn from(value: char) -> Self {
+        Expression::from(Term::Var(value))
     }
 }
 
-impl ExprInterface for &usize {
-    fn expr(self) -> Expression {
-        Term::Num(*self).expr()
+impl From<usize> for Expression {
+    fn from(value: usize) -> Self {
+        Expression::from(Term::Num(value))
     }
 }
 
-impl ExprInterface for char {
-    fn expr(self) -> Expression {
-        Term::Var(self).expr()
+impl From<&usize> for Expression {
+    fn from(value: &usize) -> Self {
+        Expression::from(Term::Num(*value))
     }
 }
 
-impl ExprInterface for i32 {
-    fn expr(self) -> Expression {
-        Term::Num(self as usize).expr()
+impl From<i32> for Expression {
+    fn from(value: i32) -> Self {
+        Expression::from(value as usize)
     }
 }
 
-impl ExprInterface for Expression {
-    fn expr(self) -> Expression {
-        self
+impl From<char> for BigExpression {
+    fn from(value: char) -> Self {
+        BigExpression::from(Term::Var(value))
     }
 }
 
-pub trait BigExprInterface {
-    fn big_expr(self) -> BigExpression;
-}
-
-impl BigExprInterface for usize {
-    fn big_expr(self) -> BigExpression {
-        Term::Num(self).big_expr()
+impl From<usize> for BigExpression {
+    fn from(value: usize) -> Self {
+        BigExpression::from(Term::Num(value))
     }
 }
 
-impl BigExprInterface for char {
-    fn big_expr(self) -> BigExpression {
-        Term::Var(self).big_expr()
+impl From<&usize> for BigExpression {
+    fn from(value: &usize) -> Self {
+        BigExpression::from(Term::Num(*value))
     }
 }
 
-impl BigExprInterface for i32 {
-    fn big_expr(self) -> BigExpression {
-        Term::Num(self as usize).big_expr()
-    }
-}
-
-impl BigExprInterface for Expression {
-    fn big_expr(self) -> BigExpression {
-        self.into()
-    }
-}
-
-impl BigExprInterface for BigExpression {
-    fn big_expr(self) -> BigExpression {
-        self
+impl From<i32> for BigExpression {
+    fn from(value: i32) -> Self {
+        BigExpression::from(value as usize)
     }
 }
 
@@ -496,10 +476,10 @@ mod tests {
     use super::*;
     #[test]
     fn test_expressions() {
-        let n = ('x'.expr() + Term::Num(255)) / Term::Num(256) * Term::Num(256);
+        let n = (Expression::from('x') + Term::Num(255)) / Term::Num(256) * Term::Num(256);
         assert_eq!(n.exec(&HashMap::from([('x', 767)])).unwrap(), 768);
 
-        let n = ('x'.big_expr() + Term::Num(255)) / Term::Num(256) * Term::Num(256);
+        let n = (BigExpression::from('x') + Term::Num(255)) / Term::Num(256) * Term::Num(256);
         assert_eq!(n.exec(&HashMap::from([('x', 767)])).unwrap(), 768);
     }
 }

@@ -3,7 +3,7 @@ use petgraph::stable_graph::NodeIndex;
 use crate::{
     compilers::metal::*,
     op::{InputTensor, Operator},
-    prelude::{symbolic::ExprInterface, *},
+    prelude::*,
 };
 
 use metal_rs::{objc::rc::autoreleasepool, *};
@@ -316,8 +316,8 @@ impl Compiler for MetalMatMulCompiler {
             SelectOp::new()
                 .ty::<MetalMul<f32>>()
                 .shapes(vec![
-                    vec!['A'.expr(), 'C'.expr(), 'B'.expr()],
-                    vec!['A'.expr(), 'C'.expr(), 'B'.expr()],
+                    vec!['A'.into(), 'C'.into(), 'B'.into()],
+                    vec!['A'.into(), 'C'.into(), 'B'.into()],
                 ])
                 .fakes(vec![vec![false, true, false], vec![true, false, false]])
                 .ptr(&mut mul),
@@ -404,8 +404,8 @@ impl Compiler for MetalMatMulCompiler {
             SelectOp::new()
                 .ty::<MetalMul<f32>>()
                 .shapes(vec![
-                    vec!['D'.expr(), 'A'.expr(), 'C'.expr(), 'B'.expr()],
-                    vec!['D'.expr(), 'A'.expr(), 'C'.expr(), 'B'.expr()],
+                    vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
+                    vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
                 ])
                 .fakes(vec![
                     vec![false, false, true, false],

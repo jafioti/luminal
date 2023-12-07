@@ -17,8 +17,6 @@ pub use broadcast::*;
 pub use permute::*;
 pub use tracker::*;
 
-use crate::core::shape::symbolic::ExprInterface;
-
 use self::symbolic::Expression;
 
 // This currently is a lot more complicated than it needs to be, because it's based on dfdx and is ready to do dynamic dimensions.
@@ -45,7 +43,7 @@ pub struct Dyn<const C: char>;
 
 impl<const C: char> Dimension for Dyn<C> {
     fn const_size() -> Expression {
-        C.expr()
+        C.into()
     }
 }
 
@@ -54,7 +52,7 @@ impl<const C: char> Dimension for Dyn<C> {
 pub struct Const<const M: usize>;
 impl<const M: usize> Dimension for Const<M> {
     fn const_size() -> Expression {
-        M.expr()
+        M.into()
     }
 }
 
@@ -254,7 +252,7 @@ macro_rules! shape {
             type LastAxis = Axis<{$Num - 1}>;
 
             fn realized_shape() -> Vec<crate::prelude::symbolic::Expression> {
-                vec!['-'.expr(); $Num]
+                vec!['-'.into(); $Num]
             }
 
             fn to_tracker() -> ShapeTracker {

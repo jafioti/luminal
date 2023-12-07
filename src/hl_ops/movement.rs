@@ -1,9 +1,6 @@
 use crate::{
     op,
-    prelude::{
-        symbolic::{ExprInterface, Expression},
-        *,
-    },
+    prelude::{symbolic::Expression, *},
 };
 
 impl<S: Shape> GraphTensor<S> {
@@ -98,14 +95,14 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
-    pub fn pad<Dst: Shape, Start: ExprInterface + Copy, End: ExprInterface + Copy>(
+    pub fn pad<Dst: Shape, Start: Into<Expression> + Copy, End: Into<Expression> + Copy>(
         mut self,
         ranges: &[(Start, End)],
     ) -> GraphTensor<Dst> {
         self.shape.pad(
             &ranges
                 .iter()
-                .map(|i| (i.0.expr(), i.1.expr()))
+                .map(|i| (i.0.into(), i.1.into()))
                 .collect::<Vec<_>>(),
         );
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)

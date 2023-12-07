@@ -1,22 +1,22 @@
 use super::*;
 use std::ops::{Bound, Range, RangeBounds, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 
-fn get_start_bound<D: ExprInterface + Copy>(bound: Bound<D>) -> Expression {
+fn get_start_bound<D: Into<Expression> + Copy>(bound: Bound<D>) -> Expression {
     match bound {
-        Bound::Included(x) => x.expr(),
-        Bound::Excluded(x) => x.expr() + 1.expr(),
-        Bound::Unbounded => 0.expr(),
+        Bound::Included(x) => x.into(),
+        Bound::Excluded(x) => x.into() + Expression::from(1),
+        Bound::Unbounded => 0.into(),
     }
 }
 
-fn get_end_bound<D: ExprInterface + Copy, S: ExprInterface>(
+fn get_end_bound<D: Into<Expression> + Copy, S: Into<Expression>>(
     bound: Bound<D>,
     size: S,
 ) -> Expression {
     match bound {
-        Bound::Excluded(x) => x.expr(),
-        Bound::Included(x) => x.expr() + 1.expr(),
-        Bound::Unbounded => size.expr(),
+        Bound::Excluded(x) => x.into(),
+        Bound::Included(x) => x.into() + Expression::from(1),
+        Bound::Unbounded => size.into(),
     }
 }
 

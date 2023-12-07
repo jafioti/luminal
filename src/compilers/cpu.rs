@@ -5,7 +5,7 @@ use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
 use crate::{
     op::{Exp2, InputTensor, Log2, Mul, Operator, Recip, Sin, Sqrt, SumReduce},
-    prelude::{symbolic::ExprInterface, *},
+    prelude::*,
 };
 
 // Ops and compilers specific to CPU execution
@@ -27,8 +27,8 @@ impl Compiler for MatMul2DCompiler {
             SelectOp::new()
                 .ty::<Mul>()
                 .shapes(vec![
-                    vec!['A'.expr(), 'C'.expr(), 'B'.expr()],
-                    vec!['A'.expr(), 'C'.expr(), 'B'.expr()],
+                    vec!['A'.into(), 'C'.into(), 'B'.into()],
+                    vec!['A'.into(), 'C'.into(), 'B'.into()],
                 ])
                 .fakes(vec![vec![false, true, false], vec![true, false, false]])
                 .ptr(&mut mul),
@@ -136,8 +136,8 @@ impl Compiler for BatchMatMul2DCompiler {
             SelectOp::new()
                 .ty::<Mul>()
                 .shapes(vec![
-                    vec!['D'.expr(), 'A'.expr(), 'C'.expr(), 'B'.expr()],
-                    vec!['D'.expr(), 'A'.expr(), 'C'.expr(), 'B'.expr()],
+                    vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
+                    vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
                 ])
                 .fakes(vec![
                     vec![false, false, true, false],
