@@ -17,6 +17,10 @@ pub use broadcast::*;
 pub use permute::*;
 pub use tracker::*;
 
+use crate::core::shape::symbolic::ExprInterface;
+
+use self::symbolic::Expression;
+
 // This currently is a lot more complicated than it needs to be, because it's based on dfdx and is ready to do dynamic dimensions.
 // TODO: Actually use dynamic dimensions
 // TODO: Simplify this code
@@ -26,7 +30,7 @@ pub trait Dimension:
     'static + Copy + Clone + std::fmt::Debug + Send + Sync + Eq + PartialEq
 {
     // fn size(&self) -> usize;
-    fn const_size() -> Dim;
+    fn const_size() -> Expression;
     // fn from_size(size: usize) -> Option<Self>;
 }
 
@@ -40,8 +44,8 @@ pub trait ConstDim: Default + Dimension {
 pub struct Dyn<const C: char>;
 
 impl<const C: char> Dimension for Dyn<C> {
-    fn const_size() -> Dim {
-        Dim::Unknown(C)
+    fn const_size() -> Expression {
+        C.expr()
     }
 }
 
@@ -49,8 +53,8 @@ impl<const C: char> Dimension for Dyn<C> {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Const<const M: usize>;
 impl<const M: usize> Dimension for Const<M> {
-    fn const_size() -> Dim {
-        Dim::Known(M)
+    fn const_size() -> Expression {
+        M.expr()
     }
 }
 
@@ -176,7 +180,7 @@ pub trait Shape:
     /// The last axis of this shape
     type LastAxis: Axes;
 
-    fn realized_shape() -> Vec<Dim>;
+    fn realized_shape() -> Vec<Expression>;
     fn to_tracker() -> crate::core::shape::tracker::ShapeTracker;
 }
 
@@ -228,7 +232,7 @@ macro_rules! shape {
             type AllAxes = $All<$($Idx,)*>;
             type LastAxis = Axis<{$Num - 1}>;
 
-            fn realized_shape() -> Vec<Dim> {
+            fn realized_shape() -> Vec<crate::prelude::symbolic::Expression> {
                 vec![$($D::const_size(), )*]
             }
             fn to_tracker() -> ShapeTracker {
@@ -249,8 +253,8 @@ macro_rules! shape {
             type AllAxes = $All<$($Idx,)*>;
             type LastAxis = Axis<{$Num - 1}>;
 
-            fn realized_shape() -> Vec<Dim> {
-                vec![Dim::Unknown('-'); $Num]
+            fn realized_shape() -> Vec<crate::prelude::symbolic::Expression> {
+                vec!['-'.expr(); $Num]
             }
 
             fn to_tracker() -> ShapeTracker {
@@ -266,7 +270,7 @@ impl Shape for () {
     type Concrete = [usize; 0];
     type AllAxes = Axis<0>;
     type LastAxis = Axis<0>;
-    fn realized_shape() -> Vec<Dim> {
+    fn realized_shape() -> Vec<Expression> {
         vec![]
     }
     fn to_tracker() -> ShapeTracker {

@@ -1,4 +1,10 @@
-use crate::{op, prelude::*};
+use crate::{
+    op,
+    prelude::{
+        symbolic::{ExprInterface, Expression},
+        *,
+    },
+};
 
 impl<S: Shape> GraphTensor<S> {
     pub fn permute<Dst: Shape, Ax: Axes>(mut self) -> GraphTensor<Dst>
@@ -47,7 +53,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Dynamically reshape with annotations for the shape tracker
-    pub fn dyn_reshape<N: Shape>(self, shape: Vec<Dim>) -> GraphTensor<N> {
+    pub fn dyn_reshape<N: Shape>(self, shape: Vec<Expression>) -> GraphTensor<N> {
         let id = if !self.shape.is_contiguous() {
             // Insert contiguous call
             self.graph()
@@ -92,14 +98,14 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
-    pub fn pad<Dst: Shape, Start: Into<Dim> + Copy, End: Into<Dim> + Copy>(
+    pub fn pad<Dst: Shape, Start: ExprInterface + Copy, End: ExprInterface + Copy>(
         mut self,
         ranges: &[(Start, End)],
     ) -> GraphTensor<Dst> {
         self.shape.pad(
             &ranges
                 .iter()
-                .map(|i| (i.0.into(), i.1.into()))
+                .map(|i| (i.0.expr(), i.1.expr()))
                 .collect::<Vec<_>>(),
         );
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)

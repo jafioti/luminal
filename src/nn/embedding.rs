@@ -1,6 +1,9 @@
 use rand::{thread_rng, Rng};
 
-use crate::{op, prelude::*};
+use crate::{
+    op,
+    prelude::{symbolic::ExprInterface, *},
+};
 
 // This is a really shoddy way to do gathers TODO: Do something else
 
@@ -51,7 +54,7 @@ impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
             .input(self.id, 0, self.shape) // Since indexes might have a 1 dimension we don't want getting changed, we feed it in as the first argument
             .finish();
 
-        indexes.shape.expand(2, Dim::Known(DIM));
+        indexes.shape.expand(2, DIM.expr());
         GraphTensor::from_id(res, indexes.shape.contiguous(), self.graph_ref)
     }
 }

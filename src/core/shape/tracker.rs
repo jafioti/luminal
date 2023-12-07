@@ -2,51 +2,19 @@ use std::collections::HashMap;
 
 use tinyvec::ArrayVec;
 
-use super::symbolic::{BigExprInterface, BigExpression};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Dim {
-    Known(usize),
-    Unknown(char),
-}
-
-impl From<usize> for Dim {
-    fn from(value: usize) -> Self {
-        Dim::Known(value)
-    }
-}
-impl From<&usize> for Dim {
-    fn from(value: &usize) -> Self {
-        Dim::Known(*value)
-    }
-}
-
-impl Dim {
-    pub fn to_usize(self) -> Option<usize> {
-        match self {
-            Dim::Known(n) => Some(n),
-            Dim::Unknown(_) => None,
-        }
-    }
-}
-
-impl Default for Dim {
-    fn default() -> Self {
-        Self::Unknown('-')
-    }
-}
+use super::symbolic::{BigExprInterface, BigExpression, ExprInterface, Expression};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShapeTracker {
-    pub dims: ArrayVec<[Dim; 6]>,
+    pub dims: ArrayVec<[Expression; 6]>,
     pub indexes: ArrayVec<[usize; 6]>,
     pub fake: ArrayVec<[bool; 6]>,
-    pub slices: ArrayVec<[(Dim, Dim); 6]>,
-    pub padding: ArrayVec<[(Dim, Dim); 6]>,
+    pub slices: ArrayVec<[(Expression, Expression); 6]>,
+    pub padding: ArrayVec<[(Expression, Expression); 6]>,
 }
 
 impl ShapeTracker {
-    pub fn new(dims: &[Dim]) -> Self {
+    pub fn new(dims: &[Expression]) -> Self {
         let mut s = Self {
             dims: Default::default(),
             indexes: Default::default(),
@@ -58,15 +26,14 @@ impl ShapeTracker {
             s.dims.push(*d);
             s.indexes.push(i);
             s.fake.push(false);
-            s.slices
-                .push((Dim::Known(0), Dim::Known(i32::MAX as usize))); // Unset upper bound slices are i32::MAX
-            s.padding.push((Dim::Known(0), Dim::Known(0)));
+            s.slices.push((0.expr(), i32::MAX.expr())); // Unset upper bound slices are i32::MAX
+            s.padding.push((0.expr(), 0.expr()));
         }
         s
     }
 
     /// Create a shape tracker where all dims are fake
-    pub fn fake(dims: &[Dim]) -> Self {
+    pub fn fake(dims: &[Expression]) -> Self {
         let mut s = Self::new(dims);
         for i in 0..dims.len() {
             s.fake[i] = true;
@@ -75,17 +42,16 @@ impl ShapeTracker {
     }
 
     /// Add dim along a certian axis
-    pub fn expand(&mut self, axis: usize, dim: Dim) {
+    pub fn expand(&mut self, axis: usize, dim: Expression) {
         self.indexes.insert(axis, self.dims.len());
         self.dims.push(dim);
         self.fake.push(true);
-        self.slices
-            .push((Dim::Known(0), Dim::Known(i32::MAX as usize)));
-        self.padding.push((Dim::Known(0), Dim::Known(0)));
+        self.slices.push((0.expr(), i32::MAX.expr()));
+        self.padding.push((0.expr(), 0.expr()));
     }
 
     /// Remove a dimension
-    pub fn remove_dim(&mut self, axis: usize) -> Dim {
+    pub fn remove_dim(&mut self, axis: usize) -> Expression {
         let index = self.indexes.remove(axis);
         self.fake.remove(index);
         for i in self.indexes.iter_mut() {
@@ -167,7 +133,7 @@ impl ShapeTracker {
             .scan(1.big_expr(), |state, (i, x)| {
                 let ret = state.clone();
                 if !self.fake[i] {
-                    *state = state.clone() * dim_to_expression(*x);
+                    *state = state.clone() * *x;
                 }
                 Some(ret)
             })
@@ -178,23 +144,17 @@ impl ShapeTracker {
         let logical = 'z'.big_expr();
         for (sh, stride, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
             (
-                dim_to_expression(self.dims[i]),
+                self.dims[i],
                 strides[i].clone(),
                 self.padding[i],
                 self.slices[i],
                 self.fake[i],
             )
         }) {
-            let logical_sh = (sh + dim_to_expression(padding.0) + dim_to_expression(padding.1))
-                .min(dim_to_expression(slice.1))
-                - dim_to_expression(slice.0);
+            let logical_sh = (sh.big_expr() + padding.0 + padding.1).min(slice.1) - slice.0;
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
-                ret = ret
-                    + (dim_ind - dim_to_expression(padding.0)
-                        + (dim_to_expression(slice.0)
-                            - dim_to_expression(padding.0).min(dim_to_expression(slice.0))))
-                        * stride;
+                ret = ret + (dim_ind - padding.0 + (slice.0 - padding.0.min(slice.0))) * stride;
             }
             acc = acc.clone() * logical_sh.clone();
         }
@@ -206,28 +166,17 @@ impl ShapeTracker {
         let mut ret = 1.big_expr();
         let mut acc = 1.big_expr();
         let logical = 'z'.big_expr();
-        for (sh, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
-            (
-                dim_to_expression(self.dims[i]),
-                self.padding[i],
-                self.slices[i],
-                self.fake[i],
-            )
-        }) {
-            let logical_sh =
-                (sh.clone() + dim_to_expression(padding.0) + dim_to_expression(padding.1))
-                    .min(dim_to_expression(slice.1))
-                    - dim_to_expression(slice.0);
+        for (sh, padding, slice, fake) in self
+            .indexes
+            .into_iter()
+            .rev()
+            .map(|i| (self.dims[i], self.padding[i], self.slices[i], self.fake[i]))
+        {
+            let logical_sh = (sh.big_expr() + padding.0 + padding.1).min(slice.1) - slice.0;
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
-                ret = ret
-                    & dim_ind.clone().gte(
-                        dim_to_expression(padding.0)
-                            - dim_to_expression(slice.0).min(dim_to_expression(padding.0)),
-                    );
-                ret = ret
-                    & dim_ind
-                        .lt((sh + dim_to_expression(padding.0)).min(dim_to_expression(slice.1)));
+                ret = ret & dim_ind.clone().gte(padding.0 - slice.0.min(padding.0));
+                ret = ret & dim_ind.lt((sh + padding.0).min(slice.1));
             }
             acc = acc * logical_sh;
         }
@@ -239,13 +188,7 @@ impl ShapeTracker {
         self.indexes
             .into_iter()
             // Filter out unknowns
-            .filter_map(|i| {
-                if let Dim::Known(n) = self.dims[i] {
-                    Some((i, n))
-                } else {
-                    None
-                }
-            })
+            .filter_map(|i| self.dims[i].to_usize().map(|n| (i, n)))
             // Add pads
             .map(|(ind, dim)| {
                 (
@@ -284,7 +227,7 @@ impl ShapeTracker {
         self.len() == 0
     }
 
-    pub fn realize(mut self, dims: &[Dim]) -> Self {
+    pub fn realize(mut self, dims: &[Expression]) -> Self {
         for (i, ind) in self.indexes.iter().enumerate() {
             self.dims[*ind] = dims[i];
         }
@@ -296,15 +239,10 @@ impl ShapeTracker {
         let new_dims = self
             .indexes
             .into_iter()
-            .map(|i| match self.dims[i] {
-                Dim::Known(n) => Dim::Known(
-                    n.min(
-                        self.slices[i].1.to_usize().unwrap_or(i32::MAX as usize)
-                            - self.slices[i].0.to_usize().unwrap_or_default(),
-                    ) + self.padding[i].0.to_usize().unwrap_or_default()
-                        + self.padding[i].1.to_usize().unwrap_or_default(),
-                ),
-                Dim::Unknown(c) => Dim::Unknown(c),
+            .map(|i| {
+                self.dims[i].min(self.slices[i].1 - self.slices[i].0)
+                    + self.padding[i].0
+                    + self.padding[i].1
             })
             .collect::<Vec<_>>();
         Self::new(&new_dims)
@@ -316,114 +254,63 @@ impl ShapeTracker {
     }
 
     /// Realize the true shape
-    pub fn shape(&self) -> Vec<Dim> {
+    pub fn shape(&self) -> Vec<Expression> {
         self.indexes.into_iter().map(|i| self.dims[i]).collect()
     }
 
     /// Take a slice
-    pub fn slice(&mut self, slices: &[(Dim, Dim)]) {
+    pub fn slice(&mut self, slices: &[(Expression, Expression)]) {
         for (i, (s, e)) in slices.iter().enumerate() {
-            // If we are slicing into a padded dim, remove as much padding as possible
-            if let Dim::Known(mut s) = s {
-                if self.padding[self.indexes[i]]
-                    .0
-                    .to_usize()
-                    .map(|n| n != 0)
-                    .unwrap_or_default()
-                {
-                    let padding = self.padding[self.indexes[i]].0.to_usize().unwrap();
-                    self.padding[self.indexes[i]].0 = Dim::Known(padding.saturating_sub(s));
-                    s = s.saturating_sub(padding);
-                }
-                if let Dim::Known(a) = self.slices[self.indexes[i]].0 {
-                    self.slices[self.indexes[i]].0 = Dim::Known(a + s);
-                } else {
-                    self.slices[self.indexes[i]].0 = Dim::Known(s);
-                }
-            } else {
-                self.slices[self.indexes[i]].0 = *s;
-            }
-            if let Dim::Known(a) = self.slices[self.indexes[i]].1 {
-                if let Dim::Known(e) = e {
-                    self.slices[self.indexes[i]].1 = Dim::Known(a.min(*e));
-                } else {
-                    self.slices[self.indexes[i]].1 = *e;
-                }
-            } else {
-                self.slices[self.indexes[i]].1 = *e;
-            }
+            self.slices[self.indexes[i]].0 = *s;
+            self.slices[self.indexes[i]].1 = *e;
         }
     }
 
     /// Add padding
-    pub fn pad(&mut self, padding: &[(Dim, Dim)]) {
+    pub fn pad(&mut self, padding: &[(Expression, Expression)]) {
         for (i, (s, e)) in padding.iter().enumerate() {
-            if let Dim::Known(a) = self.padding[self.indexes[i]].0 {
-                if let Dim::Known(s) = s {
-                    self.padding[self.indexes[i]].0 = Dim::Known(a + *s);
-                } else {
-                    self.padding[self.indexes[i]].0 = *s;
-                }
-            } else {
-                self.padding[self.indexes[i]].0 = *s;
-            }
-            if e.to_usize().map(|n| n != 0).unwrap_or_default()
+            self.padding[self.indexes[i]].0 = *s;
+            if e.to_usize().map(|n| n != 0).unwrap_or(true)
                 && self.slices[self.indexes[i]]
                     .1
                     .to_usize()
                     .map(|n| n as i32 != i32::MAX)
-                    .unwrap_or_default()
+                    .unwrap_or(true)
             {
                 panic!("Adding padding to a slice isn't supported")
             }
-            if let Dim::Known(a) = self.padding[self.indexes[i]].1 {
-                if let Dim::Known(e) = e {
-                    self.padding[self.indexes[i]].1 = Dim::Known(a + *e);
-                } else {
-                    self.padding[self.indexes[i]].1 = *e;
-                }
-            } else {
-                self.padding[self.indexes[i]].1 = *e;
-            }
+            self.padding[self.indexes[i]].1 = *e;
         }
     }
 
     /// Given a dyn dim map, resolve global dyn dims into known dims
     pub fn resolve_global_dyn_dims(mut self, dyn_dim_map: &HashMap<char, usize>) -> Self {
         for d in self.dims.iter_mut() {
-            if let Dim::Unknown(u) = *d {
-                *d = Dim::Known(dyn_dim_map[&u]);
-            }
+            *d = d.exec(dyn_dim_map).unwrap().expr();
         }
         for (a, b) in self.padding.iter_mut() {
-            if let Dim::Unknown(u) = *a {
-                *a = Dim::Known(dyn_dim_map[&u]);
-            }
-            if let Dim::Unknown(u) = *b {
-                *b = Dim::Known(dyn_dim_map[&u]);
-            }
+            *a = a.exec(dyn_dim_map).unwrap().expr();
+            *b = b.exec(dyn_dim_map).unwrap().expr();
         }
         for (a, b) in self.slices.iter_mut() {
-            if let Dim::Unknown(u) = *a {
-                *a = Dim::Known(dyn_dim_map[&u]);
-            }
-            if let Dim::Unknown(u) = *b {
-                *b = Dim::Known(dyn_dim_map[&u]);
-            }
+            *a = a.exec(dyn_dim_map).unwrap().expr();
+            *b = b.exec(dyn_dim_map).unwrap().expr();
         }
         self
     }
 
     pub fn is_sliced(&self) -> bool {
-        self.slices
-            .iter()
-            .any(|(b, e)| if let Dim::Known(n) = b {*n != 0} else {true} || if let Dim::Known(n) = e {*n as i32 != i32::MAX} else {false})
+        self.slices.iter().any(|(b, e)| {
+            b.to_usize().map(|i| i != 0).unwrap_or(true)
+                || e.to_usize().map(|n| n as i32 != i32::MAX).unwrap_or(true)
+        })
     }
 
     pub fn is_padded(&self) -> bool {
-        self.padding
-            .iter()
-            .any(|(b, e)| if let Dim::Known(n) = b {*n != 0} else {true} || if let Dim::Known(n) = e {*n != 0} else {true})
+        self.padding.iter().any(|(b, e)| {
+            b.to_usize().map(|i| i != 0).unwrap_or(true)
+                || e.to_usize().map(|n| n != 0).unwrap_or(true)
+        })
     }
 }
 
@@ -431,20 +318,20 @@ impl ShapeTracker {
 pub fn resolve_local_dyn_dims(a: &mut ShapeTracker, b: &mut ShapeTracker, default_to_one: bool) {
     // B to A
     for i in 0..a.dims.len() {
-        if matches!(a.dims[a.indexes[i]], Dim::Unknown('-')) {
+        if a.dims[a.indexes[i]].is_unknown() {
             a.dims[a.indexes[i]] = b.dims[b.indexes[i]];
-            if matches!(a.dims[a.indexes[i]], Dim::Unknown('-')) && default_to_one {
-                a.dims[a.indexes[i]] = Dim::Known(1);
+            if a.dims[a.indexes[i]].is_unknown() && default_to_one {
+                a.dims[a.indexes[i]] = 1.expr();
             }
         }
     }
 
     // A to B
     for i in 0..a.dims.len() {
-        if matches!(b.dims[b.indexes[i]], Dim::Unknown('-')) {
+        if b.dims[b.indexes[i]].is_unknown() {
             b.dims[b.indexes[i]] = a.dims[a.indexes[i]];
-            if matches!(b.dims[b.indexes[i]], Dim::Unknown('-')) && default_to_one {
-                b.dims[b.indexes[i]] = Dim::Known(1);
+            if b.dims[b.indexes[i]].is_unknown() && default_to_one {
+                b.dims[b.indexes[i]] = 1.expr();
             }
         }
     }
@@ -475,12 +362,5 @@ impl Indexer {
             acc *= logical_sh;
         }
         Some(ret)
-    }
-}
-
-fn dim_to_expression(d: Dim) -> BigExpression {
-    match d {
-        Dim::Known(n) => n.big_expr(),
-        Dim::Unknown(c) => c.big_expr(),
     }
 }

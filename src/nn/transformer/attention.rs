@@ -2,7 +2,7 @@ use std::ops::Mul;
 
 use crate::{
     nn::linear::Linear,
-    prelude::{tracker::Dim, *},
+    prelude::{symbolic::ExprInterface, *},
 };
 
 // This is still single head attention because I need a runtime reshape, like the try_reshape in dfdx
@@ -147,8 +147,8 @@ impl<
             .dyn_reshape::<(B, S1, Dyn<'-'>, Dyn<'-'>)>(vec![
                 B::const_size(),
                 S1::const_size(),
-                Dim::Known(HEADS),
-                Dim::Known(K_DIM / HEADS),
+                HEADS.expr(),
+                (K_DIM / HEADS).expr(),
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let keys = self
@@ -157,8 +157,8 @@ impl<
             .dyn_reshape::<(B, S1, Dyn<'-'>, Dyn<'-'>)>(vec![
                 B::const_size(),
                 S1::const_size(),
-                Dim::Known(HEADS),
-                Dim::Known(K_DIM / HEADS),
+                HEADS.expr(),
+                (K_DIM / HEADS).expr(),
             ])
             .permute::<_, Axes4<0, 2, 3, 1>>();
         let queries = self
@@ -167,8 +167,8 @@ impl<
             .dyn_reshape::<(B, S2, Dyn<'-'>, Dyn<'-'>)>(vec![
                 B::const_size(),
                 S2::const_size(),
-                Dim::Known(HEADS),
-                Dim::Known(K_DIM / HEADS),
+                HEADS.expr(),
+                (K_DIM / HEADS).expr(),
             ])
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
@@ -180,7 +180,7 @@ impl<
         let tokens: GraphTensor<(B, S2, Const<V_DIM>)> = weights
             .matmul(values)
             .permute::<_, Axes4<0, 2, 1, 3>>()
-            .dyn_reshape(vec![B::const_size(), S2::const_size(), Dim::Known(V_DIM)]);
+            .dyn_reshape(vec![B::const_size(), S2::const_size(), V_DIM.expr()]);
         self.w_o.forward(tokens)
     }
 }

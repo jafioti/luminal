@@ -6,10 +6,7 @@ use std::{
 };
 
 use crate::{
-    prelude::{
-        tracker::{Dim, ShapeTracker},
-        TraitObjEq,
-    },
+    prelude::{symbolic::Expression, tracker::ShapeTracker, TraitObjEq},
     tensor::Tensor,
 };
 
@@ -397,18 +394,18 @@ impl Operator for SumReduce {
             .shape()
             .iter()
             .take(self.0)
-            .filter_map(|i| if let Dim::Known(n) = i { Some(n) } else { None })
+            .filter_map(Expression::to_usize)
             .product();
         let back_size: usize = inp[0]
             .1
             .shape()
             .iter()
             .skip(self.0 + 1)
-            .filter_map(|i| if let Dim::Known(n) = i { Some(n) } else { None })
+            .filter_map(Expression::to_usize)
             .product();
-        let dim_size = match inp[0].1.shape()[self.0] {
-            Dim::Known(n) => n,
-            Dim::Unknown(_) => panic!("Can't reduce over an unknown dimension"),
+        let dim_size = match inp[0].1.shape()[self.0].to_usize() {
+            Some(n) => n,
+            None => panic!("Can't reduce over an unknown dimension"),
         };
         let mut result: Vec<f32> = vec![0.0; front_size * back_size];
         let a_data = inp[0]
@@ -446,18 +443,18 @@ impl Operator for MaxReduce {
             .shape()
             .iter()
             .take(self.0)
-            .filter_map(|i| if let Dim::Known(n) = i { Some(n) } else { None })
+            .filter_map(Expression::to_usize)
             .product();
         let back_size: usize = inp[0]
             .1
             .shape()
             .iter()
             .skip(self.0 + 1)
-            .filter_map(|i| if let Dim::Known(n) = i { Some(n) } else { None })
+            .filter_map(Expression::to_usize)
             .product();
-        let dim_size = match inp[0].1.shape()[self.0] {
-            Dim::Known(n) => n,
-            Dim::Unknown(_) => panic!("Can't reduce over an unknown dimension"),
+        let dim_size = match inp[0].1.shape()[self.0].to_usize() {
+            Some(n) => n,
+            None => panic!("Can't reduce over an unknown dimension"),
         };
         let mut result: Vec<f32> = vec![-f32::INFINITY; front_size * back_size];
         let a_data = inp[0]

@@ -1,6 +1,6 @@
 use crate::{
     op::{Constant, Function},
-    prelude::{tracker::Dim, *},
+    prelude::*,
 };
 
 impl<S: Shape> GraphTensor<S> {
@@ -16,25 +16,16 @@ impl<S: Shape> GraphTensor<S> {
                         .shape()
                         .iter()
                         .take(DIM)
-                        .filter_map(|i| match i {
-                            Dim::Known(n) => Some(n),
-                            Dim::Unknown(_) => None,
-                        })
+                        .filter_map(|i| i.to_usize())
                         .product();
                     let back_size: usize = inp[0]
                         .1
                         .shape()
                         .iter()
                         .skip(DIM + 1)
-                        .filter_map(|i| match i {
-                            Dim::Known(n) => Some(n),
-                            Dim::Unknown(_) => None,
-                        })
+                        .filter_map(|i| i.to_usize())
                         .product();
-                    let dim_size = match inp[0].1.shape()[DIM] {
-                        Dim::Known(n) => n,
-                        Dim::Unknown(_) => panic!(),
-                    };
+                    let dim_size = inp[0].1.shape()[DIM].to_usize().unwrap();
                     let mut scratchpad: Vec<f32> = vec![0.0; front_size * back_size];
                     let a_data = inp[0]
                         .0

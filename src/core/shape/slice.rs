@@ -1,40 +1,27 @@
 use super::*;
 use std::ops::{Bound, Range, RangeBounds, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 
-fn get_start_bound<D: Into<Dim> + Copy>(bound: Bound<D>) -> Dim {
+fn get_start_bound<D: ExprInterface + Copy>(bound: Bound<D>) -> Expression {
     match bound {
-        Bound::Included(x) => x.into(),
-        Bound::Excluded(x) => {
-            if let Dim::Known(n) = x.into() {
-                Dim::Known(n + 1)
-            } else {
-                x.into()
-            }
-        }
-        Bound::Unbounded => Dim::Known(0),
+        Bound::Included(x) => x.expr(),
+        Bound::Excluded(x) => x.expr() + 1.expr(),
+        Bound::Unbounded => 0.expr(),
     }
 }
 
-fn get_end_bound<D: Into<Dim> + Copy, S: Into<Dim>>(bound: Bound<D>, size: S) -> Dim {
+fn get_end_bound<D: ExprInterface + Copy, S: ExprInterface>(
+    bound: Bound<D>,
+    size: S,
+) -> Expression {
     match bound {
-        Bound::Excluded(x) => x.into(),
-        Bound::Included(x) => {
-            if let Dim::Known(n) = x.into() {
-                Dim::Known(n + 1)
-            } else {
-                x.into()
-            }
-        }
-        Bound::Unbounded => size.into(),
+        Bound::Excluded(x) => x.expr(),
+        Bound::Included(x) => x.expr() + 1.expr(),
+        Bound::Unbounded => size.expr(),
     }
 }
 
-fn dim_to_size(r: Dim) -> usize {
-    if let Dim::Known(n) = r {
-        n
-    } else {
-        usize::MAX
-    }
+fn dim_to_size(r: Expression) -> usize {
+    r.to_usize().unwrap_or(usize::MAX)
 }
 
 pub trait RangeToDim<D: Dimension> {
@@ -53,16 +40,16 @@ impl<D: Dimension> RangeToDim<D> for RangeToInclusive<usize> {
 impl<D: Dimension> RangeToDim<D> for Range<usize> {
     type Dimension = Dyn<'-'>;
 }
-impl<D: Dimension> RangeToDim<D> for RangeFrom<Dim> {
+impl<D: Dimension> RangeToDim<D> for RangeFrom<Expression> {
     type Dimension = Dyn<'-'>;
 }
-impl<D: Dimension> RangeToDim<D> for RangeTo<Dim> {
+impl<D: Dimension> RangeToDim<D> for RangeTo<Expression> {
     type Dimension = Dyn<'-'>;
 }
-impl<D: Dimension> RangeToDim<D> for RangeToInclusive<Dim> {
+impl<D: Dimension> RangeToDim<D> for RangeToInclusive<Expression> {
     type Dimension = Dyn<'-'>;
 }
-impl<D: Dimension> RangeToDim<D> for Range<Dim> {
+impl<D: Dimension> RangeToDim<D> for Range<Expression> {
     type Dimension = Dyn<'-'>;
 }
 impl<D: Dimension> RangeToDim<D> for RangeFull {
@@ -71,19 +58,19 @@ impl<D: Dimension> RangeToDim<D> for RangeFull {
 
 pub trait SliceOfShape<S: Shape> {
     type OutputShape: Shape;
-    fn to_range_vec(&self) -> Vec<(Dim, Dim)>;
+    fn to_range_vec(&self) -> Vec<(Expression, Expression)>;
 }
 
 impl SliceOfShape<R0> for () {
     type OutputShape = R0;
-    fn to_range_vec(&self) -> Vec<(Dim, Dim)> {
+    fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
         vec![]
     }
 }
 
 impl<A: Dimension, R: RangeBounds<usize> + RangeToDim<A>> SliceOfShape<(A,)> for (R,) {
     type OutputShape = (R::Dimension,);
-    fn to_range_vec(&self) -> Vec<(Dim, Dim)> {
+    fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
         vec![(
             get_start_bound(self.0.start_bound()),
             get_end_bound(self.0.end_bound(), dim_to_size(A::const_size())),
@@ -99,7 +86,7 @@ impl<
     > SliceOfShape<(A, B)> for (R1, R2)
 {
     type OutputShape = (R1::Dimension, R2::Dimension);
-    fn to_range_vec(&self) -> Vec<(Dim, Dim)> {
+    fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
         vec![
             (
                 get_start_bound(self.0.start_bound()),
@@ -123,7 +110,7 @@ impl<
     > SliceOfShape<(A, B, C)> for (R1, R2, R3)
 {
     type OutputShape = (R1::Dimension, R2::Dimension, R3::Dimension);
-    fn to_range_vec(&self) -> Vec<(Dim, Dim)> {
+    fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
         vec![
             (
                 get_start_bound(self.0.start_bound()),
@@ -153,7 +140,7 @@ impl<
     > SliceOfShape<(A, B, C, D)> for (R1, R2, R3, R4)
 {
     type OutputShape = (R1::Dimension, R2::Dimension, R3::Dimension, R4::Dimension);
-    fn to_range_vec(&self) -> Vec<(Dim, Dim)> {
+    fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
         vec![
             (
                 get_start_bound(self.0.start_bound()),
@@ -195,7 +182,7 @@ impl<
         R4::Dimension,
         R5::Dimension,
     );
-    fn to_range_vec(&self) -> Vec<(Dim, Dim)> {
+    fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
         vec![
             (
                 get_start_bound(self.0.start_bound()),

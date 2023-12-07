@@ -8,9 +8,16 @@ use std::{
 
 use tinyvec::ArrayVec;
 
-#[derive(Clone, Default)]
-pub struct Expression {
-    pub terms: ArrayVec<[Term; 10]>,
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Expression<const S: usize = 20>
+// We need to figure out how to reduce this, can't be fixed at 20. ShapeTracker would take up 6 dims * 12 pads * 12 slices * 20 terms * 8 bytes = 138kb
+where
+    tinyvec::ArrayVec<[Term; S]>: Copy,
+    [Term; S]: tinyvec::Array,
+    <[Term; S] as tinyvec::Array>::Item: std::cmp::Eq,
+    <[Term; S] as tinyvec::Array>::Item: std::hash::Hash,
+{
+    pub terms: ArrayVec<[Term; S]>,
 }
 
 impl Debug for Expression {
@@ -24,65 +31,90 @@ impl Debug for Expression {
 }
 
 impl Expression {
-    pub fn exec(&self, vars: &HashMap<char, usize>) -> usize {
+    pub fn exec(&self, vars: &HashMap<char, usize>) -> Option<usize> {
         let mut stack = ArrayVec::<[usize; 10]>::new();
         for term in &self.terms {
             match term {
                 Term::Num(n) => stack.push(*n),
-                Term::Var(c) => stack.push(vars[c]),
+                Term::Var(c) => {
+                    if let Some(n) = vars.get(c) {
+                        stack.push(*n)
+                    } else {
+                        return None;
+                    }
+                }
                 _ => {
                     let a = stack.pop().unwrap();
                     let b = stack.pop().unwrap();
-                    stack.push(match term {
-                        Term::Add => a + b,
-                        Term::Sub => a - b,
-                        Term::Mul => a * b,
-                        Term::Div => a / b,
-                        Term::Mod => a % b,
-                        Term::Max => a.max(b),
-                        Term::Min => a.min(b),
-                        Term::And => (a != 0 && b != 0) as usize,
-                        Term::Or => (a != 0 || b != 0) as usize,
-                        Term::Gte => (a >= b) as usize,
-                        Term::Lt => (a < b) as usize,
-                        _ => unreachable!(),
-                    });
+                    stack.push(term.as_op().unwrap()(a, b));
                 }
             }
         }
-        stack.pop().unwrap_or_default()
+        stack.pop()
+    }
+
+    pub fn minimize(mut self) -> Self {
+        let mut i = 0;
+        while i < self.terms.len().saturating_sub(2) {
+            match (self.terms[i], self.terms[i + 1], self.terms[i + 2].as_op()) {
+                (Term::Num(b), Term::Num(a), Some(term)) => {
+                    self.terms[i] = Term::Num(term(a, b));
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                _ => {
+                    i += 1;
+                }
+            }
+        }
+
+        self
+    }
+
+    pub fn to_usize(&self) -> Option<usize> {
+        self.exec(&HashMap::default())
+    }
+    pub fn to_symbol(&self) -> Option<char> {
+        match self.terms[0] {
+            Term::Var(c) => Some(c),
+            _ => None,
+        }
     }
 
     pub fn min<E: Into<Expression>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Min);
-        rhs
+        rhs.minimize()
     }
 
     pub fn max<E: Into<Expression>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Max);
-        rhs
+        rhs.minimize()
     }
 
     pub fn gte<E: Into<Expression>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Gte);
-        rhs
+        rhs.minimize()
     }
 
     pub fn lt<E: Into<Expression>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Lt);
-        rhs
+        rhs.minimize()
+    }
+
+    pub fn is_unknown(&self) -> bool {
+        self.terms.iter().any(|t| matches!(t, Term::Var('-')))
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq, Eq, Hash)]
 pub struct BigExpression {
     pub terms: Vec<Term>,
 }
@@ -98,33 +130,36 @@ impl Debug for BigExpression {
 }
 
 impl BigExpression {
-    pub fn exec(&self, vars: &HashMap<char, usize>) -> usize {
+    pub fn exec(&self, vars: &HashMap<char, usize>) -> Option<usize> {
         let mut stack = Vec::new();
         for term in &self.terms {
             match term {
                 Term::Num(n) => stack.push(*n),
-                Term::Var(c) => stack.push(vars[c]),
+                Term::Var(c) => {
+                    if let Some(n) = vars.get(c) {
+                        stack.push(*n)
+                    } else {
+                        return None;
+                    }
+                }
                 _ => {
                     let a = stack.pop().unwrap();
                     let b = stack.pop().unwrap();
-                    stack.push(match term {
-                        Term::Add => a + b,
-                        Term::Sub => a - b,
-                        Term::Mul => a * b,
-                        Term::Div => a / b,
-                        Term::Mod => a % b,
-                        Term::Max => a.max(b),
-                        Term::Min => a.min(b),
-                        Term::And => (a != 0 && b != 0) as usize,
-                        Term::Or => (a != 0 || b != 0) as usize,
-                        Term::Gte => (a >= b) as usize,
-                        Term::Lt => (a < b) as usize,
-                        _ => unreachable!(),
-                    });
+                    stack.push(term.as_op().unwrap()(a, b));
                 }
             }
         }
-        stack.pop().unwrap_or_default()
+        stack.pop()
+    }
+
+    pub fn to_usize(&self) -> Option<usize> {
+        self.exec(&HashMap::default())
+    }
+    pub fn to_symbol(&self) -> Option<char> {
+        match self.terms[0] {
+            Term::Var(c) => Some(c),
+            _ => None,
+        }
     }
 
     pub fn min<E: Into<BigExpression>>(self, rhs: E) -> Self {
@@ -156,7 +191,7 @@ impl BigExpression {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Term {
     Num(usize),
     Var(char),
@@ -207,6 +242,23 @@ impl Term {
     pub fn expr(self) -> Expression {
         self.into()
     }
+
+    pub fn as_op(self) -> Option<fn(usize, usize) -> usize> {
+        match self {
+            Term::Add => Some(std::ops::Add::add),
+            Term::Sub => Some(std::ops::Sub::sub),
+            Term::Mul => Some(std::ops::Mul::mul),
+            Term::Div => Some(std::ops::Div::div),
+            Term::Mod => Some(std::ops::Rem::rem),
+            Term::Max => Some(core::cmp::Ord::max),
+            Term::Min => Some(core::cmp::Ord::min),
+            Term::And => Some(|a, b| (a != 0 && b != 0) as usize),
+            Term::Or => Some(|a, b| (a != 0 || b != 0) as usize),
+            Term::Gte => Some(|a, b| (a >= b) as usize),
+            Term::Lt => Some(|a, b| (a < b) as usize),
+            _ => None,
+        }
+    }
 }
 
 impl From<Term> for BigExpression {
@@ -233,6 +285,12 @@ impl ExprInterface for usize {
     }
 }
 
+impl ExprInterface for &usize {
+    fn expr(self) -> Expression {
+        Term::Num(*self).expr()
+    }
+}
+
 impl ExprInterface for char {
     fn expr(self) -> Expression {
         Term::Var(self).expr()
@@ -242,6 +300,12 @@ impl ExprInterface for char {
 impl ExprInterface for i32 {
     fn expr(self) -> Expression {
         Term::Num(self as usize).expr()
+    }
+}
+
+impl ExprInterface for Expression {
+    fn expr(self) -> Expression {
+        self
     }
 }
 
@@ -267,13 +331,33 @@ impl BigExprInterface for i32 {
     }
 }
 
+impl BigExprInterface for Expression {
+    fn big_expr(self) -> BigExpression {
+        self.into()
+    }
+}
+
+impl BigExprInterface for BigExpression {
+    fn big_expr(self) -> BigExpression {
+        self
+    }
+}
+
+impl From<Expression> for BigExpression {
+    fn from(value: Expression) -> Self {
+        Self {
+            terms: value.terms.to_vec(),
+        }
+    }
+}
+
 impl<E: Into<Expression>> Add<E> for Expression {
     type Output = Self;
     fn add(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Add);
-        rhs
+        rhs.minimize()
     }
 }
 
@@ -283,7 +367,7 @@ impl<E: Into<Expression>> Sub<E> for Expression {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Sub);
-        rhs
+        rhs.minimize()
     }
 }
 
@@ -293,7 +377,7 @@ impl<E: Into<Expression>> Mul<E> for Expression {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Mul);
-        rhs
+        rhs.minimize()
     }
 }
 
@@ -303,7 +387,7 @@ impl<E: Into<Expression>> Div<E> for Expression {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Div);
-        rhs
+        rhs.minimize()
     }
 }
 
@@ -313,7 +397,7 @@ impl<E: Into<Expression>> Rem<E> for Expression {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Mod);
-        rhs
+        rhs.minimize()
     }
 }
 
@@ -323,7 +407,7 @@ impl<E: Into<Expression>> BitAnd<E> for Expression {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::And);
-        rhs
+        rhs.minimize()
     }
 }
 
@@ -333,7 +417,7 @@ impl<E: Into<Expression>> BitOr<E> for Expression {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Or);
-        rhs
+        rhs.minimize()
     }
 }
 
@@ -412,12 +496,10 @@ mod tests {
     use super::*;
     #[test]
     fn test_expressions() {
-        let n = Term::Var('x');
-        let n = (n.expr() + Term::Num(255)) / Term::Num(256) * Term::Num(256);
-        assert_eq!(n.exec(&HashMap::from([('x', 767)])), 768);
+        let n = ('x'.expr() + Term::Num(255)) / Term::Num(256) * Term::Num(256);
+        assert_eq!(n.exec(&HashMap::from([('x', 767)])).unwrap(), 768);
 
-        let n = Term::Var('x');
-        let n = (n.big_expr() + Term::Num(255)) / Term::Num(256) * Term::Num(256);
-        assert_eq!(n.exec(&HashMap::from([('x', 767)])), 768);
+        let n = ('x'.big_expr() + Term::Num(255)) / Term::Num(256) * Term::Num(256);
+        assert_eq!(n.exec(&HashMap::from([('x', 767)])).unwrap(), 768);
     }
 }

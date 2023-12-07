@@ -179,7 +179,7 @@ fn input_dyn_dims(
             .chain(b.slices.into_iter().flat_map(|i| [i.0, i.1]));
         a_dims.zip(b_dims)
     }) {
-        if let Dim::Unknown(c) = d1 {
+        if let Some(c) = d1.to_symbol() {
             if !added.contains(&c) {
                 encoder.set_int(index + added.len(), d2.to_usize().unwrap() as u32);
                 added.insert(c);
@@ -197,13 +197,7 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> String {
                 .chain(st.padding.into_iter().flat_map(|i| [i.0, i.1]))
                 .chain(st.slices.into_iter().flat_map(|i| [i.0, i.1]))
         })
-        .filter_map(|d| {
-            if let Dim::Unknown(c) = d {
-                Some(c)
-            } else {
-                None
-            }
-        })
+        .filter_map(|d| d.to_symbol())
         .unique()
         .enumerate()
         .fold(String::default(), |mut acc, (i, c)| {

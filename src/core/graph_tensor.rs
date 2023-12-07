@@ -63,8 +63,8 @@ impl<S: Shape> GraphTensor<S> {
     pub fn set_dyn<T: Data + Clone>(self, data: T, shape: Vec<usize>) -> Self {
         // Report dyn dim values to graph dyn map
         for (d, s) in S::realized_shape().iter().zip(shape.iter()) {
-            if let Dim::Unknown(c) = d {
-                self.graph().dyn_map.insert(*c, *s);
+            if let Some(c) = d.to_symbol() {
+                self.graph().dyn_map.insert(c, *s);
             }
         }
         let node = self

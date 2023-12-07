@@ -17,8 +17,10 @@ use regex::Regex;
 use crate::{
     graph::Graph,
     op::Operator,
-    prelude::{remap_id, Dependency, Dim, MainGraph, ShapeTracker},
+    prelude::{remap_id, Dependency, MainGraph, ShapeTracker},
 };
+
+use super::shape::symbolic::Expression;
 
 pub trait Compiler {
     /// Run a compilation pass
@@ -483,19 +485,19 @@ fn test_node(
                 return false;
             }
             for (a, b) in a_sh.iter().zip(b_sh.shape().iter()) {
-                match a {
-                    Dim::Known(n) => {
-                        if *b != Dim::Known(*n) {
+                match a.to_usize() {
+                    Some(n) => {
+                        if !b.to_usize().map(|i| i != n).unwrap_or_default() {
                             return false;
                         }
                     }
-                    Dim::Unknown(c) => {
-                        if let Some(expected) = shape_map.get(c) {
+                    None => {
+                        if let Some(expected) = shape_map.get(a) {
                             if b != expected {
                                 return false;
                             }
                         } else {
-                            shape_map.insert(*c, *b);
+                            shape_map.insert(a, *b);
                         }
                     }
                 }
@@ -530,7 +532,7 @@ pub struct SelectOp {
     #[allow(clippy::type_complexity)]
     check: Option<fn(&dyn Operator, &[ShapeTracker]) -> bool>,
     /// Shape constraint
-    shape: Option<Vec<Vec<Dim>>>,
+    shape: Option<Vec<Vec<Expression>>>,
     /// Fake constraint       
     fake: Option<Vec<Vec<bool>>>,
     /// Pointers      
@@ -558,7 +560,7 @@ impl SelectOp {
         self
     }
     /// Constrain the op to input shapes
-    pub fn shapes<S: Into<Vec<Vec<Dim>>>>(mut self, shapes: S) -> Self {
+    pub fn shapes<S: Into<Vec<Vec<Expression>>>>(mut self, shapes: S) -> Self {
         self.shape = Some(shapes.into());
         self
     }
