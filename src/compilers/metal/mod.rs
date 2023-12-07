@@ -407,13 +407,11 @@ impl<T: 'static + Copy> Operator for MetalContiguous<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            println!("{:?}", out.gpu_address());
             let mut data = vec![0.0; out.length() as usize / std::mem::size_of::<f16>()];
             let ptr = out.contents() as *mut f16;
             for (i, d) in data.iter_mut().enumerate() {
                 *d = unsafe { *ptr.add(i) }.to_f32();
             }
-            println!("Contig out: {:?}", data);
 
             vec![Tensor {
                 data: Box::new(out),

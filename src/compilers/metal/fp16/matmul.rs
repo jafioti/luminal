@@ -6,7 +6,7 @@ use petgraph::stable_graph::NodeIndex;
 use crate::{
     compilers::metal::*,
     op::{InputTensor, Operator},
-    prelude::*,
+    prelude::{symbolic::Expression, *},
 };
 
 use metal_rs::{objc::rc::autoreleasepool, *};
@@ -15,7 +15,6 @@ use metal_rs::{objc::rc::autoreleasepool, *};
 #[derive(LuminalEq, LuminalPrint, Clone)]
 pub struct MetalMatmul2D {
     simd_shader: ComputePipelineState,
-    naive_shader: ComputePipelineState,
     queue: CommandQueue,
     device: Device,
 }
@@ -83,36 +82,8 @@ kernel void kernel_matmul_2d(
 }",
             dev,
         );
-        let naive_shader = compile_function(
-            "kernel_matmul_2d_naive",
-            "#include <metal_stdlib>
-        using namespace metal;
-        
-        kernel void kernel_matmul_2d_naive(
-            device half *A [[buffer(0)]],
-            device half *B [[buffer(1)]],
-            device half *C [[buffer(2)]],
-            device uint& M [[buffer(3)]],
-            device uint& N [[buffer(4)]],
-            device uint& K [[buffer(5)]],
-            uint3 global_pos [[thread_position_in_grid]]
-        ) {{
-            uint row = global_pos.x;
-            uint column = global_pos.y;
-        
-            if(row < M && column < N) {{
-                float value = 0.0f;
-                for(int i = 0; i < K; ++i) {{
-                    value = fast::fma((float)A[row * K + i], (float)B[i * N + column], value);
-                }}
-                C[row * N + column] = (half)value;
-            }}
-        }}",
-            dev,
-        );
         Self {
             simd_shader,
-            naive_shader,
             queue,
             device: dev.clone(),
         }
@@ -149,35 +120,19 @@ impl MetalKernelForward for MetalMatmul2D {
         encoder.set_int(4, n as u32);
         encoder.set_int(5, k as u32);
 
-        if k >= 16 && n >= 256 && ((n != 0) && (n & (n - 1)) == 0) {
-            encoder.set_compute_pipeline_state(&self.simd_shader);
-            encoder.dispatch_thread_groups(
-                MTLSize {
-                    width: (m as u64).div_ceil(32),
-                    height: (n as u64).div_ceil(32 * 8),
-                    depth: 1,
-                },
-                MTLSize {
-                    width: 32,
-                    height: 8,
-                    depth: 1,
-                },
-            );
-        } else {
-            encoder.set_compute_pipeline_state(&self.naive_shader);
-            encoder.dispatch_thread_groups(
-                MTLSize {
-                    width: (m as u64).div_ceil(16),
-                    height: (n as u64).div_ceil(16),
-                    depth: 1,
-                },
-                MTLSize {
-                    width: 16,
-                    height: 16,
-                    depth: 1,
-                },
-            );
-        }
+        encoder.set_compute_pipeline_state(&self.simd_shader);
+        encoder.dispatch_thread_groups(
+            MTLSize {
+                width: (m as u64).div_ceil(32),
+                height: (n as u64).div_ceil(32 * 8),
+                depth: 1,
+            },
+            MTLSize {
+                width: 32,
+                height: 8,
+                depth: 1,
+            },
+        );
         encoder.end_encoding();
 
         vec![out]
@@ -432,7 +387,27 @@ impl Compiler for MetalMatMulCompiler {
             src1_shape.remove_dim(1);
             src2_shape.remove_dim(0);
             src2_shape.permute(&[1, 0]);
-            if !src1_shape.is_contiguous() {
+
+            // Pad out N to multiple of 256 and K to 16
+            let n_dim = src2_shape.dims[src2_shape.indexes[1]];
+            let k_dim = src1_shape.dims[src1_shape.indexes[1]];
+            let k_padding = if k_dim.to_usize().map(|i| i < 16).unwrap_or(true) {
+                Expression::from(16) - k_dim
+            } else {
+                0.into()
+            };
+            let mut padded = false;
+            if n_dim.to_usize().map(|i| i % 256 != 0).unwrap_or(true) {
+                padded = true;
+                src2_shape.pad(&[
+                    (0.into(), k_padding),
+                    (0.into(), (n_dim + 255) / 256 * 256 - n_dim),
+                ]);
+            }
+            if k_padding != 0.into() {
+                src1_shape.pad(&[(0.into(), 0.into()), (0.into(), k_padding)]);
+            }
+            if !src1_shape.is_contiguous() || src1_shape.is_sliced() || src1_shape.is_padded() {
                 src1 = graph
                     .add_op(MetalContiguous::<f16>::new(
                         src1_shape,
@@ -443,7 +418,7 @@ impl Compiler for MetalMatMulCompiler {
                     .finish();
                 src1_shape = src1_shape.contiguous();
             }
-            if !src2_shape.is_contiguous() {
+            if !src2_shape.is_contiguous() || src2_shape.is_sliced() || src2_shape.is_padded() {
                 src2 = graph
                     .add_op(MetalContiguous::<f16>::new(
                         src2_shape,
@@ -454,11 +429,26 @@ impl Compiler for MetalMatMulCompiler {
                     .finish();
                 src2_shape = src2_shape.contiguous();
             }
-            let matmul_op = graph
+            let mut matmul_op = graph
                 .add_op(MetalMatmul2D::new(&dev, queue.clone()))
                 .input(src1, 0, src1_shape)
                 .input(src2, 0, src2_shape)
                 .finish();
+
+            // Slice back to original size
+            if padded {
+                let mut new_shape =
+                    ShapeTracker::new(&[src1_shape.shape()[0], src2_shape.shape()[1]]);
+                new_shape.slice(&[(0.into(), i32::MAX.into()), (0.into(), n_dim)]);
+                matmul_op = graph
+                    .add_op(MetalContiguous::<f16>::new(
+                        new_shape,
+                        dev.clone(),
+                        &mut HashMap::new(),
+                    ))
+                    .input(matmul_op, 0, new_shape)
+                    .finish();
+            }
 
             // Create edges to dests
             move_outgoing_edge(sum_reduce, matmul_op, &mut graph.graph);

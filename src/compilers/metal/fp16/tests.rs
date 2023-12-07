@@ -562,7 +562,7 @@ fn test_batch_matmul_transpose() {
 fn test_matmul_transpose() {
     const M: usize = 1024; // Any
     const K: usize = 16; // >= 16
-    const N: usize = 768; // >= 256, multiple of 256
+    const N: usize = 767; // >= 256, multiple of 256
     let mut cx = Graph::new();
     let mut rng = StdRng::seed_from_u64(0);
 
@@ -584,7 +584,7 @@ fn test_matmul_transpose() {
     let a_t_b_t = a_t.permute::<_, LAxes2<1, 0>>().matmul(b_t).retrieve();
 
     cx.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
-    cx.execute_no_delete();
+    cx.execute();
 
     let d_dev = Cpu::default();
     let d_a = d_dev
@@ -617,8 +617,10 @@ fn test_matmul_transpose() {
 fn test_relu_and_linear() {
     // Test single and batch, unoptimized and optimized
     let mut cx = Graph::new();
-    let batch = cx.tensor::<R2<2, 3>>();
-    let a = cx.tensor::<R1<3>>();
+    let batch = cx
+        .tensor::<R2<2, 3>>()
+        .set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+    let a = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
 
     let model: (Linear<3, 4>, ReLU, Linear<4, 2>) = InitModule::initialize(&mut cx);
     model
@@ -626,13 +628,9 @@ fn test_relu_and_linear() {
         .weight
         .set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
     model.2.weight.set(vec![1., 2., 3., 1., 2., 3., 1., 2.]);
-    let b = model.forward(a);
-    let batch_out = model.forward(batch);
+    let b = model.forward(a).retrieve();
+    let batch_out = model.forward(batch).retrieve();
 
-    a.set(vec![1.0, 2.0, 3.0]);
-    batch.set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
-    b.retrieve();
-    batch_out.retrieve();
     cx.execute();
 
     let unoptimized_b = b.data();
