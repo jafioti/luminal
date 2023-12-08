@@ -19,10 +19,11 @@ pub struct MetalRMSNorm(
     ComputePipelineState, // RMSNorm kernel
     Device,
     ShapeTracker, // Input shape
+    *const HashMap<char, usize>,
 );
 
 impl MetalRMSNorm {
-    fn new(dev: Device, inp_shape: ShapeTracker) -> Self {
+    fn new(dev: Device, inp_shape: ShapeTracker, dyn_map: *const HashMap<char, usize>) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(inp_shape);
         let mut square_mean_code = format!(
             "
@@ -73,6 +74,7 @@ kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]
             compile_function(&rms_norm_code_name, &rms_norm_code, &dev),
             dev,
             inp_shape,
+            dyn_map,
         )
     }
 }
@@ -112,7 +114,7 @@ impl MetalKernelForward for MetalRMSNorm {
         encoder.set_int(3, front_size as u32);
         encoder.set_int(4, back_size as u32);
         encoder.set_int(5, dim_size as u32);
-        input_dyn_dims(&[(self.3, inputs[0].1)], encoder, 6);
+        input_dyn_dims(&[self.3], unsafe { self.4.as_ref().unwrap() }, encoder, 6);
 
         encoder.dispatch_1d(meaned_shape.n_elements());
         encoder.end_encoding();
@@ -131,7 +133,7 @@ impl MetalKernelForward for MetalRMSNorm {
         encoder.set_buffer(1, Some(inputs[0].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inputs[0].1.n_elements() as u32);
-        input_dyn_dims(&[(self.3, inputs[0].1)], encoder, 4);
+        input_dyn_dims(&[self.3], unsafe { self.4.as_ref().unwrap() }, encoder, 4);
 
         // Execute
         encoder.dispatch_1d(inputs[0].1.n_elements());
@@ -247,7 +249,7 @@ impl Compiler for RMSNormCompiler {
 
             // Insert RMSNorm op
             let rms_norm = graph
-                .add_op(MetalRMSNorm::new(dev.clone(), x.2))
+                .add_op(MetalRMSNorm::new(dev.clone(), x.2, &graph.dyn_map))
                 .input(x.0, 0, x.2)
                 .finish();
 

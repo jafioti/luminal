@@ -80,6 +80,15 @@ impl Expression {
             _ => None,
         }
     }
+    pub fn to_symbols(&self) -> Vec<char> {
+        self.terms
+            .iter()
+            .filter_map(|t| match t {
+                Term::Var(c) => Some(*c),
+                _ => None,
+            })
+            .collect()
+    }
 
     pub fn min<E: Into<Expression>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
@@ -160,6 +169,15 @@ impl BigExpression {
             Term::Var(c) => Some(c),
             _ => None,
         }
+    }
+    pub fn to_symbols(&self) -> Vec<char> {
+        self.terms
+            .iter()
+            .filter_map(|t| match t {
+                Term::Var(c) => Some(*c),
+                _ => None,
+            })
+            .collect()
     }
 
     pub fn min<E: Into<BigExpression>>(self, rhs: E) -> Self {

@@ -413,6 +413,7 @@ impl Compiler for MetalMatMulCompiler {
                         src1_shape,
                         dev.clone(),
                         &mut HashMap::new(),
+                        &graph.dyn_map,
                     ))
                     .input(src1, 0, src1_shape)
                     .finish();
@@ -424,6 +425,7 @@ impl Compiler for MetalMatMulCompiler {
                         src2_shape,
                         dev.clone(),
                         &mut HashMap::new(),
+                        &graph.dyn_map,
                     ))
                     .input(src2, 0, src2_shape)
                     .finish();
@@ -445,6 +447,7 @@ impl Compiler for MetalMatMulCompiler {
                         new_shape,
                         dev.clone(),
                         &mut HashMap::new(),
+                        &graph.dyn_map,
                     ))
                     .input(matmul_op, 0, new_shape)
                     .finish();
@@ -498,34 +501,108 @@ impl Compiler for MetalMatMulCompiler {
                 continue;
             }
             // Insert BatchMatMul2D op
-            let mut srcs = graph.get_sources(mul);
+            let srcs = graph.get_sources(mul);
+            let (mut src1, mut src1_shape) = (srcs[0].0, srcs[0].2);
+            let (mut src2, mut src2_shape) = (srcs[1].0, srcs[1].2);
             // Undo expansions and permute
-            srcs[0].2.remove_dim(2);
-            srcs[1].2.remove_dim(1);
-            srcs[1].2.remove_dim(0);
-            srcs[1].2.permute(&[1, 0]);
-            let new_op = graph
+            src1_shape.remove_dim(2);
+            src2_shape.remove_dim(1);
+            src2_shape.remove_dim(0);
+            src2_shape.permute(&[1, 0]);
+            // println!("Src1: {:?}", src1_shape);
+            // println!("Src2: {:?}", src2_shape);
+            // // Pad out N to multiple of 256 and K to 16
+            // let n_dim = src2_shape.dims[src2_shape.indexes[1]];
+            // let k_dim = src1_shape.dims[src1_shape.indexes[2]];
+            // let k_padding = if k_dim.to_usize().map(|i| i < 16).unwrap_or(true) {
+            //     Expression::from(16) - k_dim
+            // } else {
+            //     0.into()
+            // };
+            // let mut padded = false;
+            // if n_dim.to_usize().map(|i| i % 256 != 0).unwrap_or(true) {
+            //     padded = true;
+            //     src2_shape.pad(&[
+            //         (0.into(), k_padding),
+            //         (0.into(), (n_dim + 255) / 256 * 256 - n_dim),
+            //     ]);
+            // }
+            // if k_padding != 0.into() {
+            //     src1_shape.pad(&[
+            //         (0.into(), 0.into()),
+            //         (0.into(), 0.into()),
+            //         (0.into(), k_padding),
+            //     ]);
+            // }
+            if !src1_shape.is_contiguous() || src1_shape.is_sliced() || src1_shape.is_padded() {
+                src1 = graph
+                    .add_op(MetalContiguous::<f16>::new(
+                        src1_shape,
+                        dev.clone(),
+                        &mut HashMap::new(),
+                        &graph.dyn_map,
+                    ))
+                    .input(src1, 0, src1_shape)
+                    .finish();
+                src1_shape = src1_shape.contiguous();
+            }
+            if !src2_shape.is_contiguous() || src2_shape.is_sliced() || src2_shape.is_padded() {
+                src2 = graph
+                    .add_op(MetalContiguous::<f16>::new(
+                        src2_shape,
+                        dev.clone(),
+                        &mut HashMap::new(),
+                        &graph.dyn_map,
+                    ))
+                    .input(src2, 0, src2_shape)
+                    .finish();
+                src2_shape = src2_shape.contiguous();
+            }
+            let mut matmul_op = graph
                 .add_op(MetalBatchMatmul2D(
                     MetalBatchMatmul2D::compile(
                         &dev,
-                        srcs[0].2.indexes[1] < srcs[0].2.indexes[2],
-                        srcs[1].2.indexes[0] < srcs[1].2.indexes[1],
+                        src1_shape.indexes[1] < src1_shape.indexes[2],
+                        src2_shape.indexes[0] < src2_shape.indexes[1],
                     ),
                     queue.clone(),
                     dev.clone(),
                 ))
-                .input(srcs[0].0, 0, srcs[0].2)
-                .input(srcs[1].0, 0, srcs[1].2)
+                .input(src1, 0, src1_shape)
+                .input(src2, 0, src2_shape)
                 .finish();
+            // // Slice back to original size
+            // if padded {
+            //     let mut new_shape = ShapeTracker::new(&[
+            //         src1_shape.shape()[0],
+            //         src1_shape.shape()[1],
+            //         src2_shape.shape()[1],
+            //     ]);
+            //     new_shape.slice(&[
+            //         (0.into(), i32::MAX.into()),
+            //         (0.into(), i32::MAX.into()),
+            //         (0.into(), n_dim),
+            //     ]);
+            //     println!("Sliced: {:?}", new_shape);
+            //     matmul_op = graph
+            //         .add_op(MetalContiguous::<f16>::new(
+            //             new_shape,
+            //             dev.clone(),
+            //             &mut HashMap::new(),
+            //             &graph.dyn_map,
+            //         ))
+            //         .input(matmul_op, 0, new_shape)
+            //         .finish();
+            // }
 
             // Create edges to dests
-            move_outgoing_edge(sum_reduce, new_op, &mut graph.graph);
+            move_outgoing_edge(sum_reduce, matmul_op, &mut graph.graph);
             move_references(
                 &mut graph.id_remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 sum_reduce,
-                new_op,
+                matmul_op,
             );
 
             // Remove the old ops

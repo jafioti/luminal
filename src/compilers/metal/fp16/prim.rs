@@ -236,6 +236,7 @@ impl Compiler for PrimitiveCompiler {
                     dev.clone(),
                     queue.clone(),
                     &mut kernels,
+                    &graph.dyn_map,
                 ));
             } else if is::<Mul>(op) {
                 *op_ref = Box::new(MetalMul::<f16>::new(
@@ -244,6 +245,7 @@ impl Compiler for PrimitiveCompiler {
                     dev.clone(),
                     queue.clone(),
                     &mut kernels,
+                    &graph.dyn_map,
                 ));
             } else if is::<LessThan>(op) {
                 *op_ref = Box::new(MetalLessThan::<f16>::new(
@@ -252,6 +254,7 @@ impl Compiler for PrimitiveCompiler {
                     dev.clone(),
                     queue.clone(),
                     &mut kernels,
+                    &graph.dyn_map,
                 ));
             } else if is::<Mod>(op) {
                 *op_ref = Box::new(MetalMod::<f16>::new(
@@ -260,6 +263,7 @@ impl Compiler for PrimitiveCompiler {
                     dev.clone(),
                     queue.clone(),
                     &mut kernels,
+                    &graph.dyn_map,
                 ));
             } else if let Some(SumReduce(dim)) = op_ref.as_any().downcast_ref() {
                 *op_ref = Box::new(MetalSumReduce::<f16>::new(
@@ -268,6 +272,7 @@ impl Compiler for PrimitiveCompiler {
                     dev.clone(),
                     queue.clone(),
                     &mut kernels,
+                    &graph.dyn_map,
                 ));
             } else if let Some(MaxReduce(dim)) = op_ref.as_any().downcast_ref() {
                 *op_ref = Box::new(MetalMaxReduce::<f16>::new(
@@ -276,12 +281,14 @@ impl Compiler for PrimitiveCompiler {
                     dev.clone(),
                     queue.clone(),
                     &mut kernels,
+                    &graph.dyn_map,
                 ));
             } else if is::<Contiguous>(op) {
                 *op_ref = Box::new(MetalContiguous::<f16>::new(
                     src_shapes[0],
                     dev.clone(),
                     &mut kernels,
+                    &graph.dyn_map,
                 ));
             }
         }

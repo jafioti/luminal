@@ -1,6 +1,6 @@
 use std::{
     any::{Any, TypeId},
-    collections::{hash_map::DefaultHasher, HashMap, HashSet},
+    collections::{hash_map::DefaultHasher, HashMap},
     fmt::{Debug, Write},
     hash::{Hash, Hasher},
     marker::PhantomData,
@@ -161,30 +161,24 @@ impl SetInt for ComputeCommandEncoderRef {
 }
 
 fn input_dyn_dims(
-    shapes: &[(ShapeTracker, ShapeTracker)],
+    shapes: &[ShapeTracker],
+    dyn_map: &HashMap<char, usize>,
     encoder: &ComputeCommandEncoderRef,
     index: usize,
 ) {
-    let mut added = HashSet::new();
-    for (d1, d2) in shapes.iter().flat_map(|(a, b)| {
-        let a_dims = a
-            .shape()
-            .into_iter()
-            .chain(a.padding.into_iter().flat_map(|i| [i.0, i.1]))
-            .chain(a.slices.into_iter().flat_map(|i| [i.0, i.1]));
-        let b_dims = b
-            .shape()
-            .into_iter()
-            .chain(b.padding.into_iter().flat_map(|i| [i.0, i.1]))
-            .chain(b.slices.into_iter().flat_map(|i| [i.0, i.1]));
-        a_dims.zip(b_dims)
-    }) {
-        if let Some(c) = d1.to_symbol() {
-            if !added.contains(&c) {
-                encoder.set_int(index + added.len(), d2.to_usize().unwrap() as u32);
-                added.insert(c);
-            }
-        }
+    for (i, symb) in shapes
+        .iter()
+        .flat_map(|s| {
+            s.dims
+                .into_iter()
+                .chain(s.padding.into_iter().flat_map(|i| [i.0, i.1]))
+                .chain(s.slices.into_iter().flat_map(|i| [i.0, i.1]))
+        })
+        .flat_map(|e| e.to_symbols())
+        .unique()
+        .enumerate()
+    {
+        encoder.set_int(i + index, dyn_map[&symb] as u32);
     }
 }
 
@@ -197,7 +191,7 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> String {
                 .chain(st.padding.into_iter().flat_map(|i| [i.0, i.1]))
                 .chain(st.slices.into_iter().flat_map(|i| [i.0, i.1]))
         })
-        .filter_map(|d| d.to_symbol())
+        .flat_map(|d| d.to_symbols())
         .unique()
         .enumerate()
         .fold(String::default(), |mut acc, (i, c)| {
@@ -328,13 +322,20 @@ impl<T: MetalFloat + 'static> Operator for MetalConstant<T> {
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalContiguous<T>(ComputePipelineState, Device, ShapeTracker, PhantomData<T>);
+pub struct MetalContiguous<T>(
+    ComputePipelineState,
+    Device,
+    ShapeTracker,
+    PhantomData<T>,
+    *const HashMap<char, usize>,
+);
 
 impl<T: MetalFloat> MetalContiguous<T> {
     fn new(
         shape: ShapeTracker,
         dev: Device,
         kernels: &mut HashMap<String, ComputePipelineState>,
+        dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
         let mut code = format!("
@@ -347,13 +348,20 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
 }}
 ", T::type_name(), T::type_name(), render_dyn_dim_inputs(&[shape], 3),
         );
+        println!("Contiguous Kernel: {code}");
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("mkernel", &name);
 
         if !kernels.contains_key(&name) {
             kernels.insert(name.clone(), compile_function(&name, &code, &dev));
         }
-        Self(kernels[&name].clone(), dev, shape, Default::default())
+        Self(
+            kernels[&name].clone(),
+            dev,
+            shape,
+            Default::default(),
+            dyn_map,
+        )
     }
 }
 
@@ -378,7 +386,7 @@ impl<T> MetalKernelForward for MetalContiguous<T> {
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(&out), 0);
         encoder.set_int(2, inp_size as u32);
-        input_dyn_dims(&[(self.2, inputs[0].1)], encoder, 3);
+        input_dyn_dims(&[self.2], unsafe { self.4.as_ref().unwrap() }, encoder, 3);
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -905,6 +913,7 @@ pub struct MetalAdd<T>(
     ShapeTracker,
     ShapeTracker,
     PhantomData<T>,
+    *const HashMap<char, usize>,
 );
 
 impl<T: MetalFloat> MetalAdd<T> {
@@ -914,6 +923,7 @@ impl<T: MetalFloat> MetalAdd<T> {
         dev: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
+        dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
@@ -943,6 +953,7 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
             a_shape,
             b_shape,
             Default::default(),
+            dyn_map,
         )
     }
 }
@@ -969,7 +980,12 @@ impl<T> MetalKernelForward for MetalAdd<T> {
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(&[(self.3, inputs[0].1), (self.4, inputs[1].1)], encoder, 4);
+        input_dyn_dims(
+            &[self.3, self.4],
+            unsafe { self.6.as_ref().unwrap() },
+            encoder,
+            4,
+        );
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -1023,6 +1039,7 @@ pub struct MetalMul<T>(
     ShapeTracker,
     ShapeTracker,
     PhantomData<T>,
+    *const HashMap<char, usize>,
 );
 
 impl<T: MetalFloat> MetalMul<T> {
@@ -1032,6 +1049,7 @@ impl<T: MetalFloat> MetalMul<T> {
         dev: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
+        dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
@@ -1061,6 +1079,7 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
             a_shape,
             b_shape,
             Default::default(),
+            dyn_map,
         )
     }
 }
@@ -1086,7 +1105,12 @@ impl<T> MetalKernelForward for MetalMul<T> {
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(&[(self.3, inputs[0].1), (self.4, inputs[1].1)], encoder, 4);
+        input_dyn_dims(
+            &[self.3, self.4],
+            unsafe { self.6.as_ref().unwrap() },
+            encoder,
+            4,
+        );
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -1140,6 +1164,7 @@ pub struct MetalLessThan<T>(
     ShapeTracker,
     ShapeTracker,
     PhantomData<T>,
+    *const HashMap<char, usize>,
 );
 
 impl<T: MetalFloat> MetalLessThan<T> {
@@ -1149,6 +1174,7 @@ impl<T: MetalFloat> MetalLessThan<T> {
         dev: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
+        dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
@@ -1189,6 +1215,7 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
             a_shape,
             b_shape,
             Default::default(),
+            dyn_map,
         )
     }
 }
@@ -1215,7 +1242,12 @@ impl<T> MetalKernelForward for MetalLessThan<T> {
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(&[(self.3, inputs[0].1), (self.4, inputs[1].1)], encoder, 4);
+        input_dyn_dims(
+            &[self.3, self.4],
+            unsafe { self.6.as_ref().unwrap() },
+            encoder,
+            4,
+        );
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -1269,6 +1301,7 @@ pub struct MetalMod<T>(
     ShapeTracker,
     ShapeTracker,
     PhantomData<T>,
+    *const HashMap<char, usize>,
 );
 
 impl<T: MetalFloat> MetalMod<T> {
@@ -1278,6 +1311,7 @@ impl<T: MetalFloat> MetalMod<T> {
         dev: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
+        dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
@@ -1305,6 +1339,7 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
             a_shape,
             b_shape,
             Default::default(),
+            dyn_map,
         )
     }
 }
@@ -1330,7 +1365,12 @@ impl<T> MetalKernelForward for MetalMod<T> {
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(&[(self.3, inputs[0].1), (self.4, inputs[1].1)], encoder, 4);
+        input_dyn_dims(
+            &[self.3, self.4],
+            unsafe { self.6.as_ref().unwrap() },
+            encoder,
+            4,
+        );
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -1384,6 +1424,7 @@ pub struct MetalSumReduce<T>(
     pub usize,
     ShapeTracker,
     PhantomData<T>,
+    *const HashMap<char, usize>,
 );
 
 impl<T: MetalFloat> MetalSumReduce<T> {
@@ -1393,6 +1434,7 @@ impl<T: MetalFloat> MetalSumReduce<T> {
         dev: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
+        dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
         let mut code = format!(
@@ -1428,6 +1470,7 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
             dim,
             shape,
             Default::default(),
+            dyn_map,
         )
     }
 }
@@ -1474,7 +1517,7 @@ impl<T> MetalKernelForward for MetalSumReduce<T> {
         encoder.set_int(3, front_size as u32);
         encoder.set_int(4, back_size as u32);
         encoder.set_int(5, dim_size as u32);
-        input_dyn_dims(&[(self.4, inputs[0].1)], encoder, 6);
+        input_dyn_dims(&[self.4], unsafe { self.6.as_ref().unwrap() }, encoder, 6);
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -1526,6 +1569,7 @@ pub struct MetalMaxReduce<T>(
     usize,
     ShapeTracker,
     PhantomData<T>,
+    *const HashMap<char, usize>,
 );
 
 impl<T: MetalFloat> MetalMaxReduce<T> {
@@ -1535,6 +1579,7 @@ impl<T: MetalFloat> MetalMaxReduce<T> {
         dev: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
+        dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
         let mut code = format!(
@@ -1571,6 +1616,7 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
             dim,
             shape,
             Default::default(),
+            dyn_map,
         )
     }
 }
@@ -1616,7 +1662,7 @@ impl<T> MetalKernelForward for MetalMaxReduce<T> {
         encoder.set_int(3, front_size as u32);
         encoder.set_int(4, back_size as u32);
         encoder.set_int(5, dim_size as u32);
-        input_dyn_dims(&[(self.4, inputs[0].1)], encoder, 6);
+        input_dyn_dims(&[self.4], unsafe { self.6.as_ref().unwrap() }, encoder, 6);
 
         // Execute
         encoder.dispatch_1d(inp_size);

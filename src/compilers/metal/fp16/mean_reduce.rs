@@ -20,10 +20,17 @@ pub struct MetalMeanReduce(
     Device,
     usize,
     ShapeTracker,
+    *const HashMap<char, usize>,
 );
 
 impl MetalMeanReduce {
-    fn new(dev: Device, queue: CommandQueue, dim: usize, shape: ShapeTracker) -> Self {
+    fn new(
+        dev: Device,
+        queue: CommandQueue,
+        dim: usize,
+        shape: ShapeTracker,
+        dyn_map: *const HashMap<char, usize>,
+    ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
         let mut code = format!(
             "
@@ -53,6 +60,7 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
             dev,
             dim,
             shape,
+            dyn_map,
         )
     }
 }
@@ -99,7 +107,7 @@ impl MetalKernelForward for MetalMeanReduce {
         encoder.set_int(3, front_size as u32);
         encoder.set_int(4, back_size as u32);
         encoder.set_int(5, dim_size as u32);
-        input_dyn_dims(&[(self.4, inputs[0].1)], encoder, 6);
+        input_dyn_dims(&[self.4], unsafe { self.5.as_ref().unwrap() }, encoder, 6);
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -212,7 +220,13 @@ impl Compiler for MeanReduceCompiler {
             // Insert MeanReduce op
             let src = graph.get_sources(sum_reduce)[0];
             let mean_reduce = graph
-                .add_op(MetalMeanReduce::new(dev.clone(), queue.clone(), dim, src.2))
+                .add_op(MetalMeanReduce::new(
+                    dev.clone(),
+                    queue.clone(),
+                    dim,
+                    src.2,
+                    &graph.dyn_map,
+                ))
                 .input(src.0, 0, src.2)
                 .finish();
 

@@ -352,6 +352,7 @@ impl Compiler for MetalMatMulCompiler {
                         src1_shape,
                         dev.clone(),
                         &mut HashMap::default(),
+                        &graph.dyn_map,
                     ))
                     .input(src1, 0, src1_shape)
                     .finish();
@@ -363,6 +364,7 @@ impl Compiler for MetalMatMulCompiler {
                         src2_shape,
                         dev.clone(),
                         &mut HashMap::default(),
+                        &graph.dyn_map,
                     ))
                     .input(src2, 0, src2_shape)
                     .finish();
