@@ -509,35 +509,29 @@ impl Compiler for MetalMatMulCompiler {
             src2_shape.remove_dim(1);
             src2_shape.remove_dim(0);
             src2_shape.permute(&[1, 0]);
-            // println!("Src1: {:?}", src1_shape);
-            // println!("Src2: {:?}", src2_shape);
             // Pad out N to multiple of 256 and K to 16
             let n_dim = src2_shape.shape()[1];
             let k_dim = src1_shape.shape()[2];
-            println!("N: {:?} K: {:?}", n_dim, k_dim);
             let k_padding = if k_dim.to_usize().map(|i| i < 16).unwrap_or(true) {
                 Expression::from(16) - k_dim
             } else {
                 0.into()
             };
-            println!("K Padding: {:?}", k_padding);
             let mut padded = false;
             if n_dim.to_usize().map(|i| i % 256 != 0).unwrap_or(true) {
                 padded = true;
-                // src2_shape.pad(&[
-                //     (0.into(), k_padding),
-                //     (0.into(), (n_dim + 255) / 256 * 256 - n_dim),
-                // ]);
+                src2_shape.pad(&[
+                    (0.into(), 0.into()),
+                    (0.into(), (n_dim + 255) / 256 * 256 - n_dim),
+                ]);
             }
             if k_padding != 0.into() {
-                // src1_shape.pad(&[
-                //     (0.into(), 0.into()),
-                //     (0.into(), 0.into()),
-                //     (0.into(), k_padding),
-                // ]);
+                src1_shape.pad(&[
+                    (0.into(), 0.into()),
+                    (0.into(), 0.into()),
+                    (0.into(), k_padding),
+                ]);
             }
-            println!("Src1: {:?}", src1_shape);
-            println!("Src2: {:?}", src2_shape);
             if !src1_shape.is_contiguous() || src1_shape.is_sliced() || src1_shape.is_padded() {
                 src1 = graph
                     .add_op(MetalContiguous::<f16>::new(
@@ -562,8 +556,6 @@ impl Compiler for MetalMatMulCompiler {
                     .finish();
                 src2_shape = src2_shape.contiguous();
             }
-            println!("Contig Src1: {:?}", src1_shape);
-            println!("Contig Src2: {:?}", src2_shape);
             let mut matmul_op = graph
                 .add_op(MetalBatchMatmul2D(
                     MetalBatchMatmul2D::compile(&dev, true, true),
@@ -580,13 +572,11 @@ impl Compiler for MetalMatMulCompiler {
                     src1_shape.shape()[1],
                     src2_shape.shape()[1],
                 ]);
-                println!("New Shape: {:?}", new_shape);
                 new_shape.slice(&[
                     (0.into(), i32::MAX.into()),
                     (0.into(), i32::MAX.into()),
                     (0.into(), n_dim),
                 ]);
-                println!("Sliced: {:?}", new_shape);
                 matmul_op = graph
                     .add_op(MetalContiguous::<f16>::new(
                         new_shape,

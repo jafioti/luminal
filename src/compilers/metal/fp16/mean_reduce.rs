@@ -148,6 +148,7 @@ impl Operator for MetalMeanReduce {
 
     fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
         if key == "metal" {
+            #[allow(clippy::arc_with_non_send_sync)]
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));

@@ -19,7 +19,7 @@ use crate::{
 pub type GenericCompiler = (
     UnarySequentialElimination,
     // RemoveUnusedNodes, // Broken right now, unclear why
-    CSE,
+    // CSE, // This breaks compilers::metal::fp16::tests::test_encoder_block. I think it needs to take edge weights into account?
 );
 
 /// Eliminate complementary unary sequential operations like `x.log().exp()`
