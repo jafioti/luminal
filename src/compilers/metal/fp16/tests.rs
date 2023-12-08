@@ -507,10 +507,10 @@ fn test_matmul() {
 fn test_batch_matmul() {
     let mut cx = Graph::new();
     let mut rng = StdRng::seed_from_u64(0);
-    let a_data = random_vec_rng(2 * 20 * 128, &mut rng);
-    let b_data = random_vec_rng(128 * 128, &mut rng);
-    let a = cx.tensor::<R3<2, 20, 128>>().set(a_data.clone());
-    let b = cx.tensor::<R2<128, 128>>().set(b_data.clone());
+    let a_data = random_vec_rng(2 * 3, &mut rng);
+    let b_data = random_vec_rng(3 * 4, &mut rng);
+    let a = cx.tensor::<R3<1, 2, 3>>().set(a_data.clone());
+    let b = cx.tensor::<R2<3, 4>>().set(b_data.clone());
     let c = a.matmul(b).retrieve();
 
     cx.compile(MetalFp16Compiler::default());
@@ -518,10 +518,10 @@ fn test_batch_matmul() {
 
     let d_dev = Cpu::default();
     let d_a = d_dev
-        .tensor_from_vec(a_data, (DConst::<2>, DConst::<20>, DConst::<128>))
+        .tensor_from_vec(a_data, (DConst::<1>, DConst::<2>, DConst::<3>))
         .to_dtype::<f16>();
     let d_b = d_dev
-        .tensor_from_vec(b_data, (DConst::<128>, DConst::<128>))
+        .tensor_from_vec(b_data, (DConst::<3>, DConst::<4>))
         .to_dtype::<f16>();
     let d_c = d_a.matmul(d_b);
 
@@ -678,16 +678,16 @@ fn test_relu_and_linear() {
     model.0.weight = dev
         .tensor_from_vec(
             vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.],
-            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<4>),
+            (DConst::<3>, DConst::<4>),
         )
         .permute();
     model.2.weight = dev
         .tensor_from_vec(
             vec![1., 2., 3., 1., 2., 3., 1., 2.],
-            (dfdx::shapes::Const::<4>, dfdx::shapes::Const::<2>),
+            (DConst::<4>, DConst::<2>),
         )
         .permute();
-    let a = dev.tensor_from_vec(vec![1.0, 2.0, 3.0], (dfdx::shapes::Const::<3>,));
+    let a = dev.tensor_from_vec(vec![1.0, 2.0, 3.0], (DConst::<3>,));
     let out = model.forward(a);
 
     assert_close(&unoptimized_b, &out.as_vec());
@@ -767,7 +767,7 @@ fn test_transformer_encoder_block() {
         .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
     let a = cx
-        .tensor::<(Dyn<'b'>, Dyn<'a'>, crate::prelude::Const<3>)>()
+        .tensor::<(Dyn<'b'>, Dyn<'a'>, LConst<3>)>()
         .set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![1, 2, 3]);
     let b = model.forward(a).retrieve();
 
@@ -784,55 +784,54 @@ fn test_transformer_encoder_block() {
     d_model.self_attn.w_o.weight = d_dev
         .tensor_from_vec(
             vec![1., 22., 3., 1., 2., 3., 1., 2., 3.],
-            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<3>),
+            (DConst::<3>, DConst::<3>),
         )
         .permute();
     d_model.self_attn.w_k.weight = d_dev
         .tensor_from_vec(
             vec![1., 22., 3., 1., 2., 3., 1., 2., 3.],
-            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<3>),
+            (DConst::<3>, DConst::<3>),
         )
         .permute();
     d_model.self_attn.w_q.weight = d_dev
         .tensor_from_vec(
             vec![3., 2., 3., 1.3, 2., 3., 3., 2., 3.],
-            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<3>),
+            (DConst::<3>, DConst::<3>),
         )
         .permute();
     d_model.self_attn.w_v.weight = d_dev
         .tensor_from_vec(
             vec![-1., 12., 3., -1., 2., -3., 11., 2., 3.],
-            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<3>),
+            (DConst::<3>, DConst::<3>),
         )
         .permute();
     d_model.ff.0 .0.weight = d_dev
         .tensor_from_vec(
             vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 11., 2., 3.],
-            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<4>),
+            (DConst::<3>, DConst::<4>),
         )
         .permute();
-    d_model.ff.0 .0.bias = d_dev.tensor_from_vec(vec![0., 0., 0., 0.], (dfdx::shapes::Const::<4>,));
+    d_model.ff.0 .0.bias = d_dev.tensor_from_vec(vec![0., 0., 0., 0.], (DConst::<4>,));
     d_model.ff.0 .2.weight = d_dev
         .tensor_from_vec(
             vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.],
-            (dfdx::shapes::Const::<4>, dfdx::shapes::Const::<3>),
+            (DConst::<4>, DConst::<3>),
         )
         .permute();
-    d_model.ff.0 .2.bias = d_dev.tensor_from_vec(vec![0., 0., 0.], (dfdx::shapes::Const::<3>,));
-    d_model.norm1.gamma = d_dev.tensor_from_vec(vec![1., 1., 1.], (dfdx::shapes::Const::<3>,));
-    d_model.norm2.gamma = d_dev.tensor_from_vec(vec![1., 1., 1.], (dfdx::shapes::Const::<3>,));
+    d_model.ff.0 .2.bias = d_dev.tensor_from_vec(vec![0., 0., 0.], (DConst::<3>,));
+    d_model.norm1.gamma = d_dev.tensor_from_vec(vec![1., 1., 1.], (DConst::<3>,));
+    d_model.norm2.gamma = d_dev.tensor_from_vec(vec![1., 1., 1.], (DConst::<3>,));
     d_model.norm1.epsilon = 1e-5;
-    d_model.norm2.beta = d_dev.tensor_from_vec(vec![0., 0., 0.], (dfdx::shapes::Const::<3>,));
-    d_model.norm1.beta = d_dev.tensor_from_vec(vec![0., 0., 0.], (dfdx::shapes::Const::<3>,));
+    d_model.norm2.beta = d_dev.tensor_from_vec(vec![0., 0., 0.], (DConst::<3>,));
+    d_model.norm1.beta = d_dev.tensor_from_vec(vec![0., 0., 0.], (DConst::<3>,));
     d_model.norm2.epsilon = 1e-5;
-    let d_a = d_dev.tensor_from_vec(
-        vec![-1., 2., 3., 3., 3., -1.],
-        (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<3>),
-    );
+    let d_a = d_dev.tensor_from_vec(vec![-1., 2., 3., 3., 3., -1.], (DConst::<2>, DConst::<3>));
     let d_b = d_model.forward(d_a);
 
     // Annoyingly dfdx transformer encoder outputs 0s in fp16 mode, so we need to use the fp32 mode. Result ends up being close enough
-    assert_close(&b.data(), &d_b.as_vec());
+    let b = b.data();
+    println!("B: {:?}", b);
+    assert_close(&b, &d_b.as_vec());
 }
 
 #[test]
@@ -877,13 +876,10 @@ fn test_embedding() {
         <dfdx::nn::modules::builders::Embedding<3, 4>>::build_on_device(&d_dev);
     d_model.weight = d_dev.tensor_from_vec(
         vec![1.1, 2., 3., 1., 2., 3., 14., 2., 33., 1., 2., 3.],
-        (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<4>),
+        (DConst::<3>, DConst::<4>),
     );
-    let d_a = d_dev.tensor_from_vec(vec![1, 0, 1], (dfdx::shapes::Const::<3>,));
-    let d_batch = d_dev.tensor_from_vec(
-        vec![1, 0, 2, 1, 0, 1],
-        (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<3>),
-    );
+    let d_a = d_dev.tensor_from_vec(vec![1, 0, 1], (DConst::<3>,));
+    let d_batch = d_dev.tensor_from_vec(vec![1, 0, 2, 1, 0, 1], (DConst::<2>, DConst::<3>));
 
     let d_b = d_model.forward(d_a);
     let d_batch_out = d_model.forward(d_batch);

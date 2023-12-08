@@ -22,11 +22,30 @@ where
 
 impl Debug for Expression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for term in &self.terms {
-            term.fmt(f)?;
-            write!(f, " ")?;
+        let mut symbols = vec![];
+        for term in self.terms {
+            let new_symbol = match term {
+                Term::Num(n) => n.to_string(),
+                Term::Var(c) => c.to_string(),
+                Term::Max => format!(
+                    "max({}, {})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+                Term::Min => format!(
+                    "min({}, {})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+                _ => format!(
+                    "({}{term:?}{})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+            };
+            symbols.push(new_symbol);
         }
-        Ok(())
+        write!(f, "{}", symbols.pop().unwrap())
     }
 }
 
@@ -56,9 +75,63 @@ impl Expression {
     pub fn minimize(mut self) -> Self {
         let mut i = 0;
         while i < self.terms.len().saturating_sub(2) {
-            match (self.terms[i], self.terms[i + 1], self.terms[i + 2].as_op()) {
-                (Term::Num(b), Term::Num(a), Some(term)) => {
-                    self.terms[i] = Term::Num(term(a, b));
+            match (self.terms[i], self.terms[i + 1], self.terms[i + 2]) {
+                (Term::Num(b), Term::Num(a), term) if term.as_op().is_some() => {
+                    self.terms[i] = Term::Num(term.as_op().unwrap()(a, b));
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                // Remove min(i, inf) and min(inf, i)
+                (Term::Num(b), Term::Num(_) | Term::Var(_), Term::Min)
+                    if b == i32::MAX as usize =>
+                {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i);
+                }
+                (Term::Num(_) | Term::Var(_), Term::Num(a), Term::Min)
+                    if a == i32::MAX as usize =>
+                {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                // Remove max(i, 0) and max(0, i)
+                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Max) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i);
+                }
+                (Term::Num(_) | Term::Var(_), Term::Num(0), Term::Max) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                // Remove i + 0, i - 0 and 0 + i
+                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Add) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i);
+                }
+                (Term::Num(_) | Term::Var(_), Term::Num(0), Term::Add | Term::Sub) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                // Remove i * 0, 0 * i
+                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Mul) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                (Term::Num(_) | Term::Var(_), Term::Num(0), Term::Mul) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i);
+                }
+                // Remove 0 / i
+                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Div) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                // Remove i * 1 and 1 * i
+                (Term::Num(1), Term::Num(_) | Term::Var(_), Term::Mul) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i);
+                }
+                (Term::Num(_) | Term::Var(_), Term::Num(i), Term::Mul) => {
                     self.terms.remove(i + 2);
                     self.terms.remove(i + 1);
                 }

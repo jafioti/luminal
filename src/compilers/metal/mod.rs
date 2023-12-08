@@ -203,23 +203,32 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> String {
 fn expr_to_metal_string(expr: BigExpression) -> String {
     let mut symbols = vec![];
     for term in expr.terms {
-        if let Term::Num(n) = term {
-            symbols.push(n.to_string());
-        } else if let Term::Var(c) = term {
-            if c == 'z' {
-                symbols.push("idx".to_string());
-            } else {
-                symbols.push(c.to_string());
+        let new_symbol = match term {
+            Term::Num(n) => n.to_string(),
+            Term::Var(c) => {
+                if c == 'z' {
+                    "idx".to_string()
+                } else {
+                    c.to_string()
+                }
             }
-        } else {
-            let left = symbols.pop().unwrap();
-            let right = symbols.pop().unwrap();
-            symbols.push(match term {
-                Term::Max => format!("max((uint){left}, (uint){right})"),
-                Term::Min => format!("min((uint){left}, (uint){right})"),
-                _ => format!("({left}{term:?}{right})"),
-            });
-        }
+            Term::Max => format!(
+                "max((uint){}, (uint){})",
+                symbols.pop().unwrap(),
+                symbols.pop().unwrap()
+            ),
+            Term::Min => format!(
+                "min((uint){}, (uint){})",
+                symbols.pop().unwrap(),
+                symbols.pop().unwrap()
+            ),
+            _ => format!(
+                "({}{term:?}{})",
+                symbols.pop().unwrap(),
+                symbols.pop().unwrap()
+            ),
+        };
+        symbols.push(new_symbol);
     }
     symbols.pop().unwrap()
 }
@@ -348,7 +357,6 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
 }}
 ", T::type_name(), T::type_name(), render_dyn_dim_inputs(&[shape], 3),
         );
-        println!("Contiguous Kernel: {code}");
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("mkernel", &name);
 
