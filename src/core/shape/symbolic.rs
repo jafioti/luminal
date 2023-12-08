@@ -131,7 +131,7 @@ impl Expression {
                     self.terms.remove(i + 2);
                     self.terms.remove(i);
                 }
-                (Term::Num(_) | Term::Var(_), Term::Num(i), Term::Mul) => {
+                (Term::Num(_) | Term::Var(_), Term::Num(1), Term::Mul) => {
                     self.terms.remove(i + 2);
                     self.terms.remove(i + 1);
                 }
@@ -163,28 +163,28 @@ impl Expression {
             .collect()
     }
 
-    pub fn min<E: Into<Expression>>(self, rhs: E) -> Self {
+    pub fn min<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Min);
         rhs.minimize()
     }
 
-    pub fn max<E: Into<Expression>>(self, rhs: E) -> Self {
+    pub fn max<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Max);
         rhs.minimize()
     }
 
-    pub fn gte<E: Into<Expression>>(self, rhs: E) -> Self {
+    pub fn gte<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Gte);
         rhs.minimize()
     }
 
-    pub fn lt<E: Into<Expression>>(self, rhs: E) -> Self {
+    pub fn lt<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Lt);
@@ -253,32 +253,104 @@ impl BigExpression {
             .collect()
     }
 
-    pub fn min<E: Into<BigExpression>>(self, rhs: E) -> Self {
+    pub fn min<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Min);
-        rhs
+        rhs.minimize()
     }
 
-    pub fn max<E: Into<BigExpression>>(self, rhs: E) -> Self {
+    pub fn max<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Max);
-        rhs
+        rhs.minimize()
     }
 
-    pub fn gte<E: Into<BigExpression>>(self, rhs: E) -> Self {
+    pub fn gte<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Gte);
-        rhs
+        rhs.minimize()
     }
 
-    pub fn lt<E: Into<BigExpression>>(self, rhs: E) -> Self {
+    pub fn lt<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Lt);
-        rhs
+        rhs.minimize()
+    }
+
+    pub fn minimize(mut self) -> Self {
+        let mut i = 0;
+        while i < self.terms.len().saturating_sub(2) {
+            match (self.terms[i], self.terms[i + 1], self.terms[i + 2]) {
+                (Term::Num(b), Term::Num(a), term) if term.as_op().is_some() => {
+                    self.terms[i] = Term::Num(term.as_op().unwrap()(a, b));
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                // Remove min(i, inf) and min(inf, i)
+                (Term::Num(b), Term::Num(_) | Term::Var(_), Term::Min)
+                    if b == i32::MAX as usize =>
+                {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i);
+                }
+                (Term::Num(_) | Term::Var(_), Term::Num(a), Term::Min)
+                    if a == i32::MAX as usize =>
+                {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                // Remove max(i, 0) and max(0, i)
+                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Max) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i);
+                }
+                (Term::Num(_) | Term::Var(_), Term::Num(0), Term::Max) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                // Remove i + 0, i - 0 and 0 + i
+                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Add) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i);
+                }
+                (Term::Num(_) | Term::Var(_), Term::Num(0), Term::Add | Term::Sub) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                // Remove i * 0, 0 * i
+                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Mul) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                (Term::Num(_) | Term::Var(_), Term::Num(0), Term::Mul) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i);
+                }
+                // Remove 0 / i
+                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Div) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                // Remove i * 1 and 1 * i
+                (Term::Num(1), Term::Num(_) | Term::Var(_), Term::Mul) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i);
+                }
+                (Term::Num(_) | Term::Var(_), Term::Num(1), Term::Mul) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                _ => {
+                    i += 1;
+                }
+            }
+        }
+
+        self
     }
 }
 
@@ -422,7 +494,7 @@ impl From<Expression> for BigExpression {
     }
 }
 
-impl<E: Into<Expression>> Add<E> for Expression {
+impl<E: Into<Self>> Add<E> for Expression {
     type Output = Self;
     fn add(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
@@ -432,7 +504,7 @@ impl<E: Into<Expression>> Add<E> for Expression {
     }
 }
 
-impl<E: Into<Expression>> Sub<E> for Expression {
+impl<E: Into<Self>> Sub<E> for Expression {
     type Output = Self;
     fn sub(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
@@ -442,7 +514,7 @@ impl<E: Into<Expression>> Sub<E> for Expression {
     }
 }
 
-impl<E: Into<Expression>> Mul<E> for Expression {
+impl<E: Into<Self>> Mul<E> for Expression {
     type Output = Self;
     fn mul(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
@@ -452,7 +524,7 @@ impl<E: Into<Expression>> Mul<E> for Expression {
     }
 }
 
-impl<E: Into<Expression>> Div<E> for Expression {
+impl<E: Into<Self>> Div<E> for Expression {
     type Output = Self;
     fn div(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
@@ -462,7 +534,7 @@ impl<E: Into<Expression>> Div<E> for Expression {
     }
 }
 
-impl<E: Into<Expression>> Rem<E> for Expression {
+impl<E: Into<Self>> Rem<E> for Expression {
     type Output = Self;
     fn rem(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
@@ -472,7 +544,7 @@ impl<E: Into<Expression>> Rem<E> for Expression {
     }
 }
 
-impl<E: Into<Expression>> BitAnd<E> for Expression {
+impl<E: Into<Self>> BitAnd<E> for Expression {
     type Output = Self;
     fn bitand(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
@@ -482,7 +554,7 @@ impl<E: Into<Expression>> BitAnd<E> for Expression {
     }
 }
 
-impl<E: Into<Expression>> BitOr<E> for Expression {
+impl<E: Into<Self>> BitOr<E> for Expression {
     type Output = Self;
     fn bitor(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
@@ -492,7 +564,7 @@ impl<E: Into<Expression>> BitOr<E> for Expression {
     }
 }
 
-impl<E: Into<BigExpression>> Add<E> for BigExpression {
+impl<E: Into<Self>> Add<E> for BigExpression {
     type Output = Self;
     fn add(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
@@ -502,63 +574,63 @@ impl<E: Into<BigExpression>> Add<E> for BigExpression {
     }
 }
 
-impl<E: Into<BigExpression>> Sub<E> for BigExpression {
+impl<E: Into<Self>> Sub<E> for BigExpression {
     type Output = Self;
     fn sub(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Sub);
-        rhs
+        rhs.minimize()
     }
 }
 
-impl<E: Into<BigExpression>> Mul<E> for BigExpression {
+impl<E: Into<Self>> Mul<E> for BigExpression {
     type Output = Self;
     fn mul(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Mul);
-        rhs
+        rhs.minimize()
     }
 }
 
-impl<E: Into<BigExpression>> Div<E> for BigExpression {
+impl<E: Into<Self>> Div<E> for BigExpression {
     type Output = Self;
     fn div(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Div);
-        rhs
+        rhs.minimize()
     }
 }
 
-impl<E: Into<BigExpression>> Rem<E> for BigExpression {
+impl<E: Into<Self>> Rem<E> for BigExpression {
     type Output = Self;
     fn rem(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Mod);
-        rhs
+        rhs.minimize()
     }
 }
 
-impl<E: Into<BigExpression>> BitAnd<E> for BigExpression {
+impl<E: Into<Self>> BitAnd<E> for BigExpression {
     type Output = Self;
     fn bitand(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::And);
-        rhs
+        rhs.minimize()
     }
 }
 
-impl<E: Into<BigExpression>> BitOr<E> for BigExpression {
+impl<E: Into<Self>> BitOr<E> for BigExpression {
     type Output = Self;
     fn bitor(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Or);
-        rhs
+        rhs.minimize()
     }
 }
 
