@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
 use crate::prelude::{remap_id, Graph, SerializeModule, Serializer};
@@ -13,22 +15,20 @@ pub trait Module<I> {
     fn forward(&self, input: I) -> Self::Output;
 }
 
+pub fn state_dict<M: SerializeModule>(model: &M) -> HashMap<String, NodeIndex> {
+    let mut s = Serializer::default();
+    model.serialize(&mut s);
+    s.state
+}
+
 pub fn transfer_weights<M: SerializeModule>(
     src_model: &M,
     src_graph: &mut Graph,
     dest_model: &M,
     dest_graph: &mut Graph,
 ) {
-    let src_state_dict = {
-        let mut s = Serializer::default();
-        src_model.serialize(&mut s);
-        s.state
-    };
-    let dest_state_dict = {
-        let mut s = Serializer::default();
-        dest_model.serialize(&mut s);
-        s.state
-    };
+    let src_state_dict = state_dict(src_model);
+    let dest_state_dict = state_dict(dest_model);
     for (key, mut src_ind) in src_state_dict {
         src_ind = remap_id(src_ind, &src_graph.id_remap);
         let dest_ind = remap_id(
@@ -51,9 +51,7 @@ pub fn transfer_weights<M: SerializeModule>(
 
 /// Delete all incoming nodes to the states of the model
 pub fn delete_inputs<M: SerializeModule>(model: &M, graph: &mut Graph) {
-    let mut s = Serializer::default();
-    model.serialize(&mut s);
-    for node in s.state.values() {
+    for node in state_dict(model).values() {
         delete_upstream(graph, remap_id(*node, &graph.id_remap));
     }
     graph.toposort();
@@ -73,9 +71,7 @@ fn delete_upstream(graph: &mut Graph, node: NodeIndex) {
 }
 
 pub fn keep_weights<M: SerializeModule>(model: &M, graph: &mut Graph) {
-    let mut s = Serializer::default();
-    model.serialize(&mut s);
-    for node in s.state.values() {
+    for node in state_dict(model).values() {
         let id = remap_id(*node, &graph.id_remap);
         graph.no_delete.insert(id);
     }

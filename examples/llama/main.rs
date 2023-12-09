@@ -37,7 +37,6 @@ fn main() {
     let mut cx1 = Graph::new();
     let mut cx2 = Graph::new();
     let model = Model::initialize(&mut cx1);
-    keep_weights(&model, &mut cx1);
     let inp = cx1.named_tensor::<(Dyn<'b'>, Dyn<'s'>)>("Input").set_dyn(
         input.iter().map(|i| *i as f32).collect::<Vec<_>>(),
         vec![1, input.len()],
@@ -53,12 +52,17 @@ fn main() {
     cx1.compile(<(CudaFp16Compiler, GenericCompiler)>::default());
     #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
     cx1.compile(<(GenericCompiler, CPUCompiler)>::default());
-    // cx1.compile(CacheWeightsDownstream::new(&model));
+
+    // Cache model weights
+    cx1.compile(RemapDownstream(
+        state_dict(&model).values().copied().collect(),
+    ));
+    keep_weights(&model, &mut cx1);
 
     // Build KV cache forward graph
     let kv_model = Model::initialize(&mut cx2);
-    keep_weights(&kv_model, &mut cx2);
-    let single_inp = cx2.named_tensor::<(Dyn<'b'>, Const<1>)>("Input");
+    let single_inp: GraphTensor<(Dyn<'b'>, Const<1>)> =
+        cx2.named_tensor::<(Dyn<'b'>, Const<1>)>("Input");
     let cache_src = (0..config::LAYERS)
         .map(|_| {
             (
@@ -87,7 +91,11 @@ fn main() {
     cx2.compile(<(CudaFp16Compiler, GenericCompiler)>::default());
     #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
     cx2.compile(<(GenericCompiler, CPUCompiler)>::default());
-    // cx2.compile(CacheWeightsDownstream::new(&kv_model));
+    cx2.compile(RemapDownstream(
+        state_dict(&kv_model).values().copied().collect(),
+    ));
+    // Cache weights
+    keep_weights(&kv_model, &mut cx2);
     // Delete weight loading nodes
     delete_inputs(&kv_model, &mut cx2);
 

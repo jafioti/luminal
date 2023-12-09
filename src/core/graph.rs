@@ -395,10 +395,7 @@ fn get_source_tensors<'a>(
 }
 
 /// Walk through remap to get new id
-pub(crate) fn remap_id(
-    mut id: NodeIndex,
-    map: &HashMap<NodeIndex<u32>, NodeIndex<u32>>,
-) -> NodeIndex {
+pub fn remap_id(mut id: NodeIndex, map: &HashMap<NodeIndex<u32>, NodeIndex<u32>>) -> NodeIndex {
     while let Some(new_id) = map.get(&id) {
         id = *new_id;
     }
