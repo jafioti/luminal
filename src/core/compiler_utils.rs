@@ -10,7 +10,7 @@ use petgraph::{
     algo::toposort,
     stable_graph::{EdgeIndex, NodeIndex, StableGraph},
     visit::EdgeRef,
-    Directed, Direction,
+    Direction,
 };
 use regex::Regex;
 
@@ -103,7 +103,11 @@ impl Graph {
     pub fn debug_graph(
         &self,
         show_shapes: bool,
-    ) -> (StableGraph<String, u8, Directed, u32>, Vec<EdgeIndex>) {
+    ) -> (
+        StableGraph<String, u8>,
+        Vec<EdgeIndex>,
+        HashMap<NodeIndex, NodeIndex>,
+    ) {
         let mut new_graph = StableGraph::default();
         let mut id_map = HashMap::new();
         for (id, node) in self.graph.node_indices().zip(self.graph.node_weights()) {
@@ -154,17 +158,22 @@ impl Graph {
             }
         }
 
-        (new_graph, schedule_edges)
+        (new_graph, schedule_edges, id_map)
     }
 
     pub fn display(&self) {
-        let (g, e) = self.debug_graph(false);
-        display_graph(&g, &e);
+        let (g, e, _) = self.debug_graph(false);
+        display_graph(&g, &e, &[]);
     }
 
     pub fn display_shapes(&self) {
-        let (g, e) = self.debug_graph(true);
-        display_graph(&g, &e);
+        let (g, e, _) = self.debug_graph(true);
+        display_graph(&g, &e, &[]);
+    }
+
+    pub fn display_group(&self, group: &[NodeIndex]) {
+        let (g, e, id_map) = self.debug_graph(false);
+        display_graph(&g, &e, &group.iter().map(|i| id_map[i]).collect::<Vec<_>>());
     }
 
     /// Get the sources of a node given it's id
@@ -194,6 +203,7 @@ impl Graph {
 pub fn display_graph(
     graph: &petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32>,
     schedule_edges: &[EdgeIndex],
+    mark_nodes: &[NodeIndex],
 ) {
     let mut graph_string =
         petgraph::dot::Dot::with_config(&graph, &[petgraph::dot::Config::EdgeIndexLabel])
@@ -204,6 +214,15 @@ pub fn display_graph(
             graph_string.replace(&format!("label = \"{}\"", e.index()), "color=\"green\"");
     }
     graph_string = re.replace_all(&graph_string, "").to_string();
+    for n in mark_nodes {
+        graph_string = graph_string.replace(
+            &format!("    {} [ label =", n.index()),
+            &format!(
+                "    {} [ style=\"filled\" fillcolor=\"yellow\" label =",
+                n.index()
+            ),
+        );
+    }
 
     let url = format!(
         "https://dreampuf.github.io/GraphvizOnline/#{}",

@@ -1,4 +1,4 @@
-use petgraph::visit::EdgeRef;
+use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
 use crate::prelude::{remap_id, Graph, SerializeModule, Serializer};
 
@@ -54,20 +54,22 @@ pub fn delete_inputs<M: SerializeModule>(model: &M, graph: &mut Graph) {
     let mut s = Serializer::default();
     model.serialize(&mut s);
     for node in s.state.values() {
-        for e in graph
-            .graph
-            .edges_directed(
-                remap_id(*node, &graph.id_remap),
-                petgraph::Direction::Incoming,
-            )
-            .filter(|e| !e.weight().is_schedule())
-            .map(|e| e.source())
-            .collect::<Vec<_>>()
-        {
-            graph.graph.remove_node(e);
-        }
+        delete_upstream(graph, remap_id(*node, &graph.id_remap));
     }
     graph.toposort();
+}
+
+fn delete_upstream(graph: &mut Graph, node: NodeIndex) {
+    for e in graph
+        .graph
+        .edges_directed(node, petgraph::Direction::Incoming)
+        .filter(|e| !e.weight().is_schedule())
+        .map(|e| e.source())
+        .collect::<Vec<_>>()
+    {
+        delete_upstream(graph, e);
+        graph.graph.remove_node(e);
+    }
 }
 
 pub fn keep_weights<M: SerializeModule>(model: &M, graph: &mut Graph) {

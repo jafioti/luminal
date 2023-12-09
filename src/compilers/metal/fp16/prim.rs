@@ -68,13 +68,6 @@ impl Compiler for PrimitiveCompiler {
                     graph.to_retrieve.insert(copy_node);
                 }
 
-                // If there are inputs to this function remap the function to the copy node
-                // if graph
-                //     .graph
-                //     .edges_directed(function_node, petgraph::Direction::Incoming)
-                //     .count()
-                //     != 0
-                // {
                 move_references(
                     &mut graph.id_remap,
                     &mut graph.no_delete,
@@ -82,7 +75,6 @@ impl Compiler for PrimitiveCompiler {
                     function_node,
                     copy_node,
                 );
-                // }
             }
 
             // Insert copy from device for function inputs
@@ -516,6 +508,7 @@ impl Compiler for CopyCompiler {
                 source.0,
             );
             graph.graph.remove_node(second);
+            graph.id_remap.retain(|_, v| *v != second);
             for dest in graph
                 .get_dests(first)
                 .iter()
@@ -531,8 +524,10 @@ impl Compiler for CopyCompiler {
                     source.0,
                 );
                 graph.graph.remove_node(dest);
+                graph.id_remap.retain(|_, v| *v != dest);
             }
             graph.graph.remove_node(first);
+            graph.id_remap.retain(|_, v| *v != first);
         }
     }
 }

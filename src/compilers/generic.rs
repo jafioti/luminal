@@ -235,6 +235,59 @@ impl Compiler for DepthFirst {
     }
 }
 
+/// Mark no_delete as far downstream as possible
+#[derive(Debug, Default)]
+pub struct CacheWeightsDownstream(HashSet<NodeIndex>);
+
+impl CacheWeightsDownstream {
+    pub fn new<M: SerializeModule>(model: &M) -> Self {
+        let mut s = Serializer::default();
+        model.serialize(&mut s);
+        Self(s.state.values().copied().collect())
+    }
+}
+
+impl Compiler for CacheWeightsDownstream {
+    fn compile(&self, graph: &mut Graph) {
+        // Loop through state dict tensors marked as no_delete
+        for mut node in self
+            .0
+            .iter()
+            .map(|i| remap_id(*i, &graph.id_remap))
+            .filter(|i| graph.no_delete.contains(i))
+            .collect::<Vec<_>>()
+        {
+            // Go downstream as far as possible (for now just single ops)
+            while graph
+                .graph
+                .edges_directed(node, Direction::Outgoing)
+                .count()
+                == 1
+            {
+                let new_node = graph
+                    .graph
+                    .edges_directed(node, Direction::Outgoing)
+                    .next()
+                    .unwrap()
+                    .target();
+                if graph
+                    .graph
+                    .edges_directed(new_node, Direction::Incoming)
+                    .count()
+                    > 1
+                {
+                    break;
+                }
+                // Remove no_delete from current node, remap to new_node
+                graph.no_delete.remove(&node);
+                graph.no_delete.insert(new_node);
+                graph.id_remap.insert(node, new_node);
+                node = new_node;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::prelude::*;
