@@ -127,40 +127,41 @@ fn main() {
     // Move weights over
     transfer_weights(&model, &mut cx1, &kv_model, &mut cx2);
 
-    loop {
-        single_inp.set_dyn(vec![*input.last().unwrap() as f32], vec![1, 1]);
-        cx2.set_dyn_dim('p', input.len() - 1);
-        cx2.set_dyn_dim('t', input.len());
+    // loop {
+    single_inp.set_dyn(vec![*input.last().unwrap() as f32], vec![1, 1]);
+    cx2.set_dyn_dim('p', input.len() - 1);
+    cx2.set_dyn_dim('t', input.len());
 
-        let now = std::time::Instant::now();
-        cx2.execute();
-        println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
+    let now = std::time::Instant::now();
+    cx2.execute_debug();
+    println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
+    println!("Tokens: {}", input.len());
 
-        let o = out.data();
-        out.drop();
-        // Sample tokens
-        input.push(sample_index(&o));
-        println!(
-            "{}",
-            tokenizer
-                .decode(
-                    &input.iter().map(|i| *i as i64).collect::<Vec<_>>(),
-                    true,
-                    false
-                )
-                .replace("<0x0A>", "\n")
-        );
+    let o = out.data();
+    out.drop();
+    // Sample tokens
+    input.push(sample_index(&o));
+    println!(
+        "{}",
+        tokenizer
+            .decode(
+                &input.iter().map(|i| *i as i64).collect::<Vec<_>>(),
+                true,
+                false
+            )
+            .replace("<0x0A>", "\n")
+    );
 
-        // Swap caches
-        for ((src_k, src_v), (dest_k, dest_v)) in cache_src.iter().zip(cache_dest.iter()) {
-            // Move dest caches to src
-            cx2.swap_tensors(*src_k, *dest_k);
-            cx2.swap_tensors(*src_v, *dest_v);
-            // Drop dest caches
-            dest_k.drop();
-            dest_v.drop();
-        }
+    // Swap caches
+    for ((src_k, src_v), (dest_k, dest_v)) in cache_src.iter().zip(cache_dest.iter()) {
+        // Move dest caches to src
+        cx2.swap_tensors(*src_k, *dest_k);
+        cx2.swap_tensors(*src_v, *dest_v);
+        // Drop dest caches
+        dest_k.drop();
+        dest_v.drop();
     }
+    // }
 }
 
 // Currently just an argmax, do actual sampling here

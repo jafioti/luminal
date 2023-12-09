@@ -44,7 +44,9 @@ kernel void kernel_matmul_2d(
     data2 += global_pos.y * 32;
 
     simdgroup_float8x8 acc[4][4];
+    #pragma unroll(4)
     for (uint i = 0; i < 4; ++i) {
+        #pragma unroll(4)
         for (uint j = 0; j < 4; ++j) {
             acc[i][j] = simdgroup_float8x8(0);
         }
@@ -56,12 +58,15 @@ kernel void kernel_matmul_2d(
     for (uint k = 0; k < K; k+=8) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
         device const half *d1 = data1 + k;
+        #pragma unroll(4)
         for (int i = 0; i < 4; ++i) {
             simdgroup_load(A[i], d1 + i * k8, K);
             simdgroup_load(B[i], data2 + k * N + i * 8, N);
         }
 
+        #pragma unroll(4)
         for (int i = 0; i < 4; ++i) {
+            #pragma unroll(4)
             for (int j = 0; j < 4; ++j) {
                 simdgroup_multiply_accumulate(acc[i][j], A[j], B[i], acc[i][j]);
             }
@@ -71,9 +76,11 @@ kernel void kernel_matmul_2d(
     simdgroup_half8x8 temp = simdgroup_half8x8(0);
     simdgroup_half8x8 ident = simdgroup_half8x8(1);
     // Width
+    #pragma unroll(4)
     for (int i = 0; i < 4; ++i) {
         uint n8i = i * 8 * N;
         // Height
+        #pragma unroll(4)
         for (int j = 0; j < 4; ++j) {
             simdgroup_multiply(temp, acc[j][i], ident);
             simdgroup_store(temp, a+(8*j+n8i), N);
@@ -142,27 +149,15 @@ impl MetalKernelForward for MetalMatmul2D {
 impl Operator for MetalMatmul2D {
     fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let a = inp[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-            let b = inp[1]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-
             // Setup command queue / command buffer / encoder
             let command_buffer = self.queue.new_command_buffer();
 
             let out = self
                 .metal_forward(
-                    &[(a, inp[0].1), (b, inp[1].1)],
+                    &[
+                        (get_buffer_from_tensor(&inp[0].0), inp[0].1),
+                        (get_buffer_from_tensor(&inp[1].0), inp[1].1),
+                    ],
                     &self.device,
                     command_buffer,
                 )
@@ -217,7 +212,9 @@ kernel void kernel_batch_matmul_2d(
     data2 += global_pos.y * 32;
 
     simdgroup_float8x8 acc[4][4];
+    #pragma unroll(4)
     for (uint i = 0; i < 4; ++i) {
+        #pragma unroll(4)
         for (uint j = 0; j < 4; ++j) {
             acc[i][j] = simdgroup_float8x8(0);
         }
@@ -229,11 +226,13 @@ kernel void kernel_batch_matmul_2d(
     for (uint k = 0; k < K; k+=8) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
         device const half *d1 = data1 + k;
+        #pragma unroll(4)
         for (int i = 0; i < 4; ++i) {
             simdgroup_load(A[i], d1 + i * k8, K);
             simdgroup_load(B[i], data2 + k * N + i * 8, N);
         }
 
+        #pragma unroll(4)
         for (int i = 0; i < 4; ++i) {
             for (int j = 0; j < 4; ++j) {
                 simdgroup_multiply_accumulate(acc[i][j], A[j], B[i], acc[i][j]);
@@ -244,9 +243,11 @@ kernel void kernel_batch_matmul_2d(
     simdgroup_half8x8 temp = simdgroup_half8x8(0);
     simdgroup_half8x8 ident = simdgroup_half8x8(1);
     // Width
+    #pragma unroll(4)
     for (int i = 0; i < 4; ++i) {
         uint n8i = i * 8 * N;
         // Height
+        #pragma unroll(4)
         for (int j = 0; j < 4; ++j) {
             simdgroup_multiply(temp, acc[j][i], ident);
             simdgroup_store(temp, a+(8*j+n8i), N);
@@ -312,26 +313,18 @@ impl MetalKernelForward for MetalBatchMatmul2D {
 impl Operator for MetalBatchMatmul2D {
     fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let a = inp[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-            let b = inp[1]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
-
             // Setup command queue / command buffer / encoder
             let command_buffer = self.1.new_command_buffer();
 
             let out = self
-                .metal_forward(&[(a, inp[0].1), (b, inp[1].1)], &self.2, command_buffer)
+                .metal_forward(
+                    &[
+                        (get_buffer_from_tensor(&inp[0].0), inp[0].1),
+                        (get_buffer_from_tensor(&inp[1].0), inp[1].1),
+                    ],
+                    &self.2,
+                    command_buffer,
+                )
                 .pop()
                 .unwrap();
 
