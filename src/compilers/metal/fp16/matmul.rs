@@ -41,9 +41,9 @@ kernel void kernel_vecmat(
     if (global_pos.x < N) {
         float acc = 0.0;
         for (uint i = 0; i < M; ++i) {
-            acc = precise::fma((float)data1[i], (float)data2[global_pos.x + (i * N)], acc);
+            acc = fast::fma(data1[i], data2[global_pos.x + (i * N)], acc);
         }
-        a[global_pos.x] = (half)acc;
+        a[global_pos.x] = acc;
     }
 }",
                 dev,
