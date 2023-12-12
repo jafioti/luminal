@@ -195,8 +195,8 @@ fn attn_forward<
     GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
     GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
 ) {
-    let q = x
-        .matmul(attn.q_proj.permute())
+    let q = x.matmul(attn.q_proj.permute());
+    let q = q
         .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
             Batch::const_size(),
             Seq::const_size(),

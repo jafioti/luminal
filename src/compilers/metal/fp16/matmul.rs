@@ -40,11 +40,10 @@ kernel void kernel_vecmat(
 ) {
     if (global_pos.x < N) {
         float acc = 0.0;
-        data2 += global_pos.x * M;
         for (uint i = 0; i < M; ++i) {
-            acc = fast::fma(data1[i], data2[i], acc);
+            acc = precise::fma((float)data1[i], (float)data2[global_pos.x + (i * N)], acc);
         }
-        a[global_pos.x] = acc;
+        a[global_pos.x] = (half)acc;
     }
 }",
                 dev,
@@ -64,7 +63,7 @@ impl MetalKernelForward for MetalVecMat {
     ) -> Vec<Buffer> {
         let (m, n) = (
             inputs[0].1.shape()[0].to_usize().unwrap(),
-            inputs[1].1.shape()[0].to_usize().unwrap(),
+            inputs[1].1.shape()[1].to_usize().unwrap(),
         );
 
         let out = dev.new_buffer(
@@ -552,6 +551,7 @@ impl Compiler for MetalMatMulCompiler {
             src1_shape.remove_dim(1);
             src1_shape.remove_dim(0);
             src2_shape.remove_dim(0);
+            src2_shape.permute(&[1, 0]);
             // Src1: [M], Src2: [N, M]
             if !src2_shape.is_contiguous() || src2_shape.is_sliced() || src2_shape.is_padded() {
                 src2 = graph
@@ -857,6 +857,9 @@ impl Compiler for MetalMatMulCompiler {
 
 #[cfg(test)]
 mod tests {
+
+    use crate::tests::assert_close_precision;
+
     crate::test_imports!();
     #[test]
     fn test_matrix_vector() {
@@ -881,8 +884,8 @@ mod tests {
 
     #[test]
     fn test_batch_matrix_vector() {
-        const M: usize = 13;
-        const N: usize = 32;
+        const M: usize = 4096;
+        const N: usize = 4096;
         let mut cx = Graph::new();
         let (a_vec, b_vec) = (random_vec(M), random_vec(M * N));
         let a = cx.named_tensor::<R3<1, 1, M>>("Vec").set(a_vec.clone());
@@ -898,6 +901,6 @@ mod tests {
         let d_b = d_dev.tensor_from_vec(b_vec, (DConst::<M>, DConst::<N>));
         let d_c = d_a.matmul(d_b);
 
-        assert_close(&c.data(), &d_c.as_vec());
+        assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 2);
     }
 }
