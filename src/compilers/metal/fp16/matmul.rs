@@ -6,7 +6,7 @@ use petgraph::stable_graph::NodeIndex;
 use crate::{
     compilers::metal::*,
     op::{InputTensor, Operator},
-    prelude::{symbolic::Expression, *},
+    prelude::*,
 };
 
 use metal_rs::{objc::rc::autoreleasepool, *};
@@ -274,7 +274,9 @@ impl MetalKernelForward for MetalBatchMatmul2D {
             b_shape[1].to_usize().unwrap(),
         );
 
-        let out = dev.new_buffer(
+        let v = vec![f16::ZERO; batch_size * m * n];
+        let out = dev.new_buffer_with_data(
+            v.as_ptr() as *const _,
             (batch_size * m * n * std::mem::size_of::<f16>()) as u64,
             MTLResourceOptions::StorageModeShared,
         );
@@ -304,6 +306,7 @@ impl MetalKernelForward for MetalBatchMatmul2D {
                 depth: 1,
             },
         );
+        encoder.memory_barrier_with_resources(&[&out]);
         encoder.end_encoding();
 
         vec![out]
@@ -396,12 +399,19 @@ impl Compiler for MetalMatMulCompiler {
             // Pad out N to multiple of 256 and K to 16
             let n_dim = src2_shape.dims[src2_shape.indexes[1]];
             let k_dim = src1_shape.dims[src1_shape.indexes[1]];
-            let k_padding = if k_dim.to_usize().map(|i| i < 16).unwrap_or(true) {
-                Expression::from(16) - k_dim
+            let m_dim = src1_shape.dims[src1_shape.indexes[0]];
+            let k_padding = if k_dim.to_usize().map(|i| i % 16 != 0).unwrap_or(true) {
+                (k_dim + 15) / 16 * 16 - k_dim
             } else {
                 0.into()
             };
             let mut padded = false;
+            let m_padding = if m_dim.to_usize().map(|i| i % 32 != 0).unwrap_or(true) {
+                padded = true;
+                (m_dim + 31) / 32 * 32 - m_dim
+            } else {
+                0.into()
+            };
             if n_dim.to_usize().map(|i| i % 256 != 0).unwrap_or(true) {
                 padded = true;
                 src2_shape.pad(&[
@@ -410,7 +420,7 @@ impl Compiler for MetalMatMulCompiler {
                 ]);
             }
             if k_padding != 0.into() {
-                src1_shape.pad(&[(0.into(), 0.into()), (0.into(), k_padding)]);
+                src1_shape.pad(&[(0.into(), m_padding), (0.into(), k_padding)]);
             }
             if !src1_shape.is_contiguous() || src1_shape.is_sliced() || src1_shape.is_padded() {
                 src1 = graph
@@ -517,26 +527,31 @@ impl Compiler for MetalMatMulCompiler {
             // Pad out N to multiple of 256 and K to 16
             let n_dim = src2_shape.shape()[1];
             let k_dim = src1_shape.shape()[2];
-            let k_padding = if k_dim.to_usize().map(|i| i < 16).unwrap_or(true) {
-                Expression::from(16) - k_dim
+            let m_dim = src1_shape.shape()[1];
+            let mut padded = false;
+            let k_padding = if k_dim.to_usize().map(|i| i % 16 != 0).unwrap_or(true) {
+                (k_dim + 15) / 16 * 16 - k_dim
             } else {
                 0.into()
             };
-            let mut padded = false;
+            let m_padding = if m_dim.to_usize().map(|i| i % 32 != 0).unwrap_or(true) {
+                padded = true;
+                (m_dim + 31) / 32 * 32 - m_dim
+            } else {
+                0.into()
+            };
             if n_dim.to_usize().map(|i| i % 256 != 0).unwrap_or(true) {
                 padded = true;
                 src2_shape.pad(&[
-                    (0.into(), 0.into()),
+                    (0.into(), k_padding),
                     (0.into(), (n_dim + 255) / 256 * 256 - n_dim),
                 ]);
             }
-            if k_padding != 0.into() {
-                src1_shape.pad(&[
-                    (0.into(), 0.into()),
-                    (0.into(), 0.into()),
-                    (0.into(), k_padding),
-                ]);
-            }
+            src1_shape.pad(&[
+                (0.into(), 0.into()),
+                (0.into(), m_padding),
+                (0.into(), k_padding),
+            ]);
             if !src1_shape.is_contiguous() || src1_shape.is_sliced() || src1_shape.is_padded() {
                 src1 = graph
                     .add_op(MetalContiguous::<f16>::new(
@@ -579,7 +594,7 @@ impl Compiler for MetalMatMulCompiler {
                 ]);
                 new_shape.slice(&[
                     (0.into(), i32::MAX.into()),
-                    (0.into(), i32::MAX.into()),
+                    (0.into(), m_dim),
                     (0.into(), n_dim),
                 ]);
                 matmul_op = graph

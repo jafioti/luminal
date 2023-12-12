@@ -2,15 +2,13 @@ use dfdx::prelude::{Module as DfdxModule, *};
 use half::f16;
 use itertools::Itertools;
 use num_traits::Float;
+use objc::rc::autoreleasepool;
 use rand::{rngs::StdRng, SeedableRng};
 
 use super::MetalFp16Compiler;
 use crate::{
-    nn::{
-        activation::{RMSNorm, ReLU},
-        linear::Linear,
-    },
-    prelude::{Module, *},
+    nn::{activation::ReLU, linear::Linear, norm::RMSNorm},
+    prelude::{symbolic::Expression, Module, *},
     tests::assert_close_precision,
 };
 
@@ -448,24 +446,35 @@ fn test_matmul_simple() {
 
 #[test]
 fn test_matmul() {
-    let mut cx = Graph::new();
-    let mut rng = StdRng::seed_from_u64(0);
-
-    let a_data = random_vec_rng(2 * 2048, &mut rng);
-    let b_data = random_vec_rng(256 * 2048, &mut rng);
-    let a = cx.tensor::<R2<2, 2048>>().set(a_data.clone());
-    let b = cx.tensor::<R2<2048, 256>>().set(b_data.clone());
-    let c = a.matmul(b).retrieve();
-
-    cx.compile(MetalFp16Compiler::default());
-    cx.execute();
-
     let d_dev = Cpu::default();
-    let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<2048>));
-    let d_b = d_dev.tensor_from_vec(b_data, (DConst::<2048>, DConst::<256>));
-    let d_c = d_a.to_dtype::<f16>().matmul(d_b.to_dtype::<f16>());
+    for m in (1..30).step_by(4) {
+        for k in (1..70).step_by(3) {
+            for n in (1..70).step_by(7) {
+                autoreleasepool(|| {
+                    let mut cx = Graph::new();
+                    let mut rng = StdRng::seed_from_u64(0);
+                    let a_data = random_vec_rng(m * k, &mut rng);
+                    let b_data = random_vec_rng(k * n, &mut rng);
+                    let a = cx
+                        .tensor::<(Dyn<'M'>, Dyn<'K'>)>()
+                        .set_dyn(a_data.clone(), vec![m, k]);
+                    let b = cx
+                        .tensor::<(Dyn<'K'>, Dyn<'N'>)>()
+                        .set_dyn(b_data.clone(), vec![k, n]);
+                    let c = a.matmul(b).retrieve();
 
-    assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 2);
+                    cx.compile(MetalFp16Compiler::default());
+                    cx.execute();
+
+                    let d_a = d_dev.tensor_from_vec(a_data, (m, k));
+                    let d_b = d_dev.tensor_from_vec(b_data, (k, n));
+                    let d_c = d_a.matmul(d_b);
+
+                    assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 2);
+                })
+            }
+        }
+    }
 }
 
 // #[test]
@@ -505,84 +514,86 @@ fn test_matmul() {
 
 #[test]
 fn test_batch_matmul() {
+    for batch in (1..30).step_by(4) {
+        let m = 12;
+        for k in (1..70).step_by(3) {
+            for n in (1..70).step_by(7) {
+                autoreleasepool(|| {
+                    let mut cx = Graph::new();
+                    let mut rng = StdRng::seed_from_u64(0);
+                    let a_data = random_vec_rng(batch * m * k, &mut rng);
+                    let b_data = random_vec_rng(k * n, &mut rng);
+                    let a = cx
+                        .tensor::<(Dyn<'B'>, Dyn<'M'>, Dyn<'K'>)>()
+                        .set_dyn(a_data.clone(), vec![batch, m, k]);
+                    let b = cx
+                        .tensor::<(Dyn<'K'>, Dyn<'N'>)>()
+                        .set_dyn(b_data.clone(), vec![k, n]);
+                    let c = a.matmul(b).retrieve();
+
+                    cx.compile(MetalFp16Compiler::default());
+                    // cx.display();
+                    cx.execute();
+
+                    let d_dev = Cpu::default();
+                    let d_a = d_dev.tensor_from_vec(a_data, (batch, m, k));
+                    let d_b = d_dev.tensor_from_vec(b_data, (k, n));
+                    let d_c = d_a.matmul(d_b);
+
+                    assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 2);
+                });
+            }
+        }
+    }
+}
+
+#[test]
+fn test_batch_matmul_transpose() {
+    const B: usize = 1;
+    const M: usize = 48; // Any
+    const K: usize = 4096; // >= 16, multiple of 16
+    const N: usize = 4096; // >= 256, multiple of 256
     let mut cx = Graph::new();
     let mut rng = StdRng::seed_from_u64(0);
-    let a_data = random_vec_rng(2 * 3, &mut rng);
-    let b_data = random_vec_rng(3 * 4, &mut rng);
-    let a = cx.tensor::<R3<1, 2, 3>>().set(a_data.clone());
-    let b = cx.tensor::<R2<3, 4>>().set(b_data.clone());
-    let c = a.matmul(b).retrieve();
 
-    cx.compile(MetalFp16Compiler::default());
+    let a_data = random_vec_rng(B * M * K, &mut rng);
+    let a = cx.named_tensor::<R3<B, M, K>>("A").set(a_data.clone());
+    let b_data = random_vec_rng(K * N, &mut rng);
+    let b = cx.named_tensor::<R2<N, K>>("B").set(b_data.clone());
+    let a_t_data = random_vec_rng(B * K * M, &mut rng);
+    let a_t = cx.named_tensor::<R3<B, K, M>>("A_T").set(a_t_data.clone());
+    let b_t_data = random_vec_rng(K * N, &mut rng);
+    let b_t = cx.named_tensor::<R2<K, N>>("B_T").set(b_t_data.clone());
+
+    let a_b = a.matmul(b.permute::<_, LAxes2<1, 0>>()).retrieve();
+    let a_b_t = a.matmul(b_t).retrieve();
+    let a_t_b = a_t
+        .permute::<_, LAxes3<0, 2, 1>>()
+        .matmul(b.permute::<_, LAxes2<1, 0>>())
+        .retrieve();
+    let a_t_b_t = a_t.permute::<_, LAxes3<0, 2, 1>>().matmul(b_t).retrieve();
+
+    cx.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
     cx.execute();
 
     let d_dev = Cpu::default();
-    let d_a = d_dev
-        .tensor_from_vec(a_data, (DConst::<1>, DConst::<2>, DConst::<3>))
-        .to_dtype::<f16>();
-    let d_b = d_dev
-        .tensor_from_vec(b_data, (DConst::<3>, DConst::<4>))
-        .to_dtype::<f16>();
-    let d_c = d_a.matmul(d_b);
+    let d_a = d_dev.tensor_from_vec(a_data, (DConst::<B>, DConst::<M>, DConst::<K>));
+    let d_b = d_dev.tensor_from_vec(b_data, (DConst::<N>, DConst::<K>));
+    let d_a_t = d_dev.tensor_from_vec(a_t_data, (DConst::<B>, DConst::<K>, DConst::<M>));
+    let d_b_t = d_dev.tensor_from_vec(b_t_data, (DConst::<K>, DConst::<N>));
+    let d_a_b = d_a.clone().matmul(d_b.clone().permute::<_, DAxes2<1, 0>>());
+    let d_a_b_t = d_a.matmul(d_b_t.clone());
+    let d_a_t_b = d_a_t
+        .clone()
+        .permute::<_, DAxes3<0, 2, 1>>()
+        .matmul(d_b.permute::<_, DAxes2<1, 0>>());
+    let d_a_t_b_t = d_a_t.permute::<_, DAxes3<0, 2, 1>>().matmul(d_b_t);
 
-    assert_exact(&c.data(), &d_c.to_dtype::<f32>().as_vec());
+    assert_close_precision(&a_b.data(), &d_a_b.as_vec(), 1);
+    assert_close_precision(&a_b_t.data(), &d_a_b_t.as_vec(), 1);
+    assert_close_precision(&a_t_b.data(), &d_a_t_b.as_vec(), 1);
+    assert_close_precision(&a_t_b_t.data(), &d_a_t_b_t.as_vec(), 1);
 }
-
-// #[test]
-// fn test_batch_matmul_transpose() {
-//     const B: usize = 10;
-//     const M: usize = 1024; // Any
-//     const K: usize = 16; // >= 16
-//     const N: usize = 767; // >= 256, multiple of 256
-//     let mut cx = Graph::new();
-//     let mut rng = StdRng::seed_from_u64(0);
-
-//     let a_data = random_vec_rng(B * M * K, &mut rng);
-//     let a = cx.tensor::<R3<B, M, K>>().set(a_data.clone());
-//     let b_data = random_vec_rng(K * N, &mut rng);
-//     let b = cx.tensor::<R2<N, K>>().set(b_data.clone());
-//     let a_t_data = random_vec_rng(B * K * M, &mut rng);
-//     let a_t = cx.tensor::<R3<B, K, M>>().set(a_t_data.clone());
-//     let b_t_data = random_vec_rng(K * N, &mut rng);
-//     let b_t = cx.tensor::<R2<K, N>>().set(b_t_data.clone());
-
-//     let a_b = a.matmul(b.permute::<_, LAxes2<1, 0>>()).retrieve();
-//     let a_b_t = a.matmul(b_t).retrieve();
-//     let a_t_b = a_t
-//         .permute::<_, LAxes3<0, 2, 1>>()
-//         .matmul(b.permute::<_, LAxes2<1, 0>>())
-//         .retrieve();
-//     let a_t_b_t = a_t.permute::<_, LAxes3<0, 2, 1>>().matmul(b_t).retrieve();
-
-//     cx.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
-//     cx.execute();
-
-//     let d_dev = Cpu::default();
-//     let d_a = d_dev
-//         .tensor_from_vec(a_data, (DConst::<B>, DConst::<M>, DConst::<K>))
-//         .to_dtype::<f16>();
-//     let d_b = d_dev
-//         .tensor_from_vec(b_data, (DConst::<N>, DConst::<K>))
-//         .to_dtype::<f16>();
-//     let d_a_t = d_dev
-//         .tensor_from_vec(a_t_data, (DConst::<B>, DConst::<K>, DConst::<M>))
-//         .to_dtype::<f16>();
-//     let d_b_t = d_dev
-//         .tensor_from_vec(b_t_data, (DConst::<K>, DConst::<N>))
-//         .to_dtype::<f16>();
-//     let d_a_b = d_a.clone().matmul(d_b.clone().permute::<_, DAxes2<1, 0>>());
-//     let d_a_b_t = d_a.matmul(d_b_t.clone());
-//     let d_a_t_b = d_a_t
-//         .clone()
-//         .permute::<_, DAxes3<0, 2, 1>>()
-//         .matmul(d_b.permute::<_, DAxes2<1, 0>>());
-//     let d_a_t_b_t = d_a_t.permute::<_, DAxes3<0, 2, 1>>().matmul(d_b_t);
-
-//     assert_close(&a_b.data(), &d_a_b.to_dtype::<f32>().as_vec());
-//     assert_close(&a_b_t.data(), &d_a_b_t.to_dtype::<f32>().as_vec());
-//     assert_close(&a_t_b.data(), &d_a_t_b.to_dtype::<f32>().as_vec());
-//     assert_close(&a_t_b_t.data(), &d_a_t_b_t.to_dtype::<f32>().as_vec());
-// }
 
 #[test]
 fn test_matmul_transpose() {
@@ -888,19 +899,19 @@ fn test_embedding() {
 
 #[test]
 fn test_slice() {
-    let data = random_vec(32);
+    let data = random_vec(256);
     let mut cx = Graph::new();
-    let a = cx.tensor::<R1<32>>().set(data.clone());
-    let c: GraphTensor<R1<25>> = a.slice((..25,)).realize().contiguous().retrieve();
+    let a = cx.tensor::<R1<256>>().set(data.clone());
+    let c: GraphTensor<R1<20>> = a.slice((..20,)).realize().contiguous().retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
     let d_a = d_dev
-        .tensor_from_vec(data, (DConst::<32>,))
+        .tensor_from_vec(data, (DConst::<256>,))
         .to_dtype::<f16>();
-    let d_c = d_a.slice((..25,)).to_dtype::<f32>();
+    let d_c = d_a.slice((..20,)).to_dtype::<f32>();
 
     assert_exact(&c.data(), &d_c.as_vec());
 }
@@ -926,6 +937,31 @@ fn test_pad() {
     let d_c = (d_b, d_dev.zeros_like(&(10, 2))).concat_along(DAxis::<1>);
 
     assert_exact(&c.data(), &d_c.to_dtype::<f32>().as_vec());
+}
+
+#[test]
+fn test_pad_contig() {
+    let m = 13;
+    let k = 24;
+    let mut cx = Graph::new();
+    let mut rng = StdRng::seed_from_u64(0);
+    let a_data = random_vec_rng(m * k, &mut rng);
+    let a = cx
+        .tensor::<(Dyn<'M'>, Dyn<'K'>)>()
+        .set_dyn(a_data.clone(), vec![m, k])
+        .retrieve();
+    let b: GraphTensor<(Dyn<'M'>, Dyn<'K'>)> = a
+        .pad(&[(0, 0.into()), (0, Expression::from(16) - 'K')])
+        .contiguous()
+        .retrieve();
+    let c: GraphTensor<(Dyn<'M'>, Dyn<'K'>)> = a.slice((.., ..k)).realize().contiguous().retrieve();
+
+    cx.compile(MetalFp16Compiler::default());
+    cx.execute();
+
+    let a = a.data();
+    assert_exact(&a, &b.data());
+    assert_exact(&a, &c.data());
 }
 
 #[test]

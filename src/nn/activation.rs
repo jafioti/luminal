@@ -1,5 +1,3 @@
-use std::ops::{Add, Mul};
-
 use crate::prelude::*;
 
 /// Rectified Linear Unit activation function
@@ -83,74 +81,6 @@ impl<S: ConstShape> Module<GraphTensor<S>> for Tanh {
 
     fn forward(&self, input: GraphTensor<S>) -> Self::Output {
         input.tanh()
-    }
-}
-
-/// RMSNorm activation function
-pub struct RMSNorm<const DIM: usize> {
-    pub weight: GraphTensor<R1<DIM>>,
-}
-
-impl<const DIM: usize> InitModule for RMSNorm<DIM> {
-    fn initialize(cx: &mut Graph) -> Self {
-        let s = Self {
-            weight: cx.named_tensor("RMSNorm Weight"),
-        };
-        s.weight.set(vec![1.0; DIM]);
-        s
-    }
-}
-
-impl<const DIM: usize> SerializeModule for RMSNorm<DIM> {
-    fn serialize(&self, s: &mut Serializer) {
-        s.tensor("weight", self.weight);
-    }
-}
-
-impl<const DIM: usize> Module<GraphTensor<R1<DIM>>> for RMSNorm<DIM> {
-    type Output = GraphTensor<R1<DIM>>;
-
-    fn forward(&self, input: GraphTensor<R1<DIM>>) -> Self::Output {
-        (input * input)
-            .mean_reduce::<_, Axis<0>>()
-            .add(1e-6)
-            .sqrt()
-            .recip()
-            .expand()
-            .mul(input)
-            .mul(self.weight)
-    }
-}
-
-impl<S: Dimension, const DIM: usize> Module<GraphTensor<(S, Const<DIM>)>> for RMSNorm<DIM> {
-    type Output = GraphTensor<(S, Const<DIM>)>;
-
-    fn forward(&self, input: GraphTensor<(S, Const<DIM>)>) -> Self::Output {
-        (input * input)
-            .mean_reduce::<_, Axis<1>>()
-            .add(1e-6)
-            .sqrt()
-            .recip()
-            .expand()
-            .mul(input)
-            .mul(self.weight.expand())
-    }
-}
-
-impl<B: Dimension, S: Dimension, const DIM: usize> Module<GraphTensor<(B, S, Const<DIM>)>>
-    for RMSNorm<DIM>
-{
-    type Output = GraphTensor<(B, S, Const<DIM>)>;
-
-    fn forward(&self, input: GraphTensor<(B, S, Const<DIM>)>) -> Self::Output {
-        (input * input)
-            .mean_reduce::<_, Axis<2>>()
-            .add(1e-6)
-            .sqrt()
-            .recip()
-            .expand()
-            .mul(input)
-            .mul(self.weight.expand())
     }
 }
 

@@ -3,7 +3,7 @@ use std::ops::{Add, Mul};
 
 use half::f16;
 use luminal::{
-    nn::{activation::RMSNorm, embedding::Embedding},
+    nn::{embedding::Embedding, norm::RMSNorm},
     op::Function,
     prelude::*,
 };

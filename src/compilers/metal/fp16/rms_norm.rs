@@ -91,7 +91,7 @@ impl MetalKernelForward for MetalRMSNorm {
         // Setup buffers
         let meaned = dev.new_buffer(
             (meaned_shape.n_elements() * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
         let front_size: usize = inputs[0]
             .1
@@ -121,7 +121,7 @@ impl MetalKernelForward for MetalRMSNorm {
 
         let out = dev.new_buffer(
             (inputs[0].1.n_elements() * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =

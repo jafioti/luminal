@@ -222,6 +222,11 @@ fn expr_to_metal_string(expr: BigExpression) -> String {
                 symbols.pop().unwrap(),
                 symbols.pop().unwrap()
             ),
+            Term::Sub => format!(
+                "(uint)max((int){} - (int){}, 0)",
+                symbols.pop().unwrap(),
+                symbols.pop().unwrap()
+            ),
             _ => format!(
                 "({}{term:?}{})",
                 symbols.pop().unwrap(),
@@ -305,10 +310,14 @@ impl<T: MetalFloat + 'static + Copy> Operator for MetalCopyFromDevice<T> {
         }
         let buffer = get_buffer_from_tensor(&inp[0].0);
         let mut data = vec![0.0; buffer.length() as usize / std::mem::size_of::<T>()];
+        if let MTLStorageMode::Managed = buffer.storage_mode() {
+            buffer.did_modify_range(NSRange::new(0, buffer.length()));
+        }
         let ptr = buffer.contents() as *mut T;
         for (i, d) in data.iter_mut().enumerate() {
             *d = unsafe { *ptr.add(i) }.to_f32();
         }
+
         vec![Tensor {
             data: Box::new(data),
         }]
@@ -380,6 +389,9 @@ impl<T> MetalKernelForward for MetalContiguous<T> {
         dev: &Device,
         command_buffer: &CommandBufferRef,
     ) -> Vec<Buffer> {
+        if inputs[0].1.is_contiguous() && !inputs[0].1.is_sliced() && !inputs[0].1.is_padded() {
+            return vec![inputs[0].0.to_owned()];
+        }
         let inp_size = inputs[0].1.contiguous().n_elements();
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<T>()) as u64,
@@ -422,12 +434,6 @@ impl<T: 'static + Copy> Operator for MetalContiguous<T> {
 
             command_buffer.commit();
             command_buffer.wait_until_completed();
-
-            let mut data = vec![0.0; out.length() as usize / std::mem::size_of::<f16>()];
-            let ptr = out.contents() as *mut f16;
-            for (i, d) in data.iter_mut().enumerate() {
-                *d = unsafe { *ptr.add(i) }.to_f32();
-            }
 
             vec![Tensor {
                 data: Box::new(out),

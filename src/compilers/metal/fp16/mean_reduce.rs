@@ -78,7 +78,7 @@ impl MetalKernelForward for MetalMeanReduce {
 
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
         let front_size: usize = inputs[0]
             .1

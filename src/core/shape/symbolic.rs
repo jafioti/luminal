@@ -88,9 +88,7 @@ impl Expression {
                     self.terms.remove(i + 2);
                     self.terms.remove(i);
                 }
-                (Term::Num(_) | Term::Var(_), Term::Num(a), Term::Min)
-                    if a == i32::MAX as usize =>
-                {
+                (_, Term::Num(a), Term::Min) if a == i32::MAX as usize => {
                     self.terms.remove(i + 2);
                     self.terms.remove(i + 1);
                 }
@@ -99,18 +97,18 @@ impl Expression {
                     self.terms.remove(i + 2);
                     self.terms.remove(i);
                 }
-                (Term::Num(_) | Term::Var(_), Term::Num(0), Term::Max) => {
+                (_, Term::Num(0), Term::Max) => {
                     self.terms.remove(i + 2);
                     self.terms.remove(i + 1);
                 }
                 // Remove i + 0, i - 0 and 0 + i
-                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Add) => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i);
-                }
-                (Term::Num(_) | Term::Var(_), Term::Num(0), Term::Add | Term::Sub) => {
+                (_, Term::Num(0), Term::Add) => {
                     self.terms.remove(i + 2);
                     self.terms.remove(i + 1);
+                }
+                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Add | Term::Sub) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i);
                 }
                 // Remove i * 0, 0 * i
                 (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Mul) => {
@@ -122,18 +120,23 @@ impl Expression {
                     self.terms.remove(i);
                 }
                 // Remove 0 / i
-                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Div) => {
+                (Term::Num(_) | Term::Var(_), Term::Num(0), Term::Div) => {
                     self.terms.remove(i + 2);
-                    self.terms.remove(i + 1);
+                    self.terms.remove(i);
                 }
                 // Remove i * 1 and 1 * i
                 (Term::Num(1), Term::Num(_) | Term::Var(_), Term::Mul) => {
                     self.terms.remove(i + 2);
                     self.terms.remove(i);
                 }
-                (Term::Num(_) | Term::Var(_), Term::Num(1), Term::Mul) => {
+                (_, Term::Num(1), Term::Mul) => {
                     self.terms.remove(i + 2);
                     self.terms.remove(i + 1);
+                }
+                // Remove i / 1
+                (Term::Num(1), Term::Num(_) | Term::Var(_), Term::Div) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i);
                 }
                 _ => {
                     i += 1;
@@ -297,9 +300,7 @@ impl BigExpression {
                     self.terms.remove(i + 2);
                     self.terms.remove(i);
                 }
-                (Term::Num(_) | Term::Var(_), Term::Num(a), Term::Min)
-                    if a == i32::MAX as usize =>
-                {
+                (_, Term::Num(a), Term::Min) if a == i32::MAX as usize => {
                     self.terms.remove(i + 2);
                     self.terms.remove(i + 1);
                 }
@@ -308,18 +309,18 @@ impl BigExpression {
                     self.terms.remove(i + 2);
                     self.terms.remove(i);
                 }
-                (Term::Num(_) | Term::Var(_), Term::Num(0), Term::Max) => {
+                (_, Term::Num(0), Term::Max) => {
                     self.terms.remove(i + 2);
                     self.terms.remove(i + 1);
                 }
                 // Remove i + 0, i - 0 and 0 + i
-                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Add) => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i);
-                }
-                (Term::Num(_) | Term::Var(_), Term::Num(0), Term::Add | Term::Sub) => {
+                (_, Term::Num(0), Term::Add) => {
                     self.terms.remove(i + 2);
                     self.terms.remove(i + 1);
+                }
+                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Add | Term::Sub) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i);
                 }
                 // Remove i * 0, 0 * i
                 (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Mul) => {
@@ -331,18 +332,23 @@ impl BigExpression {
                     self.terms.remove(i);
                 }
                 // Remove 0 / i
-                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Div) => {
+                (Term::Num(_) | Term::Var(_), Term::Num(0), Term::Div) => {
                     self.terms.remove(i + 2);
-                    self.terms.remove(i + 1);
+                    self.terms.remove(i);
                 }
                 // Remove i * 1 and 1 * i
                 (Term::Num(1), Term::Num(_) | Term::Var(_), Term::Mul) => {
                     self.terms.remove(i + 2);
                     self.terms.remove(i);
                 }
-                (Term::Num(_) | Term::Var(_), Term::Num(1), Term::Mul) => {
+                (_, Term::Num(1), Term::Mul) => {
                     self.terms.remove(i + 2);
                     self.terms.remove(i + 1);
+                }
+                // Remove i / 1
+                (Term::Num(1), Term::Num(_) | Term::Var(_), Term::Div) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i);
                 }
                 _ => {
                     i += 1;
@@ -409,7 +415,7 @@ impl Term {
     pub fn as_op(self) -> Option<fn(usize, usize) -> usize> {
         match self {
             Term::Add => Some(std::ops::Add::add),
-            Term::Sub => Some(std::ops::Sub::sub),
+            Term::Sub => Some(|a, b| a.saturating_sub(b)),
             Term::Mul => Some(std::ops::Mul::mul),
             Term::Div => Some(std::ops::Div::div),
             Term::Mod => Some(std::ops::Rem::rem),
@@ -570,7 +576,7 @@ impl<E: Into<Self>> Add<E> for BigExpression {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Add);
-        rhs
+        rhs.minimize()
     }
 }
 

@@ -368,7 +368,7 @@ impl MetalKernelForward for FakeSumReduce {
         let inp_size = inputs[0].1.n_physical_elements();
         let out = dev.new_buffer(
             (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeManaged,
+            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =

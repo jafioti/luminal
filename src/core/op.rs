@@ -84,7 +84,7 @@ impl Operator for Print {
                 .as_any()
                 .downcast_ref::<Vec<f32>>()
                 .unwrap();
-            println!("{} Data: {:?}", i + 1, &d[d.len().saturating_sub(10)..]);
+            println!("{} Data: {:?}", i + 1, &d[..10.min(d.len())]);
             println!("{} Shape: {:?}", i + 1, tracker);
             // let mut data = vec![0.; d.len()];
             // let ind = tracker.indexer();
