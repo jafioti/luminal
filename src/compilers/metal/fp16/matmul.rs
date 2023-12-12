@@ -274,9 +274,7 @@ impl MetalKernelForward for MetalBatchMatmul2D {
             b_shape[1].to_usize().unwrap(),
         );
 
-        let v = vec![f16::ZERO; batch_size * m * n];
-        let out = dev.new_buffer_with_data(
-            v.as_ptr() as *const _,
+        let out = dev.new_buffer(
             (batch_size * m * n * std::mem::size_of::<f16>()) as u64,
             MTLResourceOptions::StorageModeShared,
         );
@@ -306,7 +304,6 @@ impl MetalKernelForward for MetalBatchMatmul2D {
                 depth: 1,
             },
         );
-        encoder.memory_barrier_with_resources(&[&out]);
         encoder.end_encoding();
 
         vec![out]
@@ -412,16 +409,14 @@ impl Compiler for MetalMatMulCompiler {
             } else {
                 0.into()
             };
-            if n_dim.to_usize().map(|i| i % 256 != 0).unwrap_or(true) {
+            let n_padding = if n_dim.to_usize().map(|i| i % 256 != 0).unwrap_or(true) {
                 padded = true;
-                src2_shape.pad(&[
-                    (0.into(), k_padding),
-                    (0.into(), (n_dim + 255) / 256 * 256 - n_dim),
-                ]);
-            }
-            if k_padding != 0.into() {
-                src1_shape.pad(&[(0.into(), m_padding), (0.into(), k_padding)]);
-            }
+                (n_dim + 255) / 256 * 256 - n_dim
+            } else {
+                0.into()
+            };
+            src1_shape.pad(&[(0.into(), m_padding), (0.into(), k_padding)]);
+            src2_shape.pad(&[(0.into(), k_padding), (0.into(), n_padding)]);
             if !src1_shape.is_contiguous() || src1_shape.is_sliced() || src1_shape.is_padded() {
                 src1 = graph
                     .add_op(MetalContiguous::<f16>::new(
@@ -540,18 +535,18 @@ impl Compiler for MetalMatMulCompiler {
             } else {
                 0.into()
             };
-            if n_dim.to_usize().map(|i| i % 256 != 0).unwrap_or(true) {
+            let n_padding = if n_dim.to_usize().map(|i| i % 256 != 0).unwrap_or(true) {
                 padded = true;
-                src2_shape.pad(&[
-                    (0.into(), k_padding),
-                    (0.into(), (n_dim + 255) / 256 * 256 - n_dim),
-                ]);
-            }
+                (n_dim + 255) / 256 * 256 - n_dim
+            } else {
+                0.into()
+            };
             src1_shape.pad(&[
                 (0.into(), 0.into()),
                 (0.into(), m_padding),
                 (0.into(), k_padding),
             ]);
+            src2_shape.pad(&[(0.into(), k_padding), (0.into(), n_padding)]);
             if !src1_shape.is_contiguous() || src1_shape.is_sliced() || src1_shape.is_padded() {
                 src1 = graph
                     .add_op(MetalContiguous::<f16>::new(

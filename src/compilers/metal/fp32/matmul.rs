@@ -140,7 +140,7 @@ impl Operator for MetalMatmul2D {
 
             let out = self.device.new_buffer(
                 (m * n * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
+                MTLResourceOptions::StorageModeShared,
             );
 
             // Setup command queue / command buffer / encoder
@@ -265,7 +265,7 @@ impl Operator for MetalBatchMatmul2D {
 
             let out = self.1.new_buffer(
                 (batch_size * m * n * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::StorageModeManaged,
+                MTLResourceOptions::StorageModeShared,
             );
 
             // Setup command queue / command buffer / encoder

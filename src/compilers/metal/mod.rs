@@ -310,9 +310,6 @@ impl<T: MetalFloat + 'static + Copy> Operator for MetalCopyFromDevice<T> {
         }
         let buffer = get_buffer_from_tensor(&inp[0].0);
         let mut data = vec![0.0; buffer.length() as usize / std::mem::size_of::<T>()];
-        if let MTLStorageMode::Managed = buffer.storage_mode() {
-            buffer.did_modify_range(NSRange::new(0, buffer.length()));
-        }
         let ptr = buffer.contents() as *mut T;
         for (i, d) in data.iter_mut().enumerate() {
             *d = unsafe { *ptr.add(i) }.to_f32();
