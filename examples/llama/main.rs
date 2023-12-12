@@ -37,7 +37,7 @@ fn main() {
     let mut cx1 = Graph::new();
     let mut cx2 = Graph::new();
     let model = Model::initialize(&mut cx1);
-    let inp = cx1.named_tensor::<(Dyn<'b'>, Dyn<'s'>)>("Input").set_dyn(
+    let inp = cx1.named_tensor::<(Const<1>, Dyn<'s'>)>("Input").set_dyn(
         input.iter().map(|i| *i as f32).collect::<Vec<_>>(),
         vec![1, input.len()],
     );
@@ -47,11 +47,11 @@ fn main() {
     loader::DfdxDeferredLoader::new("./examples/llama/setup/llama-7b-hf").load(&model, &mut cx1);
 
     #[cfg(feature = "metal")]
-    cx1.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
+    cx1.compile(<(MetalFp16Compiler, PostGenericCompiler)>::default());
     #[cfg(feature = "cuda")]
-    cx1.compile(<(CudaFp16Compiler, GenericCompiler)>::default());
+    cx1.compile(<(CudaFp16Compiler, PostGenericCompiler)>::default());
     #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
-    cx1.compile(<(GenericCompiler, CPUCompiler)>::default());
+    cx1.compile(<(PostGenericCompiler, CPUCompiler)>::default());
 
     // Cache model weights
     cx1.compile(RemapDownstream(
@@ -61,8 +61,7 @@ fn main() {
 
     // Build KV cache forward graph
     let kv_model = Model::initialize(&mut cx2);
-    let single_inp: GraphTensor<(Dyn<'b'>, Const<1>)> =
-        cx2.named_tensor::<(Dyn<'b'>, Const<1>)>("Input");
+    let single_inp: GraphTensor<R2<1, 1>> = cx2.named_tensor("Input");
     let cache_src = (0..config::LAYERS)
         .map(|_| {
             (
@@ -86,11 +85,11 @@ fn main() {
         v.set_type(std::any::TypeId::of::<cudarc::driver::CudaSlice<half::f16>>());
     }
     #[cfg(feature = "metal")]
-    cx2.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
+    cx2.compile(<(MetalFp16Compiler, PostGenericCompiler)>::default());
     #[cfg(feature = "cuda")]
-    cx2.compile(<(CudaFp16Compiler, GenericCompiler)>::default());
+    cx2.compile(<(CudaFp16Compiler, PostGenericCompiler)>::default());
     #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
-    cx2.compile(<(GenericCompiler, CPUCompiler)>::default());
+    cx2.compile(<(PostGenericCompiler, CPUCompiler)>::default());
     cx2.compile(RemapDownstream(
         state_dict(&kv_model).values().copied().collect(),
     ));

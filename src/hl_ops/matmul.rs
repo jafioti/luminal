@@ -98,13 +98,11 @@ mod tests {
     fn test_matrix_vector() {
         let mut cx = Graph::new();
         let (a_vec, b_vec) = (random_vec(3), random_vec(6));
-        let a = cx.tensor::<R1<3>>();
-        a.set(a_vec.clone());
-        let b = cx.tensor::<R2<3, 2>>();
-        b.set(b_vec.clone());
-        let c = a.matmul(b);
-        c.retrieve();
+        let a = cx.tensor::<R1<3>>().set(a_vec.clone());
+        let b = cx.tensor::<R2<3, 2>>().set(b_vec.clone());
+        let c = a.matmul(b).retrieve();
 
+        cx.compile(PreGenericCompiler::default());
         cx.execute();
 
         let d_dev = Cpu::default();

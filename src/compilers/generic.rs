@@ -11,16 +11,20 @@ use petgraph::{
 };
 
 use crate::{
-    op::{Exp2, Function, Log2, Operator, Recip},
+    op::{Exp2, Function, Log2, MaxReduce, Operator, Recip, SumReduce},
     prelude::*,
 };
 
+pub type GenericCompiler<Inner = ((),)> = (PreGenericCompiler, Inner, PostGenericCompiler);
+
 /// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
-pub type GenericCompiler = (
+pub type PostGenericCompiler = (
     UnarySequentialElimination,
     // RemoveUnusedNodes, // Broken right now, unclear why
     // CSE, // This breaks compilers::metal::fp16::tests::test_encoder_block. I think it needs to take edge weights into account?
 );
+
+pub type PreGenericCompiler = (RemoveSingleReductions,);
 
 /// Eliminate complementary unary sequential operations like `x.log().exp()`
 #[derive(Debug, Default)]
@@ -158,6 +162,68 @@ impl Compiler for CSE {
     }
 }
 
+/// Remove maxreduces and sumreduces that don't do anything
+#[derive(Default)]
+pub struct RemoveSingleReductions;
+
+impl Compiler for RemoveSingleReductions {
+    fn compile(&self, graph: &mut Graph) {
+        for node in graph.graph.node_indices().collect::<Vec<_>>() {
+            let dim = if let Some(red) = graph
+                .graph
+                .node_weight(node)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<SumReduce>()
+            {
+                Some(red.0)
+            } else {
+                graph
+                    .graph
+                    .node_weight(node)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<MaxReduce>()
+                    .map(|red| red.0)
+            };
+            if let Some(dim) = dim {
+                if graph
+                    .graph
+                    .edges_directed(node, Direction::Incoming)
+                    .next()
+                    .map(|e| {
+                        e.weight()
+                            .as_data()
+                            .map(|w| {
+                                w.2.dims[w.2.indexes[dim]]
+                                    .to_usize()
+                                    .map(|i| i == 1)
+                                    .unwrap_or_default()
+                            })
+                            .unwrap_or_default()
+                    })
+                    .unwrap_or_default()
+                {
+                    let upstream = graph
+                        .graph
+                        .neighbors_directed(node, Direction::Incoming)
+                        .next()
+                        .unwrap();
+                    move_references(
+                        &mut graph.id_remap,
+                        &mut graph.no_delete,
+                        &mut graph.to_retrieve,
+                        node,
+                        upstream,
+                    );
+                    move_outgoing_edge(node, upstream, &mut graph.graph);
+                    graph.graph.remove_node(node);
+                }
+            }
+        }
+    }
+}
+
 /// Remove unused nodes
 #[derive(Default)]
 pub struct RemoveUnusedNodes;
@@ -287,7 +353,7 @@ mod tests {
         let b = a.log_2().exp_2();
         b.retrieve();
 
-        cx.compile(GenericCompiler::default());
+        cx.compile(GenericCompiler::<()>::default());
         assert_eq!(cx.graph.node_count(), 1);
     }
 }

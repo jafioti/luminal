@@ -270,7 +270,7 @@ mod tests {
         trg.set(trg_data);
         out2.retrieve();
 
-        cx.compile(<(CPUCompiler, GenericCompiler)>::default());
+        cx.compile(<(CPUCompiler, PostGenericCompiler)>::default());
         cx.execute();
 
         let out2 = out2.data();

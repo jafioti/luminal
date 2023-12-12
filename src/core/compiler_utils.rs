@@ -116,10 +116,10 @@ impl Graph {
 
         let mut schedule_edges = vec![];
         for node in self.graph.node_indices() {
-            new_graph
-                .node_weight_mut(id_map[&node])
-                .unwrap()
-                .push_str(&node.index().to_string());
+            // new_graph
+            //     .node_weight_mut(id_map[&node])
+            //     .unwrap()
+            //     .push_str(&node.index().to_string());
             for edge in self
                 .graph
                 .edges_directed(node, Direction::Outgoing)
@@ -145,7 +145,11 @@ impl Graph {
                 }
                 if show_shapes
                     && new_graph.contains_node(id_map[&edge.target()])
-                    && !edge.weight().as_data().unwrap().2.shape().is_empty()
+                    && edge
+                        .weight()
+                        .as_data()
+                        .map(|d| !d.2.shape().is_empty())
+                        .unwrap_or_default()
                 {
                     new_graph
                         .node_weight_mut(id_map[&edge.target()])
@@ -506,17 +510,20 @@ fn test_node(
             for (a, b) in a_sh.iter().zip(b_sh.shape().iter()) {
                 match a.to_usize() {
                     Some(n) => {
-                        if !b.to_usize().map(|i| i != n).unwrap_or_default() {
+                        if b.to_usize().map(|i| i != n).unwrap_or(true) {
                             return false;
                         }
                     }
                     None => {
-                        if let Some(expected) = shape_map.get(a) {
+                        let c = a
+                            .to_symbol()
+                            .expect("Selector dimension must be either a symbol or number");
+                        if let Some(expected) = shape_map.get(&c) {
                             if b != expected {
                                 return false;
                             }
                         } else {
-                            shape_map.insert(a, *b);
+                            shape_map.insert(c, *b);
                         }
                     }
                 }
@@ -527,8 +534,10 @@ fn test_node(
     if let Some(fakes) = fake {
         for (a_sh, b_sh) in fakes.iter().zip(input_shapes.iter()) {
             for (a, b) in a_sh.iter().zip(b_sh.indexes.iter().map(|i| b_sh.fake[*i])) {
-                if *a != b {
-                    return false;
+                if let Some(a) = a {
+                    if *a != b {
+                        return false;
+                    }
                 }
             }
         }
@@ -553,7 +562,7 @@ pub struct SelectOp {
     /// Shape constraint
     shape: Option<Vec<Vec<Expression>>>,
     /// Fake constraint       
-    fake: Option<Vec<Vec<bool>>>,
+    fake: Option<Vec<Vec<Option<bool>>>>,
     /// Pointers      
     pointers: Vec<*mut NodeIndex>,
 }
@@ -584,7 +593,7 @@ impl SelectOp {
         self
     }
     /// Constrain the op to input shape fakes
-    pub fn fakes<S: Into<Vec<Vec<bool>>>>(mut self, fakes: S) -> Self {
+    pub fn fakes<S: Into<Vec<Vec<Option<bool>>>>>(mut self, fakes: S) -> Self {
         self.fake = Some(fakes.into());
         self
     }

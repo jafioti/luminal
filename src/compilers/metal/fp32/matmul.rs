@@ -319,7 +319,10 @@ impl Compiler for MetalMatMulCompiler {
                     vec!['A'.into(), 'C'.into(), 'B'.into()],
                     vec!['A'.into(), 'C'.into(), 'B'.into()],
                 ])
-                .fakes(vec![vec![false, true, false], vec![true, false, false]])
+                .fakes(vec![
+                    vec![Some(false), Some(true), Some(false)],
+                    vec![Some(true), Some(false), Some(false)],
+                ])
                 .ptr(&mut mul),
             SelectOp::new()
                 .ty::<MetalSumReduce<f32>>()
@@ -410,8 +413,8 @@ impl Compiler for MetalMatMulCompiler {
                     vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
                 ])
                 .fakes(vec![
-                    vec![false, false, true, false],
-                    vec![true, true, false, false],
+                    vec![Some(false), Some(false), Some(true), Some(false)],
+                    vec![Some(true), Some(true), Some(false), Some(false)],
                 ])
                 .ptr(&mut mul),
             SelectOp::new()

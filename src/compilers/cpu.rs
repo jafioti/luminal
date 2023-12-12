@@ -30,7 +30,10 @@ impl Compiler for MatMul2DCompiler {
                     vec!['A'.into(), 'C'.into(), 'B'.into()],
                     vec!['A'.into(), 'C'.into(), 'B'.into()],
                 ])
-                .fakes(vec![vec![false, true, false], vec![true, false, false]])
+                .fakes(vec![
+                    vec![Some(false), Some(true), Some(false)],
+                    vec![Some(true), Some(false), Some(false)],
+                ])
                 .ptr(&mut mul),
             SelectOp::new()
                 .ty::<SumReduce>()
@@ -140,8 +143,8 @@ impl Compiler for BatchMatMul2DCompiler {
                     vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
                 ])
                 .fakes(vec![
-                    vec![false, false, true, false],
-                    vec![true, true, false, false],
+                    vec![Some(false), Some(false), Some(true), Some(false)],
+                    vec![Some(true), Some(true), Some(false), Some(false)],
                 ])
                 .ptr(&mut mul),
             SelectOp::new()
@@ -363,7 +366,7 @@ mod tests {
     fn matmul() {
         test_compilers_close(
             &[test_graphs::matmul],
-            &[Box::<(CPUCompiler, GenericCompiler)>::default()],
+            &[Box::<(CPUCompiler, PostGenericCompiler)>::default()],
         );
     }
 
@@ -371,7 +374,7 @@ mod tests {
     fn batch_matmul() {
         test_compilers_close(
             &[test_graphs::batch_matmul],
-            &[Box::<(CPUCompiler, GenericCompiler)>::default()],
+            &[Box::<(CPUCompiler, PostGenericCompiler)>::default()],
         );
     }
 
@@ -379,7 +382,7 @@ mod tests {
     fn feedforward() {
         test_compilers_close(
             &[test_graphs::feedforward],
-            &[Box::<(CPUCompiler, GenericCompiler)>::default()],
+            &[Box::<(CPUCompiler, PostGenericCompiler)>::default()],
         );
     }
 
@@ -387,7 +390,7 @@ mod tests {
     fn transformer() {
         test_compilers_close(
             &[test_graphs::transformer],
-            &[Box::<(CPUCompiler, GenericCompiler)>::default()],
+            &[Box::<(CPUCompiler, PostGenericCompiler)>::default()],
         );
     }
 
@@ -404,7 +407,7 @@ mod tests {
         cx.execute();
 
         let unoptimized_c = c.data();
-        cx.compile(<(CPUCompiler, GenericCompiler)>::default());
+        cx.compile(<(CPUCompiler, PostGenericCompiler)>::default());
         cx.execute();
         assert_close(&c.data(), &unoptimized_c);
     }

@@ -176,7 +176,7 @@ fn test_square() {
     let b = a * a;
     b.retrieve();
 
-    cx.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
+    cx.compile(<(MetalFp16Compiler, PostGenericCompiler)>::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -573,7 +573,7 @@ fn test_batch_matmul_transpose() {
         .retrieve();
     let a_t_b_t = a_t.permute::<_, LAxes3<0, 2, 1>>().matmul(b_t).retrieve();
 
-    cx.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
+    cx.compile(<(MetalFp16Compiler, PostGenericCompiler)>::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -620,7 +620,7 @@ fn test_matmul_transpose() {
         .retrieve();
     let a_t_b_t = a_t.permute::<_, LAxes2<1, 0>>().matmul(b_t).retrieve();
 
-    cx.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
+    cx.compile(<(MetalFp16Compiler, PostGenericCompiler)>::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -672,7 +672,7 @@ fn test_relu_and_linear() {
 
     let unoptimized_b = b.data();
     let unoptimized_batch_out = batch_out.data();
-    cx.compile(<(GenericCompiler, MetalFp16Compiler)>::default());
+    cx.compile(<(PostGenericCompiler, MetalFp16Compiler)>::default());
     cx.execute();
 
     assert_close(&unoptimized_b, &b.data());
@@ -718,7 +718,7 @@ fn test_rms_norm() {
     a.set(inp_data.clone());
     b.retrieve();
 
-    cx.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
+    cx.compile(<(MetalFp16Compiler, PostGenericCompiler)>::default());
     cx.execute();
 
     // Test against dfdx
@@ -782,7 +782,7 @@ fn test_transformer_encoder_block() {
         .set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![1, 2, 3]);
     let b = model.forward(a).retrieve();
 
-    cx.compile(<(MetalFp16Compiler, GenericCompiler)>::default());
+    cx.compile(<(MetalFp16Compiler, PostGenericCompiler)>::default());
     cx.execute();
 
     let d_dev = Cpu::default();

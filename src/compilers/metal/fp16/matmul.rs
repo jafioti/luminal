@@ -11,6 +11,133 @@ use crate::{
 
 use metal_rs::{objc::rc::autoreleasepool, *};
 
+/// Multiplies a M vector with a MxN matrix, resulting in a N vector. Expects the matrix to be NxM row-major
+#[derive(LuminalEq, LuminalPrint, Clone)]
+pub struct MetalVecMat {
+    kernel: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+}
+
+impl MetalVecMat {
+    fn new(dev: &Device, queue: CommandQueue) -> Self {
+        Self {
+            kernel: compile_function(
+                "kernel_vecmat",
+                "
+#include <metal_stdlib>
+#include <metal_simdgroup_matrix>
+#include <metal_simdgroup>
+using namespace metal;
+
+kernel void kernel_vecmat(
+    device const half *data1 [[buffer(0)]],
+    device const half *data2 [[buffer(1)]],
+    device half *a [[buffer(2)]],
+    device uint& M [[buffer(3)]],
+    device uint& N [[buffer(4)]],
+    uint3 global_pos [[thread_position_in_grid]]
+) {
+    if (global_pos.x < N) {
+        float acc = 0.0;
+        data2 += global_pos.x * M;
+        for (uint i = 0; i < M; ++i) {
+            acc = fast::fma(data1[i], data2[i], acc);
+        }
+        a[global_pos.x] = acc;
+    }
+}",
+                dev,
+            ),
+            queue,
+            device: dev.clone(),
+        }
+    }
+}
+
+impl MetalKernelForward for MetalVecMat {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let (m, n) = (
+            inputs[0].1.shape()[0].to_usize().unwrap(),
+            inputs[1].1.shape()[0].to_usize().unwrap(),
+        );
+
+        let out = dev.new_buffer(
+            (n * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+
+        // Set inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(inputs[1].0), 0);
+        encoder.set_buffer(2, Some(&out), 0);
+        encoder.set_int(3, m as u32);
+        encoder.set_int(4, n as u32);
+
+        encoder.set_compute_pipeline_state(&self.kernel);
+        encoder.dispatch_thread_groups(
+            MTLSize {
+                width: (n as u64).div_ceil(256),
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 256,
+                height: 1,
+                depth: 1,
+            },
+        );
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
+impl Operator for MetalVecMat {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        autoreleasepool(|| {
+            // Setup command queue / command buffer / encoder
+            let command_buffer = self.queue.new_command_buffer();
+
+            let out = self
+                .metal_forward(
+                    &[
+                        (get_buffer_from_tensor(&inp[0].0), inp[0].1),
+                        (get_buffer_from_tensor(&inp[1].0), inp[1].1),
+                    ],
+                    &self.device,
+                    command_buffer,
+                )
+                .pop()
+                .unwrap();
+
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
+
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
+    }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
+        }
+        None
+    }
+}
+
 /// Multiplies a MxK matrix with a KxN matrix, resulting in a MxN matrix
 #[derive(LuminalEq, LuminalPrint, Clone)]
 pub struct MetalMatmul2D {
@@ -354,21 +481,130 @@ impl Compiler for MetalMatMulCompiler {
     fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
-        // Look for the matmul pattern
-        // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
-        // Actually starts at [A,B] | [B, C]
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
-        let s = SelectEdge::new(
+
+        // Look for vetmat pattern
+        // Mul ([1(fake), N(fake), M] | [1(fake), N, M]) -> SumReduce(2) -> [N]
+        let vecmat_pattern = SelectEdge::new(
             SelectOp::new()
                 .ty::<MetalMul<f16>>()
                 .shapes(vec![
-                    vec!['A'.into(), 'C'.into(), 'B'.into()],
-                    vec!['A'.into(), 'C'.into(), 'B'.into()],
+                    vec![1.into(), 'N'.into(), 'M'.into()],
+                    vec![1.into(), 'N'.into(), 'M'.into()],
                 ])
-                .fakes(vec![vec![false, true, false], vec![true, false, false]])
+                .fakes(vec![
+                    vec![None, Some(true), Some(false)],
+                    vec![Some(true), Some(false), Some(false)],
+                ])
                 .ptr(&mut mul),
             SelectOp::new()
-                .ty::<MetalSumReduce<f16>>()
+                .check(|o, _| {
+                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
+                        o.3 == 2
+                    } else {
+                        false
+                    }
+                })
+                .ptr(&mut sum_reduce),
+        );
+        let batch_vecmat_pattern = SelectEdge::new(
+            SelectOp::new()
+                .ty::<MetalMul<f16>>()
+                .shapes(vec![
+                    vec![1.into(), 1.into(), 'N'.into(), 'M'.into()],
+                    vec![1.into(), 1.into(), 'N'.into(), 'M'.into()],
+                ])
+                .fakes(vec![
+                    vec![None, None, Some(true), Some(false)],
+                    vec![None, Some(true), Some(false), Some(false)],
+                ])
+                .ptr(&mut mul),
+            SelectOp::new()
+                .check(|o, _| {
+                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
+                        o.3 == 3
+                    } else {
+                        false
+                    }
+                })
+                .ptr(&mut sum_reduce),
+        );
+        // Mul ([1, 1(fake?), N(fake), M] | [1, 1(fake), N, M]) -> SumReduce(2) -> [N]
+        for _ in vecmat_pattern
+            .search(graph)
+            .chain(batch_vecmat_pattern.search(graph))
+        {
+            if graph.no_delete.contains(&mul) {
+                // The intermediate mul can't be deleted
+                continue;
+            }
+            // Insert VecMat op
+            let srcs = graph.get_sources(mul);
+            let (src1, mut src1_shape) = (srcs[0].0, srcs[0].2);
+            let (mut src2, mut src2_shape) = (srcs[1].0, srcs[1].2);
+            // Undo expansions and permute
+            if src1_shape.dims.len() == 4 {
+                src1_shape.remove_dim(2);
+            }
+            if src2_shape.dims.len() == 4 {
+                src2_shape.remove_dim(1);
+            }
+            src1_shape.remove_dim(1);
+            src1_shape.remove_dim(0);
+            src2_shape.remove_dim(0);
+            // Src1: [M], Src2: [N, M]
+            if !src2_shape.is_contiguous() || src2_shape.is_sliced() || src2_shape.is_padded() {
+                src2 = graph
+                    .add_op(MetalContiguous::<f16>::new(
+                        src2_shape,
+                        dev.clone(),
+                        &mut HashMap::new(),
+                        &graph.dyn_map,
+                    ))
+                    .input(src2, 0, src2_shape)
+                    .finish();
+                src2_shape = src2_shape.contiguous();
+            }
+
+            let matmul_op = graph
+                .add_op(MetalVecMat::new(&dev, queue.clone()))
+                .input(src1, 0, src1_shape)
+                .input(src2, 0, src2_shape)
+                .finish();
+
+            // Create edges to dests
+            move_outgoing_edge(sum_reduce, matmul_op, &mut graph.graph);
+            move_references(
+                &mut graph.id_remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                sum_reduce,
+                matmul_op,
+            );
+
+            // Remove the old ops
+            graph.graph.remove_node(mul);
+            graph.graph.remove_node(sum_reduce);
+        }
+
+        // Look for the matmul pattern
+        // Mul ([M, N(fake), K] | [M(fake), N, K]) -> SumReduce(2) -> [M, N]
+        // or batch matmul where 1st or 2nd dim is 1
+        // Mul ([1, M, N(fake), K] | [1, M(fake), N, K]) -> SumReduce(3) -> [1, M, N] // BMM batch size 1
+        // Mul ([B, 1, N(fake), K] | [B, 1(fake), N, K]) -> SumReduce(3) -> [B, 1, N] // Batch vecmat
+        let matmul_pattern = SelectEdge::new(
+            SelectOp::new()
+                .ty::<MetalMul<f16>>()
+                .shapes(vec![
+                    vec!['M'.into(), 'N'.into(), 'K'.into()],
+                    vec!['M'.into(), 'N'.into(), 'K'.into()],
+                ])
+                .fakes(vec![
+                    vec![Some(false), Some(true), Some(false)],
+                    vec![Some(true), Some(false), Some(false)],
+                ])
+                .ptr(&mut mul),
+            SelectOp::new()
                 .check(|o, _| {
                     if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
                         o.3 == 2
@@ -379,7 +615,7 @@ impl Compiler for MetalMatMulCompiler {
                 .ptr(&mut sum_reduce),
         );
 
-        for _ in s.search(graph) {
+        for _ in matmul_pattern.search(graph) {
             if graph.no_delete.contains(&mul) {
                 // The intermediate mul can't be deleted
                 continue;
@@ -481,7 +717,6 @@ impl Compiler for MetalMatMulCompiler {
         // Look for the batch matmul pattern
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         let s = SelectEdge::new(
             SelectOp::new()
                 .ty::<MetalMul<f16>>()
@@ -490,8 +725,8 @@ impl Compiler for MetalMatMulCompiler {
                     vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
                 ])
                 .fakes(vec![
-                    vec![false, false, true, false],
-                    vec![true, true, false, false],
+                    vec![Some(false), Some(false), Some(true), Some(false)],
+                    vec![Some(true), Some(true), Some(false), Some(false)],
                 ])
                 .ptr(&mut mul),
             SelectOp::new()
@@ -617,5 +852,52 @@ impl Compiler for MetalMatMulCompiler {
             graph.graph.remove_node(mul);
             graph.graph.remove_node(sum_reduce);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    crate::test_imports!();
+    #[test]
+    fn test_matrix_vector() {
+        const M: usize = 13;
+        const N: usize = 32;
+        let mut cx = Graph::new();
+        let (a_vec, b_vec) = (random_vec(M), random_vec(M * N));
+        let a = cx.named_tensor::<R2<1, M>>("Vec").set(a_vec.clone());
+        let b = cx.named_tensor::<R2<M, N>>("Mat").set(b_vec.clone());
+        let c = a.matmul(b).retrieve();
+
+        cx.compile(GenericCompiler::<MetalFp16Compiler>::default());
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor_from_vec(a_vec, (DConst::<M>,));
+        let d_b = d_dev.tensor_from_vec(b_vec, (DConst::<M>, DConst::<N>));
+        let d_c = d_a.matmul(d_b);
+
+        assert_close(&c.data(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_batch_matrix_vector() {
+        const M: usize = 13;
+        const N: usize = 32;
+        let mut cx = Graph::new();
+        let (a_vec, b_vec) = (random_vec(M), random_vec(M * N));
+        let a = cx.named_tensor::<R3<1, 1, M>>("Vec").set(a_vec.clone());
+        let b = cx.named_tensor::<R2<M, N>>("Mat").set(b_vec.clone());
+        let c = a.matmul(b).retrieve();
+
+        cx.compile(GenericCompiler::<MetalFp16Compiler>::default());
+        // cx.display();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor_from_vec(a_vec, (DConst::<M>,));
+        let d_b = d_dev.tensor_from_vec(b_vec, (DConst::<M>, DConst::<N>));
+        let d_c = d_a.matmul(d_b);
+
+        assert_close(&c.data(), &d_c.as_vec());
     }
 }

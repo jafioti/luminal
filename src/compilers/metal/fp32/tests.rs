@@ -170,7 +170,7 @@ fn test_square() {
     let b = a * a;
     b.retrieve();
 
-    cx.compile(<(MetalFp32Compiler, GenericCompiler)>::default());
+    cx.compile(<(MetalFp32Compiler, PostGenericCompiler)>::default());
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -509,7 +509,7 @@ fn test_relu_and_linear() {
 
     let unoptimized_b = b.data();
     let unoptimized_batch_out = batch_out.data();
-    cx.compile(<(MetalFp32Compiler, GenericCompiler)>::default());
+    cx.compile(<(MetalFp32Compiler, PostGenericCompiler)>::default());
     cx.execute();
 
     assert_close(&unoptimized_b, &b.data());
@@ -583,7 +583,7 @@ fn test_transformer_encoder_block() {
     a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![1, 2, 3]);
     b.retrieve();
 
-    cx.compile(<(MetalFp32Compiler, GenericCompiler)>::default());
+    cx.compile(<(MetalFp32Compiler, PostGenericCompiler)>::default());
     cx.execute();
 
     let d_dev = Cpu::default();
