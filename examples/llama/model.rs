@@ -103,9 +103,10 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
         GraphTensor<(Seq, Const<HEAD_DIM>)>,
         GraphTensor<(Seq, Const<HEAD_DIM>)>,
     ) {
-        let graph = unsafe { self.inv_freq.graph_ref.as_mut().unwrap() };
         let has_cache = cache.is_some();
-        let mut op = graph
+        let mut op = self
+            .inv_freq
+            .graph()
             .add_op(Function(
                 "ARange".to_string(),
                 Box::new(move |inp| {
@@ -129,7 +130,7 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
             op = op.input(cache.unwrap().0.id, 0, cache.unwrap().0.shape);
         }
         let t: GraphTensor<(Seq,)> =
-            GraphTensor::from_id(op.finish(), <(Seq,)>::to_tracker(), graph);
+            GraphTensor::from_id(op.finish(), <(Seq,)>::to_tracker(), self.inv_freq.graph());
         let freqs = t.expand::<(Seq, Const<1>), _>().matmul(
             self.inv_freq
                 .expand::<(Const<1>, Const<HEAD_DIM_OVER_2>), _>(),
@@ -503,9 +504,10 @@ impl<
         Vec<KVCache<Batch, CurSeq, NUM_HEADS, HEAD_DIM>>,
     );
     fn forward(&self, input: GraphTensor<(Batch, CurSeq)>) -> Self::Output {
-        let graph = unsafe { self.graph_ref.as_mut().unwrap() };
         let attn_mask: GraphTensor<(CurSeq, CurSeq)> = GraphTensor::from_id(
-            graph
+            self.norm
+                .weight
+                .graph()
                 .add_op(Function(
                     "AttentionMask".to_string(),
                     Box::new(|inp| {
@@ -525,7 +527,7 @@ impl<
                 .input(input.id, 0, input.shape)
                 .finish(),
             ShapeTracker::new(&[CurSeq::const_size(), CurSeq::const_size()]),
-            graph,
+            self.norm.weight.graph(),
         );
 
         let mut hidden_states = self.embed_tokens.forward(input);
