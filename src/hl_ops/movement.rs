@@ -95,6 +95,76 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
+    /*
+    def _pool2d(self, py, px, sy, sx):
+        if py > sy or px > sx:
+            raise NotImplementedError(
+                "pool2d doesn't support kernel_size > stride"
+            )
+
+        xup = self.slice(
+            (
+                (0, self.shape[0]),
+                (0, self.shape[1]),
+                (0, (self.shape[2]+(sy-py))//sy*sy),
+                (0, (self.shape[3]+(sx-px))//sx*sx)
+            )
+        )
+
+        return xup.reshape(
+            shape=(
+                xup.shape[0],
+                xup.shape[1],
+                xup.shape[2]//sy,
+                sy,
+                xup.shape[3]//sx,
+                sx
+            )
+        )[:, :, :, :py, :, :px]
+
+        // dims: (N, C, H, W)
+        // after transpose: (N, C, W, H)
+        // indexes: [0, 1, 3, 2]
+
+        // (N, C, H, W)
+        // 2x2 pool
+        // (N, C, H / 2, W / 2, 2, 2)
+
+        // (N, C, H, W)
+        // 2 pool
+        // (N, C, H, W / 2, 2)
+         */
+
+    // TODO: Pooling goes here
+    // For now we assume kernel size = stride
+    // TODO: We need to fix this
+    pub fn pool<Dst: Shape>(
+        self,
+        kernel_size: &[usize; 2],
+        stride: &[usize; 2],
+    ) -> GraphTensor<Dst> {
+        let kx = kernel_size[0];
+        let ky = kernel_size[1];
+        // let sx = stride[0];
+        // let sy = stride[1];
+
+        let current_shape = self.shape.shape();
+        let current_dims = current_shape.len();
+
+        // We want to
+        // let sliced = self.slice(());
+
+        // What I want to do is to take the last 2, divide them by kx and ky, then
+        let mut new_shape = current_shape.clone();
+        new_shape[current_dims - 2] = current_shape[current_dims - 2] / kx;
+        new_shape[current_dims - 1] = current_shape[current_dims - 1] / ky;
+
+        new_shape.push(Expression::from(kx));
+        new_shape.push(Expression::from(ky));
+
+        return self.dyn_reshape(new_shape);
+    }
+
     pub fn pad<Dst: Shape, Start: Into<Expression> + Copy, End: Into<Expression> + Copy>(
         mut self,
         ranges: &[(Start, End)],
@@ -238,7 +308,7 @@ mod tests {
         let mut cx = Graph::new();
         let a = cx.tensor::<R2<3, 2>>();
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
-        let b = a.slice((.., ..1)).realize::<R2<3, 1>>();
+        let b: GraphTensor<(LConst<3>, LConst<1>)> = a.slice((.., ..1)).realize::<R2<3, 1>>();
         b.retrieve();
         cx.execute();
 
@@ -249,7 +319,85 @@ mod tests {
         );
         let d_b = d_a.slice((.., ..1)).realize::<Rank2<3, 1>>();
 
+        println!("{:?}", &b.data());
+
         assert_close(&b.data(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_dummy_slice() {
+        let mut cx = Graph::new();
+        let a = cx.tensor::<R2<3, 2>>();
+        a.set(vec![
+            1.4325, 2.492428, // row 1
+            3.127365, 33.2834, // row 2
+            4.18734, 23.854, // row 3
+        ]);
+        // let x = (1..2, ..1);
+        let b = a.slice((2.., 0..)).realize::<R2<3, 2>>();
+        b.retrieve();
+        cx.execute();
+        println!("{:?}", &b.data());
+    }
+
+    #[test]
+    fn test_pool() {
+        let mut cx = Graph::new();
+        let a = cx.tensor::<R2<4, 4>>();
+        a.set(vec![
+            12.0, 20.0, 30.0, 0.0, // row 1
+            8.0, 12.0, 2.0, 0.0, // row 2
+            34.0, 70.0, 37.0, 4.0, // row 3
+            112.0, 100.0, 25.0, 12.0, // row 4
+        ]);
+        // a.set(vec![
+        //     1.0, 2.0, 3.0, 4.0, // row 1
+        //     5.0, 6.0, 7.0, 8.0, // row 2
+        //     9.0, 10.0, 11.0, 12.0, // row 3
+        //     13.0, 14.0, 15.0, 16.0, // row 4
+        // ]);
+
+        a.retrieve();
+
+        /*
+           12.0, 20.0,
+           30.0, 0.0,
+
+           8.0, 12.0,
+           2.0, 0.0,
+
+           34.0, 70.0,
+           37.0, 4.0,
+
+           112.0, 100.0,
+           25.0, 12.0,
+        */
+
+        let b = a.pool::<R4<2, 2, 2, 2>>(&[2, 2], &[2, 2]);
+        b.retrieve();
+
+        // let c = b.max_reduce::<_, LAxes2<2, 3>>();
+        // let c = b.max_reduce::<_, LAxis<3>>().max_reduce::<_, LAxis<2>>();
+
+        // [2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0]
+        // let c = b.max_reduce::<_, LAxis<3>>();
+
+        let c = b.max_reduce::<_, LAxis<3>>().max_reduce::<_, LAxis<1>>();
+
+        c.retrieve();
+        cx.execute();
+
+        println!("a:");
+        println!("{:?}", a.shape);
+        println!("{:?}", &a.data());
+
+        println!("b:");
+        println!("{:?}", b.shape);
+        println!("{:?}", &b.data());
+
+        println!("c:");
+        println!("{:?}", c.shape);
+        println!("{:?}", &c.data());
     }
 
     #[test]
