@@ -71,18 +71,16 @@ impl ShapeTracker {
     }
 
     /// Strides without permute applied
-    fn unordered_strides(&self) -> Vec<usize> {
+    fn unordered_strides(&self) -> Vec<Expression> {
         let mut strides = self
             .dims
             .iter()
             .enumerate()
             .rev()
-            .scan(1, |state, (i, x)| {
+            .scan(Expression::from(1), |state, (i, x)| {
                 let ret = *state;
                 if !self.fake[i] {
-                    *state *= x
-                        .to_usize()
-                        .expect("All dims must be known before indexing!");
+                    *state = *state * *x;
                 }
                 Some(ret)
             })
@@ -91,8 +89,8 @@ impl ShapeTracker {
         strides
     }
 
-    /// Once all dims are known, compute strides
-    pub fn strides(&self) -> Vec<usize> {
+    /// Compute strides
+    pub fn strides(&self) -> Vec<Expression> {
         let strides = self.unordered_strides();
         self.indexes.into_iter().map(|i| strides[i]).collect()
     }

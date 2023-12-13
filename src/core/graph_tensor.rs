@@ -63,7 +63,7 @@ impl<S: Shape> GraphTensor<S> {
     pub fn set_dyn<T: Data + Clone>(self, data: T, shape: Vec<usize>) -> Self {
         // Report dyn dim values to graph dyn map
         for (d, s) in S::realized_shape().iter().zip(shape.iter()) {
-            if let Some(c) = d.to_symbol() {
+            if let Some(c) = d.to_symbols().pop() {
                 self.graph().dyn_map.insert(c, *s);
             }
         }
@@ -128,9 +128,6 @@ impl<S: Shape> GraphTensor<S> {
         let st = self.shape.resolve_global_dyn_dims(&self.graph().dyn_map);
         let tensor = self.graph().get_tensor_ref(self.id, 0).unwrap();
         let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        // if self.shape.is_contiguous() && !self.shape.is_sliced() && !self.shape.is_padded() {
-        //     return orig_data.clone();
-        // }
         let mut data = vec![0.; st.n_elements()];
         let ind = st.index_expression();
         let val = st.valid_expression();

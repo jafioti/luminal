@@ -1,3 +1,4 @@
+#![allow(private_bounds)]
 // Super minimal symbolic algebra library
 
 use std::{
@@ -8,20 +9,23 @@ use std::{
 
 use tinyvec::ArrayVec;
 
-pub type Expression = GenericExpression<ArrayVec<[Term; 20]>>;
+/// A symbolic expression stored on the stack
+pub type Expression = GenericExpression<ArrayVec<[Term; 20]>>; // We need to figure out how to reduce this, can't be fixed at 20. ShapeTracker would take up 6 dims * 12 pads * 12 slices * 20 terms * 8 bytes = 138kb
+/// A symbolic expression stored on the heap
 pub type BigExpression = GenericExpression<Vec<Term>>;
 
+/// Trait implemented on the 2 main symbolic expression storage types, Vec<Term> and ArrayVec<Term>
 #[allow(clippy::len_without_is_empty)]
-pub trait ExpressionStorage:
-    IndexMut<usize, Output = Term> + std::iter::Extend<Term> + IntoIterator<Item = Term>
+trait ExpressionStorage:
+    IndexMut<usize, Output = Term> + std::iter::Extend<Term> + IntoIterator<Item = Term> + Default
 {
     fn len(&self) -> usize;
     fn push(&mut self, term: Term);
     fn pop(&mut self) -> Option<Term>;
     fn remove(&mut self, index: usize) -> Term;
-    fn new() -> Self;
 }
 
+// Implement the main storage types
 impl ExpressionStorage for Vec<Term> {
     fn len(&self) -> usize {
         Vec::len(self)
@@ -34,9 +38,6 @@ impl ExpressionStorage for Vec<Term> {
     }
     fn remove(&mut self, index: usize) -> Term {
         Vec::remove(self, index)
-    }
-    fn new() -> Self {
-        Vec::new()
     }
 }
 
@@ -56,15 +57,11 @@ where
     fn remove(&mut self, index: usize) -> Term {
         ArrayVec::remove(self, index)
     }
-    fn new() -> Self {
-        ArrayVec::new()
-    }
 }
 
+/// A symbolic expression
 #[derive(Clone, Default)]
-pub struct GenericExpression<S: ExpressionStorage>
-// We need to figure out how to reduce this, can't be fixed at 20. ShapeTracker would take up 6 dims * 12 pads * 12 slices * 20 terms * 8 bytes = 138kb
-{
+pub struct GenericExpression<S: ExpressionStorage> {
     pub terms: S,
 }
 
@@ -106,6 +103,7 @@ impl<S: ExpressionStorage + Clone> Debug for GenericExpression<S> {
 }
 
 impl<S: ExpressionStorage> GenericExpression<S> {
+    /// Minimise the expression down to its smallest form
     pub fn minimize(mut self) -> Self {
         let mut i = 0;
         while i < self.terms.len().saturating_sub(2) {
@@ -181,13 +179,6 @@ impl<S: ExpressionStorage> GenericExpression<S> {
         self
     }
 
-    pub fn to_symbol(&self) -> Option<char> {
-        match self.terms[0] {
-            Term::Var(c) => Some(c),
-            _ => None,
-        }
-    }
-
     pub fn min<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
@@ -218,9 +209,11 @@ impl<S: ExpressionStorage> GenericExpression<S> {
 }
 
 impl<S: ExpressionStorage + Clone> GenericExpression<S> {
+    /// Evaluate the expression with no variables. Returns Some(value) if no variables are required, otherwise returns None.
     pub fn to_usize(&self) -> Option<usize> {
         self.exec(&HashMap::default())
     }
+    /// Evaluate the expression with one value for all variables.
     pub fn exec_single_var(&self, value: usize) -> usize {
         let mut stack = Vec::new();
         for term in self.terms.clone() {
@@ -236,13 +229,14 @@ impl<S: ExpressionStorage + Clone> GenericExpression<S> {
         }
         stack.pop().unwrap()
     }
-    pub fn exec(&self, vars: &HashMap<char, usize>) -> Option<usize> {
+    /// Evaluate the expression given variables.
+    pub fn exec(&self, variables: &HashMap<char, usize>) -> Option<usize> {
         let mut stack = Vec::new();
         for term in self.terms.clone() {
             match term {
                 Term::Num(n) => stack.push(n),
                 Term::Var(c) => {
-                    if let Some(n) = vars.get(&c) {
+                    if let Some(n) = variables.get(&c) {
                         stack.push(*n)
                     } else {
                         return None;
@@ -257,6 +251,7 @@ impl<S: ExpressionStorage + Clone> GenericExpression<S> {
         }
         stack.pop()
     }
+    /// Retrieve all symbols in the expression.
     pub fn to_symbols(&self) -> Vec<char> {
         self.terms
             .clone()
@@ -267,6 +262,8 @@ impl<S: ExpressionStorage + Clone> GenericExpression<S> {
             })
             .collect()
     }
+
+    /// Check if the '-' variable exists in the expression.
     pub fn is_unknown(&self) -> bool {
         self.terms
             .clone()
@@ -275,6 +272,7 @@ impl<S: ExpressionStorage + Clone> GenericExpression<S> {
     }
 }
 
+/// A single term of a symbolic expression such as a variable, number or operation.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Term {
     Num(usize),
@@ -339,7 +337,7 @@ impl Term {
 
 impl<S: ExpressionStorage> From<Term> for GenericExpression<S> {
     fn from(value: Term) -> Self {
-        let mut terms = S::new();
+        let mut terms = S::default();
         terms.push(value);
         GenericExpression { terms }
     }
@@ -348,6 +346,12 @@ impl<S: ExpressionStorage> From<Term> for GenericExpression<S> {
 impl<S: ExpressionStorage> From<char> for GenericExpression<S> {
     fn from(value: char) -> Self {
         GenericExpression::from(Term::Var(value))
+    }
+}
+
+impl<S: ExpressionStorage> From<&char> for GenericExpression<S> {
+    fn from(value: &char) -> Self {
+        GenericExpression::from(Term::Var(*value))
     }
 }
 
@@ -369,29 +373,11 @@ impl<S: ExpressionStorage> From<i32> for GenericExpression<S> {
     }
 }
 
-// impl From<char> for BigExpression {
-//     fn from(value: char) -> Self {
-//         BigExpression::from(Term::Var(value))
-//     }
-// }
-
-// impl From<usize> for BigExpression {
-//     fn from(value: usize) -> Self {
-//         BigExpression::from(Term::Num(value))
-//     }
-// }
-
-// impl From<&usize> for BigExpression {
-//     fn from(value: &usize) -> Self {
-//         BigExpression::from(Term::Num(*value))
-//     }
-// }
-
-// impl From<i32> for BigExpression {
-//     fn from(value: i32) -> Self {
-//         BigExpression::from(value as usize)
-//     }
-// }
+impl<S: ExpressionStorage> From<&i32> for GenericExpression<S> {
+    fn from(value: &i32) -> Self {
+        GenericExpression::from(*value as usize)
+    }
+}
 
 impl From<Expression> for BigExpression {
     fn from(value: Expression) -> Self {
