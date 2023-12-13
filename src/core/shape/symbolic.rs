@@ -221,8 +221,23 @@ impl<S: ExpressionStorage + Clone> GenericExpression<S> {
     pub fn to_usize(&self) -> Option<usize> {
         self.exec(&HashMap::default())
     }
+    pub fn exec_single_var(&self, value: usize) -> usize {
+        let mut stack = Vec::new();
+        for term in self.terms.clone() {
+            match term {
+                Term::Num(n) => stack.push(n),
+                Term::Var(_) => stack.push(value),
+                _ => {
+                    let a = stack.pop().unwrap();
+                    let b = stack.pop().unwrap();
+                    stack.push(term.as_op().unwrap()(a, b));
+                }
+            }
+        }
+        stack.pop().unwrap()
+    }
     pub fn exec(&self, vars: &HashMap<char, usize>) -> Option<usize> {
-        let mut stack = ArrayVec::<[usize; 10]>::new();
+        let mut stack = Vec::new();
         for term in self.terms.clone() {
             match term {
                 Term::Num(n) => stack.push(n),

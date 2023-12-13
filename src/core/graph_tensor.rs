@@ -128,12 +128,16 @@ impl<S: Shape> GraphTensor<S> {
         let st = self.shape.resolve_global_dyn_dims(&self.graph().dyn_map);
         let tensor = self.graph().get_tensor_ref(self.id, 0).unwrap();
         let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        // if self.shape.is_contiguous() && !self.shape.is_sliced() && !self.shape.is_padded() {
+        //     return orig_data.clone();
+        // }
         let mut data = vec![0.; st.n_elements()];
-        let ind = st.indexer();
+        let ind = st.index_expression();
+        let val = st.valid_expression();
         #[allow(unused_mut)]
         for (i, mut r) in data.iter_mut().enumerate() {
-            if let Some(n) = ind.index(i) {
-                *r = orig_data[n];
+            if val.exec_single_var(i) != 0 {
+                *r = orig_data[ind.exec_single_var(i)];
             }
         }
         data
