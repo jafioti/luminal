@@ -142,6 +142,9 @@ impl<S: Shape> GraphTensor<S> {
         let current_shape = self.shape.shape();
         let current_dims = current_shape.len();
 
+        // println!("current_dims: {current_dims}");
+        // println!("current_shape: {:?}", current_shape);
+
         let mut new_shape = current_shape.clone();
 
         let kernel_sizes: Vec<Expression> =
@@ -194,6 +197,8 @@ mod tests {
         tensor::{Cpu, TensorFrom, TensorFromVec},
         tensor_ops::{RealizeTo, TryConcatAlong},
     };
+
+    use rand::prelude::*;
 
     crate::test_imports!();
 
@@ -321,23 +326,36 @@ mod tests {
 
     #[test]
     fn test_pool() {
+        // Max Pool Example
         let mut cx = Graph::new();
-        let a = cx.tensor::<R2<4, 4>>();
+        let a = cx.tensor::<R3<1, 4, 4>>();
         a.set(vec![
-            12.0, 20.0, 30.0, 0.0, // row 1
-            8.0, 12.0, 2.0, 0.0, // row 2
-            34.0, 70.0, 37.0, 4.0, // row 3
-            112.0, 100.0, 25.0, 12.0, // row 4
+            12., 20., 30., 0., 8., 12., 2., 0., 34., 70., 37., 4., 112., 100., 25., 12.,
         ]);
-        a.retrieve();
 
         let b = a
-            .pool::<R4<2, 2, 2, 2>>(&[2, 2], &[2, 2])
-            .max_reduce::<_, LAxes2<2, 3>>();
+            .pool::<R5<1, 2, 2, 2, 2>>(&[2, 2], &[2, 2])
+            .max_reduce::<_, LAxes2<2, 4>>();
         b.retrieve();
+
+        let inp1 = cx.tensor::<R3<5, 2, 4>>();
+        inp1.set(vec![
+            84., 66., 48., 35., 87., 22., 31., 37., 33., 8., 22., 67., 54., 5., 99., 54., 19., 94.,
+            85., 77., 35., 22., 11., 10., 50., 67., 53., 17., 53., 98., 96., 30., 0., 82., 21.,
+            30., 35., 79., 70., 22.,
+        ]);
+
+        let exp_out1: &[f32; 10] = &[87., 48., 54., 99., 94., 85., 98., 96., 82., 70.];
+        // let exp_out_shape1 = &[5, 1, 2];
+
+        let out1 = inp1
+            .pool::<R5<5, 1, 2, 2, 2>>(&[2, 2], &[2, 2])
+            .max_reduce::<_, LAxes2<2, 4>>();
+        out1.retrieve();
         cx.execute();
 
-        assert_close(&b.data(), &[30.0, 12.0, 70.0, 112.0]);
+        assert_close(&b.data(), &[20., 30., 112., 37.]);
+        assert_close(&out1.data(), exp_out1);
     }
 
     #[test]
