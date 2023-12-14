@@ -138,29 +138,24 @@ impl<S: Shape> GraphTensor<S> {
     // TODO: Pooling goes here
     // For now we assume kernel size = stride
     // TODO: We need to fix this
-    pub fn pool<Dst: Shape>(
-        self,
-        kernel_size: &[usize; 2],
-        stride: &[usize; 2],
-    ) -> GraphTensor<Dst> {
-        let kx = kernel_size[0];
-        let ky = kernel_size[1];
-        // let sx = stride[0];
-        // let sy = stride[1];
-
+    pub fn pool<Dst: Shape>(self, kernel_size: &[usize], stride: &[usize]) -> GraphTensor<Dst> {
         let current_shape = self.shape.shape();
         let current_dims = current_shape.len();
 
-        // We want to
-        // let sliced = self.slice(());
-
-        // What I want to do is to take the last 2, divide them by kx and ky, then
         let mut new_shape = current_shape.clone();
-        new_shape[current_dims - 2] = current_shape[current_dims - 2] / kx;
-        new_shape[current_dims - 1] = current_shape[current_dims - 1] / ky;
 
-        new_shape.push(Expression::from(kx));
-        new_shape.push(Expression::from(ky));
+        let kernel_sizes: Vec<Expression> =
+            kernel_size.iter().map(|&k| Expression::from(k)).collect();
+
+        for i in 0..kernel_sizes.len() {
+            let dim = current_dims - kernel_sizes.len() + i;
+            new_shape[dim] = new_shape[dim] / kernel_sizes[i];
+        }
+
+        for i in 0..kernel_sizes.len() {
+            let insert_index = current_dims - 1 + (i * 2);
+            new_shape.insert(insert_index, kernel_sizes[i]);
+        }
 
         return self.dyn_reshape(new_shape);
     }
@@ -325,22 +320,6 @@ mod tests {
     }
 
     #[test]
-    fn test_dummy_slice() {
-        let mut cx = Graph::new();
-        let a = cx.tensor::<R2<3, 2>>();
-        a.set(vec![
-            1.4325, 2.492428, // row 1
-            3.127365, 33.2834, // row 2
-            4.18734, 23.854, // row 3
-        ]);
-        // let x = (1..2, ..1);
-        let b = a.slice((2.., 0..)).realize::<R2<3, 2>>();
-        b.retrieve();
-        cx.execute();
-        println!("{:?}", &b.data());
-    }
-
-    #[test]
     fn test_pool() {
         let mut cx = Graph::new();
         let a = cx.tensor::<R2<4, 4>>();
@@ -350,54 +329,15 @@ mod tests {
             34.0, 70.0, 37.0, 4.0, // row 3
             112.0, 100.0, 25.0, 12.0, // row 4
         ]);
-        // a.set(vec![
-        //     1.0, 2.0, 3.0, 4.0, // row 1
-        //     5.0, 6.0, 7.0, 8.0, // row 2
-        //     9.0, 10.0, 11.0, 12.0, // row 3
-        //     13.0, 14.0, 15.0, 16.0, // row 4
-        // ]);
-
         a.retrieve();
 
-        /*
-           12.0, 20.0,
-           30.0, 0.0,
-
-           8.0, 12.0,
-           2.0, 0.0,
-
-           34.0, 70.0,
-           37.0, 4.0,
-
-           112.0, 100.0,
-           25.0, 12.0,
-        */
-
-        let b = a.pool::<R4<2, 2, 2, 2>>(&[2, 2], &[2, 2]);
+        let b = a
+            .pool::<R4<2, 2, 2, 2>>(&[2, 2], &[2, 2])
+            .max_reduce::<_, LAxes2<2, 3>>();
         b.retrieve();
-
-        // let c = b.max_reduce::<_, LAxes2<2, 3>>();
-        // let c = b.max_reduce::<_, LAxis<3>>().max_reduce::<_, LAxis<2>>();
-
-        // [2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0]
-        // let c = b.max_reduce::<_, LAxis<3>>();
-
-        let c = b.max_reduce::<_, LAxis<3>>().max_reduce::<_, LAxis<1>>();
-
-        c.retrieve();
         cx.execute();
 
-        println!("a:");
-        println!("{:?}", a.shape);
-        println!("{:?}", &a.data());
-
-        println!("b:");
-        println!("{:?}", b.shape);
-        println!("{:?}", &b.data());
-
-        println!("c:");
-        println!("{:?}", c.shape);
-        println!("{:?}", &c.data());
+        assert_close(&b.data(), &[30.0, 12.0, 70.0, 112.0]);
     }
 
     #[test]
