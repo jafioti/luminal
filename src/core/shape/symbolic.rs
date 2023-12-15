@@ -170,6 +170,54 @@ impl<S: ExpressionStorage> GenericExpression<S> {
                     self.terms.remove(i + 2);
                     self.terms.remove(i);
                 }
+                // Simplify i - i to 0
+                (Term::Var(b), Term::Var(a), Term::Sub) if a == b => {
+                    self.terms[i] = Term::Num(0);
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                // Simplify true && i to i
+                (_, Term::Num(1), Term::And) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                // Simplify i && true to i
+                (Term::Num(1), _, Term::And) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i);
+                }
+                // Simplify false || i to i
+                (_, Term::Num(0), Term::Or) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                // Simplify i || false to i
+                (Term::Num(0), _, Term::Or) => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i);
+                }
+                // Simplify i >= i to true (1)
+                (Term::Var(b), Term::Var(a), Term::Gte) if a == b => {
+                    self.terms[i] = Term::Num(1);
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                // Simplify i < i to false (0)
+                (Term::Var(b), Term::Var(a), Term::Lt) if a == b => {
+                    self.terms[i] = Term::Num(0);
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                // Simplify min(i, i) to i
+                (Term::Var(b), Term::Var(a), Term::Min) if a == b => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
+                // Simplify max(i, i) to i
+                (Term::Var(b), Term::Var(a), Term::Max) if a == b => {
+                    self.terms.remove(i + 2);
+                    self.terms.remove(i + 1);
+                }
                 _ => {
                     i += 1;
                 }

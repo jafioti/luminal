@@ -134,16 +134,6 @@ impl Graph {
         );
     }
 
-    /// Clear any remaining tensors that may be around from old executions
-    pub fn reset(&mut self) {
-        // (This is where we should do the tensor caching!)
-        for (t, i) in self.tensors.keys().copied().collect_vec() {
-            if !self.no_delete.contains(&t) {
-                self.tensors.remove(&(t, i));
-            }
-        }
-    }
-
     /// Swap the tensors with these ids
     pub fn swap_tensors<A: Shape, B: Shape>(&mut self, a: GraphTensor<A>, b: GraphTensor<B>) {
         // Swap tensors
@@ -208,7 +198,6 @@ impl Graph {
                 *remaining_consumers.get_mut(source).unwrap() -= 1;
             }
         }
-        self.reset();
     }
 
     /// Execute the graph without deleting intermediate tensors
@@ -357,7 +346,6 @@ impl Graph {
             }
             .bold()
         );
-        self.reset();
     }
 }
 

@@ -166,8 +166,6 @@ impl ShapeTracker {
             .map(|(ind, dim)| {
                 (
                     ind,
-                    // dim + self.padding[ind].0.to_usize().unwrap_or_default()
-                    //     + self.padding[ind].1.to_usize().unwrap_or_default(),
                     dim + self.padding[ind].0.to_usize().unwrap()
                         + self.padding[ind].1.to_usize().unwrap(),
                 )
