@@ -152,12 +152,12 @@ impl<S: Shape> GraphTensor<S> {
 
         for i in 0..kernel_sizes.len() {
             let dim = current_dims - kernel_sizes.len() + i;
-            new_shape[dim] = new_shape[dim] / kernel_sizes[i];
+            new_shape[dim] = new_shape[dim] / stride[i];
         }
 
         for i in 0..kernel_sizes.len() {
             let insert_index = current_dims - 1 + (i * 2);
-            new_shape.insert(insert_index, kernel_sizes[i]);
+            new_shape.insert(insert_index, Expression::from(stride[i]));
         }
 
         return self.dyn_reshape(new_shape);
@@ -328,16 +328,8 @@ mod tests {
     fn test_pool() {
         // Max Pool Example
         let mut cx = Graph::new();
-        let a = cx.tensor::<R3<1, 4, 4>>();
-        a.set(vec![
-            12., 20., 30., 0., 8., 12., 2., 0., 34., 70., 37., 4., 112., 100., 25., 12.,
-        ]);
 
-        let b = a
-            .pool::<R5<1, 2, 2, 2, 2>>(&[2, 2], &[2, 2])
-            .max_reduce::<_, LAxes2<2, 4>>();
-        b.retrieve();
-
+        // Case 1
         let inp1 = cx.tensor::<R3<5, 2, 4>>();
         inp1.set(vec![
             84., 66., 48., 35., 87., 22., 31., 37., 33., 8., 22., 67., 54., 5., 99., 54., 19., 94.,
@@ -345,17 +337,43 @@ mod tests {
             30., 35., 79., 70., 22.,
         ]);
 
-        let exp_out1: &[f32; 10] = &[87., 48., 54., 99., 94., 85., 98., 96., 82., 70.];
-        // let exp_out_shape1 = &[5, 1, 2];
-
         let out1 = inp1
             .pool::<R5<5, 1, 2, 2, 2>>(&[2, 2], &[2, 2])
             .max_reduce::<_, LAxes2<2, 4>>();
         out1.retrieve();
+
+        // Case 2
+        let inp2 = cx.tensor::<R3<1, 4, 4>>();
+        inp2.set(vec![
+            12., 20., 30., 0., 8., 12., 2., 0., 34., 70., 37., 4., 112., 100., 25., 12.,
+        ]);
+
+        let out2 = inp2
+            .pool::<R5<1, 2, 2, 2, 2>>(&[2, 2], &[2, 2])
+            .max_reduce::<_, LAxes2<2, 4>>();
+        out2.retrieve();
+
+        // Case 3
+        let inp3 = cx.tensor::<R3<1, 4, 4>>();
+        inp3.set(vec![
+            12., 20., 30., 0., 8., 12., 2., 0., 34., 70., 37., 4., 112., 100., 25., 12.,
+        ]);
+
+        let out3 = inp3
+            .pool::<R5<1, 2, 2, 2, 2>>(&[2, 2], &[2, 1])
+            .max_reduce::<_, LAxes2<2, 4>>();
+        out3.retrieve();
+
+        // Run all the computations
         cx.execute();
 
-        assert_close(&b.data(), &[20., 30., 112., 37.]);
-        assert_close(&out1.data(), exp_out1);
+        // Run all the assertions
+        assert_close(
+            &out1.data(),
+            &[87., 48., 54., 99., 94., 85., 98., 96., 82., 70.],
+        );
+        assert_close(&out2.data(), &[20., 30., 112., 37.]);
+        assert_close(&out3.data(), &[20., 30., 30., 112., 100., 37.]);
     }
 
     #[test]
