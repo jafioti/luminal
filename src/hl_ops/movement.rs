@@ -1,5 +1,3 @@
-use itertools::Itertools;
-
 use crate::{
     op,
     prelude::{symbolic::Expression, *},
@@ -159,8 +157,6 @@ mod tests {
         tensor::{Cpu, TensorFrom, TensorFromVec},
         tensor_ops::{RealizeTo, TryConcatAlong},
     };
-
-    use crate::prelude::symbolic::Expression;
 
     crate::test_imports!();
 
