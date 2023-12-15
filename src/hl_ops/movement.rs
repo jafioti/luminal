@@ -153,8 +153,6 @@ mod tests {
         tensor_ops::{RealizeTo, TryConcatAlong},
     };
 
-    use rand::prelude::*;
-
     crate::test_imports!();
 
     #[test]
@@ -263,7 +261,7 @@ mod tests {
         let mut cx = Graph::new();
         let a = cx.tensor::<R2<3, 2>>();
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
-        let b: GraphTensor<(LConst<3>, LConst<1>)> = a.slice((.., ..1)).realize::<R2<3, 1>>();
+        let b = a.slice((.., ..1)).realize::<R2<3, 1>>();
         b.retrieve();
         cx.execute();
 
@@ -273,8 +271,6 @@ mod tests {
             (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<2>),
         );
         let d_b = d_a.slice((.., ..1)).realize::<Rank2<3, 1>>();
-
-        println!("{:?}", &b.data());
 
         assert_close(&b.data(), &d_b.as_vec());
     }
