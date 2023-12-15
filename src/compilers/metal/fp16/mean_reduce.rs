@@ -4,12 +4,12 @@ use half::f16;
 use petgraph::stable_graph::NodeIndex;
 
 use crate::{
-    compilers::metal::*,
+    compilers::metal::{prim::*, *},
     op::{InputTensor, Operator},
     prelude::*,
 };
 
-use super::prim::FakeSumReduce;
+use super::other::FakeSumReduce;
 use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Special kernel for efficient mean reduction

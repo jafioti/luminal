@@ -4,7 +4,7 @@ use half::f16;
 use petgraph::stable_graph::NodeIndex;
 
 use crate::{
-    compilers::metal::*,
+    compilers::metal::{prim::*, *},
     op::{InputTensor, Operator},
     prelude::*,
 };

@@ -1,17 +1,18 @@
 use std::sync::Arc;
 
 use half::f16;
+use num_traits::FromPrimitive;
 use petgraph::stable_graph::NodeIndex;
 
 use crate::{
     op::{InputTensor, Operator},
-    compilers::metal::*,
+    compilers::metal::{*, prim::*},
     prelude::*,
 };
 
 use metal_rs::{objc::rc::autoreleasepool, *};
 
-/// Special kernel for efficient mean reduction
+/// Special kernel for cos
 #[derive(LuminalEq, LuminalPrint, Clone)]
 pub struct MetalCos(ComputePipelineState, Device);
 
@@ -98,7 +99,6 @@ impl Operator for MetalCos {
     }
 }
 
-/// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceCompiler.
 #[derive(Default, Debug)]
 pub struct MetalCosCompiler;
 
@@ -475,5 +475,150 @@ impl Compiler for MetalGatherCompiler {
             graph.graph.remove_node(gather);
             graph.graph.remove_node(copy_to);
         }
+    }
+}
+
+/// In 16 bit, summing above 2048 doesn't work. This precludes the .expand(Dim).sum_reduce() pattern to get a dim size in a tensor, so we need to replace these fake reductions with an elementwise mul
+#[derive(Debug, Default)]
+pub struct FakeSumReduceCompiler;
+
+impl Compiler for FakeSumReduceCompiler {
+    fn compile(&self, graph: &mut Graph) {
+        let mut sum_reduce = NodeIndex::default();
+        let s = SelectEdge::new(
+            SelectOp::new().check(|o, _| {
+                if let Some(c) = o.as_any().downcast_ref::<MetalConstant<f16>>() {
+                    c.0 == f16::ONE
+                } else {
+                    false
+                }
+            }),
+            SelectOp::new()
+                .ty::<MetalSumReduce<f16>>()
+                .check(|o, shapes| {
+                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
+                        shapes[0].fake[shapes[0].indexes[o.3]] // Ensure dimension we are reducing is fake
+                    } else {
+                        false
+                    }
+                })
+                .ptr(&mut sum_reduce),
+        );
+        let mut compiled = None;
+        for _ in s.search(graph) {
+            let op_ref = graph.graph.node_weight_mut(sum_reduce).unwrap();
+            let sum_reduce = op_ref
+                .as_any()
+                .downcast_ref::<MetalSumReduce<f16>>()
+                .unwrap();
+            if compiled.is_none() {
+                compiled = Some(FakeSumReduce::compile(sum_reduce.2.clone()));
+            }
+            *op_ref = Box::new(FakeSumReduce(
+                compiled.clone().unwrap(),
+                sum_reduce.2.clone(),
+                sum_reduce.3,
+            ));
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FakeSumReduce(ComputePipelineState, Device, pub usize);
+impl PartialEq for FakeSumReduce {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl FakeSumReduce {
+    pub fn compile(dev: Device) -> ComputePipelineState {
+        let mut code = "#include <metal_stdlib>
+using namespace metal;
+kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]], device half& mul_factor [[buffer(3)]]) {{
+    if (idx < n_elements) {{
+        out[idx] = inp[idx] * mul_factor;
+    }}
+}}
+".to_string();
+        let name = format!("kernel_{}", hash(&code));
+        code = code.replace("mkernel", &name);
+
+        compile_function(&name, &code, &dev)
+    }
+}
+
+impl MetalKernelForward for FakeSumReduce {
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        dev: &Device,
+        command_buffer: &CommandBufferRef,
+    ) -> Vec<Buffer> {
+        let dim_size = f16::from_usize(inputs[0].1.shape()[self.2].to_usize().unwrap()).unwrap();
+        let inp_size = inputs[0].1.n_physical_elements();
+        let out = dev.new_buffer(
+            (inp_size * std::mem::size_of::<f16>()) as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_compute_pipeline_state(&self.0);
+
+        // Set inputs
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(&out), 0);
+        encoder.set_int(2, inp_size as u32);
+        encoder.set_bytes(
+            3,
+            std::mem::size_of::<f16>() as u64,
+            &dim_size as *const f16 as *const _,
+        );
+
+        // Execute
+        encoder.dispatch_1d(inp_size);
+        encoder.end_encoding();
+
+        vec![out]
+    }
+}
+
+impl Operator for FakeSumReduce {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        autoreleasepool(|| {
+            let inp = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+
+            let out = self
+                .metal_forward(&[(inp, tensors[0].1)], &self.1, command_buffer)
+                .pop()
+                .unwrap();
+
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
+
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
+    }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
+        }
+        None
     }
 }

@@ -36,12 +36,11 @@ pub trait Operator: Debug + TraitObjEq {
     }
 }
 
-/// An opaque function running on CPU that takes in tensor references and outputs a new tensor
+/// An opaque function running on CPU that takes in Vec<f32> tensors and outputs Vec<f32> tensors
 #[allow(clippy::type_complexity)]
 pub struct Function(
     pub String,
     pub Box<dyn Fn(Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor>>,
-    // pub TypeId,
 );
 
 impl PartialEq for Function {
