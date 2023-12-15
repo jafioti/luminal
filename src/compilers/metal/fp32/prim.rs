@@ -34,53 +34,42 @@ impl Compiler for PrimitiveCompiler {
             })
             .collect::<Vec<_>>()
         {
+            // Create copy node
+            let copy_node = graph
+                .add_op(MetalCopyToDevice::<f32>::new(dev.clone()))
+                .input(function_node, 0, ShapeTracker::new(&[]))
+                .finish();
+
+            // Switch outgoing edges from input to copy_node
+            for (edge_id, weight, dest) in graph
+                .graph
+                .edges_directed(function_node, petgraph::Direction::Outgoing)
+                .map(|e| (e.id(), *e.weight(), e.target()))
+                .filter(|(_, _, trg)| *trg != copy_node)
+                .collect::<Vec<_>>()
+            {
+                graph.graph.add_edge(copy_node, dest, weight);
+                graph.graph.remove_edge(edge_id);
+            }
+
+            if graph.to_retrieve.contains(&function_node) {
+                graph.to_retrieve.insert(copy_node);
+            }
+
+            // If there are inputs to this function remap the function to the copy node
             if graph
                 .graph
-                .node_weight(function_node)
-                .unwrap()
-                .as_any()
-                .downcast_ref::<LFunction>()
-                .unwrap()
-                .2
-                == std::any::TypeId::of::<Vec<f32>>()
+                .edges_directed(function_node, petgraph::Direction::Incoming)
+                .count()
+                != 0
             {
-                // Create copy node
-                let copy_node = graph
-                    .add_op(MetalCopyToDevice::<f32>::new(dev.clone()))
-                    .input(function_node, 0, ShapeTracker::new(&[]))
-                    .finish();
-
-                // Switch outgoing edges from input to copy_node
-                for (edge_id, weight, dest) in graph
-                    .graph
-                    .edges_directed(function_node, petgraph::Direction::Outgoing)
-                    .map(|e| (e.id(), *e.weight(), e.target()))
-                    .filter(|(_, _, trg)| *trg != copy_node)
-                    .collect::<Vec<_>>()
-                {
-                    graph.graph.add_edge(copy_node, dest, weight);
-                    graph.graph.remove_edge(edge_id);
-                }
-
-                if graph.to_retrieve.contains(&function_node) {
-                    graph.to_retrieve.insert(copy_node);
-                }
-
-                // If there are inputs to this function remap the function to the copy node
-                if graph
-                    .graph
-                    .edges_directed(function_node, petgraph::Direction::Incoming)
-                    .count()
-                    != 0
-                {
-                    move_references(
-                        &mut graph.id_remap,
-                        &mut graph.no_delete,
-                        &mut graph.to_retrieve,
-                        function_node,
-                        copy_node,
-                    );
-                }
+                move_references(
+                    &mut graph.id_remap,
+                    &mut graph.no_delete,
+                    &mut graph.to_retrieve,
+                    function_node,
+                    copy_node,
+                );
             }
 
             // Insert copy from device for function inputs

@@ -1,9 +1,6 @@
 #![allow(clippy::needless_range_loop)]
 
-use std::{
-    any::{Any, TypeId},
-    fmt::Debug,
-};
+use std::{any::Any, fmt::Debug};
 
 use crate::{
     prelude::{symbolic::Expression, tracker::ShapeTracker, TraitObjEq},
@@ -44,7 +41,7 @@ pub trait Operator: Debug + TraitObjEq {
 pub struct Function(
     pub String,
     pub Box<dyn Fn(Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor>>,
-    pub TypeId,
+    // pub TypeId,
 );
 
 impl PartialEq for Function {

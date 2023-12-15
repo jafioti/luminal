@@ -76,16 +76,6 @@ fn main() {
         kv_model.forward_kv::<_, _, Dyn<'p'>, Dyn<'t'>>((single_inp, cache_src.clone()));
     out.retrieve();
     cache_dest.keep();
-    #[cfg(feature = "metal")]
-    for (k, v) in &cache_src {
-        k.set_type(std::any::TypeId::of::<metal_rs::Buffer>());
-        v.set_type(std::any::TypeId::of::<metal_rs::Buffer>());
-    }
-    #[cfg(feature = "cuda")]
-    for (k, v) in &cache_src {
-        k.set_type(std::any::TypeId::of::<cudarc::driver::CudaSlice<half::f16>>());
-        v.set_type(std::any::TypeId::of::<cudarc::driver::CudaSlice<half::f16>>());
-    }
     cx2.compile(<(PreGenericCompiler, DeviceCompiler, PostGenericCompiler)>::default());
 
     // Cache model weights
@@ -94,7 +84,18 @@ fn main() {
     ));
     keep_weights(&kv_model, &mut cx2);
     // Delete weight loading nodes
-    delete_inputs(&kv_model, &mut cx2);
+    delete_inputs(
+        &state_dict(&kv_model).values().copied().collect::<Vec<_>>(),
+        &mut cx2,
+    );
+    // Delete cache loading nodes
+    delete_inputs(
+        &cache_src
+            .iter()
+            .flat_map(|(k, v)| [k.id(), v.id()])
+            .collect::<Vec<_>>(),
+        &mut cx2,
+    );
 
     println!("Inferencing...");
     // First pass

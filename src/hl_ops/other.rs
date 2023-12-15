@@ -55,7 +55,6 @@ impl<S: Shape> GraphTensor<S> {
                         data: Box::new(result),
                     }]
                 }),
-                std::any::TypeId::of::<Vec<f32>>(),
             ))
             .input(self.id, 0, self.shape)
             .finish();

@@ -123,7 +123,6 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
                         ),
                     }]
                 }),
-                std::any::TypeId::of::<Vec<f32>>(),
             ))
             .input(seq_tensor.id, 0, seq_tensor.shape);
         if has_cache {
@@ -522,7 +521,6 @@ impl<
                             data: Box::new(data),
                         }]
                     }),
-                    std::any::TypeId::of::<Vec<f32>>(),
                 ))
                 .input(input.id, 0, input.shape)
                 .finish(),

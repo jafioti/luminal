@@ -49,9 +49,9 @@ pub fn transfer_weights<M: SerializeModule>(
     }
 }
 
-/// Delete all incoming nodes to the states of the model
-pub fn delete_inputs<M: SerializeModule>(model: &M, graph: &mut Graph) {
-    for node in state_dict(model).values() {
+/// Delete all incoming nodes to this set of nodes
+pub fn delete_inputs(nodes: &[NodeIndex], graph: &mut Graph) {
+    for node in nodes {
         delete_upstream(graph, remap_id(*node, &graph.id_remap));
     }
     graph.toposort();

@@ -53,7 +53,6 @@ impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
                         data: Box::new(res),
                     }]
                 }),
-                std::any::TypeId::of::<Vec<f32>>(),
             ))
             .input(indexes.id, 0, indexes.shape)
             .input(self.id, 0, self.shape) // Since indexes might have a 1 dimension we don't want getting changed, we feed it in as the first argument

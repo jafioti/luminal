@@ -5,7 +5,7 @@ use crate::{
     shape::*,
     tensor::Tensor,
 };
-use std::{any::TypeId, marker::PhantomData};
+use std::marker::PhantomData;
 
 use petgraph::graph::NodeIndex;
 
@@ -95,19 +95,6 @@ impl<S: Shape> GraphTensor<S> {
             .downcast_mut::<Function>()
             .unwrap();
         node.0 = name.to_string();
-    }
-
-    /// Set type of this tensor
-    pub fn set_type(&self, type_id: TypeId) {
-        let node = self
-            .graph()
-            .graph
-            .node_weight_mut(self.id)
-            .unwrap()
-            .as_any_mut()
-            .downcast_mut::<Function>()
-            .unwrap();
-        node.2 = type_id;
     }
 
     pub fn print(&self, message: &str) {
