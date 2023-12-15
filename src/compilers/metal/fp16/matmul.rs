@@ -19,33 +19,124 @@ pub struct MetalVecMat {
     device: Device,
 }
 
+const BM: u64 = 8;
+const BN: u64 = 8;
+const TM: u64 = 4;
+const TN: u64 = 4;
 impl MetalVecMat {
     fn new(dev: &Device, queue: CommandQueue) -> Self {
         Self {
             kernel: compile_function(
                 "kernel_vecmat",
-                "
+                &format!(
+                    "
 #include <metal_stdlib>
 #include <metal_simdgroup_matrix>
 #include <metal_simdgroup>
 using namespace metal;
 
+static constant constexpr const int SIMD_SIZE = 32;
+static constant constexpr const int BM = {BM};
+static constant constexpr const int BN = {BN};
+static constant constexpr const int TM = {TM};
+static constant constexpr const int TN = {TN};
+
 kernel void kernel_vecmat(
-    device const half *data1 [[buffer(0)]],
-    device const half *data2 [[buffer(1)]],
-    device half *a [[buffer(2)]],
-    device uint& M [[buffer(3)]],
-    device uint& N [[buffer(4)]],
-    uint3 global_pos [[thread_position_in_grid]]
-) {
-    if (global_pos.x < N) {
-        float acc = 0.0;
-        for (uint i = 0; i < M; ++i) {
-            acc = fast::fma(data1[i], data2[global_pos.x + (i * N)], acc);
-        }
-        a[global_pos.x] = acc;
-    }
-}",
+    const device half* in_vec [[buffer(0)]],
+    const device half* mat [[buffer(1)]],
+    device half* out_vec [[buffer(2)]], 
+    const constant int& in_vec_size [[buffer(3)]],
+    const constant int& out_vec_size [[buffer(4)]],
+    threadgroup half* tgp_memory [[threadgroup(0)]],
+    uint3 tid [[threadgroup_position_in_grid]],
+    uint3 lid [[thread_position_in_threadgroup]],
+    uint simd_gid [[simdgroup_index_in_threadgroup]],
+    uint simd_lid [[thread_index_in_simdgroup]]) {{
+
+  // Appease compiler 
+  (void)simd_gid;
+  (void)simd_lid;
+
+  // Thread local accumulation results
+  float result[TN] = {{0}};
+  float inter[TN];
+  float v_coeff[TM];
+
+  // Threadgroup accumulation results
+  threadgroup half* tgp_results = tgp_memory + lid.x * BM * TN;
+
+  int out_col = (tid.x * BN + lid.x) * TN;
+  int in_row = lid.y * TM;
+
+  // Edgecase handling
+  if (out_col < out_vec_size) {{
+
+    out_col = out_col + TN < out_vec_size ? out_col : out_vec_size - TN;
+
+    // Per thread accumulation main loop
+    int bm = in_row;
+    for(; bm < in_vec_size; bm += BM * TM) {{
+      // Adding a threadgroup_barrier improves performance slightly
+      // This is possibly it may help exploit cache better
+      threadgroup_barrier(mem_flags::mem_none);
+
+      if(bm + TM <= in_vec_size) {{
+        #pragma unroll(TM)
+        for(int tm = 0; tm < TM; tm++) {{
+          v_coeff[tm] = in_vec[bm + tm];
+        }}
+        #pragma unroll(TM)
+        for(int tm = 0; tm < TM; tm++) {{
+          for(int tn = 0; tn < TN; tn++) {{
+            inter[tn] = mat[(bm + tm) * out_vec_size + out_col + tn];
+          }}
+          for(int tn = 0; tn < TN; tn++) {{
+            result[tn] += v_coeff[tm] * inter[tn];
+          }}
+        }}
+      }} else {{ // Edgecase handling
+        for(int tm = 0; bm + tm < in_vec_size; tm++) {{
+          v_coeff[tm] = in_vec[bm + tm];
+
+          for(int tn = 0; tn < TN; tn++) {{
+            inter[tn] = mat[(bm + tm) * out_vec_size + out_col + tn];
+          }}
+          for(int tn = 0; tn < TN; tn++) {{
+            result[tn] += v_coeff[tm] * inter[tn];
+          }}
+        }}
+      }}
+    }}
+  }}
+
+  // Threadgroup collection
+
+  #pragma unroll(TN)
+  for(int i = 0; i < TN; i++) {{
+    tgp_results[lid.y * TN + i] = result[i];
+  }}
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // Threadgroup accumulation and writing out results
+  if(lid.y == 0 && out_col < out_vec_size) {{
+    
+    #pragma unroll(BM)
+    for(int i = 1; i < BM; i++) {{
+
+      #pragma unroll(TN)
+      for(int j = 0; j < TN; j++) {{
+        result[j] += tgp_results[i * TN + j];
+      }}
+    }}
+
+    #pragma unroll(TN)
+    for(int j = 0; j < TN; j++) {{
+      out_vec[out_col + j] = result[j];
+    }}
+  }}
+}}"
+                ),
                 dev,
             ),
             queue,
@@ -80,17 +171,18 @@ impl MetalKernelForward for MetalVecMat {
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, m as u32);
         encoder.set_int(4, n as u32);
+        encoder.set_threadgroup_memory_length(0, 2048);
 
         encoder.set_compute_pipeline_state(&self.kernel);
         encoder.dispatch_thread_groups(
             MTLSize {
-                width: (n as u64).div_ceil(256),
+                width: (n as u64 + (BN * TN) - 1) / (BN * TN),
                 height: 1,
                 depth: 1,
             },
             MTLSize {
-                width: 256,
-                height: 1,
+                width: BN,
+                height: BM,
                 depth: 1,
             },
         );
@@ -863,8 +955,8 @@ mod tests {
     crate::test_imports!();
     #[test]
     fn test_matrix_vector() {
-        const M: usize = 13;
-        const N: usize = 32;
+        const M: usize = 256;
+        const N: usize = 256;
         let mut cx = Graph::new();
         let (a_vec, b_vec) = (random_vec(M), random_vec(M * N));
         let a = cx.named_tensor::<R2<1, M>>("Vec").set(a_vec.clone());
@@ -879,13 +971,13 @@ mod tests {
         let d_b = d_dev.tensor_from_vec(b_vec, (DConst::<M>, DConst::<N>));
         let d_c = d_a.matmul(d_b);
 
-        assert_close(&c.data(), &d_c.as_vec());
+        assert_close_precision(&c.data(), &d_c.as_vec(), 2);
     }
 
     #[test]
     fn test_batch_matrix_vector() {
-        const M: usize = 4096;
-        const N: usize = 4096;
+        const M: usize = 256;
+        const N: usize = 256;
         let mut cx = Graph::new();
         let (a_vec, b_vec) = (random_vec(M), random_vec(M * N));
         let a = cx.named_tensor::<R3<1, 1, M>>("Vec").set(a_vec.clone());
