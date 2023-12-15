@@ -97,10 +97,13 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
-    // For now we assume kernel size <= stride and stride shape is multiple of stride
-    pub fn pool<Dst: Shape>(self, kernel_size: &[usize], stride: &[usize]) -> GraphTensor<Dst> {
+    // For now we assume kernel size = stride
+    pub fn pool<Dst: Shape>(self, kernel_size: &[usize]) -> GraphTensor<Dst> {
         let current_shape = self.shape.shape();
         let current_dims = current_shape.len();
+
+        // For now, we set stride = kernel size
+        let stride = kernel_size;
 
         let mut new_shape = current_shape.clone();
 
@@ -295,7 +298,7 @@ mod tests {
         ]);
 
         let out1 = inp1
-            .pool::<R5<1, 2, 2, 2, 2>>(&[2, 2], &[2, 2])
+            .pool::<R5<1, 2, 2, 2, 2>>(&[2, 2])
             .max_reduce::<_, LAxes2<2, 4>>();
         out1.retrieve();
 
@@ -306,42 +309,12 @@ mod tests {
         ]);
 
         let out2 = inp2
-            .pool::<R5<1, 2, 2, 2, 2>>(&[2, 2], &[2, 2])
+            .pool::<R5<1, 2, 2, 2, 2>>(&[2, 2])
             .max_reduce::<_, LAxes2<2, 4>>();
         out2.retrieve();
 
-        // Case 3
-        let inp3 = cx.tensor::<R3<1, 8, 6>>();
-        inp3.set(vec![
-            44., 82., 83., 76., 30., 48., 0., 72., 48., 94., 57., 40., 62., 93., 77., 34., 97.,
-            31., 10., 23., 64., 77., 75., 65., 75., 1., 11., 7., 27., 25., 56., 42., 74., 97., 0.,
-            43., 61., 20., 40., 59., 83., 80., 53., 59., 43., 47., 84., 9.,
-        ]);
-        let out3 = inp3
-            .pool::<R5<1, 2, 4, 3, 2>>(&[2, 2], &[4, 2])
-            .max_reduce::<_, LAxes2<2, 4>>();
-        out3.retrieve();
-
-        // Case 4
-        let inp4 = cx.tensor::<R3<1, 8, 8>>();
-        inp4.set(vec![
-            43., 49., 18., 34., 93., 64., 10., 50., 23., 83., 82., 62., 53., 25., 0., 11., 57.,
-            17., 76., 96., 64., 96., 43., 63., 61., 41., 52., 68., 1., 28., 51., 25., 35., 95., 2.,
-            55., 75., 14., 48., 52., 59., 52., 50., 10., 36., 36., 43., 80., 0., 84., 95., 97.,
-            55., 26., 34., 43., 66., 78., 30., 89., 37., 63., 55., 89.,
-        ]);
-        let out4 = inp4
-            .pool::<R5<1, 2, 4, 4, 2>>(&[2, 2], &[4, 2])
-            .max_reduce::<_, LAxes2<2, 4>>();
-        out4.retrieve();
-
         // Run all the computations
         cx.execute();
-
-        // println!("out3: {:?}", &out3.data());
-        // println!("out3 shape: {:?}", out3.shape.shape());
-        println!("out4: {:?}", &out4.data());
-        println!("out4 shape: {:?}", out4.shape.shape());
 
         // Run all the assertions
         assert_close(
@@ -349,8 +322,6 @@ mod tests {
             &[87., 48., 54., 99., 94., 85., 98., 96., 82., 70.],
         );
         assert_close(&out2.data(), &[20., 30., 112., 37.]);
-        // assert_close(&out3.data(), &[82., 94., 57., 75., 97., 43.]);
-        assert_close(&out4.data(), &[83., 93., 95., 75.])
     }
 
     #[test]
