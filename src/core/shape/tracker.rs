@@ -71,18 +71,16 @@ impl ShapeTracker {
     }
 
     /// Strides without permute applied
-    fn unordered_strides(&self) -> Vec<usize> {
+    fn unordered_strides(&self) -> Vec<Expression> {
         let mut strides = self
             .dims
             .iter()
             .enumerate()
             .rev()
-            .scan(1, |state, (i, x)| {
+            .scan(Expression::from(1), |state, (i, x)| {
                 let ret = *state;
                 if !self.fake[i] {
-                    *state *= x
-                        .to_usize()
-                        .expect("All dims must be known before indexing!");
+                    *state = *state * *x;
                 }
                 Some(ret)
             })
@@ -91,37 +89,10 @@ impl ShapeTracker {
         strides
     }
 
-    /// Once all dims are known, compute strides
-    pub fn strides(&self) -> Vec<usize> {
+    /// Compute strides
+    pub fn strides(&self) -> Vec<Expression> {
         let strides = self.unordered_strides();
         self.indexes.into_iter().map(|i| strides[i]).collect()
-    }
-
-    /// Create an indexer to convert logical indexes into physical indexes
-    pub fn indexer(&self) -> Indexer {
-        let strides = self.unordered_strides();
-        Indexer {
-            data: self
-                .indexes
-                .into_iter()
-                .rev()
-                .map(|i| {
-                    (
-                        self.dims[i].to_usize().unwrap(),
-                        strides[i],
-                        (
-                            self.padding[i].0.to_usize().unwrap(),
-                            self.padding[i].1.to_usize().unwrap(),
-                        ),
-                        (
-                            self.slices[i].0.to_usize().unwrap(),
-                            self.slices[i].1.to_usize().unwrap(),
-                        ),
-                        self.fake[i],
-                    )
-                })
-                .collect(),
-        }
     }
 
     pub fn index_expression(&self) -> BigExpression {
@@ -336,33 +307,5 @@ pub fn resolve_local_dyn_dims(a: &mut ShapeTracker, b: &mut ShapeTracker, defaul
                 b.dims[b.indexes[i]] = 1.into();
             }
         }
-    }
-}
-
-pub struct Indexer {
-    #[allow(clippy::type_complexity)]
-    data: ArrayVec<[(usize, usize, (usize, usize), (usize, usize), bool); 6]>,
-}
-
-impl Indexer {
-    /// Convert a logical index into a physical index
-    pub fn index(&self, logical: usize) -> Option<usize> {
-        let mut ret = 0;
-        let mut acc = 1;
-        for (sh, stride, padding, slice, fake) in self.data.into_iter() {
-            let logical_sh = (sh + padding.0 + padding.1).min(slice.1) - slice.0;
-            if !fake {
-                let dim_ind = (logical / acc) % logical_sh;
-                // Over top or under bottom
-                if dim_ind >= (sh + padding.0).min(slice.1)
-                    || dim_ind < padding.0.saturating_sub(slice.0)
-                {
-                    return None;
-                }
-                ret += (dim_ind - padding.0 + (slice.0.saturating_sub(padding.0))) * stride;
-            }
-            acc *= logical_sh;
-        }
-        Some(ret)
     }
 }

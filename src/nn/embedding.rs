@@ -30,15 +30,23 @@ impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
                         .downcast_ref::<Vec<f32>>()
                         .unwrap();
                     let mut res = vec![0.; indexes.len() * DIM];
-                    let (a_ind, b_ind) = (tensors[0].1.indexer(), tensors[1].1.indexer());
+                    let (a_ind, a_val, b_ind, b_val) = (
+                        tensors[0].1.index_expression(),
+                        tensors[0].1.valid_expression(),
+                        tensors[1].1.index_expression(),
+                        tensors[1].1.valid_expression(),
+                    );
                     for i in 0..indexes.len() {
-                        let Some(index_idx) = a_ind.index(i) else {
+                        if a_val.exec_single_var(i) == 0 {
                             continue;
-                        };
-                        let start = indexes[index_idx] as usize * DIM;
+                        }
+                        let start = indexes[a_ind.exec_single_var(i)] as usize * DIM;
                         for n in 0..DIM {
-                            res[i * DIM + n] =
-                                b_ind.index(start + n).map(|i| data[i]).unwrap_or_default();
+                            res[i * DIM + n] = if b_val.exec_single_var(start + n) != 0 {
+                                data[b_ind.exec_single_var(start + n)]
+                            } else {
+                                0.0
+                            };
                         }
                     }
                     vec![Tensor {

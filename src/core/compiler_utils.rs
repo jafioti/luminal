@@ -516,7 +516,8 @@ fn test_node(
                     }
                     None => {
                         let c = a
-                            .to_symbol()
+                            .to_symbols()
+                            .pop()
                             .expect("Selector dimension must be either a symbol or number");
                         if let Some(expected) = shape_map.get(&c) {
                             if b != expected {

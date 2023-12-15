@@ -239,9 +239,11 @@ impl Operator for MetalBatchMatmul2D {
     fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
-            let (a_strides, b_strides) = (inp[0].1.strides(), inp[1].1.strides());
-            let (a_row_major, b_row_major) =
-                (a_strides[1] > a_strides[2], b_strides[0] > b_strides[1]);
+            let a_strides = inp[0].1.strides();
+            let (a_row_major, b_row_major) = (
+                inp[0].1.indexes[0] < inp[0].1.indexes[1],
+                inp[1].1.indexes[0] < inp[1].1.indexes[1],
+            );
             let (batch_size, m, k, n) = (
                 a_shape[0].to_usize().unwrap(),
                 a_shape[1].to_usize().unwrap(),
@@ -285,7 +287,7 @@ impl Operator for MetalBatchMatmul2D {
             encoder.set_int(6, n as u32);
             encoder.set_int(7, a_row_major as u32);
             encoder.set_int(8, b_row_major as u32);
-            encoder.set_int(9, a_strides[0] as u32);
+            encoder.set_int(9, a_strides[0].to_usize().unwrap() as u32);
             encoder.set_int(10, 0);
             encoder.set_int(11, (m * n) as u32);
 
