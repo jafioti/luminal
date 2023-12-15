@@ -101,9 +101,9 @@ impl MetalKernelForward for () {
 }
 
 fn compile_function(name: &str, code: &str, device: &Device) -> ComputePipelineState {
-    let opts = CompileOptions::new();
-    opts.set_fast_math_enabled(false);
-    let library = device.new_library_with_source(code, &opts).unwrap();
+    let library = device
+        .new_library_with_source(code, &CompileOptions::new())
+        .unwrap();
     let pipeline_state_descriptor = ComputePipelineDescriptor::new();
     pipeline_state_descriptor
         .set_compute_function(Some(&library.get_function(name, None).unwrap()));

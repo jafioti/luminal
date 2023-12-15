@@ -35,7 +35,6 @@ impl MetalVecMat {
 #include <metal_simdgroup>
 using namespace metal;
 
-static constant constexpr const int SIMD_SIZE = 32;
 static constant constexpr const int BM = {BM};
 static constant constexpr const int BN = {BN};
 static constant constexpr const int TM = {TM};
@@ -58,9 +57,9 @@ kernel void kernel_vecmat(
   (void)simd_lid;
 
   // Thread local accumulation results
-  float result[TN] = {{0}};
-  float inter[TN];
-  float v_coeff[TM];
+  half result[TN] = {{0}};
+  half inter[TN];
+  half v_coeff[TM];
 
   // Threadgroup accumulation results
   threadgroup half* tgp_results = tgp_memory + lid.x * BM * TN;
@@ -87,9 +86,11 @@ kernel void kernel_vecmat(
         }}
         #pragma unroll(TM)
         for(int tm = 0; tm < TM; tm++) {{
+          #pragma unroll(TN)
           for(int tn = 0; tn < TN; tn++) {{
             inter[tn] = mat[(bm + tm) * out_vec_size + out_col + tn];
           }}
+          #pragma unroll(TN)
           for(int tn = 0; tn < TN; tn++) {{
             result[tn] += v_coeff[tm] * inter[tn];
           }}
@@ -98,9 +99,11 @@ kernel void kernel_vecmat(
         for(int tm = 0; bm + tm < in_vec_size; tm++) {{
           v_coeff[tm] = in_vec[bm + tm];
 
+          #pragma unroll(TN)
           for(int tn = 0; tn < TN; tn++) {{
             inter[tn] = mat[(bm + tm) * out_vec_size + out_col + tn];
           }}
+          #pragma unroll(TN)
           for(int tn = 0; tn < TN; tn++) {{
             result[tn] += v_coeff[tm] * inter[tn];
           }}
@@ -123,7 +126,6 @@ kernel void kernel_vecmat(
     
     #pragma unroll(BM)
     for(int i = 1; i < BM; i++) {{
-
       #pragma unroll(TN)
       for(int j = 0; j < TN; j++) {{
         result[j] += tgp_results[i * TN + j];
@@ -171,12 +173,12 @@ impl MetalKernelForward for MetalVecMat {
         encoder.set_buffer(2, Some(&out), 0);
         encoder.set_int(3, m as u32);
         encoder.set_int(4, n as u32);
-        encoder.set_threadgroup_memory_length(0, 2048);
+        encoder.set_threadgroup_memory_length(0, BN * TN * BM * TM);
 
         encoder.set_compute_pipeline_state(&self.kernel);
         encoder.dispatch_thread_groups(
             MTLSize {
-                width: (n as u64 + (BN * TN) - 1) / (BN * TN),
+                width: (n as u64).div_ceil(BN * TN),
                 height: 1,
                 depth: 1,
             },
