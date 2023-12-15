@@ -18,6 +18,13 @@ type Model = LlamaForCausalLM<
     { config::LAYERS },
 >;
 
+#[cfg(feature = "metal")]
+type DeviceCompiler = MetalFp16Compiler;
+#[cfg(feature = "cuda")]
+type DeviceCompiler = CudaFp16Compiler;
+#[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
+type DeviceCompiler = CPUCompiler;
+
 fn main() {
     let prompt = "Here is a python implementation of merge sort:";
     let tokenizer = SentencePieceBpeTokenizer::from_file(
@@ -38,7 +45,7 @@ fn main() {
     let mut cx2 = Graph::new();
     let model = Model::initialize(&mut cx1);
     let inp = cx1.named_tensor::<(Const<1>, Dyn<'s'>)>("Input").set_dyn(
-        input.iter().map(|i| *i as f32).collect::<Vec<_>>(),
+        input.iter().map(|i| *i as f32).collect::<Vec<f32>>(),
         vec![1, input.len()],
     );
     let (out1, cache1) = model.forward(inp);
@@ -46,12 +53,7 @@ fn main() {
     cache1.keep();
     loader::DfdxDeferredLoader::new("./examples/llama/setup/llama-7b-hf").load(&model, &mut cx1);
 
-    #[cfg(feature = "metal")]
-    cx1.compile(<(MetalFp16Compiler, PostGenericCompiler)>::default());
-    #[cfg(feature = "cuda")]
-    cx1.compile(<(CudaFp16Compiler, PostGenericCompiler)>::default());
-    #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
-    cx1.compile(<(PostGenericCompiler, CPUCompiler)>::default());
+    cx1.compile(<(PreGenericCompiler, DeviceCompiler, PostGenericCompiler)>::default());
 
     // Cache model weights
     cx1.compile(RemapDownstream(
@@ -61,7 +63,7 @@ fn main() {
 
     // Build KV cache forward graph
     let kv_model = Model::initialize(&mut cx2);
-    let single_inp: GraphTensor<R2<1, 1>> = cx2.named_tensor("Input");
+    let single_inp = cx2.named_tensor::<R2<1, 1>>("Input");
     let cache_src = (0..config::LAYERS)
         .map(|_| {
             (
@@ -84,16 +86,12 @@ fn main() {
         k.set_type(std::any::TypeId::of::<cudarc::driver::CudaSlice<half::f16>>());
         v.set_type(std::any::TypeId::of::<cudarc::driver::CudaSlice<half::f16>>());
     }
-    #[cfg(feature = "metal")]
-    cx2.compile(<(MetalFp16Compiler, PostGenericCompiler)>::default());
-    #[cfg(feature = "cuda")]
-    cx2.compile(<(CudaFp16Compiler, PostGenericCompiler)>::default());
-    #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
-    cx2.compile(<(PostGenericCompiler, CPUCompiler)>::default());
+    cx2.compile(<(PreGenericCompiler, DeviceCompiler, PostGenericCompiler)>::default());
+
+    // Cache model weights
     cx2.compile(RemapDownstream(
         state_dict(&kv_model).values().copied().collect(),
     ));
-    // Cache weights
     keep_weights(&kv_model, &mut cx2);
     // Delete weight loading nodes
     delete_inputs(&kv_model, &mut cx2);
