@@ -162,6 +162,16 @@ impl Graph {
             .collect()
     }
 
+    /// Clear any remaining tensors that may be around from old executions
+    pub fn reset(&mut self) {
+        // (This is where we should do the tensor caching!)
+        for (t, i) in self.tensors.keys().copied().collect_vec() {
+            if !self.no_delete.contains(&t) {
+                self.tensors.remove(&(t, i));
+            }
+        }
+    }
+
     /// Execute the graph.
     pub fn execute(&mut self) {
         // Track the number of views pointing to each tensor so we know when to clear
@@ -198,6 +208,7 @@ impl Graph {
                 *remaining_consumers.get_mut(source).unwrap() -= 1;
             }
         }
+        self.reset();
     }
 
     /// Execute the graph without deleting intermediate tensors
@@ -346,6 +357,7 @@ impl Graph {
             }
             .bold()
         );
+        self.reset();
     }
 }
 
