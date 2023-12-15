@@ -95,55 +95,10 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
-    /*
-    def _pool2d(self, py, px, sy, sx):
-        if py > sy or px > sx:
-            raise NotImplementedError(
-                "pool2d doesn't support kernel_size > stride"
-            )
-
-        xup = self.slice(
-            (
-                (0, self.shape[0]),
-                (0, self.shape[1]),
-                (0, (self.shape[2]+(sy-py))//sy*sy),
-                (0, (self.shape[3]+(sx-px))//sx*sx)
-            )
-        )
-
-        return xup.reshape(
-            shape=(
-                xup.shape[0],
-                xup.shape[1],
-                xup.shape[2]//sy,
-                sy,
-                xup.shape[3]//sx,
-                sx
-            )
-        )[:, :, :, :py, :, :px]
-
-        // dims: (N, C, H, W)
-        // after transpose: (N, C, W, H)
-        // indexes: [0, 1, 3, 2]
-
-        // (N, C, H, W)
-        // 2x2 pool
-        // (N, C, H / 2, W / 2, 2, 2)
-
-        // (N, C, H, W)
-        // 2 pool
-        // (N, C, H, W / 2, 2)
-         */
-
-    // TODO: Pooling goes here
-    // For now we assume kernel size = stride
-    // TODO: We need to fix this
+    // For now we assume kernel size <= stride
     pub fn pool<Dst: Shape>(self, kernel_size: &[usize], stride: &[usize]) -> GraphTensor<Dst> {
         let current_shape = self.shape.shape();
         let current_dims = current_shape.len();
-
-        // println!("current_dims: {current_dims}");
-        // println!("current_shape: {:?}", current_shape);
 
         let mut new_shape = current_shape.clone();
 
