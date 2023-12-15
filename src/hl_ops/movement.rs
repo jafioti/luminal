@@ -95,6 +95,34 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
+    // For now we assume kernel size = stride
+    pub fn pool<Dst: Shape>(self, kernel_size: &[usize]) -> GraphTensor<Dst> {
+        let current_shape = self.shape.shape();
+        let current_dims = current_shape.len();
+
+        // For now, we set stride = kernel size
+        let stride = kernel_size;
+
+        let mut new_shape = current_shape.clone();
+
+        let kernel_sizes: Vec<Expression> =
+            kernel_size.iter().map(|&k| Expression::from(k)).collect();
+
+        let strides: Vec<Expression> = stride.iter().map(|&k| Expression::from(k)).collect();
+
+        for i in 0..kernel_sizes.len() {
+            let dim = current_dims - kernel_sizes.len() + i;
+            new_shape[dim] = (new_shape[dim] - kernel_sizes[i]) / strides[i] + 1;
+        }
+
+        for i in 0..kernel_sizes.len() {
+            let insert_index = current_dims - 1 + (i * 2);
+            new_shape.insert(insert_index, strides[i]);
+        }
+
+        return self.dyn_reshape(new_shape);
+    }
+
     pub fn pad<Dst: Shape, Start: Into<Expression> + Copy, End: Into<Expression> + Copy>(
         mut self,
         ranges: &[(Start, End)],
@@ -250,6 +278,46 @@ mod tests {
         let d_b = d_a.slice((.., ..1)).realize::<Rank2<3, 1>>();
 
         assert_close(&b.data(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_pool() {
+        // Max Pool Example
+        let mut cx = Graph::new();
+
+        // Case 1
+        let inp1 = cx.tensor::<R3<5, 2, 4>>();
+        inp1.set(vec![
+            84., 66., 48., 35., 87., 22., 31., 37., 33., 8., 22., 67., 54., 5., 99., 54., 19., 94.,
+            85., 77., 35., 22., 11., 10., 50., 67., 53., 17., 53., 98., 96., 30., 0., 82., 21.,
+            30., 35., 79., 70., 22.,
+        ]);
+
+        let out1 = inp1
+            .pool::<R5<1, 2, 2, 2, 2>>(&[2, 2])
+            .max_reduce::<_, LAxes2<2, 4>>();
+        out1.retrieve();
+
+        // Case 2
+        let inp2 = cx.tensor::<R3<1, 4, 4>>();
+        inp2.set(vec![
+            12., 20., 30., 0., 8., 12., 2., 0., 34., 70., 37., 4., 112., 100., 25., 12.,
+        ]);
+
+        let out2 = inp2
+            .pool::<R5<1, 2, 2, 2, 2>>(&[2, 2])
+            .max_reduce::<_, LAxes2<2, 4>>();
+        out2.retrieve();
+
+        // Run all the computations
+        cx.execute();
+
+        // Run all the assertions
+        assert_close(
+            &out1.data(),
+            &[87., 48., 54., 99., 94., 85., 98., 96., 82., 70.],
+        );
+        assert_close(&out2.data(), &[20., 30., 112., 37.]);
     }
 
     #[test]
