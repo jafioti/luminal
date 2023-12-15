@@ -78,13 +78,24 @@ impl<T: MetalFloat> Operator for MetalCopyFromDevice<T> {
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalConstant<T>(pub T, pub Device);
+pub struct MetalConstant<T>(
+    pub ConstantValue,
+    pub Device,
+    *const HashMap<char, usize>,
+    PhantomData<T>,
+);
 
 impl<T: MetalFloat> Operator for MetalConstant<T> {
     fn process(&self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let val = T::from_f32(match &self.0 {
+            ConstantValue::Expression(e) => {
+                e.exec(unsafe { self.2.as_ref().unwrap() }).unwrap() as f32
+            }
+            ConstantValue::Float(f) => *f,
+        });
         vec![Tensor {
             data: Box::new(self.1.new_buffer_with_data(
-                &self.0 as *const T as *const _,
+                &val as *const T as *const _,
                 std::mem::size_of::<T>() as u64,
                 MTLResourceOptions::StorageModeShared,
             )),
@@ -1654,7 +1665,12 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                     &mut kernels,
                 ));
             } else if let Some(c) = op_ref.as_any().downcast_ref::<Constant>() {
-                *op_ref = Box::new(MetalConstant(T::from_f32(c.0), dev.clone()));
+                *op_ref = Box::new(MetalConstant::<T>(
+                    c.0.clone(),
+                    dev.clone(),
+                    c.1,
+                    Default::default(),
+                ));
             } else if is::<Sin>(op) {
                 *op_ref = Box::new(MetalSin::<T>::new(dev.clone(), queue.clone(), &mut kernels));
             } else if is::<Sqrt>(op) {

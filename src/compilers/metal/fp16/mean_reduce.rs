@@ -9,7 +9,6 @@ use crate::{
     prelude::*,
 };
 
-use super::other::FakeSumReduce;
 use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Special kernel for efficient mean reduction
@@ -167,8 +166,7 @@ impl Compiler for MeanReduceCompiler {
         let queue = dev.new_command_queue();
         // Look for the mean-reduce pattern
         // mul(recip(fake_sum_reduce(const_ones)), sum_reduce(x))
-        let (mut one_const, mut fake_sum_reduce, mut recip, mut mul, mut sum_reduce) = (
-            NodeIndex::default(),
+        let (mut fake_sum_reduce, mut recip, mut mul, mut sum_reduce) = (
             NodeIndex::default(),
             NodeIndex::default(),
             NodeIndex::default(),
@@ -181,20 +179,9 @@ impl Compiler for MeanReduceCompiler {
                 .ptr(&mut sum_reduce),
             SelectEdge::new(
                 SelectEdge::new(
-                    SelectEdge::new(
-                        SelectOp::new()
-                            .check(|op, _| {
-                                if let Some(c) = op.as_any().downcast_ref::<MetalConstant<f16>>() {
-                                    c.0 == f16::ONE
-                                } else {
-                                    false
-                                }
-                            })
-                            .ptr(&mut one_const),
-                        SelectOp::new()
-                            .ty::<FakeSumReduce>()
-                            .ptr(&mut fake_sum_reduce),
-                    ),
+                    SelectOp::new()
+                        .ty::<MetalConstant<f16>>()
+                        .ptr(&mut fake_sum_reduce),
                     SelectOp::new().ty::<MetalRecip<f16>>().ptr(&mut recip),
                 ),
                 SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul),
@@ -203,7 +190,6 @@ impl Compiler for MeanReduceCompiler {
 
         for _ in s.search(graph) {
             if graph.no_delete.contains(&sum_reduce)
-                || graph.no_delete.contains(&one_const)
                 || graph.no_delete.contains(&fake_sum_reduce)
                 || graph.no_delete.contains(&recip)
             {
@@ -245,7 +231,6 @@ impl Compiler for MeanReduceCompiler {
             graph.graph.remove_node(mul);
             graph.graph.remove_node(sum_reduce);
             graph.graph.remove_node(recip);
-            graph.graph.remove_node(one_const);
             graph.graph.remove_node(fake_sum_reduce);
         }
     }

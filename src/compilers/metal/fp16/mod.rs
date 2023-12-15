@@ -7,7 +7,6 @@ mod rms_norm;
 
 pub type MetalFp16Compiler = (
     super::prim::PrimitiveCompiler<f16>,
-    other::FakeSumReduceCompiler,
     // other::MetalCosCompiler, // For some reason doesn't produce the same outputs, need to test
     other::MetalExpCompiler,
     other::MetalGatherCompiler,

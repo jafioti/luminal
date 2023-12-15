@@ -1,6 +1,6 @@
 use crate::{
-    op::{Constant, Function},
-    prelude::*,
+    op::{Constant, ConstantValue, Function},
+    prelude::{symbolic::BigExpression, *},
 };
 
 impl<S: Shape> GraphTensor<S> {
@@ -70,7 +70,20 @@ impl<S: Shape> GraphTensor<S> {
 impl Graph {
     pub fn constant(&mut self, i: f32) -> GraphTensor<R0> {
         GraphTensor::from_id(
-            self.add_op(Constant(i)).finish(),
+            self.add_op(Constant(ConstantValue::Float(i), &self.dyn_map))
+                .finish(),
+            ShapeTracker::new(&[]),
+            self,
+        )
+    }
+
+    pub fn constant_expr(&mut self, expr: BigExpression) -> GraphTensor<R0> {
+        GraphTensor::from_id(
+            self.add_op(Constant(
+                ConstantValue::Expression(expr.minimize()),
+                &self.dyn_map,
+            ))
+            .finish(),
             ShapeTracker::new(&[]),
             self,
         )

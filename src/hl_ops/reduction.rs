@@ -1,6 +1,9 @@
 use itertools::Itertools;
 
-use crate::{op, prelude::*};
+use crate::{
+    op::{self},
+    prelude::*,
+};
 
 impl<S: Shape> GraphTensor<S> {
     pub fn sum_reduce<Dst: Shape, Ax: Axes>(self) -> GraphTensor<Dst>
@@ -55,17 +58,11 @@ impl<S: Shape> GraphTensor<S> {
                 .input(node_id, 0, shape)
                 .finish();
 
-            // Divide by div tensor
-            // Create ones tensor and expand up to full tensor shape
-            let ones = self.graph().constant(1.0).id;
-            let mut st = ShapeTracker::new(&[]);
-            st.expand(0, shape.shape()[dim as usize]);
-            shape.remove_dim(dim as usize);
+            // Divide by size of dimension
             let div_tensor = self
                 .graph()
-                .add_op(op::SumReduce(0))
-                .input(ones, 0, st)
-                .finish();
+                .constant_expr(shape.remove_dim(dim as usize).into())
+                .id;
             let mul_tensor = self
                 .graph()
                 .add_op(op::Recip)

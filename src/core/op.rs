@@ -1,11 +1,13 @@
 #![allow(clippy::needless_range_loop)]
 
-use std::{any::Any, fmt::Debug};
+use std::{any::Any, collections::HashMap, fmt::Debug};
 
 use crate::{
     prelude::{symbolic::Expression, tracker::ShapeTracker, TraitObjEq},
     tensor::Tensor,
 };
+
+use super::shape::symbolic::BigExpression;
 
 pub enum InputTensor<'a> {
     Owned(Tensor),
@@ -115,13 +117,24 @@ impl Operator for Print {
     }
 }
 
-/// Produces a single number constant, known at compile time
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Constant(pub f32);
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConstantValue {
+    Expression(BigExpression),
+    Float(f32),
+}
+
+/// Produces a single number constant from an expression or a float
+#[derive(Debug, Clone, PartialEq)]
+pub struct Constant(pub ConstantValue, pub *const HashMap<char, usize>);
 impl Operator for Constant {
     fn process(&self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         vec![Tensor {
-            data: Box::new(vec![self.0]),
+            data: Box::new(vec![match &self.0 {
+                ConstantValue::Expression(e) => {
+                    e.exec(unsafe { self.1.as_ref().unwrap() }).unwrap() as f32
+                }
+                ConstantValue::Float(f) => *f,
+            }]),
         }]
     }
 }

@@ -5,7 +5,7 @@ use petgraph::stable_graph::NodeIndex;
 
 use crate::{
     compilers::metal::{prim::*, *},
-    op::{InputTensor, Operator},
+    op::{ConstantValue, InputTensor, Operator},
     prelude::*,
 };
 
@@ -207,7 +207,11 @@ impl Compiler for RMSNormCompiler {
                         SelectOp::new()
                             .check(|op, _| {
                                 if let Some(c) = op.as_any().downcast_ref::<MetalConstant<f16>>() {
-                                    c.0 == f16::from_f32(1e-6)
+                                    if let ConstantValue::Float(v) = c.0 {
+                                        v == 1e-6
+                                    } else {
+                                        false
+                                    }
                                 } else {
                                     false
                                 }
