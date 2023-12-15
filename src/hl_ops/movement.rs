@@ -245,9 +245,6 @@ impl<S: Shape> GraphTensor<S> {
         let max_y = (n_y - 1) * sy + ky;
         let py = w - max_y;
 
-        // let max_x = (h / sx) * (sx - 1) + kx;
-        // let max_y = (w / sy) * (sy - 1) + ky;
-
         println!("current_shape: {:?}", current_shape);
         println!("(kx, ky) = {:?}", kernel_size);
         println!("(sx, sy) = {:?}", stride);
@@ -264,11 +261,11 @@ impl<S: Shape> GraphTensor<S> {
         //     (Expression::from(0), Expression::from(max_y)),
         // ]);
 
-        // self.shape.slice(&[
-        //     self.shape.slices[0],
-        //     (Expression::from(0), Expression::from(max_x)),
-        //     (Expression::from(0), Expression::from(max_y)),
-        // ]);
+        self.shape.slice(&[
+            self.shape.slices[0],
+            (Expression::from(0), Expression::from(max_y)),
+            (Expression::from(0), Expression::from(max_x)),
+        ]);
 
         // Instead of slicing, we pad
         /*
@@ -277,15 +274,15 @@ impl<S: Shape> GraphTensor<S> {
         let b = a.pad::<R2<3, 4>, usize, usize>(&[(0, 0), (0, 2)]);
         */
 
-        self.shape.pad(&[
-            self.shape.padding[0],
-            (Expression::from(0), Expression::from(px)),
-            (Expression::from(0), Expression::from(py)),
-        ]);
+        // self.shape.pad(&[
+        //     self.shape.padding[0],
+        //     (Expression::from(0), Expression::from(px)),
+        //     (Expression::from(0), Expression::from(py)),
+        // ]);
 
-        println!("padded_shape: {:?}", self.shape);
+        // println!("padded_shape: {:?}", self.shape);
 
-        // println!("sliced_shape: {:?}", self.shape);
+        println!("sliced_shape: {:?}", self.shape);
 
         let mut new_shape_expr = self.shape.shape();
 
