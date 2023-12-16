@@ -1,4 +1,5 @@
 pub mod compiler_utils;
+pub mod display;
 pub mod graph;
 pub mod graph_tensor;
 pub mod module;
