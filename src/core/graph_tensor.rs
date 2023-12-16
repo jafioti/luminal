@@ -5,6 +5,7 @@ use crate::{
     shape::*,
     tensor::Tensor,
 };
+use std::fmt::Debug;
 use std::marker::PhantomData;
 
 use petgraph::graph::NodeIndex;
@@ -146,6 +147,108 @@ impl<S: ConstShape> GraphTensor<S> {
             }]
         });
         self
+    }
+}
+
+pub fn pretty_print_tensor_recursive(
+    f: &mut std::fmt::Formatter<'_>,
+    data: &[f32],
+    shape: &[usize],
+    level: usize,
+) -> std::fmt::Result {
+    if shape.is_empty() {
+        // Base case: no dimensions left
+        return Ok(());
+    }
+
+    let indent = "  ".repeat(level);
+
+    if shape.len() == 1 {
+        // If this is the innermost dimension, print the raw data in a single line
+        write!(f, "{}[", indent)?;
+        if data.len() > 10 {
+            for (i, value) in data.iter().take(5).enumerate() {
+                write!(f, "{:.2}", value)?;
+                if i < data.len() - 1 {
+                    write!(f, ", ")?;
+                }
+            }
+            write!(f, "..., ")?;
+            for (i, value) in data.iter().skip(data.len() - 5).enumerate() {
+                write!(f, "{:.2}", value)?;
+                if i < data.len() - 1 {
+                    write!(f, ", ")?;
+                }
+            }
+        } else {
+            for (i, value) in data.iter().enumerate() {
+                write!(f, "{:.2}", value)?;
+                if i < data.len() - 1 {
+                    write!(f, ", ")?;
+                }
+            }
+        }
+        write!(f, "]")?; // No newline after the innermost array
+    } else {
+        // For higher dimensions, handle the nesting
+        writeln!(f, "{indent}[")?;
+        let stride = shape[1..].iter().product();
+        if data.len() / stride > 10 {
+            for (i, chunk) in data.chunks(stride).take(5).enumerate() {
+                pretty_print_tensor_recursive(f, chunk, &shape[1..], level + 1)?;
+                if i < shape[0] - 1 {
+                    writeln!(f, ",")?; // Place the comma right after the bracket and then a newline
+                }
+            }
+            writeln!(f, "{indent}  ..., ")?;
+            for (i, chunk) in data
+                .chunks(stride)
+                .skip(data.len() / stride - 5)
+                .enumerate()
+            {
+                pretty_print_tensor_recursive(f, chunk, &shape[1..], level + 1)?;
+                if i < shape[0] - 1 {
+                    writeln!(f, ",")?; // Place the comma right after the bracket and then a newline
+                }
+            }
+        } else {
+            for (i, chunk) in data.chunks(stride).enumerate() {
+                pretty_print_tensor_recursive(f, chunk, &shape[1..], level + 1)?;
+                if i < shape[0] - 1 {
+                    writeln!(f, ",")?; // Place the comma right after the bracket and then a newline
+                }
+            }
+        }
+        writeln!(f)?; // Add a newline before closing the current dimension bracket
+        write!(f, "{indent}]")?; // Close the current dimension bracket
+    }
+
+    // Only add a newline after the top-level closing bracket
+    if level == 0 {
+        writeln!(f)?;
+    }
+
+    Ok(())
+}
+
+impl<S: Shape> Debug for GraphTensor<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Get the data
+        let data = self.data();
+
+        // Get the shape
+        let shape = self
+            .shape
+            .shape()
+            .iter()
+            .map(|expr| expr.to_usize().unwrap())
+            .collect::<Vec<_>>();
+
+        // Print the shape
+        writeln!(f, "Tensor with Shape: {:?}", shape)?;
+
+        // Print the data by going dimension by dimension, recursively
+        pretty_print_tensor_recursive(f, &data, &shape, 0)
     }
 }
 

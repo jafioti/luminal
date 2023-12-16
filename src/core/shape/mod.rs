@@ -9,9 +9,6 @@ pub mod tracker;
 pub use realize::*;
 pub use slice::*;
 
-#[cfg(test)]
-mod test;
-
 pub use axes::*;
 pub use broadcast::*;
 pub use permute::*;

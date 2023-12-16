@@ -105,10 +105,9 @@ impl<S: Shape> GraphTensor<S> {
 
         let mut new_shape = current_shape.clone();
 
-        let kernel_sizes: Vec<Expression> =
-            kernel_size.iter().map(|&k| Expression::from(k)).collect();
+        let kernel_sizes = kernel_size.iter().map(Expression::from).collect::<Vec<_>>();
 
-        let strides: Vec<Expression> = stride.iter().map(|&k| Expression::from(k)).collect();
+        let strides = stride.iter().map(Expression::from).collect::<Vec<_>>();
 
         for i in 0..kernel_sizes.len() {
             let dim = current_dims - kernel_sizes.len() + i;
@@ -120,7 +119,7 @@ impl<S: Shape> GraphTensor<S> {
             new_shape.insert(insert_index, strides[i]);
         }
 
-        return self.dyn_reshape(new_shape);
+        self.dyn_reshape(new_shape)
     }
 
     pub fn pad<Dst: Shape, Start: Into<Expression> + Copy, End: Into<Expression> + Copy>(
