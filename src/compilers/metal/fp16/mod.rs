@@ -1,5 +1,6 @@
 use half::f16;
 
+mod arange;
 mod matmul;
 mod mean_reduce;
 mod other;
@@ -10,6 +11,7 @@ pub type MetalFp16Compiler = (
     // other::MetalCosCompiler, // For some reason doesn't produce the same outputs, need to test
     other::MetalExpCompiler,
     other::MetalGatherCompiler,
+    arange::ARangeCompiler,
     matmul::MetalMatMulCompiler,
     mean_reduce::MeanReduceCompiler,
     rms_norm::RMSNormCompiler,

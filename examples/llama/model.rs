@@ -6,6 +6,7 @@ use luminal::{
     nn::{embedding::Embedding, norm::RMSNorm},
     op::Function,
     prelude::*,
+    shape::symbolic::BigExpression,
 };
 
 // Full LLaMa model implementation, heavily based off of https://github.com/coreylowman/llama-dfdx/blob/main/src/modeling.rs
@@ -62,14 +63,13 @@ impl<
         Batch: Dimension,
         const NUM_HEADS: usize,
         Seq: Dimension,
-        PrevSeq: Dimension,
         const HEAD_DIM: usize,
         const HEAD_DIM_OVER_2: usize,
     >
     Module<(
         GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
         GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
-        Option<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
+        BigExpression,
     )> for RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
 {
     type Output = (
@@ -79,13 +79,13 @@ impl<
 
     fn forward(
         &self,
-        (q, k, cache): (
+        (q, k, prev_seq): (
             GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
             GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
-            Option<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
+            BigExpression,
         ),
     ) -> Self::Output {
-        let (sin, cos) = self.get_sincos::<Batch, NUM_HEADS, Seq, PrevSeq>(q, cache);
+        let (sin, cos) = self.get_sincos::<Batch, NUM_HEADS, Seq>(q, prev_seq);
         let q_embed = (Self::rotate_half(q) * sin.expand()) + (q * cos.expand());
         let k_embed = (Self::rotate_half(k) * sin.expand()) + (k * cos.expand());
         (q_embed, k_embed)
@@ -95,41 +95,34 @@ impl<
 impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
     RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
 {
-    fn get_sincos<Batch: Dimension, const NUM_HEADS: usize, Seq: Dimension, PrevSeq: Dimension>(
+    fn get_sincos<Batch: Dimension, const NUM_HEADS: usize, Seq: Dimension>(
         &self,
         seq_tensor: GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
-        cache: Option<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
+        prev_seq: BigExpression,
     ) -> (
         GraphTensor<(Seq, Const<HEAD_DIM>)>,
         GraphTensor<(Seq, Const<HEAD_DIM>)>,
     ) {
-        let has_cache = cache.is_some();
-        let mut op = self
+        let op = self
             .inv_freq
             .graph()
             .add_op(Function(
                 "ARange".to_string(),
                 Box::new(move |inp| {
-                    let offset = if has_cache {
-                        inp[1].1.shape()[2].to_usize().unwrap()
-                    } else {
-                        0
-                    };
                     vec![Tensor {
                         data: Box::new(
                             (0..inp[0].1.shape()[2].to_usize().unwrap())
-                                .map(|i| (i + offset) as f32)
+                                .map(|i| i as f32)
                                 .collect::<Vec<_>>(),
                         ),
                     }]
                 }),
             ))
-            .input(seq_tensor.id, 0, seq_tensor.shape);
-        if has_cache {
-            op = op.input(cache.unwrap().0.id, 0, cache.unwrap().0.shape);
-        }
+            .input(seq_tensor.id, 0, seq_tensor.shape)
+            .finish();
         let t: GraphTensor<(Seq,)> =
-            GraphTensor::from_id(op.finish(), <(Seq,)>::to_tracker(), self.inv_freq.graph());
+            GraphTensor::from_id(op, <(Seq,)>::to_tracker(), self.inv_freq.graph());
+        let t = t + self.inv_freq.graph().constant_expr(prev_seq).expand();
         let freqs = t.expand::<(Seq, Const<1>), _>().matmul(
             self.inv_freq
                 .expand::<(Const<1>, Const<HEAD_DIM_OVER_2>), _>(),
@@ -185,11 +178,10 @@ fn attn_forward<
     const HEAD_DIM_OVER_2: usize,
     Batch: Dimension,
     Seq: Dimension,
-    PrevSeq: Dimension,
 >(
     attn: &Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>,
     x: GraphTensor<(Batch, Seq, Const<HIDDEN>)>,
-    cache: Option<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
+    prev_seq: BigExpression,
 ) -> (
     GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
     GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
@@ -225,7 +217,7 @@ fn attn_forward<
     let (q, k) = attn.rotary_embed.forward((
         q.reshape::<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>(),
         k.reshape(),
-        cache,
+        prev_seq,
     ));
 
     (q, k, v)
@@ -256,11 +248,7 @@ impl<
             GraphTensor<(CurSeq, CurSeq)>,
         ),
     ) -> Self::Output {
-        let (q, k, v) = attn_forward(
-            self,
-            x,
-            Option::<KVCache<_, Dyn<'s'>, NUM_HEADS, HEAD_DIM>>::None,
-        );
+        let (q, k, v) = attn_forward(self, x, 0.into());
 
         let w = q.matmul(k.permute());
         let w = w.mul((HEAD_DIM as f64).sqrt().recip() as f32);
@@ -297,7 +285,7 @@ impl<
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
         KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>,
     ) {
-        let (q, k, v) = attn_forward(self, x, Some(cache));
+        let (q, k, v) = attn_forward(self, x, PrevSeq::const_size().into());
         // Add KV cache
         let k = cache
             .0

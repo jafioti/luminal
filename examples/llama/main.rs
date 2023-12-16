@@ -125,13 +125,13 @@ fn main() {
     // Move weights over
     transfer_weights(&model, &mut cx1, &kv_model, &mut cx2);
 
-    for _ in 0..5 {
+    loop {
         single_inp.set_dyn(vec![*input.last().unwrap() as f32], vec![1, 1]);
         cx2.set_dyn_dim('p', input.len() - 1);
         cx2.set_dyn_dim('t', input.len());
 
         let now = std::time::Instant::now();
-        cx2.execute_debug();
+        cx2.execute();
         println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
 
         let o = out.data();
