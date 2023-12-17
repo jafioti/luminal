@@ -1,9 +1,6 @@
 use crate::{
     op,
-    prelude::{
-        symbolic::{BigExpression, Expression},
-        *,
-    },
+    prelude::{symbolic::Expression, *},
 };
 
 impl<S: Shape> GraphTensor<S> {
@@ -98,14 +95,43 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
+    /// Cut out 'size' elements every 'spacing' elements in the last dimension. 'size' must be smaller than the last dimension
+    pub fn excise<Dst: Shape>(mut self, spacing: usize, size: usize) -> GraphTensor<Dst> {
+        let n_dims = self.shape.len();
+        // Pad out to a multiple of spacing + size
+        let total_size = (self.shape.dims[self.shape.indexes[n_dims - 1]] + ((spacing + size) - 1))
+            / (spacing + size)
+            * (spacing + size);
+        let padding = total_size - self.shape.dims[self.shape.indexes[n_dims - 1]];
+        self.shape.padding[self.shape.indexes[n_dims - 1]].1 = padding;
+
+        self = self.contiguous();
+        // Expand a new dimension to do the slicing on
+        let n_rows = total_size / (spacing + size);
+        self.shape.expand(n_dims, (spacing + size).into());
+        // self = self.contiguous();
+        self.shape.dims[self.shape.indexes[n_dims - 1]] = n_rows;
+        self.shape.fake[self.shape.indexes[n_dims]] = false;
+
+        // Slice
+        self.shape.slices[self.shape.indexes[n_dims]].1 = spacing.into();
+
+        self = self.contiguous();
+
+        self.shape.remove_dim(n_dims);
+        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
+    }
+
     pub fn pool_1d<Dst: Shape>(
         mut self,
         dim: usize,
         kernel: usize,
         stride: usize,
+        dilation: usize,
     ) -> GraphTensor<Dst> {
+        let full_kernel = kernel + dilation;
         let dim_size = self.shape.dims[self.shape.indexes[dim]];
-        let number_of_windows = ((dim_size - kernel) / stride) + 1;
+        let number_of_windows = ((dim_size - full_kernel) / stride) + 1;
         // Expand new dimension
         self.shape.expand(dim, number_of_windows + 1);
         self = self.contiguous();
@@ -113,37 +139,16 @@ impl<S: Shape> GraphTensor<S> {
         self.shape.dims[self.shape.indexes[dim + 1]] =
             self.shape.dims[self.shape.indexes[dim + 1]] + stride;
         // Slice down to kernel size
-        self.shape.slices[self.shape.indexes[dim + 1]].1 = kernel.into();
+        self.shape.slices[self.shape.indexes[dim + 1]].1 = full_kernel.into();
         self.shape.slices[self.shape.indexes[dim]].1 = number_of_windows;
 
-        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
-    }
-
-    // For now we assume kernel size = stride
-    pub fn pool<Dst: Shape>(self, kernel_size: &[usize]) -> GraphTensor<Dst> {
-        let current_shape = self.shape.shape();
-        let current_dims = current_shape.len();
-
-        // For now, we set stride = kernel size
-        let stride = kernel_size;
-
-        let mut new_shape = current_shape.clone();
-
-        let kernel_sizes = kernel_size.iter().map(Expression::from).collect::<Vec<_>>();
-
-        let strides = stride.iter().map(BigExpression::from).collect::<Vec<_>>();
-
-        for i in 0..kernel_sizes.len() {
-            let dim = current_dims - kernel_sizes.len() + i;
-            new_shape[dim] = (new_shape[dim].clone() - kernel_sizes[i]) / strides[i].clone() + 1;
+        if dilation > 0 {
+            // Remove dilations
+            self = self.contiguous();
+            self.excise(1, dilation)
+        } else {
+            GraphTensor::from_id(self.id, self.shape, self.graph_ref)
         }
-
-        for i in 0..kernel_sizes.len() {
-            let insert_index = current_dims - 1 + (i * 2);
-            new_shape.insert(insert_index, strides[i].clone());
-        }
-
-        self.dyn_reshape(new_shape.into_iter().map(Expression::from).collect())
     }
 
     pub fn pad<Dst: Shape, Start: Into<Expression> + Copy, End: Into<Expression> + Copy>(
@@ -307,17 +312,16 @@ mod tests {
     fn test_pool_1d() {
         let mut cx = Graph::new();
 
-        // Stride 1
         let inp1 = cx.tensor::<R1<5>>().set(vec![1., 2., 3., 4., 5.]);
-        let out1 = inp1.pool_1d::<R2<3, 3>>(0, 3, 1).retrieve();
+        // Stride 1
+        let out1 = inp1.pool_1d::<R2<3, 3>>(0, 3, 1, 0).retrieve();
 
         // Stride 2
-        let out2 = inp1.pool_1d::<R2<2, 3>>(0, 3, 2).retrieve();
+        let out2 = inp1.pool_1d::<R2<2, 3>>(0, 3, 2, 0).retrieve();
 
         // Stride 3
-        let out3 = inp1.pool_1d::<R2<1, 3>>(0, 3, 3).retrieve();
+        let out3 = inp1.pool_1d::<R2<1, 3>>(0, 3, 3, 0).retrieve();
 
-        // Run all the computations
         cx.execute();
 
         assert_exact(&out1.data(), &[1., 2., 3., 2., 3., 4., 3., 4., 5.]);
@@ -326,43 +330,24 @@ mod tests {
     }
 
     #[test]
-    fn test_pool() {
-        // Max Pool Example
+    fn test_pool_1d_dilation() {
         let mut cx = Graph::new();
 
-        // Case 1
-        let inp1 = cx.tensor::<R3<5, 2, 4>>();
-        inp1.set(vec![
-            84., 66., 48., 35., 87., 22., 31., 37., 33., 8., 22., 67., 54., 5., 99., 54., 19., 94.,
-            85., 77., 35., 22., 11., 10., 50., 67., 53., 17., 53., 98., 96., 30., 0., 82., 21.,
-            30., 35., 79., 70., 22.,
-        ]);
+        let inp1 = cx.tensor::<R1<5>>().set(vec![1., 2., 3., 4., 5.]);
+        // Stride 1
+        let out1 = inp1.pool_1d::<R2<3, 2>>(0, 2, 1, 1).retrieve();
 
-        let out1 = inp1
-            .pool::<R5<1, 2, 2, 2, 2>>(&[2, 2])
-            .max_reduce::<_, LAxes2<2, 4>>();
-        out1.retrieve();
+        // Stride 2
+        let out2 = inp1.pool_1d::<R2<2, 2>>(0, 2, 2, 1).retrieve();
 
-        // Case 2
-        let inp2 = cx.tensor::<R3<1, 4, 4>>();
-        inp2.set(vec![
-            12., 20., 30., 0., 8., 12., 2., 0., 34., 70., 37., 4., 112., 100., 25., 12.,
-        ]);
+        // Stride 3
+        let out3 = inp1.pool_1d::<R2<1, 2>>(0, 2, 3, 1).retrieve();
 
-        let out2 = inp2
-            .pool::<R5<1, 2, 2, 2, 2>>(&[2, 2])
-            .max_reduce::<_, LAxes2<2, 4>>();
-        out2.retrieve();
-
-        // Run all the computations
         cx.execute();
 
-        // Run all the assertions
-        assert_close(
-            &out1.data(),
-            &[87., 48., 54., 99., 94., 85., 98., 96., 82., 70.],
-        );
-        assert_close(&out2.data(), &[20., 30., 112., 37.]);
+        assert_exact(&out1.data(), &[1., 3., 2., 4., 3., 5.]);
+        assert_exact(&out2.data(), &[1., 3., 3., 5.]);
+        assert_exact(&out3.data(), &[1., 3.]);
     }
 
     #[test]
