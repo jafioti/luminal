@@ -2,7 +2,7 @@ use itertools::Itertools;
 
 use crate::{
     op::{self},
-    prelude::*,
+    prelude::{symbolic::Expression, *},
 };
 
 impl<S: Shape> GraphTensor<S> {
@@ -72,7 +72,17 @@ impl<S: Shape> GraphTensor<S> {
                 .graph()
                 .add_op(op::Mul)
                 .input(node_id, 0, shape)
-                .input(mul_tensor, 0, ShapeTracker::fake(&shape.shape()))
+                .input(
+                    mul_tensor,
+                    0,
+                    ShapeTracker::fake(
+                        &shape
+                            .shape()
+                            .into_iter()
+                            .map(Expression::from)
+                            .collect::<Vec<_>>(),
+                    ),
+                )
                 .finish();
         }
         GraphTensor::from_id(node_id, shape, self.graph_ref)

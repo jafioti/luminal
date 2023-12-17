@@ -3,7 +3,7 @@
 use std::{any::Any, collections::HashMap, fmt::Debug};
 
 use crate::{
-    prelude::{symbolic::Expression, tracker::ShapeTracker, TraitObjEq},
+    prelude::{tracker::ShapeTracker, TraitObjEq},
     tensor::Tensor,
 };
 
@@ -453,14 +453,14 @@ impl Operator for SumReduce {
             .shape()
             .iter()
             .take(self.0)
-            .filter_map(Expression::to_usize)
+            .filter_map(BigExpression::to_usize)
             .product();
         let back_size: usize = inp[0]
             .1
             .shape()
             .iter()
             .skip(self.0 + 1)
-            .filter_map(Expression::to_usize)
+            .filter_map(BigExpression::to_usize)
             .product();
         let dim_size = match inp[0].1.shape()[self.0].to_usize() {
             Some(n) => n,
@@ -503,14 +503,14 @@ impl Operator for MaxReduce {
             .shape()
             .iter()
             .take(self.0)
-            .filter_map(Expression::to_usize)
+            .filter_map(BigExpression::to_usize)
             .product();
         let back_size: usize = inp[0]
             .1
             .shape()
             .iter()
             .skip(self.0 + 1)
-            .filter_map(Expression::to_usize)
+            .filter_map(BigExpression::to_usize)
             .product();
         let dim_size = match inp[0].1.shape()[self.0].to_usize() {
             Some(n) => n,

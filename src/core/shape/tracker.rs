@@ -96,6 +96,7 @@ impl ShapeTracker {
     }
 
     pub fn index_expression(&self) -> BigExpression {
+        // Create strides in original order
         let mut strides = self
             .dims
             .iter()
@@ -113,6 +114,7 @@ impl ShapeTracker {
         let mut ret = BigExpression::from(0);
         let mut acc = BigExpression::from(1);
         let logical = BigExpression::from('z');
+        // Loop through all dims in current order
         for (sh, stride, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
             (
                 self.dims[i],
@@ -126,7 +128,11 @@ impl ShapeTracker {
                 (BigExpression::from(sh) + padding.0 + padding.1).min(slice.1) - slice.0;
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
-                ret = ret + (dim_ind - padding.0 + (slice.0 - padding.0.min(slice.0))) * stride;
+                ret = ret
+                    + (dim_ind - padding.0
+                        + (BigExpression::from(slice.0)
+                            - BigExpression::from(padding.0).min(slice.0)))
+                        * stride;
             }
             acc = acc.clone() * logical_sh.clone();
         }
@@ -148,8 +154,12 @@ impl ShapeTracker {
                 (BigExpression::from(sh) + padding.0 + padding.1).min(slice.1) - slice.0;
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
-                ret = ret & dim_ind.clone().gte(padding.0 - slice.0.min(padding.0));
-                ret = ret & dim_ind.lt((sh + padding.0).min(slice.1));
+                ret = ret
+                    & dim_ind.clone().gte(
+                        BigExpression::from(padding.0)
+                            - BigExpression::from(slice.0).min(padding.0),
+                    );
+                ret = ret & dim_ind.lt((BigExpression::from(sh) + padding.0).min(slice.1));
             }
             acc = acc * logical_sh;
         }
@@ -225,8 +235,15 @@ impl ShapeTracker {
     }
 
     /// Realize the true shape
-    pub fn shape(&self) -> Vec<Expression> {
-        self.indexes.into_iter().map(|i| self.dims[i]).collect()
+    pub fn shape(&self) -> Vec<BigExpression> {
+        self.indexes
+            .into_iter()
+            .map(|i| {
+                (BigExpression::from(self.dims[i]) + self.padding[i].0 + self.padding[i].1)
+                    .min(self.slices[i].1)
+                    - self.slices[i].0
+            })
+            .collect()
     }
 
     /// Take a slice

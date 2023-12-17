@@ -524,7 +524,7 @@ fn test_node(
                                 return false;
                             }
                         } else {
-                            shape_map.insert(c, *b);
+                            shape_map.insert(c, b.clone());
                         }
                     }
                 }

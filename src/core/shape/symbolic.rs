@@ -435,6 +435,14 @@ impl From<Expression> for BigExpression {
     }
 }
 
+impl From<BigExpression> for Expression {
+    fn from(value: BigExpression) -> Self {
+        let mut terms = ArrayVec::new();
+        terms.extend(value.terms);
+        Self { terms }
+    }
+}
+
 impl<S: ExpressionStorage, E: Into<Self>> Add<E> for GenericExpression<S> {
     type Output = Self;
     fn add(self, rhs: E) -> Self::Output {

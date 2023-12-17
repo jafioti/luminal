@@ -1,6 +1,9 @@
 use crate::{
     op,
-    prelude::{symbolic::Expression, *},
+    prelude::{
+        symbolic::{BigExpression, Expression},
+        *,
+    },
 };
 
 impl<S: Shape> GraphTensor<S> {
@@ -95,6 +98,27 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
+    pub fn pool_1d<Dst: Shape>(
+        mut self,
+        dim: usize,
+        kernel: usize,
+        stride: usize,
+    ) -> GraphTensor<Dst> {
+        let dim_size = self.shape.dims[self.shape.indexes[dim]];
+        let number_of_windows = ((dim_size - kernel) / stride) + 1;
+        // Expand new dimension
+        self.shape.expand(dim, number_of_windows + 1);
+        self = self.contiguous();
+        // Width + stride trick
+        self.shape.dims[self.shape.indexes[dim + 1]] =
+            self.shape.dims[self.shape.indexes[dim + 1]] + stride;
+        // Slice down to kernel size
+        self.shape.slices[self.shape.indexes[dim + 1]].1 = kernel.into();
+        self.shape.slices[self.shape.indexes[dim]].1 = number_of_windows;
+
+        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
+    }
+
     // For now we assume kernel size = stride
     pub fn pool<Dst: Shape>(self, kernel_size: &[usize]) -> GraphTensor<Dst> {
         let current_shape = self.shape.shape();
@@ -105,22 +129,21 @@ impl<S: Shape> GraphTensor<S> {
 
         let mut new_shape = current_shape.clone();
 
-        let kernel_sizes: Vec<Expression> =
-            kernel_size.iter().map(|&k| Expression::from(k)).collect();
+        let kernel_sizes = kernel_size.iter().map(Expression::from).collect::<Vec<_>>();
 
-        let strides: Vec<Expression> = stride.iter().map(|&k| Expression::from(k)).collect();
+        let strides = stride.iter().map(BigExpression::from).collect::<Vec<_>>();
 
         for i in 0..kernel_sizes.len() {
             let dim = current_dims - kernel_sizes.len() + i;
-            new_shape[dim] = (new_shape[dim] - kernel_sizes[i]) / strides[i] + 1;
+            new_shape[dim] = (new_shape[dim].clone() - kernel_sizes[i]) / strides[i].clone() + 1;
         }
 
         for i in 0..kernel_sizes.len() {
             let insert_index = current_dims - 1 + (i * 2);
-            new_shape.insert(insert_index, strides[i]);
+            new_shape.insert(insert_index, strides[i].clone());
         }
 
-        return self.dyn_reshape(new_shape);
+        self.dyn_reshape(new_shape.into_iter().map(Expression::from).collect())
     }
 
     pub fn pad<Dst: Shape, Start: Into<Expression> + Copy, End: Into<Expression> + Copy>(
@@ -142,9 +165,9 @@ impl<S: Shape> GraphTensor<S> {
     ) -> GraphTensor<Dst> {
         let dim = Ax::as_array()[0] as usize;
         let mut a_padding = self.shape.padding;
-        a_padding[dim].1 = rhs.shape.shape()[dim];
+        a_padding[dim].1 = rhs.shape.shape()[dim].clone().into();
         let mut b_padding = rhs.shape.padding;
-        b_padding[dim].0 = self.shape.shape()[dim];
+        b_padding[dim].0 = self.shape.shape()[dim].clone().into();
         let lhs = self.pad(&a_padding);
         lhs + rhs.pad(&b_padding)
     }
@@ -278,6 +301,28 @@ mod tests {
         let d_b = d_a.slice((.., ..1)).realize::<Rank2<3, 1>>();
 
         assert_close(&b.data(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_pool_1d() {
+        let mut cx = Graph::new();
+
+        // Stride 1
+        let inp1 = cx.tensor::<R1<5>>().set(vec![1., 2., 3., 4., 5.]);
+        let out1 = inp1.pool_1d::<R2<3, 3>>(0, 3, 1).retrieve();
+
+        // Stride 2
+        let out2 = inp1.pool_1d::<R2<2, 3>>(0, 3, 2).retrieve();
+
+        // Stride 3
+        let out3 = inp1.pool_1d::<R2<1, 3>>(0, 3, 3).retrieve();
+
+        // Run all the computations
+        cx.execute();
+
+        assert_exact(&out1.data(), &[1., 2., 3., 2., 3., 4., 3., 4., 5.]);
+        assert_exact(&out2.data(), &[1., 2., 3., 3., 4., 5.]);
+        assert_exact(&out3.data(), &[1., 2., 3.]);
     }
 
     #[test]

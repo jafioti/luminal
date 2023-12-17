@@ -779,8 +779,10 @@ impl Compiler for MetalMatMulCompiler {
 
             // Slice back to original size
             if padded {
-                let mut new_shape =
-                    ShapeTracker::new(&[src1_shape.shape()[0], src2_shape.shape()[1]]);
+                let mut new_shape = ShapeTracker::new(&[
+                    src1_shape.shape()[0].clone().into(),
+                    src2_shape.shape()[1].clone().into(),
+                ]);
                 new_shape.slice(&[(0.into(), i32::MAX.into()), (0.into(), n_dim)]);
                 matmul_op = graph
                     .add_op(MetalContiguous::<f16>::new(
@@ -849,9 +851,9 @@ impl Compiler for MetalMatMulCompiler {
             src2_shape.remove_dim(0);
             src2_shape.permute(&[1, 0]);
             // Pad out N to multiple of 256 and K to 16
-            let n_dim = src2_shape.shape()[1];
-            let k_dim = src1_shape.shape()[2];
-            let m_dim = src1_shape.shape()[1];
+            let n_dim = Expression::from(src2_shape.shape()[1].clone());
+            let k_dim = Expression::from(src1_shape.shape()[2].clone());
+            let m_dim = Expression::from(src1_shape.shape()[1].clone());
             let mut padded = false;
             let k_padding = if k_dim.to_usize().map(|i| i % 16 != 0).unwrap_or(true) {
                 (k_dim + 15) / 16 * 16 - k_dim
@@ -912,9 +914,9 @@ impl Compiler for MetalMatMulCompiler {
             // Slice back to original size
             if padded {
                 let mut new_shape = ShapeTracker::new(&[
-                    src1_shape.shape()[0],
-                    src1_shape.shape()[1],
-                    src2_shape.shape()[1],
+                    Expression::from(src1_shape.shape()[0].clone()),
+                    Expression::from(src1_shape.shape()[1].clone()),
+                    Expression::from(src2_shape.shape()[1].clone()),
                 ]);
                 new_shape.slice(&[
                     (0.into(), i32::MAX.into()),

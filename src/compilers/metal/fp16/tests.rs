@@ -707,10 +707,10 @@ fn test_relu_and_linear() {
 #[test]
 fn test_rms_norm() {
     // Test single and batch, unoptimized and optimized
-    let inp_data = random_vec(3 * 4);
+    let inp_data = random_vec(15 * 4);
     let weight_data = random_vec(4);
     let mut cx = Graph::new();
-    let a = cx.tensor::<R2<3, 4>>();
+    let a = cx.tensor::<R2<15, 4>>();
 
     let model = RMSNorm::<4>::initialize(&mut cx);
     model.weight.set(weight_data.clone());
@@ -727,7 +727,7 @@ fn test_rms_norm() {
         .tensor_from_vec(weight_data, (DConst::<4>,))
         .to_dtype::<f16>();
     let a = dev
-        .tensor_from_vec(inp_data, (DConst::<3>, DConst::<4>))
+        .tensor_from_vec(inp_data, (DConst::<15>, DConst::<4>))
         .to_dtype::<f16>()
         .to_dtype::<f32>();
     let var_f32 = a.clone().square().mean::<_, DAxis<1>>();

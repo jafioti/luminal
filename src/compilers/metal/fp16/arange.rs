@@ -136,7 +136,7 @@ impl Compiler for ARangeCompiler {
                 .add_op(MetalARange::new(
                     dev.clone(),
                     queue.clone(),
-                    src.shape()[2].into(),
+                    src.shape()[2].clone(),
                     &graph.dyn_map,
                 ))
                 .finish();

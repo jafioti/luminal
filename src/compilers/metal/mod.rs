@@ -21,7 +21,7 @@ use metal_rs::*;
 use crate::{
     op::InputTensor,
     prelude::{
-        symbolic::{BigExpression, Term},
+        symbolic::{BigExpression, Expression, Term},
         *,
     },
 };
@@ -190,8 +190,12 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> String {
         .flat_map(|st| {
             st.shape()
                 .into_iter()
-                .chain(st.padding.into_iter().flat_map(|i| [i.0, i.1]))
-                .chain(st.slices.into_iter().flat_map(|i| [i.0, i.1]))
+                .chain(
+                    st.padding
+                        .into_iter()
+                        .flat_map(|i| [i.0.into(), i.1.into()]),
+                )
+                .chain(st.slices.into_iter().flat_map(|i| [i.0.into(), i.1.into()]))
         })
         .flat_map(|d| d.to_symbols())
         .unique()
