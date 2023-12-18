@@ -122,6 +122,7 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
+    /// Pool elements along a dimension, pools are exposed as a new dimension
     pub fn pool_1d<Dst: Shape>(
         mut self,
         dim: usize,
@@ -129,20 +130,36 @@ impl<S: Shape> GraphTensor<S> {
         stride: usize,
         dilation: usize,
     ) -> GraphTensor<Dst> {
+        let n_dims = self.shape.len();
         let full_kernel = kernel + dilation;
         let dim_size = self.shape.dims[self.shape.indexes[dim]];
         let number_of_windows = ((dim_size - full_kernel) / stride) + 1;
         // Expand new dimension
-        self.shape.expand(dim, number_of_windows + 1);
+        self.shape.expand(dim, number_of_windows);
+
+        let orig_width = self.shape.dims[self.shape.indexes[dim + 1]];
+
         self = self.contiguous();
-        // Width + stride trick
-        self.shape.dims[self.shape.indexes[dim + 1]] =
-            self.shape.dims[self.shape.indexes[dim + 1]] + stride;
+        // View as single dimension of matrix with wider width
+        let mat_size = (orig_width + stride) * number_of_windows;
+        let actual_size = orig_width * self.shape.dims[self.shape.indexes[dim]];
+        // Reshape into single dimension to pad
+        self.shape.remove_dim(dim + 1);
+        self.shape.dims[self.shape.indexes[dim]] = actual_size;
+        self.shape.padding[self.shape.indexes[dim]].1 = mat_size - actual_size;
+        self = self.contiguous();
+        // Reshape back (mats should be full now)
+        self.shape.add_dim(dim + 1, orig_width + stride);
+        self.shape.dims[self.shape.indexes[dim]] = number_of_windows;
         // Slice down to kernel size
         self.shape.slices[self.shape.indexes[dim + 1]].1 = full_kernel.into();
         self.shape.slices[self.shape.indexes[dim]].1 = number_of_windows;
+        self = self.contiguous();
 
         if dilation > 0 {
+            if dim != n_dims - 1 {
+                panic!("Dilation isn't supported on pooling non-last dimensions");
+            }
             // Remove dilations
             self = self.contiguous();
             self.excise(1, dilation)
@@ -315,10 +332,8 @@ mod tests {
         let inp1 = cx.tensor::<R1<5>>().set(vec![1., 2., 3., 4., 5.]);
         // Stride 1
         let out1 = inp1.pool_1d::<R2<3, 3>>(0, 3, 1, 0).retrieve();
-
         // Stride 2
         let out2 = inp1.pool_1d::<R2<2, 3>>(0, 3, 2, 0).retrieve();
-
         // Stride 3
         let out3 = inp1.pool_1d::<R2<1, 3>>(0, 3, 3, 0).retrieve();
 
@@ -330,16 +345,35 @@ mod tests {
     }
 
     #[test]
+    fn test_pool_1d_dims() {
+        let mut cx = Graph::new();
+
+        let inp1 = cx.tensor::<R2<4, 4>>().set(vec![
+            1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
+        ]);
+        // Stride 1
+        let out1 = inp1.pool_1d::<R2<3, 3>>(1, 3, 1, 0).retrieve();
+
+        cx.execute();
+
+        assert_exact(
+            &out1.data(),
+            &[
+                1., 2., 3., 2., 3., 4., 5., 6., 7., 6., 7., 8., 9., 10., 11., 10., 11., 12., 13.,
+                14., 15., 14., 15., 16.,
+            ],
+        );
+    }
+
+    #[test]
     fn test_pool_1d_dilation() {
         let mut cx = Graph::new();
 
         let inp1 = cx.tensor::<R1<5>>().set(vec![1., 2., 3., 4., 5.]);
         // Stride 1
         let out1 = inp1.pool_1d::<R2<3, 2>>(0, 2, 1, 1).retrieve();
-
         // Stride 2
         let out2 = inp1.pool_1d::<R2<2, 2>>(0, 2, 2, 1).retrieve();
-
         // Stride 3
         let out3 = inp1.pool_1d::<R2<1, 2>>(0, 2, 3, 1).retrieve();
 

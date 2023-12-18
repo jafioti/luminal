@@ -42,12 +42,18 @@ impl ShapeTracker {
     }
 
     /// Add dim along a certian axis
-    pub fn expand(&mut self, axis: usize, dim: Expression) {
+    pub fn add_dim(&mut self, axis: usize, dim: Expression) {
         self.indexes.insert(axis, self.dims.len());
         self.dims.push(dim);
-        self.fake.push(true);
+        self.fake.push(false);
         self.slices.push((0.into(), i32::MAX.into()));
         self.padding.push((0.into(), 0.into()));
+    }
+
+    /// Add fake dim along a certian axis
+    pub fn expand(&mut self, axis: usize, dim: Expression) {
+        self.add_dim(axis, dim);
+        self.fake[self.indexes[axis]] = true;
     }
 
     /// Remove a dimension
