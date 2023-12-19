@@ -241,7 +241,7 @@ impl<S: Shape> Debug for GraphTensor<S> {
             .shape
             .shape()
             .iter()
-            .map(|expr| expr.to_usize().unwrap())
+            .map(|expr| expr.exec(&self.graph().dyn_map).unwrap())
             .collect::<Vec<_>>();
 
         // Print the shape
