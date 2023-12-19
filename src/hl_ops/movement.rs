@@ -125,8 +125,8 @@ impl<S: Shape> GraphTensor<S> {
     /// Pool elements along the last dimension, pools are exposed as a new dimension
     pub fn pool_last_dim<Dst: Shape>(
         mut self,
-        kernel: usize,
-        stride: usize,
+        kernel: Expression,
+        stride: Expression,
         dilation: usize,
     ) -> GraphTensor<Dst> {
         let n_dims = self.shape.len();
@@ -151,7 +151,7 @@ impl<S: Shape> GraphTensor<S> {
         self.shape.add_dim(n_dims, orig_width + stride);
         self.shape.dims[self.shape.indexes[n_dims - 1]] = number_of_windows;
         // Slice down to kernel size
-        self.shape.slices[self.shape.indexes[n_dims]].1 = full_kernel.into();
+        self.shape.slices[self.shape.indexes[n_dims]].1 = full_kernel;
         self.shape.slices[self.shape.indexes[n_dims - 1]].1 = number_of_windows;
         self = self.contiguous();
 
@@ -162,6 +162,28 @@ impl<S: Shape> GraphTensor<S> {
         } else {
             GraphTensor::from_id(self.id, self.shape, self.graph_ref)
         }
+    }
+
+    /// Cumulative sum last dimension
+    pub fn cumsum_last_dim(mut self) -> Self {
+        let axis = self.shape.len() - 1;
+        if !self.shape.is_contiguous() {
+            self = self.contiguous();
+        }
+        // Pad out length
+        let orig_length = self.shape.dims[self.shape.indexes[axis]];
+        self.shape.padding[self.shape.indexes[axis]].0 = orig_length - 1;
+        self = self.contiguous();
+        // Pool
+        let mut pooled: GraphTensor<()> = self.pool_last_dim::<()>(orig_length, 1.into(), 0);
+        // Sum Reduce along new dimension
+        let final_id = self
+            .graph()
+            .add_op(op::SumReduce(axis))
+            .input(pooled.id, 0, pooled.shape)
+            .finish();
+        pooled.shape.remove_dim(axis + 1);
+        GraphTensor::from_id(final_id, pooled.shape, self.graph_ref)
     }
 
     pub fn pad<Dst: Shape, Start: Into<Expression> + Copy, End: Into<Expression> + Copy>(
@@ -322,16 +344,39 @@ mod tests {
     }
 
     #[test]
+    fn test_cumsum() {
+        let mut cx = Graph::new();
+        let a = cx.constant(1.).expand::<R1<3>, _>();
+        let b = a.cumsum_last_dim().retrieve();
+        let c = a
+            .expand::<R2<3, 3>, LAxis<1>>()
+            .permute::<_, LAxes2<1, 0>>()
+            .cumsum_last_dim()
+            .permute::<_, LAxes2<1, 0>>()
+            .retrieve();
+        cx.execute();
+
+        assert_exact(&b.data(), &[1., 2., 3.]);
+        assert_exact(&c.data(), &[1., 1., 1., 2., 2., 2., 3., 3., 3.]);
+    }
+
+    #[test]
     fn test_pool_1d() {
         let mut cx = Graph::new();
 
         let inp1 = cx.tensor::<R1<5>>().set(vec![1., 2., 3., 4., 5.]);
         // Stride 1
-        let out1 = inp1.pool_last_dim::<R2<3, 3>>(3, 1, 0).retrieve();
+        let out1 = inp1
+            .pool_last_dim::<R2<3, 3>>(3.into(), 1.into(), 0)
+            .retrieve();
         // Stride 2
-        let out2 = inp1.pool_last_dim::<R2<2, 3>>(3, 2, 0).retrieve();
+        let out2 = inp1
+            .pool_last_dim::<R2<2, 3>>(3.into(), 2.into(), 0)
+            .retrieve();
         // Stride 3
-        let out3 = inp1.pool_last_dim::<R2<1, 3>>(3, 3, 0).retrieve();
+        let out3 = inp1
+            .pool_last_dim::<R2<1, 3>>(3.into(), 3.into(), 0)
+            .retrieve();
 
         cx.execute();
 
@@ -348,7 +393,9 @@ mod tests {
             1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
         ]);
         // Stride 1
-        let out1 = inp1.pool_last_dim::<R3<4, 2, 3>>(3, 1, 0).retrieve();
+        let out1 = inp1
+            .pool_last_dim::<R3<4, 2, 3>>(3.into(), 1.into(), 0)
+            .retrieve();
 
         cx.execute();
 
@@ -372,10 +419,10 @@ mod tests {
         let out1 = inp1
             // Pool first dim first by moving it to end
             .permute::<_, LAxes2<1, 0>>()
-            .pool_last_dim::<R3<4, 2, 3>>(3, 1, 0)
+            .pool_last_dim::<R3<4, 2, 3>>(3.into(), 1.into(), 0)
             // Now move other dim to end
             .permute::<_, LAxes3<1, 2, 0>>()
-            .pool_last_dim::<R4<2, 3, 2, 3>>(3, 1, 0)
+            .pool_last_dim::<R4<2, 3, 2, 3>>(3.into(), 1.into(), 0)
             // Now swap middle two dims
             .permute::<_, LAxes4<0, 2, 1, 3>>()
             // Now merge both pooled dimensions
@@ -400,11 +447,17 @@ mod tests {
 
         let inp1 = cx.tensor::<R1<5>>().set(vec![1., 2., 3., 4., 5.]);
         // Stride 1
-        let out1 = inp1.pool_last_dim::<R2<3, 2>>(2, 1, 1).retrieve();
+        let out1 = inp1
+            .pool_last_dim::<R2<3, 2>>(2.into(), 1.into(), 1)
+            .retrieve();
         // Stride 2
-        let out2 = inp1.pool_last_dim::<R2<2, 2>>(2, 2, 1).retrieve();
+        let out2 = inp1
+            .pool_last_dim::<R2<2, 2>>(2.into(), 2.into(), 1)
+            .retrieve();
         // Stride 3
-        let out3 = inp1.pool_last_dim::<R2<1, 2>>(2, 3, 1).retrieve();
+        let out3 = inp1
+            .pool_last_dim::<R2<1, 2>>(2.into(), 3.into(), 1)
+            .retrieve();
 
         cx.execute();
 

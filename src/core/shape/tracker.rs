@@ -237,7 +237,7 @@ impl ShapeTracker {
 
     /// Check if contiguous
     pub fn is_contiguous(&self) -> bool {
-        self.indexes.iter().enumerate().all(|(a, b)| a == *b)
+        self.indexes.iter().enumerate().all(|(a, b)| a == *b) && self.fake.iter().all(|i| !*i)
     }
 
     /// Realize the true shape
