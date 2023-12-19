@@ -124,8 +124,19 @@ pub enum ConstantValue {
 }
 
 /// Produces a single number constant from an expression or a float
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Constant(pub ConstantValue, pub *const HashMap<char, usize>);
+impl Debug for Constant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Constant(",)?;
+        match &self.0 {
+            ConstantValue::Expression(e) => e.fmt(f)?,
+            ConstantValue::Float(fl) => fl.fmt(f)?,
+        }
+        write!(f, ")")
+    }
+}
+
 impl Operator for Constant {
     fn process(&self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         vec![Tensor {
