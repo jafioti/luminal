@@ -31,19 +31,23 @@ impl Graph {
     }
 
     /// Lower left-hand triangle of 1s
-    pub fn tril<H: Dimension, W: Dimension>(&mut self, offset: i32) -> GraphTensor<(H, W)> {
+    ///
+    /// Same API as https://pytorch.org/docs/stable/generated/torch.tril
+    pub fn tril<H: Dimension, W: Dimension>(&mut self, diagonal: i32) -> GraphTensor<(H, W)> {
         let horizontal = self.arange::<W>().expand::<(H, W), _>();
         let vertical = self.arange::<H>().expand::<(H, W), _>();
 
-        (horizontal + self.constant(-(offset as f32 + 1.)).expand()).less_than(vertical)
+        (horizontal + self.constant(-(diagonal as f32 + 1.)).expand()).less_than(vertical)
     }
 
-    /// Lower left-hand triangle of 1s
-    pub fn triu<H: Dimension, W: Dimension>(&mut self, offset: i32) -> GraphTensor<(H, W)> {
+    /// Upper right-hand triangle of 1s
+    ///
+    /// Same API as https://pytorch.org/docs/stable/generated/torch.triu
+    pub fn triu<H: Dimension, W: Dimension>(&mut self, diagonal: i32) -> GraphTensor<(H, W)> {
         let horizontal = self.arange::<W>().expand::<(H, W), _>();
         let vertical = self.arange::<H>().expand::<(H, W), _>();
 
-        (horizontal + self.constant(-(offset as f32 - 1.)).expand()).greater_than(vertical)
+        (horizontal + self.constant(-(diagonal as f32 - 1.)).expand()).greater_than(vertical)
     }
 }
 
