@@ -13,8 +13,6 @@ pub struct Conv1D<
     const KERNEL: usize,
     const STRIDE: usize,
     const DILATION: usize,
-    const DIM_OUT: usize,
-    const POOL_OUT: usize,
 > {
     pub weight: GraphTensor<R3<CHANNELS_IN, CHANNELS_OUT, KERNEL>>,
 }
@@ -25,10 +23,7 @@ impl<
         const KERNEL: usize,
         const STRIDE: usize,
         const DILATION: usize,
-        const DIM_OUT: usize,
-        const POOL_OUT: usize,
-    > InitModule
-    for Conv1D<CHANNELS_IN, CHANNELS_OUT, KERNEL, STRIDE, DILATION, DIM_OUT, POOL_OUT>
+    > InitModule for Conv1D<CHANNELS_IN, CHANNELS_OUT, KERNEL, STRIDE, DILATION>
 {
     fn initialize(cx: &mut Graph) -> Self {
         let conv = Self {
@@ -52,10 +47,7 @@ impl<
         const KERNEL: usize,
         const STRIDE: usize,
         const DILATION: usize,
-        const DIM_OUT: usize,
-        const POOL_OUT: usize,
-    > SerializeModule
-    for Conv1D<CHANNELS_IN, CHANNELS_OUT, KERNEL, STRIDE, DILATION, DIM_OUT, POOL_OUT>
+    > SerializeModule for Conv1D<CHANNELS_IN, CHANNELS_OUT, KERNEL, STRIDE, DILATION>
 {
     fn serialize(&self, s: &mut crate::serialization::Serializer) {
         s.tensor("weight", self.weight);
@@ -69,15 +61,12 @@ impl<
         const KERNEL: usize,
         const STRIDE: usize,
         const DILATION: usize,
-        const DIM_IN: usize,
-        const DIM_OUT: usize,
-        const POOL_OUT: usize,
-    > Module<GraphTensor<R2<CHANNELS_IN, DIM_IN>>>
-    for Conv1D<CHANNELS_IN, CHANNELS_OUT, KERNEL, STRIDE, DILATION, DIM_OUT, POOL_OUT>
+    > Conv1D<CHANNELS_IN, CHANNELS_OUT, KERNEL, STRIDE, DILATION>
 {
-    type Output = GraphTensor<R2<CHANNELS_OUT, DIM_OUT>>;
-
-    fn forward(&self, input: GraphTensor<R2<CHANNELS_IN, DIM_IN>>) -> Self::Output {
+    fn forward<const DIM_IN: usize, const DIM_OUT: usize, const POOL_OUT: usize>(
+        &self,
+        input: GraphTensor<R2<CHANNELS_IN, DIM_IN>>,
+    ) -> GraphTensor<R2<CHANNELS_OUT, DIM_OUT>> {
         input
             .pool_last_dim::<R3<CHANNELS_IN, POOL_OUT, KERNEL>>(
                 KERNEL.into(),
@@ -113,14 +102,14 @@ mod tests {
         const DIM_OUT: usize = 3;
         const POOL_OUT: usize = DIM_IN / STRIDE;
 
-        let model: Conv1D<CHANNELS_IN, CHANNELS_OUT, KERNEL, KERNEL, DILATION, DIM_OUT, POOL_OUT> =
+        let model: Conv1D<CHANNELS_IN, CHANNELS_OUT, KERNEL, KERNEL, DILATION> =
             Conv1D::initialize(&mut cx);
         model.weight.set(vec![0.0316, -0.2057]);
 
         let inp1 = cx.tensor::<R2<1, 6>>();
         inp1.set(vec![3., 0., 9., 6., 0., 6.]);
 
-        let out1 = model.forward(inp1).retrieve();
+        let out1 = model.forward::<DIM_IN, DIM_OUT, POOL_OUT>(inp1).retrieve();
         cx.execute();
 
         assert_close(&out1.data(), &[0.0948, -0.9498, -1.2342]);
