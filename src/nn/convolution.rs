@@ -10,7 +10,7 @@ pub struct Conv1D<
     const DILATION: usize,
     const CHANNELS_IN_TIMES_KERNEL: usize,
 > {
-    pub weight: GraphTensor<R3<CHANNELS_IN, CHANNELS_OUT, KERNEL>>,
+    pub weight: GraphTensor<R2<CHANNELS_OUT, CHANNELS_IN_TIMES_KERNEL>>,
 }
 
 impl<
@@ -68,20 +68,18 @@ impl<
         &self,
         input: GraphTensor<R2<CHANNELS_IN, DIM_IN>>,
     ) -> GraphTensor<R2<CHANNELS_OUT, DIM_OUT>> {
-        input
-            .pool_last_dim::<R3<CHANNELS_IN, DIM_OUT, KERNEL>>(
-                KERNEL.into(),
-                STRIDE.into(),
-                DILATION,
-            )
-            .permute::<_, Axes3<1, 0, 2>>()
-            .reshape::<R2<DIM_OUT, CHANNELS_IN_TIMES_KERNEL>>()
+        self.weight
+            // .reshape::<R2<CHANNELS_OUT, CHANNELS_IN_TIMES_KERNEL>>()
             .matmul(
-                self.weight
-                    .permute::<_, Axes3<2, 1, 0>>()
-                    .reshape::<R2<CHANNELS_IN_TIMES_KERNEL, CHANNELS_OUT>>(),
+                input
+                    .pool_last_dim::<R3<CHANNELS_IN, DIM_OUT, KERNEL>>(
+                        KERNEL.into(),
+                        STRIDE.into(),
+                        DILATION,
+                    )
+                    .permute::<_, Axes3<0, 2, 1>>()
+                    .reshape::<R2<CHANNELS_IN_TIMES_KERNEL, DIM_OUT>>(),
             )
-            .permute::<_, Axes2<1, 0>>()
     }
 }
 
@@ -152,7 +150,7 @@ mod tests {
             0.2000, -0.2300, -0.1600, 0.2200, 0.0900, 0.0700, -0.1000, -0.0400, -0.0500, 0.1400,
             0.0700, -0.1200, 0.1400, 0.2200,
         ]);
-        let weight = model.weight.permute::<_, Axes3<1, 0, 2>>().retrieve();
+        // let weight = model.weight.permute::<_, Axes3<1, 0, 2>>().retrieve();
 
         let inp1 = cx.tensor::<R2<CHANNELS_IN, DIM_IN>>();
         inp1.set(vec![
@@ -165,26 +163,14 @@ mod tests {
         inp1.retrieve();
 
         let out1 = model.forward::<DIM_IN, DIM_OUT>(inp1).retrieve();
-        let exp_out1 = cx.tensor::<R2<CHANNELS_OUT, DIM_OUT>>();
-        exp_out1.set(vec![
-            0.7600, -0.4700, 0.0100, -0.1600, -0.1800, 2.2300, 1.7200, 0.6900, 3.5100, 3.7700,
-            3.4600, 3.8100, -1.2600, -1.3900, 0.9400, 0.5300, 0.6300, -0.0400, 0.3800, -1.4900,
-            -0.8800, -0.3100, 1.7500, -2.7500,
-        ]);
-        exp_out1.retrieve();
         cx.execute();
-
-        // println!("{:?}", weight);
-        // println!("{:?}", inp1);
-        println!("Expected: {:?}", exp_out1);
-        println!("Actual: {:?}", out1);
 
         assert_close(
             &out1.data(),
             &[
-                -0.2061, -1.3519, -2.4679, 0.6841, -1.4186, -2.2877, -0.1398, -0.8774, 2.7790,
-                0.2744, 0.6171, 2.3570, -0.5874, 0.4322, 0.3313, -1.1620, 1.9789, 1.0397, 1.1491,
-                -2.4564, 3.7550, 1.8571, 3.2417, 4.4339,
+                0.7600, -0.4700, 0.0100, -0.1600, -0.1800, 2.2300, 1.7200, 0.6900, 3.5100, 3.7700,
+                3.4600, 3.8100, -1.2600, -1.3900, 0.9400, 0.5300, 0.6300, -0.0400, 0.3800, -1.4900,
+                -0.8800, -0.3100, 1.7500, -2.7500,
             ],
         );
     }
