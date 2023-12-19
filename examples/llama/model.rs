@@ -4,7 +4,6 @@ use std::ops::{Add, Mul};
 use half::f16;
 use luminal::{
     nn::{embedding::Embedding, norm::RMSNorm},
-    op::Function,
     prelude::*,
     shape::symbolic::BigExpression,
 };
@@ -85,7 +84,7 @@ impl<
             BigExpression,
         ),
     ) -> Self::Output {
-        let (sin, cos) = self.get_sincos::<Batch, NUM_HEADS, Seq>(q, prev_seq);
+        let (sin, cos) = self.get_sincos::<NUM_HEADS, Seq>(prev_seq);
         let q_embed = (Self::rotate_half(q) * sin.expand()) + (q * cos.expand());
         let k_embed = (Self::rotate_half(k) * sin.expand()) + (k * cos.expand());
         (q_embed, k_embed)
@@ -95,34 +94,15 @@ impl<
 impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
     RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
 {
-    fn get_sincos<Batch: Dimension, const NUM_HEADS: usize, Seq: Dimension>(
+    fn get_sincos<const NUM_HEADS: usize, Seq: Dimension>(
         &self,
-        seq_tensor: GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
         prev_seq: BigExpression,
     ) -> (
         GraphTensor<(Seq, Const<HEAD_DIM>)>,
         GraphTensor<(Seq, Const<HEAD_DIM>)>,
     ) {
-        let op = self
-            .inv_freq
-            .graph()
-            .add_op(Function(
-                "ARange".to_string(),
-                Box::new(move |inp| {
-                    vec![Tensor {
-                        data: Box::new(
-                            (0..inp[0].1.shape()[2].to_usize().unwrap())
-                                .map(|i| i as f32)
-                                .collect::<Vec<_>>(),
-                        ),
-                    }]
-                }),
-            ))
-            .input(seq_tensor.id, 0, seq_tensor.shape)
-            .finish();
-        let t: GraphTensor<(Seq,)> =
-            GraphTensor::from_id(op, <(Seq,)>::to_tracker(), self.inv_freq.graph());
-        let t = t + self.inv_freq.graph().constant_expr(prev_seq).expand();
+        let t = self.inv_freq.graph().arange::<Seq>()
+            + self.inv_freq.graph().constant_expr(prev_seq).expand();
         let freqs = t.expand::<(Seq, Const<1>), _>().matmul(
             self.inv_freq
                 .expand::<(Const<1>, Const<HEAD_DIM_OVER_2>), _>(),
@@ -491,11 +471,12 @@ impl<
         Vec<KVCache<Batch, CurSeq, NUM_HEADS, HEAD_DIM>>,
     );
     fn forward(&self, input: GraphTensor<(Batch, CurSeq)>) -> Self::Output {
+        // let attn_mask = self.norm.weight.graph().triu::<CurSeq, CurSeq>(1) * f16::MIN.to_f32();
         let attn_mask: GraphTensor<(CurSeq, CurSeq)> = GraphTensor::from_id(
             self.norm
                 .weight
                 .graph()
-                .add_op(Function(
+                .add_op(luminal::op::Function(
                     "AttentionMask".to_string(),
                     Box::new(|inp| {
                         let seq_len = inp[0].1.shape()[1].to_usize().unwrap();
