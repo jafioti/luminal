@@ -79,7 +79,11 @@ impl<
 
     fn forward(&self, input: GraphTensor<R2<CHANNELS_IN, DIM_IN>>) -> Self::Output {
         input
-            .pool_last_dim::<R3<CHANNELS_IN, DIM_IN, KERNEL>>(KERNEL, STRIDE, DILATION)
+            .pool_last_dim::<R3<CHANNELS_IN, POOL_OUT, KERNEL>>(
+                KERNEL.into(),
+                STRIDE.into(),
+                DILATION,
+            )
             .permute::<_, Axes3<1, 0, 2>>()
             .reshape::<R2<DIM_OUT, KERNEL>>()
             .matmul(
