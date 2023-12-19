@@ -139,7 +139,7 @@ impl<S: Shape> GraphTensor<S> {
         // Expand new dimension
         self.shape.expand(n_dims - 1, number_of_windows);
 
-        let orig_width = BigExpression::from(self.shape.dims[self.shape.indexes[n_dims]]);
+        let orig_width = BigExpression::from(dim_size);
 
         self = self.contiguous();
         if n_dims > 1 {
@@ -181,6 +181,7 @@ impl<S: Shape> GraphTensor<S> {
         let orig_length = self.shape.dims[self.shape.indexes[axis]];
         self.shape.padding[self.shape.indexes[axis]].0 = orig_length - 1;
         self = self.contiguous();
+
         // Pool
         let mut pooled = self.pool_last_dim::<()>(orig_length, 1.into(), 0);
         // Sum Reduce along new dimension

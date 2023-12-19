@@ -959,9 +959,8 @@ fn test_pad_contig() {
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
 
-    let a = a.data();
-    assert_exact(&a, &b.data());
-    assert_exact(&a, &c.data());
+    assert_exact(&a.data(), &b.data());
+    assert_exact(&a.data(), &c.data());
 }
 
 #[test]

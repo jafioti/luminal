@@ -43,15 +43,15 @@ mod tests {
 
         assert_exact(&arange.data(), &[0., 1., 2., 3., 4., 5., 6., 7., 8., 9.]);
     }
-    // #[test]
-    // fn test_dyn_arange() {
-    //     let mut cx = Graph::new();
+    #[test]
+    fn test_dyn_arange() {
+        let mut cx = Graph::new();
 
-    //     let arange = cx.arange::<Dyn<'a'>>().retrieve();
-    //     cx.set_dyn_dim('a', 6);
+        let arange = cx.arange::<Dyn<'a'>>().retrieve();
+        cx.set_dyn_dim('a', 6);
 
-    //     cx.execute();
+        cx.execute();
 
-    //     assert_exact(&arange.data(), &[0., 1., 2., 3., 4., 5.]);
-    // }
+        assert_exact(&arange.data(), &[0., 1., 2., 3., 4., 5.]);
+    }
 }

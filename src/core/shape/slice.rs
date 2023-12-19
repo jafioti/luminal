@@ -21,7 +21,7 @@ fn get_end_bound<D: Into<Expression> + Copy, S: Into<Expression>>(
 }
 
 fn dim_to_size(r: Expression) -> usize {
-    r.to_usize().unwrap_or(usize::MAX)
+    r.to_usize().unwrap_or(i32::MAX as usize)
 }
 
 pub trait RangeToDim<D: Dimension> {
