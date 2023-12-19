@@ -255,8 +255,8 @@ impl ShapeTracker {
     /// Take a slice
     pub fn slice(&mut self, slices: &[(Expression, Expression)]) {
         for (i, (s, e)) in slices.iter().enumerate() {
-            self.slices[self.indexes[i]].0 = self.slices[self.indexes[i]].0.max(*s);
-            self.slices[self.indexes[i]].1 = self.slices[self.indexes[i]].1.min(*e);
+            self.slices[self.indexes[i]].0 = self.slices[self.indexes[i]].0.max(s.max(0));
+            self.slices[self.indexes[i]].1 = self.slices[self.indexes[i]].1.min(e.max(0));
         }
     }
 
@@ -272,8 +272,8 @@ impl ShapeTracker {
             {
                 panic!("Adding padding to a slice isn't supported")
             }
-            self.padding[self.indexes[i]].0 = self.padding[self.indexes[i]].0 + *s;
-            self.padding[self.indexes[i]].1 = self.padding[self.indexes[i]].1 + *e;
+            self.padding[self.indexes[i]].0 = self.padding[self.indexes[i]].0 + s.max(0);
+            self.padding[self.indexes[i]].1 = self.padding[self.indexes[i]].1 + e.max(0);
         }
     }
 
