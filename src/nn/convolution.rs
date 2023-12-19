@@ -78,25 +78,6 @@ impl<
     type Output = GraphTensor<R2<CHANNELS_OUT, DIM_OUT>>;
 
     fn forward(&self, input: GraphTensor<R2<CHANNELS_IN, DIM_IN>>) -> Self::Output {
-        // We want to compute the conv1d
-        // Input: C_in x D_in
-        // Conv filter: C_in, C_out, Kernel
-        // Output: C_out, D_out
-
-        /*
-         let out1: GraphTensor<R3<1, 3, KERNEL>> = inp1.pool_last_dim(KERNEL, KERNEL, 0);
-
-        let out2 = out1
-            .permute::<_, Axes3<1, 0, 2>>()
-            .reshape::<R2<3, KERNEL>>()
-            .matmul(
-                conv1
-                    .permute::<_, Axes3<2, 1, 0>>()
-                    .reshape::<R2<KERNEL, 1>>(),
-            )
-            .permute::<_, Axes2<1, 0>>();
-        */
-
         input
             .pool_last_dim::<R3<CHANNELS_IN, DIM_IN, KERNEL>>(KERNEL, STRIDE, DILATION)
             .permute::<_, Axes3<1, 0, 2>>()
