@@ -1,7 +1,6 @@
 use crate::prelude::*;
 use rand::{thread_rng, Rng};
 
-// Conv1D
 pub struct Conv1D<
     const CHANNELS_IN: usize,
     const CHANNELS_OUT: usize,
@@ -150,7 +149,6 @@ mod tests {
             0.2000, -0.2300, -0.1600, 0.2200, 0.0900, 0.0700, -0.1000, -0.0400, -0.0500, 0.1400,
             0.0700, -0.1200, 0.1400, 0.2200,
         ]);
-        // let weight = model.weight.permute::<_, Axes3<1, 0, 2>>().retrieve();
 
         let inp1 = cx.tensor::<R2<CHANNELS_IN, DIM_IN>>();
         inp1.set(vec![
