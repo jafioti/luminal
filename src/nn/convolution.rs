@@ -67,18 +67,16 @@ impl<
         &self,
         input: GraphTensor<R2<CHANNELS_IN, DIM_IN>>,
     ) -> GraphTensor<R2<CHANNELS_OUT, DIM_OUT>> {
-        self.weight
-            // .reshape::<R2<CHANNELS_OUT, CHANNELS_IN_TIMES_KERNEL>>()
-            .matmul(
-                input
-                    .pool_last_dim::<R3<CHANNELS_IN, DIM_OUT, KERNEL>>(
-                        KERNEL.into(),
-                        STRIDE.into(),
-                        DILATION,
-                    )
-                    .permute::<_, Axes3<0, 2, 1>>()
-                    .reshape::<R2<CHANNELS_IN_TIMES_KERNEL, DIM_OUT>>(),
-            )
+        self.weight.matmul(
+            input
+                .pool_last_dim::<R3<CHANNELS_IN, DIM_OUT, KERNEL>>(
+                    KERNEL.into(),
+                    STRIDE.into(),
+                    DILATION,
+                )
+                .permute::<_, Axes3<0, 2, 1>>()
+                .reshape::<R2<CHANNELS_IN_TIMES_KERNEL, DIM_OUT>>(),
+        )
     }
 }
 
