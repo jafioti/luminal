@@ -1,6 +1,9 @@
 use crate::{
     op,
-    prelude::{symbolic::Expression, *},
+    prelude::{
+        symbolic::{BigExpression, Expression},
+        *,
+    },
 };
 
 impl<S: Shape> GraphTensor<S> {
@@ -136,19 +139,23 @@ impl<S: Shape> GraphTensor<S> {
         // Expand new dimension
         self.shape.expand(n_dims - 1, number_of_windows);
 
-        let orig_width = self.shape.dims[self.shape.indexes[n_dims]];
+        let orig_width = BigExpression::from(self.shape.dims[self.shape.indexes[n_dims]]);
 
         self = self.contiguous();
-        // View as single dimension of matrix with wider width
-        let mat_size = (orig_width + stride) * number_of_windows;
-        let actual_size = orig_width * self.shape.dims[self.shape.indexes[n_dims - 1]];
-        // Reshape into single dimension to pad
-        self.shape.remove_dim(n_dims);
-        self.shape.dims[self.shape.indexes[n_dims - 1]] = actual_size;
-        self.shape.padding[self.shape.indexes[n_dims - 1]].1 = mat_size - actual_size;
-        self = self.contiguous();
-        // Reshape back (mats should be full now)
-        self.shape.add_dim(n_dims, orig_width + stride);
+        if n_dims > 1 {
+            // View as single dimension of matrix with wider width
+            let mat_size = (orig_width.clone() + stride) * number_of_windows;
+            let actual_size = orig_width.clone() * self.shape.dims[self.shape.indexes[n_dims - 1]];
+            // Reshape into single dimension to pad
+            self.shape.remove_dim(n_dims);
+            self.shape.dims[self.shape.indexes[n_dims - 1]] = actual_size.clone().into();
+            self.shape.padding[self.shape.indexes[n_dims - 1]].1 = (mat_size - actual_size).into();
+            self = self.contiguous();
+            // Reshape back (mats should be full now)
+            self.shape.add_dim(n_dims, (orig_width + stride).into());
+        } else {
+            self.shape.dims[self.shape.indexes[n_dims]] = (orig_width + stride).into();
+        }
         self.shape.dims[self.shape.indexes[n_dims - 1]] = number_of_windows;
         // Slice down to kernel size
         self.shape.slices[self.shape.indexes[n_dims]].1 = full_kernel;
@@ -175,7 +182,7 @@ impl<S: Shape> GraphTensor<S> {
         self.shape.padding[self.shape.indexes[axis]].0 = orig_length - 1;
         self = self.contiguous();
         // Pool
-        let mut pooled: GraphTensor<()> = self.pool_last_dim::<()>(orig_length, 1.into(), 0);
+        let mut pooled = self.pool_last_dim::<()>(orig_length, 1.into(), 0);
         // Sum Reduce along new dimension
         let final_id = self
             .graph()
