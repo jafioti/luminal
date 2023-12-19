@@ -7,6 +7,7 @@ use std::{
     ops::{Add, BitAnd, BitOr, Div, IndexMut, Mul, Rem, Sub},
 };
 
+use itertools::Itertools;
 use tinyvec::ArrayVec;
 
 /// A symbolic expression stored on the stack
@@ -17,7 +18,11 @@ pub type BigExpression = GenericExpression<Vec<Term>>;
 /// Trait implemented on the 2 main symbolic expression storage types, Vec<Term> and ArrayVec<Term>
 #[allow(clippy::len_without_is_empty)]
 trait ExpressionStorage:
-    IndexMut<usize, Output = Term> + std::iter::Extend<Term> + IntoIterator<Item = Term> + Default
+    Clone
+    + IndexMut<usize, Output = Term>
+    + std::iter::Extend<Term>
+    + IntoIterator<Item = Term>
+    + Default
 {
     fn len(&self) -> usize;
     fn push(&mut self, term: Term);
@@ -103,127 +108,172 @@ impl<S: ExpressionStorage + Clone> Debug for GenericExpression<S> {
 }
 
 impl<S: ExpressionStorage> GenericExpression<S> {
-    /// Minimise the expression down to its smallest form
     pub fn minimize(mut self) -> Self {
-        let mut i = 0;
-        while i < self.terms.len().saturating_sub(2) {
-            match (self.terms[i], self.terms[i + 1], self.terms[i + 2]) {
-                (Term::Num(b), Term::Num(a), term) if term.as_op().is_some() => {
-                    self.terms[i] = Term::Num(term.as_op().unwrap()(a, b));
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i + 1);
+        fn get_triples<S: ExpressionStorage>(
+            exp: &GenericExpression<S>,
+        ) -> Vec<(Option<usize>, usize, Option<usize>)> {
+            // Mark all terms with their index
+            let terms = exp
+                .terms
+                .clone()
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>();
+            let mut stack = Vec::new();
+            let mut triples = vec![];
+            for (index, term) in terms {
+                match term {
+                    Term::Num(_) | Term::Var(_) => stack.push((Some(index), term)),
+                    _ => {
+                        let (a_ind, a_term) = stack.pop().unwrap();
+                        let (b_ind, b_term) = stack.pop().unwrap();
+                        triples.push((a_ind, index, b_ind));
+                        if let (Term::Num(a), Term::Num(b)) = (a_term, b_term) {
+                            stack.push((None, Term::Num(term.as_op().unwrap()(a, b))));
+                        } else if let Term::Var(a) = a_term {
+                            stack.push((None, Term::Var(a)));
+                        } else if let Term::Var(b) = b_term {
+                            stack.push((None, Term::Var(b)));
+                        }
+                    }
                 }
-                // Remove min(i, inf) and min(inf, i)
-                (Term::Num(b), Term::Num(_) | Term::Var(_), Term::Min)
-                    if b == i32::MAX as usize =>
-                {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i);
+            }
+            triples
+        }
+        fn remove_terms<S: ExpressionStorage>(terms: &mut S, inds: &[usize]) {
+            for ind in inds.iter().sorted().rev() {
+                terms.remove(*ind);
+            }
+        }
+        let mut changed = true;
+        while changed {
+            changed = false;
+            let triples = get_triples(&self);
+            for (a_ind, op_ind, b_ind) in triples {
+                let mut inner_changed = true;
+                match (
+                    a_ind.map(|a| self.terms[a]),
+                    self.terms[op_ind],
+                    b_ind.map(|b| self.terms[b]),
+                ) {
+                    (Some(Term::Num(a)), term, Some(Term::Num(b))) if term.as_op().is_some() => {
+                        self.terms[a_ind.unwrap()] = Term::Num(term.as_op().unwrap()(a, b));
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    // Remove min(i, inf) and min(inf, i)
+                    (Some(Term::Num(a)), Term::Min, _) if a == i32::MAX as usize => {
+                        remove_terms(&mut self.terms, &[op_ind, a_ind.unwrap()]);
+                    }
+                    (_, Term::Min, Some(Term::Num(b))) if b == i32::MAX as usize => {
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    // Remove min(i, 0) and min(0, i)
+                    (Some(Term::Num(0)), Term::Min, _) => {
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    (_, Term::Min, Some(Term::Num(0))) => {
+                        remove_terms(&mut self.terms, &[op_ind, a_ind.unwrap()]);
+                    }
+                    // Remove max(i, 0) and max(0, i)
+                    (_, Term::Max, Some(Term::Num(0))) => {
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    (Some(Term::Num(0)), Term::Max, _) => {
+                        remove_terms(&mut self.terms, &[op_ind, a_ind.unwrap()]);
+                    }
+                    // Remove max(i, inf) and max(inf, i)
+                    (_, Term::Max, Some(Term::Num(i))) if i == i32::MAX as usize => {
+                        remove_terms(&mut self.terms, &[op_ind, a_ind.unwrap()]);
+                    }
+                    (Some(Term::Num(i)), Term::Max, _) if i == i32::MAX as usize => {
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    // Remove i + 0, i - 0 and 0 + i
+                    (Some(Term::Num(0)), Term::Add, _) => {
+                        remove_terms(&mut self.terms, &[op_ind, a_ind.unwrap()]);
+                    }
+                    (_, Term::Add | Term::Sub, Some(Term::Num(0))) => {
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()])
+                    }
+                    // Simplify i * 0, 0 * i to 0
+                    (_, Term::Mul, Some(Term::Num(0))) => {
+                        remove_terms(&mut self.terms, &[op_ind, a_ind.unwrap()]);
+                    }
+                    (Some(Term::Num(0)), Term::Mul, _) => {
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    // Simplify 0 / i to 0
+                    (Some(Term::Num(0)), Term::Div, _) => {
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    // Remove i / 1
+                    (_, Term::Div, Some(Term::Num(1))) => {
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    // Remove i * 1 and 1 * i
+                    (_, Term::Mul, Some(Term::Num(1))) => {
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    (Some(Term::Num(1)), Term::Mul, _) => {
+                        remove_terms(&mut self.terms, &[op_ind, a_ind.unwrap()]);
+                    }
+                    // Simplify i - i to 0
+                    (Some(a), Term::Sub, Some(b)) if a == b => {
+                        self.terms[a_ind.unwrap()] = Term::Num(0);
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    // Simplify true && i and i && true to i
+                    (_, Term::And, Some(Term::Num(1))) => {
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    (Some(Term::Num(1)), Term::And, _) => {
+                        remove_terms(&mut self.terms, &[op_ind, a_ind.unwrap()]);
+                    }
+                    // Simplify false && i and i && false to false
+                    (_, Term::And, Some(Term::Num(0))) => {
+                        remove_terms(&mut self.terms, &[op_ind, a_ind.unwrap()]);
+                    }
+                    (Some(Term::Num(0)), Term::And, _) => {
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    // Simplify false || i and i || false to i
+                    (_, Term::Or, Some(Term::Num(0))) => {
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    (Some(Term::Num(0)), Term::Or, _) => {
+                        remove_terms(&mut self.terms, &[op_ind, a_ind.unwrap()]);
+                    }
+                    // Simplify true || i and i || true to true
+                    (_, Term::Or, Some(Term::Num(1))) => {
+                        remove_terms(&mut self.terms, &[op_ind, a_ind.unwrap()]);
+                    }
+                    (Some(Term::Num(1)), Term::Or, _) => {
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    // Simplify i >= i to true (1)
+                    (Some(a), Term::Gte, Some(b)) if a == b => {
+                        self.terms[a_ind.unwrap()] = Term::Num(1);
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    // Simplify i < i to false (0)
+                    (Some(a), Term::Lt, Some(b)) if a == b => {
+                        self.terms[a_ind.unwrap()] = Term::Num(0);
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    // Simplify min(i, i) and max(i, i) to i
+                    (Some(a), Term::Min | Term::Max, Some(b)) if a == b => {
+                        remove_terms(&mut self.terms, &[op_ind, b_ind.unwrap()]);
+                    }
+                    _ => {
+                        inner_changed = false;
+                    }
                 }
-                (_, Term::Num(a), Term::Min) if a == i32::MAX as usize => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i + 1);
-                }
-                // Remove max(i, 0) and max(0, i)
-                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Max) => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i);
-                }
-                (_, Term::Num(0), Term::Max) => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i + 1);
-                }
-                // Remove i + 0, i - 0 and 0 + i
-                (_, Term::Num(0), Term::Add) => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i + 1);
-                }
-                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Add | Term::Sub) => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i);
-                }
-                // Remove i * 0, 0 * i
-                (Term::Num(0), Term::Num(_) | Term::Var(_), Term::Mul) => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i + 1);
-                }
-                (Term::Num(_) | Term::Var(_), Term::Num(0), Term::Mul) => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i);
-                }
-                // Remove 0 / i
-                (Term::Num(_) | Term::Var(_), Term::Num(0), Term::Div) => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i);
-                }
-                // Remove i * 1 and 1 * i
-                (Term::Num(1), Term::Num(_) | Term::Var(_), Term::Mul) => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i);
-                }
-                (_, Term::Num(1), Term::Mul) => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i + 1);
-                }
-                // Remove i / 1
-                (Term::Num(1), Term::Num(_) | Term::Var(_), Term::Div) => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i);
-                }
-                // Simplify i - i to 0
-                (Term::Var(b), Term::Var(a), Term::Sub) if a == b => {
-                    self.terms[i] = Term::Num(0);
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i + 1);
-                }
-                // Simplify true && i to i
-                (_, Term::Num(1), Term::And) => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i + 1);
-                }
-                // Simplify i && true to i
-                (Term::Num(1), _, Term::And) => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i);
-                }
-                // Simplify false || i to i
-                (_, Term::Num(0), Term::Or) => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i + 1);
-                }
-                // Simplify i || false to i
-                (Term::Num(0), _, Term::Or) => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i);
-                }
-                // Simplify i >= i to true (1)
-                (Term::Var(b), Term::Var(a), Term::Gte) if a == b => {
-                    self.terms[i] = Term::Num(1);
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i + 1);
-                }
-                // Simplify i < i to false (0)
-                (Term::Var(b), Term::Var(a), Term::Lt) if a == b => {
-                    self.terms[i] = Term::Num(0);
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i + 1);
-                }
-                // Simplify min(i, i) to i
-                (Term::Var(b), Term::Var(a), Term::Min) if a == b => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i + 1);
-                }
-                // Simplify max(i, i) to i
-                (Term::Var(b), Term::Var(a), Term::Max) if a == b => {
-                    self.terms.remove(i + 2);
-                    self.terms.remove(i + 1);
-                }
-                _ => {
-                    i += 1;
+                if inner_changed {
+                    changed = true;
+                    break;
                 }
             }
         }
-
         self
     }
 
