@@ -1,6 +1,6 @@
 use std::{
     cell::UnsafeCell,
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     fmt::Debug,
     sync::Arc,
 };
@@ -23,11 +23,7 @@ pub struct CommonBufferCompiler;
 
 impl Compiler for CommonBufferCompiler {
     fn compile(&self, graph: &mut Graph) {
-        let dev = Device::system_default().unwrap();
-        let mut already_added_nodes = HashSet::new();
-        let mut queue = dev.new_command_queue();
-        let mut num_buffers_on_queue = 0;
-        let mut is_metal: HashSet<NodeIndex> = graph
+        let is_metal: HashSet<NodeIndex> = graph
             .graph
             .node_indices()
             .filter(|i| {
@@ -39,205 +35,164 @@ impl Compiler for CommonBufferCompiler {
                     .is_some()
             })
             .collect();
-        for node in graph.graph.node_indices().collect::<Vec<_>>() {
-            if !already_added_nodes.contains(&node) && is_metal.contains(&node) {
-                // Start a set from this node
-                if num_buffers_on_queue >= 63 {
-                    num_buffers_on_queue = 0;
-                    queue = dev.new_command_queue();
-                } else {
-                    num_buffers_on_queue += 1;
-                }
-                #[allow(clippy::arc_with_non_send_sync)]
-                let b = Arc::new(UnsafeCell::new(queue.new_command_buffer().to_owned()));
-                let exec = graph
-                    .add_op(ExecuteMetalKernels {
-                        queue: queue.clone(),
-                        buffer: b.clone(),
-                    })
-                    .finish();
-                let mut current_set = HashSet::new();
-                build_set(
-                    node,
-                    b.clone(),
-                    &dev,
-                    &mut current_set,
-                    &mut already_added_nodes,
-                    graph,
-                    exec,
-                    &is_metal,
-                    &get_nodes_in_dir(&graph.graph, node, Direction::Outgoing),
-                    Direction::Outgoing,
-                );
-                let upper_nodes = current_set
-                    .iter()
-                    .flat_map(|n| get_nodes_in_dir(&graph.graph, *n, Direction::Outgoing))
-                    .collect();
-                for node in current_set.clone() {
-                    build_set(
-                        node,
-                        b.clone(),
-                        &dev,
-                        &mut current_set,
-                        &mut already_added_nodes,
-                        graph,
-                        exec,
-                        &is_metal,
-                        &upper_nodes,
-                        Direction::Incoming,
-                    );
-                }
-                // Add deps from execute op to consumers
-                for node in &current_set {
-                    is_metal.remove(node);
-                    for outside_node in graph
-                        .graph
-                        .edges_directed(*node, Direction::Outgoing)
-                        .filter(|e| !e.weight().is_schedule())
-                        .map(|e| e.target())
-                        .filter(|n| !current_set.contains(n))
-                        .collect::<Vec<_>>()
-                    {
-                        graph.add_schedule_dependency(exec, outside_node);
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn build_set(
-    node: NodeIndex,
-    buffer: Arc<UnsafeCell<CommandBuffer>>,
-    dev: &Device,
-    current_set: &mut HashSet<NodeIndex>,
-    already_added_nodes: &mut HashSet<NodeIndex>,
-    graph: &mut Graph,
-    exec_node: NodeIndex,
-    is_metal: &HashSet<NodeIndex>,
-    valid_nodes: &HashSet<NodeIndex>,
-    direction: Direction,
-) {
-    if !current_set.contains(&node) {
-        graph.add_schedule_dependency(node, exec_node);
-        // Wrap current node
-        let wrapper = graph
+        // Do forward pass
+        let mut forward_map: HashMap<NodeIndex, usize> = HashMap::new();
+        for node in graph
             .graph
-            .node_weight(node)
-            .unwrap()
-            .custom("metal")
-            .unwrap()
-            .downcast::<MetalKernelWrapper>()
-            .unwrap();
-        *graph.graph.node_weight_mut(node).unwrap() = Box::new(MetalKernelOperation {
-            wrapper,
-            dev: dev.clone(),
-            buffer: buffer.clone(),
-        });
-        current_set.insert(node);
-        already_added_nodes.insert(node);
-    }
-    // Add outgoing
-    for node in graph
-        .graph
-        .edges_directed(node, direction)
-        .filter(|e| !e.weight().is_schedule())
-        .map(|e| e.target())
-        .unique()
-        .collect::<Vec<_>>()
-    {
-        if !already_added_nodes.contains(&node)
-            && is_metal.contains(&node)
-            && !dfs(
-                &graph.graph,
-                is_metal,
-                current_set,
-                node,
-                valid_nodes,
-                match direction {
-                    Direction::Outgoing => Direction::Incoming,
-                    Direction::Incoming => Direction::Outgoing,
-                },
-            )
+            .node_indices()
+            .filter(|n| graph.graph.edges_directed(*n, Direction::Incoming).count() == 0)
+            .sorted()
         {
-            build_set(
-                node,
-                buffer.clone(),
-                dev,
-                current_set,
-                already_added_nodes,
-                graph,
-                exec_node,
-                is_metal,
-                valid_nodes,
-                direction,
-            );
-        }
-    }
-}
-
-fn get_nodes_in_dir(
-    graph: &MainGraph,
-    start_from: NodeIndex,
-    direction: Direction,
-) -> HashSet<NodeIndex> {
-    let mut stack = VecDeque::new();
-    let mut seen = HashSet::new();
-
-    stack.push_back(start_from);
-    while let Some(node) = stack.pop_back() {
-        if seen.contains(&node) {
-            continue;
-        }
-        seen.insert(node);
-        for neighbor in graph
-            .edges_directed(node, direction)
-            .filter(|e| !e.weight().is_schedule())
-            .map(|e| e.target())
-        {
-            stack.push_back(neighbor);
-        }
-    }
-    seen
-}
-
-fn dfs(
-    graph: &MainGraph,
-    is_metal: &HashSet<NodeIndex>,
-    set: &HashSet<NodeIndex>,
-    start_from: NodeIndex,
-    valid_nodes: &HashSet<NodeIndex>,
-    direction: Direction,
-) -> bool {
-    let mut stack = VecDeque::new();
-
-    stack.push_back((start_from, false)); // second element in tuple indicates if we've passed a non-metal node
-
-    while let Some((node, mut passed_non_metal)) = stack.pop_back() {
-        if !is_metal.contains(&node) {
-            // Mark that we've passed a non-metal node.
-            passed_non_metal = true;
-        }
-
-        if set.contains(&node) {
-            // Now if we passed a non-selected node and the current node is in `stop`, return true.
-            if passed_non_metal {
-                return true;
-            }
-        } else if valid_nodes.contains(&node) {
-            // Iterate over all neighbors by incoming edges (reversed).
-            for neighbor in graph
-                .edges_directed(node, direction)
-                .filter(|e| !e.weight().is_schedule())
-                .map(|e| e.source())
-            {
-                stack.push_back((neighbor, passed_non_metal));
+            let mut stack = vec![node];
+            while let Some(node) = stack.pop() {
+                // Get rank as max of predecessors
+                let rank = graph
+                    .graph
+                    .neighbors_directed(node, Direction::Incoming)
+                    .filter_map(|i| forward_map.get(&i).map(|r| (i, *r)))
+                    .map(|(node_index, rank)| {
+                        if is_metal.contains(&node) != is_metal.contains(&node_index) {
+                            rank + 1
+                        } else {
+                            rank
+                        }
+                    })
+                    .max()
+                    .unwrap_or_default();
+                // Max it with the current entry in the map or insert
+                if let Some(entry) = forward_map.get_mut(&node) {
+                    if rank > *entry {
+                        *entry = rank;
+                        stack.extend(graph.graph.neighbors_directed(node, Direction::Outgoing));
+                    }
+                } else {
+                    forward_map.insert(node, rank);
+                    stack.extend(graph.graph.neighbors_directed(node, Direction::Outgoing));
+                }
             }
         }
-    }
 
-    false
+        // Do backward pass
+        let mut backward_map: HashMap<NodeIndex, usize> = HashMap::new();
+        for node in graph
+            .graph
+            .node_indices()
+            .filter(|n| graph.graph.edges_directed(*n, Direction::Outgoing).count() == 0)
+            .sorted()
+        {
+            let mut stack = vec![node];
+            while let Some(node) = stack.pop() {
+                // Get rank as max of successors
+                let rank = graph
+                    .graph
+                    .neighbors_directed(node, Direction::Outgoing)
+                    .filter_map(|i| backward_map.get(&i).map(|r| (i, *r)))
+                    .map(|(node_index, rank)| {
+                        if is_metal.contains(&node) != is_metal.contains(&node_index) {
+                            rank + 1
+                        } else {
+                            rank
+                        }
+                    })
+                    .max()
+                    .unwrap_or_default();
+                // Max it with the current entry in the map or insert
+                if let Some(entry) = backward_map.get_mut(&node) {
+                    if rank > *entry {
+                        *entry = rank;
+                        stack.extend(graph.graph.neighbors_directed(node, Direction::Incoming));
+                    }
+                } else {
+                    backward_map.insert(node, rank);
+                    stack.extend(graph.graph.neighbors_directed(node, Direction::Incoming));
+                }
+            }
+        }
+        // Get sets (Rank -> # of nodes with that rank)
+        let forward_sets = forward_map
+            .iter()
+            .sorted_by_key(|(_, v)| **v)
+            .group_by(|(_, v)| **v)
+            .into_iter()
+            .map(|(k, g)| (k, g.count()))
+            .collect::<HashMap<_, _>>();
+        let backward_sets = backward_map
+            .iter()
+            .sorted_by_key(|(_, v)| **v)
+            .group_by(|(_, v)| **v)
+            .into_iter()
+            .map(|(k, g)| (k, g.count()))
+            .collect::<HashMap<_, _>>();
+
+        // Assign nodes to sets
+        let mut node_sets: HashMap<(bool, usize), HashSet<NodeIndex>> = HashMap::new();
+        for node in graph.graph.node_indices().filter(|i| is_metal.contains(i)) {
+            let forward_bigger =
+                forward_sets[&forward_map[&node]] >= backward_sets[&backward_map[&node]];
+            node_sets
+                .entry((
+                    forward_bigger,
+                    if forward_bigger {
+                        forward_map[&node]
+                    } else {
+                        backward_map[&node]
+                    },
+                ))
+                .and_modify(|set| {
+                    set.insert(node);
+                })
+                .or_insert(HashSet::from([node]));
+        }
+        // Add sets to graph
+        let dev = Device::system_default().unwrap();
+        let mut queue = dev.new_command_queue();
+        let mut num_buffers_on_queue = 0;
+        for set in node_sets.values() {
+            if num_buffers_on_queue >= 63 {
+                num_buffers_on_queue = 0;
+                queue = dev.new_command_queue();
+            } else {
+                num_buffers_on_queue += 1;
+            }
+            #[allow(clippy::arc_with_non_send_sync)]
+            let buffer = Arc::new(UnsafeCell::new(queue.new_command_buffer().to_owned()));
+            let exec = graph
+                .add_op(ExecuteMetalKernels {
+                    queue: queue.clone(),
+                    buffer: buffer.clone(),
+                })
+                .finish();
+            for node in set {
+                // Create schedule dependency
+                graph.add_schedule_dependency(*node, exec);
+                // Wrap node in MetalKernelOperation
+                let wrapper = graph
+                    .graph
+                    .node_weight(*node)
+                    .unwrap()
+                    .custom("metal")
+                    .unwrap()
+                    .downcast::<MetalKernelWrapper>()
+                    .unwrap();
+                *graph.graph.node_weight_mut(*node).unwrap() = Box::new(MetalKernelOperation {
+                    wrapper,
+                    dev: dev.clone(),
+                    buffer: buffer.clone(),
+                });
+                // Create schedule dependencies from exec to consumers
+                for outside_node in graph
+                    .graph
+                    .edges_directed(*node, Direction::Outgoing)
+                    .filter(|e| !e.weight().is_schedule())
+                    .map(|e| e.target())
+                    .filter(|n| !set.contains(n))
+                    .collect::<Vec<_>>()
+                {
+                    graph.add_schedule_dependency(exec, outside_node);
+                }
+            }
+        }
+    }
 }
 
 #[derive(LuminalEq, LuminalPrint)]

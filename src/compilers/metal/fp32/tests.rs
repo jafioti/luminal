@@ -577,11 +577,10 @@ fn test_transformer_encoder_block() {
         .weight
         .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
-    let a = cx.tensor::<(Dyn<'b'>, Dyn<'a'>, crate::prelude::Const<3>)>();
-    let b = model.forward(a);
-
-    a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![1, 2, 3]);
-    b.retrieve();
+    let a = cx
+        .tensor::<(Dyn<'b'>, Dyn<'a'>, crate::prelude::Const<3>)>()
+        .set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![1, 2, 3]);
+    let b = model.forward(a).retrieve();
 
     cx.compile(<(MetalFp32Compiler, PostGenericCompiler)>::default());
     cx.execute();

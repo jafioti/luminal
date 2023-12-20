@@ -210,30 +210,23 @@ impl<
         const HEAD_DIM_OVER_2: usize,
         Batch: Dimension,
         CurSeq: Dimension,
-    >
-    Module<(
-        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        GraphTensor<(CurSeq, CurSeq)>,
-    )> for Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
+    > Module<GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>>
+    for Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
 {
     type Output = (
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
         KVCache<Batch, CurSeq, NUM_HEADS, HEAD_DIM>,
     );
 
-    fn forward(
-        &self,
-        (x, attn_mask): (
-            GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-            GraphTensor<(CurSeq, CurSeq)>,
-        ),
-    ) -> Self::Output {
+    fn forward(&self, x: GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>) -> Self::Output {
         let (q, k, v) = attn_forward(self, x, 0.into());
 
-        let w = q.matmul(k.permute());
-        let w = w.mul((HEAD_DIM as f64).sqrt().recip() as f32);
-        let w = w.add(attn_mask.expand());
-        let w = w.softmax::<3>();
+        let attention_mask = self.k_proj.graph().triu::<CurSeq, CurSeq>(1) * f16::MIN.to_f32();
+        let w = q
+            .matmul(k.permute())
+            .mul((HEAD_DIM as f64).sqrt().recip() as f32)
+            .add(attention_mask.expand())
+            .softmax::<3>();
 
         let o = w
             .matmul(v)
@@ -352,25 +345,16 @@ impl<
         const HEAD_DIM_OVER_2: usize,
         Batch: Dimension,
         CurSeq: Dimension,
-    >
-    Module<(
-        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        GraphTensor<(CurSeq, CurSeq)>,
-    )> for DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>
+    > Module<GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>>
+    for DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>
 {
     type Output = (
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
         KVCache<Batch, CurSeq, NUM_HEADS, HEAD_DIM>,
     );
-    fn forward(
-        &self,
-        (x, attn_mask): (
-            GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-            GraphTensor<(CurSeq, CurSeq)>,
-        ),
-    ) -> Self::Output {
+    fn forward(&self, x: GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>) -> Self::Output {
         let normed = self.input_layer_norm.forward(x);
-        let (y, cache) = self.self_attn.forward((normed, attn_mask));
+        let (y, cache) = self.self_attn.forward(normed);
         let x = x + y;
         let y = self.mlp.forward(self.post_attention_layer_norm.forward(x));
         (x + y, cache)
@@ -471,37 +455,10 @@ impl<
         Vec<KVCache<Batch, CurSeq, NUM_HEADS, HEAD_DIM>>,
     );
     fn forward(&self, input: GraphTensor<(Batch, CurSeq)>) -> Self::Output {
-        // let attn_mask = self.norm.weight.graph().triu::<CurSeq, CurSeq>(1) * f16::MIN.to_f32();
-        let attn_mask: GraphTensor<(CurSeq, CurSeq)> = GraphTensor::from_id(
-            self.norm
-                .weight
-                .graph()
-                .add_op(luminal::op::Function(
-                    "AttentionMask".to_string(),
-                    Box::new(|inp| {
-                        let seq_len = inp[0].1.shape()[1].to_usize().unwrap();
-                        let mut data = vec![0.; seq_len * seq_len];
-                        for i in 0..seq_len {
-                            for j in (i + 1)..seq_len {
-                                data[i * seq_len + j] = f16::MIN.to_f32();
-                            }
-                        }
-                        vec![Tensor {
-                            data: Box::new(data),
-                        }]
-                    }),
-                ))
-                .input(input.id, 0, input.shape)
-                .finish(),
-            ShapeTracker::new(&[CurSeq::const_size(), CurSeq::const_size()]),
-            self.norm.weight.graph(),
-        );
-
         let mut hidden_states = self.embed_tokens.forward(input);
         let mut caches = vec![];
         for layer_i in &self.layers {
-            let (new_hidden_states, (k_cache, v_cache)) =
-                layer_i.forward((hidden_states, attn_mask));
+            let (new_hidden_states, (k_cache, v_cache)) = layer_i.forward(hidden_states);
             hidden_states = new_hidden_states;
             caches.push((k_cache.contiguous(), v_cache.contiguous()));
         }
