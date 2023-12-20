@@ -63,7 +63,7 @@ impl<
         const CHANNELS_IN_TIMES_KERNEL: usize,
     > Conv1D<CHANNELS_IN, CHANNELS_OUT, KERNEL, STRIDE, DILATION, CHANNELS_IN_TIMES_KERNEL>
 {
-    fn forward<const DIM_IN: usize, const DIM_OUT: usize>(
+    pub fn forward<const DIM_IN: usize, const DIM_OUT: usize>(
         &self,
         input: GraphTensor<R2<CHANNELS_IN, DIM_IN>>,
     ) -> GraphTensor<R2<CHANNELS_OUT, DIM_OUT>> {
