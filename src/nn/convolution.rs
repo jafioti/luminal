@@ -83,18 +83,143 @@ impl<
 pub struct Conv2D<
     const CHANNELS_IN: usize,
     const CHANNELS_OUT: usize,
-    const KERNEL: usize,
-    const STRIDE: usize,
-    const DILATION: usize,
-    const CHANNELS_IN_TIMES_KERNEL: usize,
+    const KERNELX: usize,
+    const KERNELY: usize,
+    const STRIDEX: usize,
+    const STRIDEY: usize,
+    const DILATIONX: usize,
+    const DILATIONY: usize,
+    const CHANNELS_IN_TIMES_KERNELX_KERNELY: usize,
 > {
-    pub weight: GraphTensor<R2<CHANNELS_OUT, CHANNELS_IN_TIMES_KERNEL>>,
+    pub weight: GraphTensor<R2<CHANNELS_OUT, CHANNELS_IN_TIMES_KERNELX_KERNELY>>,
+}
+
+impl<
+        const CHANNELS_IN: usize,
+        const CHANNELS_OUT: usize,
+        const KERNELX: usize,
+        const KERNELY: usize,
+        const STRIDEX: usize,
+        const STRIDEY: usize,
+        const DILATIONX: usize,
+        const DILATIONY: usize,
+        const CHANNELS_IN_TIMES_KERNELX_KERNELY: usize,
+    > InitModule
+    for Conv2D<
+        CHANNELS_IN,
+        CHANNELS_OUT,
+        KERNELX,
+        KERNELY,
+        STRIDEX,
+        STRIDEY,
+        DILATIONX,
+        DILATIONY,
+        CHANNELS_IN_TIMES_KERNELX_KERNELY,
+    >
+{
+    fn initialize(cx: &mut Graph) -> Self {
+        let conv = Self {
+            weight: cx.named_tensor("Weight"),
+        };
+
+        // Init weight as uniform(-1, 1)
+        let mut rng = thread_rng();
+        conv.weight.set(
+            (0..(CHANNELS_IN * CHANNELS_OUT * KERNELX * KERNELY))
+                .map(|_| rng.gen_range(-1_f32..1_f32))
+                .collect::<Vec<_>>(),
+        );
+        conv
+    }
+}
+
+impl<
+        const CHANNELS_IN: usize,
+        const CHANNELS_OUT: usize,
+        const KERNELX: usize,
+        const KERNELY: usize,
+        const STRIDEX: usize,
+        const STRIDEY: usize,
+        const DILATIONX: usize,
+        const DILATIONY: usize,
+        const CHANNELS_IN_TIMES_KERNELX_KERNELY: usize,
+    > SerializeModule
+    for Conv2D<
+        CHANNELS_IN,
+        CHANNELS_OUT,
+        KERNELX,
+        KERNELY,
+        STRIDEX,
+        STRIDEY,
+        DILATIONX,
+        DILATIONY,
+        CHANNELS_IN_TIMES_KERNELX_KERNELY,
+    >
+{
+    fn serialize(&self, s: &mut crate::serialization::Serializer) {
+        s.tensor("weight", self.weight);
+    }
+}
+
+// Single
+impl<
+        const CHANNELS_IN: usize,
+        const CHANNELS_OUT: usize,
+        const KERNELX: usize,
+        const KERNELY: usize,
+        const STRIDEX: usize,
+        const STRIDEY: usize,
+        const DILATIONX: usize,
+        const DILATIONY: usize,
+        const CHANNELS_IN_TIMES_KERNELX_KERNELY: usize,
+    >
+    Conv2D<
+        CHANNELS_IN,
+        CHANNELS_OUT,
+        KERNELX,
+        KERNELY,
+        STRIDEX,
+        STRIDEY,
+        DILATIONX,
+        DILATIONY,
+        CHANNELS_IN_TIMES_KERNELX_KERNELY,
+    >
+{
+    pub fn forward<
+        const DIMX_IN: usize,
+        const DIMY_IN: usize,
+        const DIMX_OUT: usize,
+        const DIMY_OUT: usize,
+        const DIMX_TIMES_DIMY_OUT: usize,
+    >(
+        &self,
+        input: GraphTensor<R3<CHANNELS_IN, DIMX_IN, DIMY_IN>>,
+    ) -> GraphTensor<R3<CHANNELS_OUT, DIMX_OUT, DIMY_OUT>> {
+        let input_pooled = input
+            .pool_last_dim::<R4<CHANNELS_IN, DIMX_IN, DIMY_OUT, KERNELY>>(
+                KERNELY.into(),
+                STRIDEY.into(),
+                DILATIONY,
+            )
+            .permute::<_, Axes4<0, 2, 3, 1>>()
+            .pool_last_dim::<R5<CHANNELS_IN, DIMY_OUT, KERNELY, DIMX_OUT, KERNELX>>(
+                KERNELX.into(),
+                STRIDEX.into(),
+                DILATIONX,
+            )
+            .permute::<_, Axes5<0, 4, 2, 3, 1>>()
+            .reshape::<R2<CHANNELS_IN_TIMES_KERNELX_KERNELY, DIMX_TIMES_DIMY_OUT>>();
+
+        self.weight
+            .matmul(input_pooled)
+            .reshape::<R3<CHANNELS_OUT, DIMX_OUT, DIMY_OUT>>()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::Conv1D;
-    use crate::{prelude::*, tests::assert_close};
+    use crate::{nn::convolution::Conv2D, prelude::*, tests::assert_close};
 
     #[test]
     fn test_conv1d_simple() {
@@ -249,38 +374,29 @@ mod tests {
             1.2000, -3.4200, -1.6700, 0.9000,
         ]);
 
-        let conv = cx.tensor::<R2<CHANNELS_OUT, CHANNELS_IN_TIMES_KERNELX_KERNELY>>();
-        conv.set(vec![
+        exp_out1.retrieve();
+
+        let model: Conv2D<
+            CHANNELS_IN,
+            CHANNELS_OUT,
+            KERNELX,
+            KERNELY,
+            STRIDEX,
+            STRIDEY,
+            DILATIONX,
+            DILATIONY,
+            CHANNELS_IN_TIMES_KERNELX_KERNELY,
+        > = Conv2D::initialize(&mut cx);
+        model.weight.set(vec![
             0.1600, 0.2000, 0.1900, -0.1100, 0.0100, -0.0300, -0.1200, -0.0800, -0.1300, -0.0300,
             0.1600, -0.1700, -0.0000, 0.1900, 0.1300, 0.0300, -0.1500, 0.0900, 0.0100, 0.0200,
             0.1500, 0.0700, -0.0800, 0.1700, 0.1000, -0.0700, 0.1600, -0.1600, -0.1900, -0.0500,
             -0.2100, 0.0100, -0.2000, 0.2100, -0.0400, -0.1400, 0.1500, 0.0500, -0.1700, 0.1400,
         ]);
 
-        let inp1_pooled = inp1
-            .pool_last_dim::<R4<CHANNELS_IN, DIMX_IN, DIMY_OUT, KERNELY>>(
-                KERNELY.into(),
-                STRIDEY.into(),
-                DILATIONY,
-            )
-            .permute::<_, Axes4<0, 2, 3, 1>>()
-            .pool_last_dim::<R5<CHANNELS_IN, DIMY_OUT, KERNELY, DIMX_OUT, KERNELX>>(
-                KERNELX.into(),
-                STRIDEX.into(),
-                DILATIONX,
-            )
-            .permute::<_, Axes5<0, 4, 2, 3, 1>>()
-            .reshape::<R2<CHANNELS_IN_TIMES_KERNELX_KERNELY, DIMX_TIMES_DIMY_OUT>>();
-
-        let out1 = conv
-            .matmul(inp1_pooled)
-            .reshape::<R3<CHANNELS_OUT, DIMX_OUT, DIMY_OUT>>();
-
-        let weight = conv.reshape::<R4<CHANNELS_OUT, CHANNELS_IN, KERNELX, KERNELY>>();
-
-        weight.retrieve();
-        exp_out1.retrieve();
-        out1.retrieve();
+        let out1 = model
+            .forward::<DIMX_IN, DIMY_IN, DIMX_OUT, DIMY_OUT, DIMX_TIMES_DIMY_OUT>(inp1)
+            .retrieve();
 
         cx.execute();
 
