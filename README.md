@@ -22,7 +22,7 @@ cx.compile(GenericCompiler::default());
 cx.execute();
 
 // Get result
-println!("Result: {:?}", c.data());
+println!("Result: {:?}", c);
 ```
 
 ## Getting Started
