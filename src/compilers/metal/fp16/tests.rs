@@ -219,12 +219,11 @@ fn test_mul() {
 #[test]
 fn test_mul2() {
     let mut cx = Graph::new();
-    let a = cx.tensor::<(LConst<1>, LConst<1>, Dyn<'a'>, Dyn<'a'>)>();
-    a.set_dyn(vec![82.4, 783.0, 99.6, 974.5], vec![1, 1, 2, 2]);
-    let b = cx.tensor::<R0>();
-    b.set(vec![0.57735026]);
-    let c = a * b.expand();
-    c.retrieve();
+    let a = cx
+        .tensor::<(LConst<1>, LConst<1>, Dyn<'a'>, Dyn<'a'>)>()
+        .set_dyn(vec![82.4, 783.0, 99.6, 974.5], vec![1, 1, 2, 2]);
+    let b = cx.tensor::<R0>().set(vec![0.57735026]);
+    let c = (a * b.expand()).retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -236,7 +235,7 @@ fn test_mul2() {
     let d_b = d_dev.tensor(0.57735026).to_dtype::<f16>();
     let d_c = d_a * d_b.broadcast::<_, dfdx::shapes::Axes4<0, 1, 2, 3>>();
 
-    assert_close(&c.data(), &d_c.to_dtype::<f32>().as_vec());
+    assert_exact(&c.data(), &d_c.to_dtype::<f32>().as_vec());
 }
 
 #[test]
