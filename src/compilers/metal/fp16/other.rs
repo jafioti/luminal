@@ -353,13 +353,13 @@ pub struct MetalGather(ComputePipelineState, Device, usize);
 impl MetalGather {
     fn new(dev: Device, embed_dim: usize) -> Self {
         Self(compile_function("metal_gather", "
-        #include <metal_stdlib>
-        using namespace metal;
-        kernel void metal_gather(device float *inp [[buffer(0)]], device half *weights [[buffer(1)]], device half *out [[buffer(2)]], device uint& n_embeddings [[buffer(3)]], device uint& embedding_dim [[buffer(4)]], uint2 i_ [[thread_position_in_grid]]) {
-            if (i_.x < n_embeddings && i_.y < embedding_dim) {
-                out[i_.x * embedding_dim + i_.y] = weights[(uint)inp[i_.x] * embedding_dim + i_.y];
-            }
-        }
+#include <metal_stdlib>
+using namespace metal;
+kernel void metal_gather(device float *inp [[buffer(0)]], device half *weights [[buffer(1)]], device half *out [[buffer(2)]], device uint& n_embeddings [[buffer(3)]], device uint& embedding_dim [[buffer(4)]], uint2 i_ [[thread_position_in_grid]]) {
+    if (i_.x < n_embeddings && i_.y < embedding_dim) {
+        out[i_.x * embedding_dim + i_.y] = weights[(uint)inp[i_.x] * embedding_dim + i_.y];
+    }
+}
         ", &dev), dev, embed_dim)
     }
 }
