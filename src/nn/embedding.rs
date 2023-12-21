@@ -1,67 +1,6 @@
 use rand::{thread_rng, Rng};
 
-use crate::{op, prelude::*};
-
-// This is a really shoddy way to do gathers TODO: Do something else
-
-// Gather batch of batches from 2D embedding matrix
-impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
-    pub fn gather<S1: Dimension, S2: Dimension>(
-        self,
-        mut indexes: GraphTensor<(S1, S2)>,
-    ) -> GraphTensor<(S1, S2, Const<DIM>)> {
-        let res = self
-            .graph()
-            .add_op(op::Function(
-                "Gather".to_string(),
-                Box::new(|tensors| {
-                    let indexes = tensors[0]
-                        .0
-                        .borrowed()
-                        .data
-                        .as_any()
-                        .downcast_ref::<Vec<f32>>()
-                        .unwrap();
-                    let data = tensors[1]
-                        .0
-                        .borrowed()
-                        .data
-                        .as_any()
-                        .downcast_ref::<Vec<f32>>()
-                        .unwrap();
-                    let mut res = vec![0.; indexes.len() * DIM];
-                    let (a_ind, a_val, b_ind, b_val) = (
-                        tensors[0].1.index_expression(),
-                        tensors[0].1.valid_expression(),
-                        tensors[1].1.index_expression(),
-                        tensors[1].1.valid_expression(),
-                    );
-                    for i in 0..indexes.len() {
-                        if a_val.exec_single_var(i) == 0 {
-                            continue;
-                        }
-                        let start = indexes[a_ind.exec_single_var(i)] as usize * DIM;
-                        for n in 0..DIM {
-                            res[i * DIM + n] = if b_val.exec_single_var(start + n) != 0 {
-                                data[b_ind.exec_single_var(start + n)]
-                            } else {
-                                0.0
-                            };
-                        }
-                    }
-                    vec![Tensor {
-                        data: Box::new(res),
-                    }]
-                }),
-            ))
-            .input(indexes.id, 0, indexes.shape)
-            .input(self.id, 0, self.shape) // Since indexes might have a 1 dimension we don't want getting changed, we feed it in as the first argument
-            .finish();
-
-        indexes.shape.expand(2, DIM.into());
-        GraphTensor::from_id(res, indexes.shape.contiguous(), self.graph_ref)
-    }
-}
+use crate::prelude::*;
 
 pub struct Embedding<const N: usize, const DIM: usize> {
     pub weight: GraphTensor<R2<N, DIM>>,
@@ -118,32 +57,26 @@ mod tests {
         tensor::{Cpu, TensorFromVec},
     };
 
-    use crate::{
-        prelude::{Module, *},
-        tests::assert_close,
-    };
+    use crate::prelude::Module;
 
     use super::Embedding;
     use dfdx::nn::BuildOnDevice;
+    crate::test_imports!();
 
     #[test]
     fn test_embedding() {
         let mut cx = Graph::new();
-        let batch = cx.tensor::<R2<2, 3>>();
-        let a = cx.tensor::<R1<3>>();
+        let batch = cx
+            .tensor::<R2<2, 3>>()
+            .set(vec![1.0, 0.0, 2.0, 1.0, 0.0, 1.0]);
+        let a = cx.tensor::<R1<3>>().set(vec![1.0, 0.0, 1.0]);
 
         let model: Embedding<3, 4> = InitModule::initialize(&mut cx);
         model
             .weight
             .set(vec![1.1, 2., 3., 1., 2., 3., 14., 2., 33., 1., 2., 3.]);
-        let b = model.forward(a);
-        let batch_out = model.forward(batch);
-
-        b.retrieve();
-        a.retrieve();
-        batch_out.retrieve();
-        a.set(vec![1.0, 0.0, 1.0]);
-        batch.set(vec![1.0, 0.0, 2.0, 1.0, 0.0, 1.0]);
+        let b = model.forward(a).retrieve();
+        let batch_out = model.forward(batch).retrieve();
 
         cx.execute();
 
@@ -151,13 +84,10 @@ mod tests {
         let mut d_model = <dfdx::nn::modules::builders::Embedding<3, 4>>::build_on_device(&d_dev);
         d_model.weight = d_dev.tensor_from_vec(
             vec![1.1, 2., 3., 1., 2., 3., 14., 2., 33., 1., 2., 3.],
-            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<4>),
+            (DConst::<3>, DConst::<4>),
         );
-        let d_a = d_dev.tensor_from_vec(vec![1, 0, 1], (dfdx::shapes::Const::<3>,));
-        let d_batch = d_dev.tensor_from_vec(
-            vec![1, 0, 2, 1, 0, 1],
-            (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<3>),
-        );
+        let d_a = d_dev.tensor_from_vec(vec![1, 0, 1], (DConst::<3>,));
+        let d_batch = d_dev.tensor_from_vec(vec![1, 0, 2, 1, 0, 1], (DConst::<2>, DConst::<3>));
 
         let d_b = d_model.forward(d_a);
         let d_batch_out = d_model.forward(d_batch);

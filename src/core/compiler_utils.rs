@@ -659,6 +659,10 @@ impl SelectEdge {
     }
 }
 
+pub fn check_no_delete(graph: &Graph, nodes: &[NodeIndex]) -> bool {
+    nodes.iter().any(|n| graph.no_delete.contains(n))
+}
+
 #[cfg(test)]
 mod tests {
     use petgraph::adj::NodeIndex;
