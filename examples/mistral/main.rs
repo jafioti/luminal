@@ -1,12 +1,32 @@
 use crate::model::Mistral;
+use itertools::Itertools;
+use luminal::prelude::*;
 
 mod model;
 
-fn main() {
-    let mistral = Mistral::new("./examples/mistral/setup/mistral-7b-hf/tokenizer.model").unwrap();
+fn main() -> Result<(), String> {
+    let mut mistral =
+        Mistral::new("./examples/mistral/setup/mistral-7b-hf/tokenizer.model").unwrap();
+    let filename = "./examples/mistral/setup/mistral-7b-hf/model-00001-of-00003.safetensors";
+    mistral.load_safe_tensors_from_file(&filename)?;
+    mistral.embedding.weight.retrieve();
+    mistral
+        .graph
+        .compile(<(PreGenericCompiler, MetalFp16Compiler, PostGenericCompiler)>::default());
 
-    let prompt = "Hello Mistral";
+    mistral.graph.execute_debug();
 
-    let input = mistral.encode(prompt);
-    println!("{:?}", input)
+    println!(
+        "{:?}",
+        mistral
+            .embedding
+            .weight
+            .data()
+            .iter()
+            .skip(1000000)
+            .take(30)
+            .collect_vec()
+    );
+
+    Ok(())
 }
