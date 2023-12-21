@@ -1,12 +1,18 @@
 use std::sync::Arc;
 
 use half::f16;
-use petgraph::stable_graph::NodeIndex;
+use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
 use crate::{
     compilers::metal::*,
-    op::{Function as LFunction, InputTensor, Operator},
-    prelude::*,
+    op::{ConstantValue, InputTensor, Operator},
+    prelude::{
+        metal::{
+            other::MetalSub,
+            prim::{MetalConstant, MetalContiguous, MetalSumReduce},
+        },
+        *,
+    },
 };
 
 use metal_rs::{objc::rc::autoreleasepool, *};
@@ -114,46 +120,122 @@ impl Compiler for ARangeCompiler {
     fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
-        // Look for the mean-reduce pattern
-        // mul(recip(fake_sum_reduce(const_ones)), sum_reduce(x))
-        let mut arange_op = NodeIndex::default();
-        // let (mut one_const, mut contig1, mut contig2, mut contig3, mut contig4) = ()
+        let (
+            mut one_const,
+            mut contig1,
+            mut contig2,
+            mut contig3,
+            mut contig4,
+            mut sum_reduce,
+            mut subtraction_constant,
+            mut subtraction,
+        ) = (
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+        );
 
-        let s = SelectEdge::from(
-            SelectOp::new()
-                .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<LFunction>() {
-                        o.0 == "ARange"
-                    } else {
-                        false
-                    }
-                })
-                .ptr(&mut arange_op),
+        // TODO: Make sure this actually checks the shape transformations to ensure pooling happens
+        let s = SelectEdge::new(
+            SelectEdge::new(
+                SelectEdge::new(
+                    SelectEdge::new(
+                        SelectEdge::new(
+                            SelectEdge::new(
+                                SelectOp::new()
+                                    .check(|o, _| {
+                                        if let Some(c) =
+                                            o.as_any().downcast_ref::<MetalConstant<f16>>()
+                                        {
+                                            if let ConstantValue::Float(f) = c.0 {
+                                                f == 1.0
+                                            } else {
+                                                false
+                                            }
+                                        } else {
+                                            false
+                                        }
+                                    })
+                                    .ptr(&mut one_const),
+                                SelectOp::new()
+                                    .ty::<MetalContiguous<f16>>()
+                                    .ptr(&mut contig1),
+                            ),
+                            SelectOp::new()
+                                .ty::<MetalContiguous<f16>>()
+                                .ptr(&mut contig2),
+                        ),
+                        SelectOp::new()
+                            .ty::<MetalContiguous<f16>>()
+                            .ptr(&mut contig3),
+                    ),
+                    SelectOp::new()
+                        .ty::<MetalContiguous<f16>>()
+                        .ptr(&mut contig4),
+                ),
+                SelectOp::new()
+                    .ty::<MetalSumReduce<f16>>()
+                    .ptr(&mut sum_reduce),
+            ),
+            SelectEdge::new(
+                SelectOp::new()
+                    .check(|o, _| {
+                        if let Some(c) = o.as_any().downcast_ref::<MetalConstant<f16>>() {
+                            if let ConstantValue::Float(f) = c.0 {
+                                f == 1.0
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    })
+                    .ptr(&mut subtraction_constant),
+                SelectOp::new().ty::<MetalSub<f16>>().ptr(&mut subtraction),
+            ),
         );
 
         for _ in s.search(graph) {
-            let src = graph.get_sources(arange_op)[0].2;
-            let new_arange = graph
+            let arange_amount = {
+                let sh = graph
+                    .graph
+                    .edge_weight(
+                        graph
+                            .graph
+                            .edges_connecting(one_const, contig1)
+                            .next()
+                            .unwrap()
+                            .id(),
+                    )
+                    .unwrap()
+                    .as_data()
+                    .unwrap()
+                    .2;
+                sh.dims[sh.indexes[sh.len() - 1]]
+            };
+            let arange_op = graph
                 .add_op(MetalARange::new(
                     dev.clone(),
                     queue.clone(),
-                    src.shape()[2].clone(),
+                    arange_amount.into(),
                     &graph.dyn_map,
                 ))
                 .finish();
+            move_outgoing_edge(subtraction, arange_op, &mut graph.graph);
 
-            // Create edges to dests
-            move_outgoing_edge(arange_op, new_arange, &mut graph.graph);
-            move_references(
-                &mut graph.id_remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                arange_op,
-                new_arange,
-            );
-
-            // Remove the old op
-            graph.graph.remove_node(arange_op);
+            graph.graph.remove_node(one_const);
+            graph.graph.remove_node(contig1);
+            graph.graph.remove_node(contig2);
+            graph.graph.remove_node(contig3);
+            graph.graph.remove_node(contig4);
+            graph.graph.remove_node(sum_reduce);
+            graph.graph.remove_node(subtraction);
+            graph.graph.remove_node(subtraction_constant);
         }
     }
 }
