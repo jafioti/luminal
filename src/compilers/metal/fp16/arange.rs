@@ -117,6 +117,7 @@ impl Compiler for ARangeCompiler {
         // Look for the mean-reduce pattern
         // mul(recip(fake_sum_reduce(const_ones)), sum_reduce(x))
         let mut arange_op = NodeIndex::default();
+        // let (mut one_const, mut contig1, mut contig2, mut contig3, mut contig4) = ()
 
         let s = SelectEdge::from(
             SelectOp::new()
