@@ -76,6 +76,21 @@ impl Graph {
     }
 }
 
+// Gather batch of batches from 2D embedding matrix
+impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
+    pub fn gather<S1: Dimension, S2: Dimension>(
+        self,
+        indexes: GraphTensor<(S1, S2)>,
+    ) -> GraphTensor<(S1, S2, Const<DIM>)> {
+        let one_hot = indexes
+            .graph()
+            .arange::<S>()
+            .expand::<(S1, S2, S), _>()
+            .equals(indexes.expand());
+        (one_hot.expand::<(S1, S2, S, Const<DIM>), _>() * self.expand()).sum_reduce::<_, Axis<2>>()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     crate::test_imports!();
