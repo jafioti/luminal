@@ -29,11 +29,16 @@ impl Mistral {
 
     // Method to encode text as vector
     pub fn encode(self, text: &str) -> Vec<f32> {
-        self.tokenizer
+        let mut vector = self
+            .tokenizer
             .encode(text, None, text.len(), &TruncationStrategy::LongestFirst, 0)
             .token_ids
             .iter()
             .map(|&x| x as f32)
-            .collect_vec()
+            .collect_vec();
+
+        vector.insert(0, 1.0); // Start token
+
+        vector
     }
 }
