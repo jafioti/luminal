@@ -4,16 +4,18 @@ use luminal::{
     nn::{linear::Linear, norm::RMSNorm},
     prelude::*,
 };
-use memmap2::MmapOptions;
+use memmap2::{Mmap, MmapOptions};
 use rust_tokenizers::{
     error::TokenizerError,
     tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy},
 };
 use safetensors::{tensor::TensorView, SafeTensorError, SafeTensors};
 use std::{
+    collections::HashMap,
     fs::File,
     ops::{Add, Div},
 };
+use yoke::{Yoke, Yokeable};
 
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
@@ -253,6 +255,9 @@ pub struct Mistral {
     pub lm_head: Linear<HIDDEN_DIM, VOCAB_SIZE>,
 }
 
+#[derive(Yokeable)]
+struct SafeTensors_<'a>(SafeTensors<'a>);
+
 impl Mistral {
     // Forward pass
     pub fn forward<Batch: Dimension, SequenceLength: Dimension>(
@@ -288,7 +293,7 @@ impl Mistral {
         // Create the transformer layers
         let transformer_layers = [0..NUM_LAYERS]
             .iter()
-            .map(|i| TransformerBlock {
+            .map(|_| TransformerBlock {
                 attention: Attention {
                     q_proj: graph.tensor(),
                     k_proj: graph.tensor(),
@@ -337,32 +342,61 @@ impl Mistral {
         vector
     }
 
-    // Method to load weights from file
-    pub fn load_safe_tensors_from_file(&mut self, filename: &str) -> Result<(), String> {
-        let file = File::open(filename).map_err(|e| e.to_string())?;
+    // // Method to load weights from file
+    // pub fn load_safe_tensors_from_file(&mut self, filename: &str) -> Result<(), String> {
+    //     let file = File::open(filename).map_err(|e| e.to_string())?;
 
-        let buffer = unsafe { MmapOptions::new().map(&file).map_err(|e| e.to_string())? };
+    //     let buffer = unsafe { MmapOptions::new().map(&file).map_err(|e| e.to_string())? };
 
-        let tensors = SafeTensors::deserialize(&buffer).map_err(|e| e.to_string())?;
+    //     let tensors = SafeTensors::deserialize(&buffer).map_err(|e| e.to_string())?;
 
-        let _ = self
-            .load_safe_tensors(&tensors)
-            .map_err(|e| e.to_string())?;
+    //     let _ = self
+    //         .load_safe_tensors(&tensors)
+    //         .map_err(|e| e.to_string())?;
+
+    //     Ok(())
+    // }
+
+    pub unsafe fn load_safe_tensors_from_files(
+        &mut self,
+        file_paths: Vec<String>,
+    ) -> Result<(), String> {
+        let mut variable_file_mapper = HashMap::new();
+        let mut file_tensor_mapper = HashMap::new();
+
+        // First, we read the tensors from all the files
+        for file_path in file_paths.iter() {
+            let file = File::open(file_path).map_err(|e| e.to_string())?;
+            let buffer = MmapOptions::new().map(&file).map_err(|e| e.to_string())?;
+            let tensors =
+                Yoke::<SafeTensors_<'static>, Mmap>::try_attach_to_cart(buffer, |data| {
+                    let tensors = SafeTensors::deserialize(data).map_err(|e| e.to_string())?;
+                    Ok::<_, String>(SafeTensors_(tensors))
+                })?;
+
+            for name in tensors.get().0.names() {
+                variable_file_mapper.insert(name.to_string(), file_path.to_string());
+            }
+
+            file_tensor_mapper.insert(file_path.to_string(), tensors);
+        }
+
+        // Then we populate the
 
         Ok(())
     }
 
-    // Method to load weights
-    pub fn load_safe_tensors(&mut self, tensors: &SafeTensors<'_>) -> Result<(), SafeTensorError> {
-        // Pull in the embeddings
-        let embeddings_safe_tensor = tensors.tensor("model.embed_tokens.weight")?;
+    // // Method to load weights
+    // pub fn load_safe_tensors(&mut self, tensors: &SafeTensors<'_>) -> Result<(), SafeTensorError> {
+    //     // Pull in the embeddings
+    //     let embeddings_safe_tensor = tensors.tensor("model.embed_tokens.weight")?;
 
-        // Convert to f32
-        let embeddings = convert_vector_bf16_f32(&embeddings_safe_tensor);
+    //     // Convert to f32
+    //     let embeddings = convert_vector_bf16_f32(&embeddings_safe_tensor);
 
-        // Apply to embeddings layer
-        self.embedding.set(embeddings);
+    //     // Apply to embeddings layer
+    //     self.embedding.set(embeddings);
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 }
