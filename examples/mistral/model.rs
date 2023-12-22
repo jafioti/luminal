@@ -283,12 +283,42 @@ impl Mistral {
         let mut graph = Box::new(Graph::new());
 
         // Create the embedding
-        // let embedding = Linear::initialize(graph.as_mut());
+        let embedding = graph.tensor();
+
+        // Create the transformer layers
+        let transformer_layers = [0..NUM_LAYERS]
+            .iter()
+            .map(|i| TransformerBlock {
+                attention: Attention {
+                    q_proj: graph.tensor(),
+                    k_proj: graph.tensor(),
+                    v_proj: graph.tensor(),
+                    o_proj: graph.tensor(),
+                    rotary_embedding_frequencies: graph.tensor(),
+                },
+                attention_norm: RMSNorm::initialize(graph.as_mut()),
+                feed_forward: FeedForward {
+                    w1: graph.tensor(),
+                    w2: graph.tensor(),
+                    w3: graph.tensor(),
+                },
+                feed_forward_norm: RMSNorm::initialize(graph.as_mut()),
+            })
+            .collect_vec();
+
+        // Create the norm
+        let norm = RMSNorm::initialize(graph.as_mut());
+
+        // Create the lm head
+        let lm_head = Linear::initialize(graph.as_mut());
 
         Ok(Self {
             tokenizer,
             graph,
-            // embedding,
+            embedding,
+            transformer_layers,
+            norm,
+            lm_head,
         })
     }
 
@@ -331,7 +361,7 @@ impl Mistral {
         let embeddings = convert_vector_bf16_f32(&embeddings_safe_tensor);
 
         // Apply to embeddings layer
-        self.embedding.weight.set(embeddings);
+        self.embedding.set(embeddings);
 
         Ok(())
     }
