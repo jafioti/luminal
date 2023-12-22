@@ -78,7 +78,6 @@ mod tests {
         let b = model.forward(a).retrieve();
         let batch_out = model.forward(batch).retrieve();
 
-        cx.compile(MetalFp16Compiler::default());
         cx.execute();
 
         let d_dev = Cpu::default();
