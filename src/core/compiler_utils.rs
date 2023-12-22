@@ -436,7 +436,7 @@ fn match_nodes(
             return Some(mapping);
         }
         if current_index >= topo_order.len() {
-            return None;
+            continue;
         }
         let node_g1 = topo_order[current_index];
         for node_g0 in g0.node_indices() {

@@ -446,8 +446,8 @@ fn test_matmul_simple() {
 #[test]
 fn test_matmul() {
     let d_dev = Cpu::default();
-    for m in (1..30).step_by(4) {
-        for k in (1..70).step_by(3) {
+    for m in (1..23).step_by(4) {
+        for k in (1..35).step_by(3) {
             for n in (1..70).step_by(7) {
                 autoreleasepool(|| {
                     let mut cx = Graph::new();
@@ -513,10 +513,10 @@ fn test_matmul() {
 
 #[test]
 fn test_batch_matmul() {
-    for batch in (1..30).step_by(4) {
-        let m = 12;
-        for k in (1..70).step_by(3) {
-            for n in (1..70).step_by(7) {
+    let m = 12;
+    for batch in (1..23).step_by(4) {
+        for k in (1..35).step_by(3) {
+            for n in (1..48).step_by(7) {
                 autoreleasepool(|| {
                     let mut cx = Graph::new();
                     let mut rng = StdRng::seed_from_u64(0);

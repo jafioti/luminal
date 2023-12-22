@@ -194,11 +194,9 @@ fn attn_forward<
             HEAD_DIM.into(),
         ])
         .permute::<_, Axes4<0, 2, 1, 3>>();
-    let (q, k) = attn.rotary_embed.forward((
-        q.reshape::<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>(),
-        k.reshape(),
-        prev_seq,
-    ));
+    let (q, k) = attn
+        .rotary_embed
+        .forward((q.permute(), k.permute(), prev_seq));
 
     (q, k, v)
 }
