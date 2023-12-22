@@ -1,5 +1,7 @@
 use std::ops::{Add, Mul};
 
+use num::complex::ComplexFloat;
+
 use crate::{op, prelude::*};
 
 impl<S: Shape> GraphTensor<S> {
@@ -106,6 +108,10 @@ impl<S: Shape> GraphTensor<S> {
     // Approximate, see full impl here: https://github.com/tinygrad/tinygrad/blob/a32c67760140dd26b60d7932268f2e62e96a66e0/tinygrad/tensor.py#L568
     pub fn pow(self, e: f32) -> GraphTensor<S> {
         self.abs().log().mul(e).exp()
+    }
+
+    pub fn pow2(self, base: f32) -> GraphTensor<S> {
+        self.mul(base.abs().ln()).exp()
     }
 
     /// The Rectified Linear Unit activation function

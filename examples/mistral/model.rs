@@ -73,8 +73,47 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> torch.Te
     t = torch.arange(end, device=freqs.device)  # type: ignore
     freqs = torch.outer(t, freqs).float()  # type: ignore
     return torch.polar(torch.ones_like(freqs), freqs)  # complex64
+*/
+
+/*
+ let t = graph.arange::<SequenceLength>();
+        let frequencies = t.expand::<(SequenceLength, Const<1>), _>().matmul(
+            self.rotary_embedding_frequencies
+                .expand::<R2<1, ATTENTION_HEAD_DIM_OVER_2>, _>(),
+        );
+        let embeddings = frequencies
+            .concat_along::<(SequenceLength, Const<ATTENTION_HEAD_DIM>), Axis<1>, _>(frequencies);
+
+        let (sin, cos) = (embeddings.sin(), embeddings.cos());
 
 */
+
+pub fn pre_compute_rotary_embedding_frequencies<
+    const HIDDEN_DIM_OVER_2: usize,
+    SequenceLength: Dimension,
+>(
+    graph: &mut Graph,
+) -> (
+    GraphTensor<(SequenceLength, Const<HIDDEN_DIM_OVER_2>)>,
+    GraphTensor<(SequenceLength, Const<HIDDEN_DIM_OVER_2>)>,
+) {
+    let theta: f32 = 10000.0;
+    let frequencies =
+        (graph.arange::<Const<HIDDEN_DIM_OVER_2>>() * 2.0) / (HIDDEN_DIM_OVER_2 as f32 * 2.0);
+    let frequencies = frequencies
+        .pow2(theta)
+        .recip()
+        .reshape::<R2<1, HIDDEN_DIM_OVER_2>>();
+    let t = graph
+        .arange::<SequenceLength>()
+        .reshape::<(SequenceLength, Const<1>)>();
+    let frequencies = t.matmul(frequencies);
+
+    let real = frequencies.cos();
+    let imaginary = frequencies.sin();
+
+    (real, imaginary)
+}
 
 impl Attention {
     // Helper to get a graph

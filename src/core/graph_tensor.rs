@@ -168,21 +168,21 @@ pub fn pretty_print_tensor_recursive(
         write!(f, "{}[", indent)?;
         if data.len() > 10 {
             for (i, value) in data.iter().take(5).enumerate() {
-                write!(f, "{:.2}", value)?;
+                write!(f, "{:.4}", value)?;
                 if i < data.len() - 1 {
                     write!(f, ", ")?;
                 }
             }
             write!(f, "..., ")?;
             for (i, value) in data.iter().skip(data.len() - 5).enumerate() {
-                write!(f, "{:.2}", value)?;
+                write!(f, "{:.4}", value)?;
                 if i < data.len() - 1 {
                     write!(f, ", ")?;
                 }
             }
         } else {
             for (i, value) in data.iter().enumerate() {
-                write!(f, "{:.2}", value)?;
+                write!(f, "{:.4}", value)?;
                 if i < data.len() - 1 {
                     write!(f, ", ")?;
                 }
