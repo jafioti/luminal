@@ -1,4 +1,4 @@
-use half::bf16;
+use half::{bf16, f16};
 use itertools::Itertools;
 use luminal::{nn::linear::Linear, prelude::*};
 use memmap2::{Mmap, MmapOptions};
@@ -7,12 +7,17 @@ use rust_tokenizers::{
     tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy},
 };
 use safetensors::{tensor::TensorView, SafeTensorError, SafeTensors};
-use std::fs::File;
+use std::{
+    fs::File,
+    ops::{Add, Div},
+};
 
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
 pub const LAYERS: usize = 32;
+pub const ATTENTION_HEAD_DIM: usize = HIDDEN_DIM / LAYERS;
+pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const ATTENTION_PROJECTION_DIM: usize = 1024;
 pub const MLP_PROJECTION_DIM: usize = 14336;
 
@@ -33,6 +38,100 @@ pub fn convert_vector_bf16_f32(tensor_view: &TensorView<'_>) -> Vec<f32> {
     output
 }
 
+// Rotary Embedding Layer
+pub struct RotaryEmbedding<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> {
+    pub inv_freq: GraphTensor<R1<HEAD_DIM_OVER_2>>,
+}
+
+// Create the self-Attention layer
+pub struct Attention {
+    pub q_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
+    pub k_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
+    pub v_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
+    pub o_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
+}
+
+impl Attention {
+    fn forward<Batch: Dimension, SequenceLength: Dimension>(
+        &self,
+        x: GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
+    ) -> GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)> {
+        let xq = x
+            .matmul(self.q_proj.permute())
+            .dyn_reshape::<(
+                Batch,
+                SequenceLength,
+                Const<NUM_ATTENTION_HEADS>,
+                Const<ATTENTION_HEAD_DIM>,
+            )>(vec![
+                Batch::const_size(),
+                SequenceLength::const_size(),
+                NUM_ATTENTION_HEADS.into(),
+                ATTENTION_HEAD_DIM.into(),
+            ])
+            .permute::<_, Axes4<0, 2, 1, 3>>();
+        let xk = x
+            .matmul(self.k_proj.permute())
+            .dyn_reshape::<(
+                Batch,
+                SequenceLength,
+                Const<NUM_ATTENTION_HEADS>,
+                Const<ATTENTION_HEAD_DIM>,
+            )>(vec![
+                Batch::const_size(),
+                SequenceLength::const_size(),
+                NUM_ATTENTION_HEADS.into(),
+                ATTENTION_HEAD_DIM.into(),
+            ])
+            .permute::<_, Axes4<0, 2, 1, 3>>();
+        let xv = x
+            .matmul(self.v_proj.permute())
+            .dyn_reshape::<(
+                Batch,
+                SequenceLength,
+                Const<NUM_ATTENTION_HEADS>,
+                Const<ATTENTION_HEAD_DIM>,
+            )>(vec![
+                Batch::const_size(),
+                SequenceLength::const_size(),
+                NUM_ATTENTION_HEADS.into(),
+                ATTENTION_HEAD_DIM.into(),
+            ])
+            .permute::<_, Axes4<0, 2, 1, 3>>();
+
+        // We apply rotary embeddings here
+
+        // Attention mask
+        let attention_mask = self
+            .q_proj
+            .graph()
+            .triu::<SequenceLength, SequenceLength>(1)
+            * f16::MIN.to_f32();
+
+        // Finally we compute the outputs (attention calculation)
+        let xo = xq
+            .matmul(xk.permute())
+            .div((ATTENTION_HEAD_DIM as f64).sqrt() as f32)
+            .add(attention_mask.expand())
+            .softmax::<3>()
+            .matmul(xv)
+            .permute::<(
+                Batch,
+                SequenceLength,
+                Const<NUM_ATTENTION_HEADS>,
+                Const<ATTENTION_HEAD_DIM>,
+            ), _>()
+            .dyn_reshape::<(Batch, SequenceLength, Const<HIDDEN_DIM>)>(vec![
+                Batch::const_size(),
+                SequenceLength::const_size(),
+                HIDDEN_DIM.into(),
+            ])
+            .matmul(self.o_proj.permute());
+
+        return xo;
+    }
+}
+
 pub struct Mistral {
     // Graph
     pub graph: Box<Graph>,
@@ -42,6 +141,8 @@ pub struct Mistral {
 
     // Embedding
     pub embedding: Linear<VOCAB_SIZE, HIDDEN_DIM>,
+    // Decoder Layers
+    // pub layers: Vec<DecoderLayer>
 }
 
 impl Mistral {
