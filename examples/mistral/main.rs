@@ -9,7 +9,7 @@ fn main() -> Result<(), String> {
         Mistral::new("./examples/mistral/setup/mistral-7b-hf/tokenizer.model").unwrap();
     let filename = "./examples/mistral/setup/mistral-7b-hf/model-00001-of-00003.safetensors";
     mistral.load_safe_tensors_from_file(&filename)?;
-    mistral.embedding.weight.retrieve();
+    mistral.embedding.retrieve();
     mistral
         .graph
         .compile(<(PreGenericCompiler, MetalFp16Compiler, PostGenericCompiler)>::default());
@@ -20,7 +20,6 @@ fn main() -> Result<(), String> {
         "{:?}",
         mistral
             .embedding
-            .weight
             .data()
             .iter()
             .skip(1000000)
