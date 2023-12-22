@@ -9,7 +9,7 @@ use crate::{
     prelude::*,
 };
 
-pub type MetalBinaryCompilers<T> = (MetalSubtractionCompiler<T>, MetalEqualCompiler<T>);
+use super::other::MetalARange;
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
 pub struct MetalSub<T>(
@@ -144,55 +144,59 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
     fn compile(&self, graph: &mut Graph) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
-        let (mut a, mut b, mut neg_one, mut mul, mut add) = (
-            NodeIndex::default(),
-            NodeIndex::default(),
+        let (mut neg_one, mut mul, mut add) = (
             NodeIndex::default(),
             NodeIndex::default(),
             NodeIndex::default(),
         );
         let s = SelectEdge::new(
-            SelectOp::new().ptr(&mut a),
             SelectEdge::new(
-                SelectEdge::new(
-                    SelectOp::new()
-                        .check(|o, _| {
-                            if let Some(c) = o.as_any().downcast_ref::<MetalConstant<T>>() {
-                                if let ConstantValue::Float(f) = c.0 {
-                                    f == -1.
-                                } else {
-                                    false
-                                }
+                SelectOp::new()
+                    .check(|o, _| {
+                        if let Some(c) = o.as_any().downcast_ref::<MetalConstant<T>>() {
+                            if let ConstantValue::Float(f) = c.0 {
+                                f == -1.
                             } else {
                                 false
                             }
-                        })
-                        .ptr(&mut neg_one),
-                    SelectEdge::new(
-                        SelectOp::new().ptr(&mut b),
-                        SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul),
-                    ),
-                ),
-                SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add),
+                        } else {
+                            false
+                        }
+                    })
+                    .ptr(&mut neg_one),
+                SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul),
             ),
+            SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add),
         );
 
         for _ in s.search(graph) {
-            if check_no_delete(graph, &[a, b, neg_one, mul, add]) {
+            if check_no_delete(graph, &[neg_one, mul, add]) {
                 continue;
             }
-            let a_edge = graph
+            let (a, a_edge) = graph
                 .graph
-                .edge_weight(graph.graph.edges_connecting(a, add).next().unwrap().id())
-                .unwrap()
-                .as_data()
+                .edges_directed(add, petgraph::Direction::Incoming)
+                .find(|e| e.source() != mul)
+                .map(|e| (e.source(), e.weight().as_data().unwrap()))
                 .unwrap();
-            let b_edge = graph
+            let (b, b_edge) = graph
                 .graph
-                .edge_weight(graph.graph.edges_connecting(b, mul).next().unwrap().id())
-                .unwrap()
-                .as_data()
+                .edges_directed(mul, petgraph::Direction::Incoming)
+                .find(|e| e.source() != neg_one)
+                .map(|e| (e.source(), e.weight().as_data().unwrap()))
                 .unwrap();
+            let b_final_shape = graph
+                .graph
+                .edges_connecting(mul, add)
+                .next()
+                .unwrap()
+                .weight()
+                .as_data()
+                .unwrap()
+                .2;
+            if b_final_shape != b_edge.2.contiguous() {
+                continue;
+            }
             let sub = graph
                 .add_op(MetalSub::<T>::new(
                     a_edge.2,
@@ -398,7 +402,13 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
             if lt1_inputs != lt2_inputs {
                 continue;
             }
-            let (a, b) = (lt1_inputs[0], lt1_inputs[1]);
+            let inputs = graph
+                .graph
+                .edges_directed(less_than1, petgraph::Direction::Incoming)
+                .sorted_by_key(|e| e.weight().as_data().unwrap().0)
+                .map(|e| e.source())
+                .collect::<Vec<_>>();
+            let (a, b) = (inputs[0], inputs[1]);
             if check_no_delete(graph, &[a, b, less_than1, less_than2, add, one, sub]) {
                 continue;
             }
@@ -448,5 +458,181 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
             graph.graph.remove_node(one);
             graph.graph.remove_node(sub);
         }
+    }
+}
+
+#[derive(LuminalEq, LuminalPrint, Clone)]
+pub struct MetalGather<T>(ComputePipelineState, Device, usize, PhantomData<T>);
+
+impl<T: MetalFloat> MetalGather<T> {
+    fn new(dev: Device, embed_dim: usize) -> Self {
+        Self(compile_function("metal_gather", &format!(
+            "
+#include <metal_stdlib>
+using namespace metal;
+kernel void metal_gather(device float *inp [[buffer(0)]], device {} *weights [[buffer(1)]], device {} *out [[buffer(2)]], device uint& n_embeddings [[buffer(3)]], device uint& embedding_dim [[buffer(4)]], uint2 i_ [[thread_position_in_grid]]) {{
+    if (i_.x < n_embeddings && i_.y < embedding_dim) {{
+        out[i_.x * embedding_dim + i_.y] = weights[(uint)inp[i_.x] * embedding_dim + i_.y];
+    }}
+}}", T::type_name(), T::type_name()
+        ), &dev), dev, embed_dim, Default::default())
+    }
+}
+
+impl<T: MetalFloat> Operator for MetalGather<T> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        autoreleasepool(|| {
+            // Setup buffers
+            let indexes = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Vec<f32>>()
+                .unwrap();
+            let index_buffer = self.1.new_buffer_with_data(
+                unsafe { std::mem::transmute(indexes.as_ptr()) },
+                (indexes.len() * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
+            let b_inp = tensors[1]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Buffer>()
+                .unwrap();
+
+            // Setup command queue / command buffer / encoder
+            let command_queue = self.1.new_command_queue();
+            let command_buffer = command_queue.new_command_buffer();
+
+            let out = self.1.new_buffer(
+                (indexes.len() * self.2 * std::mem::size_of::<f16>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
+
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.0);
+
+            // Set inputs
+            encoder.set_buffer(0, Some(&index_buffer), 0);
+            encoder.set_buffer(1, Some(b_inp), 0);
+            encoder.set_buffer(2, Some(&out), 0);
+            encoder.set_int(3, indexes.len() as u32);
+            encoder.set_int(4, self.2 as u32);
+
+            // Execute
+            encoder.dispatch_threads(
+                MTLSize {
+                    width: indexes.len() as u64,
+                    height: self.2 as u64,
+                    depth: 1,
+                },
+                MTLSize {
+                    width: 16,
+                    height: 16,
+                    depth: 1,
+                },
+            );
+            encoder.end_encoding();
+
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
+
+            vec![Tensor {
+                data: Box::new(out),
+            }]
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct MetalGatherCompiler<T: MetalFloat>(PhantomData<T>);
+
+impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
+    fn compile(&self, graph: &mut Graph) {
+        let dev = Device::system_default().unwrap();
+        let (mut ind_copy, mut arange, mut equal, mut mul, mut sum_reduce) = (
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+        );
+        let s = SelectEdge::new(
+            SelectEdge::new(
+                SelectEdge::new(
+                    SelectOp::new().ty::<MetalARange<T>>().ptr(&mut arange),
+                    SelectEdge::new(
+                        SelectOp::new()
+                            .ty::<MetalCopyToDevice<T>>()
+                            .ptr(&mut ind_copy),
+                        SelectOp::new().ty::<MetalEqual<T>>().ptr(&mut equal),
+                    ),
+                ),
+                SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul),
+            ),
+            SelectOp::new()
+                .ty::<MetalSumReduce<T>>()
+                .ptr(&mut sum_reduce),
+        );
+        for _ in s.search(graph) {
+            if check_no_delete(graph, &[arange, ind_copy, equal, mul, sum_reduce]) {
+                continue;
+            }
+            let embedding_dim = graph
+                .graph
+                .edges_directed(mul, petgraph::Direction::Incoming)
+                .find(|e| e.source() != equal && !e.weight().is_schedule())
+                .unwrap()
+                .weight()
+                .as_data()
+                .unwrap()
+                .2
+                .shape()[3]
+                .to_usize()
+                .unwrap();
+            let gather = graph
+                .add_op(MetalGather::<T>::new(dev.clone(), embedding_dim))
+                .finish();
+            move_incoming_edge(ind_copy, gather, &mut graph.graph);
+            graph.graph.remove_node(equal);
+            move_incoming_edge(mul, gather, &mut graph.graph);
+            move_outgoing_edge(sum_reduce, gather, &mut graph.graph);
+            graph.graph.remove_node(arange);
+            graph.graph.remove_node(ind_copy);
+            graph.graph.remove_node(mul);
+            graph.graph.remove_node(sum_reduce);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    crate::test_imports!();
+    #[test]
+    fn test_subtraction() {
+        let mut cx = Graph::new();
+        let a = cx
+            .tensor::<R1<10>>()
+            .set(vec![1., 2., 3., 4., 5., 6., 7., 8., 9., 10.]);
+        let b = cx.tensor::<R0>().set(vec![1.]);
+        let c = (a - b.expand()).retrieve();
+        let d = (-a + b.expand()).retrieve();
+
+        cx.execute();
+
+        let unopt_c = c.data();
+        c.drop();
+        let unopt_d = d.data();
+        d.drop();
+
+        cx.compile(MetalFp16Compiler::default());
+        cx.execute();
+
+        assert_close(&unopt_c, &c.data());
+        assert_close(&unopt_d, &d.data());
     }
 }
