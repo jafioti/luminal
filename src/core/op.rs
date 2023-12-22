@@ -85,11 +85,11 @@ impl Operator for Print {
             println!("{} Data: {:?}", i + 1, &d[..10.min(d.len())]);
             println!("{} Shape: {:?}", i + 1, tracker);
             // let mut data = vec![0.; d.len()];
-            // let ind = tracker.indexer();
+            // let (ind, val) = (tracker.index_expression(), tracker.valid_expression());
             // #[allow(unused_mut)]
             // for (i, mut r) in data.iter_mut().enumerate() {
-            //     if let Some(n) = ind.index(i) {
-            //         *r = d[n];
+            //     if val.exec_single_var(i) != 0 {
+            //         *r = d[ind.exec_single_var(i)];
             //     }
             // }
             // std::fs::write(

@@ -189,12 +189,13 @@ impl<S: Shape> GraphTensor<S> {
         rhs: GraphTensor<Rhs>,
     ) -> GraphTensor<Dst> {
         let dim = Ax::as_array()[0] as usize;
+        // Create padding
         let mut a_padding = self.shape.padding;
         a_padding[dim].1 = rhs.shape.shape()[dim].clone().into();
         let mut b_padding = rhs.shape.padding;
         b_padding[dim].0 = self.shape.shape()[dim].clone().into();
-        let lhs = self.pad(&a_padding);
-        lhs + rhs.pad(&b_padding)
+        // Pad and add
+        self.pad(&a_padding) + rhs.pad(&b_padding)
     }
 }
 
