@@ -8,7 +8,7 @@ use crate::{
     op::{ConstantValue, InputTensor, Operator},
     prelude::{
         metal::{
-            other::MetalSub,
+            binary::MetalSub,
             prim::{MetalConstant, MetalContiguous, MetalSumReduce},
         },
         *,

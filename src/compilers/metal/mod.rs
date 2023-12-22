@@ -10,6 +10,7 @@ mod fp32;
 pub use fp32::*;
 pub mod fp16;
 pub use fp16::*;
+mod binary;
 mod common_buffer;
 mod other;
 mod prim;
