@@ -348,6 +348,34 @@ fn get_tensor<'a>(
 }
 
 impl Mistral {
+    // Infer next token
+    pub fn infer_next_token(&mut self, text: &str) -> String {
+        // First, we encode the text
+        let token_ids = self.encode(text);
+        let n_tokens = token_ids.len();
+
+        // Create the input tensor
+        let input = self.graph.tensor::<(Const<1>, Dyn<'s'>)>();
+        input.set_dyn(token_ids, vec![1, n_tokens]);
+
+        // Call forward
+        let output_probabilities = self.forward(input);
+        // output_probabilities.retrieve();
+
+        // Do the sampling in the graph computation
+        let output_token_ids = output_probabilities.max_reduce::<(Const<1>, Dyn<'s'>), Axis<2>>();
+        output_token_ids.retrieve();
+
+        // Execute the graph
+        self.graph.execute_debug();
+
+        // Call decode on the output token ids
+        let output_token_ids = output_token_ids.data();
+        let output_text = self.decode(output_token_ids);
+
+        output_text
+    }
+
     // Forward pass
     pub fn forward<Batch: Dimension, SequenceLength: Dimension>(
         &mut self,
@@ -415,7 +443,7 @@ impl Mistral {
     }
 
     // Method to encode text as vector
-    pub fn encode(&mut self, text: &str) -> Vec<f32> {
+    pub fn encode(&self, text: &str) -> Vec<f32> {
         let mut vector = self
             .tokenizer
             .encode(text, None, text.len(), &TruncationStrategy::LongestFirst, 0)
@@ -427,6 +455,14 @@ impl Mistral {
         vector.insert(0, 1.0); // Start token
 
         vector
+    }
+
+    // Method to decode tokens as text
+    pub fn decode(&self, token_ids: Vec<f32>) -> String {
+        let binding = token_ids.iter().map(|i| *i as i64).collect_vec();
+        let token_ids = binding.as_slice();
+
+        self.tokenizer.decode(token_ids, true, false)
     }
 
     pub unsafe fn load_safe_tensors_from_files(

@@ -55,6 +55,11 @@ impl Graph {
         self.constant(1.).expand().cumsum_last_dim() - 1.
     }
 
+    // arange but with shape
+    pub fn arange_<S: Shape>(&mut self) -> GraphTensor<S> {
+        self.constant(1.).expand().cumsum_last_dim() - 1.
+    }
+
     /// Lower left-hand triangle of 1s
     ///
     /// Same API as https://pytorch.org/docs/stable/generated/torch.tril
