@@ -45,52 +45,10 @@ pub fn convert_vector_bf16_f32(tensor_view: &TensorView<'_>) -> Vec<f32> {
     output
 }
 
-// Rotary Embedding helpers
-fn rotate_half<Batch: Dimension, NumHeads: Dimension, Seq: Dimension>(
-    x: GraphTensor<(Batch, NumHeads, Seq, Const<ATTENTION_HEAD_DIM>)>,
-) -> GraphTensor<(Batch, NumHeads, Seq, Const<ATTENTION_HEAD_DIM>)> {
-    let x1 = x
-        .slice((.., .., .., ..ATTENTION_HEAD_DIM_OVER_2))
-        .contiguous();
-    let x2 = x
-        .slice((.., .., .., ATTENTION_HEAD_DIM_OVER_2..))
-        .contiguous();
-    (-x2).concat_along::<(Batch, NumHeads, Seq, Const<ATTENTION_HEAD_DIM>), Axis<3>, _>(x1)
-}
-
-// Create the self-Attention layer
-pub struct Attention {
-    pub q_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
-    pub k_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
-    pub v_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
-    pub o_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
-    pub rotary_embedding_frequencies: GraphTensor<R1<ATTENTION_HEAD_DIM_OVER_2>>,
-}
-
-/*
-def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> torch.Tensor:
-    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-    t = torch.arange(end, device=freqs.device)  # type: ignore
-    freqs = torch.outer(t, freqs).float()  # type: ignore
-    return torch.polar(torch.ones_like(freqs), freqs)  # complex64
-*/
-
-/*
- let t = graph.arange::<SequenceLength>();
-        let frequencies = t.expand::<(SequenceLength, Const<1>), _>().matmul(
-            self.rotary_embedding_frequencies
-                .expand::<R2<1, ATTENTION_HEAD_DIM_OVER_2>, _>(),
-        );
-        let embeddings = frequencies
-            .concat_along::<(SequenceLength, Const<ATTENTION_HEAD_DIM>), Axis<1>, _>(frequencies);
-
-        let (sin, cos) = (embeddings.sin(), embeddings.cos());
-
-*/
-
-pub fn pre_compute_rotary_embedding_frequencies<
-    const HIDDEN_DIM_OVER_2: usize,
+// Rotary Embeddings
+pub fn compute_rotary_embedding_frequencies<
     SequenceLength: Dimension,
+    const HIDDEN_DIM_OVER_2: usize,
 >(
     graph: &mut Graph,
 ) -> (
@@ -115,56 +73,111 @@ pub fn pre_compute_rotary_embedding_frequencies<
     (real, imaginary)
 }
 
+pub fn apply_rotary_embeddings<
+    Batch: Dimension,
+    NumAttentionHeads: Dimension,
+    SequenceLength: Dimension,
+    const ATTENTION_HEAD_DIM: usize,
+    const ATTENTION_HEAD_DIM_OVER_2: usize,
+>(
+    input: GraphTensor<(
+        Batch,
+        NumAttentionHeads,
+        SequenceLength,
+        Const<ATTENTION_HEAD_DIM>,
+    )>,
+    frequencies: (
+        GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM_OVER_2>)>,
+        GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM_OVER_2>)>,
+    ),
+) -> GraphTensor<(
+    Batch,
+    NumAttentionHeads,
+    SequenceLength,
+    Const<ATTENTION_HEAD_DIM>,
+)> {
+    let (real, imaginary) = frequencies;
+
+    // Split into real and imaginary
+    let input_expanded = input.reshape::<(
+        Batch,
+        NumAttentionHeads,
+        SequenceLength,
+        Const<ATTENTION_HEAD_DIM_OVER_2>,
+        Const<2>,
+    )>();
+
+    let input_real = input_expanded
+        .slice((.., .., .., .., ..1))
+        .contiguous()
+        .reshape::<(
+            Batch,
+            NumAttentionHeads,
+            SequenceLength,
+            Const<ATTENTION_HEAD_DIM_OVER_2>,
+        )>();
+
+    let input_imaginary = input_expanded
+        .slice((.., .., .., .., 1..))
+        .contiguous()
+        .reshape::<(
+            Batch,
+            NumAttentionHeads,
+            SequenceLength,
+            Const<ATTENTION_HEAD_DIM_OVER_2>,
+        )>();
+
+    // x = a + bi, y = c + di
+    // x * y = (ac - bd) + (ad + bc)i
+    let (a, b) = (real, imaginary);
+    let (c, d) = (input_real, input_imaginary);
+
+    let output_real = (a.expand() * c) - (b.expand() * d);
+    let output_imaginary = (a.expand() * d) + (b.expand() * c);
+
+    // Finally, we put the real and imaginary together
+    let output_real = output_real
+        .reshape::<(
+            Batch,
+            NumAttentionHeads,
+            SequenceLength,
+            Const<ATTENTION_HEAD_DIM_OVER_2>,
+            Const<1>,
+        )>()
+        .contiguous();
+    let output_imaginary = output_imaginary
+        .reshape::<(
+            Batch,
+            NumAttentionHeads,
+            SequenceLength,
+            Const<ATTENTION_HEAD_DIM_OVER_2>,
+            Const<1>,
+        )>()
+        .contiguous();
+
+    let output = output_real.concat_along::<(
+        Batch,
+        NumAttentionHeads,
+        SequenceLength,
+        Const<ATTENTION_HEAD_DIM_OVER_2>,
+        Const<2>,
+    ), Axis<4>, _>(output_imaginary);
+
+    output.reshape()
+}
+
+// Create the self-Attention layer
+pub struct Attention {
+    pub q_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
+    pub k_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
+    pub v_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
+    pub o_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
+}
+
 impl Attention {
     // Helper to get a graph
     fn graph(&self) -> &mut Graph {
         self.q_proj.graph()
-    }
-
-    // Method to apply rotary embedding
-    fn apply_rotary_embeddings<Batch: Dimension, SequenceLength: Dimension>(
-        &self,
-        xq: GraphTensor<(
-            Batch,
-            Const<NUM_ATTENTION_HEADS>,
-            SequenceLength,
-            Const<ATTENTION_HEAD_DIM>,
-        )>,
-        xk: GraphTensor<(
-            Batch,
-            Const<NUM_ATTENTION_HEADS>,
-            SequenceLength,
-            Const<ATTENTION_HEAD_DIM>,
-        )>,
-    ) -> (
-        GraphTensor<(
-            Batch,
-            Const<NUM_ATTENTION_HEADS>,
-            SequenceLength,
-            Const<ATTENTION_HEAD_DIM>,
-        )>,
-        GraphTensor<(
-            Batch,
-            Const<NUM_ATTENTION_HEADS>,
-            SequenceLength,
-            Const<ATTENTION_HEAD_DIM>,
-        )>,
-    ) {
-        let graph = self.graph();
-        let t = graph.arange::<SequenceLength>();
-        let frequencies = t.expand::<(SequenceLength, Const<1>), _>().matmul(
-            self.rotary_embedding_frequencies
-                .expand::<R2<1, ATTENTION_HEAD_DIM_OVER_2>, _>(),
-        );
-        let embeddings = frequencies
-            .concat_along::<(SequenceLength, Const<ATTENTION_HEAD_DIM>), Axis<1>, _>(frequencies);
-
-        let (sin, cos) = (embeddings.sin(), embeddings.cos());
-
-        let q_embed = (rotate_half(xq) * sin.expand()) + (xq * cos.expand());
-        let k_embed = (rotate_half(xk) * sin.expand()) + (xk * cos.expand());
-
-        (q_embed, k_embed)
     }
 
     // Forward method
@@ -216,7 +229,13 @@ impl Attention {
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         // We apply rotary embeddings
-        (xq, xk) = self.apply_rotary_embeddings(xq, xk);
+        // (xq, xk) = self.apply_rotary_embeddings(xq, xk);
+        let rotary_frequencies = compute_rotary_embedding_frequencies::<
+            SequenceLength,
+            ATTENTION_HEAD_DIM_OVER_2,
+        >(&mut self.graph());
+        let xq = apply_rotary_embeddings(xq, rotary_frequencies);
+        let xk = apply_rotary_embeddings(xk, rotary_frequencies);
 
         // Attention mask
         let attention_mask =
@@ -368,7 +387,6 @@ impl Mistral {
                     k_proj: graph.tensor(),
                     v_proj: graph.tensor(),
                     o_proj: graph.tensor(),
-                    rotary_embedding_frequencies: graph.tensor(),
                 },
                 attention_norm: RMSNorm::initialize(graph.as_mut()),
                 feed_forward: FeedForward {
