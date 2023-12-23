@@ -75,12 +75,21 @@ impl MetalFloat for f16 {
 }
 
 pub trait MetalKernelForward: Debug {
+    /// Annotate the buffer sizes of the intermediate buffers
+    fn intermediate_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<BigExpression> {
+        vec![]
+    }
+    /// Annotate the buffer sizes of the output buffers
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression>;
+    /// Set up the kernel on the buffer
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
         dev: &Device,
         command_buffer: &CommandBufferRef,
-    ) -> Vec<Buffer>;
+        intermediate_buffers: &[&Buffer],
+        output_buffers: &[&Buffer],
+    );
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
@@ -93,13 +102,17 @@ impl Default for MetalKernelWrapper {
 }
 
 impl MetalKernelForward for () {
+    fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<BigExpression> {
+        vec![]
+    }
     fn metal_forward(
         &self,
         _: &[(&Buffer, ShapeTracker)],
         _: &Device,
         _: &CommandBufferRef,
-    ) -> Vec<Buffer> {
-        vec![]
+        _: &[&Buffer],
+        _: &[&Buffer],
+    ) {
     }
 }
 

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{mem::size_of, sync::Arc};
 
 use half::f16;
 use petgraph::stable_graph::NodeIndex;
@@ -65,20 +65,23 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
 }
 
 impl MetalKernelForward for MetalMeanReduce {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+        let mut sh = input_shapes[0];
+        sh.remove_dim(self.3);
+        vec![sh.n_elements() * size_of::<f16>()]
+    }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        dev: &Device,
+        _: &Device,
         command_buffer: &CommandBufferRef,
-    ) -> Vec<Buffer> {
+        _: &[&Buffer],
+        output_buffers: &[&Buffer],
+    ) {
         let mut sh = inputs[0].1;
         sh.remove_dim(self.3);
-        let inp_size = sh.contiguous().n_elements();
+        let inp_size = sh.n_elements().to_usize().unwrap();
 
-        let out = dev.new_buffer(
-            (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
         let front_size: usize = inputs[0]
             .1
             .shape()
@@ -101,7 +104,7 @@ impl MetalKernelForward for MetalMeanReduce {
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
-        encoder.set_buffer(1, Some(&out), 0);
+        encoder.set_buffer(1, Some(output_buffers[0]), 0);
         encoder.set_int(2, inp_size as u32);
         encoder.set_int(3, front_size as u32);
         encoder.set_int(4, back_size as u32);
@@ -111,8 +114,6 @@ impl MetalKernelForward for MetalMeanReduce {
         // Execute
         encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
-
-        vec![out]
     }
 }
 
@@ -127,14 +128,18 @@ impl Operator for MetalMeanReduce {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
+            let mut sh = tensors[0].1;
+            sh.remove_dim(self.3);
+            let inp_size = sh.n_elements().to_usize().unwrap();
+            let out = self.2.new_buffer(
+                (inp_size * std::mem::size_of::<f16>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
 
             // Setup command queue / command buffer / encoder
             let command_buffer = self.1.new_command_buffer();
 
-            let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
-                .pop()
-                .unwrap();
+            self.metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer, &[], &[&out]);
 
             command_buffer.commit();
             command_buffer.wait_until_completed();

@@ -672,6 +672,18 @@ impl<S: ExpressionStorage, E: Into<Self>> BitOr<E> for GenericExpression<S> {
     }
 }
 
+impl<S: ExpressionStorage> std::iter::Product for GenericExpression<S> {
+    fn product<I: Iterator<Item = GenericExpression<S>>>(mut iter: I) -> Self {
+        let Some(mut p) = iter.next() else {
+            return 0.into();
+        };
+        for n in iter {
+            p = p * n;
+        }
+        p
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

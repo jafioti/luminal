@@ -6,7 +6,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use metal_rs::{Buffer, CommandBuffer, CommandQueue, Device};
+use metal_rs::{Buffer, CommandBuffer, CommandQueue, Device, MTLResourceOptions};
 use petgraph::{
     stable_graph::NodeIndex,
     visit::EdgeRef,
@@ -178,6 +178,7 @@ impl Compiler for CommonBufferCompiler {
                     wrapper,
                     dev: dev.clone(),
                     buffer: buffer.clone(),
+                    dyn_map: &graph.dyn_map,
                 });
                 // Create schedule dependencies from exec to consumers
                 for outside_node in graph
@@ -216,6 +217,7 @@ struct MetalKernelOperation {
     wrapper: Box<MetalKernelWrapper>,
     dev: Device,
     buffer: Arc<UnsafeCell<CommandBuffer>>,
+    dyn_map: *const HashMap<char, usize>,
 }
 
 impl std::fmt::Debug for MetalKernelOperation {
@@ -226,20 +228,49 @@ impl std::fmt::Debug for MetalKernelOperation {
 
 impl Operator for MetalKernelOperation {
     fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        self.wrapper
+        // For now let's allocate the required buffers here
+        let inp_shapes = inp.iter().map(|(_, s)| *s).collect::<Vec<_>>();
+        let intermediate_buffers = self
+            .wrapper
             .0
-            .metal_forward(
-                &inp.iter()
-                    .map(|(t, sh)| {
-                        (
-                            t.borrowed().data.as_any().downcast_ref::<Buffer>().unwrap(),
-                            *sh,
-                        )
-                    })
-                    .collect::<Vec<_>>(),
-                &self.dev,
-                unsafe { &*self.buffer.get() },
-            )
+            .intermediate_buffer_sizes(&inp_shapes)
+            .into_iter()
+            .map(|n| {
+                self.dev.new_buffer(
+                    n.exec(unsafe { self.dyn_map.as_ref().unwrap() }).unwrap() as u64,
+                    MTLResourceOptions::StorageModeShared,
+                )
+            })
+            .collect::<Vec<_>>();
+        let intermediate_buffers_ref = intermediate_buffers.iter().collect::<Vec<_>>();
+        let output_buffers = self
+            .wrapper
+            .0
+            .output_buffer_sizes(&inp_shapes)
+            .into_iter()
+            .map(|n| {
+                self.dev.new_buffer(
+                    n.exec(unsafe { self.dyn_map.as_ref().unwrap() }).unwrap() as u64,
+                    MTLResourceOptions::StorageModeShared,
+                )
+            })
+            .collect::<Vec<_>>();
+        let output_buffers_ref = output_buffers.iter().collect::<Vec<_>>();
+        self.wrapper.0.metal_forward(
+            &inp.iter()
+                .map(|(t, sh)| {
+                    (
+                        t.borrowed().data.as_any().downcast_ref::<Buffer>().unwrap(),
+                        *sh,
+                    )
+                })
+                .collect::<Vec<_>>(),
+            &self.dev,
+            unsafe { &*self.buffer.get() },
+            &intermediate_buffers_ref,
+            &output_buffers_ref,
+        );
+        output_buffers
             .into_iter()
             .map(|b| Tensor { data: Box::new(b) })
             .collect()

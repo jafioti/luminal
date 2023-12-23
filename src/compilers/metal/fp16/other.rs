@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, mem::size_of};
 
 use half::f16;
 use num_traits::FloatConst;
@@ -35,32 +35,30 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
 }
 
 impl MetalKernelForward for MetalCos {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+        vec![input_shapes[0].n_elements() * size_of::<f16>()]
+    }
     fn metal_forward(
-            &self,
-            inputs: &[(&Buffer, ShapeTracker)],
-            dev: &Device,
-            command_buffer: &CommandBufferRef,
-        ) -> Vec<Buffer> {
-        let inp_size = inputs[0].1.n_physical_elements();
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        _: &Device,
+        command_buffer: &CommandBufferRef,
+        _: &[&Buffer],
+        output_buffers: &[&Buffer],
+    ) {
+        let inp_size = inputs[0].1.n_physical_elements().to_usize().unwrap();
         let encoder = command_buffer
             .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
         encoder.set_compute_pipeline_state(&self.0);
 
-        let out = dev.new_buffer(
-            (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
-
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
-        encoder.set_buffer(1, Some(&out), 0);
+        encoder.set_buffer(1, Some(output_buffers[0]), 0);
         encoder.set_int(2, inp_size as u32);
 
         // Execute
         encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
-
-        vec![out]
     }
 }
 
@@ -74,11 +72,16 @@ impl Operator for MetalCos {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
+            let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
+            let out = self.1.new_buffer(
+                (inp_size * std::mem::size_of::<f16>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
             // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
 
-            let out = self.metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer).pop().unwrap();
+            self.metal_forward(&[(a, tensors[0].1)], &self.1, command_buffer, &[], &[&out]);
             
             command_buffer.commit();
             command_buffer.wait_until_completed();
@@ -210,18 +213,18 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
 }
 
 impl MetalKernelForward for MetalExp {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+        vec![input_shapes[0].n_elements() * size_of::<f16>()]
+    }
     fn metal_forward(
-            &self,
-            inputs: &[(&Buffer, ShapeTracker)],
-            dev: &Device,
-            command_buffer: &CommandBufferRef,
-        ) -> Vec<Buffer> {
-        let inp_size = inputs[0].1.n_physical_elements();
-
-        let out = dev.new_buffer(
-            (inp_size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        _: &Device,
+        command_buffer: &CommandBufferRef,
+        _: &[&Buffer],
+        output_buffers: &[&Buffer],
+    ) {
+        let inp_size = inputs[0].1.n_physical_elements().to_usize().unwrap();
 
         let encoder = command_buffer
                 .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
@@ -229,14 +232,12 @@ impl MetalKernelForward for MetalExp {
 
             // Set inputs
             encoder.set_buffer(0, Some(inputs[0].0), 0);
-            encoder.set_buffer(1, Some(&out), 0);
+            encoder.set_buffer(1, Some(output_buffers[0]), 0);
             encoder.set_int(2, inp_size as u32);
 
             // Execute
             encoder.dispatch_1d(inp_size);
             encoder.end_encoding();
-
-            vec![out]
     }
 }
 
@@ -251,13 +252,18 @@ impl Operator for MetalExp {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
+            let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
+            let out = self.1.new_buffer(
+                (inp_size * std::mem::size_of::<f16>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
             
 
             // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
 
-            let out = self.metal_forward(&[(a_inp, tensors[0].1)], &self.1, command_buffer).pop().unwrap();
+            self.metal_forward(&[(a_inp, tensors[0].1)], &self.1, command_buffer, &[], &[&out]);
             
             command_buffer.commit();
             command_buffer.wait_until_completed();
@@ -394,8 +400,7 @@ impl Operator for MetalGather {
             let command_buffer = command_queue.new_command_buffer();
 
             // Input 0 is indexes, input 1 is embedding weights
-            let n_embeddings = tensors[0].1.n_elements();
-
+            let n_embeddings = tensors[0].1.n_physical_elements().to_usize().unwrap();
             let out = self.1.new_buffer(
                 (n_embeddings * self.2 * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeShared,

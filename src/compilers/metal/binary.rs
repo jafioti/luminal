@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, mem::size_of};
 
 use objc::rc::autoreleasepool;
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
@@ -65,18 +65,18 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
 }
 
 impl<T> MetalKernelForward for MetalSub<T> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+        vec![input_shapes[0].n_elements() * size_of::<T>()]
+    }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        dev: &Device,
+        _: &Device,
         command_buffer: &CommandBufferRef,
-    ) -> Vec<Buffer> {
-        let inp_size = inputs[0].1.n_elements();
-        let out = dev.new_buffer(
-            (inp_size * std::mem::size_of::<T>()) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
-
+        _: &[&Buffer],
+        output_buffers: &[&Buffer],
+    ) {
+        let inp_size = inputs[0].1.n_elements().to_usize().unwrap();
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
         encoder.set_compute_pipeline_state(&self.0);
@@ -84,7 +84,7 @@ impl<T> MetalKernelForward for MetalSub<T> {
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
-        encoder.set_buffer(2, Some(&out), 0);
+        encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, inp_size as u32);
         input_dyn_dims(
             &[self.3, self.4],
@@ -96,8 +96,6 @@ impl<T> MetalKernelForward for MetalSub<T> {
         // Execute
         encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
-
-        vec![out]
     }
 }
 
@@ -105,18 +103,22 @@ impl<T: MetalFloat> Operator for MetalSub<T> {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_buffer = self.1.new_command_buffer();
+            let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
+            let out = self.2.new_buffer(
+                (inp_size * std::mem::size_of::<T>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
 
-            let out = self
-                .metal_forward(
-                    &[
-                        (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
-                        (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
-                    ],
-                    &self.2,
-                    command_buffer,
-                )
-                .pop()
-                .unwrap();
+            self.metal_forward(
+                &[
+                    (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
+                    (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
+                ],
+                &self.2,
+                command_buffer,
+                &[],
+                &[&out],
+            );
 
             command_buffer.commit();
             command_buffer.wait_until_completed();
@@ -272,17 +274,18 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
 }
 
 impl<T> MetalKernelForward for MetalEqual<T> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+        vec![input_shapes[0].n_elements() * size_of::<T>()]
+    }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        dev: &Device,
+        _: &Device,
         command_buffer: &CommandBufferRef,
-    ) -> Vec<Buffer> {
-        let inp_size = inputs[0].1.n_elements();
-        let out = dev.new_buffer(
-            (inp_size * std::mem::size_of::<T>()) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        _: &[&Buffer],
+        output_buffers: &[&Buffer],
+    ) {
+        let inp_size = inputs[0].1.n_elements().to_usize().unwrap();
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
@@ -291,7 +294,7 @@ impl<T> MetalKernelForward for MetalEqual<T> {
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
-        encoder.set_buffer(2, Some(&out), 0);
+        encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, inp_size as u32);
         input_dyn_dims(
             &[self.3, self.4],
@@ -303,8 +306,6 @@ impl<T> MetalKernelForward for MetalEqual<T> {
         // Execute
         encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
-
-        vec![out]
     }
 }
 
@@ -312,18 +313,22 @@ impl<T: MetalFloat> Operator for MetalEqual<T> {
     fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_buffer = self.1.new_command_buffer();
+            let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
+            let out = self.2.new_buffer(
+                (inp_size * std::mem::size_of::<T>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
 
-            let out = self
-                .metal_forward(
-                    &[
-                        (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
-                        (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
-                    ],
-                    &self.2,
-                    command_buffer,
-                )
-                .pop()
-                .unwrap();
+            self.metal_forward(
+                &[
+                    (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
+                    (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
+                ],
+                &self.2,
+                command_buffer,
+                &[],
+                &[&out],
+            );
 
             command_buffer.commit();
             command_buffer.wait_until_completed();
