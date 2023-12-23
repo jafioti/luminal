@@ -399,14 +399,10 @@ fn test_max_reduce() {
 fn test_mean_reduce() {
     let data = random_vec(40960);
     let mut cx = Graph::new();
-    let a = cx.tensor::<R3<1, 10, 4096>>();
-    a.set(data.clone());
-    let b = a.mean_reduce::<_, LAxis<2>>();
-    b.retrieve();
-    let c = a.mean_reduce::<_, LAxis<1>>();
-    c.retrieve();
-    let d = a.mean_reduce::<_, LAxis<0>>();
-    d.retrieve();
+    let a = cx.tensor::<R3<1, 10, 4096>>().set(data.clone());
+    let b = a.mean_reduce::<_, LAxis<2>>().retrieve();
+    let c = a.mean_reduce::<_, LAxis<1>>().retrieve();
+    let d = a.mean_reduce::<_, LAxis<0>>().retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -531,7 +527,6 @@ fn test_batch_matmul() {
                     let c = a.matmul(b).retrieve();
 
                     cx.compile(MetalFp16Compiler::default());
-                    // cx.display();
                     cx.execute();
 
                     let d_dev = Cpu::default();

@@ -116,7 +116,7 @@ impl<S: Shape> GraphTensor<S> {
         let st = self.shape.resolve_global_dyn_dims(&self.graph().dyn_map);
         let tensor = self.graph().get_tensor_ref(self.id, 0).unwrap();
         let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
-        let mut data = vec![0.; st.n_elements()];
+        let mut data = vec![0.; st.n_elements().to_usize().unwrap()];
         let ind = st.index_expression();
         let val = st.valid_expression();
         #[allow(unused_mut)]

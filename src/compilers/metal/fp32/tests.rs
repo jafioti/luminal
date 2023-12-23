@@ -363,10 +363,8 @@ fn test_max_reduce() {
 fn test_mean_reduce() {
     let data = random_vec(40960);
     let mut cx = Graph::new();
-    let a = cx.tensor::<R3<1, 10, 4096>>();
-    a.set(data.clone());
-    let b = a.mean_reduce::<_, LAxis<2>>();
-    b.retrieve();
+    let a = cx.tensor::<R3<1, 10, 4096>>().set(data.clone());
+    let b = a.mean_reduce::<_, LAxis<2>>().retrieve();
 
     cx.compile(MetalFp32Compiler::default());
     cx.execute();
