@@ -90,7 +90,7 @@ impl<S: Shape> GraphTensor<S> {
 
     pub fn argmax(self) -> GraphTensor<<S as ReduceShape<<S as Shape>::LastAxis>>::Reduced> {
         let x_equal = self.equals(self.max_reduce::<_, S::LastAxis>().expand());
-        let r = self.graph().arange_::<S>();
+        let r = self.graph().arange_();
         (x_equal * r).max_reduce::<_, S::LastAxis>()
     }
 }
