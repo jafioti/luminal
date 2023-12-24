@@ -386,8 +386,11 @@ impl Mistral {
         // Execute the graph
         self.graph.execute_debug();
 
+        println!("Token IDs: {:?}", output_token_ids);
+
         // Pull the data from the output node
         let output_token_ids = output_token_ids.data();
+
         let output_text = self.decode(output_token_ids);
 
         output_text
