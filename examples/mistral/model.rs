@@ -387,12 +387,14 @@ impl Mistral {
         self.graph
             .compile(<(PreGenericCompiler, MetalFp16Compiler, PostGenericCompiler)>::default());
 
+        self.graph.display();
+
         // Execute the graph
         self.graph.execute_debug();
 
-        println!("input: {:?}", self.input);
-        // println!("embedding: {:?}", self.embedding);
-        println!("hidden_states: {:?}", hidden_states);
+        // println!("input: {:?}", self.input);
+        // // println!("embedding: {:?}", self.embedding);
+        // println!("hidden_states: {:?}", hidden_states);
     }
 
     // Infer next token
