@@ -389,11 +389,12 @@ impl Mistral {
             .arange_::<(Const<1>, Dyn<'s'>, Const<VOCAB_SIZE>)>()
             .equals(self.input.expand());
         token_ids_one_hot.retrieve();
+        // self.input.retrieve(); // UNCOMMENT THIS TO CRASH
 
         // let token_ids_one_hot = token_ids_one_hot.sum_reduce::<_, Axis<2>>();
         // let hidden_states = self.embedding.gather(self.input);
         // self.embedding.retrieve();
-        // self.input.retrieve();
+
         // hidden_states.retrieve();
 
         // Compile the graph
@@ -404,15 +405,15 @@ impl Mistral {
             PostGenericCompiler,
         )>::default());
 
-        self.graph.display();
+        // self.graph.display();
 
         // Execute the graph
         self.graph.execute_debug();
 
         // println!("input: {:?}", self.input);
-        // // println!("embedding: {:?}", self.embedding);
+        // println!("embedding: {:?}", self.embedding);
         // println!("hidden_states: {:?}", hidden_states);
-        println!("token_ids_one_hot: {:?}", token_ids_one_hot);
+        // println!("token_ids_one_hot: {:?}", token_ids_one_hot);
     }
 
     // Infer next token
