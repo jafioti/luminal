@@ -320,6 +320,12 @@ pub struct Mistral {
 
     // LM Head Layer
     pub lm_head: Linear<HIDDEN_DIM, VOCAB_SIZE>,
+
+    // Input Layer
+    pub input: GraphTensor<(Const<1>, Dyn<'s'>)>,
+
+    // Output Layer
+    pub output_token_ids: GraphTensor<(Const<1>, Dyn<'s'>)>,
 }
 
 #[derive(Yokeable)]
@@ -354,26 +360,30 @@ impl Mistral {
         let token_ids = self.encode(text);
         let n_tokens = token_ids.len();
 
-        // Create the input tensor
-        let input = self.graph.tensor::<(Const<1>, Dyn<'s'>)>();
-        input.set_dyn(token_ids, vec![1, n_tokens]);
-
-        // Call forward
-        let output_probabilities = self.forward(input);
-        // output_probabilities.retrieve();
-
-        // Do the sampling in the graph computation
-        let output_token_ids = output_probabilities.max_reduce::<(Const<1>, Dyn<'s'>), Axis<2>>();
-        output_token_ids.retrieve();
+        // Insert the data in the input node
+        self.input.set_dyn(token_ids, vec![1, n_tokens]);
 
         // Execute the graph
         self.graph.execute_debug();
 
-        // Call decode on the output token ids
-        let output_token_ids = output_token_ids.data();
+        // Pull the data from the output node
+        let output_token_ids = self.output_token_ids.data();
         let output_text = self.decode(output_token_ids);
 
         output_text
+    }
+
+    pub fn build_forward_graph(&mut self) {
+        let output_probabilities = self.forward(self.input);
+
+        // Do the sampling in the graph computation
+        self.output_token_ids = output_probabilities.argmax();
+        self.output_token_ids.retrieve();
+    }
+
+    pub fn compile_forward_graph(&mut self) {
+        self.graph
+            .compile(<(PreGenericCompiler, MetalFp16Compiler, PostGenericCompiler)>::default());
     }
 
     // Forward pass
@@ -432,6 +442,12 @@ impl Mistral {
         // Create the lm head
         let lm_head = Linear::initialize(graph.as_mut());
 
+        // Create the input node
+        let input = graph.tensor::<(Const<1>, Dyn<'s'>)>();
+
+        // Create the output node
+        let output_token_ids = graph.tensor::<(Const<1>, Dyn<'s'>)>();
+
         Ok(Self {
             tokenizer,
             graph,
@@ -439,6 +455,8 @@ impl Mistral {
             transformer_layers,
             norm,
             lm_head,
+            input,
+            output_token_ids,
         })
     }
 
@@ -634,5 +652,12 @@ impl Mistral {
         self.lm_head.weight.set(lm_head);
 
         Ok(())
+    }
+}
+
+impl SerializeModule for Mistral {
+    fn serialize(&self, s: &mut Serializer) {
+        s.module("norm", &self.norm);
+        s.module("lm_head/weight", &self.lm_head);
     }
 }
