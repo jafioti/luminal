@@ -1,8 +1,5 @@
-use std::ops::{Add, Mul};
-
-use num::complex::ComplexFloat;
-
 use crate::{op, prelude::*};
+use std::ops::{Add, Mul};
 
 impl<S: Shape> GraphTensor<S> {
     /// Base 2 log
