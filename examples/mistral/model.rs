@@ -22,11 +22,13 @@ pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
 pub const NUM_LAYERS: usize = 32;
 pub const NUM_ATTENTION_HEADS: usize = 32;
-pub const ATTENTION_PROJECTION_DIM: usize = 1024;
+pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
 
+pub const NUM_ATTENTION_GROUPS: usize = NUM_ATTENTION_HEADS / NUM_KV_HEADS;
 pub const ATTENTION_HEAD_DIM: usize = HIDDEN_DIM / NUM_ATTENTION_HEADS;
 pub const ATTENTION_HEAD_DIM_OVER_2: usize = ATTENTION_HEAD_DIM / 2;
+pub const ATTENTION_PROJECTION_DIM: usize = ATTENTION_HEAD_DIM * NUM_KV_HEADS;
 
 // Helper to deserialize safetensors stored in bf16
 pub fn convert_vector_bf16_f32(tensor_view: &TensorView<'_>) -> Vec<f32> {
@@ -169,8 +171,8 @@ pub fn apply_rotary_embeddings<
 // Create the self-Attention layer
 pub struct Attention {
     pub q_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
-    pub k_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
-    pub v_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
+    pub k_proj: GraphTensor<R2<HIDDEN_DIM, ATTENTION_PROJECTION_DIM>>,
+    pub v_proj: GraphTensor<R2<HIDDEN_DIM, ATTENTION_PROJECTION_DIM>>,
     pub o_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
 }
 
@@ -185,57 +187,74 @@ impl Attention {
         &self,
         x: GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
     ) -> GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)> {
-        let mut xq = x
-            .matmul(self.q_proj.permute())
-            .dyn_reshape::<(
+        let xq = x
+            .matmul(self.q_proj)
+            .reshape::<(
                 Batch,
                 SequenceLength,
                 Const<NUM_ATTENTION_HEADS>,
                 Const<ATTENTION_HEAD_DIM>,
-            )>(vec![
-                Batch::const_size(),
-                SequenceLength::const_size(),
-                NUM_ATTENTION_HEADS.into(),
-                ATTENTION_HEAD_DIM.into(),
-            ])
+            )>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
-        let mut xk = x
-            .matmul(self.k_proj.permute())
-            .dyn_reshape::<(
+
+        let xk = x
+            .matmul(self.k_proj)
+            .reshape::<(
                 Batch,
                 SequenceLength,
-                Const<NUM_ATTENTION_HEADS>,
+                Const<NUM_KV_HEADS>,
                 Const<ATTENTION_HEAD_DIM>,
-            )>(vec![
-                Batch::const_size(),
-                SequenceLength::const_size(),
-                NUM_ATTENTION_HEADS.into(),
-                ATTENTION_HEAD_DIM.into(),
-            ])
+            )>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
+
         let xv = x
-            .matmul(self.v_proj.permute())
-            .dyn_reshape::<(
+            .matmul(self.v_proj)
+            .reshape::<(
                 Batch,
                 SequenceLength,
-                Const<NUM_ATTENTION_HEADS>,
+                Const<NUM_KV_HEADS>,
                 Const<ATTENTION_HEAD_DIM>,
-            )>(vec![
-                Batch::const_size(),
-                SequenceLength::const_size(),
-                NUM_ATTENTION_HEADS.into(),
-                ATTENTION_HEAD_DIM.into(),
-            ])
+            )>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         // We apply rotary embeddings
-        // (xq, xk) = self.apply_rotary_embeddings(xq, xk);
         let rotary_frequencies = compute_rotary_embedding_frequencies::<
             SequenceLength,
             ATTENTION_HEAD_DIM_OVER_2,
         >(&mut self.graph());
         let xq = apply_rotary_embeddings(xq, rotary_frequencies);
         let xk = apply_rotary_embeddings(xk, rotary_frequencies);
+
+        // We repeat xv and xk to match the size of xq
+        let xk = xk
+            .expand::<(
+                Batch,
+                Const<NUM_KV_HEADS>,
+                Const<NUM_ATTENTION_GROUPS>,
+                SequenceLength,
+                Const<ATTENTION_HEAD_DIM>,
+            ), Axis<2>>()
+            .reshape::<(
+                Batch,
+                SequenceLength,
+                Const<NUM_ATTENTION_HEADS>,
+                Const<ATTENTION_HEAD_DIM>,
+            )>();
+
+        let xv = xv
+            .expand::<(
+                Batch,
+                Const<NUM_KV_HEADS>,
+                Const<NUM_ATTENTION_GROUPS>,
+                SequenceLength,
+                Const<ATTENTION_HEAD_DIM>,
+            ), Axis<2>>()
+            .reshape::<(
+                Batch,
+                SequenceLength,
+                Const<NUM_ATTENTION_HEADS>,
+                Const<ATTENTION_HEAD_DIM>,
+            )>();
 
         // Attention mask
         let attention_mask =
@@ -247,7 +266,7 @@ impl Attention {
             .div((ATTENTION_HEAD_DIM as f64).sqrt() as f32)
             .add(attention_mask.expand())
             .softmax::<3>()
-            .matmul(xv)
+            .matmul(xv.permute())
             .permute::<(
                 Batch,
                 SequenceLength,
@@ -261,7 +280,7 @@ impl Attention {
             ])
             .matmul(self.o_proj.permute());
 
-        return xo;
+        xo
     }
 }
 
@@ -323,9 +342,6 @@ pub struct Mistral {
 
     // Input Layer
     pub input: GraphTensor<(Const<1>, Dyn<'s'>)>,
-
-    // Output Layer
-    pub output_token_ids: GraphTensor<(Const<1>, Dyn<'s'>)>,
 }
 
 #[derive(Yokeable)]
@@ -355,7 +371,11 @@ fn get_tensor<'a>(
 
 impl Mistral {
     // Infer next token
-    pub fn infer_next_token(&mut self, text: &str) -> String {
+    pub fn infer_next_token(
+        &mut self,
+        output_token_ids: GraphTensor<(Const<1>, Dyn<'s'>)>,
+        text: &str,
+    ) -> String {
         // First, we encode the text
         let token_ids = self.encode(text);
         let n_tokens = token_ids.len();
@@ -367,18 +387,20 @@ impl Mistral {
         self.graph.execute_debug();
 
         // Pull the data from the output node
-        let output_token_ids = self.output_token_ids.data();
+        let output_token_ids = output_token_ids.data();
         let output_text = self.decode(output_token_ids);
 
         output_text
     }
 
-    pub fn build_forward_graph(&mut self) {
+    pub fn build_forward_graph(&mut self) -> GraphTensor<(Const<1>, Dyn<'s'>)> {
         let output_probabilities = self.forward(self.input);
 
         // Do the sampling in the graph computation
-        self.output_token_ids = output_probabilities.argmax();
-        self.output_token_ids.retrieve();
+        let output_token_ids = output_probabilities.argmax();
+        output_token_ids.retrieve();
+
+        output_token_ids
     }
 
     pub fn compile_forward_graph(&mut self) {
@@ -415,22 +437,22 @@ impl Mistral {
         let mut graph = Box::new(Graph::new());
 
         // Create the embedding
-        let embedding = graph.tensor();
+        let embedding = graph.named_tensor("embedding");
 
         // Create the transformer layers
         let transformer_layers = (0..NUM_LAYERS)
             .map(|i| TransformerBlock {
                 attention: Attention {
-                    q_proj: graph.tensor(),
-                    k_proj: graph.tensor(),
-                    v_proj: graph.tensor(),
-                    o_proj: graph.tensor(),
+                    q_proj: graph.named_tensor(format!("layers.{i}.attention.q_proj").as_str()),
+                    k_proj: graph.named_tensor(format!("layers.{i}.attention.k_proj").as_str()),
+                    v_proj: graph.named_tensor(format!("layers.{i}.attention.v_proj").as_str()),
+                    o_proj: graph.named_tensor(format!("layers.{i}.attention.o_proj").as_str()),
                 },
                 attention_norm: RMSNorm::initialize(graph.as_mut()),
                 feed_forward: FeedForward {
-                    gate_proj: graph.tensor(),
-                    down_proj: graph.tensor(),
-                    up_proj: graph.tensor(),
+                    gate_proj: graph.named_tensor(format!("layers.{i}.mlp.gate_proj").as_str()),
+                    down_proj: graph.named_tensor(format!("layers.{i}.mlp.down_proj").as_str()),
+                    up_proj: graph.named_tensor(format!("layers.{i}.mlp.up_proj").as_str()),
                 },
                 feed_forward_norm: RMSNorm::initialize(graph.as_mut()),
             })
@@ -443,10 +465,7 @@ impl Mistral {
         let lm_head = Linear::initialize(graph.as_mut());
 
         // Create the input node
-        let input = graph.tensor::<(Const<1>, Dyn<'s'>)>();
-
-        // Create the output node
-        let output_token_ids = graph.tensor::<(Const<1>, Dyn<'s'>)>();
+        let input = graph.named_tensor::<(Const<1>, Dyn<'s'>)>("input_node");
 
         Ok(Self {
             tokenizer,
@@ -456,7 +475,6 @@ impl Mistral {
             norm,
             lm_head,
             input,
-            output_token_ids,
         })
     }
 

@@ -1,7 +1,5 @@
 use crate::model::Mistral;
 use itertools::Itertools;
-use luminal::prelude::*;
-
 mod model;
 
 fn main() -> Result<(), String> {
@@ -23,15 +21,16 @@ fn main() -> Result<(), String> {
 
     // Build the forward graph
     println!("Building the forward graph");
-    mistral.build_forward_graph();
+    let output_token_ids = mistral.build_forward_graph();
 
     // Compile the graph
     println!("Compiling the forward graph");
     mistral.compile_forward_graph();
 
+    // Test inference
     let input_text = "Hello, how are";
     println!("Infering the next token");
-    let output_text = mistral.infer_next_token(input_text);
+    let output_text = mistral.infer_next_token(output_token_ids, input_text);
 
     println!("Inference: {output_text}");
 
