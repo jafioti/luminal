@@ -378,14 +378,31 @@ impl Mistral {
         self.input.set_dyn(token_ids, vec![1, n_tokens]);
 
         // Forward pass
-        let hidden_states = self.embedding.gather(self.input);
+        // embedding: VOCAB_SIZE x HIDDEN_DIM
+        // token_ids: BATCH_SIZE x SEQUENCE_LENGTH
+        // token_ids_one_hot: BATCH_SIZE x SEQUENCE_LENGTH x VOCAB_SIZE
+        // hidden_states: token_ids_one_hot @ embedding = BATCH_SIZE x SEQUENCE_LENGTH x HIDDEN_DIM
+
+        // Let's try to do this by hand
+        let token_ids_one_hot = self
+            .graph
+            .arange_::<(Const<1>, Dyn<'s'>, Const<VOCAB_SIZE>)>()
+            .equals(self.input.expand());
+        token_ids_one_hot.retrieve();
+
+        // let token_ids_one_hot = token_ids_one_hot.sum_reduce::<_, Axis<2>>();
+        // let hidden_states = self.embedding.gather(self.input);
         // self.embedding.retrieve();
-        self.input.retrieve();
-        hidden_states.retrieve();
+        // self.input.retrieve();
+        // hidden_states.retrieve();
 
         // Compile the graph
-        self.graph
-            .compile(<(PreGenericCompiler, MetalFp16Compiler, PostGenericCompiler)>::default());
+        self.graph.compile(<(
+            PreGenericCompiler,
+            MetalFp16Compiler,
+            // CPUCompiler,
+            PostGenericCompiler,
+        )>::default());
 
         self.graph.display();
 
@@ -395,6 +412,7 @@ impl Mistral {
         // println!("input: {:?}", self.input);
         // // println!("embedding: {:?}", self.embedding);
         // println!("hidden_states: {:?}", hidden_states);
+        println!("token_ids_one_hot: {:?}", token_ids_one_hot);
     }
 
     // Infer next token
