@@ -172,36 +172,32 @@ impl ShapeTracker {
         ret.minimize()
     }
 
-    /// The number of elements in this tensor, including pads and slices. Counts unknown dims as size 0
-    pub fn n_elements(&self) -> usize {
+    /// The number of elements in this tensor, including pads and slices
+    pub fn n_elements(&self) -> BigExpression {
+        if self.is_empty() {
+            return 1.into(); // Zero dimensional tensors are scalars
+        }
         self.indexes
             .into_iter()
-            // Filter out unknowns
-            .filter_map(|i| self.dims[i].to_usize().map(|n| (i, n)))
+            .map(|i| (i, BigExpression::from(self.dims[i])))
             // Add pads
-            .map(|(ind, dim)| {
-                (
-                    ind,
-                    dim + self.padding[ind].0.to_usize().unwrap()
-                        + self.padding[ind].1.to_usize().unwrap(),
-                )
-            })
+            .map(|(ind, dim)| (ind, dim + self.padding[ind].0 + self.padding[ind].1))
             // Slice
-            .map(|(ind, dim)| {
-                dim.min(self.slices[ind].1.to_usize().unwrap_or(i32::MAX as usize))
-                    - self.slices[ind].0.to_usize().unwrap_or_default()
-            })
+            .map(|(ind, dim)| dim.min(self.slices[ind].1) - self.slices[ind].0)
             .product()
     }
 
-    /// The number of elements in this tensor, not including pads and slices. Counts unknown dims as size 0
-    pub fn n_physical_elements(&self) -> usize {
+    /// The number of elements in this tensor, not including pads and slices
+    pub fn n_physical_elements(&self) -> BigExpression {
+        if self.is_empty() {
+            return 1.into(); // Zero dimensional tensors are scalars
+        }
         self.dims
             .into_iter()
             // Filter out fake dimensions
             .enumerate()
             .filter(|(i, _)| !self.fake[*i])
-            .flat_map(|(_, i)| i.to_usize())
+            .map(|(_, i)| i.into())
             .product()
     }
 

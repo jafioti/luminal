@@ -148,32 +148,31 @@ kernel void metal_arange(device {} *out [[buffer(0)]], device uint& n_elements [
 }
 
 impl<T: MetalFloat> MetalKernelForward for MetalARange<T> {
+    fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<BigExpression> {
+        vec![self.3.clone() * std::mem::size_of::<f16>()]
+    }
     fn metal_forward(
         &self,
         _: &[(&Buffer, ShapeTracker)],
-        dev: &Device,
+        _: &Device,
         command_buffer: &CommandBufferRef,
-    ) -> Vec<Buffer> {
+        _: &[&Buffer],
+        output_buffers: &[&Buffer],
+    ) {
         // Calculate size
         let size = self.3.exec(unsafe { self.4.as_ref().unwrap() }).unwrap();
-        let out = dev.new_buffer(
-            (size * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
         encoder.set_compute_pipeline_state(&self.0);
 
         // Set inputs
-        encoder.set_buffer(0, Some(&out), 0);
+        encoder.set_buffer(0, Some(output_buffers[0]), 0);
         encoder.set_int(1, size as u32);
 
         // Execute
         encoder.dispatch_1d(size);
         encoder.end_encoding();
-
-        vec![out]
     }
 }
 
@@ -182,11 +181,13 @@ impl<T: MetalFloat> Operator for MetalARange<T> {
         autoreleasepool(|| {
             // Setup command queue / command buffer / encoder
             let command_buffer = self.1.new_command_buffer();
+            let size = self.3.exec(unsafe { self.4.as_ref().unwrap() }).unwrap();
+            let out = self.2.new_buffer(
+                (size * std::mem::size_of::<f16>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
 
-            let out = self
-                .metal_forward(&[], &self.2, command_buffer)
-                .pop()
-                .unwrap();
+            self.metal_forward(&[], &self.2, command_buffer, &[], &[&out]);
 
             command_buffer.commit();
             command_buffer.wait_until_completed();
@@ -209,7 +210,7 @@ impl<T: MetalFloat> Operator for MetalARange<T> {
 }
 
 /// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceCompiler.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct ARangeCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for ARangeCompiler<T> {

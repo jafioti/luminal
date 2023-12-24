@@ -163,7 +163,7 @@ impl Operator for Contiguous {
             .as_any()
             .downcast_ref::<Vec<f32>>()
             .unwrap();
-        let mut res = vec![0.; inp[0].1.n_elements()];
+        let mut res = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
         let ind = inp[0].1.index_expression();
         let val = inp[0].1.valid_expression();
         for i in 0..res.len() {
@@ -301,7 +301,7 @@ impl Operator for Add {
             inp[1].1.index_expression(),
             inp[1].1.valid_expression(),
         );
-        let mut data = vec![0.; inp[0].1.n_elements()];
+        let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
         for i in 0..data.len() {
             data[i] = if a_val.exec_single_var(i) != 0 {
                 a_data[a_ind.exec_single_var(i)]
@@ -339,7 +339,7 @@ impl Operator for Mul {
                 .downcast_ref::<Vec<f32>>()
                 .unwrap(),
         );
-        let mut data = vec![0.; inp[0].1.n_elements()];
+        let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
         let (a_ind, a_val, b_ind, b_val) = (
             inp[0].1.index_expression(),
             inp[0].1.valid_expression(),
@@ -383,7 +383,7 @@ impl Operator for Mod {
                 .downcast_ref::<Vec<f32>>()
                 .unwrap(),
         );
-        let mut data = vec![0.; inp[0].1.n_elements()];
+        let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
         let (a_ind, a_val, b_ind, b_val) = (
             inp[0].1.index_expression(),
             inp[0].1.valid_expression(),
@@ -427,7 +427,7 @@ impl Operator for LessThan {
                 .downcast_ref::<Vec<f32>>()
                 .unwrap(),
         );
-        let mut data = vec![0.; inp[0].1.n_elements()];
+        let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
         let (a_ind, a_val, b_ind, b_val) = (
             inp[0].1.index_expression(),
             inp[0].1.valid_expression(),
