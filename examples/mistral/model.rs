@@ -24,6 +24,7 @@ pub const NUM_LAYERS: usize = 32;
 pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
+pub const ROPE_THETA: f32 = 1000000.0;
 
 pub const NUM_ATTENTION_GROUPS: usize = NUM_ATTENTION_HEADS / NUM_KV_HEADS;
 pub const ATTENTION_HEAD_DIM: usize = HIDDEN_DIM / NUM_ATTENTION_HEADS;
@@ -57,11 +58,10 @@ pub fn compute_rotary_embedding_frequencies<
     GraphTensor<(SequenceLength, Const<HIDDEN_DIM_OVER_2>)>,
     GraphTensor<(SequenceLength, Const<HIDDEN_DIM_OVER_2>)>,
 ) {
-    let theta: f32 = 10000.0;
     let frequencies =
         (graph.arange::<Const<HIDDEN_DIM_OVER_2>>() * 2.0) / (HIDDEN_DIM_OVER_2 as f32 * 2.0);
     let frequencies = frequencies
-        .pow2(theta)
+        .pow2(ROPE_THETA)
         .recip()
         .reshape::<R2<1, HIDDEN_DIM_OVER_2>>();
     let t = graph
