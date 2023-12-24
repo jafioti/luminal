@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{mem::size_of, sync::Arc};
 
 use half::f16;
 use petgraph::stable_graph::NodeIndex;
@@ -148,20 +148,21 @@ kernel void kernel_vecmat(
 }
 
 impl MetalKernelForward for MetalVecMat {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+        vec![input_shapes[1].shape()[1].clone() * size_of::<f16>()]
+    }
+
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        dev: &Device,
+        _: &Device,
         command_buffer: &CommandBufferRef,
-    ) -> Vec<Buffer> {
+        _: &[&Buffer],
+        output_buffers: &[&Buffer],
+    ) {
         let (m, n) = (
             inputs[0].1.shape()[0].to_usize().unwrap(),
             inputs[1].1.shape()[1].to_usize().unwrap(),
-        );
-
-        let out = dev.new_buffer(
-            (n * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =
@@ -170,7 +171,7 @@ impl MetalKernelForward for MetalVecMat {
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
-        encoder.set_buffer(2, Some(&out), 0);
+        encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, m as u32);
         encoder.set_int(4, n as u32);
         encoder.set_threadgroup_memory_length(0, BN * TN * BM * TM);
@@ -189,8 +190,6 @@ impl MetalKernelForward for MetalVecMat {
             },
         );
         encoder.end_encoding();
-
-        vec![out]
     }
 }
 
@@ -200,17 +199,22 @@ impl Operator for MetalVecMat {
             // Setup command queue / command buffer / encoder
             let command_buffer = self.queue.new_command_buffer();
 
-            let out = self
-                .metal_forward(
-                    &[
-                        (get_buffer_from_tensor(&inp[0].0), inp[0].1),
-                        (get_buffer_from_tensor(&inp[1].0), inp[1].1),
-                    ],
-                    &self.device,
-                    command_buffer,
-                )
-                .pop()
-                .unwrap();
+            let n = inp[1].1.shape()[1].to_usize().unwrap();
+
+            let out = self.device.new_buffer(
+                (n * std::mem::size_of::<f16>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
+            self.metal_forward(
+                &[
+                    (get_buffer_from_tensor(&inp[0].0), inp[0].1),
+                    (get_buffer_from_tensor(&inp[1].0), inp[1].1),
+                ],
+                &self.device,
+                command_buffer,
+                &[],
+                &[&out],
+            );
 
             command_buffer.commit();
             command_buffer.wait_until_completed();
@@ -318,22 +322,26 @@ kernel void kernel_matmul_2d(
 }
 
 impl MetalKernelForward for MetalMatmul2D {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+        let (m, n) = (
+            input_shapes[0].shape()[0].clone(),
+            input_shapes[1].shape()[1].clone(),
+        );
+        vec![BigExpression::from(m) * n * size_of::<f16>()]
+    }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        dev: &Device,
+        _: &Device,
         command_buffer: &CommandBufferRef,
-    ) -> Vec<Buffer> {
+        _: &[&Buffer],
+        output_buffers: &[&Buffer],
+    ) {
         let (a_shape, b_shape) = (inputs[0].1.shape(), inputs[1].1.shape());
         let (m, k, n) = (
             a_shape[0].to_usize().unwrap(),
             a_shape[1].to_usize().unwrap(),
             b_shape[1].to_usize().unwrap(),
-        );
-
-        let out = dev.new_buffer(
-            (m * n * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =
@@ -342,7 +350,7 @@ impl MetalKernelForward for MetalMatmul2D {
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
-        encoder.set_buffer(2, Some(&out), 0);
+        encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, m as u32);
         encoder.set_int(4, n as u32);
         encoder.set_int(5, k as u32);
@@ -361,8 +369,6 @@ impl MetalKernelForward for MetalMatmul2D {
             },
         );
         encoder.end_encoding();
-
-        vec![out]
     }
 }
 
@@ -372,17 +378,26 @@ impl Operator for MetalMatmul2D {
             // Setup command queue / command buffer / encoder
             let command_buffer = self.queue.new_command_buffer();
 
-            let out = self
-                .metal_forward(
-                    &[
-                        (get_buffer_from_tensor(&inp[0].0), inp[0].1),
-                        (get_buffer_from_tensor(&inp[1].0), inp[1].1),
-                    ],
-                    &self.device,
-                    command_buffer,
-                )
-                .pop()
-                .unwrap();
+            let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
+            let (m, n) = (
+                a_shape[0].to_usize().unwrap(),
+                b_shape[1].to_usize().unwrap(),
+            );
+
+            let out = self.device.new_buffer(
+                (m * n * std::mem::size_of::<f16>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
+            self.metal_forward(
+                &[
+                    (get_buffer_from_tensor(&inp[0].0), inp[0].1),
+                    (get_buffer_from_tensor(&inp[1].0), inp[1].1),
+                ],
+                &self.device,
+                command_buffer,
+                &[],
+                &[&out],
+            );
 
             command_buffer.commit();
             command_buffer.wait_until_completed();
@@ -480,23 +495,28 @@ kernel void kernel_batch_matmul_2d(
 }
 
 impl MetalKernelForward for MetalBatchMatmul2D {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+        let (batch_size, m, n) = (
+            input_shapes[0].shape()[0].clone(),
+            input_shapes[0].shape()[1].clone(),
+            input_shapes[1].shape()[1].clone(),
+        );
+        vec![BigExpression::from(m) * n * batch_size * size_of::<f16>()]
+    }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        dev: &Device,
+        _: &Device,
         command_buffer: &CommandBufferRef,
-    ) -> Vec<Buffer> {
+        _: &[&Buffer],
+        output_buffers: &[&Buffer],
+    ) {
         let (a_shape, b_shape) = (inputs[0].1.shape(), inputs[1].1.shape());
         let (batch_size, m, k, n) = (
             a_shape[0].to_usize().unwrap(),
             a_shape[1].to_usize().unwrap(),
             a_shape[2].to_usize().unwrap(),
             b_shape[1].to_usize().unwrap(),
-        );
-
-        let out = dev.new_buffer(
-            (batch_size * m * n * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeShared,
         );
 
         let encoder =
@@ -506,7 +526,7 @@ impl MetalKernelForward for MetalBatchMatmul2D {
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
-        encoder.set_buffer(2, Some(&out), 0);
+        encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, m as u32);
         encoder.set_int(4, n as u32);
         encoder.set_int(5, k as u32);
@@ -525,8 +545,6 @@ impl MetalKernelForward for MetalBatchMatmul2D {
             },
         );
         encoder.end_encoding();
-
-        vec![out]
     }
 }
 
@@ -536,17 +554,28 @@ impl Operator for MetalBatchMatmul2D {
             // Setup command queue / command buffer / encoder
             let command_buffer = self.1.new_command_buffer();
 
-            let out = self
-                .metal_forward(
-                    &[
-                        (get_buffer_from_tensor(&inp[0].0), inp[0].1),
-                        (get_buffer_from_tensor(&inp[1].0), inp[1].1),
-                    ],
-                    &self.2,
-                    command_buffer,
-                )
-                .pop()
-                .unwrap();
+            let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
+            let (batch_size, m, n) = (
+                a_shape[0].to_usize().unwrap(),
+                a_shape[1].to_usize().unwrap(),
+                b_shape[1].to_usize().unwrap(),
+            );
+
+            let out = self.2.new_buffer(
+                (batch_size * m * n * std::mem::size_of::<f16>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
+
+            self.metal_forward(
+                &[
+                    (get_buffer_from_tensor(&inp[0].0), inp[0].1),
+                    (get_buffer_from_tensor(&inp[1].0), inp[1].1),
+                ],
+                &self.2,
+                command_buffer,
+                &[],
+                &[&out],
+            );
 
             command_buffer.commit();
             command_buffer.wait_until_completed();

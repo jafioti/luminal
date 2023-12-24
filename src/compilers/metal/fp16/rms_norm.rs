@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{mem::size_of, sync::Arc};
 
 use half::f16;
 use petgraph::stable_graph::NodeIndex;
@@ -80,19 +80,26 @@ kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]
 }
 
 impl MetalKernelForward for MetalRMSNorm {
+    fn intermediate_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+        let mut meaned_shape = input_shapes[0];
+        meaned_shape.remove_dim(meaned_shape.len() - 1);
+        vec![meaned_shape.n_elements() * size_of::<f32>()]
+    }
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+        vec![input_shapes[0].n_elements() * size_of::<f16>()]
+    }
+
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        dev: &Device,
+        _: &Device,
         command_buffer: &CommandBufferRef,
-    ) -> Vec<Buffer> {
+        intermediate_buffers: &[&Buffer],
+        output_buffers: &[&Buffer],
+    ) {
         let mut meaned_shape = inputs[0].1;
         meaned_shape.remove_dim(meaned_shape.len() - 1);
         // Setup buffers
-        let meaned = dev.new_buffer(
-            (meaned_shape.n_elements() * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
         let front_size: usize = inputs[0]
             .1
             .shape()
@@ -106,40 +113,34 @@ impl MetalKernelForward for MetalRMSNorm {
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
         encoder.set_compute_pipeline_state(&self.0);
+        let meaned_elements = meaned_shape.n_elements().to_usize().unwrap();
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
-        encoder.set_buffer(1, Some(&meaned), 0);
-        encoder.set_int(2, meaned_shape.n_elements() as u32);
+        encoder.set_buffer(1, Some(intermediate_buffers[0]), 0);
+        encoder.set_int(2, meaned_elements as u32);
         encoder.set_int(3, front_size as u32);
         encoder.set_int(4, back_size as u32);
         encoder.set_int(5, dim_size as u32);
         input_dyn_dims(&[self.3], unsafe { self.4.as_ref().unwrap() }, encoder, 6);
 
-        encoder.dispatch_1d(meaned_shape.n_elements());
+        encoder.dispatch_1d(meaned_elements);
         encoder.end_encoding();
-
-        let out = dev.new_buffer(
-            (inputs[0].1.n_elements() * std::mem::size_of::<f16>()) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
         encoder.set_compute_pipeline_state(&self.1);
 
         // Set inputs
-        encoder.set_buffer(0, Some(&meaned), 0);
+        encoder.set_buffer(0, Some(intermediate_buffers[0]), 0);
         encoder.set_buffer(1, Some(inputs[0].0), 0);
-        encoder.set_buffer(2, Some(&out), 0);
-        encoder.set_int(3, inputs[0].1.n_elements() as u32);
+        encoder.set_buffer(2, Some(output_buffers[0]), 0);
+        encoder.set_int(3, inputs[0].1.n_elements().to_usize().unwrap() as u32);
         input_dyn_dims(&[self.3], unsafe { self.4.as_ref().unwrap() }, encoder, 4);
 
         // Execute
-        encoder.dispatch_1d(inputs[0].1.n_elements());
+        encoder.dispatch_1d(inputs[0].1.n_elements().to_usize().unwrap());
         encoder.end_encoding();
-
-        vec![out]
     }
 }
 
@@ -155,11 +156,24 @@ impl Operator for MetalRMSNorm {
                 .as_any()
                 .downcast_ref::<Buffer>()
                 .unwrap();
+            let mut meaned_shape = tensors[0].1;
+            meaned_shape.remove_dim(meaned_shape.len() - 1);
+            let meaned = self.2.new_buffer(
+                (meaned_shape.n_elements().to_usize().unwrap() * size_of::<f32>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
+            let out = self.2.new_buffer(
+                (tensors[0].1.n_elements().to_usize().unwrap() * size_of::<f16>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
 
-            let out = self
-                .metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer)
-                .pop()
-                .unwrap();
+            self.metal_forward(
+                &[(a, tensors[0].1)],
+                &self.2,
+                command_buffer,
+                &[&meaned],
+                &[&out],
+            );
 
             command_buffer.commit();
             command_buffer.wait_until_completed();

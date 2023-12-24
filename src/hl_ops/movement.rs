@@ -285,10 +285,12 @@ mod tests {
     #[test]
     fn test_pad_2d() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R2<3, 2>>();
-        a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
-        let b = a.pad::<R2<3, 4>, usize, usize>(&[(0, 0), (0, 2)]);
-        b.retrieve();
+        let a = cx
+            .tensor::<R2<3, 2>>()
+            .set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
+        let b = a
+            .pad::<R2<3, 4>, usize, usize>(&[(0, 0), (0, 2)])
+            .retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
