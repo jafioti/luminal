@@ -133,99 +133,6 @@ pub fn apply_rotary_embeddings<
     (input * cos.expand()) + (input_half * sin.expand())
 }
 
-// pub fn apply_rotary_embeddings<
-//     Batch: Dimension,
-//     NumAttentionHeads: Dimension,
-//     SequenceLength: Dimension,
-//     const ATTENTION_HEAD_DIM: usize,
-//     const ATTENTION_HEAD_DIM_OVER_2: usize,
-// >(
-//     input: GraphTensor<(
-//         Batch,
-//         NumAttentionHeads,
-//         SequenceLength,
-//         Const<ATTENTION_HEAD_DIM>,
-//     )>,
-//     frequencies: (
-//         GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM_OVER_2>)>,
-//         GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM_OVER_2>)>,
-//     ),
-// ) -> GraphTensor<(
-//     Batch,
-//     NumAttentionHeads,
-//     SequenceLength,
-//     Const<ATTENTION_HEAD_DIM>,
-// )> {
-//     let (real, imaginary) = frequencies;
-
-//     // Split into real and imaginary
-//     let input_expanded = input.reshape::<(
-//         Batch,
-//         NumAttentionHeads,
-//         SequenceLength,
-//         Const<ATTENTION_HEAD_DIM_OVER_2>,
-//         Const<2>,
-//     )>();
-
-//     let input_real = input_expanded
-//         .slice((.., .., .., .., ..1))
-//         .contiguous()
-//         .reshape::<(
-//             Batch,
-//             NumAttentionHeads,
-//             SequenceLength,
-//             Const<ATTENTION_HEAD_DIM_OVER_2>,
-//         )>();
-
-//     let input_imaginary = input_expanded
-//         .slice((.., .., .., .., 1..))
-//         .contiguous()
-//         .reshape::<(
-//             Batch,
-//             NumAttentionHeads,
-//             SequenceLength,
-//             Const<ATTENTION_HEAD_DIM_OVER_2>,
-//         )>();
-
-//     // x = a + bi, y = c + di
-//     // x * y = (ac - bd) + (ad + bc)i
-//     let (a, b) = (real, imaginary);
-//     let (c, d) = (input_real, input_imaginary);
-
-//     let output_real = (a.expand() * c) - (b.expand() * d);
-//     let output_imaginary = (a.expand() * d) + (b.expand() * c);
-
-//     // Finally, we put the real and imaginary together
-//     let output_real = output_real
-//         .reshape::<(
-//             Batch,
-//             NumAttentionHeads,
-//             SequenceLength,
-//             Const<ATTENTION_HEAD_DIM_OVER_2>,
-//             Const<1>,
-//         )>()
-//         .contiguous();
-//     let output_imaginary = output_imaginary
-//         .reshape::<(
-//             Batch,
-//             NumAttentionHeads,
-//             SequenceLength,
-//             Const<ATTENTION_HEAD_DIM_OVER_2>,
-//             Const<1>,
-//         )>()
-//         .contiguous();
-
-//     let output = output_real.concat_along::<(
-//         Batch,
-//         NumAttentionHeads,
-//         SequenceLength,
-//         Const<ATTENTION_HEAD_DIM_OVER_2>,
-//         Const<2>,
-//     ), Axis<4>, _>(output_imaginary);
-
-//     output.reshape()
-// }
-
 // Create the self-Attention layer
 pub struct Attention {
     pub q_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
@@ -470,7 +377,7 @@ impl Mistral {
         let value_states = hidden_states.matmul(v_proj.permute());
 
         // Now, let's compute the rotary embeddings
-        let (cos, sin) = compute_rotary_embedding_frequencies::<Dyn<'s'>>(&mut self.graph);
+        let rotary_embeddings = compute_rotary_embedding_frequencies::<Dyn<'s'>>(&mut self.graph);
 
         // And we apply the embeddings
         let query_states = query_states
@@ -504,17 +411,23 @@ impl Mistral {
         let query_states =
             apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM, ATTENTION_HEAD_DIM_OVER_2>(
                 query_states,
-                (cos, sin),
+                rotary_embeddings,
+            );
+
+        let key_states =
+            apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM, ATTENTION_HEAD_DIM_OVER_2>(
+                key_states,
+                rotary_embeddings,
             );
 
         // q_proj.retrieve();
         // k_proj.retrieve();
-        query_states.retrieve();
+        // query_states.retrieve();
         // q1.retrieve();
         // q2.retrieve();
         // q_h.retrieve();
         // k_h.retrieve();
-        // key_states.retrieve();
+        key_states.retrieve();
         // value_states.retrieve();
         // hidden_states.retrieve();
         // sin.retrieve();
@@ -537,12 +450,12 @@ impl Mistral {
         // println!("hidden_states: {:?}", hidden_states);
         // println!("token_ids_one_hot: {:?}", token_ids_one_hot);
         // println!("input_layer_norm: {:?}", input_layer_norm);
-        println!("query_states: {:?}", query_states);
+        // println!("query_states: {:?}", query_states);
         // println!("q1: {:?}", q1);
         // println!("q_h: {:?}", q_h);
         // println!("k_h: {:?}", k_h);
         // println!("k_proj: {:?}", k_proj);
-        // println!("key_states: {:?}", key_states);
+        println!("key_states: {:?}", key_states);
         // println!("value_states: {:?}", value_states);
         // println!("rotary_frequencies (sin): {:?}", sin);
         // println!("frequencies {:?}", frequencies);
