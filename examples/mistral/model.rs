@@ -400,63 +400,49 @@ impl Mistral {
         // let eps = self.transformer_layers[0].attention_norm.epsilon;
         // println!("eps: {eps}");
 
-        let hidden_states = self.transformer_layers[0].attention.forward(hidden_states);
-        // let q_proj = self.transformer_layers[0].attention.q_proj;
-        // let query_states = hidden_states.matmul(q_proj.permute());
+        // let hidden_states = self.transformer_layers[0].attention.forward(hidden_states);
+        let q_proj = self.transformer_layers[0].attention.q_proj;
+        let query_states = hidden_states.matmul(q_proj.permute());
 
-        // let k_proj = self.transformer_layers[0].attention.k_proj;
-        // let key_states = hidden_states.matmul(k_proj.permute());
+        let k_proj = self.transformer_layers[0].attention.k_proj;
+        let key_states = hidden_states.matmul(k_proj.permute());
 
-        // let v_proj = self.transformer_layers[0].attention.v_proj;
-        // // let value_states = hidden_states.matmul(v_proj.permute());
+        let v_proj = self.transformer_layers[0].attention.v_proj;
+        let value_states = hidden_states.matmul(v_proj.permute());
 
-        // // Now, let's compute the rotary embeddings
-        // let (cos, sin) = compute_rotary_embedding_frequencies::<Dyn<'s'>>(&mut self.graph);
+        // Now, let's compute the rotary embeddings
+        let rotary_frequencies = compute_rotary_embedding_frequencies::<Dyn<'s'>>(&mut self.graph);
 
-        // let x = sin / 2.0;
+        // And we apply the embeddings
+        let query_states = query_states
+            .reshape::<(
+                Const<1>,
+                Dyn<'s'>,
+                Const<NUM_ATTENTION_HEADS>,
+                Const<ATTENTION_HEAD_DIM>,
+            )>()
+            .permute::<_, Axes4<0, 2, 1, 3>>();
+        let query_states = apply_rotary_embeddings(query_states, rotary_frequencies);
+        // In last dim, gets first row right, messes up other rows
 
-        // // Compute rotary embeddings directly here
-        // let x = self.graph.constant(ATTENTION_HEAD_DIM as f32);
-        // let frequencies = self.graph.arange::<Const<ATTENTION_HEAD_DIM>>();
-        // let frequencies = frequencies * 2.0;
-        // let frequencies = frequencies * (x.recip().expand());
+        // let query_states =
+        //     query_states
+        //         .permute::<_, Axes4<0, 2, 1, 3>>()
+        //         .reshape::<(Const<1>, Dyn<'s'>, Const<HIDDEN_DIM>)>();
 
-        // let frequencies = frequencies
-        //     .pow2(ROPE_THETA)
-        //     .recip()
-        //     .reshape::<R2<1, ATTENTION_HEAD_DIM>>();
-        // let t = self
-        //     .graph
-        //     .arange::<Dyn<'s'>>()
-        //     .reshape::<(Dyn<'s'>, Const<1>)>();
-        // let frequencies = t.matmul(frequencies);
-        // let cos = frequencies.cos();
-        // let sin = frequencies.sin();
-
-        // let frequencies = frequencies.recip();
-        // frequencies.retrieve();
-        /*
-            let frequencies =
-            (graph.arange::<Const<HIDDEN_DIM_OVER_2>>() * 2.0) / (HIDDEN_DIM_OVER_2 as f32 * 2.0);
-        let frequencies = frequencies
-            .pow2(ROPE_THETA)
-            .recip()
-            .reshape::<R2<1, HIDDEN_DIM_OVER_2>>();
-        let t = graph
-            .arange::<SequenceLength>()
-            .reshape::<(SequenceLength, Const<1>)>();
-        let frequencies = t.matmul(frequencies);
-
-        let real = frequencies.cos();
-        let imaginary = frequencies.sin();
-
-        (real, imaginary)
-
-             */
+        // let key_states = key_states
+        //     .reshape::<(
+        //         Const<1>,
+        //         Dyn<'s'>,
+        //         Const<NUM_KV_HEADS>,
+        //         Const<ATTENTION_HEAD_DIM>,
+        //     )>()
+        //     .permute::<_, Axes4<0, 2, 1, 3>>();
+        // let key_states = apply_rotary_embeddings(key_states, rotary_frequencies);
 
         // q_proj.retrieve();
         // k_proj.retrieve();
-        // query_states.retrieve();
+        query_states.retrieve();
         // key_states.retrieve();
         // value_states.retrieve();
         hidden_states.retrieve();
@@ -477,10 +463,10 @@ impl Mistral {
 
         // println!("input: {:?}", self.input);
         // println!("embedding: {:?}", self.embedding);
-        println!("hidden_states: {:?}", hidden_states);
+        // println!("hidden_states: {:?}", hidden_states);
         // println!("token_ids_one_hot: {:?}", token_ids_one_hot);
         // println!("input_layer_norm: {:?}", input_layer_norm);
-        // println!("query_states: {:?}", query_states);
+        println!("query_states: {:?}", query_states);
         // println!("k_proj: {:?}", k_proj);
         // println!("key_states: {:?}", key_states);
         // println!("value_states: {:?}", value_states);
