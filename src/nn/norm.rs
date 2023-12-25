@@ -29,12 +29,14 @@ impl<const DIM: isize> SerializeModule for LayerNorm<DIM> {
 /// RMSNorm normalization
 pub struct RMSNorm<const DIM: usize> {
     pub weight: GraphTensor<R1<DIM>>,
+    pub epsilon: f32,
 }
 
 impl<const DIM: usize> InitModule for RMSNorm<DIM> {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             weight: cx.named_tensor("RMSNorm Weight").set(vec![1.0; DIM]),
+            epsilon: 1e-6,
         }
     }
 }
@@ -51,7 +53,7 @@ impl<const DIM: usize> Module<GraphTensor<R1<DIM>>> for RMSNorm<DIM> {
     fn forward(&self, input: GraphTensor<R1<DIM>>) -> Self::Output {
         (input * input)
             .mean_reduce::<_, Axis<0>>()
-            .add(1e-6)
+            .add(self.epsilon)
             .sqrt()
             .recip()
             .expand()
@@ -66,7 +68,7 @@ impl<S: Dimension, const DIM: usize> Module<GraphTensor<(S, Const<DIM>)>> for RM
     fn forward(&self, input: GraphTensor<(S, Const<DIM>)>) -> Self::Output {
         (input * input)
             .mean_reduce::<_, Axis<1>>()
-            .add(1e-6)
+            .add(self.epsilon)
             .sqrt()
             .recip()
             .expand()
@@ -83,7 +85,7 @@ impl<B: Dimension, S: Dimension, const DIM: usize> Module<GraphTensor<(B, S, Con
     fn forward(&self, input: GraphTensor<(B, S, Const<DIM>)>) -> Self::Output {
         (input * input)
             .mean_reduce::<_, Axis<2>>()
-            .add(1e-6)
+            .add(self.epsilon)
             .sqrt()
             .recip()
             .expand()

@@ -20,7 +20,8 @@ use yoke::{Yoke, Yokeable};
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
-pub const NUM_LAYERS: usize = 32;
+// pub const NUM_LAYERS: usize = 32;
+pub const NUM_LAYERS: usize = 1;
 pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
@@ -332,7 +333,7 @@ pub struct Mistral {
     pub embedding: GraphTensor<R2<VOCAB_SIZE, HIDDEN_DIM>>,
 
     // Transformer Layers
-    // pub transformer_layers: Vec<TransformerBlock>,
+    pub transformer_layers: Vec<TransformerBlock>,
 
     // Final Norm layer
     // pub norm: RMSNorm<HIDDEN_DIM>,
@@ -382,6 +383,20 @@ impl Mistral {
         // Embeddings is correct
         let hidden_states = self.embedding.gather(self.input);
 
+        // Transformer Layer
+        // let hidden_states = self.transformer_layers[0].forward(hidden_states);
+        // let hidden_states = self.transformer_layers[0]
+        //     .attention_norm
+        //     .forward(hidden_states);
+
+        // hidden_states.retrieve();
+
+        // let input_layer_norm = self.transformer_layers[0].attention_norm.weight;
+        // input_layer_norm.retrieve();
+
+        let hidden_states = self.transformer_layers[0]
+            .attention_norm
+            .forward(hidden_states);
         hidden_states.retrieve();
 
         // Compile the graph
@@ -392,7 +407,7 @@ impl Mistral {
             PostGenericCompiler,
         )>::default());
 
-        // self.graph.display();
+        self.graph.display();
 
         // Execute the graph
         self.graph.execute_debug();
@@ -401,6 +416,8 @@ impl Mistral {
         // println!("embedding: {:?}", self.embedding);
         println!("hidden_states: {:?}", hidden_states);
         // println!("token_ids_one_hot: {:?}", token_ids_one_hot);
+        // println!("input_layer_norm: {:?}", input_layer_norm);
+        // println!("rms_out: {:?}", rms_out);
     }
 
     // Infer next token
@@ -480,24 +497,32 @@ impl Mistral {
         // Create the embedding
         let embedding = graph.named_tensor("embedding");
 
-        // // Create the transformer layers
-        // let transformer_layers = (0..NUM_LAYERS)
-        //     .map(|i| TransformerBlock {
-        //         attention: Attention {
-        //             q_proj: graph.named_tensor(format!("layers.{i}.attention.q_proj").as_str()),
-        //             k_proj: graph.named_tensor(format!("layers.{i}.attention.k_proj").as_str()),
-        //             v_proj: graph.named_tensor(format!("layers.{i}.attention.v_proj").as_str()),
-        //             o_proj: graph.named_tensor(format!("layers.{i}.attention.o_proj").as_str()),
-        //         },
-        //         attention_norm: RMSNorm::initialize(graph.as_mut()),
-        //         feed_forward: FeedForward {
-        //             gate_proj: graph.named_tensor(format!("layers.{i}.mlp.gate_proj").as_str()),
-        //             down_proj: graph.named_tensor(format!("layers.{i}.mlp.down_proj").as_str()),
-        //             up_proj: graph.named_tensor(format!("layers.{i}.mlp.up_proj").as_str()),
-        //         },
-        //         feed_forward_norm: RMSNorm::initialize(graph.as_mut()),
-        //     })
-        //     .collect_vec();
+        // Create the transformer layers
+        let transformer_layers = (0..NUM_LAYERS)
+            .map(|i| {
+                let mut attention_norm = RMSNorm::initialize(graph.as_mut());
+                attention_norm.epsilon = 1e-5;
+
+                let mut feed_forward_norm = RMSNorm::initialize(graph.as_mut());
+                feed_forward_norm.epsilon = 1e-5;
+
+                TransformerBlock {
+                    attention: Attention {
+                        q_proj: graph.named_tensor(format!("layers.{i}.attention.q_proj").as_str()),
+                        k_proj: graph.named_tensor(format!("layers.{i}.attention.k_proj").as_str()),
+                        v_proj: graph.named_tensor(format!("layers.{i}.attention.v_proj").as_str()),
+                        o_proj: graph.named_tensor(format!("layers.{i}.attention.o_proj").as_str()),
+                    },
+                    attention_norm: attention_norm,
+                    feed_forward: FeedForward {
+                        gate_proj: graph.named_tensor(format!("layers.{i}.mlp.gate_proj").as_str()),
+                        down_proj: graph.named_tensor(format!("layers.{i}.mlp.down_proj").as_str()),
+                        up_proj: graph.named_tensor(format!("layers.{i}.mlp.up_proj").as_str()),
+                    },
+                    feed_forward_norm: feed_forward_norm,
+                }
+            })
+            .collect_vec();
 
         // // Create the norm
         // let norm = RMSNorm::initialize(graph.as_mut());
@@ -512,7 +537,7 @@ impl Mistral {
             tokenizer,
             graph,
             embedding,
-            // transformer_layers,
+            transformer_layers,
             // norm,
             // lm_head,
             input,
@@ -578,122 +603,122 @@ impl Mistral {
         self.embedding.set(embeddings);
 
         // Layers: Transformer Layers
-        // for layer_index in 0..self.transformer_layers.len() {
-        //     // We populate each layer here
-        //     let weight_prefix = format!("model.layers.{layer_index}");
+        for layer_index in 0..self.transformer_layers.len() {
+            // We populate each layer here
+            let weight_prefix = format!("model.layers.{layer_index}");
 
-        //     // Attention
-        //     let weight_name = format!("{weight_prefix}.self_attn.q_proj.weight");
-        //     let q_proj_safe_tensor = &get_tensor(
-        //         &weight_file_mapper,
-        //         &file_tensor_mapper,
-        //         weight_name.as_str(),
-        //     )?;
+            // Attention
+            let weight_name = format!("{weight_prefix}.self_attn.q_proj.weight");
+            let q_proj_safe_tensor = &get_tensor(
+                &weight_file_mapper,
+                &file_tensor_mapper,
+                weight_name.as_str(),
+            )?;
 
-        //     let q_proj = convert_vector_bf16_f32(q_proj_safe_tensor);
-        //     self.transformer_layers[layer_index]
-        //         .attention
-        //         .q_proj
-        //         .set(q_proj);
+            let q_proj = convert_vector_bf16_f32(q_proj_safe_tensor);
+            self.transformer_layers[layer_index]
+                .attention
+                .q_proj
+                .set(q_proj);
 
-        //     let weight_name = format!("{weight_prefix}.self_attn.k_proj.weight");
-        //     let k_proj_safe_tensor = &get_tensor(
-        //         &weight_file_mapper,
-        //         &file_tensor_mapper,
-        //         weight_name.as_str(),
-        //     )?;
-        //     let k_proj = convert_vector_bf16_f32(k_proj_safe_tensor);
-        //     self.transformer_layers[layer_index]
-        //         .attention
-        //         .k_proj
-        //         .set(k_proj);
+            let weight_name = format!("{weight_prefix}.self_attn.k_proj.weight");
+            let k_proj_safe_tensor = &get_tensor(
+                &weight_file_mapper,
+                &file_tensor_mapper,
+                weight_name.as_str(),
+            )?;
+            let k_proj = convert_vector_bf16_f32(k_proj_safe_tensor);
+            self.transformer_layers[layer_index]
+                .attention
+                .k_proj
+                .set(k_proj);
 
-        //     let weight_name = format!("{weight_prefix}.self_attn.v_proj.weight");
-        //     let v_proj_safe_tensor = &get_tensor(
-        //         &weight_file_mapper,
-        //         &file_tensor_mapper,
-        //         weight_name.as_str(),
-        //     )?;
-        //     let v_proj = convert_vector_bf16_f32(v_proj_safe_tensor);
-        //     self.transformer_layers[layer_index]
-        //         .attention
-        //         .v_proj
-        //         .set(v_proj);
+            let weight_name = format!("{weight_prefix}.self_attn.v_proj.weight");
+            let v_proj_safe_tensor = &get_tensor(
+                &weight_file_mapper,
+                &file_tensor_mapper,
+                weight_name.as_str(),
+            )?;
+            let v_proj = convert_vector_bf16_f32(v_proj_safe_tensor);
+            self.transformer_layers[layer_index]
+                .attention
+                .v_proj
+                .set(v_proj);
 
-        //     let weight_name = format!("{weight_prefix}.self_attn.o_proj.weight");
-        //     let o_proj_safe_tensor = &get_tensor(
-        //         &weight_file_mapper,
-        //         &file_tensor_mapper,
-        //         weight_name.as_str(),
-        //     )?;
-        //     let o_proj = convert_vector_bf16_f32(o_proj_safe_tensor);
-        //     self.transformer_layers[layer_index]
-        //         .attention
-        //         .o_proj
-        //         .set(o_proj);
+            let weight_name = format!("{weight_prefix}.self_attn.o_proj.weight");
+            let o_proj_safe_tensor = &get_tensor(
+                &weight_file_mapper,
+                &file_tensor_mapper,
+                weight_name.as_str(),
+            )?;
+            let o_proj = convert_vector_bf16_f32(o_proj_safe_tensor);
+            self.transformer_layers[layer_index]
+                .attention
+                .o_proj
+                .set(o_proj);
 
-        //     // Norms
-        //     let weight_name = format!("{weight_prefix}.input_layernorm.weight");
-        //     let attention_norm_safe_tensor = &get_tensor(
-        //         &weight_file_mapper,
-        //         &file_tensor_mapper,
-        //         weight_name.as_str(),
-        //     )?;
-        //     let attention_norm = convert_vector_bf16_f32(attention_norm_safe_tensor);
-        //     self.transformer_layers[layer_index]
-        //         .attention_norm
-        //         .weight
-        //         .set(attention_norm);
+            // Norms
+            let weight_name = format!("{weight_prefix}.input_layernorm.weight");
+            let attention_norm_safe_tensor = &get_tensor(
+                &weight_file_mapper,
+                &file_tensor_mapper,
+                weight_name.as_str(),
+            )?;
+            let attention_norm = convert_vector_bf16_f32(attention_norm_safe_tensor);
+            self.transformer_layers[layer_index]
+                .attention_norm
+                .weight
+                .set(attention_norm);
 
-        //     let weight_name = format!("{weight_prefix}.post_attention_layernorm.weight");
-        //     let feed_forward_norm_safe_tensor = &get_tensor(
-        //         &weight_file_mapper,
-        //         &file_tensor_mapper,
-        //         weight_name.as_str(),
-        //     )?;
-        //     let feed_forward_norm = convert_vector_bf16_f32(feed_forward_norm_safe_tensor);
-        //     self.transformer_layers[layer_index]
-        //         .feed_forward_norm
-        //         .weight
-        //         .set(feed_forward_norm);
+            let weight_name = format!("{weight_prefix}.post_attention_layernorm.weight");
+            let feed_forward_norm_safe_tensor = &get_tensor(
+                &weight_file_mapper,
+                &file_tensor_mapper,
+                weight_name.as_str(),
+            )?;
+            let feed_forward_norm = convert_vector_bf16_f32(feed_forward_norm_safe_tensor);
+            self.transformer_layers[layer_index]
+                .feed_forward_norm
+                .weight
+                .set(feed_forward_norm);
 
-        //     // Feed Forward
-        //     let weight_name = format!("{weight_prefix}.mlp.gate_proj.weight");
-        //     let gate_proj_safe_tensor = &get_tensor(
-        //         &weight_file_mapper,
-        //         &file_tensor_mapper,
-        //         weight_name.as_str(),
-        //     )?;
-        //     let gate_proj = convert_vector_bf16_f32(gate_proj_safe_tensor);
-        //     self.transformer_layers[layer_index]
-        //         .feed_forward
-        //         .gate_proj
-        //         .set(gate_proj);
+            // Feed Forward
+            let weight_name = format!("{weight_prefix}.mlp.gate_proj.weight");
+            let gate_proj_safe_tensor = &get_tensor(
+                &weight_file_mapper,
+                &file_tensor_mapper,
+                weight_name.as_str(),
+            )?;
+            let gate_proj = convert_vector_bf16_f32(gate_proj_safe_tensor);
+            self.transformer_layers[layer_index]
+                .feed_forward
+                .gate_proj
+                .set(gate_proj);
 
-        //     let weight_name = format!("{weight_prefix}.mlp.down_proj.weight");
-        //     let down_proj_safe_tensor = &get_tensor(
-        //         &weight_file_mapper,
-        //         &file_tensor_mapper,
-        //         weight_name.as_str(),
-        //     )?;
-        //     let down_proj = convert_vector_bf16_f32(down_proj_safe_tensor);
-        //     self.transformer_layers[layer_index]
-        //         .feed_forward
-        //         .down_proj
-        //         .set(down_proj);
+            let weight_name = format!("{weight_prefix}.mlp.down_proj.weight");
+            let down_proj_safe_tensor = &get_tensor(
+                &weight_file_mapper,
+                &file_tensor_mapper,
+                weight_name.as_str(),
+            )?;
+            let down_proj = convert_vector_bf16_f32(down_proj_safe_tensor);
+            self.transformer_layers[layer_index]
+                .feed_forward
+                .down_proj
+                .set(down_proj);
 
-        //     let weight_name = format!("{weight_prefix}.mlp.up_proj.weight");
-        //     let up_proj_safe_tensor = &get_tensor(
-        //         &weight_file_mapper,
-        //         &file_tensor_mapper,
-        //         weight_name.as_str(),
-        //     )?;
-        //     let up_proj = convert_vector_bf16_f32(up_proj_safe_tensor);
-        //     self.transformer_layers[layer_index]
-        //         .feed_forward
-        //         .up_proj
-        //         .set(up_proj);
-        // }
+            let weight_name = format!("{weight_prefix}.mlp.up_proj.weight");
+            let up_proj_safe_tensor = &get_tensor(
+                &weight_file_mapper,
+                &file_tensor_mapper,
+                weight_name.as_str(),
+            )?;
+            let up_proj = convert_vector_bf16_f32(up_proj_safe_tensor);
+            self.transformer_layers[layer_index]
+                .feed_forward
+                .up_proj
+                .set(up_proj);
+        }
 
         // // Layer: Norm
         // let norm_safe_tensor = &get_tensor(
