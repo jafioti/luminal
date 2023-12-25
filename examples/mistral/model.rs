@@ -26,6 +26,7 @@ pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
 pub const ROPE_THETA: f32 = 1000000.0;
+pub const MAX_POSITION_EMBEDDINGS: usize = 32768;
 
 pub const NUM_ATTENTION_GROUPS: usize = NUM_ATTENTION_HEADS / NUM_KV_HEADS;
 pub const ATTENTION_HEAD_DIM: usize = HIDDEN_DIM / NUM_ATTENTION_HEADS;
@@ -70,6 +71,9 @@ pub fn compute_rotary_embedding_frequencies<SequenceLength: Dimension>(
 
     let real = frequencies.cos();
     let imaginary = frequencies.sin();
+
+    // let real: GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)> =
+    //     real.slice((..sequence_length, ..));
 
     (real, imaginary)
 }
@@ -407,70 +411,65 @@ impl Mistral {
             )>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        // let query_states = apply_rotary_embeddings(query_states, rotary_frequencies);
-        // Ok, let's first figure out rotate_half
-
-        // let q_h =
-        //     rotate_half::<_, _, _, ATTENTION_HEAD_DIM, ATTENTION_HEAD_DIM_OVER_2>(query_states);
-
-        // let k_h = rotate_half::<_, _, _, ATTENTION_HEAD_DIM, ATTENTION_HEAD_DIM_OVER_2>(key_states);
-
-        // let query_states = (query_states * cos.expand()) + (q_h * sin.expand());
-
         let query_states =
             apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM, ATTENTION_HEAD_DIM_OVER_2>(
                 query_states,
                 rotary_embeddings,
             );
 
-        let key_states =
-            apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM, ATTENTION_HEAD_DIM_OVER_2>(
-                key_states,
-                rotary_embeddings,
-            );
+        // let key_states =
+        //     apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM, ATTENTION_HEAD_DIM_OVER_2>(
+        //         key_states,
+        //         rotary_embeddings,
+        //     );
 
-        // Let's try to repeat the key states
-        let key_states = key_states
-            .expand::<(
-                Const<1>,
-                Const<NUM_KV_HEADS>,
-                Const<NUM_ATTENTION_GROUPS>,
-                Dyn<'s'>,
-                Const<ATTENTION_HEAD_DIM>,
-            ), Axis<2>>()
-            .reshape::<(
-                Const<1>,
-                Const<NUM_ATTENTION_HEADS>,
-                Dyn<'s'>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>();
+        // // Let's try to repeat the key states
+        // let key_states = key_states
+        //     .expand::<(
+        //         Const<1>,
+        //         Const<NUM_KV_HEADS>,
+        //         Const<NUM_ATTENTION_GROUPS>,
+        //         Dyn<'s'>,
+        //         Const<ATTENTION_HEAD_DIM>,
+        //     ), Axis<2>>()
+        //     .reshape::<(
+        //         Const<1>,
+        //         Const<NUM_ATTENTION_HEADS>,
+        //         Dyn<'s'>,
+        //         Const<ATTENTION_HEAD_DIM>,
+        //     )>();
 
-        let value_states = value_states
-            .expand::<(
-                Const<1>,
-                Const<NUM_KV_HEADS>,
-                Const<NUM_ATTENTION_GROUPS>,
-                Dyn<'s'>,
-                Const<ATTENTION_HEAD_DIM>,
-            ), Axis<2>>()
-            .reshape::<(
-                Const<1>,
-                Const<NUM_ATTENTION_HEADS>,
-                Dyn<'s'>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>();
+        // let value_states = value_states
+        //     .expand::<(
+        //         Const<1>,
+        //         Const<NUM_KV_HEADS>,
+        //         Const<NUM_ATTENTION_GROUPS>,
+        //         Dyn<'s'>,
+        //         Const<ATTENTION_HEAD_DIM>,
+        //     ), Axis<2>>()
+        //     .reshape::<(
+        //         Const<1>,
+        //         Const<NUM_ATTENTION_HEADS>,
+        //         Dyn<'s'>,
+        //         Const<ATTENTION_HEAD_DIM>,
+        //     )>();
+
+        // Now we implement attention (finally)
+        // let attn_weights = query_states.matmul(key_states.permute::<_, Axes4<0, 1, 3, 2>>());
+        // / (ATTENTION_HEAD_DIM as f32).sqrt();
 
         // q_proj.retrieve();
         // k_proj.retrieve();
-        // query_states.retrieve();
+        query_states.retrieve();
         // q1.retrieve();
         // q2.retrieve();
         // q_h.retrieve();
         // k_h.retrieve();
         // key_states.retrieve();
-        value_states.retrieve();
+        // value_states.retrieve();
         // hidden_states.retrieve();
         // sin.retrieve();
+        // attn_weights.retrieve();
 
         // Compile the graph
         self.graph.compile(<(
@@ -490,15 +489,16 @@ impl Mistral {
         // println!("hidden_states: {:?}", hidden_states);
         // println!("token_ids_one_hot: {:?}", token_ids_one_hot);
         // println!("input_layer_norm: {:?}", input_layer_norm);
-        // println!("query_states: {:?}", query_states);
+        println!("query_states: {:?}", query_states);
         // println!("q1: {:?}", q1);
         // println!("q_h: {:?}", q_h);
         // println!("k_h: {:?}", k_h);
         // println!("k_proj: {:?}", k_proj);
         // println!("key_states: {:?}", key_states);
-        println!("value_states: {:?}", value_states);
+        // println!("value_states: {:?}", value_states);
         // println!("rotary_frequencies (sin): {:?}", sin);
         // println!("frequencies {:?}", frequencies);
+        // println!("attn_weights: {:?}", attn_weights);
     }
 
     // Infer next token
