@@ -74,6 +74,35 @@ pub fn compute_rotary_embedding_frequencies<SequenceLength: Dimension>(
     (real, imaginary)
 }
 
+pub fn rotate_half<
+    Batch: Dimension,
+    SequenceLength: Dimension,
+    NumAttentionHeads: Dimension,
+    const ATTENTION_HEAD_DIM: usize,
+    const ATTENTION_HEAD_DIM_OVER_2: usize,
+>(
+    x: GraphTensor<(
+        Batch,
+        SequenceLength,
+        NumAttentionHeads,
+        Const<ATTENTION_HEAD_DIM>,
+    )>,
+) -> GraphTensor<(
+    Batch,
+    SequenceLength,
+    NumAttentionHeads,
+    Const<ATTENTION_HEAD_DIM>,
+)> {
+    let x1 = x
+        .slice((.., .., .., ..ATTENTION_HEAD_DIM_OVER_2))
+        .contiguous();
+    let x2 = x
+        .slice((.., .., .., ATTENTION_HEAD_DIM_OVER_2..))
+        .contiguous();
+
+    (-x2).concat_along::<_, Axis<3>, _>(x1)
+}
+
 pub fn apply_rotary_embeddings<
     Batch: Dimension,
     NumAttentionHeads: Dimension,
@@ -422,27 +451,20 @@ impl Mistral {
                 Const<ATTENTION_HEAD_DIM>,
             )>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
-        let query_states = apply_rotary_embeddings(query_states, rotary_frequencies);
-        // In last dim, gets first row right, messes up other rows
+        // let query_states = apply_rotary_embeddings(query_states, rotary_frequencies);
+        // TODO: In last dim, gets first row right, messes up other rows
 
-        // let query_states =
-        //     query_states
-        //         .permute::<_, Axes4<0, 2, 1, 3>>()
-        //         .reshape::<(Const<1>, Dyn<'s'>, Const<HIDDEN_DIM>)>();
+        // Ok, let's first figure out rotate_half
 
-        // let key_states = key_states
-        //     .reshape::<(
-        //         Const<1>,
-        //         Dyn<'s'>,
-        //         Const<NUM_KV_HEADS>,
-        //         Const<ATTENTION_HEAD_DIM>,
-        //     )>()
-        //     .permute::<_, Axes4<0, 2, 1, 3>>();
-        // let key_states = apply_rotary_embeddings(key_states, rotary_frequencies);
+        let q_h =
+            rotate_half::<_, _, _, ATTENTION_HEAD_DIM, ATTENTION_HEAD_DIM_OVER_2>(query_states);
 
         // q_proj.retrieve();
         // k_proj.retrieve();
-        query_states.retrieve();
+        // query_states.retrieve();
+        // q1.retrieve();
+        // q2.retrieve();
+        q_h.retrieve();
         // key_states.retrieve();
         // value_states.retrieve();
         hidden_states.retrieve();
@@ -466,7 +488,9 @@ impl Mistral {
         // println!("hidden_states: {:?}", hidden_states);
         // println!("token_ids_one_hot: {:?}", token_ids_one_hot);
         // println!("input_layer_norm: {:?}", input_layer_norm);
-        println!("query_states: {:?}", query_states);
+        // println!("query_states: {:?}", query_states);
+        // println!("q1: {:?}", q1);
+        println!("q_h: {:?}", q_h);
         // println!("k_proj: {:?}", k_proj);
         // println!("key_states: {:?}", key_states);
         // println!("value_states: {:?}", value_states);
