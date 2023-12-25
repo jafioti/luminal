@@ -948,7 +948,7 @@ fn test_pad_contig() {
         .pad(&[(0, 0.into()), (0, Expression::from(16) - 'K')])
         .contiguous()
         .retrieve();
-    let c: GraphTensor<(Dyn<'M'>, Dyn<'K'>)> = a.slice((.., ..k)).realize().contiguous().retrieve();
+    let c: GraphTensor<(Dyn<'M'>, Dyn<'K'>)> = (a.slice((.., ..k)).realize() / 1.0).retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
