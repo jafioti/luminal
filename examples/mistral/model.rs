@@ -50,21 +50,19 @@ pub fn convert_vector_bf16_f32(tensor_view: &TensorView<'_>) -> Vec<f32> {
 }
 
 // Rotary Embeddings
-pub fn compute_rotary_embedding_frequencies<
-    SequenceLength: Dimension,
-    const HIDDEN_DIM_OVER_2: usize,
->(
+pub fn compute_rotary_embedding_frequencies<SequenceLength: Dimension>(
     graph: &mut Graph,
 ) -> (
-    GraphTensor<(SequenceLength, Const<HIDDEN_DIM_OVER_2>)>,
-    GraphTensor<(SequenceLength, Const<HIDDEN_DIM_OVER_2>)>,
+    GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
+    GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
 ) {
     let frequencies =
-        (graph.arange::<Const<HIDDEN_DIM_OVER_2>>() * 2.0) / (HIDDEN_DIM_OVER_2 as f32 * 2.0);
+        (graph.arange::<Const<ATTENTION_HEAD_DIM>>() * 2.0) / (ATTENTION_HEAD_DIM as f32);
+
     let frequencies = frequencies
         .pow2(ROPE_THETA)
         .recip()
-        .reshape::<R2<1, HIDDEN_DIM_OVER_2>>();
+        .reshape::<R2<1, ATTENTION_HEAD_DIM>>();
     let t = graph
         .arange::<SequenceLength>()
         .reshape::<(SequenceLength, Const<1>)>();
@@ -172,118 +170,120 @@ pub fn apply_rotary_embeddings<
 // Create the self-Attention layer
 pub struct Attention {
     pub q_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
-    pub k_proj: GraphTensor<R2<HIDDEN_DIM, ATTENTION_PROJECTION_DIM>>,
-    pub v_proj: GraphTensor<R2<HIDDEN_DIM, ATTENTION_PROJECTION_DIM>>,
+    // pub k_proj: GraphTensor<R2<HIDDEN_DIM, ATTENTION_PROJECTION_DIM>>,
+    pub k_proj: GraphTensor<R2<ATTENTION_PROJECTION_DIM, HIDDEN_DIM>>,
+    pub v_proj: GraphTensor<R2<ATTENTION_PROJECTION_DIM, HIDDEN_DIM>>,
+    // pub v_proj: GraphTensor<R2<HIDDEN_DIM, ATTENTION_PROJECTION_DIM>>,
     pub o_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
 }
 
-impl Attention {
-    // Helper to get a graph
-    fn graph(&self) -> &mut Graph {
-        self.q_proj.graph()
-    }
+// impl Attention {
+//     // Helper to get a graph
+//     fn graph(&self) -> &mut Graph {
+//         self.q_proj.graph()
+//     }
 
-    // Forward method
-    fn forward<Batch: Dimension, SequenceLength: Dimension>(
-        &self,
-        x: GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
-    ) -> GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)> {
-        let xq = x
-            .matmul(self.q_proj)
-            .reshape::<(
-                Batch,
-                SequenceLength,
-                Const<NUM_ATTENTION_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>()
-            .permute::<_, Axes4<0, 2, 1, 3>>();
+//     // Forward method
+//     fn forward<Batch: Dimension, SequenceLength: Dimension>(
+//         &self,
+//         x: GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
+//     ) -> GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)> {
+//         let xq = x
+//             .matmul(self.q_proj)
+//             .reshape::<(
+//                 Batch,
+//                 SequenceLength,
+//                 Const<NUM_ATTENTION_HEADS>,
+//                 Const<ATTENTION_HEAD_DIM>,
+//             )>()
+//             .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        let xk = x
-            .matmul(self.k_proj)
-            .reshape::<(
-                Batch,
-                SequenceLength,
-                Const<NUM_KV_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>()
-            .permute::<_, Axes4<0, 2, 1, 3>>();
+//         let xk = x
+//             .matmul(self.k_proj)
+//             .reshape::<(
+//                 Batch,
+//                 SequenceLength,
+//                 Const<NUM_KV_HEADS>,
+//                 Const<ATTENTION_HEAD_DIM>,
+//             )>()
+//             .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        let xv = x
-            .matmul(self.v_proj)
-            .reshape::<(
-                Batch,
-                SequenceLength,
-                Const<NUM_KV_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>()
-            .permute::<_, Axes4<0, 2, 1, 3>>();
+//         let xv = x
+//             .matmul(self.v_proj)
+//             .reshape::<(
+//                 Batch,
+//                 SequenceLength,
+//                 Const<NUM_KV_HEADS>,
+//                 Const<ATTENTION_HEAD_DIM>,
+//             )>()
+//             .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        // We apply rotary embeddings
-        let rotary_frequencies = compute_rotary_embedding_frequencies::<
-            SequenceLength,
-            ATTENTION_HEAD_DIM_OVER_2,
-        >(&mut self.graph());
-        let xq = apply_rotary_embeddings(xq, rotary_frequencies);
-        let xk = apply_rotary_embeddings(xk, rotary_frequencies);
+//         // We apply rotary embeddings
+//         let rotary_frequencies = compute_rotary_embedding_frequencies::<
+//             SequenceLength,
+//             ATTENTION_HEAD_DIM_OVER_2,
+//         >(&mut self.graph());
+//         let xq = apply_rotary_embeddings(xq, rotary_frequencies);
+//         let xk = apply_rotary_embeddings(xk, rotary_frequencies);
 
-        // We repeat xv and xk to match the size of xq
-        let xk = xk
-            .expand::<(
-                Batch,
-                Const<NUM_KV_HEADS>,
-                Const<NUM_ATTENTION_GROUPS>,
-                SequenceLength,
-                Const<ATTENTION_HEAD_DIM>,
-            ), Axis<2>>()
-            .reshape::<(
-                Batch,
-                SequenceLength,
-                Const<NUM_ATTENTION_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>();
+//         // We repeat xv and xk to match the size of xq
+//         let xk = xk
+//             .expand::<(
+//                 Batch,
+//                 Const<NUM_KV_HEADS>,
+//                 Const<NUM_ATTENTION_GROUPS>,
+//                 SequenceLength,
+//                 Const<ATTENTION_HEAD_DIM>,
+//             ), Axis<2>>()
+//             .reshape::<(
+//                 Batch,
+//                 SequenceLength,
+//                 Const<NUM_ATTENTION_HEADS>,
+//                 Const<ATTENTION_HEAD_DIM>,
+//             )>();
 
-        let xv = xv
-            .expand::<(
-                Batch,
-                Const<NUM_KV_HEADS>,
-                Const<NUM_ATTENTION_GROUPS>,
-                SequenceLength,
-                Const<ATTENTION_HEAD_DIM>,
-            ), Axis<2>>()
-            .reshape::<(
-                Batch,
-                SequenceLength,
-                Const<NUM_ATTENTION_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>();
+//         let xv = xv
+//             .expand::<(
+//                 Batch,
+//                 Const<NUM_KV_HEADS>,
+//                 Const<NUM_ATTENTION_GROUPS>,
+//                 SequenceLength,
+//                 Const<ATTENTION_HEAD_DIM>,
+//             ), Axis<2>>()
+//             .reshape::<(
+//                 Batch,
+//                 SequenceLength,
+//                 Const<NUM_ATTENTION_HEADS>,
+//                 Const<ATTENTION_HEAD_DIM>,
+//             )>();
 
-        // Attention mask
-        let attention_mask =
-            self.graph().triu::<SequenceLength, SequenceLength>(1) * f16::MIN.to_f32();
+//         // Attention mask
+//         let attention_mask =
+//             self.graph().triu::<SequenceLength, SequenceLength>(1) * f16::MIN.to_f32();
 
-        // Finally we compute the outputs (attention calculation)
-        let xo = xq
-            .matmul(xk.permute())
-            .div((ATTENTION_HEAD_DIM as f64).sqrt() as f32)
-            .add(attention_mask.expand())
-            .softmax::<3>()
-            .matmul(xv.permute())
-            .permute::<(
-                Batch,
-                SequenceLength,
-                Const<NUM_ATTENTION_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            ), _>()
-            .dyn_reshape::<(Batch, SequenceLength, Const<HIDDEN_DIM>)>(vec![
-                Batch::const_size(),
-                SequenceLength::const_size(),
-                HIDDEN_DIM.into(),
-            ])
-            .matmul(self.o_proj.permute());
+//         // Finally we compute the outputs (attention calculation)
+//         let xo = xq
+//             .matmul(xk.permute())
+//             .div((ATTENTION_HEAD_DIM as f64).sqrt() as f32)
+//             .add(attention_mask.expand())
+//             .softmax::<3>()
+//             .matmul(xv.permute())
+//             .permute::<(
+//                 Batch,
+//                 SequenceLength,
+//                 Const<NUM_ATTENTION_HEADS>,
+//                 Const<ATTENTION_HEAD_DIM>,
+//             ), _>()
+//             .dyn_reshape::<(Batch, SequenceLength, Const<HIDDEN_DIM>)>(vec![
+//                 Batch::const_size(),
+//                 SequenceLength::const_size(),
+//                 HIDDEN_DIM.into(),
+//             ])
+//             .matmul(self.o_proj.permute());
 
-        xo
-    }
-}
+//         xo
+//     }
+// }
 
 // Create the FeedForward Layer
 pub struct FeedForward {
@@ -310,17 +310,17 @@ pub struct TransformerBlock {
     pub feed_forward_norm: RMSNorm<HIDDEN_DIM>,
 }
 
-impl TransformerBlock {
-    fn forward<Batch: Dimension, SequenceLength: Dimension>(
-        &self,
-        x: GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
-    ) -> GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)> {
-        let r = self.attention.forward(self.attention_norm.forward(x));
-        let h = x + r;
-        let r = self.feed_forward.forward(self.feed_forward_norm.forward(h));
-        h + r
-    }
-}
+// impl TransformerBlock {
+//     fn forward<Batch: Dimension, SequenceLength: Dimension>(
+//         &self,
+//         x: GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
+//     ) -> GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)> {
+//         let r = self.attention.forward(self.attention_norm.forward(x));
+//         let h = x + r;
+//         let r = self.feed_forward.forward(self.feed_forward_norm.forward(h));
+//         h + r
+//     }
+// }
 
 pub struct Mistral {
     // Graph
@@ -396,15 +396,64 @@ impl Mistral {
         // let hidden_states = self.transformer_layers[0].attention.forward(hidden_states);
         let q_proj = self.transformer_layers[0].attention.q_proj;
         let query_states = hidden_states.matmul(q_proj.permute());
-        // let h = hidden_states
-        //     .permute::<_, Axes3<2, 0, 1>>()
-        //     .reshape::<(Const<HIDDEN_DIM>, Dyn<'s'>)>();
-        // let query_states = q_proj.matmul(h).permute();
-        // q_proj @ hidden_states
+
+        let k_proj = self.transformer_layers[0].attention.k_proj;
+        let key_states = hidden_states.matmul(k_proj.permute());
+
+        let v_proj = self.transformer_layers[0].attention.v_proj;
+        // let value_states = hidden_states.matmul(v_proj.permute());
+
+        // Now, let's compute the rotary embeddings
+        let (cos, sin) = compute_rotary_embedding_frequencies::<Dyn<'s'>>(&mut self.graph);
+
+        // let x = sin / 2.0;
+
+        // // Compute rotary embeddings directly here
+        // let x = self.graph.constant(ATTENTION_HEAD_DIM as f32);
+        // let frequencies = self.graph.arange::<Const<ATTENTION_HEAD_DIM>>();
+        // let frequencies = frequencies * 2.0;
+        // let frequencies = frequencies * (x.recip().expand());
+
+        // let frequencies = frequencies
+        //     .pow2(ROPE_THETA)
+        //     .recip()
+        //     .reshape::<R2<1, ATTENTION_HEAD_DIM>>();
+        // let t = self
+        //     .graph
+        //     .arange::<Dyn<'s'>>()
+        //     .reshape::<(Dyn<'s'>, Const<1>)>();
+        // let frequencies = t.matmul(frequencies);
+        // let cos = frequencies.cos();
+        // let sin = frequencies.sin();
+
+        // let frequencies = frequencies.recip();
+        // frequencies.retrieve();
+        /*
+            let frequencies =
+            (graph.arange::<Const<HIDDEN_DIM_OVER_2>>() * 2.0) / (HIDDEN_DIM_OVER_2 as f32 * 2.0);
+        let frequencies = frequencies
+            .pow2(ROPE_THETA)
+            .recip()
+            .reshape::<R2<1, HIDDEN_DIM_OVER_2>>();
+        let t = graph
+            .arange::<SequenceLength>()
+            .reshape::<(SequenceLength, Const<1>)>();
+        let frequencies = t.matmul(frequencies);
+
+        let real = frequencies.cos();
+        let imaginary = frequencies.sin();
+
+        (real, imaginary)
+
+             */
 
         // q_proj.retrieve();
+        k_proj.retrieve();
         query_states.retrieve();
+        key_states.retrieve();
+        // value_states.retrieve();
         hidden_states.retrieve();
+        sin.retrieve();
 
         // Compile the graph
         self.graph.compile(<(
@@ -421,11 +470,15 @@ impl Mistral {
 
         // println!("input: {:?}", self.input);
         // println!("embedding: {:?}", self.embedding);
-        println!("hidden_states: {:?}", hidden_states);
+        // println!("hidden_states: {:?}", hidden_states);
         // println!("token_ids_one_hot: {:?}", token_ids_one_hot);
         // println!("input_layer_norm: {:?}", input_layer_norm);
-        println!("query_states: {:?}", query_states);
-        // println!("q_proj: {:?}", q_proj);
+        // println!("query_states: {:?}", query_states);
+        // println!("k_proj: {:?}", k_proj);
+        // println!("key_states: {:?}", key_states);
+        // println!("value_states: {:?}", value_states);
+        println!("rotary_frequencies (sin): {:?}", sin);
+        // println!("frequencies {:?}", frequencies);
     }
 
     // Infer next token
