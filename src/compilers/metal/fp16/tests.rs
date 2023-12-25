@@ -942,7 +942,7 @@ fn test_pad_contig() {
     let a_data = random_vec_rng(m * k, &mut rng);
     let a = cx
         .tensor::<(Dyn<'M'>, Dyn<'K'>)>()
-        .set_dyn(a_data.clone(), vec![m, k])
+        .set_dyn(a_data, vec![m, k])
         .retrieve();
     let b: GraphTensor<(Dyn<'M'>, Dyn<'K'>)> = a
         .pad(&[(0, 0.into()), (0, Expression::from(16) - 'K')])
@@ -953,8 +953,9 @@ fn test_pad_contig() {
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
 
-    assert_exact(&a.data(), &b.data());
-    assert_exact(&a.data(), &c.data());
+    // Close because b and c are going through 16 bits, while a is not
+    assert_close(&a.data(), &b.data());
+    assert_close(&a.data(), &c.data());
 }
 
 #[test]

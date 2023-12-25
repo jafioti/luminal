@@ -215,7 +215,7 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> String {
         .unique()
         .enumerate()
         .fold(String::default(), |mut acc, (i, c)| {
-            write!(&mut acc, ", device uint& {c} [[buffer({})]]", i + offset).unwrap();
+            write!(&mut acc, ", device int& {c} [[buffer({})]]", i + offset).unwrap();
             acc
         })
 }
@@ -227,23 +227,18 @@ fn expr_to_metal_string(expr: BigExpression) -> String {
             Term::Num(n) => n.to_string(),
             Term::Var(c) => {
                 if c == 'z' {
-                    "idx".to_string()
+                    "(int)idx".to_string()
                 } else {
                     c.to_string()
                 }
             }
             Term::Max => format!(
-                "max((uint){}, (uint){})",
+                "max((int){}, (int){})",
                 symbols.pop().unwrap(),
                 symbols.pop().unwrap()
             ),
             Term::Min => format!(
-                "min((uint){}, (uint){})",
-                symbols.pop().unwrap(),
-                symbols.pop().unwrap()
-            ),
-            Term::Sub => format!(
-                "(uint)max((int){} - (int){}, 0)",
+                "min((int){}, (int){})",
                 symbols.pop().unwrap(),
                 symbols.pop().unwrap()
             ),

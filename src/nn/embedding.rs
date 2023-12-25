@@ -69,7 +69,7 @@ mod tests {
         let batch = cx
             .tensor::<R2<2, 3>>()
             .set(vec![1.0, 0.0, 2.0, 1.0, 0.0, 1.0]);
-        let a = cx.tensor::<R1<3>>().set(vec![1.0, 0.0, 1.0]);
+        let a = cx.tensor::<R1<3>>().set(vec![1.0, 0.0, 1.0]).retrieve();
 
         let model: Embedding<3, 4> = InitModule::initialize(&mut cx);
         model

@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, mem::size_of};
 
 use objc::rc::autoreleasepool;
-use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
+use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
 
 use crate::{
     compilers::metal::{prim::*, *},
@@ -37,7 +37,7 @@ impl<T: MetalFloat> MetalSub<T> {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
         out[idx] = 
             (({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}]) 
@@ -139,7 +139,7 @@ impl<T: MetalFloat> Operator for MetalSub<T> {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(LuminalPrint, Default)]
 pub struct MetalSubtractionCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
@@ -246,7 +246,7 @@ impl<T: MetalFloat> MetalEqual<T> {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
         {} a_val = (({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}]);
         {} b_val = (({b_valid_exp}) == 0 ? 0.0 : inp_b[{b_idx_exp}]);
@@ -349,7 +349,7 @@ impl<T: MetalFloat> Operator for MetalEqual<T> {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(LuminalPrint, Default)]
 pub struct MetalEqualCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
@@ -396,12 +396,12 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
         for _ in s.search(graph) {
             let lt1_inputs = graph
                 .graph
-                .neighbors_directed(less_than1, petgraph::Direction::Incoming)
+                .neighbors_directed(less_than1, Direction::Incoming)
                 .sorted()
                 .collect::<Vec<_>>();
             let lt2_inputs = graph
                 .graph
-                .neighbors_directed(less_than2, petgraph::Direction::Incoming)
+                .neighbors_directed(less_than2, Direction::Incoming)
                 .sorted()
                 .collect::<Vec<_>>();
             if lt1_inputs != lt2_inputs {
@@ -409,7 +409,7 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
             }
             let inputs = graph
                 .graph
-                .edges_directed(less_than1, petgraph::Direction::Incoming)
+                .edges_directed(less_than1, Direction::Incoming)
                 .sorted_by_key(|e| e.weight().as_data().unwrap().0)
                 .map(|e| e.source())
                 .collect::<Vec<_>>();
@@ -475,9 +475,9 @@ impl<T: MetalFloat> MetalGather<T> {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void metal_gather(device float *inp [[buffer(0)]], device {} *weights [[buffer(1)]], device {} *out [[buffer(2)]], device uint& n_embeddings [[buffer(3)]], device uint& embedding_dim [[buffer(4)]], uint2 i_ [[thread_position_in_grid]]) {{
+kernel void metal_gather(device float *inp [[buffer(0)]], device {} *weights [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_embeddings [[buffer(3)]], device int& embedding_dim [[buffer(4)]], int2 i_ [[thread_position_in_grid]]) {{
     if (i_.x < n_embeddings && i_.y < embedding_dim) {{
-        out[i_.x * embedding_dim + i_.y] = weights[(uint)inp[i_.x] * embedding_dim + i_.y];
+        out[i_.x * embedding_dim + i_.y] = weights[(int)inp[i_.x] * embedding_dim + i_.y];
     }}
 }}", T::type_name(), T::type_name()
         ), &dev), dev, embed_dim, Default::default())
@@ -553,7 +553,7 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(LuminalPrint, Default)]
 pub struct MetalGatherCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
@@ -584,12 +584,12 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
                 .ptr(&mut sum_reduce),
         );
         for _ in s.search(graph) {
-            if check_no_delete(graph, &[arange, ind_copy, equal, mul, sum_reduce]) {
+            if check_no_delete(graph, &[arange, equal, mul, sum_reduce]) {
                 continue;
             }
             let embedding_dim = graph
                 .graph
-                .edges_directed(mul, petgraph::Direction::Incoming)
+                .edges_directed(mul, Direction::Incoming)
                 .find(|e| e.source() != equal && !e.weight().is_schedule())
                 .unwrap()
                 .weight()

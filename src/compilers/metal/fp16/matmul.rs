@@ -64,8 +64,8 @@ kernel void kernel_vecmat(
   // Threadgroup accumulation results
   threadgroup half* tgp_results = tgp_memory + lid.x * BM * TN;
 
-  int out_col = (tid.x * BN + lid.x) * TN;
-  int in_row = lid.y * TM;
+  uint out_col = (tid.x * BN + lid.x) * TN;
+  uint in_row = lid.y * TM;
 
   // Edgecase handling
   if (out_col < out_vec_size) {{
@@ -257,9 +257,9 @@ kernel void kernel_matmul_2d(
     device const half *data1 [[buffer(0)]],
     device const half *data2 [[buffer(1)]],
     device half *a [[buffer(2)]],
-    device uint& M [[buffer(3)]],
-    device uint& N [[buffer(4)]],
-    device uint& K [[buffer(5)]],
+    device int& M [[buffer(3)]],
+    device int& N [[buffer(4)]],
+    device int& K [[buffer(5)]],
     uint3 block_pos [[threadgroup_position_in_grid]],
     uint3 global_pos [[thread_position_in_grid]]
 ) {
@@ -269,17 +269,17 @@ kernel void kernel_matmul_2d(
 
     simdgroup_float8x8 acc[4][4];
     #pragma unroll(4)
-    for (uint i = 0; i < 4; ++i) {
+    for (int i = 0; i < 4; ++i) {
         #pragma unroll(4)
-        for (uint j = 0; j < 4; ++j) {
+        for (int j = 0; j < 4; ++j) {
             acc[i][j] = simdgroup_float8x8(0);
         }
     }
 
     simdgroup_half8x8 A[4];
     simdgroup_half8x8 B[4];
-    uint k8 = 8 * K;
-    for (uint k = 0; k < K; k+=8) {
+    int k8 = 8 * K;
+    for (int k = 0; k < K; k+=8) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
         device const half *d1 = data1 + k;
         #pragma unroll(4)
@@ -302,7 +302,7 @@ kernel void kernel_matmul_2d(
     // Width
     #pragma unroll(4)
     for (int i = 0; i < 4; ++i) {
-        uint n8i = i * 8 * N;
+        int n8i = i * 8 * N;
         // Height
         #pragma unroll(4)
         for (int j = 0; j < 4; ++j) {
@@ -436,9 +436,9 @@ kernel void kernel_batch_matmul_2d(
     device const half *data1 [[buffer(0)]],
     device const half *data2 [[buffer(1)]],
     device half *a [[buffer(2)]],
-    device uint& M [[buffer(3)]],
-    device uint& N [[buffer(4)]],
-    device uint& K [[buffer(5)]],
+    device int& M [[buffer(3)]],
+    device int& N [[buffer(4)]],
+    device int& K [[buffer(5)]],
     uint3 block_pos [[threadgroup_position_in_grid]],
     uint3 global_pos [[thread_position_in_grid]]
 ) {
@@ -448,17 +448,17 @@ kernel void kernel_batch_matmul_2d(
 
     simdgroup_float8x8 acc[4][4];
     #pragma unroll(4)
-    for (uint i = 0; i < 4; ++i) {
+    for (int i = 0; i < 4; ++i) {
         #pragma unroll(4)
-        for (uint j = 0; j < 4; ++j) {
+        for (int j = 0; j < 4; ++j) {
             acc[i][j] = simdgroup_float8x8(0);
         }
     }
 
     simdgroup_half8x8 A[4];
     simdgroup_half8x8 B[4];
-    uint k8 = 8 * K;
-    for (uint k = 0; k < K; k+=8) {
+    int k8 = 8 * K;
+    for (int k = 0; k < K; k+=8) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
         device const half *d1 = data1 + k;
         #pragma unroll(4)
@@ -480,7 +480,7 @@ kernel void kernel_batch_matmul_2d(
     // Width
     #pragma unroll(4)
     for (int i = 0; i < 4; ++i) {
-        uint n8i = i * 8 * N;
+        int n8i = i * 8 * N;
         // Height
         #pragma unroll(4)
         for (int j = 0; j < 4; ++j) {
