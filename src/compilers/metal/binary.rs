@@ -475,7 +475,7 @@ impl<T: MetalFloat> MetalGather<T> {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void metal_gather(device float *inp [[buffer(0)]], device {} *weights [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_embeddings [[buffer(3)]], device int& embedding_dim [[buffer(4)]], int2 i_ [[thread_position_in_grid]]) {{
+kernel void metal_gather(device float *inp [[buffer(0)]], device {} *weights [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_embeddings [[buffer(3)]], device int& embedding_dim [[buffer(4)]], uint2 i_ [[thread_position_in_grid]]) {{
     if (i_.x < n_embeddings && i_.y < embedding_dim) {{
         out[i_.x * embedding_dim + i_.y] = weights[(int)inp[i_.x] * embedding_dim + i_.y];
     }}
