@@ -106,7 +106,7 @@ impl<S: Shape> Div<f32> for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
     fn div(self, rhs: f32) -> Self::Output {
-        self / self.graph().constant(rhs).expand()
+        self * self.graph().constant(rhs).recip().expand()
     }
 }
 
