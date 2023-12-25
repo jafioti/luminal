@@ -106,7 +106,7 @@ impl<S: Shape> GraphTensor<S> {
     pub fn pow(self, e: f32) -> GraphTensor<S> {
         self.abs().log().mul(e).exp()
     }
-
+    // 1 / (b ^ x)
     pub fn pow2(self, base: f32) -> GraphTensor<S> {
         self.mul(base.abs().ln()).exp()
     }
