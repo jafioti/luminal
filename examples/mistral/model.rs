@@ -417,50 +417,57 @@ impl Mistral {
                 rotary_embeddings,
             );
 
-        // let key_states =
-        //     apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM, ATTENTION_HEAD_DIM_OVER_2>(
-        //         key_states,
-        //         rotary_embeddings,
-        //     );
+        let key_states =
+            apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM, ATTENTION_HEAD_DIM_OVER_2>(
+                key_states,
+                rotary_embeddings,
+            );
 
-        // // Let's try to repeat the key states
-        // let key_states = key_states
-        //     .expand::<(
-        //         Const<1>,
-        //         Const<NUM_KV_HEADS>,
-        //         Const<NUM_ATTENTION_GROUPS>,
-        //         Dyn<'s'>,
-        //         Const<ATTENTION_HEAD_DIM>,
-        //     ), Axis<2>>()
-        //     .reshape::<(
-        //         Const<1>,
-        //         Const<NUM_ATTENTION_HEADS>,
-        //         Dyn<'s'>,
-        //         Const<ATTENTION_HEAD_DIM>,
-        //     )>();
+        // Let's try to repeat the key states
+        let key_states = key_states
+            .expand::<(
+                Const<1>,
+                Const<NUM_KV_HEADS>,
+                Const<NUM_ATTENTION_GROUPS>,
+                Dyn<'s'>,
+                Const<ATTENTION_HEAD_DIM>,
+            ), Axis<2>>()
+            .reshape::<(
+                Const<1>,
+                Const<NUM_ATTENTION_HEADS>,
+                Dyn<'s'>,
+                Const<ATTENTION_HEAD_DIM>,
+            )>();
 
-        // let value_states = value_states
-        //     .expand::<(
-        //         Const<1>,
-        //         Const<NUM_KV_HEADS>,
-        //         Const<NUM_ATTENTION_GROUPS>,
-        //         Dyn<'s'>,
-        //         Const<ATTENTION_HEAD_DIM>,
-        //     ), Axis<2>>()
-        //     .reshape::<(
-        //         Const<1>,
-        //         Const<NUM_ATTENTION_HEADS>,
-        //         Dyn<'s'>,
-        //         Const<ATTENTION_HEAD_DIM>,
-        //     )>();
+        let value_states = value_states
+            .expand::<(
+                Const<1>,
+                Const<NUM_KV_HEADS>,
+                Const<NUM_ATTENTION_GROUPS>,
+                Dyn<'s'>,
+                Const<ATTENTION_HEAD_DIM>,
+            ), Axis<2>>()
+            .reshape::<(
+                Const<1>,
+                Const<NUM_ATTENTION_HEADS>,
+                Dyn<'s'>,
+                Const<ATTENTION_HEAD_DIM>,
+            )>();
 
         // Now we implement attention (finally)
-        // let attn_weights = query_states.matmul(key_states.permute::<_, Axes4<0, 1, 3, 2>>());
-        // / (ATTENTION_HEAD_DIM as f32).sqrt();
+        let attn_weights = query_states.matmul(key_states.permute::<_, Axes4<0, 1, 3, 2>>())
+            / ((ATTENTION_HEAD_DIM as f64).sqrt() as f32);
+
+        let attention_mask = self.graph.triu::<Dyn<'s'>, Dyn<'s'>>(1) * f16::MIN.to_f32();
+
+        let attn_weights = attn_weights + attention_mask.expand();
+        let attn_weights = attn_weights.softmax::<3>();
+
+        let attn_output = attn_weights.matmul(value_states);
 
         // q_proj.retrieve();
         // k_proj.retrieve();
-        query_states.retrieve();
+        // query_states.retrieve();
         // q1.retrieve();
         // q2.retrieve();
         // q_h.retrieve();
@@ -469,7 +476,7 @@ impl Mistral {
         // value_states.retrieve();
         // hidden_states.retrieve();
         // sin.retrieve();
-        // attn_weights.retrieve();
+        attn_weights.retrieve();
 
         // Compile the graph
         self.graph.compile(<(
@@ -489,7 +496,7 @@ impl Mistral {
         // println!("hidden_states: {:?}", hidden_states);
         // println!("token_ids_one_hot: {:?}", token_ids_one_hot);
         // println!("input_layer_norm: {:?}", input_layer_norm);
-        println!("query_states: {:?}", query_states);
+        // println!("query_states: {:?}", query_states);
         // println!("q1: {:?}", q1);
         // println!("q_h: {:?}", q_h);
         // println!("k_h: {:?}", k_h);
@@ -498,7 +505,7 @@ impl Mistral {
         // println!("value_states: {:?}", value_states);
         // println!("rotary_frequencies (sin): {:?}", sin);
         // println!("frequencies {:?}", frequencies);
-        // println!("attn_weights: {:?}", attn_weights);
+        println!("attn_weights: {:?}", attn_weights);
     }
 
     // Infer next token
