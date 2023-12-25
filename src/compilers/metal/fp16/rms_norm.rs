@@ -222,7 +222,7 @@ impl Compiler for RMSNormCompiler {
                             .check(|op, _| {
                                 if let Some(c) = op.as_any().downcast_ref::<MetalConstant<f16>>() {
                                     if let ConstantValue::Float(v) = c.0 {
-                                        v == 1e-6
+                                        v > 0.0 && v <= 1e-4
                                     } else {
                                         false
                                     }
