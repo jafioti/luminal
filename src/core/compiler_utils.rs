@@ -17,7 +17,7 @@ use regex::Regex;
 use crate::{
     graph::Graph,
     op::Operator,
-    prelude::{remap_id, Dependency, MainGraph, ShapeTracker},
+    prelude::{Dependency, MainGraph, ShapeTracker},
 };
 
 use super::shape::symbolic::Expression;
@@ -282,7 +282,7 @@ impl<'a> NewOp<'a> {
 
     pub fn input(mut self, id: NodeIndex, from_output: u8, shape: ShapeTracker) -> Self {
         self.graph_ref.graph.add_edge(
-            remap_id(id, &self.graph_ref.id_remap),
+            id,
             self.new_op_id,
             Dependency::Data {
                 input_order: self.num_srcs,
@@ -303,6 +303,9 @@ pub fn move_references(
     src: NodeIndex,
     trg: NodeIndex,
 ) {
+    // if id_remap.get(&trg).map(|e| *e == src).unwrap_or_default() {
+    //     id_remap.remove(&trg);
+    // } else {
     // Only remap if it isn't already remapped, otherwise it would invalidate the past remappig
     if let Entry::Vacant(e) = id_remap.entry(src) {
         // Create remap
@@ -316,6 +319,7 @@ pub fn move_references(
             to_retrieve.insert(trg);
         }
     }
+    // }
 }
 
 pub fn move_outgoing_edge<N, E: Clone>(

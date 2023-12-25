@@ -30,9 +30,9 @@ kernel void kernel_matmul_2d(
     device const float *data1 [[buffer(0)]],
     device const float *data2 [[buffer(1)]],
     device float *a [[buffer(2)]],
-    device uint& M [[buffer(3)]],
-    device uint& N [[buffer(4)]],
-    device uint& K [[buffer(5)]],
+    device int& M [[buffer(3)]],
+    device int& N [[buffer(4)]],
+    device int& K [[buffer(5)]],
     uint3 block_pos [[threadgroup_position_in_grid]],
     uint3 global_pos [[thread_position_in_grid]]
 ) {
@@ -41,16 +41,16 @@ kernel void kernel_matmul_2d(
     data2 += global_pos.y * 32;
 
     simdgroup_float8x8 acc[4][4];
-    for (uint i = 0; i < 4; ++i) {
-        for (uint j = 0; j < 4; ++j) {
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
         acc[i][j] = simdgroup_float8x8(0);
         }
     }
 
     simdgroup_float8x8 A[4];
     simdgroup_float8x8 B[4];
-    uint k8 = 8 * K;
-    for (uint k = 0; k < K; k+=8) {
+    int k8 = 8 * K;
+    for (int k = 0; k < K; k+=8) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
         device const float *d1 = data1 + k;
         for (int i = 0; i < 4; ++i) {
@@ -67,7 +67,7 @@ kernel void kernel_matmul_2d(
 
     // Width
     for (int i = 0; i < 4; ++i) {
-        uint n8i = i * 8 * N;
+        int n8i = i * 8 * N;
         // Height
         for (int j = 0; j < 4; ++j) {
             simdgroup_store(acc[j][i], a+(8*j+n8i), N);
@@ -85,19 +85,19 @@ kernel void kernel_matmul_2d_naive(
     device float *A [[buffer(0)]],
     device float *B [[buffer(1)]],
     device float *C [[buffer(2)]],
-    device uint& M [[buffer(3)]],
-    device uint& N [[buffer(4)]],
-    device uint& K [[buffer(5)]],
+    device int& M [[buffer(3)]],
+    device int& N [[buffer(4)]],
+    device int& K [[buffer(5)]],
     uint tid [[thread_position_in_grid]]
 ) {
-    uint row = tid / N;
-    uint column = tid % N;
+    int row = tid / N;
+    int column = tid % N;
 
     if(row < M && column < N) {
         float value = 0.0f;
         for(int i = 0; i < K; ++i) {
-            uint A_index = row * K + i;
-            uint B_index = i * N + column;
+            int A_index = row * K + i;
+            int B_index = i * N + column;
             value += A[A_index] * B[B_index];
         }
         C[row * N + column] = value;
@@ -201,26 +201,26 @@ kernel void mkernel(
     device float *A [[buffer(0)]],
     device float *B [[buffer(1)]],
     device float *C [[buffer(2)]],
-    device uint& Batch [[buffer(3)]],
-    device uint& M [[buffer(4)]],
-    device uint& K [[buffer(5)]],
-    device uint& N [[buffer(6)]],
-    device uint& A_major [[buffer(7)]],
-    device uint& B_major [[buffer(8)]],
-    device uint& A_batch_stride [[buffer(9)]],
-    device uint& B_batch_stride [[buffer(10)]],
-    device uint& C_batch_stride [[buffer(11)]],
+    device int& Batch [[buffer(3)]],
+    device int& M [[buffer(4)]],
+    device int& K [[buffer(5)]],
+    device int& N [[buffer(6)]],
+    device int& A_major [[buffer(7)]],
+    device int& B_major [[buffer(8)]],
+    device int& A_batch_stride [[buffer(9)]],
+    device int& B_batch_stride [[buffer(10)]],
+    device int& C_batch_stride [[buffer(11)]],
     uint tid [[thread_position_in_grid]]
 ) {
-    uint batch = tid / (M * N);
-    uint row = (tid % (M * N)) / N;
-    uint column = (tid % (M * N)) % N;
+    int batch = tid / (M * N);
+    int row = (tid % (M * N)) / N;
+    int column = (tid % (M * N)) % N;
 
     if(batch < Batch && row < M && column < N) {
         float value = 0.0f;
-        for(uint i = 0; i < K; ++i) {
-            uint A_index = batch * A_batch_stride + (A_major ? (row * K + i) : (i * M + row)); // Row Major vs Column Major
-            uint B_index = batch * B_batch_stride + (B_major ? (i * N + column) : (column * K + i)); // Row Major vs Column Major
+        for(int i = 0; i < K; ++i) {
+            int A_index = batch * A_batch_stride + (A_major ? (row * K + i) : (i * M + row)); // Row Major vs Column Major
+            int B_index = batch * B_batch_stride + (B_major ? (i * N + column) : (column * K + i)); // Row Major vs Column Major
             value += A[A_index] * B[B_index];
         }
         C[batch * C_batch_stride + row * N + column] = value;

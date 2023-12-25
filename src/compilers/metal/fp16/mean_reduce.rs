@@ -35,13 +35,13 @@ impl MetalMeanReduce {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], device uint& front_size [[buffer(3)]], device uint& back_size [[buffer(4)]], device uint& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device int& n_elements [[buffer(2)]], device int& front_size [[buffer(3)]], device int& back_size [[buffer(4)]], device int& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
     if (i_ < n_elements) {{
-        uint a_ = i_ / back_size;
-        uint b_ = i_ % back_size;
+        int a_ = i_ / back_size;
+        int b_ = i_ % back_size;
         float reduce_value = 0.0;
-        for (uint c_ = 0; c_ < dim_size; c_++) {{
-            uint idx = a_ * dim_size * back_size + c_ * back_size + b_;
+        for (int c_ = 0; c_ < dim_size; c_++) {{
+            int idx = a_ * dim_size * back_size + c_ * back_size + b_;
             if (({valid_exp}) != 0) {{
                 reduce_value += (float)inp[{idx_exp}];
             }}

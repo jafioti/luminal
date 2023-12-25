@@ -125,7 +125,7 @@ impl<T: MetalFloat> MetalContiguous<T> {
         let mut code = format!("
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements && ({valid_exp} != 0)) {{
         out[idx] = inp[{idx_exp}];
     }}
@@ -233,7 +233,7 @@ impl<T: MetalFloat> MetalLog2<T> {
         let mut code = format!("
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         out[idx] = log2(inp[idx]);
     }}
@@ -330,7 +330,7 @@ impl<T: MetalFloat> MetalExp2<T> {
         let mut code = format!("
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         out[idx] = exp2(inp[idx]);
     }}
@@ -425,7 +425,7 @@ impl<T: MetalFloat> MetalSin<T> {
     ) -> Self {
         let mut code = format!("#include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         out[idx] = ({})sin((float)inp[idx]);
     }}
@@ -521,7 +521,7 @@ impl<T: MetalFloat> MetalSqrt<T> {
     ) -> Self {
         let mut code = format!("#include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         out[idx] = sqrt(inp[idx]);
     }}
@@ -616,7 +616,7 @@ impl<T: MetalFloat> MetalRecip<T> {
     ) -> Self {
         let mut code = format!("#include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         out[idx] = 1.0 / inp[idx];
     }}
@@ -721,7 +721,7 @@ impl<T: MetalFloat> MetalAdd<T> {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
         out[idx] = 
             (({a_valid_exp}) == 0 ? 0.0h : inp_a[{a_idx_exp}]) 
@@ -849,7 +849,7 @@ impl<T: MetalFloat> MetalMul<T> {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
         out[idx] = 
             (({a_valid_exp}) == 0 ? 0.0h : inp_a[{a_idx_exp}]) 
@@ -978,7 +978,7 @@ impl<T: MetalFloat> MetalLessThan<T> {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} *inp_b [[buffer(1)]], device {type_name} *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} *inp_b [[buffer(1)]], device {type_name} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
         {type_name} a_t = 0.0h;
         {type_name} b_t = 0.0h;
@@ -1117,7 +1117,7 @@ impl<T: MetalFloat> MetalMod<T> {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
         out[idx] = fmod(({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}], ({b_valid_exp}) == 0 ? 0.0 : inp_b[{b_idx_exp}]);
     }}
@@ -1242,12 +1242,12 @@ impl<T: MetalFloat> MetalSumReduce<T> {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], device uint& front_size [[buffer(3)]], device uint& back_size [[buffer(4)]], device uint& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], device int& front_size [[buffer(3)]], device int& back_size [[buffer(4)]], device int& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
     if (i_ < n_elements) {{
-        uint a_ = i_ / back_size;
-        uint b_ = i_ % back_size;
+        int a_ = i_ / back_size;
+        int b_ = i_ % back_size;
         {} reduce_value = 0.0;
-        for (uint c_ = 0; c_ < dim_size; c_++) {{
+        for (int c_ = 0; c_ < dim_size; c_++) {{
             uint idx = a_ * dim_size * back_size + c_ * back_size + b_;
             if (({valid_exp}) != 0) {{
                 reduce_value += inp[{idx_exp}];
@@ -1393,12 +1393,12 @@ impl<T: MetalFloat> MetalMaxReduce<T> {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], device uint& front_size [[buffer(3)]], device uint& back_size [[buffer(4)]], device uint& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], device int& front_size [[buffer(3)]], device int& back_size [[buffer(4)]], device int& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
     if (i_ < n_elements) {{
-        uint a_ = i_ / back_size;
-        uint b_ = i_ % back_size;
+        int a_ = i_ / back_size;
+        int b_ = i_ % back_size;
         {} reduce_value = -{};
-        for (uint c_ = 0; c_ < dim_size; c_++) {{
+        for (int c_ = 0; c_ < dim_size; c_++) {{
             uint idx = a_ * dim_size * back_size + c_ * back_size + b_;
             if (({valid_exp}) != 0) {{
                 int a_idx = {idx_exp};
@@ -1521,7 +1521,7 @@ impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, LuminalPrint)]
 pub struct PrimitiveCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
@@ -1618,19 +1618,39 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
             })
             .collect::<Vec<_>>()
         {
-            // Create copy node
-            let copy_node = graph
-                .add_op(MetalCopyFromDevice::<T>::new(dev.clone()))
-                .input(output_node, 0, output_shape)
-                .finish();
+            if graph
+                .graph
+                .node_weight(output_node)
+                .unwrap()
+                .as_any()
+                .is::<MetalCopyToDevice<T>>()
+            {
+                // This output is already a copy to, instead of adding a copy from, let's remap back to the source
+                let src = graph
+                    .graph
+                    .neighbors_directed(output_node, petgraph::Direction::Incoming)
+                    .next()
+                    .unwrap();
+                graph.id_remap.remove(&src);
+                graph.no_delete.remove(&output_node);
+                graph.to_retrieve.remove(&output_node);
+                graph.no_delete.insert(src);
+                graph.to_retrieve.insert(src);
+            } else {
+                // Create copy node
+                let copy_node = graph
+                    .add_op(MetalCopyFromDevice::<T>::new(dev.clone()))
+                    .input(output_node, 0, output_shape)
+                    .finish();
 
-            move_references(
-                &mut graph.id_remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                output_node,
-                copy_node,
-            );
+                move_references(
+                    &mut graph.id_remap,
+                    &mut graph.no_delete,
+                    &mut graph.to_retrieve,
+                    output_node,
+                    copy_node,
+                );
+            }
         }
 
         // Copy prints from device
