@@ -78,9 +78,9 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     pub fn contiguous(self) -> GraphTensor<S> {
-        if self.shape.is_contiguous() && !self.shape.is_sliced() && !self.shape.is_padded() {
-            return self;
-        }
+        // if self.shape.is_contiguous() && !self.shape.is_sliced() && !self.shape.is_padded() {
+        //     return self;
+        // }
         let new_id = self
             .graph()
             .add_op(op::Contiguous)
