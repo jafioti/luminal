@@ -174,31 +174,37 @@ impl ShapeTracker {
 
     /// The number of elements in this tensor, including pads and slices
     pub fn n_elements(&self) -> BigExpression {
-        if self.is_empty() {
-            return 1.into(); // Zero dimensional tensors are scalars
-        }
-        self.indexes
+        let r = self
+            .indexes
             .into_iter()
             .map(|i| (i, BigExpression::from(self.dims[i])))
             // Add pads
             .map(|(ind, dim)| (ind, dim + self.padding[ind].0 + self.padding[ind].1))
             // Slice
             .map(|(ind, dim)| dim.min(self.slices[ind].1) - self.slices[ind].0)
-            .product()
+            .product();
+        if r == 0.into() {
+            1.into()
+        } else {
+            r
+        }
     }
 
     /// The number of elements in this tensor, not including pads and slices
     pub fn n_physical_elements(&self) -> BigExpression {
-        if self.is_empty() {
-            return 1.into(); // Zero dimensional tensors are scalars
-        }
-        self.dims
+        let r = self
+            .dims
             .into_iter()
             // Filter out fake dimensions
             .enumerate()
             .filter(|(i, _)| !self.fake[*i])
             .map(|(_, i)| i.into())
-            .product()
+            .product();
+        if r == 0.into() {
+            1.into()
+        } else {
+            r
+        }
     }
 
     /// The number of dimensions
