@@ -398,6 +398,15 @@ impl Mistral {
             )>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
+        let value_states = value_states
+            .reshape::<(
+                Const<1>,
+                Dyn<'s'>,
+                Const<NUM_KV_HEADS>,
+                Const<ATTENTION_HEAD_DIM>,
+            )>()
+            .permute::<_, Axes4<0, 2, 1, 3>>();
+
         // let query_states = apply_rotary_embeddings(query_states, rotary_frequencies);
         // Ok, let's first figure out rotate_half
 
@@ -420,6 +429,37 @@ impl Mistral {
                 rotary_embeddings,
             );
 
+        // Let's try to repeat the key states
+        let key_states = key_states
+            .expand::<(
+                Const<1>,
+                Const<NUM_KV_HEADS>,
+                Const<NUM_ATTENTION_GROUPS>,
+                Dyn<'s'>,
+                Const<ATTENTION_HEAD_DIM>,
+            ), Axis<2>>()
+            .reshape::<(
+                Const<1>,
+                Const<NUM_ATTENTION_HEADS>,
+                Dyn<'s'>,
+                Const<ATTENTION_HEAD_DIM>,
+            )>();
+
+        let value_states = value_states
+            .expand::<(
+                Const<1>,
+                Const<NUM_KV_HEADS>,
+                Const<NUM_ATTENTION_GROUPS>,
+                Dyn<'s'>,
+                Const<ATTENTION_HEAD_DIM>,
+            ), Axis<2>>()
+            .reshape::<(
+                Const<1>,
+                Const<NUM_ATTENTION_HEADS>,
+                Dyn<'s'>,
+                Const<ATTENTION_HEAD_DIM>,
+            )>();
+
         // q_proj.retrieve();
         // k_proj.retrieve();
         // query_states.retrieve();
@@ -427,8 +467,8 @@ impl Mistral {
         // q2.retrieve();
         // q_h.retrieve();
         // k_h.retrieve();
-        key_states.retrieve();
-        // value_states.retrieve();
+        // key_states.retrieve();
+        value_states.retrieve();
         // hidden_states.retrieve();
         // sin.retrieve();
 
@@ -455,8 +495,8 @@ impl Mistral {
         // println!("q_h: {:?}", q_h);
         // println!("k_h: {:?}", k_h);
         // println!("k_proj: {:?}", k_proj);
-        println!("key_states: {:?}", key_states);
-        // println!("value_states: {:?}", value_states);
+        // println!("key_states: {:?}", key_states);
+        println!("value_states: {:?}", value_states);
         // println!("rotary_frequencies (sin): {:?}", sin);
         // println!("frequencies {:?}", frequencies);
     }
