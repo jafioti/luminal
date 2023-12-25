@@ -26,7 +26,8 @@ pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
 pub const ROPE_THETA: f32 = 1000000.0;
-pub const MAX_POSITION_EMBEDDINGS: usize = 32768;
+// pub const MAX_POSITION_EMBEDDINGS: usize = 32768;
+pub const MAX_POSITION_EMBEDDINGS: usize = 5;
 
 pub const NUM_ATTENTION_GROUPS: usize = NUM_ATTENTION_HEADS / NUM_KV_HEADS;
 pub const ATTENTION_HEAD_DIM: usize = HIDDEN_DIM / NUM_ATTENTION_HEADS;
@@ -314,6 +315,12 @@ pub struct Mistral {
     // LM Head Layer
     // pub lm_head: Linear<HIDDEN_DIM, VOCAB_SIZE>,
 
+    // RoPE Embeddings
+    pub rope_embeddings: (
+        GraphTensor<R2<MAX_POSITION_EMBEDDINGS, ATTENTION_HEAD_DIM>>,
+        GraphTensor<R2<MAX_POSITION_EMBEDDINGS, ATTENTION_HEAD_DIM>>,
+    ),
+
     // Input Layer
     pub input: GraphTensor<(Const<1>, Dyn<'s'>)>,
 }
@@ -461,10 +468,11 @@ impl Mistral {
         //     / (ATTENTION_HEAD_DIM_OVER_2 as f32 * 2.0);
         // let inv_freq = inv_freq.pow2(ROPE_THETA).recip();
 
-        let inv_freq = self.graph.arange::<Const<ATTENTION_HEAD_DIM_OVER_2>>()
-            / (ATTENTION_HEAD_DIM_OVER_2 as f32);
+        // let inv_freq = self.graph.arange::<Const<ATTENTION_HEAD_DIM_OVER_2>>()
+        //     / (ATTENTION_HEAD_DIM_OVER_2 as f32);
         // let inv_freq = inv_freq.pow2(ROPE_THETA).recip();
-        let inv_freq = inv_freq.pow2(ROPE_THETA);
+        // let inv_freq = inv_freq.pow2(ROPE_THETA);
+        let (cos, sin) = self.rope_embeddings;
 
         // q_proj.retrieve();
         // k_proj.retrieve();
@@ -476,10 +484,10 @@ impl Mistral {
         // key_states.retrieve();
         // value_states.retrieve();
         // hidden_states.retrieve();
-        // cos.retrieve();
-        // sin.retrieve();
+        cos.retrieve();
+        sin.retrieve();
         // attn_weights.retrieve();
-        inv_freq.retrieve();
+        // inv_freq.retrieve();
 
         // Compile the graph
         self.graph.compile(<(
@@ -506,11 +514,11 @@ impl Mistral {
         // println!("k_proj: {:?}", k_proj);
         // println!("key_states: {:?}", key_states);
         // println!("value_states: {:?}", value_states);
-        // println!("rotary_frequencies (cos): {:?}", cos);
-        // println!("rotary_frequencies (sin): {:?}", sin);
+        println!("rotary_frequencies (cos): {:?}", cos);
+        println!("rotary_frequencies (sin): {:?}", sin);
         // println!("frequencies {:?}", frequencies);
         // println!("attn_weights: {:?}", attn_weights);
-        println!("inv_freq: {:?}", inv_freq);
+        // println!("inv_freq: {:?}", inv_freq);
     }
 
     // Infer next token
@@ -626,6 +634,30 @@ impl Mistral {
         // // Create the input node
         let input = graph.named_tensor::<(Const<1>, Dyn<'s'>)>("input_node");
 
+        // Create the throwaway rope graph (just to compute RoPE)
+        let mut rope_graph = Box::new(Graph::new());
+
+        let (rope_cos, rope_sin) =
+            compute_rotary_embedding_frequencies::<Const<MAX_POSITION_EMBEDDINGS>>(&mut rope_graph);
+
+        rope_cos.retrieve();
+        rope_sin.retrieve();
+
+        rope_graph
+            .compile(<(PreGenericCompiler, MetalFp32Compiler, PostGenericCompiler)>::default());
+
+        rope_graph.execute_debug();
+
+        // Build the actual rope embeddings
+        let (cos, sin) = (
+            graph.named_tensor("rope_embeddings_cos"),
+            graph.named_tensor("rope_embeddings_sin"),
+        );
+        cos.set(rope_cos.data());
+        sin.set(rope_sin.data());
+
+        let rope_embeddings = (cos, sin);
+
         Ok(Self {
             tokenizer,
             graph,
@@ -634,6 +666,7 @@ impl Mistral {
             // norm,
             // lm_head,
             input,
+            rope_embeddings,
         })
     }
 
