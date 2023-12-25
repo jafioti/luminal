@@ -69,13 +69,10 @@ pub fn compute_rotary_embedding_frequencies<SequenceLength: Dimension>(
         .reshape::<(SequenceLength, Const<1>)>();
     let frequencies = t.matmul(frequencies);
 
-    let real = frequencies.cos();
-    let imaginary = frequencies.sin();
+    let cos = frequencies.cos();
+    let sin = frequencies.sin();
 
-    // let real: GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)> =
-    //     real.slice((..sequence_length, ..));
-
-    (real, imaginary)
+    (cos, sin)
 }
 
 pub fn rotate_half<
@@ -83,7 +80,6 @@ pub fn rotate_half<
     SequenceLength: Dimension,
     NumAttentionHeads: Dimension,
     const ATTENTION_HEAD_DIM: usize,
-    const ATTENTION_HEAD_DIM_OVER_2: usize,
 >(
     x: GraphTensor<(
         Batch,
@@ -97,12 +93,8 @@ pub fn rotate_half<
     NumAttentionHeads,
     Const<ATTENTION_HEAD_DIM>,
 )> {
-    let x1 = x
-        .slice((.., .., .., ..ATTENTION_HEAD_DIM_OVER_2))
-        .contiguous();
-    let x2 = x
-        .slice((.., .., .., ATTENTION_HEAD_DIM_OVER_2..))
-        .contiguous();
+    let x1 = x.slice((.., .., .., ..ATTENTION_HEAD_DIM / 2)).contiguous();
+    let x2 = x.slice((.., .., .., ATTENTION_HEAD_DIM / 2..)).contiguous();
 
     (-x2).concat_along::<_, Axis<3>, _>(x1)
 }
@@ -112,7 +104,6 @@ pub fn apply_rotary_embeddings<
     SequenceLength: Dimension,
     NumAttentionHeads: Dimension,
     const ATTENTION_HEAD_DIM: usize,
-    const ATTENTION_HEAD_DIM_OVER_2: usize,
 >(
     input: GraphTensor<(
         Batch,
@@ -132,7 +123,12 @@ pub fn apply_rotary_embeddings<
 )> {
     let (cos, sin) = frequencies;
 
-    let input_half = rotate_half::<_, _, _, ATTENTION_HEAD_DIM, ATTENTION_HEAD_DIM_OVER_2>(input);
+    let input_half: GraphTensor<(
+        Batch,
+        NumAttentionHeads,
+        SequenceLength,
+        Const<ATTENTION_HEAD_DIM>,
+    )> = rotate_half::<_, _, _, ATTENTION_HEAD_DIM>(input);
 
     (input * cos.expand()) + (input_half * sin.expand())
 }
@@ -382,6 +378,7 @@ impl Mistral {
 
         // Now, let's compute the rotary embeddings
         let rotary_embeddings = compute_rotary_embedding_frequencies::<Dyn<'s'>>(&mut self.graph);
+        let (cos, sin) = rotary_embeddings;
 
         // And we apply the embeddings
         let query_states = query_states
@@ -412,16 +409,10 @@ impl Mistral {
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         let query_states =
-            apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM, ATTENTION_HEAD_DIM_OVER_2>(
-                query_states,
-                rotary_embeddings,
-            );
+            apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM>(query_states, rotary_embeddings);
 
         let key_states =
-            apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM, ATTENTION_HEAD_DIM_OVER_2>(
-                key_states,
-                rotary_embeddings,
-            );
+            apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM>(key_states, rotary_embeddings);
 
         // Let's try to repeat the key states
         let key_states = key_states
@@ -455,15 +446,25 @@ impl Mistral {
             )>();
 
         // Now we implement attention (finally)
-        let attn_weights = query_states.matmul(key_states.permute::<_, Axes4<0, 1, 3, 2>>())
-            / ((ATTENTION_HEAD_DIM as f64).sqrt() as f32);
+        let attn_weights = query_states.matmul(key_states.permute::<_, Axes4<0, 1, 3, 2>>());
+        // / ((ATTENTION_HEAD_DIM as f64).sqrt() as f32);
 
-        let attention_mask = self.graph.triu::<Dyn<'s'>, Dyn<'s'>>(1) * f16::MIN.to_f32();
+        // let attention_mask = self.graph.triu::<Dyn<'s'>, Dyn<'s'>>(1) * f16::MIN.to_f32();
 
-        let attn_weights = attn_weights + attention_mask.expand();
-        let attn_weights = attn_weights.softmax::<3>();
+        // let attn_weights = attn_weights + attention_mask.expand();
+        // let attn_weights = attn_weights.softmax::<3>();
 
-        let attn_output = attn_weights.matmul(value_states);
+        // let attn_output = attn_weights.matmul(value_states);
+
+        // Debug Rotary frequencies
+        // let inv_freq = (self.graph.arange::<Const<ATTENTION_HEAD_DIM_OVER_2>>() * 2.0)
+        //     / (ATTENTION_HEAD_DIM_OVER_2 as f32 * 2.0);
+        // let inv_freq = inv_freq.pow2(ROPE_THETA).recip();
+
+        let inv_freq = self.graph.arange::<Const<ATTENTION_HEAD_DIM_OVER_2>>()
+            / (ATTENTION_HEAD_DIM_OVER_2 as f32);
+        // let inv_freq = inv_freq.pow2(ROPE_THETA).recip();
+        let inv_freq = inv_freq.pow2(ROPE_THETA);
 
         // q_proj.retrieve();
         // k_proj.retrieve();
@@ -475,8 +476,10 @@ impl Mistral {
         // key_states.retrieve();
         // value_states.retrieve();
         // hidden_states.retrieve();
+        // cos.retrieve();
         // sin.retrieve();
-        attn_weights.retrieve();
+        // attn_weights.retrieve();
+        inv_freq.retrieve();
 
         // Compile the graph
         self.graph.compile(<(
@@ -503,9 +506,11 @@ impl Mistral {
         // println!("k_proj: {:?}", k_proj);
         // println!("key_states: {:?}", key_states);
         // println!("value_states: {:?}", value_states);
+        // println!("rotary_frequencies (cos): {:?}", cos);
         // println!("rotary_frequencies (sin): {:?}", sin);
         // println!("frequencies {:?}", frequencies);
-        println!("attn_weights: {:?}", attn_weights);
+        // println!("attn_weights: {:?}", attn_weights);
+        println!("inv_freq: {:?}", inv_freq);
     }
 
     // Infer next token
