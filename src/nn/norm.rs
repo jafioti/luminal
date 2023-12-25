@@ -33,11 +33,9 @@ pub struct RMSNorm<const DIM: usize> {
 
 impl<const DIM: usize> InitModule for RMSNorm<DIM> {
     fn initialize(cx: &mut Graph) -> Self {
-        let s = Self {
-            weight: cx.named_tensor("RMSNorm Weight"),
-        };
-        s.weight.set(vec![1.0; DIM]);
-        s
+        Self {
+            weight: cx.named_tensor("RMSNorm Weight").set(vec![1.0; DIM]),
+        }
     }
 }
 
