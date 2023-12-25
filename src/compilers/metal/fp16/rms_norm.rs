@@ -60,7 +60,7 @@ using namespace metal;
 
 kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]], device half *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
-        float added = inp[{meaned_idx_exp}] + 1e-6f;
+        float added = inp[{meaned_idx_exp}] + 1e-5f;
         float sq = sqrt(added);
         float recip = 1.0f / sq;
         out[idx] = (half)(recip * (float)x[{idx_exp}]);
@@ -78,6 +78,7 @@ kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]
         )
     }
 }
+// TODO: Make epsilon a parameter
 
 impl MetalKernelForward for MetalRMSNorm {
     fn intermediate_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
