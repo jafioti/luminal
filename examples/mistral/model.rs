@@ -385,18 +385,25 @@ impl Mistral {
 
         // Transformer Layer
         // let hidden_states = self.transformer_layers[0].forward(hidden_states);
-        // let hidden_states = self.transformer_layers[0]
-        //     .attention_norm
-        //     .forward(hidden_states);
-
-        // hidden_states.retrieve();
-
-        // let input_layer_norm = self.transformer_layers[0].attention_norm.weight;
-        // input_layer_norm.retrieve();
 
         let hidden_states = self.transformer_layers[0]
             .attention_norm
             .forward(hidden_states);
+
+        // let eps = self.transformer_layers[0].attention_norm.epsilon;
+        // println!("eps: {eps}");
+
+        // let hidden_states = self.transformer_layers[0].attention.forward(hidden_states);
+        let q_proj = self.transformer_layers[0].attention.q_proj;
+        let query_states = hidden_states.matmul(q_proj.permute());
+        // let h = hidden_states
+        //     .permute::<_, Axes3<2, 0, 1>>()
+        //     .reshape::<(Const<HIDDEN_DIM>, Dyn<'s'>)>();
+        // let query_states = q_proj.matmul(h).permute();
+        // q_proj @ hidden_states
+
+        // q_proj.retrieve();
+        query_states.retrieve();
         hidden_states.retrieve();
 
         // Compile the graph
@@ -407,7 +414,7 @@ impl Mistral {
             PostGenericCompiler,
         )>::default());
 
-        self.graph.display();
+        // self.graph.display();
 
         // Execute the graph
         self.graph.execute_debug();
@@ -417,7 +424,8 @@ impl Mistral {
         println!("hidden_states: {:?}", hidden_states);
         // println!("token_ids_one_hot: {:?}", token_ids_one_hot);
         // println!("input_layer_norm: {:?}", input_layer_norm);
-        // println!("rms_out: {:?}", rms_out);
+        println!("query_states: {:?}", query_states);
+        // println!("q_proj: {:?}", q_proj);
     }
 
     // Infer next token
