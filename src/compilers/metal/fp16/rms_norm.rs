@@ -29,14 +29,14 @@ impl MetalRMSNorm {
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device half *inp [[buffer(0)]], device float *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], device uint& front_size [[buffer(3)]], device uint& back_size [[buffer(4)]], device uint& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device half *inp [[buffer(0)]], device float *out [[buffer(1)]], device int& n_elements [[buffer(2)]], device int& front_size [[buffer(3)]], device int& back_size [[buffer(4)]], device int& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
     if (i_ < n_elements) {{
-        uint a_ = i_ / back_size;
-        uint b_ = i_ % back_size;
+        int a_ = i_ / back_size;
+        int b_ = i_ % back_size;
         float reduce_value = 0.0;
-        uint add_factor = a_ * dim_size * back_size + b_;
-        for (uint c_ = 0; c_ < dim_size * back_size; c_ += back_size) {{
-            uint idx = add_factor + c_;
+        int add_factor = a_ * dim_size * back_size + b_;
+        for (int c_ = 0; c_ < dim_size * back_size; c_ += back_size) {{
+            int idx = add_factor + c_;
             if (({valid_exp}) != 0) {{
                 float val = (float)inp[{idx_exp}];
                 reduce_value += (val * val);
@@ -58,7 +58,7 @@ kernel void mkernel(device half *inp [[buffer(0)]], device float *out [[buffer(1
 #include <metal_stdlib>
 using namespace metal;
 
-kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]], device half *out [[buffer(2)]], device uint& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]], device half *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
         float added = inp[{meaned_idx_exp}] + 1e-6f;
         float sq = sqrt(added);

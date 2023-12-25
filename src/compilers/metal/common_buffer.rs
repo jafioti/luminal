@@ -18,7 +18,7 @@ use crate::{
     prelude::*,
 };
 
-#[derive(Default, Debug)]
+#[derive(Default, LuminalPrint)]
 pub struct CommonBufferCompiler;
 
 impl Compiler for CommonBufferCompiler {

@@ -12,7 +12,7 @@ use crate::{
 use super::binary::MetalSub;
 
 /// Sometimes CopyTo -> CopyFrom and CopyFrom -> CopyTo patterns remain, so let's clean them up
-#[derive(Debug, Default)]
+#[derive(LuminalPrint, Default)]
 pub struct CopyCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for CopyCompiler<T> {
@@ -133,7 +133,7 @@ impl<T: MetalFloat> MetalARange<T> {
             compile_function("metal_arange", &format!("
 #include <metal_stdlib>
 using namespace metal;
-kernel void metal_arange(device {} *out [[buffer(0)]], device uint& n_elements [[buffer(1)]], uint idx [[thread_position_in_grid]]) {{
+kernel void metal_arange(device {} *out [[buffer(0)]], device int& n_elements [[buffer(1)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         out[idx] = ({})idx;
     }}
@@ -210,7 +210,7 @@ impl<T: MetalFloat> Operator for MetalARange<T> {
 }
 
 /// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceCompiler.
-#[derive(Default, Debug)]
+#[derive(Default, LuminalPrint)]
 pub struct ARangeCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
