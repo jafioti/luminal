@@ -602,6 +602,12 @@ impl From<Expression> for BigExpression {
     }
 }
 
+impl From<&Expression> for Expression {
+    fn from(value: &Expression) -> Self {
+        *value
+    }
+}
+
 impl From<BigExpression> for Expression {
     fn from(value: BigExpression) -> Self {
         let mut terms = ArrayVec::new();

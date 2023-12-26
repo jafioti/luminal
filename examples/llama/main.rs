@@ -45,8 +45,8 @@ fn main() {
     input.insert(0, 1); // Start token
 
     println!("Creating Graphs...");
-    let mut cx1 = Graph::new();
-    let mut cx2 = Graph::new();
+    let mut cx1 = Graph::new(); // Prompt processing graph
+    let mut cx2 = Graph::new(); // Token generation graph
     let model = Model::initialize(&mut cx1);
     let inp = cx1.named_tensor::<(Const<1>, Dyn<'s'>)>("Input").set_dyn(
         input.iter().map(|i| *i as f32).collect::<Vec<f32>>(),
@@ -133,7 +133,7 @@ fn main() {
     transfer_weights(&model, &mut cx1, &kv_model, &mut cx2);
 
     loop {
-        single_inp.set_dyn(vec![*input.last().unwrap() as f32], vec![1, 1]);
+        single_inp.set(vec![*input.last().unwrap() as f32]);
         cx2.set_dyn_dim('p', input.len() - 1);
         cx2.set_dyn_dim('t', input.len());
 

@@ -895,7 +895,11 @@ fn test_slice() {
     let data = random_vec(256);
     let mut cx = Graph::new();
     let a = cx.tensor::<R1<256>>().set(data.clone());
-    let c: GraphTensor<R1<20>> = a.slice((..20,)).realize().contiguous().retrieve();
+    let c: GraphTensor<R1<20>> = a
+        .slice((..Expression::from(20),))
+        .realize()
+        .contiguous()
+        .retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -947,7 +951,8 @@ fn test_pad_contig() {
         .pad(&[(0, 0.into()), (0, Expression::from(16) - 'K')])
         .contiguous()
         .retrieve();
-    let c: GraphTensor<(Dyn<'M'>, Dyn<'K'>)> = (a.slice((.., ..k)).realize() / 1.0).retrieve();
+    let c: GraphTensor<(Dyn<'M'>, Dyn<'K'>)> =
+        (a.slice((.., ..Expression::from(k))).realize() / 1.0).retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
@@ -963,7 +968,11 @@ fn test_movement() {
     let mut cx = Graph::new();
     let a = cx.tensor::<R1<32>>().set(data.clone());
     let b: GraphTensor<R1<42>> = a.pad(&[(0, 10)]).contiguous().retrieve();
-    let c: GraphTensor<R1<25>> = b.slice((..25,)).realize().contiguous().retrieve();
+    let c: GraphTensor<R1<25>> = b
+        .slice((..Expression::from(25),))
+        .realize()
+        .contiguous()
+        .retrieve();
 
     cx.compile(MetalFp16Compiler::default());
     cx.execute();

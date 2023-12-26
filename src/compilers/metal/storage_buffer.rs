@@ -1,6 +1,6 @@
 use std::{
     cell::UnsafeCell,
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
     sync::Arc,
 };
@@ -8,8 +8,9 @@ use std::{
 use itertools::Itertools;
 use metal_rs::{Buffer, CommandBuffer, CommandQueue, Device, MTLResourceOptions};
 use petgraph::{
+    algo::toposort,
     stable_graph::NodeIndex,
-    visit::{Bfs, EdgeRef},
+    visit::Bfs,
     Direction::{self},
 };
 
@@ -23,26 +24,13 @@ pub struct StorageBufferCompiler;
 
 impl Compiler for StorageBufferCompiler {
     fn compile(&self, graph: &mut Graph) {
-        let is_metal: HashSet<NodeIndex> = graph
-            .graph
-            .node_indices()
-            .filter(|i| {
-                graph
-                    .graph
-                    .node_weight(*i)
-                    .unwrap()
-                    .custom("metal")
-                    .is_some()
-            })
-            .collect();
-        // First pass
+        // First pass - get clear sets for each node
         #[allow(clippy::type_complexity)]
         let mut first_pass: HashMap<
             NodeIndex,
-            (Vec<(NodeIndex, Vec<NodeIndex>)>, Vec<NodeIndex>),
+            (BTreeMap<NodeIndex, Vec<NodeIndex>>, BTreeSet<NodeIndex>),
         > = HashMap::new();
-        // Loop through starting nodes in graph
-        for node in graph
+        let starting_nodes = graph
             .graph
             .node_indices()
             .filter(|n| {
@@ -52,13 +40,90 @@ impl Compiler for StorageBufferCompiler {
                     .count()
                     == 0
             })
-            .collect_vec()
-        {
+            .collect_vec();
+        // Loop through starting nodes in graph
+        for node in &starting_nodes {
             // Breadth first search from starting nodes
-            let mut bfs = Bfs::new(&graph.graph, node);
+            let mut bfs = Bfs::new(&graph.graph, *node);
             while let Some(node) = bfs.next(&graph.graph) {
-                todo!();
+                // Run through parents to build new tenative set and clear set
+                let (mut tenative_set, mut clear_set) = (BTreeMap::default(), BTreeSet::default());
+                for parent in graph.graph.neighbors_directed(node, Direction::Incoming) {
+                    if let Some((parent_tenative_set, parent_clear_set)) = first_pass.get(&parent) {
+                        let new_tenative_set = parent_tenative_set
+                            .iter()
+                            .map(|(n, c)| {
+                                let mut c = c.clone();
+                                c.retain(|n| *n != parent);
+                                (*n, c)
+                            })
+                            .collect::<BTreeMap<_, _>>();
+                        tenative_set.extend(new_tenative_set);
+                        clear_set.extend(
+                            tenative_set
+                                .iter()
+                                .filter(|(_, v)| v.is_empty())
+                                .map(|(n, _)| *n),
+                        );
+                        tenative_set.retain(|_, v| !v.is_empty());
+                        clear_set.extend(parent_clear_set);
+                    }
+                }
+                first_pass.insert(node, (tenative_set, clear_set));
             }
+        }
+
+        // Second pass - assign buffers
+        let available_buffers = graph
+            .graph
+            .node_indices()
+            .map(|n| {
+                let input_shapes = graph
+                    .get_sources(n)
+                    .into_iter()
+                    .map(|(_, _, i)| i)
+                    .collect::<Vec<_>>();
+                let output_buffers = graph
+                    .graph
+                    .node_weight(n)
+                    .unwrap()
+                    .custom("metal")
+                    .unwrap()
+                    .downcast_ref::<MetalKernelWrapper>()
+                    .unwrap()
+                    .0
+                    .output_buffer_sizes(&input_shapes);
+                (n, output_buffers)
+            })
+            .collect::<HashMap<_, _>>();
+        // Loop through starting nodes in graph
+        for node in toposort(&graph.graph, None).unwrap() {
+            let Some(Some(wrapper)) = graph
+                .graph
+                .node_weight(node)
+                .unwrap()
+                .custom("metal")
+                .map(|e| e.downcast_ref::<MetalKernelWrapper>().cloned())
+            else {
+                continue;
+            };
+            let input_shapes = graph
+                .get_sources(node)
+                .into_iter()
+                .map(|(_, _, i)| i)
+                .collect::<Vec<_>>();
+            // Assign output buffers
+            for required_buffer in wrapper.0.output_buffer_sizes(&input_shapes) {
+                // Find an applicable buffer
+                if let Some((source_node, applicable_buffer)) = first_pass[&node]
+                    .1
+                    .iter()
+                    .flat_map(|i| available_buffers[i].iter().cloned().map(|b| (*i, b)))
+                    .find(|(_, size)| *size == required_buffer)
+                {}
+            }
+            // Assing intermediate buffers
+            for required_buffer in wrapper.0.intermediate_buffer_sizes(&input_shapes) {}
         }
     }
 }
