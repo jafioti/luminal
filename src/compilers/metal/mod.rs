@@ -11,9 +11,10 @@ pub use fp32::*;
 pub mod fp16;
 pub use fp16::*;
 mod binary;
-mod common_buffer;
+mod command_buffer;
 mod other;
 mod prim;
+mod storage_buffer;
 
 use half::f16;
 use itertools::Itertools;

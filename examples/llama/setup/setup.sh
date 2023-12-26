@@ -11,7 +11,7 @@ fi
 git lfs install
 
 echo "Downloading Model..."
-git clone https://huggingface.co/decapoda-research/llama-7b-hf $SCRIPT_DIR/llama-7b-hf
+git lfs clone https://huggingface.co/decapoda-research/llama-7b-hf $SCRIPT_DIR/llama-7b-hf
 
 # Convert the model
 echo "Converting Model..."

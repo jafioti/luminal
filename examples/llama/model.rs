@@ -1,5 +1,5 @@
 #![allow(clippy::type_complexity)]
-use std::ops::{Add, Mul};
+use std::{marker::PhantomData, ops::Mul};
 
 use half::f16;
 use luminal::{
@@ -151,56 +151,6 @@ pub struct Attention<
     pub rotary_embed: RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>,
 }
 
-fn attn_forward<
-    const NUM_HEADS: usize,
-    const HIDDEN: usize,
-    const HEAD_DIM: usize,
-    const HEAD_DIM_OVER_2: usize,
-    Batch: Dimension,
-    Seq: Dimension,
->(
-    attn: &Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>,
-    x: GraphTensor<(Batch, Seq, Const<HIDDEN>)>,
-    prev_seq: BigExpression,
-) -> (
-    GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
-    GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
-    GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
-) {
-    let q = x
-        .matmul(attn.q_proj.permute())
-        .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-            Batch::const_size(),
-            Seq::const_size(),
-            NUM_HEADS.into(),
-            HEAD_DIM.into(),
-        ])
-        .permute::<_, Axes4<0, 2, 1, 3>>();
-    let k = x
-        .matmul(attn.k_proj.permute())
-        .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-            Batch::const_size(),
-            Seq::const_size(),
-            NUM_HEADS.into(),
-            HEAD_DIM.into(),
-        ])
-        .permute::<_, Axes4<0, 2, 1, 3>>();
-    let v = x
-        .matmul(attn.v_proj.permute())
-        .dyn_reshape::<(Batch, Seq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-            Batch::const_size(),
-            Seq::const_size(),
-            NUM_HEADS.into(),
-            HEAD_DIM.into(),
-        ])
-        .permute::<_, Axes4<0, 2, 1, 3>>();
-    let (q, k) = attn
-        .rotary_embed
-        .forward((q.permute(), k.permute(), prev_seq));
-
-    (q, k, v)
-}
-
 impl<
         const NUM_HEADS: usize,
         const HIDDEN: usize,
@@ -208,72 +158,87 @@ impl<
         const HEAD_DIM_OVER_2: usize,
         Batch: Dimension,
         CurSeq: Dimension,
-    > Module<GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>>
-    for Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
+        PrevSeq: Dimension,
+        TotSeq: Dimension,
+    >
+    Module<(
+        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
+        Option<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
+        PhantomData<TotSeq>,
+    )> for Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
 {
     type Output = (
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        KVCache<Batch, CurSeq, NUM_HEADS, HEAD_DIM>,
+        KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>,
     );
 
-    fn forward(&self, x: GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>) -> Self::Output {
-        let (q, k, v) = attn_forward(self, x, 0.into());
-
-        let attention_mask = self.k_proj.graph().triu::<CurSeq, CurSeq>(1) * f16::MIN.to_f32();
-        let w = q
-            .matmul(k.permute())
-            .mul((HEAD_DIM as f64).sqrt().recip() as f32)
-            .add(attention_mask.expand())
-            .softmax::<3>();
-
-        let o = w
-            .matmul(v)
-            .permute::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>), _>()
-            .dyn_reshape::<(Batch, CurSeq, Const<HIDDEN>)>(vec![
-                Batch::const_size(),
-                CurSeq::const_size(),
-                HIDDEN.into(),
-            ]);
-        (o.matmul(self.o_proj.permute()), (k, v))
-    }
-}
-
-// KV cache forward
-impl<
-        const NUM_HEADS: usize,
-        const HIDDEN: usize,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-    > Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
-{
-    fn forward_kv<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>(
+    fn forward(
         &self,
-        (x, cache): (
+        (x, cache, _): (
             GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-            KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>,
+            Option<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
+            PhantomData<TotSeq>,
         ),
-    ) -> (
-        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>,
-    ) {
-        let (q, k, v) = attn_forward(self, x, PrevSeq::const_size().into());
-        // Add KV cache
-        let k = cache
-            .0
-            .contiguous()
-            .concat_along::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(
-                k.contiguous(),
-            );
-        let v = cache
-            .1
-            .contiguous()
-            .concat_along::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(
-                v.contiguous(),
-            );
-        let w = q
-            .matmul(k.permute::<(Batch, Const<NUM_HEADS>, Const<HEAD_DIM>, TotSeq), _>())
-            .mul((HEAD_DIM as f64).sqrt().recip() as f32) // Inv head scale
-            .softmax::<3>();
+    ) -> Self::Output {
+        let q = x
+            .matmul(self.q_proj.permute())
+            .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
+                Batch::const_size(),
+                CurSeq::const_size(),
+                NUM_HEADS.into(),
+                HEAD_DIM.into(),
+            ])
+            .permute::<_, Axes4<0, 2, 1, 3>>();
+        let k = x
+            .matmul(self.k_proj.permute())
+            .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
+                Batch::const_size(),
+                CurSeq::const_size(),
+                NUM_HEADS.into(),
+                HEAD_DIM.into(),
+            ])
+            .permute::<_, Axes4<0, 2, 1, 3>>();
+        let v = x
+            .matmul(self.v_proj.permute())
+            .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
+                Batch::const_size(),
+                CurSeq::const_size(),
+                NUM_HEADS.into(),
+                HEAD_DIM.into(),
+            ])
+            .permute::<_, Axes4<0, 2, 1, 3>>();
+        let (q, k) =
+            self.rotary_embed
+                .forward((q.permute(), k.permute(), PrevSeq::const_size().into()));
+
+        let (k, v) = if let Some(cache) = cache {
+            // Add KV cache
+            let k = cache
+                .0
+                .contiguous()
+                .concat_along::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(
+                    k.contiguous(),
+                );
+            let v = cache
+                .1
+                .contiguous()
+                .concat_along::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(
+                    v.contiguous(),
+                );
+            (k, v)
+        } else {
+            (k.realize(), v.realize())
+        };
+
+        let mut w = q
+            .matmul(k.permute::<_, Axes4<0, 1, 3, 2>>())
+            .mul((HEAD_DIM as f64).sqrt().recip() as f32);
+        // We don't need to mask on a kv cached pass
+        if cache.is_none() {
+            let attention_mask = self.k_proj.graph().triu::<CurSeq, TotSeq>(1) * f16::MIN.to_f32();
+            w = w + attention_mask.expand();
+        }
+        w = w.softmax::<3>();
 
         let o = w
             .matmul(v)
@@ -283,7 +248,6 @@ impl<
                 CurSeq::const_size(),
                 HIDDEN.into(),
             ]);
-
         (o.matmul(self.o_proj.permute()), (k, v))
     }
 }
@@ -343,43 +307,31 @@ impl<
         const HEAD_DIM_OVER_2: usize,
         Batch: Dimension,
         CurSeq: Dimension,
-    > Module<GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>>
-    for DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>
+        PrevSeq: Dimension,
+        TotSeq: Dimension,
+    >
+    Module<(
+        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
+        Option<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
+        PhantomData<TotSeq>,
+    )> for DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>
 {
     type Output = (
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        KVCache<Batch, CurSeq, NUM_HEADS, HEAD_DIM>,
-    );
-    fn forward(&self, x: GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>) -> Self::Output {
-        let normed = self.input_layer_norm.forward(x);
-        let (y, cache) = self.self_attn.forward(normed);
-        let x = x + y;
-        let y = self.mlp.forward(self.post_attention_layer_norm.forward(x));
-        (x + y, cache)
-    }
-}
-
-// KV cache forward
-impl<
-        const NUM_HEADS: usize,
-        const HIDDEN: usize,
-        const INTERMEDIATE: usize,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-    > DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>
-{
-    fn forward_kv<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>(
-        &self,
-        (x, cache): (
-            GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-            KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>,
-        ),
-    ) -> (
-        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
         KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>,
-    ) {
+    );
+    fn forward(
+        &self,
+        (x, cache, _): (
+            GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
+            Option<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
+            PhantomData<TotSeq>,
+        ),
+    ) -> Self::Output {
         let normed = self.input_layer_norm.forward(x);
-        let (y, cache) = self.self_attn.forward_kv((normed, cache));
+        let (y, cache) = self
+            .self_attn
+            .forward((normed, cache, PhantomData::<TotSeq>));
         let x = x + y;
         let y = self.mlp.forward(self.post_attention_layer_norm.forward(x));
         (x + y, cache)
@@ -445,59 +397,39 @@ impl<
         const LAYERS: usize,
         Batch: Dimension,
         CurSeq: Dimension,
-    > Module<GraphTensor<(Batch, CurSeq)>>
-    for Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
+        PrevSeq: Dimension,
+        TotSeq: Dimension,
+    >
+    Module<(
+        GraphTensor<(Batch, CurSeq)>,
+        Option<Vec<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>>,
+        PhantomData<TotSeq>,
+    )> for Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
 {
     type Output = (
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        Vec<KVCache<Batch, CurSeq, NUM_HEADS, HEAD_DIM>>,
+        Vec<KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>>,
     );
-    fn forward(&self, input: GraphTensor<(Batch, CurSeq)>) -> Self::Output {
+    fn forward(
+        &self,
+        (input, cache, _): (
+            GraphTensor<(Batch, CurSeq)>,
+            Option<Vec<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>>,
+            PhantomData<TotSeq>,
+        ),
+    ) -> Self::Output {
         let mut hidden_states = self.embed_tokens.forward(input);
         let mut caches = vec![];
-        for layer_i in &self.layers {
-            let (new_hidden_states, (k_cache, v_cache)) = layer_i.forward(hidden_states);
+        for (i, layer_i) in self.layers.iter().enumerate() {
+            let (new_hidden_states, (k_cache, v_cache)) = layer_i.forward((
+                hidden_states,
+                cache.as_ref().map(|v| v[i]),
+                PhantomData::<TotSeq>,
+            ));
             hidden_states = new_hidden_states;
             caches.push((k_cache.contiguous(), v_cache.contiguous()));
         }
         (self.norm.forward(hidden_states), caches)
-    }
-}
-
-impl<
-        const VOCAB: usize,
-        const NUM_HEADS: usize,
-        const HIDDEN: usize,
-        const INTERMEDIATE: usize,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-        const LAYERS: usize,
-    > Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
-{
-    pub fn forward_kv<
-        Batch: Dimension,
-        CurSeq: Dimension,
-        PrevSeq: Dimension,
-        TotSeq: Dimension,
-    >(
-        &self,
-        (input, caches): (
-            GraphTensor<(Batch, CurSeq)>,
-            Vec<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
-        ),
-    ) -> (
-        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        Vec<KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>>,
-    ) {
-        let mut hidden_states = self.embed_tokens.forward(input);
-        let mut new_caches = Vec::with_capacity(caches.len());
-        for (layer_i, cache) in self.layers.iter().zip(caches.into_iter()) {
-            let (new_hidden_states, (k_cache, v_cache)) =
-                layer_i.forward_kv((hidden_states, cache));
-            hidden_states = new_hidden_states;
-            new_caches.push((k_cache.contiguous(), v_cache.contiguous()));
-        }
-        (self.norm.forward(hidden_states), new_caches)
     }
 }
 
@@ -565,47 +497,29 @@ impl<
         const LAYERS: usize,
         Batch: Dimension,
         CurSeq: Dimension,
-    > Module<GraphTensor<(Batch, CurSeq)>>
+        PrevSeq: Dimension,
+        TotSeq: Dimension,
+    >
+    Module<(
+        GraphTensor<(Batch, CurSeq)>,
+        Option<Vec<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>>,
+        PhantomData<TotSeq>,
+    )>
     for LlamaForCausalLM<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
 {
     type Output = (
         GraphTensor<(Batch, CurSeq, Const<VOCAB>)>,
-        Vec<KVCache<Batch, CurSeq, NUM_HEADS, HEAD_DIM>>,
-    );
-    fn forward(&self, input: GraphTensor<(Batch, CurSeq)>) -> Self::Output {
-        let (hidden_states, caches) = self.llama.forward(input);
-        let o = hidden_states.matmul(self.lm_head.permute());
-        (o, caches)
-    }
-}
-
-// KV cache forward
-impl<
-        const VOCAB: usize,
-        const NUM_HEADS: usize,
-        const HIDDEN: usize,
-        const INTERMEDIATE: usize,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-        const LAYERS: usize,
-    > LlamaForCausalLM<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
-{
-    pub fn forward_kv<
-        Batch: Dimension,
-        CurSeq: Dimension,
-        PrevSeq: Dimension,
-        TotSeq: Dimension,
-    >(
-        &self,
-        (input, caches): (
-            GraphTensor<(Batch, CurSeq)>,
-            Vec<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
-        ),
-    ) -> (
-        GraphTensor<(Batch, CurSeq, Const<VOCAB>)>,
         Vec<KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>>,
-    ) {
-        let (hidden_states, caches) = self.llama.forward_kv((input, caches));
+    );
+    fn forward(
+        &self,
+        (input, caches, _): (
+            GraphTensor<(Batch, CurSeq)>,
+            Option<Vec<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>>,
+            PhantomData<TotSeq>,
+        ),
+    ) -> Self::Output {
+        let (hidden_states, caches) = self.llama.forward((input, caches, PhantomData::<TotSeq>));
         let o = hidden_states.matmul(self.lm_head.permute());
         (o, caches)
     }
