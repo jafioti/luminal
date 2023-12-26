@@ -182,30 +182,15 @@ impl<
     ) -> Self::Output {
         let q = x
             .matmul(self.q_proj.permute())
-            .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-                Batch::const_size(),
-                CurSeq::const_size(),
-                NUM_HEADS.into(),
-                HEAD_DIM.into(),
-            ])
+            .reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let k = x
             .matmul(self.k_proj.permute())
-            .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-                Batch::const_size(),
-                CurSeq::const_size(),
-                NUM_HEADS.into(),
-                HEAD_DIM.into(),
-            ])
+            .reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let v = x
             .matmul(self.v_proj.permute())
-            .dyn_reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>(vec![
-                Batch::const_size(),
-                CurSeq::const_size(),
-                NUM_HEADS.into(),
-                HEAD_DIM.into(),
-            ])
+            .reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let (q, k) =
             self.rotary_embed
@@ -242,12 +227,8 @@ impl<
 
         let o = w
             .matmul(v)
-            .permute::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>), _>()
-            .dyn_reshape::<(Batch, CurSeq, Const<HIDDEN>)>(vec![
-                Batch::const_size(),
-                CurSeq::const_size(),
-                HIDDEN.into(),
-            ]);
+            .permute::<_, Axes4<0, 2, 1, 3>>()
+            .reshape::<(Batch, CurSeq, Const<HIDDEN>)>();
         (o.matmul(self.o_proj.permute()), (k, v))
     }
 }
@@ -384,7 +365,6 @@ pub struct LlamaForCausalLM<
     pub embed_tokens: Embedding<VOCAB, HIDDEN>,
     pub layers: Vec<DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>>,
     pub norm: RMSNorm<HIDDEN>,
-    pub graph_ref: *mut Graph,
     pub lm_head: GraphTensor<(Const<VOCAB>, Const<HIDDEN>)>,
 }
 
@@ -421,7 +401,7 @@ impl<
         ),
     ) -> Self::Output {
         let mut hidden_states = self.embed_tokens.forward(input);
-        let mut new_caches = vec![];
+        let mut new_caches = Vec::with_capacity(LAYERS);
         for (i, layer_i) in self.layers.iter().enumerate() {
             let (new_hidden_states, (k_cache, v_cache)) = layer_i.forward((
                 hidden_states,
@@ -431,10 +411,8 @@ impl<
             hidden_states = new_hidden_states;
             new_caches.push((k_cache.contiguous(), v_cache.contiguous()));
         }
-        let hidden_states = self.norm.forward(hidden_states);
-        // let (hidden_states, caches) = self.llama.forward((input, caches, PhantomData::<TotSeq>));
-        let o = hidden_states.matmul(self.lm_head.permute());
-        (o, new_caches)
+        hidden_states = self.norm.forward(hidden_states);
+        (hidden_states.matmul(self.lm_head.permute()), new_caches)
     }
 }
 
@@ -454,7 +432,6 @@ impl<
             norm: InitModule::initialize(cx),
             embed_tokens: InitModule::initialize(cx),
             layers: (0..LAYERS).map(|_| InitModule::initialize(cx)).collect(),
-            graph_ref: cx,
             lm_head: cx.named_tensor("LM Head"),
         }
     }
