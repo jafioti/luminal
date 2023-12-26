@@ -1,10 +1,7 @@
 use colored::Colorize;
-use half::{bf16, f16};
+use half::bf16;
 use itertools::Itertools;
-use luminal::{
-    nn::{linear::Linear, norm::RMSNorm},
-    prelude::*,
-};
+use luminal::{nn::norm::RMSNorm, prelude::*};
 use memmap2::{Mmap, MmapOptions};
 use rust_tokenizers::{
     error::TokenizerError,
