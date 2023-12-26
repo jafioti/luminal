@@ -52,22 +52,23 @@ fn main() -> Result<(), String> {
             .load_safe_tensors_from_files(file_paths.iter().map(|s| s.to_string()).collect_vec())?;
     }
 
-    mistral.debug_run();
+    // mistral.debug_run();
 
-    // // Build the forward graph
-    // println!("Building the forward graph");
-    // let output_token_ids = mistral.build_forward_graph();
+    // Test inference
+    let prompt = "Merry ";
 
-    // // Compile the graph
-    // println!("Compiling the forward graph");
-    // mistral.compile_forward_graph();
+    // Build the forward graph
+    println!("Building the forward graph");
+    let output_token_ids = mistral.build_forward_graph(prompt);
 
-    // // Test inference
-    // let input_text = "Hello, how are";
-    // println!("Infering the next token");
-    // let output_text = mistral.infer_next_token(output_token_ids, input_text);
+    // Compile the graph
+    println!("Compiling the forward graph");
+    mistral.compile_forward_graph();
 
-    // println!("Inference: {output_text}");
+    println!("Infering the next token");
+    let output_text = mistral.infer_next_token(output_token_ids, prompt);
+
+    println!("Inference: {output_text}");
 
     Ok(())
 }
