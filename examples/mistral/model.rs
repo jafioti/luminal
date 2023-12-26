@@ -20,8 +20,8 @@ use yoke::{Yoke, Yokeable};
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
-// pub const NUM_LAYERS: usize = 32;
-pub const NUM_LAYERS: usize = 1;
+pub const NUM_LAYERS: usize = 32;
+// pub const NUM_LAYERS: usize = 1;
 pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
@@ -196,10 +196,10 @@ pub struct Mistral {
     pub transformer_layers: Vec<TransformerBlock>,
 
     // Final Norm layer
-    // pub norm: RMSNorm<HIDDEN_DIM>,
+    pub norm: RMSNorm<HIDDEN_DIM>,
 
     // LM Head Layer
-    // pub lm_head: Linear<HIDDEN_DIM, VOCAB_SIZE>,
+    pub lm_head: Linear<HIDDEN_DIM, VOCAB_SIZE>,
 
     // RoPE Embeddings
     pub rope_embeddings: (
@@ -422,40 +422,46 @@ impl Mistral {
     }
 
     // Infer next token
-    // pub fn infer_next_token(
-    //     &mut self,
-    //     output_token_ids: GraphTensor<(Const<1>, Dyn<'s'>)>,
-    //     text: &str,
-    // ) -> String {
-    //     // First, we encode the text
-    //     let token_ids = self.encode(text);
-    //     let n_tokens = token_ids.len();
+    pub fn infer_next_token(
+        &mut self,
+        output_token_ids: GraphTensor<(Const<1>, Dyn<'s'>)>,
+        text: &str,
+    ) -> String {
+        // First, we encode the text
+        let token_ids = self.encode(text);
+        let n_tokens = token_ids.len();
+        println!("n_tokens: {:?}", n_tokens);
+        println!("token_ids: {:?}", token_ids);
 
-    //     // Insert the data in the input node
-    //     self.input.set_dyn(token_ids, vec![1, n_tokens]);
+        // Insert the data in the input node
+        self.input.set_dyn(token_ids, vec![1, n_tokens]);
 
-    //     // Execute the graph
-    //     self.graph.execute_debug();
+        // Execute the graph
+        self.graph.execute_debug();
 
-    //     println!("Token IDs: {:?}", output_token_ids);
+        println!("Token IDs: {:?}", output_token_ids);
 
-    //     // Pull the data from the output node
-    //     let output_token_ids = output_token_ids.data();
+        // Pull the data from the output node
+        let output_token_ids = output_token_ids.data();
 
-    //     let output_text = self.decode(output_token_ids);
+        let output_text = self.decode(output_token_ids);
 
-    //     output_text
-    // }
+        output_text
+    }
 
-    // pub fn build_forward_graph(&mut self) -> GraphTensor<(Const<1>, Dyn<'s'>)> {
-    //     let output_probabilities = self.forward(self.input);
+    pub fn build_forward_graph(&mut self, prompt: &str) -> GraphTensor<(Const<1>, Dyn<'s'>)> {
+        let input_data: Vec<f32> = self.encode(prompt);
+        let sequence_length = input_data.len();
+        self.input.set_dyn(input_data, vec![1, sequence_length]);
+        let input_embeddings = self.embedding.gather(self.input);
+        let output_probabilities = self.forward(input_embeddings);
 
-    //     // Do the sampling in the graph computation
-    //     let output_token_ids = output_probabilities.argmax();
-    //     output_token_ids.retrieve();
+        // Do the sampling in the graph computation
+        let output_token_ids = output_probabilities.argmax();
+        output_token_ids.retrieve();
 
-    //     output_token_ids
-    // }
+        output_token_ids
+    }
 
     pub fn forward<Batch: Dimension, SequenceLength: Dimension>(
         &mut self,
@@ -571,9 +577,10 @@ impl Mistral {
             let attention_weights = query_states.matmul(key_states);
             let attention_weights = attention_weights * (ATTENTION_HEAD_DIM as f32).sqrt().recip();
 
-            // park attention mask code
-            // let attention_mask = self.graph.triu::<Dyn<'s'>, Dyn<'s'>>(1) * f16::MIN.to_f32();
-            // let attention_weights = attention_weights + attention_mask.expand();
+            // Attention Mask
+            let attention_mask =
+                self.graph.triu::<SequenceLength, SequenceLength>(1) * f16::MIN.to_f32();
+            let attention_weights = attention_weights + attention_mask.expand();
 
             let attention_weights = attention_weights.softmax::<3>();
 
@@ -599,6 +606,10 @@ impl Mistral {
             hidden_states = hidden_states + projection_layer_output;
         }
 
+        // Finally, we call the final norm
+        hidden_states = self.norm.forward(hidden_states);
+
+        // Return
         hidden_states
     }
 
@@ -645,11 +656,11 @@ impl Mistral {
             })
             .collect_vec();
 
-        // // Create the norm
-        // let norm = RMSNorm::initialize(graph.as_mut());
+        // Create the norm
+        let norm = RMSNorm::initialize(graph.as_mut());
 
-        // // Create the lm head
-        // let lm_head = Linear::initialize(graph.as_mut());
+        // Create the lm head
+        let lm_head = Linear::initialize(graph.as_mut());
 
         // // Create the input node
         let input = graph.named_tensor::<(Const<1>, Dyn<'s'>)>("input_node");
@@ -666,12 +677,7 @@ impl Mistral {
         rope_graph
             .compile(<(PreGenericCompiler, MetalFp32Compiler, PostGenericCompiler)>::default());
 
-        rope_graph.execute_debug();
-
-        // Debug
-        // println!("rotary_frequencies (cos): {:?}", rope_cos);
-        // println!("rope_cos_trunc: {:?}", rope_cos_trunc);
-        // println!("rotary_frequencies (sin): {:?}", rope_sin);
+        rope_graph.execute();
 
         // Build the actual rope embeddings
         let (cos, sin) = (
@@ -688,8 +694,8 @@ impl Mistral {
             graph,
             embedding,
             transformer_layers,
-            // norm,
-            // lm_head,
+            norm,
+            lm_head,
             input,
             rope_embeddings,
         })
@@ -871,20 +877,20 @@ impl Mistral {
                 .set(up_proj);
         }
 
-        // // Layer: Norm
-        // let norm_safe_tensor = &get_tensor(
-        //     &weight_file_mapper,
-        //     &file_tensor_mapper,
-        //     "model.norm.weight",
-        // )?;
-        // let norm = convert_vector_bf16_f32(norm_safe_tensor);
-        // self.norm.weight.set(norm);
+        // Layer: Norm
+        let norm_safe_tensor = &get_tensor(
+            &weight_file_mapper,
+            &file_tensor_mapper,
+            "model.norm.weight",
+        )?;
+        let norm = convert_vector_bf16_f32(norm_safe_tensor);
+        self.norm.weight.set(norm);
 
-        // // Layer: LM Head
-        // let lm_head_safe_tensor =
-        //     &get_tensor(&weight_file_mapper, &file_tensor_mapper, "lm_head.weight")?;
-        // let lm_head = convert_vector_bf16_f32(lm_head_safe_tensor);
-        // self.lm_head.weight.set(lm_head);
+        // Layer: LM Head
+        let lm_head_safe_tensor =
+            &get_tensor(&weight_file_mapper, &file_tensor_mapper, "lm_head.weight")?;
+        let lm_head = convert_vector_bf16_f32(lm_head_safe_tensor);
+        self.lm_head.weight.set(lm_head);
 
         Ok(())
     }
