@@ -1,8 +1,13 @@
 use crate::op;
 use crate::prelude::*;
-use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
+use std::ops::AddAssign;
+use std::ops::DivAssign;
+use std::ops::MulAssign;
+use std::ops::RemAssign;
+use std::ops::SubAssign;
+use std::ops::{Add, Div, Mul, Rem, Sub};
 
-impl<S: Shape> Add<GraphTensor<S>> for GraphTensor<S> {
+impl<S: Shape> Add for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
     fn add(mut self, mut rhs: GraphTensor<S>) -> Self::Output {
@@ -19,7 +24,13 @@ impl<S: Shape> Add<GraphTensor<S>> for GraphTensor<S> {
     }
 }
 
-impl<S: Shape> Sub<GraphTensor<S>> for GraphTensor<S> {
+impl<S: Shape> AddAssign for GraphTensor<S> {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
+}
+
+impl<S: Shape> Sub for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
     fn sub(self, rhs: GraphTensor<S>) -> Self::Output {
@@ -27,7 +38,13 @@ impl<S: Shape> Sub<GraphTensor<S>> for GraphTensor<S> {
     }
 }
 
-impl<S: Shape> Mul<GraphTensor<S>> for GraphTensor<S> {
+impl<S: Shape> SubAssign for GraphTensor<S> {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = *self - rhs;
+    }
+}
+
+impl<S: Shape> Mul for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
     fn mul(mut self, mut rhs: GraphTensor<S>) -> Self::Output {
@@ -44,12 +61,24 @@ impl<S: Shape> Mul<GraphTensor<S>> for GraphTensor<S> {
     }
 }
 
+impl<S: Shape> MulAssign for GraphTensor<S> {
+    fn mul_assign(&mut self, rhs: Self) {
+        *self = *self * rhs;
+    }
+}
+
 #[allow(clippy::suspicious_arithmetic_impl)]
 impl<S: Shape> Div<GraphTensor<S>> for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
     fn div(self, rhs: GraphTensor<S>) -> Self::Output {
         self * rhs.recip()
+    }
+}
+
+impl<S: Shape> DivAssign for GraphTensor<S> {
+    fn div_assign(&mut self, rhs: Self) {
+        *self = *self / rhs;
     }
 }
 
@@ -70,11 +99,9 @@ impl<S: Shape> Rem<GraphTensor<S>> for GraphTensor<S> {
     }
 }
 
-impl<S: Shape> Neg for GraphTensor<S> {
-    type Output = GraphTensor<S>;
-
-    fn neg(self) -> Self::Output {
-        self * -1.0
+impl<S: Shape> RemAssign for GraphTensor<S> {
+    fn rem_assign(&mut self, rhs: Self) {
+        *self = *self % rhs;
     }
 }
 
