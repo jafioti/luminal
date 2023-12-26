@@ -1,5 +1,13 @@
 use crate::{op, prelude::*};
-use std::ops::{Add, Mul};
+use std::ops::{Add, Mul, Neg};
+
+impl<S: Shape> Neg for GraphTensor<S> {
+    type Output = GraphTensor<S>;
+
+    fn neg(self) -> Self::Output {
+        self * -1.0
+    }
+}
 
 impl<S: Shape> GraphTensor<S> {
     /// Base 2 log
