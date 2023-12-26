@@ -1,3 +1,4 @@
+use colored::Colorize;
 use half::{bf16, f16};
 use itertools::Itertools;
 use luminal::{
@@ -16,8 +17,8 @@ use yoke::{Yoke, Yokeable};
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
-pub const NUM_LAYERS: usize = 32;
-// pub const NUM_LAYERS: usize = 2;
+// pub const NUM_LAYERS: usize = 32;
+pub const NUM_LAYERS: usize = 1;
 pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
@@ -28,6 +29,16 @@ pub const NUM_ATTENTION_GROUPS: usize = NUM_ATTENTION_HEADS / NUM_KV_HEADS;
 pub const ATTENTION_HEAD_DIM: usize = HIDDEN_DIM / NUM_ATTENTION_HEADS;
 pub const ATTENTION_HEAD_DIM_OVER_2: usize = ATTENTION_HEAD_DIM / 2;
 pub const ATTENTION_PROJECTION_DIM: usize = ATTENTION_HEAD_DIM * NUM_KV_HEADS;
+
+// From examples/llama
+// Currently just an argmax, do actual sampling here
+fn sample_index(dist: &[f32]) -> usize {
+    dist.iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap()
+        .0
+}
 
 // Helper to deserialize safetensors stored in bf16
 pub fn convert_vector_bf16_f32(tensor_view: &TensorView<'_>) -> Vec<f32> {
@@ -277,14 +288,46 @@ impl Mistral {
         let hidden_states = self.forward(input_embeddings);
         let logits = hidden_states.matmul(self.lm_head.permute()).retrieve();
 
+        // Get the output ids
+        // let output_ids = logits.argmax().retrieve();
+        let last_logit = logits
+            .slice((.., (sequence_length - 1).., ..))
+            .contiguous()
+            .reshape::<R1<VOCAB_SIZE>>()
+            .retrieve();
+
         println!("Compiling Graph");
         self.compile_forward_graph();
 
-        println!("Executing Graph");
-        self.graph.execute_debug();
+        let mut context = prompt.to_string();
+        loop {
+            let input_data: Vec<f32> = self.encode(context.as_str());
+            let sequence_length = input_data.len();
+            // cx2.set_dyn_dim('p', input.len() - 1);
+            self.graph.set_dyn_dim('s', sequence_length);
+            println!("{sequence_length}");
+            self.input.set_dyn(input_data, vec![1, sequence_length]);
 
-        // println!("hidden_states: {:?}", hidden_states);
-        println!("logits: {:?}", logits);
+            println!("Executing Graph");
+            // self.graph.execute_debug();
+            self.graph.execute();
+
+            let output_ids = sample_index(&last_logit.data());
+
+            // Decode token
+            let output_token = self.decode(vec![output_ids as f32]);
+            context.push_str(output_token.as_str());
+
+            // println!("hidden_states: {:?}", hidden_states);
+            // println!("logits: {:?}", logits);
+            // println!("last_logit: {:?}", last_logit);
+            // println!("output_ids: {:?}", output_ids);
+            println!(
+                "{}{}",
+                prompt.on_black().white().bold(),
+                output_token.green()
+            );
+        }
     }
 
     pub fn forward<Batch: Dimension, SequenceLength: Dimension>(
@@ -403,7 +446,7 @@ impl Mistral {
 
             // Attention Mask
             // let attention_mask =
-            //     self.graph.triu::<SequenceLength, SequenceLength>(1) * f16::MIN.to_f32();
+            // self.graph.triu::<SequenceLength, SequenceLength>(1) * f16::MIN.to_f32();
             // let attention_mask = attention_mask.log();
             // let attention_weights = attention_weights + attention_mask.expand();
 
