@@ -166,7 +166,7 @@ pub fn pretty_print_tensor_recursive(
     if shape.len() == 1 {
         // If this is the innermost dimension, print the raw data in a single line
         write!(f, "{}[", indent)?;
-        if data.len() > 128 {
+        if data.len() > 10 {
             for (i, value) in data.iter().take(5).enumerate() {
                 write!(f, "{:.6}", value)?;
                 if i < data.len() - 1 {
