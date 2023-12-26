@@ -438,7 +438,8 @@ impl Mistral {
                 Const<NUM_ATTENTION_HEADS>,
                 Dyn<'s'>,
                 Const<ATTENTION_HEAD_DIM>,
-            )>();
+            )>()
+            .permute::<_, Axes4<0, 1, 3, 2>>();
 
         let value_states = value_states
             .expand::<(
@@ -456,15 +457,20 @@ impl Mistral {
             )>();
 
         // Now we implement attention (finally)
-        // let attn_weights = query_states.matmul(key_states.permute::<_, Axes4<0, 1, 3, 2>>())
-        //     / ((ATTENTION_HEAD_DIM as f64).sqrt() as f32);
-
-        // let attention_mask = self.graph.triu::<Dyn<'s'>, Dyn<'s'>>(1) * f16::MIN.to_f32();s
+        let attn_weights = query_states.matmul(key_states);
+        let attn_weights = attn_weights * (ATTENTION_HEAD_DIM as f32).sqrt().recip();
+        // let attention_mask = self.graph.triu::<Dyn<'s'>, Dyn<'s'>>(1) * f16::MIN.to_f32();
 
         // let attn_weights = attn_weights + attention_mask.expand();
-        // let attn_weights = attn_weights.softmax::<3>();
+        let attn_weights = attn_weights.softmax::<3>();
 
-        // let attn_output = attn_weights.matmul(value_states);
+        let attn_output = attn_weights.matmul(value_states);
+        let o_proj = self.transformer_layers[0].attention.o_proj;
+        let attn_output =
+            attn_output
+                .permute::<_, Axes4<0, 2, 1, 3>>()
+                .reshape::<(Const<1>, Dyn<'s'>, Const<HIDDEN_DIM>)>();
+        let attn_output = attn_output.matmul(o_proj.permute());
 
         // Debug Rotary frequencies
         // let inv_freq = (self.graph.arange::<Const<ATTENTION_HEAD_DIM_OVER_2>>() * 2.0)
@@ -479,7 +485,7 @@ impl Mistral {
 
         // q_proj.retrieve();
         // k_proj.retrieve();
-        query_states.retrieve();
+        // query_states.retrieve();
         // q1.retrieve();
         // q2.retrieve();
         // q_h.retrieve();
@@ -493,6 +499,7 @@ impl Mistral {
         // sin.retrieve();
         // attn_weights.retrieve();
         // inv_freq.retrieve();
+        attn_output.retrieve();
 
         // Compile the graph
         self.graph.compile(<(
@@ -512,7 +519,7 @@ impl Mistral {
         // println!("hidden_states: {:?}", hidden_states);
         // println!("token_ids_one_hot: {:?}", token_ids_one_hot);
         // println!("input_layer_norm: {:?}", input_layer_norm);
-        println!("query_states: {:?}", query_states);
+        // println!("query_states: {:?}", query_states);
         // println!("q1: {:?}", q1);
         // println!("q_h: {:?}", q_h);
         // println!("k_h: {:?}", k_h);
@@ -524,6 +531,7 @@ impl Mistral {
         // println!("frequencies {:?}", frequencies);
         // println!("attn_weights: {:?}", attn_weights);
         // println!("inv_freq: {:?}", inv_freq);
+        println!("attn_output: {:?}", attn_output);
     }
 
     // Infer next token
