@@ -558,7 +558,10 @@ impl Operator for MaxReduce {
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, tests::assert_close};
+    use crate::{
+        prelude::{symbolic::Expression, *},
+        tests::assert_close,
+    };
     use dfdx::prelude::*;
     use itertools::Itertools;
 
@@ -617,7 +620,7 @@ mod tests {
         let mut cx = Graph::new();
         let a = cx.tensor::<R2<2, 3>>();
         a.set(vec![1., 2., 3., 1., 2., 3.]);
-        let b = a.slice((1.., ..));
+        let b = a.slice((Expression::from(1).., ..));
         b.retrieve();
         cx.execute();
 
