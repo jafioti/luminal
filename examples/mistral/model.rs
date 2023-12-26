@@ -145,121 +145,6 @@ pub struct Attention {
     pub o_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
 }
 
-impl Attention {
-    // Helper to get a graph
-    fn graph(&self) -> &mut Graph {
-        self.q_proj.graph()
-    }
-
-    // Forward method
-    fn forward<Batch: Dimension, SequenceLength: Dimension>(
-        &self,
-        x: GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
-    ) -> GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)> {
-        let xq = x
-            .matmul(self.q_proj)
-            .reshape::<(
-                Batch,
-                SequenceLength,
-                Const<NUM_ATTENTION_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>()
-            .permute::<_, Axes4<0, 2, 1, 3>>();
-
-        // let xk = x
-        //     .matmul(self.k_proj)
-        //     .reshape::<(
-        //         Batch,
-        //         SequenceLength,
-        //         Const<NUM_KV_HEADS>,
-        //         Const<ATTENTION_HEAD_DIM>,
-        //     )>()
-        //     .permute::<_, Axes4<0, 2, 1, 3>>();
-        let xk = x.matmul(self.k_proj.permute());
-        let xk = xk
-            .reshape::<(
-                Batch,
-                SequenceLength,
-                Const<NUM_KV_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>()
-            .permute::<_, Axes4<0, 2, 1, 3>>();
-
-        let xv = x.matmul(self.v_proj.permute());
-        let xv = xv
-            .reshape::<(
-                Batch,
-                SequenceLength,
-                Const<NUM_KV_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>()
-            .permute::<_, Axes4<0, 2, 1, 3>>();
-
-        // We apply rotary embeddings
-        let rotary_frequencies =
-            compute_rotary_embedding_frequencies::<SequenceLength>(&mut self.graph());
-        // let xq = apply_rotary_embeddings(xq, rotary_frequencies);
-        // let xk = apply_rotary_embeddings(xk, rotary_frequencies);
-
-        // We repeat xv and xk to match the size of xq
-        let xk = xk
-            .expand::<(
-                Batch,
-                Const<NUM_KV_HEADS>,
-                Const<NUM_ATTENTION_GROUPS>,
-                SequenceLength,
-                Const<ATTENTION_HEAD_DIM>,
-            ), Axis<2>>()
-            .reshape::<(
-                Batch,
-                SequenceLength,
-                Const<NUM_ATTENTION_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>();
-
-        let xv = xv
-            .expand::<(
-                Batch,
-                Const<NUM_KV_HEADS>,
-                Const<NUM_ATTENTION_GROUPS>,
-                SequenceLength,
-                Const<ATTENTION_HEAD_DIM>,
-            ), Axis<2>>()
-            .reshape::<(
-                Batch,
-                SequenceLength,
-                Const<NUM_ATTENTION_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>();
-
-        // Attention mask
-        let attention_mask =
-            self.graph().triu::<SequenceLength, SequenceLength>(1) * f16::MIN.to_f32();
-
-        // Finally we compute the outputs (attention calculation)
-        let xo = xq
-            .matmul(xk.permute())
-            .div((ATTENTION_HEAD_DIM as f64).sqrt() as f32)
-            .add(attention_mask.expand())
-            .softmax::<3>()
-            .matmul(xv.permute())
-            .permute::<(
-                Batch,
-                SequenceLength,
-                Const<NUM_ATTENTION_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            ), _>()
-            .dyn_reshape::<(Batch, SequenceLength, Const<HIDDEN_DIM>)>(vec![
-                Batch::const_size(),
-                SequenceLength::const_size(),
-                HIDDEN_DIM.into(),
-            ])
-            .matmul(self.o_proj.permute());
-
-        xo
-    }
-}
-
 // Create the FeedForward Layer
 pub struct FeedForward {
     pub gate_proj: GraphTensor<R2<MLP_PROJECTION_DIM, HIDDEN_DIM>>,
@@ -604,12 +489,12 @@ impl Mistral {
             let o_proj = transformer_layer.attention.o_proj;
 
             // Pre-attention norm
-            hidden_states = transformer_layer.attention_norm.forward(hidden_states);
+            let mut attention_output = transformer_layer.attention_norm.forward(hidden_states);
 
             // Prepare key, query, and value states for attention
-            let query_states = hidden_states.matmul(q_proj.permute());
-            let key_states = hidden_states.matmul(k_proj.permute());
-            let value_states = hidden_states.matmul(v_proj.permute());
+            let query_states = attention_output.matmul(q_proj.permute());
+            let key_states = attention_output.matmul(k_proj.permute());
+            let value_states = attention_output.matmul(v_proj.permute());
 
             // Reshape
             let query_states = query_states
@@ -692,13 +577,26 @@ impl Mistral {
 
             let attention_weights = attention_weights.softmax::<3>();
 
-            let attention_output = attention_weights.matmul(value_states);
-
-            hidden_states = attention_output
+            attention_output = attention_weights
+                .matmul(value_states)
                 .permute::<_, Axes4<0, 2, 1, 3>>()
                 .reshape::<(Batch, SequenceLength, Const<HIDDEN_DIM>)>();
 
-            hidden_states = hidden_states.matmul(o_proj.permute());
+            attention_output = attention_output.matmul(o_proj.permute());
+
+            // Add the residual
+            hidden_states = hidden_states + attention_output;
+
+            // Now for the projection layer
+            let mut projection_layer_output =
+                transformer_layer.feed_forward_norm.forward(hidden_states);
+
+            projection_layer_output = transformer_layer
+                .feed_forward
+                .forward(projection_layer_output);
+
+            // Add the residual
+            hidden_states = hidden_states + projection_layer_output;
         }
 
         hidden_states
