@@ -1,7 +1,7 @@
 use colored::Colorize;
 use half::bf16;
 use itertools::Itertools;
-use luminal::{nn::norm::RMSNorm, prelude::*};
+use luminal::{nn::norm::RMSNorm, prelude::*, shape::symbolic::Expression};
 use memmap2::{Mmap, MmapOptions};
 use rust_tokenizers::{
     error::TokenizerError,
@@ -98,8 +98,12 @@ pub fn rotate_half<
     NumAttentionHeads,
     Const<ATTENTION_HEAD_DIM>,
 )> {
-    let x1 = x.slice((.., .., .., ..ATTENTION_HEAD_DIM / 2)).contiguous();
-    let x2 = x.slice((.., .., .., ATTENTION_HEAD_DIM / 2..)).contiguous();
+    let x1 = x
+        .slice((.., .., .., ..Expression::from(ATTENTION_HEAD_DIM / 2)))
+        .contiguous();
+    let x2 = x
+        .slice((.., .., .., Expression::from(ATTENTION_HEAD_DIM / 2)..))
+        .contiguous();
 
     (-x2).concat_along::<_, Axis<3>, _>(x1)
 }
@@ -277,7 +281,7 @@ impl Mistral {
         println!("Encoding Prompt");
         let input_data: Vec<f32> = self.encode(prompt);
         let sequence_length = input_data.len();
-        self.input.set_dyn(input_data, vec![1, sequence_length]);
+        // self.input.set_dyn(input_data, vec![1, sequence_length]);
         println!("Defining Computation Graph");
         let input_embeddings = self.embedding.gather(self.input);
         let hidden_states = self.forward(input_embeddings);
@@ -286,7 +290,7 @@ impl Mistral {
         // Get the output ids
         // let output_ids = logits.argmax().retrieve();
         let last_logit = logits
-            .slice((.., (sequence_length - 1).., ..))
+            .slice((.., Expression::from(sequence_length - 1).., ..))
             .contiguous()
             .reshape::<R1<VOCAB_SIZE>>()
             .retrieve();
@@ -329,20 +333,19 @@ impl Mistral {
         input_embeddings: GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
     ) -> GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)> {
         // Get the sequence length as a run-time value
-        let sequence_length = input_embeddings
-            .shape
-            .shape()
-            .iter()
-            .map(|expr| expr.exec(&input_embeddings.graph().dyn_map).unwrap())
-            .collect_vec()[1];
+        let sequence_length = &input_embeddings.shape.shape()[1];
 
         // Start with the initial hidden states as the inputs
         let mut hidden_states = input_embeddings;
 
         // Extract the Rotary Embeddings
         let (cos, sin) = self.rope_embeddings;
-        let cos = cos.slice((..sequence_length, ..)).contiguous();
-        let sin = sin.slice((..sequence_length, ..)).contiguous();
+        let cos = cos
+            .slice((..Expression::from(sequence_length.clone()), ..))
+            .contiguous();
+        let sin = sin
+            .slice((..Expression::from(sequence_length.clone()), ..))
+            .contiguous();
 
         let rotary_embeddings = (cos.realize(), sin.realize());
 
@@ -759,3 +762,7 @@ impl Mistral {
         Ok(())
     }
 }
+
+// let tensor = cx.tensor();
+// tensor.set(vec![]);
+// tensor.defer_load(move|| {});
