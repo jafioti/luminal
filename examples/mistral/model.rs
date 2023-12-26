@@ -10,24 +10,18 @@ use rust_tokenizers::{
     tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy},
 };
 use safetensors::{tensor::TensorView, SafeTensors};
-use std::{
-    collections::HashMap,
-    fs::File,
-    ops::{Add, Div},
-};
+use std::{collections::HashMap, fs::File};
 use yoke::{Yoke, Yokeable};
 
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
 pub const NUM_LAYERS: usize = 32;
-// pub const NUM_LAYERS: usize = 1;
 pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
 pub const ROPE_THETA: f32 = 1000000.0;
 pub const MAX_POSITION_EMBEDDINGS: usize = 32768;
-// pub const MAX_POSITION_EMBEDDINGS: usize = 5;
 
 pub const NUM_ATTENTION_GROUPS: usize = NUM_ATTENTION_HEADS / NUM_KV_HEADS;
 pub const ATTENTION_HEAD_DIM: usize = HIDDEN_DIM / NUM_ATTENTION_HEADS;
@@ -170,18 +164,6 @@ pub struct TransformerBlock {
     pub feed_forward_norm: RMSNorm<HIDDEN_DIM>,
 }
 
-// impl TransformerBlock {
-//     fn forward<Batch: Dimension, SequenceLength: Dimension>(
-//         &self,
-//         x: GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
-//     ) -> GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)> {
-//         let r = self.attention.forward(self.attention_norm.forward(x));
-//         let h = x + r;
-//         let r = self.feed_forward.forward(self.feed_forward_norm.forward(h));
-//         h + r
-//     }
-// }
-
 pub struct Mistral {
     // Graph
     pub graph: Box<Graph>,
@@ -237,190 +219,6 @@ fn get_tensor<'a>(
 }
 
 impl Mistral {
-    pub fn debug_run(&mut self) {
-        // Set a value for the input
-        let text = "Hello, how are";
-        let token_ids = self.encode(text);
-        let n_tokens = token_ids.len();
-        self.input.set_dyn(token_ids, vec![1, n_tokens]);
-
-        // Forward pass
-
-        // Embeddings is correct
-        let hidden_states = self.embedding.gather(self.input);
-
-        // Transformer Layer
-        // let hidden_states = self.transformer_layers[0].forward(hidden_states);
-
-        // let hidden_states = self.transformer_layers[0]
-        //     .attention_norm
-        //     .forward(hidden_states);
-
-        // // let eps = self.transformer_layers[0].attention_norm.epsilon;
-        // // println!("eps: {eps}");
-
-        // // let hidden_states = self.transformer_layers[0].attention.forward(hidden_states);
-        // let q_proj = self.transformer_layers[0].attention.q_proj;
-        // let query_states = hidden_states.matmul(q_proj.permute());
-
-        // let k_proj = self.transformer_layers[0].attention.k_proj;
-        // let key_states = hidden_states.matmul(k_proj.permute());
-
-        // let v_proj = self.transformer_layers[0].attention.v_proj;
-        // let value_states = hidden_states.matmul(v_proj.permute());
-
-        // let (cos, sin) = self.rope_embeddings;
-        // let cos = cos.slice((..n_tokens, ..)).contiguous();
-        // let sin = sin.slice((..n_tokens, ..)).contiguous();
-
-        // let rotary_embeddings = (cos.realize(), sin.realize());
-
-        // // And we apply the embeddings
-        // let query_states = query_states
-        //     .reshape::<(
-        //         Const<1>,
-        //         Dyn<'s'>,
-        //         Const<NUM_ATTENTION_HEADS>,
-        //         Const<ATTENTION_HEAD_DIM>,
-        //     )>()
-        //     .permute::<_, Axes4<0, 2, 1, 3>>();
-
-        // let key_states = key_states
-        //     .reshape::<(
-        //         Const<1>,
-        //         Dyn<'s'>,
-        //         Const<NUM_KV_HEADS>,
-        //         Const<ATTENTION_HEAD_DIM>,
-        //     )>()
-        //     .permute::<_, Axes4<0, 2, 1, 3>>();
-
-        // let value_states = value_states
-        //     .reshape::<(
-        //         Const<1>,
-        //         Dyn<'s'>,
-        //         Const<NUM_KV_HEADS>,
-        //         Const<ATTENTION_HEAD_DIM>,
-        //     )>()
-        //     .permute::<_, Axes4<0, 2, 1, 3>>();
-
-        // let query_states =
-        //     apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM>(query_states, rotary_embeddings);
-
-        // let key_states =
-        //     apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM>(key_states, rotary_embeddings);
-
-        // // Let's try to repeat the key states
-        // let key_states = key_states
-        //     .expand::<(
-        //         Const<1>,
-        //         Const<NUM_KV_HEADS>,
-        //         Const<NUM_ATTENTION_GROUPS>,
-        //         Dyn<'s'>,
-        //         Const<ATTENTION_HEAD_DIM>,
-        //     ), Axis<2>>()
-        //     .reshape::<(
-        //         Const<1>,
-        //         Const<NUM_ATTENTION_HEADS>,
-        //         Dyn<'s'>,
-        //         Const<ATTENTION_HEAD_DIM>,
-        //     )>()
-        //     .permute::<_, Axes4<0, 1, 3, 2>>();
-
-        // let value_states = value_states
-        //     .expand::<(
-        //         Const<1>,
-        //         Const<NUM_KV_HEADS>,
-        //         Const<NUM_ATTENTION_GROUPS>,
-        //         Dyn<'s'>,
-        //         Const<ATTENTION_HEAD_DIM>,
-        //     ), Axis<2>>()
-        //     .reshape::<(
-        //         Const<1>,
-        //         Const<NUM_ATTENTION_HEADS>,
-        //         Dyn<'s'>,
-        //         Const<ATTENTION_HEAD_DIM>,
-        //     )>();
-
-        // // Now we implement attention (finally)
-        // let attn_weights = query_states.matmul(key_states);
-        // let attn_weights = attn_weights * (ATTENTION_HEAD_DIM as f32).sqrt().recip();
-        // // let attention_mask = self.graph.triu::<Dyn<'s'>, Dyn<'s'>>(1) * f16::MIN.to_f32();
-
-        // // let attn_weights = attn_weights + attention_mask.expand();
-        // let attn_weights = attn_weights.softmax::<3>();
-
-        // let attn_output = attn_weights.matmul(value_states);
-        // let o_proj = self.transformer_layers[0].attention.o_proj;
-        // let attn_output =
-        //     attn_output
-        //         .permute::<_, Axes4<0, 2, 1, 3>>()
-        //         .reshape::<(Const<1>, Dyn<'s'>, Const<HIDDEN_DIM>)>();
-        // let attn_output = attn_output.matmul(o_proj.permute());
-
-        let attn_output = self.forward(hidden_states);
-
-        // Debug Rotary frequencies
-        // let inv_freq = (self.graph.arange::<Const<ATTENTION_HEAD_DIM_OVER_2>>() * 2.0)
-        //     / (ATTENTION_HEAD_DIM_OVER_2 as f32 * 2.0);
-        // let inv_freq = inv_freq.pow2(ROPE_THETA).recip();
-
-        // let inv_freq = self.graph.arange::<Const<ATTENTION_HEAD_DIM_OVER_2>>()
-        //     / (ATTENTION_HEAD_DIM_OVER_2 as f32);
-        // let inv_freq = inv_freq.pow2(ROPE_THETA).recip();
-        // let inv_freq = inv_freq.pow2(ROPE_THETA);
-        // let (cos, sin) = self.rope_embeddings;
-
-        // q_proj.retrieve();
-        // k_proj.retrieve();
-        // query_states.retrieve();
-        // q1.retrieve();
-        // q2.retrieve();
-        // q_h.retrieve();
-        // k_h.retrieve();
-        // key_states.retrieve();
-        // value_states.retrieve();
-        // hidden_states.retrieve();
-        // cos_full.retrieve();
-        // sin_full.retrieve();
-        // cos.retrieve();
-        // sin.retrieve();
-        // attn_weights.retrieve();
-        // inv_freq.retrieve();
-        attn_output.retrieve();
-
-        // Compile the graph
-        self.graph.compile(<(
-            PreGenericCompiler,
-            MetalFp16Compiler,
-            // CPUCompiler,
-            PostGenericCompiler,
-        )>::default());
-
-        // self.graph.display();
-
-        // Execute the graph
-        self.graph.execute_debug();
-
-        // println!("input: {:?}", self.input);
-        // println!("embedding: {:?}", self.embedding);
-        // println!("hidden_states: {:?}", hidden_states);
-        // println!("token_ids_one_hot: {:?}", token_ids_one_hot);
-        // println!("input_layer_norm: {:?}", input_layer_norm);
-        // println!("query_states: {:?}", query_states);
-        // println!("q1: {:?}", q1);
-        // println!("q_h: {:?}", q_h);
-        // println!("k_h: {:?}", k_h);
-        // println!("k_proj: {:?}", k_proj);
-        // println!("key_states: {:?}", key_states);
-        // println!("value_states: {:?}", value_states);
-        // println!("rotary_frequencies (cos): {:?}", cos);
-        // println!("rotary_frequencies (sin): {:?}", sin);
-        // println!("frequencies {:?}", frequencies);
-        // println!("attn_weights: {:?}", attn_weights);
-        // println!("inv_freq: {:?}", inv_freq);
-        println!("attn_output: {:?}", attn_output);
-    }
-
     // Infer next token
     pub fn infer_next_token(
         &mut self,
@@ -430,14 +228,15 @@ impl Mistral {
         // First, we encode the text
         let token_ids = self.encode(text);
         let n_tokens = token_ids.len();
-        println!("n_tokens: {:?}", n_tokens);
-        println!("token_ids: {:?}", token_ids);
 
         // Insert the data in the input node
-        self.input.set_dyn(token_ids, vec![1, n_tokens]);
+        self.input.set_dyn(token_ids.clone(), vec![1, n_tokens]);
 
         // Execute the graph
         self.graph.execute_debug();
+
+        println!("n_tokens: {:?}", n_tokens);
+        println!("token_ids: {:?}", token_ids);
 
         println!("Token IDs: {:?}", output_token_ids);
 
@@ -721,7 +520,9 @@ impl Mistral {
         let binding = token_ids.iter().map(|i| *i as i64).collect_vec();
         let token_ids = binding.as_slice();
 
-        self.tokenizer.decode(token_ids, true, false)
+        self.tokenizer
+            .decode(token_ids, true, false)
+            .replace("<0x0A>", "\n")
     }
 
     pub unsafe fn load_safe_tensors_from_files(
@@ -895,10 +696,3 @@ impl Mistral {
         Ok(())
     }
 }
-
-// impl SerializeModule for Mistral {
-//     fn serialize(&self, s: &mut Serializer) {
-//         s.module("norm", &self.norm);
-//         s.module("lm_head/weight", &self.lm_head);
-//     }
-// }
