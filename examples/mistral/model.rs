@@ -367,110 +367,112 @@ impl Mistral {
         // Transformer Layer
         // let hidden_states = self.transformer_layers[0].forward(hidden_states);
 
-        let hidden_states = self.transformer_layers[0]
-            .attention_norm
-            .forward(hidden_states);
+        // let hidden_states = self.transformer_layers[0]
+        //     .attention_norm
+        //     .forward(hidden_states);
 
-        // let eps = self.transformer_layers[0].attention_norm.epsilon;
-        // println!("eps: {eps}");
+        // // let eps = self.transformer_layers[0].attention_norm.epsilon;
+        // // println!("eps: {eps}");
 
-        // let hidden_states = self.transformer_layers[0].attention.forward(hidden_states);
-        let q_proj = self.transformer_layers[0].attention.q_proj;
-        let query_states = hidden_states.matmul(q_proj.permute());
+        // // let hidden_states = self.transformer_layers[0].attention.forward(hidden_states);
+        // let q_proj = self.transformer_layers[0].attention.q_proj;
+        // let query_states = hidden_states.matmul(q_proj.permute());
 
-        let k_proj = self.transformer_layers[0].attention.k_proj;
-        let key_states = hidden_states.matmul(k_proj.permute());
+        // let k_proj = self.transformer_layers[0].attention.k_proj;
+        // let key_states = hidden_states.matmul(k_proj.permute());
 
-        let v_proj = self.transformer_layers[0].attention.v_proj;
-        let value_states = hidden_states.matmul(v_proj.permute());
+        // let v_proj = self.transformer_layers[0].attention.v_proj;
+        // let value_states = hidden_states.matmul(v_proj.permute());
 
-        let (cos, sin) = self.rope_embeddings;
-        let cos = cos.slice((..n_tokens, ..)).contiguous();
-        let sin = sin.slice((..n_tokens, ..)).contiguous();
+        // let (cos, sin) = self.rope_embeddings;
+        // let cos = cos.slice((..n_tokens, ..)).contiguous();
+        // let sin = sin.slice((..n_tokens, ..)).contiguous();
 
-        let rotary_embeddings = (cos.realize(), sin.realize());
+        // let rotary_embeddings = (cos.realize(), sin.realize());
 
-        // And we apply the embeddings
-        let query_states = query_states
-            .reshape::<(
-                Const<1>,
-                Dyn<'s'>,
-                Const<NUM_ATTENTION_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>()
-            .permute::<_, Axes4<0, 2, 1, 3>>();
+        // // And we apply the embeddings
+        // let query_states = query_states
+        //     .reshape::<(
+        //         Const<1>,
+        //         Dyn<'s'>,
+        //         Const<NUM_ATTENTION_HEADS>,
+        //         Const<ATTENTION_HEAD_DIM>,
+        //     )>()
+        //     .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        let key_states = key_states
-            .reshape::<(
-                Const<1>,
-                Dyn<'s'>,
-                Const<NUM_KV_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>()
-            .permute::<_, Axes4<0, 2, 1, 3>>();
+        // let key_states = key_states
+        //     .reshape::<(
+        //         Const<1>,
+        //         Dyn<'s'>,
+        //         Const<NUM_KV_HEADS>,
+        //         Const<ATTENTION_HEAD_DIM>,
+        //     )>()
+        //     .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        let value_states = value_states
-            .reshape::<(
-                Const<1>,
-                Dyn<'s'>,
-                Const<NUM_KV_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>()
-            .permute::<_, Axes4<0, 2, 1, 3>>();
+        // let value_states = value_states
+        //     .reshape::<(
+        //         Const<1>,
+        //         Dyn<'s'>,
+        //         Const<NUM_KV_HEADS>,
+        //         Const<ATTENTION_HEAD_DIM>,
+        //     )>()
+        //     .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        let query_states =
-            apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM>(query_states, rotary_embeddings);
+        // let query_states =
+        //     apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM>(query_states, rotary_embeddings);
 
-        let key_states =
-            apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM>(key_states, rotary_embeddings);
+        // let key_states =
+        //     apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM>(key_states, rotary_embeddings);
 
-        // Let's try to repeat the key states
-        let key_states = key_states
-            .expand::<(
-                Const<1>,
-                Const<NUM_KV_HEADS>,
-                Const<NUM_ATTENTION_GROUPS>,
-                Dyn<'s'>,
-                Const<ATTENTION_HEAD_DIM>,
-            ), Axis<2>>()
-            .reshape::<(
-                Const<1>,
-                Const<NUM_ATTENTION_HEADS>,
-                Dyn<'s'>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>()
-            .permute::<_, Axes4<0, 1, 3, 2>>();
+        // // Let's try to repeat the key states
+        // let key_states = key_states
+        //     .expand::<(
+        //         Const<1>,
+        //         Const<NUM_KV_HEADS>,
+        //         Const<NUM_ATTENTION_GROUPS>,
+        //         Dyn<'s'>,
+        //         Const<ATTENTION_HEAD_DIM>,
+        //     ), Axis<2>>()
+        //     .reshape::<(
+        //         Const<1>,
+        //         Const<NUM_ATTENTION_HEADS>,
+        //         Dyn<'s'>,
+        //         Const<ATTENTION_HEAD_DIM>,
+        //     )>()
+        //     .permute::<_, Axes4<0, 1, 3, 2>>();
 
-        let value_states = value_states
-            .expand::<(
-                Const<1>,
-                Const<NUM_KV_HEADS>,
-                Const<NUM_ATTENTION_GROUPS>,
-                Dyn<'s'>,
-                Const<ATTENTION_HEAD_DIM>,
-            ), Axis<2>>()
-            .reshape::<(
-                Const<1>,
-                Const<NUM_ATTENTION_HEADS>,
-                Dyn<'s'>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>();
+        // let value_states = value_states
+        //     .expand::<(
+        //         Const<1>,
+        //         Const<NUM_KV_HEADS>,
+        //         Const<NUM_ATTENTION_GROUPS>,
+        //         Dyn<'s'>,
+        //         Const<ATTENTION_HEAD_DIM>,
+        //     ), Axis<2>>()
+        //     .reshape::<(
+        //         Const<1>,
+        //         Const<NUM_ATTENTION_HEADS>,
+        //         Dyn<'s'>,
+        //         Const<ATTENTION_HEAD_DIM>,
+        //     )>();
 
-        // Now we implement attention (finally)
-        let attn_weights = query_states.matmul(key_states);
-        let attn_weights = attn_weights * (ATTENTION_HEAD_DIM as f32).sqrt().recip();
-        // let attention_mask = self.graph.triu::<Dyn<'s'>, Dyn<'s'>>(1) * f16::MIN.to_f32();
+        // // Now we implement attention (finally)
+        // let attn_weights = query_states.matmul(key_states);
+        // let attn_weights = attn_weights * (ATTENTION_HEAD_DIM as f32).sqrt().recip();
+        // // let attention_mask = self.graph.triu::<Dyn<'s'>, Dyn<'s'>>(1) * f16::MIN.to_f32();
 
-        // let attn_weights = attn_weights + attention_mask.expand();
-        let attn_weights = attn_weights.softmax::<3>();
+        // // let attn_weights = attn_weights + attention_mask.expand();
+        // let attn_weights = attn_weights.softmax::<3>();
 
-        let attn_output = attn_weights.matmul(value_states);
-        let o_proj = self.transformer_layers[0].attention.o_proj;
-        let attn_output =
-            attn_output
-                .permute::<_, Axes4<0, 2, 1, 3>>()
-                .reshape::<(Const<1>, Dyn<'s'>, Const<HIDDEN_DIM>)>();
-        let attn_output = attn_output.matmul(o_proj.permute());
+        // let attn_output = attn_weights.matmul(value_states);
+        // let o_proj = self.transformer_layers[0].attention.o_proj;
+        // let attn_output =
+        //     attn_output
+        //         .permute::<_, Axes4<0, 2, 1, 3>>()
+        //         .reshape::<(Const<1>, Dyn<'s'>, Const<HIDDEN_DIM>)>();
+        // let attn_output = attn_output.matmul(o_proj.permute());
+
+        let attn_output = self.forward(hidden_states);
 
         // Debug Rotary frequencies
         // let inv_freq = (self.graph.arange::<Const<ATTENTION_HEAD_DIM_OVER_2>>() * 2.0)
@@ -570,35 +572,142 @@ impl Mistral {
     //     output_token_ids
     // }
 
+    pub fn forward<Batch: Dimension, SequenceLength: Dimension>(
+        &mut self,
+        input_embeddings: GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
+    ) -> GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)> {
+        // Get the sequence length as a run-time value
+        let sequence_length = input_embeddings
+            .shape
+            .shape()
+            .iter()
+            .map(|expr| expr.exec(&input_embeddings.graph().dyn_map).unwrap())
+            .collect_vec()[1];
+
+        // Start with the initial hidden states as the inputs
+        let mut hidden_states = input_embeddings;
+
+        // Extract the Rotary Embeddings
+        let (cos, sin) = self.rope_embeddings;
+        let cos = cos.slice((..sequence_length, ..)).contiguous();
+        let sin = sin.slice((..sequence_length, ..)).contiguous();
+
+        let rotary_embeddings = (cos.realize(), sin.realize());
+
+        // Now, we loop over all layers
+        for layer_index in 0..NUM_LAYERS {
+            // Pull the weights we need
+            let transformer_layer = &self.transformer_layers[layer_index];
+            let q_proj = transformer_layer.attention.q_proj;
+            let k_proj = transformer_layer.attention.k_proj;
+            let v_proj = transformer_layer.attention.v_proj;
+            let o_proj = transformer_layer.attention.o_proj;
+
+            // Pre-attention norm
+            hidden_states = transformer_layer.attention_norm.forward(hidden_states);
+
+            // Prepare key, query, and value states for attention
+            let query_states = hidden_states.matmul(q_proj.permute());
+            let key_states = hidden_states.matmul(k_proj.permute());
+            let value_states = hidden_states.matmul(v_proj.permute());
+
+            // Reshape
+            let query_states = query_states
+                .reshape::<(
+                    Batch,
+                    SequenceLength,
+                    Const<NUM_ATTENTION_HEADS>,
+                    Const<ATTENTION_HEAD_DIM>,
+                )>()
+                .permute::<_, Axes4<0, 2, 1, 3>>();
+
+            let key_states = key_states
+                .reshape::<(
+                    Batch,
+                    SequenceLength,
+                    Const<NUM_KV_HEADS>,
+                    Const<ATTENTION_HEAD_DIM>,
+                )>()
+                .permute::<_, Axes4<0, 2, 1, 3>>();
+
+            let value_states = value_states
+                .reshape::<(
+                    Batch,
+                    SequenceLength,
+                    Const<NUM_KV_HEADS>,
+                    Const<ATTENTION_HEAD_DIM>,
+                )>()
+                .permute::<_, Axes4<0, 2, 1, 3>>();
+
+            // Apply the embeddings
+            let query_states = apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM>(
+                query_states,
+                rotary_embeddings,
+            );
+
+            let key_states = apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM>(
+                key_states,
+                rotary_embeddings,
+            );
+
+            // Repeat the KV States for Grouped-Query Attention
+            let key_states = key_states
+                .expand::<(
+                    Batch,
+                    Const<NUM_KV_HEADS>,
+                    Const<NUM_ATTENTION_GROUPS>,
+                    SequenceLength,
+                    Const<ATTENTION_HEAD_DIM>,
+                ), Axis<2>>()
+                .reshape::<(
+                    Batch,
+                    Const<NUM_ATTENTION_HEADS>,
+                    SequenceLength,
+                    Const<ATTENTION_HEAD_DIM>,
+                )>()
+                .permute::<_, Axes4<0, 1, 3, 2>>();
+
+            let value_states = value_states
+                .expand::<(
+                    Batch,
+                    Const<NUM_KV_HEADS>,
+                    Const<NUM_ATTENTION_GROUPS>,
+                    SequenceLength,
+                    Const<ATTENTION_HEAD_DIM>,
+                ), Axis<2>>()
+                .reshape::<(
+                    Batch,
+                    Const<NUM_ATTENTION_HEADS>,
+                    SequenceLength,
+                    Const<ATTENTION_HEAD_DIM>,
+                )>();
+
+            // FINALLY, we actually compute attention
+            let attention_weights = query_states.matmul(key_states);
+            let attention_weights = attention_weights * (ATTENTION_HEAD_DIM as f32).sqrt().recip();
+
+            // park attention mask code
+            // let attention_mask = self.graph.triu::<Dyn<'s'>, Dyn<'s'>>(1) * f16::MIN.to_f32();
+            // let attention_weights = attention_weights + attention_mask.expand();
+
+            let attention_weights = attention_weights.softmax::<3>();
+
+            let attention_output = attention_weights.matmul(value_states);
+
+            hidden_states = attention_output
+                .permute::<_, Axes4<0, 2, 1, 3>>()
+                .reshape::<(Batch, SequenceLength, Const<HIDDEN_DIM>)>();
+
+            hidden_states = hidden_states.matmul(o_proj.permute());
+        }
+
+        hidden_states
+    }
+
     pub fn compile_forward_graph(&mut self) {
         self.graph
             .compile(<(PreGenericCompiler, MetalFp16Compiler, PostGenericCompiler)>::default());
     }
-
-    // Forward pass
-    // pub fn forward<Batch: Dimension, SequenceLength: Dimension>(
-    //     &mut self,
-    //     input: GraphTensor<(Batch, SequenceLength)>,
-    // ) -> GraphTensor<(Batch, SequenceLength, Const<VOCAB_SIZE>)> {
-    //     // First compute the embeddings
-    //     let mut hidden_states = self.embedding.gather(input);
-    //     hidden_states.retrieve();
-    //     hidden_states.print("Embedding");
-
-    //     // Loop over transformer layers
-    //     for (layer_index, transformer_layer) in self.transformer_layers.iter().enumerate() {
-    //         hidden_states = transformer_layer.forward(hidden_states);
-    //         hidden_states.retrieve();
-    //         hidden_states.print(format!("Layer {layer_index} Output").as_str());
-    //     }
-
-    //     // Normalize
-    //     hidden_states = self.norm.forward(hidden_states);
-    //     hidden_states.print("Norm Output");
-
-    //     // Compute output
-    //     self.lm_head.forward(hidden_states)
-    // }
 
     // Initializer
     pub fn new(tokenizer_path: &str) -> Result<Self, TokenizerError> {
@@ -652,8 +761,6 @@ impl Mistral {
 
         let (rope_cos, rope_sin) =
             compute_rotary_embedding_frequencies::<Const<10>>(&mut rope_graph);
-
-        let rope_cos_trunc = rope_cos.slice((..5, ..)).contiguous().retrieve();
 
         rope_cos.retrieve();
         rope_sin.retrieve();
