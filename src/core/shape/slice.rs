@@ -68,7 +68,7 @@ impl SliceOfShape<R0> for () {
     }
 }
 
-impl<A: Dimension, R: RangeBounds<usize> + RangeToDim<A>> SliceOfShape<(A,)> for (R,) {
+impl<A: Dimension, R: RangeBounds<Expression> + RangeToDim<A>> SliceOfShape<(A,)> for (R,) {
     type OutputShape = (R::Dimension,);
     fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
         vec![(
@@ -81,8 +81,8 @@ impl<A: Dimension, R: RangeBounds<usize> + RangeToDim<A>> SliceOfShape<(A,)> for
 impl<
         A: Dimension,
         B: Dimension,
-        R1: RangeBounds<usize> + RangeToDim<A>,
-        R2: RangeBounds<usize> + RangeToDim<B>,
+        R1: RangeBounds<Expression> + RangeToDim<A>,
+        R2: RangeBounds<Expression> + RangeToDim<B>,
     > SliceOfShape<(A, B)> for (R1, R2)
 {
     type OutputShape = (R1::Dimension, R2::Dimension);
@@ -104,9 +104,9 @@ impl<
         A: Dimension,
         B: Dimension,
         C: Dimension,
-        R1: RangeBounds<usize> + RangeToDim<A>,
-        R2: RangeBounds<usize> + RangeToDim<B>,
-        R3: RangeBounds<usize> + RangeToDim<C>,
+        R1: RangeBounds<Expression> + RangeToDim<A>,
+        R2: RangeBounds<Expression> + RangeToDim<B>,
+        R3: RangeBounds<Expression> + RangeToDim<C>,
     > SliceOfShape<(A, B, C)> for (R1, R2, R3)
 {
     type OutputShape = (R1::Dimension, R2::Dimension, R3::Dimension);
@@ -133,10 +133,10 @@ impl<
         B: Dimension,
         C: Dimension,
         D: Dimension,
-        R1: RangeBounds<usize> + RangeToDim<A>,
-        R2: RangeBounds<usize> + RangeToDim<B>,
-        R3: RangeBounds<usize> + RangeToDim<C>,
-        R4: RangeBounds<usize> + RangeToDim<C>,
+        R1: RangeBounds<Expression> + RangeToDim<A>,
+        R2: RangeBounds<Expression> + RangeToDim<B>,
+        R3: RangeBounds<Expression> + RangeToDim<C>,
+        R4: RangeBounds<Expression> + RangeToDim<C>,
     > SliceOfShape<(A, B, C, D)> for (R1, R2, R3, R4)
 {
     type OutputShape = (R1::Dimension, R2::Dimension, R3::Dimension, R4::Dimension);
@@ -168,11 +168,11 @@ impl<
         C: Dimension,
         D: Dimension,
         E: Dimension,
-        R1: RangeBounds<usize> + RangeToDim<A>,
-        R2: RangeBounds<usize> + RangeToDim<B>,
-        R3: RangeBounds<usize> + RangeToDim<C>,
-        R4: RangeBounds<usize> + RangeToDim<C>,
-        R5: RangeBounds<usize> + RangeToDim<C>,
+        R1: RangeBounds<Expression> + RangeToDim<A>,
+        R2: RangeBounds<Expression> + RangeToDim<B>,
+        R3: RangeBounds<Expression> + RangeToDim<C>,
+        R4: RangeBounds<Expression> + RangeToDim<C>,
+        R5: RangeBounds<Expression> + RangeToDim<C>,
     > SliceOfShape<(A, B, C, D, E)> for (R1, R2, R3, R4, R5)
 {
     type OutputShape = (

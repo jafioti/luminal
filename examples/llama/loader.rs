@@ -17,10 +17,7 @@ impl DfdxDeferredLoader {
 
 impl Loader for DfdxDeferredLoader {
     fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) {
-        let mut serializer = Serializer::default();
-        model.serialize(&mut serializer);
-
-        for (s, n) in serializer.state {
+        for (s, n) in state_dict(model) {
             let Some(n_elements) = graph
                 .graph
                 .edges_directed(n, petgraph::Direction::Outgoing)

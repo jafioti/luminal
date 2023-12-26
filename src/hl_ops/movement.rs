@@ -207,6 +207,8 @@ mod tests {
         tensor_ops::{RealizeTo, TryConcatAlong},
     };
 
+    use crate::prelude::symbolic::Expression;
+
     crate::test_imports!();
 
     #[test]
@@ -317,7 +319,7 @@ mod tests {
         let mut cx = Graph::new();
         let a = cx.tensor::<R2<3, 2>>();
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
-        let b = a.slice((.., ..1)).realize::<R2<3, 1>>();
+        let b = a.slice((.., ..Expression::from(1))).realize::<R2<3, 1>>();
         b.retrieve();
         cx.execute();
 
@@ -459,8 +461,8 @@ mod tests {
         let mut cx = Graph::new();
         let a = cx.tensor::<R2<3, 2>>();
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
-        let x1 = a.slice((.., ..1)).contiguous();
-        let x2 = a.slice((.., 1..)).contiguous();
+        let x1 = a.slice((.., ..Expression::from(1))).contiguous();
+        let x2 = a.slice((.., Expression::from(1)..)).contiguous();
         let c = (-x2).concat_along::<R2<3, 2>, LAxis<1>, _>(x1);
         c.retrieve();
         cx.execute();
