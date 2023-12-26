@@ -141,10 +141,8 @@ pub fn apply_rotary_embeddings<
 // Create the self-Attention layer
 pub struct Attention {
     pub q_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
-    // pub k_proj: GraphTensor<R2<HIDDEN_DIM, ATTENTION_PROJECTION_DIM>>,
     pub k_proj: GraphTensor<R2<ATTENTION_PROJECTION_DIM, HIDDEN_DIM>>,
     pub v_proj: GraphTensor<R2<ATTENTION_PROJECTION_DIM, HIDDEN_DIM>>,
-    // pub v_proj: GraphTensor<R2<HIDDEN_DIM, ATTENTION_PROJECTION_DIM>>,
     pub o_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
 }
 
