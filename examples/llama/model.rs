@@ -29,8 +29,7 @@ where
     type Output = GraphTensor<Sh>;
 
     fn forward(&self, input: GraphTensor<Sh>) -> Self::Output {
-        let gate = input.matmul(self.gate_proj.permute());
-        let gate = gate.swish();
+        let gate = input.matmul(self.gate_proj.permute()).swish();
         let up = input.matmul(self.up_proj.permute()) * gate;
         up.matmul(self.down_proj.permute())
     }
@@ -218,7 +217,7 @@ impl<
         let mut w = q
             .matmul(k.permute())
             .mul((HEAD_DIM as f64).sqrt().recip() as f32);
-        // We don't need to mask on a kv cached pass
+        // We only mask on a non-kv cache pass
         if cache.is_none() {
             let attention_mask = self.k_proj.graph().triu::<CurSeq, TotSeq>(1) * f16::MIN.to_f32();
             w = w + attention_mask.expand();
