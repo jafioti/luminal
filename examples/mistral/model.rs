@@ -456,8 +456,8 @@ impl Mistral {
             )>();
 
         // Now we implement attention (finally)
-        let attn_weights = query_states.matmul(key_states.permute::<_, Axes4<0, 1, 3, 2>>())
-            / ((ATTENTION_HEAD_DIM as f64).sqrt() as f32);
+        // let attn_weights = query_states.matmul(key_states.permute::<_, Axes4<0, 1, 3, 2>>())
+        //     / ((ATTENTION_HEAD_DIM as f64).sqrt() as f32);
 
         // let attention_mask = self.graph.triu::<Dyn<'s'>, Dyn<'s'>>(1) * f16::MIN.to_f32();s
 
@@ -479,7 +479,7 @@ impl Mistral {
 
         // q_proj.retrieve();
         // k_proj.retrieve();
-        // query_states.retrieve();
+        query_states.retrieve();
         // q1.retrieve();
         // q2.retrieve();
         // q_h.retrieve();
@@ -489,8 +489,8 @@ impl Mistral {
         // hidden_states.retrieve();
         // cos_full.retrieve();
         // sin_full.retrieve();
-        cos.retrieve();
-        sin.retrieve();
+        // cos.retrieve();
+        // sin.retrieve();
         // attn_weights.retrieve();
         // inv_freq.retrieve();
 
@@ -512,15 +512,15 @@ impl Mistral {
         // println!("hidden_states: {:?}", hidden_states);
         // println!("token_ids_one_hot: {:?}", token_ids_one_hot);
         // println!("input_layer_norm: {:?}", input_layer_norm);
-        // println!("query_states: {:?}", query_states);
+        println!("query_states: {:?}", query_states);
         // println!("q1: {:?}", q1);
         // println!("q_h: {:?}", q_h);
         // println!("k_h: {:?}", k_h);
         // println!("k_proj: {:?}", k_proj);
         // println!("key_states: {:?}", key_states);
         // println!("value_states: {:?}", value_states);
-        println!("rotary_frequencies (cos): {:?}", cos);
-        println!("rotary_frequencies (sin): {:?}", sin);
+        // println!("rotary_frequencies (cos): {:?}", cos);
+        // println!("rotary_frequencies (sin): {:?}", sin);
         // println!("frequencies {:?}", frequencies);
         // println!("attn_weights: {:?}", attn_weights);
         // println!("inv_freq: {:?}", inv_freq);
