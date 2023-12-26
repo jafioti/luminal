@@ -2,7 +2,7 @@ mod config;
 mod loader;
 mod model;
 
-use std::marker::PhantomData;
+use std::{marker::PhantomData, time::Instant};
 
 use luminal::prelude::*;
 use model::LlamaForCausalLM;
@@ -80,7 +80,7 @@ fn main() {
                 cx2.named_tensor("Value Cache"),
             )
         })
-        .collect::<Vec<_>>();
+        .collect();
     let (out, cache_dest) =
         kv_model.forward((single_inp, Some(cache_src.clone()), PhantomData::<Dyn<'t'>>));
     out.retrieve();
@@ -127,8 +127,6 @@ fn main() {
     for ((key_src, val_src), (key_dest, val_dest)) in cache1.into_iter().zip(cache_src.iter()) {
         cx2.set_tensor(key_dest.id(), 0, cx1.get_tensor(key_src.id(), 0).unwrap());
         cx2.set_tensor(val_dest.id(), 0, cx1.get_tensor(val_src.id(), 0).unwrap());
-        key_dest.keep();
-        val_dest.keep();
     }
 
     // Move weights over
@@ -139,7 +137,7 @@ fn main() {
         cx2.set_dyn_dim('p', input.len() - 1);
         cx2.set_dyn_dim('t', input.len());
 
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         cx2.execute();
         println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
 
