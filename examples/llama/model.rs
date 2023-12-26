@@ -5,7 +5,7 @@ use half::f16;
 use luminal::{
     nn::{embedding::Embedding, norm::RMSNorm},
     prelude::*,
-    shape::symbolic::BigExpression,
+    shape::symbolic::{BigExpression, Expression},
 };
 
 // Full LLaMa model implementation, heavily based off of https://github.com/coreylowman/llama-dfdx/blob/main/src/modeling.rs
@@ -113,8 +113,12 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
     fn rotate_half<Batch: Dimension, NumHeads: Dimension, Seq: Dimension>(
         x: GraphTensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>)>,
     ) -> GraphTensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>)> {
-        let x1 = x.slice((.., .., .., ..HEAD_DIM_OVER_2)).contiguous();
-        let x2 = x.slice((.., .., .., HEAD_DIM_OVER_2..)).contiguous();
+        let x1 = x
+            .slice((.., .., .., ..Expression::from(HEAD_DIM_OVER_2)))
+            .contiguous();
+        let x2 = x
+            .slice((.., .., .., Expression::from(HEAD_DIM_OVER_2)..))
+            .contiguous();
         (-x2).concat_along::<(Batch, NumHeads, Seq, Const<HEAD_DIM>), Axis<3>, _>(x1)
     }
 }
