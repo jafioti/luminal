@@ -110,16 +110,15 @@ fn test_sin() {
 #[test]
 fn test_sqrt() {
     let mut cx = Graph::new();
-    let a = cx.tensor::<R1<3>>();
-    a.set(vec![1., 2., 3.]);
-    let b = a.sqrt();
+    let a = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
+    let b = a / a.sqrt();
     b.retrieve();
     cx.compile(MetalFp16Compiler::default());
     cx.execute();
 
     let d_dev = Cpu::default();
     let d_a = d_dev.tensor([1., 2., 3.]).to_dtype::<f16>();
-    let d_b = d_a.sqrt();
+    let d_b = d_a.clone() / d_a.sqrt();
 
     assert_close(&b.data(), &d_b.to_dtype::<f32>().as_vec());
 }

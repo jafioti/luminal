@@ -2,11 +2,15 @@ mod config;
 mod loader;
 mod model;
 
+use std::marker::PhantomData;
+
 use luminal::prelude::*;
 use model::LlamaForCausalLM;
 use rust_tokenizers::tokenizer::{
     SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy::LongestFirst,
 };
+
+use crate::model::KVCache;
 
 type Model = LlamaForCausalLM<
     { config::VOCAB },
@@ -48,7 +52,11 @@ fn main() {
         input.iter().map(|i| *i as f32).collect::<Vec<f32>>(),
         vec![1, input.len()],
     );
-    let (out1, cache1) = model.forward(inp);
+    let (out1, cache1) = model.forward((
+        inp,
+        Option::<Vec<KVCache<Const<1>, Const<0>, { config::HEADS }, { config::HEAD_DIM }>>>::None,
+        PhantomData::<Dyn<'s'>>,
+    ));
     out1.retrieve();
     cache1.keep();
     loader::DfdxDeferredLoader::new("./examples/llama/setup/llama-7b-hf").load(&model, &mut cx1);
@@ -64,7 +72,8 @@ fn main() {
     // Build KV cache forward graph
     let kv_model = Model::initialize(&mut cx2);
     let single_inp = cx2.named_tensor::<R2<1, 1>>("Input");
-    let cache_src = (0..config::LAYERS)
+    let cache_src: Vec<KVCache<Const<1>, Dyn<'p'>, { config::HEADS }, { config::HEAD_DIM }>> = (0
+        ..config::LAYERS)
         .map(|_| {
             (
                 cx2.named_tensor("Key Cache"),
@@ -73,7 +82,7 @@ fn main() {
         })
         .collect::<Vec<_>>();
     let (out, cache_dest) =
-        kv_model.forward_kv::<_, _, Dyn<'p'>, Dyn<'t'>>((single_inp, cache_src.clone()));
+        kv_model.forward((single_inp, Some(cache_src.clone()), PhantomData::<Dyn<'t'>>));
     out.retrieve();
     cache_dest.keep();
     cx2.compile(<(PreGenericCompiler, DeviceCompiler, PostGenericCompiler)>::default());

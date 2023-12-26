@@ -19,9 +19,9 @@ use crate::{
 };
 
 #[derive(Default, LuminalPrint)]
-pub struct CommonBufferCompiler;
+pub struct CommandBufferCompiler;
 
-impl Compiler for CommonBufferCompiler {
+impl Compiler for CommandBufferCompiler {
     fn compile(&self, graph: &mut Graph) {
         let is_metal: HashSet<NodeIndex> = graph
             .graph
