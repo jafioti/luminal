@@ -299,29 +299,28 @@ impl Mistral {
         println!("Compiling Graph");
         self.compile_forward_graph();
 
-        let mut context = prompt.to_string();
+        let mut context_vector = self.encode(prompt);
         loop {
-            let input_data: Vec<f32> = self.encode(context.as_str());
-            let sequence_length = input_data.len();
-            // cx2.set_dyn_dim('p', input.len() - 1);
+            let _context = context_vector.clone();
+            // let input_data: Vec<f32> = self.encode(context.as_str());
+            let sequence_length = _context.len();
             self.graph.set_dyn_dim('s', sequence_length);
             println!("{sequence_length}");
-            self.input.set_dyn(input_data, vec![1, sequence_length]);
+            self.input.set_dyn(_context, vec![1, sequence_length]);
 
             println!("Executing Graph");
             // self.graph.execute_debug();
             self.graph.execute();
 
             let output_ids = sample_index(&last_logit.data());
+            context_vector.push(output_ids as f32);
 
             // Decode token
             let output_token = self.decode(vec![output_ids as f32]);
-            context.push_str(output_token.as_str());
+            // context.push_str(output_token.as_str());
 
-            // println!("hidden_states: {:?}", hidden_states);
-            // println!("logits: {:?}", logits);
-            // println!("last_logit: {:?}", last_logit);
-            // println!("output_ids: {:?}", output_ids);
+            println!("Logits: {:?}", logits);
+
             println!(
                 "{}{}",
                 prompt.on_black().white().bold(),
