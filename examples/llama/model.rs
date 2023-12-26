@@ -231,7 +231,7 @@ impl<
         };
 
         let mut w = q
-            .matmul(k.permute::<_, Axes4<0, 1, 3, 2>>())
+            .matmul(k.permute())
             .mul((HEAD_DIM as f64).sqrt().recip() as f32);
         // We don't need to mask on a kv cached pass
         if cache.is_none() {
@@ -372,7 +372,7 @@ impl<
     }
 }
 
-pub struct Llama<
+pub struct LlamaForCausalLM<
     const VOCAB: usize,
     const NUM_HEADS: usize,
     const HIDDEN: usize,
@@ -385,105 +385,6 @@ pub struct Llama<
     pub layers: Vec<DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>>,
     pub norm: RMSNorm<HIDDEN>,
     pub graph_ref: *mut Graph,
-}
-
-impl<
-        const VOCAB: usize,
-        const NUM_HEADS: usize,
-        const HIDDEN: usize,
-        const INTERMEDIATE: usize,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-        const LAYERS: usize,
-        Batch: Dimension,
-        CurSeq: Dimension,
-        PrevSeq: Dimension,
-        TotSeq: Dimension,
-    >
-    Module<(
-        GraphTensor<(Batch, CurSeq)>,
-        Option<Vec<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>>,
-        PhantomData<TotSeq>,
-    )> for Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
-{
-    type Output = (
-        GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        Vec<KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>>,
-    );
-    fn forward(
-        &self,
-        (input, cache, _): (
-            GraphTensor<(Batch, CurSeq)>,
-            Option<Vec<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>>,
-            PhantomData<TotSeq>,
-        ),
-    ) -> Self::Output {
-        let mut hidden_states = self.embed_tokens.forward(input);
-        let mut caches = vec![];
-        for (i, layer_i) in self.layers.iter().enumerate() {
-            let (new_hidden_states, (k_cache, v_cache)) = layer_i.forward((
-                hidden_states,
-                cache.as_ref().map(|v| v[i]),
-                PhantomData::<TotSeq>,
-            ));
-            hidden_states = new_hidden_states;
-            caches.push((k_cache.contiguous(), v_cache.contiguous()));
-        }
-        (self.norm.forward(hidden_states), caches)
-    }
-}
-
-impl<
-        const VOCAB: usize,
-        const NUM_HEADS: usize,
-        const HIDDEN: usize,
-        const INTERMEDIATE: usize,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-        const LAYERS: usize,
-    > InitModule
-    for Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
-{
-    fn initialize(cx: &mut Graph) -> Self {
-        Self {
-            norm: InitModule::initialize(cx),
-            embed_tokens: InitModule::initialize(cx),
-            layers: (0..LAYERS).map(|_| InitModule::initialize(cx)).collect(),
-            graph_ref: cx,
-        }
-    }
-}
-
-impl<
-        const VOCAB: usize,
-        const NUM_HEADS: usize,
-        const HIDDEN: usize,
-        const INTERMEDIATE: usize,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-        const LAYERS: usize,
-    > SerializeModule
-    for Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
-{
-    fn serialize(&self, s: &mut Serializer) {
-        s.module("norm", &self.norm);
-        s.module("embed_tokens", &self.embed_tokens);
-        for (i, l) in self.layers.iter().enumerate() {
-            s.module(&format!("layers/{i}"), l);
-        }
-    }
-}
-
-pub struct LlamaForCausalLM<
-    const VOCAB: usize,
-    const NUM_HEADS: usize,
-    const HIDDEN: usize,
-    const INTERMEDIATE: usize,
-    const HEAD_DIM: usize,
-    const HEAD_DIM_OVER_2: usize,
-    const LAYERS: usize,
-> {
-    pub llama: Llama<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>,
     pub lm_head: GraphTensor<(Const<VOCAB>, Const<HIDDEN>)>,
 }
 
@@ -519,9 +420,21 @@ impl<
             PhantomData<TotSeq>,
         ),
     ) -> Self::Output {
-        let (hidden_states, caches) = self.llama.forward((input, caches, PhantomData::<TotSeq>));
+        let mut hidden_states = self.embed_tokens.forward(input);
+        let mut new_caches = vec![];
+        for (i, layer_i) in self.layers.iter().enumerate() {
+            let (new_hidden_states, (k_cache, v_cache)) = layer_i.forward((
+                hidden_states,
+                caches.as_ref().map(|v| v[i]),
+                PhantomData::<TotSeq>,
+            ));
+            hidden_states = new_hidden_states;
+            new_caches.push((k_cache.contiguous(), v_cache.contiguous()));
+        }
+        let hidden_states = self.norm.forward(hidden_states);
+        // let (hidden_states, caches) = self.llama.forward((input, caches, PhantomData::<TotSeq>));
         let o = hidden_states.matmul(self.lm_head.permute());
-        (o, caches)
+        (o, new_caches)
     }
 }
 
@@ -538,7 +451,10 @@ impl<
 {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
-            llama: InitModule::initialize(cx),
+            norm: InitModule::initialize(cx),
+            embed_tokens: InitModule::initialize(cx),
+            layers: (0..LAYERS).map(|_| InitModule::initialize(cx)).collect(),
+            graph_ref: cx,
             lm_head: cx.named_tensor("LM Head"),
         }
     }
@@ -556,7 +472,11 @@ impl<
     for LlamaForCausalLM<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
 {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("model", &self.llama);
+        s.module("model/norm", &self.norm);
+        s.module("model/embed_tokens", &self.embed_tokens);
+        for (i, l) in self.layers.iter().enumerate() {
+            s.module(&format!("model/layers/{i}"), l);
+        }
         s.tensor("lm_head/weight", self.lm_head);
     }
 }
