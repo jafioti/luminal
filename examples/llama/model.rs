@@ -199,16 +199,10 @@ impl<
             // Add KV cache
             let k = cache
                 .0
-                .contiguous()
-                .concat_along::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(
-                    k.contiguous(),
-                );
+                .concat_along::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(k);
             let v = cache
                 .1
-                .contiguous()
-                .concat_along::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(
-                    v.contiguous(),
-                );
+                .concat_along::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(v);
             (k, v)
         } else {
             (k.realize(), v.realize())
@@ -220,7 +214,7 @@ impl<
         // We only mask on a non-kv cache pass
         if cache.is_none() {
             let attention_mask = self.k_proj.graph().triu::<CurSeq, TotSeq>(1) * f16::MIN.to_f32();
-            w = w + attention_mask.expand();
+            w += attention_mask.expand();
         }
         w = w.softmax::<3>();
 

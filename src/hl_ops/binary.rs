@@ -5,7 +5,7 @@ use std::ops::DivAssign;
 use std::ops::MulAssign;
 use std::ops::RemAssign;
 use std::ops::SubAssign;
-use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
+use std::ops::{Add, Div, Mul, Rem, Sub};
 
 impl<S: Shape> Add for GraphTensor<S> {
     type Output = GraphTensor<S>;
@@ -102,14 +102,6 @@ impl<S: Shape> Rem<GraphTensor<S>> for GraphTensor<S> {
 impl<S: Shape> RemAssign for GraphTensor<S> {
     fn rem_assign(&mut self, rhs: Self) {
         *self = *self % rhs;
-    }
-}
-
-impl<S: Shape> Neg for GraphTensor<S> {
-    type Output = GraphTensor<S>;
-
-    fn neg(self) -> Self::Output {
-        self * -1.0
     }
 }
 

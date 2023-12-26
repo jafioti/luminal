@@ -66,9 +66,17 @@ where
 }
 
 /// A symbolic expression
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct GenericExpression<S: ExpressionStorage> {
     pub terms: S,
+}
+
+impl<S: ExpressionStorage> Default for GenericExpression<S> {
+    fn default() -> Self {
+        let mut s = S::default();
+        s.push(Term::Num(0));
+        Self { terms: s }
+    }
 }
 
 impl<S: Copy + ExpressionStorage> Copy for GenericExpression<S> {}
