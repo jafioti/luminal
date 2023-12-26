@@ -20,7 +20,7 @@ fn main() -> Result<(), String> {
     }
 
     // Test inference
-    let prompt = "Hello, how are ";
+    let prompt = "Merry ";
 
     mistral.debug_run(prompt);
 
