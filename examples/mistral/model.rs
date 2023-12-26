@@ -377,9 +377,10 @@ impl Mistral {
             let attention_weights = attention_weights * (ATTENTION_HEAD_DIM as f32).sqrt().recip();
 
             // Attention Mask
-            let attention_mask =
-                self.graph.triu::<SequenceLength, SequenceLength>(1) * f16::MIN.to_f32();
-            let attention_weights = attention_weights + attention_mask.expand();
+            // let attention_mask =
+            //     self.graph.triu::<SequenceLength, SequenceLength>(1) * f16::MIN.to_f32();
+            // let attention_mask = attention_mask.log();
+            // let attention_weights = attention_weights + attention_mask.expand();
 
             let attention_weights = attention_weights.softmax::<3>();
 
