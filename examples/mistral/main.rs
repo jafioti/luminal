@@ -20,20 +20,22 @@ fn main() -> Result<(), String> {
     }
 
     // Test inference
-    let prompt = "Merry ";
+    let prompt = "Hello, how are ";
 
-    // Build the forward graph
-    println!("Building the forward graph");
-    let output_token_ids = mistral.build_forward_graph(prompt);
+    mistral.debug_run(prompt);
+
+    // // Build the forward graph
+    // println!("Building the forward graph");
+    // let output_probabilities = mistral.build_forward_graph(prompt);
 
     // Compile the graph
-    println!("Compiling the forward graph");
-    mistral.compile_forward_graph();
+    // println!("Compiling the forward graph");
+    // mistral.compile_forward_graph();
 
-    println!("Infering the next token");
-    let output_text = mistral.infer_next_token(output_token_ids, prompt);
+    // println!("Infering the next token");
+    // let _ = mistral.infer_next_token(output_probabilities, prompt);
 
-    println!("Inference: {output_text}");
+    // println!("Inference: {output_text}");
 
     Ok(())
 }

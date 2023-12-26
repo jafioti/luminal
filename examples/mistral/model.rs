@@ -17,6 +17,7 @@ use yoke::{Yoke, Yokeable};
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
 pub const NUM_LAYERS: usize = 32;
+// pub const NUM_LAYERS: usize = 2;
 pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
@@ -181,7 +182,7 @@ pub struct Mistral {
     pub norm: RMSNorm<HIDDEN_DIM>,
 
     // LM Head Layer
-    pub lm_head: Linear<HIDDEN_DIM, VOCAB_SIZE>,
+    pub lm_head: GraphTensor<R2<VOCAB_SIZE, HIDDEN_DIM>>,
 
     // RoPE Embeddings
     pub rope_embeddings: (
@@ -222,9 +223,9 @@ impl Mistral {
     // Infer next token
     pub fn infer_next_token(
         &mut self,
-        output_token_ids: GraphTensor<(Const<1>, Dyn<'s'>)>,
+        logits: GraphTensor<(Const<1>, Dyn<'s'>, Const<VOCAB_SIZE>)>,
         text: &str,
-    ) -> String {
+    ) {
         // First, we encode the text
         let token_ids = self.encode(text);
         let n_tokens = token_ids.len();
@@ -238,28 +239,52 @@ impl Mistral {
         println!("n_tokens: {:?}", n_tokens);
         println!("token_ids: {:?}", token_ids);
 
-        println!("Token IDs: {:?}", output_token_ids);
+        println!("Output: {:?}", logits);
 
         // Pull the data from the output node
-        let output_token_ids = output_token_ids.data();
+        // let output_token_ids = output_token_ids.data();
 
-        let output_text = self.decode(output_token_ids);
+        // let output_text = self.decode(output_token_ids);
 
-        output_text
+        // output_text
     }
 
-    pub fn build_forward_graph(&mut self, prompt: &str) -> GraphTensor<(Const<1>, Dyn<'s'>)> {
+    // pub fn build_forward_graph(
+    //     &mut self,
+    //     prompt: &str,
+    // ) -> GraphTensor<(Const<1>, Dyn<'s'>, Const<VOCAB_SIZE>)> {
+    //     let input_data: Vec<f32> = self.encode(prompt);
+    //     let sequence_length = input_data.len();
+    //     self.input.set_dyn(input_data, vec![1, sequence_length]);
+    //     let input_embeddings = self.embedding.gather(self.input);
+    //     let hidden_states = self.forward(input_embeddings);
+    //     let logits = self.lm_head.forward(hidden_states).retrieve();
+
+    //     // Do the sampling in the graph computation
+    //     // let output_token_ids = output_probabilities.argmax();
+    //     // output_token_ids.retrieve();
+
+    //     logits
+    // }
+
+    pub fn debug_run(&mut self, prompt: &str) {
+        println!("Encoding Prompt");
         let input_data: Vec<f32> = self.encode(prompt);
         let sequence_length = input_data.len();
         self.input.set_dyn(input_data, vec![1, sequence_length]);
+        println!("Defining Computation Graph");
         let input_embeddings = self.embedding.gather(self.input);
-        let output_probabilities = self.forward(input_embeddings);
+        let hidden_states = self.forward(input_embeddings);
+        let logits = hidden_states.matmul(self.lm_head.permute()).retrieve();
 
-        // Do the sampling in the graph computation
-        let output_token_ids = output_probabilities.argmax();
-        output_token_ids.retrieve();
+        println!("Compiling Graph");
+        self.compile_forward_graph();
 
-        output_token_ids
+        println!("Executing Graph");
+        self.graph.execute_debug();
+
+        // println!("hidden_states: {:?}", hidden_states);
+        println!("logits: {:?}", logits);
     }
 
     pub fn forward<Batch: Dimension, SequenceLength: Dimension>(
@@ -460,7 +485,7 @@ impl Mistral {
         let norm = RMSNorm::initialize(graph.as_mut());
 
         // Create the lm head
-        let lm_head = Linear::initialize(graph.as_mut());
+        let lm_head = graph.named_tensor("lm_head");
 
         // // Create the input node
         let input = graph.named_tensor::<(Const<1>, Dyn<'s'>)>("input_node");
@@ -692,7 +717,7 @@ impl Mistral {
         let lm_head_safe_tensor =
             &get_tensor(&weight_file_mapper, &file_tensor_mapper, "lm_head.weight")?;
         let lm_head = convert_vector_bf16_f32(lm_head_safe_tensor);
-        self.lm_head.weight.set(lm_head);
+        self.lm_head.set(lm_head);
 
         Ok(())
     }
