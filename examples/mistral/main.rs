@@ -1,39 +1,6 @@
 use crate::model::Mistral;
 use itertools::Itertools;
-use luminal::{
-    compilers::{MetalFp16Compiler, PostGenericCompiler, PreGenericCompiler},
-    graph::Graph,
-    graph_tensor::GraphTensor,
-    shape::R2,
-};
 mod model;
-
-// fn main() {
-//     let mut graph = Graph::new();
-
-//     let x = graph.arange_::<R2<4, 8>>();
-//     x.retrieve();
-
-//     // let y = x.slice((.., ..6));
-//     // let y = x
-//     //     .reshape::<R2<4, 6>>()
-//     //     .pad::<R2<4, 8>, usize, usize>(&[(0, 0), (0, 2)]);
-//     let mut y = x.contiguous();
-//     y.shape.slice(&[(0.into(), 4.into()), (0.into(), 6.into())]);
-//     y.retrieve();
-
-//     graph.compile(<(
-//         PreGenericCompiler,
-//         MetalFp16Compiler,
-//         // CPUCompiler,
-//         PostGenericCompiler,
-//     )>::default());
-
-//     graph.execute();
-
-//     println!("x: {:?}", x);
-//     println!("y: {:?}", y);
-// }
 
 fn main() -> Result<(), String> {
     println!("Defining the model and loading the tokenizer");
@@ -51,8 +18,6 @@ fn main() -> Result<(), String> {
         mistral
             .load_safe_tensors_from_files(file_paths.iter().map(|s| s.to_string()).collect_vec())?;
     }
-
-    // mistral.debug_run();
 
     // Test inference
     let prompt = "Merry ";
