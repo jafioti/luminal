@@ -26,8 +26,8 @@ pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
 pub const ROPE_THETA: f32 = 1000000.0;
-// pub const MAX_POSITION_EMBEDDINGS: usize = 32768;
-pub const MAX_POSITION_EMBEDDINGS: usize = 5;
+pub const MAX_POSITION_EMBEDDINGS: usize = 32768;
+// pub const MAX_POSITION_EMBEDDINGS: usize = 5;
 
 pub const NUM_ATTENTION_GROUPS: usize = NUM_ATTENTION_HEADS / NUM_KV_HEADS;
 pub const ATTENTION_HEAD_DIM: usize = HIDDEN_DIM / NUM_ATTENTION_HEADS;
@@ -59,12 +59,13 @@ pub fn compute_rotary_embedding_frequencies<SequenceLength: Dimension>(
     GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
 ) {
     let frequencies =
-        (graph.arange::<Const<ATTENTION_HEAD_DIM>>() * 2.0) / (ATTENTION_HEAD_DIM as f32);
+        (graph.arange::<Const<ATTENTION_HEAD_DIM_OVER_2>>() * 2.0) / (ATTENTION_HEAD_DIM as f32);
 
     let frequencies = frequencies
         .pow2(ROPE_THETA)
         .recip()
-        .reshape::<R2<1, ATTENTION_HEAD_DIM>>();
+        .reshape::<R2<1, ATTENTION_HEAD_DIM_OVER_2>>();
+    let frequencies = frequencies.concat_along::<_, Axis<1>, _>(frequencies);
     let t = graph
         .arange::<SequenceLength>()
         .reshape::<(SequenceLength, Const<1>)>();
@@ -383,9 +384,11 @@ impl Mistral {
         let v_proj = self.transformer_layers[0].attention.v_proj;
         let value_states = hidden_states.matmul(v_proj.permute());
 
-        // Now, let's compute the rotary embeddings
-        let rotary_embeddings = compute_rotary_embedding_frequencies::<Dyn<'s'>>(&mut self.graph);
-        let (cos, sin) = rotary_embeddings;
+        let (cos, sin) = self.rope_embeddings;
+        let cos = cos.slice((..n_tokens, ..)).contiguous();
+        let sin = sin.slice((..n_tokens, ..)).contiguous();
+
+        let rotary_embeddings = (cos.realize(), sin.realize());
 
         // And we apply the embeddings
         let query_states = query_states
@@ -453,10 +456,10 @@ impl Mistral {
             )>();
 
         // Now we implement attention (finally)
-        let attn_weights = query_states.matmul(key_states.permute::<_, Axes4<0, 1, 3, 2>>());
-        // / ((ATTENTION_HEAD_DIM as f64).sqrt() as f32);
+        let attn_weights = query_states.matmul(key_states.permute::<_, Axes4<0, 1, 3, 2>>())
+            / ((ATTENTION_HEAD_DIM as f64).sqrt() as f32);
 
-        // let attention_mask = self.graph.triu::<Dyn<'s'>, Dyn<'s'>>(1) * f16::MIN.to_f32();
+        // let attention_mask = self.graph.triu::<Dyn<'s'>, Dyn<'s'>>(1) * f16::MIN.to_f32();s
 
         // let attn_weights = attn_weights + attention_mask.expand();
         // let attn_weights = attn_weights.softmax::<3>();
@@ -472,7 +475,7 @@ impl Mistral {
         //     / (ATTENTION_HEAD_DIM_OVER_2 as f32);
         // let inv_freq = inv_freq.pow2(ROPE_THETA).recip();
         // let inv_freq = inv_freq.pow2(ROPE_THETA);
-        let (cos, sin) = self.rope_embeddings;
+        // let (cos, sin) = self.rope_embeddings;
 
         // q_proj.retrieve();
         // k_proj.retrieve();
@@ -484,6 +487,8 @@ impl Mistral {
         // key_states.retrieve();
         // value_states.retrieve();
         // hidden_states.retrieve();
+        // cos_full.retrieve();
+        // sin_full.retrieve();
         cos.retrieve();
         sin.retrieve();
         // attn_weights.retrieve();
@@ -638,7 +643,9 @@ impl Mistral {
         let mut rope_graph = Box::new(Graph::new());
 
         let (rope_cos, rope_sin) =
-            compute_rotary_embedding_frequencies::<Const<MAX_POSITION_EMBEDDINGS>>(&mut rope_graph);
+            compute_rotary_embedding_frequencies::<Const<10>>(&mut rope_graph);
+
+        let rope_cos_trunc = rope_cos.slice((..5, ..)).contiguous().retrieve();
 
         rope_cos.retrieve();
         rope_sin.retrieve();
@@ -647,6 +654,11 @@ impl Mistral {
             .compile(<(PreGenericCompiler, MetalFp32Compiler, PostGenericCompiler)>::default());
 
         rope_graph.execute_debug();
+
+        // Debug
+        // println!("rotary_frequencies (cos): {:?}", rope_cos);
+        // println!("rope_cos_trunc: {:?}", rope_cos_trunc);
+        // println!("rotary_frequencies (sin): {:?}", rope_sin);
 
         // Build the actual rope embeddings
         let (cos, sin) = (
