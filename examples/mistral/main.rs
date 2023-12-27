@@ -7,7 +7,7 @@ fn main() -> Result<(), String> {
     let mut mistral = Mistral::new("./examples/mistral/setup/mistral-7b-hf/tokenizer.model")
         .map_err(|e| e.to_string())?;
 
-    let file_paths = [
+    static FILE_PATHS: [&'static str; 3] = [
         "./examples/mistral/setup/mistral-7b-hf/model-00001-of-00003.safetensors",
         "./examples/mistral/setup/mistral-7b-hf/model-00002-of-00003.safetensors",
         "./examples/mistral/setup/mistral-7b-hf/model-00003-of-00003.safetensors",
@@ -15,12 +15,11 @@ fn main() -> Result<(), String> {
 
     println!("Loading the model weights from safetensors");
     unsafe {
-        mistral
-            .load_safe_tensors_from_files(file_paths.iter().map(|s| s.to_string()).collect_vec())?;
+        mistral.load_safe_tensors_from_files(&FILE_PATHS)?;
     }
 
     // Test inference
-    let prompt = "Merry ";
+    let prompt = "Santa says: Merry";
 
     mistral.debug_run(prompt);
 
