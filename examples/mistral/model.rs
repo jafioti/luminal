@@ -13,8 +13,8 @@ use std::{collections::HashMap, fs::File};
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
-// pub const NUM_LAYERS: usize = 32;
-pub const NUM_LAYERS: usize = 1;
+pub const NUM_LAYERS: usize = 32;
+// pub const NUM_LAYERS: usize = 1;
 pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
@@ -201,10 +201,6 @@ pub struct Mistral {
 
     // Input Layer
     pub input: GraphTensor<(Const<1>, Dyn<'s'>)>,
-}
-
-impl Mistral {
-    // Ok, let's figure out how to load in a deferred way
 }
 
 impl Mistral {
