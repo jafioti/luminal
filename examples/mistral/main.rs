@@ -14,28 +14,12 @@ fn main() -> Result<(), String> {
     ];
 
     println!("Loading the model weights from safetensors");
-    // unsafe {
-    //     mistral.load_safe_tensors_from_files(file_paths.to_vec())?;
-    // }
-    mistral.load_defer(file_paths.iter().map(|s| s.to_string()).collect_vec())?;
+    mistral.load(file_paths.iter().map(|s| s.to_string()).collect_vec())?;
 
     // Test inference
     let prompt = "Santa says: Merry";
 
     mistral.debug_run(prompt);
-
-    // // Build the forward graph
-    // println!("Building the forward graph");
-    // let output_probabilities = mistral.build_forward_graph(prompt);
-
-    // Compile the graph
-    // println!("Compiling the forward graph");
-    // mistral.compile_forward_graph();
-
-    // println!("Infering the next token");
-    // let _ = mistral.infer_next_token(output_probabilities, prompt);
-
-    // println!("Inference: {output_text}");
 
     Ok(())
 }

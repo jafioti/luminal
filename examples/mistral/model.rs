@@ -2,14 +2,13 @@ use colored::Colorize;
 use half::bf16;
 use itertools::Itertools;
 use luminal::{nn::norm::RMSNorm, op::Function, prelude::*, shape::symbolic::Expression};
-use memmap2::{Mmap, MmapOptions};
+use memmap2::MmapOptions;
 use rust_tokenizers::{
     error::TokenizerError,
     tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy},
 };
 use safetensors::{tensor::TensorView, SafeTensors};
-use std::{cell::RefCell, collections::HashMap, fs::File};
-use yoke::{Yoke, Yokeable};
+use std::{collections::HashMap, fs::File};
 
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
@@ -206,157 +205,6 @@ pub struct Mistral {
 
 impl Mistral {
     // Ok, let's figure out how to load in a deferred way
-    pub fn load_defer(&mut self, file_paths: Vec<String>) -> Result<(), String> {
-        // First, let's get a mapping from node to weight name
-        let mut weight_name_tensor_mapping = HashMap::new();
-
-        // Embeddings
-        weight_name_tensor_mapping
-            .insert("model.embed_tokens.weight".to_string(), self.embedding.id);
-
-        // Transformer Layers
-        for layer_index in 0..self.transformer_layers.len() {
-            let weight_prefix = format!("model.layers.{layer_index}");
-
-            // Query Projection
-            let weight_name = format!("{weight_prefix}.self_attn.q_proj.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index].attention.q_proj.id,
-            );
-
-            // Key Projection
-            let weight_name = format!("{weight_prefix}.self_attn.k_proj.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index].attention.k_proj.id,
-            );
-
-            // Value Projection
-            let weight_name = format!("{weight_prefix}.self_attn.v_proj.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index].attention.v_proj.id,
-            );
-
-            // Output Projection
-            let weight_name = format!("{weight_prefix}.self_attn.o_proj.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index].attention.o_proj.id,
-            );
-
-            // Pre-Attention Norm
-            let weight_name = format!("{weight_prefix}.input_layernorm.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index]
-                    .attention_norm
-                    .weight
-                    .id,
-            );
-
-            // Feed Forward Norm
-            let weight_name = format!("{weight_prefix}.post_attention_layernorm.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index]
-                    .feed_forward_norm
-                    .weight
-                    .id,
-            );
-
-            // Feed Forward Gate Projection
-            let weight_name = format!("{weight_prefix}.mlp.gate_proj.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index]
-                    .feed_forward
-                    .gate_proj
-                    .id,
-            );
-
-            // Feed Forward Down Projection
-            let weight_name = format!("{weight_prefix}.mlp.down_proj.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index]
-                    .feed_forward
-                    .down_proj
-                    .id,
-            );
-
-            // Feed Forward Up Projection
-            let weight_name = format!("{weight_prefix}.mlp.up_proj.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index].feed_forward.up_proj.id,
-            );
-        }
-
-        // Final Norm
-        weight_name_tensor_mapping.insert("model.norm.weight".to_string(), self.norm.weight.id);
-
-        // LM Head
-        weight_name_tensor_mapping.insert("lm_head.weight".to_string(), self.lm_head.id);
-
-        // And then we loop over all of them an load
-        for (weight_name, node_index) in weight_name_tensor_mapping.drain() {
-            if let Some(loading_node) = self
-                .graph
-                .graph
-                .node_weight_mut(node_index)
-                .and_then(|op| op.as_any_mut().downcast_mut::<Function>())
-            {
-                let file_paths = file_paths.clone();
-                loading_node.1 = Box::new(move |_| {
-                    let mut output_vector = vec![];
-                    // Do the loading here
-                    for file_path in file_paths.iter() {
-                        let file = File::open(file_path).unwrap();
-                        let buffer = unsafe { MmapOptions::new().map(&file).unwrap() };
-                        let safetensors = SafeTensors::deserialize(&buffer).unwrap();
-
-                        if let Ok(tensor_view) = safetensors.tensor(weight_name.as_str()) {
-                            output_vector = vec![Tensor {
-                                data: Box::new(convert_vector_bf16_f32(&tensor_view)),
-                            }];
-                            break;
-                        }
-                    }
-
-                    // Return
-                    output_vector
-                });
-            }
-        }
-        Ok(())
-    }
-}
-
-#[derive(Yokeable)]
-struct SafeTensors_<'a>(SafeTensors<'a>);
-
-fn get_tensor<'a>(
-    weight_file_mapper: &'a HashMap<String, String>,
-    file_tensor_mapper: &'a HashMap<String, Yoke<SafeTensors_<'static>, Mmap>>,
-    weight_name: &'a str,
-) -> Result<TensorView<'a>, String> {
-    let file_path = weight_file_mapper
-        .get(weight_name)
-        .ok_or("Weight not found".to_string())?;
-
-    let tensors = file_tensor_mapper
-        .get(file_path)
-        .ok_or("Tensors not found".to_string())?;
-
-    let tensor = tensors
-        .get()
-        .0
-        .tensor(weight_name)
-        .map_err(|e| e.to_string())?;
-
-    Ok(tensor)
 }
 
 impl Mistral {
@@ -679,173 +527,130 @@ impl Mistral {
             .replace("<0x0A>", "\n")
     }
 
-    pub unsafe fn load_safe_tensors_from_files(
-        &mut self,
-        file_paths: Vec<&str>,
-    ) -> Result<(), String> {
-        let mut weight_file_mapper = HashMap::new();
-        let mut file_tensor_mapper = HashMap::new();
+    pub fn load(&mut self, file_paths: Vec<String>) -> Result<(), String> {
+        // First, let's get a mapping from node to weight name
+        let mut weight_name_tensor_mapping = HashMap::new();
 
-        // First, we read the tensors from all the files
-        for &file_path in file_paths.iter() {
-            let file = File::open(file_path).map_err(|e| e.to_string())?;
-            let buffer = MmapOptions::new().map(&file).map_err(|e| e.to_string())?;
-            let tensors =
-                Yoke::<SafeTensors_<'static>, Mmap>::try_attach_to_cart(buffer, |data| {
-                    let tensors = SafeTensors::deserialize(data).map_err(|e| e.to_string())?;
-                    Ok::<_, String>(SafeTensors_(tensors))
-                })?;
+        // Embeddings
+        weight_name_tensor_mapping
+            .insert("model.embed_tokens.weight".to_string(), self.embedding.id);
 
-            for name in tensors.get().0.names() {
-                weight_file_mapper.insert(name.to_string(), file_path.to_string());
-            }
-
-            file_tensor_mapper.insert(file_path.to_string(), tensors);
-        }
-
-        // Then we populate the layers
-
-        // Layer: Embeddings
-        let embeddings_safe_tensor = &get_tensor(
-            &weight_file_mapper,
-            &file_tensor_mapper,
-            "model.embed_tokens.weight",
-        )?;
-        let embeddings = convert_vector_bf16_f32(embeddings_safe_tensor);
-        self.embedding.set(embeddings);
-
-        // Layers: Transformer Layers
+        // Transformer Layers
         for layer_index in 0..self.transformer_layers.len() {
-            // We populate each layer here
             let weight_prefix = format!("model.layers.{layer_index}");
 
-            // Attention
+            // Query Projection
             let weight_name = format!("{weight_prefix}.self_attn.q_proj.weight");
-            let q_proj_safe_tensor = &get_tensor(
-                &weight_file_mapper,
-                &file_tensor_mapper,
-                weight_name.as_str(),
-            )?;
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index].attention.q_proj.id,
+            );
 
-            let q_proj = convert_vector_bf16_f32(q_proj_safe_tensor);
-            self.transformer_layers[layer_index]
-                .attention
-                .q_proj
-                .set(q_proj);
-
+            // Key Projection
             let weight_name = format!("{weight_prefix}.self_attn.k_proj.weight");
-            let k_proj_safe_tensor = &get_tensor(
-                &weight_file_mapper,
-                &file_tensor_mapper,
-                weight_name.as_str(),
-            )?;
-            let k_proj = convert_vector_bf16_f32(k_proj_safe_tensor);
-            self.transformer_layers[layer_index]
-                .attention
-                .k_proj
-                .set(k_proj);
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index].attention.k_proj.id,
+            );
 
+            // Value Projection
             let weight_name = format!("{weight_prefix}.self_attn.v_proj.weight");
-            let v_proj_safe_tensor = &get_tensor(
-                &weight_file_mapper,
-                &file_tensor_mapper,
-                weight_name.as_str(),
-            )?;
-            let v_proj = convert_vector_bf16_f32(v_proj_safe_tensor);
-            self.transformer_layers[layer_index]
-                .attention
-                .v_proj
-                .set(v_proj);
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index].attention.v_proj.id,
+            );
 
+            // Output Projection
             let weight_name = format!("{weight_prefix}.self_attn.o_proj.weight");
-            let o_proj_safe_tensor = &get_tensor(
-                &weight_file_mapper,
-                &file_tensor_mapper,
-                weight_name.as_str(),
-            )?;
-            let o_proj = convert_vector_bf16_f32(o_proj_safe_tensor);
-            self.transformer_layers[layer_index]
-                .attention
-                .o_proj
-                .set(o_proj);
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index].attention.o_proj.id,
+            );
 
-            // Norms
+            // Pre-Attention Norm
             let weight_name = format!("{weight_prefix}.input_layernorm.weight");
-            let attention_norm_safe_tensor = &get_tensor(
-                &weight_file_mapper,
-                &file_tensor_mapper,
-                weight_name.as_str(),
-            )?;
-            let attention_norm = convert_vector_bf16_f32(attention_norm_safe_tensor);
-            self.transformer_layers[layer_index]
-                .attention_norm
-                .weight
-                .set(attention_norm);
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index]
+                    .attention_norm
+                    .weight
+                    .id,
+            );
 
+            // Feed Forward Norm
             let weight_name = format!("{weight_prefix}.post_attention_layernorm.weight");
-            let feed_forward_norm_safe_tensor = &get_tensor(
-                &weight_file_mapper,
-                &file_tensor_mapper,
-                weight_name.as_str(),
-            )?;
-            let feed_forward_norm = convert_vector_bf16_f32(feed_forward_norm_safe_tensor);
-            self.transformer_layers[layer_index]
-                .feed_forward_norm
-                .weight
-                .set(feed_forward_norm);
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index]
+                    .feed_forward_norm
+                    .weight
+                    .id,
+            );
 
-            // Feed Forward
+            // Feed Forward Gate Projection
             let weight_name = format!("{weight_prefix}.mlp.gate_proj.weight");
-            let gate_proj_safe_tensor = &get_tensor(
-                &weight_file_mapper,
-                &file_tensor_mapper,
-                weight_name.as_str(),
-            )?;
-            let gate_proj = convert_vector_bf16_f32(gate_proj_safe_tensor);
-            self.transformer_layers[layer_index]
-                .feed_forward
-                .gate_proj
-                .set(gate_proj);
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index]
+                    .feed_forward
+                    .gate_proj
+                    .id,
+            );
 
+            // Feed Forward Down Projection
             let weight_name = format!("{weight_prefix}.mlp.down_proj.weight");
-            let down_proj_safe_tensor = &get_tensor(
-                &weight_file_mapper,
-                &file_tensor_mapper,
-                weight_name.as_str(),
-            )?;
-            let down_proj = convert_vector_bf16_f32(down_proj_safe_tensor);
-            self.transformer_layers[layer_index]
-                .feed_forward
-                .down_proj
-                .set(down_proj);
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index]
+                    .feed_forward
+                    .down_proj
+                    .id,
+            );
 
+            // Feed Forward Up Projection
             let weight_name = format!("{weight_prefix}.mlp.up_proj.weight");
-            let up_proj_safe_tensor = &get_tensor(
-                &weight_file_mapper,
-                &file_tensor_mapper,
-                weight_name.as_str(),
-            )?;
-            let up_proj = convert_vector_bf16_f32(up_proj_safe_tensor);
-            self.transformer_layers[layer_index]
-                .feed_forward
-                .up_proj
-                .set(up_proj);
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index].feed_forward.up_proj.id,
+            );
         }
 
-        let norm_safe_tensor = &get_tensor(
-            &weight_file_mapper,
-            &file_tensor_mapper,
-            "model.norm.weight",
-        )?;
-        let norm = convert_vector_bf16_f32(norm_safe_tensor);
-        self.norm.weight.set(norm);
+        // Final Norm
+        weight_name_tensor_mapping.insert("model.norm.weight".to_string(), self.norm.weight.id);
 
-        // Layer: LM Head
-        let lm_head_safe_tensor =
-            &get_tensor(&weight_file_mapper, &file_tensor_mapper, "lm_head.weight")?;
-        let lm_head = convert_vector_bf16_f32(lm_head_safe_tensor);
-        self.lm_head.set(lm_head);
+        // LM Head
+        weight_name_tensor_mapping.insert("lm_head.weight".to_string(), self.lm_head.id);
 
+        // And then we loop over all of them an load
+        for (weight_name, node_index) in weight_name_tensor_mapping.drain() {
+            if let Some(loading_node) = self
+                .graph
+                .graph
+                .node_weight_mut(node_index)
+                .and_then(|op| op.as_any_mut().downcast_mut::<Function>())
+            {
+                let file_paths = file_paths.clone();
+                loading_node.1 = Box::new(move |_| {
+                    let mut output_vector = vec![];
+                    // Do the loading here
+                    for file_path in file_paths.iter() {
+                        let file = File::open(file_path).unwrap();
+                        let buffer = unsafe { MmapOptions::new().map(&file).unwrap() };
+                        let safetensors = SafeTensors::deserialize(&buffer).unwrap();
+
+                        if let Ok(tensor_view) = safetensors.tensor(weight_name.as_str()) {
+                            output_vector = vec![Tensor {
+                                data: Box::new(convert_vector_bf16_f32(&tensor_view)),
+                            }];
+                            break;
+                        }
+                    }
+
+                    // Return
+                    output_vector
+                });
+            }
+        }
         Ok(())
     }
 }

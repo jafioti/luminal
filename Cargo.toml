@@ -39,7 +39,6 @@ regex = "1.9.5"
 num = "0.4.1"
 gemm = "0.15.4"
 objc = "0.2.7"
-yoke = { version = "0.7.3", features = ["derive"] }
 
 [dev-dependencies]
 dfdx = { version = "0.13", features = ["f16"] }
