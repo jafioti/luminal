@@ -1,21 +1,21 @@
 use colored::Colorize;
 use half::bf16;
 use itertools::Itertools;
-use luminal::{nn::norm::RMSNorm, prelude::*, shape::symbolic::Expression};
+use luminal::{nn::norm::RMSNorm, op::Function, prelude::*, shape::symbolic::Expression};
 use memmap2::{Mmap, MmapOptions};
 use rust_tokenizers::{
     error::TokenizerError,
     tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy},
 };
 use safetensors::{tensor::TensorView, SafeTensors};
-use std::{collections::HashMap, fs::File};
+use std::{cell::RefCell, collections::HashMap, fs::File};
 use yoke::{Yoke, Yokeable};
 
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
-pub const NUM_LAYERS: usize = 32;
-// pub const NUM_LAYERS: usize = 1;
+// pub const NUM_LAYERS: usize = 32;
+pub const NUM_LAYERS: usize = 1;
 pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
@@ -204,6 +204,136 @@ pub struct Mistral {
     pub input: GraphTensor<(Const<1>, Dyn<'s'>)>,
 }
 
+impl Mistral {
+    // Ok, let's figure out how to load in a deferred way
+    pub fn load_defer(&mut self, file_paths: Vec<String>) -> Result<(), String> {
+        // First, let's get a mapping from node to weight name
+        let mut weight_name_tensor_mapping = HashMap::new();
+
+        // Embeddings
+        weight_name_tensor_mapping
+            .insert("model.embed_tokens.weight".to_string(), self.embedding.id);
+
+        // Transformer Layers
+        for layer_index in 0..self.transformer_layers.len() {
+            let weight_prefix = format!("model.layers.{layer_index}");
+
+            // Query Projection
+            let weight_name = format!("{weight_prefix}.self_attn.q_proj.weight");
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index].attention.q_proj.id,
+            );
+
+            // Key Projection
+            let weight_name = format!("{weight_prefix}.self_attn.k_proj.weight");
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index].attention.k_proj.id,
+            );
+
+            // Value Projection
+            let weight_name = format!("{weight_prefix}.self_attn.v_proj.weight");
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index].attention.v_proj.id,
+            );
+
+            // Output Projection
+            let weight_name = format!("{weight_prefix}.self_attn.o_proj.weight");
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index].attention.o_proj.id,
+            );
+
+            // Pre-Attention Norm
+            let weight_name = format!("{weight_prefix}.input_layernorm.weight");
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index]
+                    .attention_norm
+                    .weight
+                    .id,
+            );
+
+            // Feed Forward Norm
+            let weight_name = format!("{weight_prefix}.post_attention_layernorm.weight");
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index]
+                    .feed_forward_norm
+                    .weight
+                    .id,
+            );
+
+            // Feed Forward Gate Projection
+            let weight_name = format!("{weight_prefix}.mlp.gate_proj.weight");
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index]
+                    .feed_forward
+                    .gate_proj
+                    .id,
+            );
+
+            // Feed Forward Down Projection
+            let weight_name = format!("{weight_prefix}.mlp.down_proj.weight");
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index]
+                    .feed_forward
+                    .down_proj
+                    .id,
+            );
+
+            // Feed Forward Up Projection
+            let weight_name = format!("{weight_prefix}.mlp.up_proj.weight");
+            weight_name_tensor_mapping.insert(
+                weight_name.clone(),
+                self.transformer_layers[layer_index].feed_forward.up_proj.id,
+            );
+        }
+
+        // Final Norm
+        weight_name_tensor_mapping.insert("model.norm.weight".to_string(), self.norm.weight.id);
+
+        // LM Head
+        weight_name_tensor_mapping.insert("lm_head.weight".to_string(), self.lm_head.id);
+
+        // And then we loop over all of them an load
+        for (weight_name, node_index) in weight_name_tensor_mapping.drain() {
+            if let Some(loading_node) = self
+                .graph
+                .graph
+                .node_weight_mut(node_index)
+                .and_then(|op| op.as_any_mut().downcast_mut::<Function>())
+            {
+                let file_paths = file_paths.clone();
+                loading_node.1 = Box::new(move |_| {
+                    let mut output_vector = vec![];
+                    // Do the loading here
+                    for file_path in file_paths.iter() {
+                        let file = File::open(file_path).unwrap();
+                        let buffer = unsafe { MmapOptions::new().map(&file).unwrap() };
+                        let safetensors = SafeTensors::deserialize(&buffer).unwrap();
+
+                        if let Ok(tensor_view) = safetensors.tensor(weight_name.as_str()) {
+                            output_vector = vec![Tensor {
+                                data: Box::new(convert_vector_bf16_f32(&tensor_view)),
+                            }];
+                            break;
+                        }
+                    }
+
+                    // Return
+                    output_vector
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Yokeable)]
 struct SafeTensors_<'a>(SafeTensors<'a>);
 
@@ -230,53 +360,6 @@ fn get_tensor<'a>(
 }
 
 impl Mistral {
-    // Infer next token
-    pub fn infer_next_token(
-        &mut self,
-        logits: GraphTensor<(Const<1>, Dyn<'s'>, Const<VOCAB_SIZE>)>,
-        text: &str,
-    ) {
-        // First, we encode the text
-        let token_ids = self.encode(text);
-        let n_tokens = token_ids.len();
-
-        // Insert the data in the input node
-        self.input.set_dyn(token_ids.clone(), vec![1, n_tokens]);
-
-        // Execute the graph
-        self.graph.execute_debug();
-
-        println!("n_tokens: {:?}", n_tokens);
-        println!("token_ids: {:?}", token_ids);
-
-        println!("Output: {:?}", logits);
-
-        // Pull the data from the output node
-        // let output_token_ids = output_token_ids.data();
-
-        // let output_text = self.decode(output_token_ids);
-
-        // output_text
-    }
-
-    // pub fn build_forward_graph(
-    //     &mut self,
-    //     prompt: &str,
-    // ) -> GraphTensor<(Const<1>, Dyn<'s'>, Const<VOCAB_SIZE>)> {
-    //     let input_data: Vec<f32> = self.encode(prompt);
-    //     let sequence_length = input_data.len();
-    //     self.input.set_dyn(input_data, vec![1, sequence_length]);
-    //     let input_embeddings = self.embedding.gather(self.input);
-    //     let hidden_states = self.forward(input_embeddings);
-    //     let logits = self.lm_head.forward(hidden_states).retrieve();
-
-    //     // Do the sampling in the graph computation
-    //     // let output_token_ids = output_probabilities.argmax();
-    //     // output_token_ids.retrieve();
-
-    //     logits
-    // }
-
     pub fn debug_run(&mut self, prompt: &str) {
         println!("Encoding Prompt");
         let input_data: Vec<f32> = self.encode(prompt);
@@ -309,8 +392,8 @@ impl Mistral {
             self.input.set_dyn(_context, vec![1, sequence_length]);
 
             println!("Executing Graph");
-            // self.graph.execute_debug();
-            self.graph.execute();
+            self.graph.execute_debug();
+            // self.graph.execute();
 
             let output_ids = sample_index(&last_logit.data());
             context_vector.push(output_ids as f32);
@@ -596,9 +679,9 @@ impl Mistral {
             .replace("<0x0A>", "\n")
     }
 
-    pub unsafe fn load_safe_tensors_from_files<'data>(
+    pub unsafe fn load_safe_tensors_from_files(
         &mut self,
-        file_paths: &'static [&str],
+        file_paths: Vec<&str>,
     ) -> Result<(), String> {
         let mut weight_file_mapper = HashMap::new();
         let mut file_tensor_mapper = HashMap::new();
