@@ -13,8 +13,8 @@ use std::{collections::HashMap, fs::File};
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
-pub const NUM_LAYERS: usize = 32;
-// pub const NUM_LAYERS: usize = 1;
+// pub const NUM_LAYERS: usize = 32;
+pub const NUM_LAYERS: usize = 1;
 pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
@@ -226,18 +226,19 @@ impl Mistral {
         self.compile_forward_graph();
 
         let mut context_vector = self.encode(prompt);
-        let max_new_tokens = 1;
-        for _ in 0..max_new_tokens {
+        let max_new_tokens = 2;
+        for i in 0..max_new_tokens {
+            println!("########################### Iteration {i} ###########################");
             let _context = context_vector.clone();
             // let input_data: Vec<f32> = self.encode(context.as_str());
             let sequence_length = _context.len();
-            self.graph.set_dyn_dim('s', sequence_length);
+            // self.graph.set_dyn_dim('s', sequence_length);
             println!("Sequence Length: {sequence_length}");
             self.input.set_dyn(_context, vec![1, sequence_length]);
 
             println!("Executing Graph");
-            self.graph.execute_debug();
-            // self.graph.execute();
+            // self.graph.execute_debug();
+            self.graph.execute();
 
             let output_ids = sample_index(&last_logit.data());
             context_vector.push(output_ids as f32);
@@ -246,6 +247,8 @@ impl Mistral {
             let output_token = self.decode(vec![output_ids as f32]);
             // context.push_str(output_token.as_str());
 
+            println!("Logits Shape: {:?}", logits.shape);
+            println!("Logits Data Length: {:?}", logits.data().len());
             println!("Logits: {:?}", logits);
             println!(
                 "Tokens: {:?}",
