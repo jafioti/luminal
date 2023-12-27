@@ -14,8 +14,8 @@ use yoke::{Yoke, Yokeable};
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
-// pub const NUM_LAYERS: usize = 32;
-pub const NUM_LAYERS: usize = 1;
+pub const NUM_LAYERS: usize = 32;
+// pub const NUM_LAYERS: usize = 1;
 pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
@@ -299,12 +299,13 @@ impl Mistral {
         self.compile_forward_graph();
 
         let mut context_vector = self.encode(prompt);
-        loop {
+        let max_new_tokens = 1;
+        for _ in 0..max_new_tokens {
             let _context = context_vector.clone();
             // let input_data: Vec<f32> = self.encode(context.as_str());
             let sequence_length = _context.len();
             self.graph.set_dyn_dim('s', sequence_length);
-            println!("{sequence_length}");
+            println!("Sequence Length: {sequence_length}");
             self.input.set_dyn(_context, vec![1, sequence_length]);
 
             println!("Executing Graph");
@@ -319,6 +320,10 @@ impl Mistral {
             // context.push_str(output_token.as_str());
 
             println!("Logits: {:?}", logits);
+            println!(
+                "Tokens: {:?}",
+                context_vector.iter().map(|x| *x as u32).collect_vec()
+            );
 
             println!(
                 "{}{}",
@@ -591,15 +596,15 @@ impl Mistral {
             .replace("<0x0A>", "\n")
     }
 
-    pub unsafe fn load_safe_tensors_from_files(
+    pub unsafe fn load_safe_tensors_from_files<'data>(
         &mut self,
-        file_paths: Vec<String>,
+        file_paths: &'static [&str],
     ) -> Result<(), String> {
         let mut weight_file_mapper = HashMap::new();
         let mut file_tensor_mapper = HashMap::new();
 
         // First, we read the tensors from all the files
-        for file_path in file_paths.iter() {
+        for &file_path in file_paths.iter() {
             let file = File::open(file_path).map_err(|e| e.to_string())?;
             let buffer = MmapOptions::new().map(&file).map_err(|e| e.to_string())?;
             let tensors =
@@ -744,7 +749,6 @@ impl Mistral {
                 .set(up_proj);
         }
 
-        // Layer: Norm
         let norm_safe_tensor = &get_tensor(
             &weight_file_mapper,
             &file_tensor_mapper,
@@ -762,7 +766,3 @@ impl Mistral {
         Ok(())
     }
 }
-
-// let tensor = cx.tensor();
-// tensor.set(vec![]);
-// tensor.defer_load(move|| {});

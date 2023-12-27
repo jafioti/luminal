@@ -1,6 +1,6 @@
 use crate::{
     graph::Graph,
-    op::{self, Function},
+    op::{self, Function, InputTensor},
     prelude::{remap_id, Data},
     shape::*,
     tensor::Tensor,
@@ -146,6 +146,28 @@ impl<S: ConstShape> GraphTensor<S> {
                 data: Box::new(data.clone()),
             }]
         });
+        self
+    }
+
+    // Implement a deferred set where the input is a closure
+    pub fn set_defer(self, load_data: &'static impl Fn() -> Result<Vec<f32>, String>) -> Self {
+        let node = self
+            .graph()
+            .graph
+            .node_weight_mut(self.id)
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<Function>()
+            .unwrap();
+
+        // Set the closure here
+        node.1 = Box::new(|_| {
+            vec![Tensor {
+                data: Box::new(load_data().unwrap()),
+            }]
+        });
+
+        // Return
         self
     }
 }
