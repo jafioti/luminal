@@ -13,13 +13,17 @@ use std::{collections::HashMap, fs::File};
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
-// pub const NUM_LAYERS: usize = 32;
-pub const NUM_LAYERS: usize = 1;
+pub const NUM_LAYERS: usize = 32;
+// pub const NUM_LAYERS: usize = 1;
 pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
 pub const ROPE_THETA: f32 = 1000000.0;
-pub const MAX_POSITION_EMBEDDINGS: usize = 32768;
+
+// For some reason, setting it to 32k doesn't work
+// Setting it to a different value should affect computations
+// pub const MAX_POSITION_EMBEDDINGS: usize = 32768;
+pub const MAX_POSITION_EMBEDDINGS: usize = 10;
 
 pub const NUM_ATTENTION_GROUPS: usize = NUM_ATTENTION_HEADS / NUM_KV_HEADS;
 pub const ATTENTION_HEAD_DIM: usize = HIDDEN_DIM / NUM_ATTENTION_HEADS;
@@ -203,63 +207,85 @@ pub struct Mistral {
     pub input: GraphTensor<(Const<1>, Dyn<'s'>)>,
 }
 
+pub fn slice_last_sequence<Batch: Dimension, SequenceLength: Dimension, Hidden: Dimension>(
+    input: GraphTensor<(Batch, SequenceLength, Hidden)>,
+) -> GraphTensor<(Batch, Const<1>, Hidden)> {
+    let sequence_length = &input.shape.shape()[1];
+    let sequence_length = Expression::from(sequence_length.clone());
+
+    input
+        .slice((.., (sequence_length - 1).., ..))
+        .contiguous()
+        .realize()
+}
+
 impl Mistral {
     pub fn debug_run(&mut self, prompt: &str) {
-        println!("Encoding Prompt");
+        // println!("Encoding Prompt");
         let input_data: Vec<f32> = self.encode(prompt);
         let sequence_length = input_data.len();
         // self.input.set_dyn(input_data, vec![1, sequence_length]);
-        println!("Defining Computation Graph");
+        // println!("Defining Computation Graph");
         let input_embeddings = self.embedding.gather(self.input);
         let hidden_states = self.forward(input_embeddings);
         let logits = hidden_states.matmul(self.lm_head.permute()).retrieve();
 
         // Get the output ids
         // let output_ids = logits.argmax().retrieve();
-        let last_logit = logits
-            .slice((.., Expression::from(sequence_length - 1).., ..))
-            .contiguous()
+        // let last_logit = logits
+        //     .slice((.., Expression::from(sequence_length - 1).., ..))
+        //     .contiguous()
+        //     .reshape::<R1<VOCAB_SIZE>>()
+        //     .retrieve();
+
+        let last_logit = slice_last_sequence(logits)
             .reshape::<R1<VOCAB_SIZE>>()
             .retrieve();
 
-        println!("Compiling Graph");
+        // println!("Compiling Graph");
         self.compile_forward_graph();
 
         let mut context_vector = self.encode(prompt);
-        let max_new_tokens = 2;
+        let mut completion = String::new();
+        let max_new_tokens = 4;
         for i in 0..max_new_tokens {
             println!("########################### Iteration {i} ###########################");
             let _context = context_vector.clone();
-            // let input_data: Vec<f32> = self.encode(context.as_str());
             let sequence_length = _context.len();
             // self.graph.set_dyn_dim('s', sequence_length);
             println!("Sequence Length: {sequence_length}");
+            println!("Input Vectors: {:?}", _context);
             self.input.set_dyn(_context, vec![1, sequence_length]);
 
-            println!("Executing Graph");
+            // println!("Executing Graph");
             // self.graph.execute_debug();
             self.graph.execute();
 
-            let output_ids = sample_index(&last_logit.data());
+            println!("------- Last Logits -------");
+            let last_logit_data = last_logit.data();
+            let output_ids = sample_index(&last_logit_data);
+            println!("Last Logits Shape: {:?}", last_logit.shape);
+            println!("Last Logits Data Length: {:?}", last_logit_data.len());
             context_vector.push(output_ids as f32);
 
             // Decode token
             let output_token = self.decode(vec![output_ids as f32]);
             // context.push_str(output_token.as_str());
+            completion.push_str(&output_token);
 
+            println!("------- Logits -------");
             println!("Logits Shape: {:?}", logits.shape);
             println!("Logits Data Length: {:?}", logits.data().len());
             println!("Logits: {:?}", logits);
-            println!(
-                "Tokens: {:?}",
-                context_vector.iter().map(|x| *x as u32).collect_vec()
-            );
+            // println!(
+            //     "Tokens: {:?}",
+            //     context_vector.iter().map(|x| *x as u32).collect_vec()
+            // );
 
-            println!(
-                "{}{}",
-                prompt.on_black().white().bold(),
-                output_token.green()
-            );
+            println!("{}{}", prompt.on_black().white().bold(), completion.green());
+
+            logits.drop();
+            last_logit.drop();
         }
     }
 
@@ -469,7 +495,7 @@ impl Mistral {
         let mut rope_graph = Box::new(Graph::new());
 
         let (rope_cos, rope_sin) =
-            compute_rotary_embedding_frequencies::<Const<10>>(&mut rope_graph);
+            compute_rotary_embedding_frequencies::<Const<MAX_POSITION_EMBEDDINGS>>(&mut rope_graph);
 
         rope_cos.retrieve();
         rope_sin.retrieve();
