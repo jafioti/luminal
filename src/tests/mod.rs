@@ -140,7 +140,7 @@ macro_rules! test_imports {
                 Axis as LAxis, Const as LConst, *,
             },
             tests::{
-                assert_close, assert_exact,
+                assert_close, assert_close_precision, assert_exact,
                 harness::{test_compilers_close, test_compilers_exact},
                 random_vec, random_vec_rng, test_graphs,
             },
