@@ -1,6 +1,6 @@
 use crate::{
     graph::Graph,
-    op::{self, Function, InputTensor},
+    op::{self, Function},
     prelude::{remap_id, Data},
     shape::*,
     tensor::Tensor,
