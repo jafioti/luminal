@@ -1,14 +1,8 @@
-use colored::Colorize;
-use half::bf16;
-use itertools::Itertools;
-use luminal::{nn::norm::RMSNorm, op::Function, prelude::*, shape::symbolic::Expression};
-use memmap2::MmapOptions;
-use rust_tokenizers::{
-    error::TokenizerError,
-    tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy},
+use luminal::{
+    nn::{embedding::Embedding, norm::RMSNorm},
+    prelude::*,
+    shape::symbolic::Expression,
 };
-use safetensors::{tensor::TensorView, SafeTensors};
-use std::{array, collections::HashMap, fs::File};
 
 //////////////////////////////////////////////
 ///          Mistral 7B Config             ///
@@ -16,8 +10,8 @@ use std::{array, collections::HashMap, fs::File};
 
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
-// pub const NUM_LAYERS: usize = 32;
-pub const NUM_LAYERS: usize = 1;
+pub const NUM_LAYERS: usize = 32;
+// pub const NUM_LAYERS: usize = 1;
 pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
@@ -26,7 +20,7 @@ pub const ROPE_THETA: f32 = 1000000.0;
 // For some reason, setting it to 32k doesn't work
 // Setting it to a different value should affect computations
 // pub const MAX_POSITION_EMBEDDINGS: usize = 32768;
-pub const MAX_POSITION_EMBEDDINGS: usize = 10;
+pub const MAX_POSITION_EMBEDDINGS: usize = 30;
 
 pub const NUM_ATTENTION_GROUPS: usize = NUM_ATTENTION_HEADS / NUM_KV_HEADS;
 pub const ATTENTION_HEAD_DIM: usize = HIDDEN_DIM / NUM_ATTENTION_HEADS;
@@ -37,6 +31,44 @@ pub const ATTENTION_PROJECTION_DIM: usize = ATTENTION_HEAD_DIM * NUM_KV_HEADS;
 ///              Model Structs             ///
 //////////////////////////////////////////////
 
+pub struct Mlp<const I: usize, const H: usize> {
+    pub gate_proj: GraphTensor<(Const<I>, Const<H>)>,
+    pub down_proj: GraphTensor<(Const<H>, Const<I>)>,
+    pub up_proj: GraphTensor<(Const<I>, Const<H>)>,
+}
+
+impl<Sh: Shape, Im: Shape, const I: usize, const H: usize> Module<GraphTensor<Sh>> for Mlp<I, H>
+where
+    GraphTensor<Sh>: Matmul<R2<H, I>, Output = GraphTensor<Im>>,
+    GraphTensor<Im>: Matmul<R2<I, H>, Output = GraphTensor<Sh>>,
+{
+    type Output = GraphTensor<Sh>;
+
+    fn forward(&self, input: GraphTensor<Sh>) -> Self::Output {
+        let gate = input.matmul(self.gate_proj.permute()).swish();
+        let up = input.matmul(self.up_proj.permute()) * gate;
+        up.matmul(self.down_proj.permute())
+    }
+}
+
+impl<const I: usize, const H: usize> InitModule for Mlp<I, H> {
+    fn initialize(cx: &mut Graph) -> Self {
+        Self {
+            gate_proj: cx.named_tensor("Gate Weight"),
+            up_proj: cx.named_tensor("Up Weight"),
+            down_proj: cx.named_tensor("Down Weight"),
+        }
+    }
+}
+
+impl<const I: usize, const H: usize> SerializeModule for Mlp<I, H> {
+    fn serialize(&self, s: &mut Serializer) {
+        s.tensor("gate_proj/weight", self.gate_proj);
+        s.tensor("up_proj/weight", self.up_proj);
+        s.tensor("down_proj/weight", self.down_proj);
+    }
+}
+
 pub struct SelfAttention {
     pub q_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
     pub k_proj: GraphTensor<R2<ATTENTION_PROJECTION_DIM, HIDDEN_DIM>>,
@@ -44,71 +76,20 @@ pub struct SelfAttention {
     pub o_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
 }
 
-pub struct FeedForward {
-    pub gate_proj: GraphTensor<R2<MLP_PROJECTION_DIM, HIDDEN_DIM>>,
-    pub down_proj: GraphTensor<R2<HIDDEN_DIM, MLP_PROJECTION_DIM>>,
-    pub up_proj: GraphTensor<R2<MLP_PROJECTION_DIM, HIDDEN_DIM>>,
-}
-
-pub struct TransformerBlock {
-    pub attention: SelfAttention,
-    pub attention_norm: RMSNorm<HIDDEN_DIM>,
-    pub feed_forward: FeedForward,
-    pub feed_forward_norm: RMSNorm<HIDDEN_DIM>,
-}
-
-pub type RotaryEmbeddings<SequenceLength> = (
-    GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
-    GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
-);
-
-pub struct Mistral {
-    // Graphs
-    pub prompt_processing_graph: Box<Graph>,
-    pub token_generation_graph: Box<Graph>,
-
-    // Tokenizer
-    pub tokenizer: SentencePieceBpeTokenizer,
-
-    // Embedding
-    pub embedding: GraphTensor<R2<VOCAB_SIZE, HIDDEN_DIM>>,
-
-    // Transformer Layers
-    pub transformer_layers: [TransformerBlock; NUM_LAYERS],
-
-    // Final Norm layer
-    pub norm: RMSNorm<HIDDEN_DIM>,
-
-    // LM Head Layer
-    pub lm_head: GraphTensor<R2<VOCAB_SIZE, HIDDEN_DIM>>,
-
-    // RoPE Embeddings
-    pub rotary_embeddings: RotaryEmbeddings<Const<MAX_POSITION_EMBEDDINGS>>,
-
-    // Input Layer
-    pub input: GraphTensor<(Const<1>, Dyn<'s'>)>,
-}
-
-//////////////////////////////////////////////
-///          Batch Forward Impls           ///
-//////////////////////////////////////////////
-
-impl FeedForward {
-    fn forward<Batch: Dimension, SequenceLength: Dimension>(
+impl<Batch: Dimension, SequenceLength: Dimension>
+    Module<(
+        GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
+        RotaryEmbeddings<SequenceLength>,
+    )> for SelfAttention
+{
+    type Output = GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>;
+    fn forward(
         &self,
-        x: GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
-    ) -> GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)> {
-        (x.matmul(self.gate_proj.permute()).swish() * x.matmul(self.up_proj.permute()))
-            .matmul(self.down_proj.permute())
-    }
-}
-
-impl SelfAttention {
-    fn forward<Batch: Dimension, SequenceLength: Dimension>(
-        &self,
-        x: GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
-        rotary_embeddings: RotaryEmbeddings<SequenceLength>,
-    ) -> GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)> {
+        (x, rotary_embeddings): (
+            GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
+            RotaryEmbeddings<SequenceLength>,
+        ),
+    ) -> Self::Output {
         // Apply the Projections
         let query_states = x
             .matmul(self.q_proj.permute())
@@ -147,13 +128,7 @@ impl SelfAttention {
 
         // Repeat the KV States for Grouped-Query Attention
         let key_states = key_states
-            .expand::<(
-                Batch,
-                Const<NUM_KV_HEADS>,
-                Const<NUM_ATTENTION_GROUPS>,
-                SequenceLength,
-                Const<ATTENTION_HEAD_DIM>,
-            ), Axis<2>>()
+            .expand::<(_, _, Const<NUM_ATTENTION_GROUPS>, _, _), Axis<2>>()
             .reshape::<(
                 Batch,
                 Const<NUM_ATTENTION_HEADS>,
@@ -163,13 +138,7 @@ impl SelfAttention {
             .permute::<_, Axes4<0, 1, 3, 2>>();
 
         let value_states = value_states
-            .expand::<(
-                Batch,
-                Const<NUM_KV_HEADS>,
-                Const<NUM_ATTENTION_GROUPS>,
-                SequenceLength,
-                Const<ATTENTION_HEAD_DIM>,
-            ), Axis<2>>()
+            .expand::<(_, _, Const<NUM_ATTENTION_GROUPS>, _, _), Axis<2>>()
             .reshape::<(
                 Batch,
                 Const<NUM_ATTENTION_HEADS>,
@@ -190,16 +159,51 @@ impl SelfAttention {
     }
 }
 
-impl TransformerBlock {
-    fn forward<Batch: Dimension, SequenceLength: Dimension>(
+impl InitModule for SelfAttention {
+    fn initialize(cx: &mut Graph) -> Self {
+        Self {
+            q_proj: cx.named_tensor("Q Proj"),
+            k_proj: cx.named_tensor("K Proj"),
+            v_proj: cx.named_tensor("V Proj"),
+            o_proj: cx.named_tensor("O Proj"),
+        }
+    }
+}
+
+impl SerializeModule for SelfAttention {
+    fn serialize(&self, s: &mut Serializer) {
+        s.tensor("q_proj/weight", self.q_proj);
+        s.tensor("v_proj/weight", self.v_proj);
+        s.tensor("k_proj/weight", self.k_proj);
+        s.tensor("o_proj/weight", self.o_proj);
+    }
+}
+
+pub struct TransformerBlock {
+    pub attention: SelfAttention,
+    pub attention_norm: RMSNorm<HIDDEN_DIM>,
+    pub feed_forward: Mlp<MLP_PROJECTION_DIM, HIDDEN_DIM>,
+    pub feed_forward_norm: RMSNorm<HIDDEN_DIM>,
+}
+
+impl<Batch: Dimension, SequenceLength: Dimension>
+    Module<(
+        GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
+        RotaryEmbeddings<SequenceLength>,
+    )> for TransformerBlock
+{
+    type Output = GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>;
+    fn forward(
         &self,
-        x: GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
-        rotary_embeddings: RotaryEmbeddings<SequenceLength>,
-    ) -> GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)> {
+        (x, rotary_embeddings): (
+            GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
+            RotaryEmbeddings<SequenceLength>,
+        ),
+    ) -> Self::Output {
         // Attention
         let mut residual = x;
         let mut x = self.attention_norm.forward(x);
-        x = self.attention.forward(x, rotary_embeddings);
+        x = self.attention.forward((x, rotary_embeddings));
 
         // Residual Addition
         x += residual;
@@ -217,142 +221,213 @@ impl TransformerBlock {
     }
 }
 
+impl InitModule for TransformerBlock {
+    fn initialize(cx: &mut Graph) -> Self {
+        Self {
+            attention: InitModule::initialize(cx),
+            attention_norm: {
+                let mut norm = RMSNorm::initialize(cx);
+                norm.epsilon = 1e-5;
+                norm
+            },
+            feed_forward: InitModule::initialize(cx),
+            feed_forward_norm: {
+                let mut norm = RMSNorm::initialize(cx);
+                norm.epsilon = 1e-5;
+                norm
+            },
+        }
+    }
+}
+
+impl SerializeModule for TransformerBlock {
+    fn serialize(&self, s: &mut Serializer) {
+        s.module("self_attn", &self.attention);
+        s.module("input_layernorm", &self.attention_norm);
+        s.module("post_attention_layernorm", &self.feed_forward_norm);
+        s.module("mlp", &self.feed_forward);
+    }
+}
+
+pub type RotaryEmbeddings<SequenceLength> = (
+    GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
+    GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
+);
+
+pub struct MistralLM {
+    // Token embeddings
+    pub embedding: Embedding<VOCAB_SIZE, HIDDEN_DIM>,
+    // Transformer layers
+    pub layers: Vec<TransformerBlock>,
+    // Final Norm layer
+    pub norm: RMSNorm<HIDDEN_DIM>,
+    // LM Head Layer
+    pub lm_head: GraphTensor<R2<VOCAB_SIZE, HIDDEN_DIM>>,
+    // RoPE Embeddings
+    pub rotary_embeddings: RotaryEmbeddings<Const<MAX_POSITION_EMBEDDINGS>>,
+}
+
+impl<Batch: Dimension, Seq: Dimension> Module<GraphTensor<(Batch, Seq)>> for MistralLM {
+    type Output = GraphTensor<(Batch, Seq, Const<VOCAB_SIZE>)>;
+    fn forward(&self, input: GraphTensor<(Batch, Seq)>) -> Self::Output {
+        let mut hidden_states = self.embedding.forward(input);
+        // Extract the Rotary Embeddings
+        let (cos, sin) = self.rotary_embeddings;
+        let cos = cos.slice((..Seq::const_size(), ..)).contiguous().realize();
+        let sin = sin.slice((..Seq::const_size(), ..)).contiguous().realize();
+
+        // Now, we loop over all layers
+        for layer in &self.layers {
+            hidden_states = layer.forward((hidden_states, (cos, sin)));
+        }
+
+        // Finally, we call the final norm
+        hidden_states = self.norm.forward(hidden_states);
+
+        hidden_states.matmul(self.lm_head.permute())
+    }
+}
+
+//////////////////////////////////////////////
+///          Batch Forward Impls           ///
+//////////////////////////////////////////////
+
 //////////////////////////////////////////////
 ///        KV-Cache Forward Impls          ///
 //////////////////////////////////////////////
 
-pub struct KVCache<Batch: Dimension, SequenceLength: Dimension> {
-    pub keys: GraphTensor<(
-        Batch,
-        Const<NUM_KV_HEADS>,
-        SequenceLength,
-        Const<ATTENTION_HEAD_DIM>,
-    )>,
-    pub values: GraphTensor<(
-        Batch,
-        Const<NUM_KV_HEADS>,
-        SequenceLength,
-        Const<ATTENTION_HEAD_DIM>,
-    )>,
-}
+// pub struct KVCache<Batch: Dimension, SequenceLength: Dimension> {
+//     pub keys: GraphTensor<(
+//         Batch,
+//         Const<NUM_KV_HEADS>,
+//         SequenceLength,
+//         Const<ATTENTION_HEAD_DIM>,
+//     )>,
+//     pub values: GraphTensor<(
+//         Batch,
+//         Const<NUM_KV_HEADS>,
+//         SequenceLength,
+//         Const<ATTENTION_HEAD_DIM>,
+//     )>,
+// }
 
-impl SelfAttention {
-    fn forward_kv<
-        Batch: Dimension,
-        OutputSequenceLength: Dimension,
-        PreviousSequenceLength: Dimension,
-    >(
-        &self,
-        x: GraphTensor<(Batch, Const<1>, Const<HIDDEN_DIM>)>,
-        rotary_embeddings: RotaryEmbeddings<Const<1>>,
-        kv_cache: KVCache<Batch, PreviousSequenceLength>,
-    ) -> (
-        GraphTensor<(Batch, OutputSequenceLength, Const<HIDDEN_DIM>)>,
-        KVCache<Batch, OutputSequenceLength>,
-    ) {
-        // Apply the Projections
-        let query_states = x
-            .matmul(self.q_proj.permute())
-            .reshape::<(
-                Batch,
-                Const<1>,
-                Const<NUM_ATTENTION_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>()
-            .permute::<_, Axes4<0, 2, 1, 3>>();
+// impl SelfAttention {
+//     fn forward_kv<
+//         Batch: Dimension,
+//         OutputSequenceLength: Dimension,
+//         PreviousSequenceLength: Dimension,
+//     >(
+//         &self,
+//         x: GraphTensor<(Batch, Const<1>, Const<HIDDEN_DIM>)>,
+//         rotary_embeddings: RotaryEmbeddings<Const<1>>,
+//         kv_cache: KVCache<Batch, PreviousSequenceLength>,
+//     ) -> (
+//         GraphTensor<(Batch, OutputSequenceLength, Const<HIDDEN_DIM>)>,
+//         KVCache<Batch, OutputSequenceLength>,
+//     ) {
+//         // Apply the Projections
+//         let query_states = x
+//             .matmul(self.q_proj.permute())
+//             .reshape::<(
+//                 Batch,
+//                 Const<1>,
+//                 Const<NUM_ATTENTION_HEADS>,
+//                 Const<ATTENTION_HEAD_DIM>,
+//             )>()
+//             .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        let key_states = x
-            .matmul(self.k_proj.permute())
-            .reshape::<(
-                Batch,
-                Const<1>,
-                Const<NUM_KV_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>()
-            .permute::<_, Axes4<0, 2, 1, 3>>();
-        let value_states = x
-            .matmul(self.v_proj.permute())
-            .reshape::<(
-                Batch,
-                Const<1>,
-                Const<NUM_KV_HEADS>,
-                Const<ATTENTION_HEAD_DIM>,
-            )>()
-            .permute::<_, Axes4<0, 2, 1, 3>>();
+//         let key_states = x
+//             .matmul(self.k_proj.permute())
+//             .reshape::<(
+//                 Batch,
+//                 Const<1>,
+//                 Const<NUM_KV_HEADS>,
+//                 Const<ATTENTION_HEAD_DIM>,
+//             )>()
+//             .permute::<_, Axes4<0, 2, 1, 3>>();
+//         let value_states = x
+//             .matmul(self.v_proj.permute())
+//             .reshape::<(
+//                 Batch,
+//                 Const<1>,
+//                 Const<NUM_KV_HEADS>,
+//                 Const<ATTENTION_HEAD_DIM>,
+//             )>()
+//             .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        // Apply the Rotary Embeddings
-        let query_states =
-            apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM>(query_states, rotary_embeddings);
+//         // Apply the Rotary Embeddings
+//         let query_states =
+//             apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM>(query_states, rotary_embeddings);
 
-        let key_states =
-            apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM>(key_states, rotary_embeddings);
+//         let key_states =
+//             apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM>(key_states, rotary_embeddings);
 
-        // Now we append the KV-Cache
-        let key_states = kv_cache.keys.concat_along::<(
-            Batch,
-            Const<NUM_KV_HEADS>,
-            OutputSequenceLength,
-            Const<ATTENTION_HEAD_DIM>,
-        ), Axis<2>, _>(key_states);
+//         // Now we append the KV-Cache
+//         let key_states = kv_cache.keys.concat_along::<(
+//             Batch,
+//             Const<NUM_KV_HEADS>,
+//             OutputSequenceLength,
+//             Const<ATTENTION_HEAD_DIM>,
+//         ), Axis<2>, _>(key_states);
 
-        let value_states = kv_cache.values.concat_along::<(
-            Batch,
-            Const<NUM_KV_HEADS>,
-            OutputSequenceLength,
-            Const<ATTENTION_HEAD_DIM>,
-        ), Axis<2>, _>(value_states);
+//         let value_states = kv_cache.values.concat_along::<(
+//             Batch,
+//             Const<NUM_KV_HEADS>,
+//             OutputSequenceLength,
+//             Const<ATTENTION_HEAD_DIM>,
+//         ), Axis<2>, _>(value_states);
 
-        let kv_cache = KVCache {
-            keys: key_states,
-            values: value_states,
-        };
+//         let kv_cache = KVCache {
+//             keys: key_states,
+//             values: value_states,
+//         };
 
-        // Repeat the KV States for Grouped-Query Attention
-        let key_states = key_states
-            .expand::<(
-                Batch,
-                Const<NUM_KV_HEADS>,
-                Const<NUM_ATTENTION_GROUPS>,
-                OutputSequenceLength,
-                Const<ATTENTION_HEAD_DIM>,
-            ), Axis<2>>()
-            .reshape::<(
-                Batch,
-                Const<NUM_ATTENTION_HEADS>,
-                OutputSequenceLength,
-                Const<ATTENTION_HEAD_DIM>,
-            )>()
-            .permute::<_, Axes4<0, 1, 3, 2>>();
+//         // Repeat the KV States for Grouped-Query Attention
+//         let key_states = key_states
+//             .expand::<(
+//                 Batch,
+//                 Const<NUM_KV_HEADS>,
+//                 Const<NUM_ATTENTION_GROUPS>,
+//                 OutputSequenceLength,
+//                 Const<ATTENTION_HEAD_DIM>,
+//             ), Axis<2>>()
+//             .reshape::<(
+//                 Batch,
+//                 Const<NUM_ATTENTION_HEADS>,
+//                 OutputSequenceLength,
+//                 Const<ATTENTION_HEAD_DIM>,
+//             )>()
+//             .permute::<_, Axes4<0, 1, 3, 2>>();
 
-        let value_states = value_states
-            .expand::<(
-                Batch,
-                Const<NUM_KV_HEADS>,
-                Const<NUM_ATTENTION_GROUPS>,
-                OutputSequenceLength,
-                Const<ATTENTION_HEAD_DIM>,
-            ), Axis<2>>()
-            .reshape::<(
-                Batch,
-                Const<NUM_ATTENTION_HEADS>,
-                OutputSequenceLength,
-                Const<ATTENTION_HEAD_DIM>,
-            )>();
+//         let value_states = value_states
+//             .expand::<(
+//                 Batch,
+//                 Const<NUM_KV_HEADS>,
+//                 Const<NUM_ATTENTION_GROUPS>,
+//                 OutputSequenceLength,
+//                 Const<ATTENTION_HEAD_DIM>,
+//             ), Axis<2>>()
+//             .reshape::<(
+//                 Batch,
+//                 Const<NUM_ATTENTION_HEADS>,
+//                 OutputSequenceLength,
+//                 Const<ATTENTION_HEAD_DIM>,
+//             )>();
 
-        let scores = query_states.matmul(key_states);
-        let scores = scores * (ATTENTION_HEAD_DIM as f32).sqrt().recip();
-        let scores = scores.softmax::<3>();
+//         let scores = query_states.matmul(key_states);
+//         let scores = scores * (ATTENTION_HEAD_DIM as f32).sqrt().recip();
+//         let scores = scores.softmax::<3>();
 
-        let output = scores
-            .matmul(value_states)
-            .permute::<_, Axes4<0, 2, 1, 3>>()
-            .reshape::<(Batch, OutputSequenceLength, Const<HIDDEN_DIM>)>()
-            .matmul(self.o_proj.permute());
+//         let output = scores
+//             .matmul(value_states)
+//             .permute::<_, Axes4<0, 2, 1, 3>>()
+//             .reshape::<(Batch, OutputSequenceLength, Const<HIDDEN_DIM>)>()
+//             .matmul(self.o_proj.permute());
 
-        // Return the output along with the new kv-cache
-        (output, kv_cache)
-    }
-}
+//         // Return the output along with the new kv-cache
+//         (output, kv_cache)
+//     }
+// }
 
 // impl TransformerBlock {
 //     fn forward_kv<Batch: Dimension>()
@@ -362,75 +437,34 @@ impl SelfAttention {
 ///          Serialization Impls           ///
 //////////////////////////////////////////////
 
-impl SerializeModule for Mistral {
-    fn serialize(&self, s: &mut Serializer) {
-        // Embeddings
-        s.tensor("model.embed_tokens.weight", self.embedding);
-
-        // Transformer Layers
-        for layer_index in 0..self.transformer_layers.len() {
-            let weight_prefix = format!("model.layers.{layer_index}");
-
-            // Attention - Query Projection
-            s.tensor(
-                format!("{weight_prefix}.self_attn.q_proj.weight").as_str(),
-                self.transformer_layers[layer_index].attention.q_proj,
-            );
-
-            // Attention - Key Projection
-            s.tensor(
-                format!("{weight_prefix}.self_attn.k_proj.weight").as_str(),
-                self.transformer_layers[layer_index].attention.k_proj,
-            );
-
-            // Attention - Value Projection
-            s.tensor(
-                format!("{weight_prefix}.self_attn.v_proj.weight").as_str(),
-                self.transformer_layers[layer_index].attention.v_proj,
-            );
-
-            // Attention - Output Projection
-            s.tensor(
-                format!("{weight_prefix}.self_attn.o_proj.weight").as_str(),
-                self.transformer_layers[layer_index].attention.o_proj,
-            );
-
-            // Pre-Attention Norm
-            s.module(
-                format!("{weight_prefix}.input_layernorm.weight").as_str(),
-                &self.transformer_layers[layer_index].attention_norm,
-            );
-
-            // Feed Forward Norm
-            s.module(
-                format!("{weight_prefix}.post_attention_layernorm.weight").as_str(),
-                &self.transformer_layers[layer_index].feed_forward_norm,
-            );
-
-            // Feed Forward - Gate Projection
-            s.tensor(
-                format!("{weight_prefix}.mlp.gate_proj.weight").as_str(),
-                self.transformer_layers[layer_index].feed_forward.gate_proj,
-            );
-
-            // Feed Forward - Down Projection
-            s.tensor(
-                format!("{weight_prefix}.mlp.down_proj.weight").as_str(),
-                self.transformer_layers[layer_index].feed_forward.down_proj,
-            );
-
-            // Feed Forward - Up Projection
-            s.tensor(
-                format!("{weight_prefix}.mlp.up_proj.weight").as_str(),
-                self.transformer_layers[layer_index].feed_forward.up_proj,
-            );
+impl InitModule for MistralLM {
+    fn initialize(cx: &mut Graph) -> Self {
+        Self {
+            embedding: InitModule::initialize(cx),
+            norm: InitModule::initialize(cx),
+            lm_head: cx.named_tensor("LM Head"),
+            rotary_embeddings: {
+                let (cos, sin) = compute_rotary_embedding_frequencies();
+                (
+                    cx.named_tensor("Rope Embeddings Cos").set(cos).keep(),
+                    cx.named_tensor("Rope Embeddings Sin").set(sin).keep(),
+                )
+            },
+            layers: (0..NUM_LAYERS)
+                .map(|_| InitModule::initialize(cx))
+                .collect(),
         }
+    }
+}
 
-        // Final Norm
-        s.module("model.norm.weight", &self.norm);
-
-        // LM Head
-        s.tensor("lm_head.weight", self.lm_head);
+impl SerializeModule for MistralLM {
+    fn serialize(&self, s: &mut Serializer) {
+        s.module("model/embed_tokens", &self.embedding);
+        s.module("model/norm", &self.norm);
+        s.tensor("lm_head/weight", self.lm_head);
+        for (i, layer) in self.layers.iter().enumerate() {
+            s.module(&format!("model/layers/{i}"), layer);
+        }
     }
 }
 
@@ -438,153 +472,37 @@ impl SerializeModule for Mistral {
 ///          Initialization Impls          ///
 //////////////////////////////////////////////
 
-impl Mistral {
-    pub fn new(tokenizer_path: &str) -> Result<Self, TokenizerError> {
-        // Load the tokenizer
-        let tokenizer = SentencePieceBpeTokenizer::from_file(tokenizer_path, false)?;
-
-        // Create the graph
-        let mut prompt_processing_graph = Box::new(Graph::new());
-        let token_generation_graph = Box::new(Graph::new());
-
-        // Create the embedding
-        let embedding = prompt_processing_graph.named_tensor("embedding");
-
-        // Create the transformer layers
-
-        let transformer_layers = array::from_fn(|i| {
-            let mut attention_norm = RMSNorm::initialize(prompt_processing_graph.as_mut());
-            attention_norm.epsilon = 1e-5;
-
-            let mut feed_forward_norm = RMSNorm::initialize(prompt_processing_graph.as_mut());
-            feed_forward_norm.epsilon = 1e-5;
-
-            TransformerBlock {
-                attention: SelfAttention {
-                    q_proj: prompt_processing_graph
-                        .named_tensor(format!("layers.{i}.attention.q_proj").as_str()),
-                    k_proj: prompt_processing_graph
-                        .named_tensor(format!("layers.{i}.attention.k_proj").as_str()),
-                    v_proj: prompt_processing_graph
-                        .named_tensor(format!("layers.{i}.attention.v_proj").as_str()),
-                    o_proj: prompt_processing_graph
-                        .named_tensor(format!("layers.{i}.attention.o_proj").as_str()),
-                },
-                attention_norm: attention_norm,
-                feed_forward: FeedForward {
-                    gate_proj: prompt_processing_graph
-                        .named_tensor(format!("layers.{i}.mlp.gate_proj").as_str()),
-                    down_proj: prompt_processing_graph
-                        .named_tensor(format!("layers.{i}.mlp.down_proj").as_str()),
-                    up_proj: prompt_processing_graph
-                        .named_tensor(format!("layers.{i}.mlp.up_proj").as_str()),
-                },
-                feed_forward_norm: feed_forward_norm,
-            }
-        });
-
-        // Create the norm
-        let norm = RMSNorm::initialize(prompt_processing_graph.as_mut());
-
-        // Create the lm head
-        let lm_head = prompt_processing_graph.named_tensor("lm_head");
-
-        // // Create the input node
-        let input = prompt_processing_graph.named_tensor::<(Const<1>, Dyn<'s'>)>("input_node");
-
-        // Create the throwaway rope graph (just to compute RoPE)
-        let mut rope_graph = Box::new(Graph::new());
-
-        let (rope_cos, rope_sin) =
-            compute_rotary_embedding_frequencies::<Const<MAX_POSITION_EMBEDDINGS>>(&mut rope_graph);
-
-        rope_cos.retrieve();
-        rope_sin.retrieve();
-
-        rope_graph
-            .compile(<(PreGenericCompiler, MetalFp32Compiler, PostGenericCompiler)>::default());
-
-        rope_graph.execute();
-
-        // Build the actual rope embeddings
-        let (cos, sin) = (
-            prompt_processing_graph.named_tensor("rope_embeddings_cos"),
-            prompt_processing_graph.named_tensor("rope_embeddings_sin"),
-        );
-        cos.set(rope_cos.data());
-        sin.set(rope_sin.data());
-
-        let rotary_embeddings = (cos, sin);
-
-        Ok(Self {
-            tokenizer,
-            prompt_processing_graph,
-            token_generation_graph,
-            embedding,
-            transformer_layers,
-            norm,
-            lm_head,
-            input,
-            rotary_embeddings,
-        })
-    }
-}
-
 //////////////////////////////////////////////
 ///            Helper Functions            ///
 //////////////////////////////////////////////
 
 // From examples/llama
-// Currently just an argmax, do actual sampling here
-fn sample_index(dist: &[f32]) -> usize {
-    dist.iter()
-        .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-        .unwrap()
-        .0
-}
-
-// Helper to deserialize safetensors stored in bf16
-pub fn convert_vector_bf16_f32(tensor_view: &TensorView<'_>) -> Vec<f32> {
-    // Get the data
-    let data = tensor_view.data();
-
-    // Create a mutable vector to store the final output
-    let mut output: Vec<f32> = Vec::with_capacity(data.len() / 2);
-
-    // Iterate over the raw buffer in chunks of 2 bytes
-    for chunk in data.chunks_exact(2) {
-        let value = bf16::from_le_bytes(chunk.try_into().unwrap()).to_f32();
-        output.push(value);
-    }
-
-    output
-}
 
 // Rotary Embeddings
-pub fn compute_rotary_embedding_frequencies<SequenceLength: Dimension>(
-    graph: &mut Graph,
-) -> (
-    GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
-    GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
-) {
-    let frequencies =
-        (graph.arange::<Const<ATTENTION_HEAD_DIM_OVER_2>>() * 2.0) / (ATTENTION_HEAD_DIM as f32);
+pub fn compute_rotary_embedding_frequencies() -> (Vec<f32>, Vec<f32>) {
+    let mut rope_graph = Graph::new();
+
+    let frequencies = (rope_graph.arange::<Const<ATTENTION_HEAD_DIM_OVER_2>>() * 2.0)
+        / (ATTENTION_HEAD_DIM as f32);
 
     let frequencies = frequencies
         .pow2(ROPE_THETA)
         .recip()
         .reshape::<R2<1, ATTENTION_HEAD_DIM_OVER_2>>();
-    let frequencies = frequencies.concat_along::<_, Axis<1>, _>(frequencies);
-    let t = graph
-        .arange::<SequenceLength>()
-        .reshape::<(SequenceLength, Const<1>)>();
+    let frequencies: GraphTensor<R2<1, ATTENTION_HEAD_DIM>> =
+        frequencies.concat_along::<_, Axis<1>, _>(frequencies);
+    let t = rope_graph
+        .arange::<Const<MAX_POSITION_EMBEDDINGS>>()
+        .reshape::<(Const<MAX_POSITION_EMBEDDINGS>, Const<1>)>();
     let frequencies = t.matmul(frequencies);
 
-    let cos = frequencies.cos();
-    let sin = frequencies.sin();
+    let cos = frequencies.cos().retrieve();
+    let sin = frequencies.sin().retrieve();
 
-    (cos, sin)
+    rope_graph.compile(<(PreGenericCompiler, MetalFp32Compiler, PostGenericCompiler)>::default());
+
+    rope_graph.execute();
+    (cos.data(), sin.data())
 }
 
 pub fn rotate_half<
@@ -615,6 +533,7 @@ pub fn rotate_half<
     (-x2).concat_along::<_, Axis<3>, _>(x1)
 }
 
+#[allow(clippy::type_complexity)]
 pub fn apply_rotary_embeddings<
     Batch: Dimension,
     SequenceLength: Dimension,
@@ -627,7 +546,7 @@ pub fn apply_rotary_embeddings<
         SequenceLength,
         Const<ATTENTION_HEAD_DIM>,
     )>,
-    frequencies: (
+    (cos, sin): (
         GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
         GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
     ),
@@ -637,8 +556,6 @@ pub fn apply_rotary_embeddings<
     SequenceLength,
     Const<ATTENTION_HEAD_DIM>,
 )> {
-    let (cos, sin) = frequencies;
-
     let input_half: GraphTensor<(
         Batch,
         NumAttentionHeads,
@@ -647,283 +564,4 @@ pub fn apply_rotary_embeddings<
     )> = rotate_half::<_, _, _, ATTENTION_HEAD_DIM>(input);
 
     (input * cos.expand()) + (input_half * sin.expand())
-}
-
-pub fn slice_last_sequence<Batch: Dimension, SequenceLength: Dimension, Hidden: Dimension>(
-    input: GraphTensor<(Batch, SequenceLength, Hidden)>,
-) -> GraphTensor<(Batch, Const<1>, Hidden)> {
-    let sequence_length = &input.shape.shape()[1];
-    let sequence_length = Expression::from(sequence_length.clone());
-
-    input
-        .slice((.., (sequence_length - 1).., ..))
-        .contiguous()
-        .realize()
-}
-
-impl Mistral {
-    pub fn debug_run(&mut self, prompt: &str) {
-        // println!("Encoding Prompt");
-        let input_data: Vec<f32> = self.encode(prompt);
-        // self.input.set_dyn(input_data, vec![1, sequence_length]);
-        // println!("Defining Computation Graph");
-        let input_embeddings = self.embedding.gather(self.input);
-        let hidden_states = self.forward(input_embeddings);
-        let logits = hidden_states.matmul(self.lm_head.permute()).retrieve();
-
-        // Get the output ids
-        // let output_ids = logits.argmax().retrieve();
-        // let last_logit = logits
-        //     .slice((.., Expression::from(sequence_length - 1).., ..))
-        //     .contiguous()
-        //     .reshape::<R1<VOCAB_SIZE>>()
-        //     .retrieve();
-
-        let last_logit = slice_last_sequence(logits)
-            .reshape::<R1<VOCAB_SIZE>>()
-            .retrieve();
-
-        // println!("Compiling Graph");
-        self.compile_forward_graph();
-
-        // Let's call keep weights on the mistral model
-        keep_weights(self, self.input.graph());
-
-        let mut context_vector = self.encode(prompt);
-        let mut completion = String::new();
-        let max_new_tokens = 4;
-        for i in 0..max_new_tokens {
-            println!("########################### Iteration {i} ###########################");
-            let _context = context_vector.clone();
-            let sequence_length = _context.len();
-            // self.graph.set_dyn_dim('s', sequence_length);
-            // println!("Sequence Length: {sequence_length}");
-            // println!("Input Vectors: {:?}", _context);
-            self.input.set_dyn(_context, vec![1, sequence_length]);
-
-            // println!("Executing Graph");
-            // self.graph.execute_debug();
-            self.prompt_processing_graph.execute();
-
-            // println!("------- Last Logits -------");
-            let last_logit_data = last_logit.data();
-            let output_ids = sample_index(&last_logit_data);
-            // println!("Last Logits Shape: {:?}", last_logit.shape);
-            // println!("Last Logits Data Length: {:?}", last_logit_data.len());
-            context_vector.push(output_ids as f32);
-
-            // Decode token
-            let output_token = self.decode(vec![output_ids as f32]);
-            // context.push_str(output_token.as_str());
-            completion.push_str(&output_token);
-
-            // println!("------- Logits -------");
-            // println!("Logits Shape: {:?}", logits.shape);
-            // println!("Logits Data Length: {:?}", logits.data().len());
-            // println!("Logits: {:?}", logits);
-            // println!(
-            //     "Tokens: {:?}",
-            //     context_vector.iter().map(|x| *x as u32).collect_vec()
-            // );
-
-            println!("{}{}", prompt.on_black().white().bold(), completion.green());
-
-            logits.drop();
-            last_logit.drop();
-        }
-    }
-
-    pub fn forward<Batch: Dimension, SequenceLength: Dimension>(
-        &mut self,
-        input_embeddings: GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
-    ) -> GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)> {
-        // Get the sequence length as a run-time value
-        let sequence_length = &input_embeddings.shape.shape()[1];
-
-        // Start with the initial hidden states as the inputs
-        let mut hidden_states = input_embeddings;
-
-        // Extract the Rotary Embeddings
-        let (cos, sin) = self.rotary_embeddings;
-        let cos = cos
-            .slice((..Expression::from(sequence_length.clone()), ..))
-            .contiguous();
-        let sin = sin
-            .slice((..Expression::from(sequence_length.clone()), ..))
-            .contiguous();
-
-        let rotary_embeddings = (cos.realize(), sin.realize());
-
-        // Now, we loop over all layers
-        for layer_index in 0..NUM_LAYERS {
-            hidden_states =
-                self.transformer_layers[layer_index].forward(hidden_states, rotary_embeddings);
-        }
-
-        // Finally, we call the final norm
-        hidden_states = self.norm.forward(hidden_states);
-
-        // Return
-        hidden_states
-    }
-
-    pub fn compile_forward_graph(&mut self) {
-        self.prompt_processing_graph.compile(<(
-            PreGenericCompiler,
-            MetalFp16Compiler,
-            PostGenericCompiler,
-        )>::default());
-    }
-
-    // Method to encode text as vector
-    pub fn encode(&self, text: &str) -> Vec<f32> {
-        let mut vector = self
-            .tokenizer
-            .encode(text, None, text.len(), &TruncationStrategy::LongestFirst, 0)
-            .token_ids
-            .iter()
-            .map(|&x| x as f32)
-            .collect_vec();
-
-        vector.insert(0, 1.0); // Start token
-
-        vector
-    }
-
-    // Method to decode tokens as text
-    pub fn decode(&self, token_ids: Vec<f32>) -> String {
-        let binding = token_ids.iter().map(|i| *i as i64).collect_vec();
-        let token_ids = binding.as_slice();
-
-        self.tokenizer
-            .decode(token_ids, true, false)
-            .replace("<0x0A>", "\n")
-    }
-
-    pub fn load(&mut self, file_paths: Vec<String>) -> Result<(), String> {
-        // First, let's get a mapping from node to weight name
-        let mut weight_name_tensor_mapping = HashMap::new();
-
-        // Embeddings
-        weight_name_tensor_mapping
-            .insert("model.embed_tokens.weight".to_string(), self.embedding.id);
-
-        // Transformer Layers
-        for layer_index in 0..self.transformer_layers.len() {
-            let weight_prefix = format!("model.layers.{layer_index}");
-
-            // Query Projection
-            let weight_name = format!("{weight_prefix}.self_attn.q_proj.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index].attention.q_proj.id,
-            );
-
-            // Key Projection
-            let weight_name = format!("{weight_prefix}.self_attn.k_proj.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index].attention.k_proj.id,
-            );
-
-            // Value Projection
-            let weight_name = format!("{weight_prefix}.self_attn.v_proj.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index].attention.v_proj.id,
-            );
-
-            // Output Projection
-            let weight_name = format!("{weight_prefix}.self_attn.o_proj.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index].attention.o_proj.id,
-            );
-
-            // Pre-Attention Norm
-            let weight_name = format!("{weight_prefix}.input_layernorm.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index]
-                    .attention_norm
-                    .weight
-                    .id,
-            );
-
-            // Feed Forward Norm
-            let weight_name = format!("{weight_prefix}.post_attention_layernorm.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index]
-                    .feed_forward_norm
-                    .weight
-                    .id,
-            );
-
-            // Feed Forward Gate Projection
-            let weight_name = format!("{weight_prefix}.mlp.gate_proj.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index]
-                    .feed_forward
-                    .gate_proj
-                    .id,
-            );
-
-            // Feed Forward Down Projection
-            let weight_name = format!("{weight_prefix}.mlp.down_proj.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index]
-                    .feed_forward
-                    .down_proj
-                    .id,
-            );
-
-            // Feed Forward Up Projection
-            let weight_name = format!("{weight_prefix}.mlp.up_proj.weight");
-            weight_name_tensor_mapping.insert(
-                weight_name.clone(),
-                self.transformer_layers[layer_index].feed_forward.up_proj.id,
-            );
-        }
-
-        // Final Norm
-        weight_name_tensor_mapping.insert("model.norm.weight".to_string(), self.norm.weight.id);
-
-        // LM Head
-        weight_name_tensor_mapping.insert("lm_head.weight".to_string(), self.lm_head.id);
-
-        // And then we loop over all of them an load
-        for (weight_name, node_index) in weight_name_tensor_mapping.drain() {
-            if let Some(loading_node) = self
-                .prompt_processing_graph
-                .graph
-                .node_weight_mut(node_index)
-                .and_then(|op| op.as_any_mut().downcast_mut::<Function>())
-            {
-                let file_paths = file_paths.clone();
-                loading_node.1 = Box::new(move |_| {
-                    let mut output_vector = vec![];
-                    // Do the loading here
-                    for file_path in file_paths.iter() {
-                        let file = File::open(file_path).unwrap();
-                        let buffer = unsafe { MmapOptions::new().map(&file).unwrap() };
-                        let safetensors = SafeTensors::deserialize(&buffer).unwrap();
-
-                        if let Ok(tensor_view) = safetensors.tensor(weight_name.as_str()) {
-                            output_vector = vec![Tensor {
-                                data: Box::new(convert_vector_bf16_f32(&tensor_view)),
-                            }];
-                            break;
-                        }
-                    }
-
-                    // Return
-                    output_vector
-                });
-            }
-        }
-        Ok(())
-    }
 }
