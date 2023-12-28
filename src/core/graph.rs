@@ -197,7 +197,7 @@ impl Graph {
             }
 
             // Execute
-            let tensors = self.graph.node_weight(*node).unwrap().process(srcs);
+            let tensors = self.graph.node_weight_mut(*node).unwrap().process(srcs);
             for (i, tensor) in tensors.into_iter().enumerate() {
                 self.tensors.insert((*node, i as u8), tensor);
             }
@@ -231,7 +231,7 @@ impl Graph {
             }
 
             // All sources are ready, execute
-            let tensors = self.graph.node_weight(*node).unwrap().process(srcs);
+            let tensors = self.graph.node_weight_mut(*node).unwrap().process(srcs);
             for (i, tensor) in tensors.into_iter().enumerate() {
                 self.tensors.insert((*node, i as u8), tensor);
             }
@@ -293,7 +293,7 @@ impl Graph {
             std::io::stdout().flush().unwrap();
             // Execute
             let now = std::time::Instant::now();
-            let tensors = self.graph.node_weight(*node).unwrap().process(srcs);
+            let tensors = self.graph.node_weight_mut(*node).unwrap().process(srcs);
             let elapsed = now.elapsed();
             println!(
                 "{:.>1$}",
