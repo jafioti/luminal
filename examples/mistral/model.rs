@@ -16,8 +16,8 @@ use std::{collections::HashMap, fs::File};
 
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
-// pub const NUM_LAYERS: usize = 32;
-pub const NUM_LAYERS: usize = 1;
+pub const NUM_LAYERS: usize = 32;
+// pub const NUM_LAYERS: usize = 1;
 pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
@@ -221,6 +221,82 @@ impl TransformerBlock {
 }
 
 //////////////////////////////////////////////
+///          Serialization Impls           ///
+//////////////////////////////////////////////
+
+impl SerializeModule for Mistral {
+    fn serialize(&self, s: &mut Serializer) {
+        // Embeddings
+        s.tensor("model.embed_tokens.weight", self.embedding);
+
+        // Transformer Layers
+        for layer_index in 0..self.transformer_layers.len() {
+            let weight_prefix = format!("model.layers.{layer_index}");
+
+            // Attention - Query Projection
+            s.tensor(
+                format!("{weight_prefix}.self_attn.q_proj.weight").as_str(),
+                self.transformer_layers[layer_index].attention.q_proj,
+            );
+
+            // Attention - Key Projection
+            s.tensor(
+                format!("{weight_prefix}.self_attn.k_proj.weight").as_str(),
+                self.transformer_layers[layer_index].attention.k_proj,
+            );
+
+            // Attention - Value Projection
+            s.tensor(
+                format!("{weight_prefix}.self_attn.v_proj.weight").as_str(),
+                self.transformer_layers[layer_index].attention.v_proj,
+            );
+
+            // Attention - Output Projection
+            s.tensor(
+                format!("{weight_prefix}.self_attn.o_proj.weight").as_str(),
+                self.transformer_layers[layer_index].attention.o_proj,
+            );
+
+            // Pre-Attention Norm
+            s.module(
+                format!("{weight_prefix}.input_layernorm.weight").as_str(),
+                &self.transformer_layers[layer_index].attention_norm,
+            );
+
+            // Feed Forward Norm
+            s.module(
+                format!("{weight_prefix}.post_attention_layernorm.weight").as_str(),
+                &self.transformer_layers[layer_index].feed_forward_norm,
+            );
+
+            // Feed Forward - Gate Projection
+            s.tensor(
+                format!("{weight_prefix}.mlp.gate_proj.weight").as_str(),
+                self.transformer_layers[layer_index].feed_forward.gate_proj,
+            );
+
+            // Feed Forward - Down Projection
+            s.tensor(
+                format!("{weight_prefix}.mlp.down_proj.weight").as_str(),
+                self.transformer_layers[layer_index].feed_forward.down_proj,
+            );
+
+            // Feed Forward - Up Projection
+            s.tensor(
+                format!("{weight_prefix}.mlp.up_proj.weight").as_str(),
+                self.transformer_layers[layer_index].feed_forward.up_proj,
+            );
+        }
+
+        // Final Norm
+        s.module("model.norm.weight", &self.norm);
+
+        // LM Head
+        s.tensor("lm_head.weight", self.lm_head);
+    }
+}
+
+//////////////////////////////////////////////
 ///            Helper Functions            ///
 //////////////////////////////////////////////
 
@@ -376,6 +452,9 @@ impl Mistral {
 
         // println!("Compiling Graph");
         self.compile_forward_graph();
+
+        // Let's call keep weights on the mistral model
+        keep_weights(self, self.input.graph());
 
         let mut context_vector = self.encode(prompt);
         let mut completion = String::new();
@@ -608,7 +687,7 @@ impl Mistral {
                 self.transformer_layers[layer_index].attention.o_proj.id,
             );
 
-            // Pre-SelfAttention Norm
+            // Pre-Attention Norm
             let weight_name = format!("{weight_prefix}.input_layernorm.weight");
             weight_name_tensor_mapping.insert(
                 weight_name.clone(),
