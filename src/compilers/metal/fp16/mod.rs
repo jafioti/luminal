@@ -19,6 +19,7 @@ pub type MetalFp16Compiler = (
     rms_norm::RMSNormCompiler,
     super::other::CopyCompiler<f16>,
     super::command_buffer::CommandBufferCompiler,
+    super::storage_buffer::StorageBufferCompiler,
 );
 
 #[cfg(test)]

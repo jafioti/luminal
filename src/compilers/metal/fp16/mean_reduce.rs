@@ -118,7 +118,7 @@ impl MetalKernelForward for MetalMeanReduce {
 }
 
 impl Operator for MetalMeanReduce {
-    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup buffers
             let a = tensors[0]
