@@ -8,7 +8,7 @@ use rust_tokenizers::{
     tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy},
 };
 use safetensors::{tensor::TensorView, SafeTensors};
-use std::{collections::HashMap, fs::File};
+use std::{array, collections::HashMap, fs::File};
 
 //////////////////////////////////////////////
 ///          Mistral 7B Config             ///
@@ -16,8 +16,8 @@ use std::{collections::HashMap, fs::File};
 
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
-pub const NUM_LAYERS: usize = 32;
-// pub const NUM_LAYERS: usize = 1;
+// pub const NUM_LAYERS: usize = 32;
+pub const NUM_LAYERS: usize = 1;
 pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
@@ -57,9 +57,15 @@ pub struct TransformerBlock {
     pub feed_forward_norm: RMSNorm<HIDDEN_DIM>,
 }
 
+pub type RotaryEmbeddings<SequenceLength> = (
+    GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
+    GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
+);
+
 pub struct Mistral {
-    // Graph
-    pub graph: Box<Graph>,
+    // Graphs
+    pub prompt_processing_graph: Box<Graph>,
+    pub token_generation_graph: Box<Graph>,
 
     // Tokenizer
     pub tokenizer: SentencePieceBpeTokenizer,
@@ -68,7 +74,7 @@ pub struct Mistral {
     pub embedding: GraphTensor<R2<VOCAB_SIZE, HIDDEN_DIM>>,
 
     // Transformer Layers
-    pub transformer_layers: Vec<TransformerBlock>,
+    pub transformer_layers: [TransformerBlock; NUM_LAYERS],
 
     // Final Norm layer
     pub norm: RMSNorm<HIDDEN_DIM>,
@@ -77,10 +83,7 @@ pub struct Mistral {
     pub lm_head: GraphTensor<R2<VOCAB_SIZE, HIDDEN_DIM>>,
 
     // RoPE Embeddings
-    pub rotary_embeddings: (
-        GraphTensor<R2<MAX_POSITION_EMBEDDINGS, ATTENTION_HEAD_DIM>>,
-        GraphTensor<R2<MAX_POSITION_EMBEDDINGS, ATTENTION_HEAD_DIM>>,
-    ),
+    pub rotary_embeddings: RotaryEmbeddings<Const<MAX_POSITION_EMBEDDINGS>>,
 
     // Input Layer
     pub input: GraphTensor<(Const<1>, Dyn<'s'>)>,
@@ -104,10 +107,7 @@ impl SelfAttention {
     fn forward<Batch: Dimension, SequenceLength: Dimension>(
         &self,
         x: GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
-        rotary_embeddings: (
-            GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
-            GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
-        ),
+        rotary_embeddings: RotaryEmbeddings<SequenceLength>,
     ) -> GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)> {
         // Apply the Projections
         let query_states = x
@@ -194,10 +194,7 @@ impl TransformerBlock {
     fn forward<Batch: Dimension, SequenceLength: Dimension>(
         &self,
         x: GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)>,
-        rotary_embeddings: (
-            GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
-            GraphTensor<(SequenceLength, Const<ATTENTION_HEAD_DIM>)>,
-        ),
+        rotary_embeddings: RotaryEmbeddings<SequenceLength>,
     ) -> GraphTensor<(Batch, SequenceLength, Const<HIDDEN_DIM>)> {
         // Attention
         let mut residual = x;
@@ -219,6 +216,147 @@ impl TransformerBlock {
         x
     }
 }
+
+//////////////////////////////////////////////
+///        KV-Cache Forward Impls          ///
+//////////////////////////////////////////////
+
+pub struct KVCache<Batch: Dimension, SequenceLength: Dimension> {
+    pub keys: GraphTensor<(
+        Batch,
+        Const<NUM_KV_HEADS>,
+        SequenceLength,
+        Const<ATTENTION_HEAD_DIM>,
+    )>,
+    pub values: GraphTensor<(
+        Batch,
+        Const<NUM_KV_HEADS>,
+        SequenceLength,
+        Const<ATTENTION_HEAD_DIM>,
+    )>,
+}
+
+impl SelfAttention {
+    fn forward_kv<
+        Batch: Dimension,
+        OutputSequenceLength: Dimension,
+        PreviousSequenceLength: Dimension,
+    >(
+        &self,
+        x: GraphTensor<(Batch, Const<1>, Const<HIDDEN_DIM>)>,
+        rotary_embeddings: RotaryEmbeddings<Const<1>>,
+        kv_cache: KVCache<Batch, PreviousSequenceLength>,
+    ) -> (
+        GraphTensor<(Batch, OutputSequenceLength, Const<HIDDEN_DIM>)>,
+        KVCache<Batch, OutputSequenceLength>,
+    ) {
+        // Apply the Projections
+        let query_states = x
+            .matmul(self.q_proj.permute())
+            .reshape::<(
+                Batch,
+                Const<1>,
+                Const<NUM_ATTENTION_HEADS>,
+                Const<ATTENTION_HEAD_DIM>,
+            )>()
+            .permute::<_, Axes4<0, 2, 1, 3>>();
+
+        let key_states = x
+            .matmul(self.k_proj.permute())
+            .reshape::<(
+                Batch,
+                Const<1>,
+                Const<NUM_KV_HEADS>,
+                Const<ATTENTION_HEAD_DIM>,
+            )>()
+            .permute::<_, Axes4<0, 2, 1, 3>>();
+        let value_states = x
+            .matmul(self.v_proj.permute())
+            .reshape::<(
+                Batch,
+                Const<1>,
+                Const<NUM_KV_HEADS>,
+                Const<ATTENTION_HEAD_DIM>,
+            )>()
+            .permute::<_, Axes4<0, 2, 1, 3>>();
+
+        // Apply the Rotary Embeddings
+        let query_states =
+            apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM>(query_states, rotary_embeddings);
+
+        let key_states =
+            apply_rotary_embeddings::<_, _, _, ATTENTION_HEAD_DIM>(key_states, rotary_embeddings);
+
+        // Now we append the KV-Cache
+        let key_states = kv_cache.keys.concat_along::<(
+            Batch,
+            Const<NUM_KV_HEADS>,
+            OutputSequenceLength,
+            Const<ATTENTION_HEAD_DIM>,
+        ), Axis<2>, _>(key_states);
+
+        let value_states = kv_cache.values.concat_along::<(
+            Batch,
+            Const<NUM_KV_HEADS>,
+            OutputSequenceLength,
+            Const<ATTENTION_HEAD_DIM>,
+        ), Axis<2>, _>(value_states);
+
+        let kv_cache = KVCache {
+            keys: key_states,
+            values: value_states,
+        };
+
+        // Repeat the KV States for Grouped-Query Attention
+        let key_states = key_states
+            .expand::<(
+                Batch,
+                Const<NUM_KV_HEADS>,
+                Const<NUM_ATTENTION_GROUPS>,
+                OutputSequenceLength,
+                Const<ATTENTION_HEAD_DIM>,
+            ), Axis<2>>()
+            .reshape::<(
+                Batch,
+                Const<NUM_ATTENTION_HEADS>,
+                OutputSequenceLength,
+                Const<ATTENTION_HEAD_DIM>,
+            )>()
+            .permute::<_, Axes4<0, 1, 3, 2>>();
+
+        let value_states = value_states
+            .expand::<(
+                Batch,
+                Const<NUM_KV_HEADS>,
+                Const<NUM_ATTENTION_GROUPS>,
+                OutputSequenceLength,
+                Const<ATTENTION_HEAD_DIM>,
+            ), Axis<2>>()
+            .reshape::<(
+                Batch,
+                Const<NUM_ATTENTION_HEADS>,
+                OutputSequenceLength,
+                Const<ATTENTION_HEAD_DIM>,
+            )>();
+
+        let scores = query_states.matmul(key_states);
+        let scores = scores * (ATTENTION_HEAD_DIM as f32).sqrt().recip();
+        let scores = scores.softmax::<3>();
+
+        let output = scores
+            .matmul(value_states)
+            .permute::<_, Axes4<0, 2, 1, 3>>()
+            .reshape::<(Batch, OutputSequenceLength, Const<HIDDEN_DIM>)>()
+            .matmul(self.o_proj.permute());
+
+        // Return the output along with the new kv-cache
+        (output, kv_cache)
+    }
+}
+
+// impl TransformerBlock {
+//     fn forward_kv<Batch: Dimension>()
+// }
 
 //////////////////////////////////////////////
 ///          Serialization Impls           ///
@@ -293,6 +431,102 @@ impl SerializeModule for Mistral {
 
         // LM Head
         s.tensor("lm_head.weight", self.lm_head);
+    }
+}
+
+//////////////////////////////////////////////
+///          Initialization Impls          ///
+//////////////////////////////////////////////
+
+impl Mistral {
+    pub fn new(tokenizer_path: &str) -> Result<Self, TokenizerError> {
+        // Load the tokenizer
+        let tokenizer = SentencePieceBpeTokenizer::from_file(tokenizer_path, false)?;
+
+        // Create the graph
+        let mut prompt_processing_graph = Box::new(Graph::new());
+        let token_generation_graph = Box::new(Graph::new());
+
+        // Create the embedding
+        let embedding = prompt_processing_graph.named_tensor("embedding");
+
+        // Create the transformer layers
+
+        let transformer_layers = array::from_fn(|i| {
+            let mut attention_norm = RMSNorm::initialize(prompt_processing_graph.as_mut());
+            attention_norm.epsilon = 1e-5;
+
+            let mut feed_forward_norm = RMSNorm::initialize(prompt_processing_graph.as_mut());
+            feed_forward_norm.epsilon = 1e-5;
+
+            TransformerBlock {
+                attention: SelfAttention {
+                    q_proj: prompt_processing_graph
+                        .named_tensor(format!("layers.{i}.attention.q_proj").as_str()),
+                    k_proj: prompt_processing_graph
+                        .named_tensor(format!("layers.{i}.attention.k_proj").as_str()),
+                    v_proj: prompt_processing_graph
+                        .named_tensor(format!("layers.{i}.attention.v_proj").as_str()),
+                    o_proj: prompt_processing_graph
+                        .named_tensor(format!("layers.{i}.attention.o_proj").as_str()),
+                },
+                attention_norm: attention_norm,
+                feed_forward: FeedForward {
+                    gate_proj: prompt_processing_graph
+                        .named_tensor(format!("layers.{i}.mlp.gate_proj").as_str()),
+                    down_proj: prompt_processing_graph
+                        .named_tensor(format!("layers.{i}.mlp.down_proj").as_str()),
+                    up_proj: prompt_processing_graph
+                        .named_tensor(format!("layers.{i}.mlp.up_proj").as_str()),
+                },
+                feed_forward_norm: feed_forward_norm,
+            }
+        });
+
+        // Create the norm
+        let norm = RMSNorm::initialize(prompt_processing_graph.as_mut());
+
+        // Create the lm head
+        let lm_head = prompt_processing_graph.named_tensor("lm_head");
+
+        // // Create the input node
+        let input = prompt_processing_graph.named_tensor::<(Const<1>, Dyn<'s'>)>("input_node");
+
+        // Create the throwaway rope graph (just to compute RoPE)
+        let mut rope_graph = Box::new(Graph::new());
+
+        let (rope_cos, rope_sin) =
+            compute_rotary_embedding_frequencies::<Const<MAX_POSITION_EMBEDDINGS>>(&mut rope_graph);
+
+        rope_cos.retrieve();
+        rope_sin.retrieve();
+
+        rope_graph
+            .compile(<(PreGenericCompiler, MetalFp32Compiler, PostGenericCompiler)>::default());
+
+        rope_graph.execute();
+
+        // Build the actual rope embeddings
+        let (cos, sin) = (
+            prompt_processing_graph.named_tensor("rope_embeddings_cos"),
+            prompt_processing_graph.named_tensor("rope_embeddings_sin"),
+        );
+        cos.set(rope_cos.data());
+        sin.set(rope_sin.data());
+
+        let rotary_embeddings = (cos, sin);
+
+        Ok(Self {
+            tokenizer,
+            prompt_processing_graph,
+            token_generation_graph,
+            embedding,
+            transformer_layers,
+            norm,
+            lm_head,
+            input,
+            rotary_embeddings,
+        })
     }
 }
 
@@ -431,7 +665,6 @@ impl Mistral {
     pub fn debug_run(&mut self, prompt: &str) {
         // println!("Encoding Prompt");
         let input_data: Vec<f32> = self.encode(prompt);
-        let sequence_length = input_data.len();
         // self.input.set_dyn(input_data, vec![1, sequence_length]);
         // println!("Defining Computation Graph");
         let input_embeddings = self.embedding.gather(self.input);
@@ -464,19 +697,19 @@ impl Mistral {
             let _context = context_vector.clone();
             let sequence_length = _context.len();
             // self.graph.set_dyn_dim('s', sequence_length);
-            println!("Sequence Length: {sequence_length}");
-            println!("Input Vectors: {:?}", _context);
+            // println!("Sequence Length: {sequence_length}");
+            // println!("Input Vectors: {:?}", _context);
             self.input.set_dyn(_context, vec![1, sequence_length]);
 
             // println!("Executing Graph");
             // self.graph.execute_debug();
-            self.graph.execute();
+            self.prompt_processing_graph.execute();
 
-            println!("------- Last Logits -------");
+            // println!("------- Last Logits -------");
             let last_logit_data = last_logit.data();
             let output_ids = sample_index(&last_logit_data);
-            println!("Last Logits Shape: {:?}", last_logit.shape);
-            println!("Last Logits Data Length: {:?}", last_logit_data.len());
+            // println!("Last Logits Shape: {:?}", last_logit.shape);
+            // println!("Last Logits Data Length: {:?}", last_logit_data.len());
             context_vector.push(output_ids as f32);
 
             // Decode token
@@ -484,10 +717,10 @@ impl Mistral {
             // context.push_str(output_token.as_str());
             completion.push_str(&output_token);
 
-            println!("------- Logits -------");
-            println!("Logits Shape: {:?}", logits.shape);
-            println!("Logits Data Length: {:?}", logits.data().len());
-            println!("Logits: {:?}", logits);
+            // println!("------- Logits -------");
+            // println!("Logits Shape: {:?}", logits.shape);
+            // println!("Logits Data Length: {:?}", logits.data().len());
+            // println!("Logits: {:?}", logits);
             // println!(
             //     "Tokens: {:?}",
             //     context_vector.iter().map(|x| *x as u32).collect_vec()
@@ -535,91 +768,11 @@ impl Mistral {
     }
 
     pub fn compile_forward_graph(&mut self) {
-        self.graph
-            .compile(<(PreGenericCompiler, MetalFp16Compiler, PostGenericCompiler)>::default());
-    }
-
-    // Initializer
-    pub fn new(tokenizer_path: &str) -> Result<Self, TokenizerError> {
-        // Load the tokenizer
-        let tokenizer = SentencePieceBpeTokenizer::from_file(tokenizer_path, false)?;
-
-        // Create the graph
-        let mut graph = Box::new(Graph::new());
-
-        // Create the embedding
-        let embedding = graph.named_tensor("embedding");
-
-        // Create the transformer layers
-        let transformer_layers = (0..NUM_LAYERS)
-            .map(|i| {
-                let mut attention_norm = RMSNorm::initialize(graph.as_mut());
-                attention_norm.epsilon = 1e-5;
-
-                let mut feed_forward_norm = RMSNorm::initialize(graph.as_mut());
-                feed_forward_norm.epsilon = 1e-5;
-
-                TransformerBlock {
-                    attention: SelfAttention {
-                        q_proj: graph.named_tensor(format!("layers.{i}.attention.q_proj").as_str()),
-                        k_proj: graph.named_tensor(format!("layers.{i}.attention.k_proj").as_str()),
-                        v_proj: graph.named_tensor(format!("layers.{i}.attention.v_proj").as_str()),
-                        o_proj: graph.named_tensor(format!("layers.{i}.attention.o_proj").as_str()),
-                    },
-                    attention_norm: attention_norm,
-                    feed_forward: FeedForward {
-                        gate_proj: graph.named_tensor(format!("layers.{i}.mlp.gate_proj").as_str()),
-                        down_proj: graph.named_tensor(format!("layers.{i}.mlp.down_proj").as_str()),
-                        up_proj: graph.named_tensor(format!("layers.{i}.mlp.up_proj").as_str()),
-                    },
-                    feed_forward_norm: feed_forward_norm,
-                }
-            })
-            .collect_vec();
-
-        // Create the norm
-        let norm = RMSNorm::initialize(graph.as_mut());
-
-        // Create the lm head
-        let lm_head = graph.named_tensor("lm_head");
-
-        // // Create the input node
-        let input = graph.named_tensor::<(Const<1>, Dyn<'s'>)>("input_node");
-
-        // Create the throwaway rope graph (just to compute RoPE)
-        let mut rope_graph = Box::new(Graph::new());
-
-        let (rope_cos, rope_sin) =
-            compute_rotary_embedding_frequencies::<Const<MAX_POSITION_EMBEDDINGS>>(&mut rope_graph);
-
-        rope_cos.retrieve();
-        rope_sin.retrieve();
-
-        rope_graph
-            .compile(<(PreGenericCompiler, MetalFp32Compiler, PostGenericCompiler)>::default());
-
-        rope_graph.execute();
-
-        // Build the actual rope embeddings
-        let (cos, sin) = (
-            graph.named_tensor("rope_embeddings_cos"),
-            graph.named_tensor("rope_embeddings_sin"),
-        );
-        cos.set(rope_cos.data());
-        sin.set(rope_sin.data());
-
-        let rotary_embeddings = (cos, sin);
-
-        Ok(Self {
-            tokenizer,
-            graph,
-            embedding,
-            transformer_layers,
-            norm,
-            lm_head,
-            input,
-            rotary_embeddings,
-        })
+        self.prompt_processing_graph.compile(<(
+            PreGenericCompiler,
+            MetalFp16Compiler,
+            PostGenericCompiler,
+        )>::default());
     }
 
     // Method to encode text as vector
@@ -744,7 +897,7 @@ impl Mistral {
         // And then we loop over all of them an load
         for (weight_name, node_index) in weight_name_tensor_mapping.drain() {
             if let Some(loading_node) = self
-                .graph
+                .prompt_processing_graph
                 .graph
                 .node_weight_mut(node_index)
                 .and_then(|op| op.as_any_mut().downcast_mut::<Function>())
