@@ -100,7 +100,7 @@ impl<T> MetalKernelForward for MetalSub<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalSub<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_buffer = self.1.new_command_buffer();
             let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
@@ -310,7 +310,7 @@ impl<T> MetalKernelForward for MetalEqual<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalEqual<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_buffer = self.1.new_command_buffer();
             let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
@@ -485,7 +485,7 @@ kernel void metal_gather(device float *inp [[buffer(0)]], device {} *weights [[b
 }
 
 impl<T: MetalFloat> Operator for MetalGather<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup buffers
             let indexes = tensors[0]

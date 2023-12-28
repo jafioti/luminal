@@ -177,7 +177,7 @@ impl<T: MetalFloat> MetalKernelForward for MetalARange<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalARange<T> {
-    fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup command queue / command buffer / encoder
             let command_buffer = self.1.new_command_buffer();

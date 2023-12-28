@@ -9,6 +9,7 @@ use super::MetalFp16Compiler;
 use crate::{
     nn::{activation::ReLU, linear::Linear, norm::RMSNorm},
     prelude::{symbolic::Expression, Module, *},
+    tests::assert_close_precision,
 };
 
 crate::test_imports!();

@@ -115,7 +115,7 @@ kernel void kernel_matmul_2d_naive(
 }
 
 impl Operator for MetalMatmul2D {
-    fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
             let (m, k, n) = (
@@ -236,7 +236,7 @@ kernel void mkernel(
 }
 
 impl Operator for MetalBatchMatmul2D {
-    fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
             let a_strides = inp[0].1.strides();
