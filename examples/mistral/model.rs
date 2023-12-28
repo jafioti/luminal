@@ -16,11 +16,7 @@ pub const NUM_ATTENTION_HEADS: usize = 32;
 pub const NUM_KV_HEADS: usize = 8;
 pub const MLP_PROJECTION_DIM: usize = 14336;
 pub const ROPE_THETA: f32 = 1000000.0;
-
-// For some reason, setting it to 32k doesn't work
-// Setting it to a different value should affect computations
-// pub const MAX_POSITION_EMBEDDINGS: usize = 32768;
-pub const MAX_POSITION_EMBEDDINGS: usize = 30;
+pub const MAX_POSITION_EMBEDDINGS: usize = 4096;
 
 pub const NUM_ATTENTION_GROUPS: usize = NUM_ATTENTION_HEADS / NUM_KV_HEADS;
 pub const ATTENTION_HEAD_DIM: usize = HIDDEN_DIM / NUM_ATTENTION_HEADS;

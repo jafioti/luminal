@@ -49,11 +49,10 @@ fn main() -> Result<(), String> {
 
     // Run inference
     let prompt = "Santa says: Merry";
-    let input_data = encode(&tokenizer, prompt);
+    let mut context_vector = encode(&tokenizer, prompt);
 
-    let mut context_vector = input_data;
     let mut completion = String::new();
-    let max_new_tokens = 40;
+    let max_new_tokens = 4096 - context_vector.len();
     for i in 0..max_new_tokens {
         println!("########################### Iteration {i} ###########################");
         input.set_dyn(context_vector.clone(), vec![1, context_vector.len()]);
