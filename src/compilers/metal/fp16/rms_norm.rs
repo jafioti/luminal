@@ -145,7 +145,7 @@ impl MetalKernelForward for MetalRMSNorm {
 }
 
 impl Operator for MetalRMSNorm {
-    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_queue = self.2.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
