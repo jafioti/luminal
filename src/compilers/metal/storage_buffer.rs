@@ -7,10 +7,11 @@ use std::{
 
 use itertools::Itertools;
 use metal_rs::{Buffer, Device, MTLResourceOptions};
+use objc::rc::autoreleasepool;
 use petgraph::{
     algo::toposort,
     stable_graph::NodeIndex,
-    visit::{EdgeRef, IntoEdgesDirected},
+    visit::EdgeRef,
     Direction::{self},
 };
 
@@ -82,6 +83,7 @@ impl Compiler for StorageBufferCompiler {
         let available_buffers = graph
             .graph
             .node_indices()
+            .filter(|n| !graph.no_delete.contains(n))
             .filter_map(|n| {
                 if let Some(Ok(wrapper)) = graph
                     .graph
@@ -110,16 +112,19 @@ impl Compiler for StorageBufferCompiler {
         let mut buffers = vec![];
         let mut buffer_map = HashMap::new();
         for node in toposort(&graph.graph, None).unwrap() {
-            buffer_map.insert(node, (vec![], vec![]));
-            let Some(Some(wrapper)) = graph
+            if graph.no_delete.contains(&node) {
+                continue;
+            }
+            let Some(Ok(wrapper)) = graph
                 .graph
                 .node_weight(node)
                 .unwrap()
                 .custom("metal")
-                .map(|e| e.downcast_ref::<MetalKernelWrapper>().cloned())
+                .map(|e| e.downcast::<MetalKernelWrapper>())
             else {
                 continue;
             };
+            buffer_map.insert(node, (vec![], vec![]));
             let input_shapes = graph
                 .get_sources(node)
                 .into_iter()
@@ -128,52 +133,52 @@ impl Compiler for StorageBufferCompiler {
             // Assign output buffers
             for required_buffer in wrapper.0.output_buffer_sizes(&input_shapes) {
                 // Find an applicable buffer
-                if let Some((buffer_index, source_node, _)) = first_pass[&node]
-                    .1
-                    .iter()
-                    .filter(|i| available_buffers.contains_key(i))
-                    .flat_map(|i| {
-                        available_buffers[i]
-                            .0
-                            .iter()
-                            .cloned()
-                            .enumerate()
-                            .map(|(o, b)| (o, *i, b))
-                    })
-                    .find(|(_, _, size)| *size == required_buffer)
-                {
-                    let buffer = buffer_map.get(&source_node).unwrap().0[buffer_index];
-                    buffer_map.get_mut(&node).unwrap().0.push(buffer);
-                } else {
-                    // Allocate new buffer
-                    buffer_map.get_mut(&node).unwrap().0.push(buffers.len());
-                    buffers.push(required_buffer);
-                }
+                // if let Some((buffer_index, source_node, _)) = first_pass[&node]
+                //     .1
+                //     .iter()
+                //     .filter(|i| available_buffers.contains_key(i))
+                //     .flat_map(|i| {
+                //         available_buffers[i]
+                //             .0
+                //             .iter()
+                //             .cloned()
+                //             .enumerate()
+                //             .map(|(o, b)| (o, *i, b))
+                //     })
+                //     .find(|(_, _, size)| *size == required_buffer)
+                // {
+                //     let buffer = buffer_map.get(&source_node).unwrap().0[buffer_index];
+                //     buffer_map.get_mut(&node).unwrap().0.push(buffer);
+                // } else {
+                // Allocate new buffer
+                buffer_map.get_mut(&node).unwrap().0.push(buffers.len());
+                buffers.push(required_buffer);
+                // }
             }
             // Assign intermediate buffers
             for required_buffer in wrapper.0.intermediate_buffer_sizes(&input_shapes) {
                 // Find an applicable buffer
-                if let Some((buffer_index, source_node, _)) = first_pass[&node]
-                    .1
-                    .iter()
-                    .filter(|i| available_buffers.contains_key(i))
-                    .flat_map(|i| {
-                        available_buffers[i]
-                            .1
-                            .iter()
-                            .cloned()
-                            .enumerate()
-                            .map(|(o, b)| (o, *i, b))
-                    })
-                    .find(|(_, _, size)| *size == required_buffer)
-                {
-                    let buffer = buffer_map.get(&source_node).unwrap().1[buffer_index];
-                    buffer_map.get_mut(&node).unwrap().1.push(buffer);
-                } else {
-                    // Allocate new buffer
-                    buffer_map.get_mut(&node).unwrap().1.push(buffers.len());
-                    buffers.push(required_buffer);
-                }
+                // if let Some((buffer_index, source_node, _)) = first_pass[&node]
+                //     .1
+                //     .iter()
+                //     .filter(|i| available_buffers.contains_key(i))
+                //     .flat_map(|i| {
+                //         available_buffers[i]
+                //             .1
+                //             .iter()
+                //             .cloned()
+                //             .enumerate()
+                //             .map(|(o, b)| (o, *i, b))
+                //     })
+                //     .find(|(_, _, size)| *size == required_buffer)
+                // {
+                //     let buffer = buffer_map.get(&source_node).unwrap().1[buffer_index];
+                //     buffer_map.get_mut(&node).unwrap().1.push(buffer);
+                // } else {
+                // Allocate new buffer
+                buffer_map.get_mut(&node).unwrap().1.push(buffers.len());
+                buffers.push(required_buffer);
+                // }
             }
         }
 
@@ -187,6 +192,7 @@ impl Compiler for StorageBufferCompiler {
                 dyn_map: &graph.dyn_map,
                 buffer_sizes: buffers,
                 buffers: shared_buffers.clone(),
+                prev_dyn_map: HashMap::default(),
             })
             .finish();
         // Ensure allocator is ran before any nodes that use the buffers
@@ -250,20 +256,28 @@ struct AllocateMetalBuffers {
     dyn_map: *const HashMap<char, usize>,
     buffer_sizes: Vec<BigExpression>,
     buffers: Arc<UnsafeCell<Vec<Buffer>>>,
+    prev_dyn_map: HashMap<char, usize>,
 }
 
 impl Operator for AllocateMetalBuffers {
     fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let buffers = unsafe { &mut *self.buffers.get() };
         // Allocate all buffers
-        *unsafe { &mut *self.buffers.get() } = self
-            .buffer_sizes
-            .iter()
-            .map(|e| e.exec(unsafe { self.dyn_map.as_ref().unwrap() }).unwrap())
-            .map(|i| {
-                self.dev
-                    .new_buffer(i as u64, MTLResourceOptions::StorageModeShared)
-            })
-            .collect();
+        let dyn_map = unsafe { self.dyn_map.as_ref().unwrap() };
+        if *dyn_map != self.prev_dyn_map {
+            // Only allocate if dyn_map changed (should be done on a per-buffer basis)
+            *buffers = self
+                .buffer_sizes
+                .iter()
+                .map(|e| {
+                    self.dev.new_buffer(
+                        e.exec(dyn_map).unwrap() as u64,
+                        MTLResourceOptions::StorageModeShared,
+                    )
+                })
+                .collect();
+            self.prev_dyn_map = dyn_map.clone();
+        }
         vec![]
     }
 }
