@@ -23,7 +23,12 @@ pub struct MetalRMSNorm(
 );
 
 impl MetalRMSNorm {
-    fn new(dev: Device, inp_shape: ShapeTracker, dyn_map: *const HashMap<char, usize>) -> Self {
+    fn new(
+        epsilon: f32,
+        dev: Device,
+        inp_shape: ShapeTracker,
+        dyn_map: *const HashMap<char, usize>,
+    ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(inp_shape);
         let mut square_mean_code = format!(
             "
@@ -60,7 +65,7 @@ using namespace metal;
 
 kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]], device half *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
-        float added = inp[{meaned_idx_exp}] + 1e-6f;
+        float added = inp[{meaned_idx_exp}] + {epsilon};
         float sq = sqrt(added);
         float recip = 1.0f / sq;
         out[idx] = (half)(recip * (float)x[{idx_exp}]);
@@ -78,6 +83,7 @@ kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]
         )
     }
 }
+// TODO: Make epsilon a parameter
 
 impl MetalKernelForward for MetalRMSNorm {
     fn intermediate_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
@@ -145,7 +151,7 @@ impl MetalKernelForward for MetalRMSNorm {
 }
 
 impl Operator for MetalRMSNorm {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_queue = self.2.new_command_queue();
             let command_buffer = command_queue.new_command_buffer();
@@ -222,7 +228,7 @@ impl Compiler for RMSNormCompiler {
                             .check(|op, _| {
                                 if let Some(c) = op.as_any().downcast_ref::<MetalConstant<f16>>() {
                                     if let ConstantValue::Float(v) = c.0 {
-                                        v == 1e-6
+                                        v <= 1e-4 && v > 0.0
                                     } else {
                                         false
                                     }
@@ -258,6 +264,17 @@ impl Compiler for RMSNormCompiler {
                 // An intermediate node can't be deleted
                 continue;
             }
+            let ConstantValue::Float(epsilon_num) = graph
+                .graph
+                .node_weight(epsilon)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<MetalConstant<f16>>()
+                .unwrap()
+                .0
+            else {
+                unreachable!()
+            };
             let x = graph.get_sources(square)[0];
             if !graph.get_sources(square).iter().all(|(i, _, _)| *i == x.0) {
                 continue;
@@ -268,7 +285,12 @@ impl Compiler for RMSNormCompiler {
 
             // Insert RMSNorm op
             let rms_norm = graph
-                .add_op(MetalRMSNorm::new(dev.clone(), x.2, &graph.dyn_map))
+                .add_op(MetalRMSNorm::new(
+                    epsilon_num,
+                    dev.clone(),
+                    x.2,
+                    &graph.dyn_map,
+                ))
                 .input(x.0, 0, x.2)
                 .finish();
 

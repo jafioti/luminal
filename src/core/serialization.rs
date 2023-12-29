@@ -1,11 +1,15 @@
 use crate::op::Function;
 use crate::prelude::{Graph, GraphTensor, Shape, Tensor};
+use half::{bf16, f16};
 use memmap2::MmapOptions;
 use petgraph::stable_graph::NodeIndex;
 use safetensors::tensor::{Dtype, View};
-use safetensors::SafeTensorError;
+use safetensors::{SafeTensorError, SafeTensors};
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::fs::File;
+
+use super::module::state_dict;
 
 /// Tell luminal how to represent the module as a dict of (String, NodeIndex)'s
 pub trait SerializeModule {
@@ -92,76 +96,63 @@ impl Loader for StateDictLoader {
     }
 }
 
-/// Load the entire model from a safetensor file all at once
+/// Load the model from a safetensor file
 pub struct SafeTensorLoader {
-    /// The path to the safetensor file
-    path: String,
+    /// The paths to the safetensors file
+    paths: Vec<String>,
 }
 
 impl SafeTensorLoader {
-    pub fn new(path: &str) -> Self {
-        Self {
-            path: path.to_string(),
-        }
+    pub fn new(paths: Vec<String>) -> Self {
+        Self { paths }
     }
 }
 
 impl Loader for SafeTensorLoader {
     fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) {
-        let data = std::fs::read(self.path).unwrap();
-        let st = safetensors::SafeTensors::deserialize(&data).unwrap();
-        let mut state_dict: HashMap<String, Tensor> = st
-            .tensors()
-            .into_iter()
-            .map(|(k, v)| (k, v.into()))
-            .collect();
-        let mut serializer = Serializer::default();
-        model.serialize(&mut serializer);
-
-        for (s, n) in serializer.state {
-            graph.tensors.insert((n, 0), state_dict.remove(&s).unwrap());
-        }
-    }
-}
-
-/// Load the entire model from a safetensor file, loading each tensor as needed
-pub struct SafeTensorDeferredLoader {
-    /// The path to the safetensor file
-    path: String,
-}
-
-impl SafeTensorDeferredLoader {
-    pub fn new(path: &str) -> Self {
-        Self {
-            path: path.to_string(),
-        }
-    }
-}
-
-impl Loader for SafeTensorDeferredLoader {
-    fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) {
-        let mut serializer = Serializer::default();
-        model.serialize(&mut serializer);
-
-        for (s, n) in serializer.state {
-            if let Some(inp_func) = graph
+        for (weight_name, node_index) in state_dict(model) {
+            if let Some(loading_node) = graph
                 .graph
-                .node_weight_mut(n)
-                .unwrap()
-                .as_any_mut()
-                .downcast_mut::<Function>()
+                .node_weight_mut(node_index)
+                .and_then(|op| op.as_any_mut().downcast_mut::<Function>())
             {
-                let path = self.path.clone();
-                inp_func.1 = Box::new(move |_| {
-                    // Get memmapped tensor
-                    let file = std::fs::File::open(path.clone()).unwrap();
-                    let buffer = unsafe { MmapOptions::new().map(&file).unwrap() };
-                    let st = safetensors::SafeTensors::deserialize(&buffer).unwrap();
-                    let tensor = st.tensor(&s).unwrap().into();
+                let file_paths = self.paths.clone();
+                loading_node.1 = Box::new(move |_| {
+                    for file_path in file_paths.iter() {
+                        let file = File::open(file_path).unwrap();
+                        let buffer = unsafe { MmapOptions::new().map(&file).unwrap() };
+                        let safetensors = SafeTensors::deserialize(&buffer).unwrap();
 
-                    vec![tensor]
+                        if let Ok(tensor_view) = safetensors.tensor(&weight_name.replace('/', "."))
+                        {
+                            // Convert to fp32
+                            let data: Vec<f32> = match tensor_view.dtype() {
+                                Dtype::F32 => tensor_view
+                                    .data()
+                                    .chunks_exact(4)
+                                    .map(|c| f32::from_ne_bytes([c[0], c[1], c[2], c[3]]))
+                                    .collect(),
+                                Dtype::F16 => tensor_view
+                                    .data()
+                                    .chunks_exact(2)
+                                    .map(|c| f16::from_ne_bytes([c[0], c[1]]).to_f32())
+                                    .collect(),
+                                Dtype::BF16 => tensor_view
+                                    .data()
+                                    .chunks_exact(2)
+                                    .map(|c| bf16::from_ne_bytes([c[0], c[1]]).to_f32())
+                                    .collect(),
+                                _ => panic!("{:?} is not a supported dtype", tensor_view.dtype()),
+                            };
+                            return vec![Tensor {
+                                data: Box::new(data),
+                            }];
+                        }
+                    }
+
+                    panic!("Tensor \"{weight_name}\" not found in files");
                 });
-            };
+            }
         }
     }
 }

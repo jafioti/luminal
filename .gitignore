@@ -6,3 +6,4 @@ Cargo.lock
 *.npx
 *.npz
 /**/llama-7b-hf
+/**/mistral-7b-hf

@@ -87,6 +87,12 @@ impl<S: Shape> GraphTensor<S> {
         }
         GraphTensor::from_id(node_id, shape, self.graph_ref)
     }
+
+    pub fn argmax(self) -> GraphTensor<<S as ReduceShape<<S as Shape>::LastAxis>>::Reduced> {
+        let x_equal = self.equals(self.max_reduce::<_, S::LastAxis>().expand());
+        let r = self.graph().arange_();
+        (x_equal * r).max_reduce::<_, S::LastAxis>()
+    }
 }
 
 #[cfg(test)]
