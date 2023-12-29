@@ -8,6 +8,13 @@ use luminal::{prelude::*, shape::symbolic::Expression};
 
 use crate::model::KVCache;
 
+#[cfg(feature = "metal")]
+type DeviceCompiler = MetalFp16Compiler;
+#[cfg(feature = "cuda")]
+type DeviceCompiler = CudaFp16Compiler;
+#[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
+type DeviceCompiler = CPUCompiler;
+
 fn main() -> Result<(), String> {
     println!("Constructing graph...");
     let tokenizer = SentencePieceBpeTokenizer::from_file(
@@ -54,7 +61,7 @@ fn main() -> Result<(), String> {
     cache_dest.keep();
 
     println!("Compiling graph...");
-    cx1.compile(GenericCompiler::<MetalFp16Compiler>::default());
+    cx1.compile(GenericCompiler::<DeviceCompiler>::default());
     // Cache model weights
     cx1.compile(RemapDownstream(
         state_dict(&model).values().copied().collect(),
@@ -62,7 +69,7 @@ fn main() -> Result<(), String> {
     keep_weights(&model, &mut cx1);
 
     // Compile second graph
-    cx2.compile(GenericCompiler::<MetalFp16Compiler>::default());
+    cx2.compile(GenericCompiler::<DeviceCompiler>::default());
     // Cache model weights
     cx2.compile(RemapDownstream(
         state_dict(&kv_model).values().copied().collect(),
