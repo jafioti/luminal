@@ -78,6 +78,10 @@ mod tests {
         let b = model.forward(a).retrieve();
         let batch_out = model.forward(batch).retrieve();
 
+        // Uncommenting these lines causes the test to crash
+        // a.retrieve();
+        // cx.compile(<(PreGenericCompiler, MetalFp16Compiler, PostGenericCompiler)>::default());
+
         cx.execute();
 
         let d_dev = Cpu::default();

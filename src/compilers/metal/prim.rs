@@ -23,7 +23,7 @@ impl<T> MetalCopyToDevice<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalCopyToDevice<T> {
-    fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         if inp[0].0.borrowed().data.as_any().is::<Buffer>() {
             // Already on device
             return vec![inp.pop().unwrap().0.cloned()];
@@ -61,7 +61,7 @@ impl<T> MetalCopyFromDevice<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalCopyFromDevice<T> {
-    fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         if inp[0].0.borrowed().data.as_any().is::<Vec<f32>>() {
             // Already off device
             return vec![inp.pop().unwrap().0.cloned()];
@@ -88,7 +88,7 @@ pub struct MetalConstant<T>(
 );
 
 impl<T: MetalFloat> Operator for MetalConstant<T> {
-    fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let val = T::from_f32(match &self.0 {
             ConstantValue::Expression(e) => {
                 e.exec(unsafe { self.2.as_ref().unwrap() }).unwrap() as f32
@@ -178,7 +178,7 @@ impl<T> MetalKernelForward for MetalContiguous<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalContiguous<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup command queue / command buffer / encoder
             let command_queue = self.1.new_command_queue();
@@ -277,7 +277,7 @@ impl<T> MetalKernelForward for MetalLog2<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalLog2<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_buffer = self.1.new_command_buffer();
             let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
@@ -373,7 +373,7 @@ impl<T> MetalKernelForward for MetalExp2<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalExp2<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_buffer = self.1.new_command_buffer();
 
@@ -469,7 +469,7 @@ impl<T> MetalKernelForward for MetalSin<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalSin<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_buffer = self.1.new_command_buffer();
             let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
@@ -564,7 +564,7 @@ impl<T> MetalKernelForward for MetalSqrt<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalSqrt<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_buffer = self.1.new_command_buffer();
             let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
@@ -659,7 +659,7 @@ impl<T> MetalKernelForward for MetalRecip<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalRecip<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_buffer = self.1.new_command_buffer();
             let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
@@ -784,7 +784,7 @@ impl<T> MetalKernelForward for MetalAdd<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalAdd<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_buffer = self.1.new_command_buffer();
             let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
@@ -912,7 +912,7 @@ impl<T> MetalKernelForward for MetalMul<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalMul<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_buffer = self.1.new_command_buffer();
             let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
@@ -1052,7 +1052,7 @@ impl<T> MetalKernelForward for MetalLessThan<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalLessThan<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_buffer = self.1.new_command_buffer();
             let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
@@ -1178,7 +1178,7 @@ impl<T> MetalKernelForward for MetalMod<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalMod<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_buffer = self.1.new_command_buffer();
             let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
@@ -1329,7 +1329,7 @@ impl<T> MetalKernelForward for MetalSumReduce<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalSumReduce<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup command queue / command buffer / encoder
             let command_buffer = self.1.new_command_buffer();
@@ -1480,7 +1480,7 @@ impl<T> MetalKernelForward for MetalMaxReduce<T> {
 }
 
 impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let a = tensors[0]
                 .0
