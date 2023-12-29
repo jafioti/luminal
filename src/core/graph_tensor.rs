@@ -282,6 +282,8 @@ pub trait MarkTensors {
     fn keep(&self);
     /// Mark all tensors in this collection to be retrieved
     fn retrieve(&self);
+    /// Drop all tensors in this collection
+    fn drop(&self);
 }
 
 impl<S: Shape> MarkTensors for GraphTensor<S> {
@@ -291,6 +293,9 @@ impl<S: Shape> MarkTensors for GraphTensor<S> {
 
     fn retrieve(&self) {
         GraphTensor::retrieve(*self);
+    }
+    fn drop(&self) {
+        GraphTensor::drop(self);
     }
 }
 
@@ -306,6 +311,12 @@ impl<S: MarkTensors> MarkTensors for Vec<S> {
             t.retrieve();
         }
     }
+
+    fn drop(&self) {
+        for t in self {
+            t.drop();
+        }
+    }
 }
 impl<S: MarkTensors> MarkTensors for &[S] {
     fn keep(&self) {
@@ -317,6 +328,12 @@ impl<S: MarkTensors> MarkTensors for &[S] {
     fn retrieve(&self) {
         for t in *self {
             t.retrieve();
+        }
+    }
+
+    fn drop(&self) {
+        for t in *self {
+            t.drop();
         }
     }
 }
@@ -332,6 +349,9 @@ macro_rules! tuple_impls {
             }
             fn retrieve(&self) {
                 $(self.$idx.retrieve();)+
+            }
+            fn drop(&self) {
+                $(self.$idx.drop();)+
             }
         }
     };
