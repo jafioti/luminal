@@ -116,6 +116,9 @@ impl<S: Shape> GraphTensor<S> {
         let st = self.shape.resolve_global_dyn_dims(&self.graph().dyn_map);
         let tensor = self.graph().get_tensor_ref(self.id, 0).unwrap();
         let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        // println!("Inside graph_tensor.data()");
+        // println!("self.shape: {:?}", self.shape);
+        // println!("orig_data.len(): {}", orig_data.len());
         let mut data = vec![0.; st.n_elements().to_usize().unwrap()];
         let ind = st.index_expression();
         let val = st.valid_expression();
@@ -148,6 +151,28 @@ impl<S: ConstShape> GraphTensor<S> {
         });
         self
     }
+
+    // Implement a deferred set where the input is a closure
+    pub fn set_defer(self, load_data: &'static impl Fn() -> Result<Vec<f32>, String>) -> Self {
+        let node = self
+            .graph()
+            .graph
+            .node_weight_mut(self.id)
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<Function>()
+            .unwrap();
+
+        // Set the closure here
+        node.1 = Box::new(|_| {
+            vec![Tensor {
+                data: Box::new(load_data().unwrap()),
+            }]
+        });
+
+        // Return
+        self
+    }
 }
 
 pub fn pretty_print_tensor_recursive(
@@ -168,21 +193,21 @@ pub fn pretty_print_tensor_recursive(
         write!(f, "{}[", indent)?;
         if data.len() > 10 {
             for (i, value) in data.iter().take(5).enumerate() {
-                write!(f, "{:.2}", value)?;
+                write!(f, "{:.6}", value)?;
                 if i < data.len() - 1 {
                     write!(f, ", ")?;
                 }
             }
             write!(f, "..., ")?;
             for (i, value) in data.iter().skip(data.len() - 5).enumerate() {
-                write!(f, "{:.2}", value)?;
+                write!(f, "{:.6}", value)?;
                 if i < data.len() - 1 {
                     write!(f, ", ")?;
                 }
             }
         } else {
             for (i, value) in data.iter().enumerate() {
-                write!(f, "{:.2}", value)?;
+                write!(f, "{:.6}", value)?;
                 if i < data.len() - 1 {
                     write!(f, ", ")?;
                 }
@@ -257,6 +282,8 @@ pub trait MarkTensors {
     fn keep(&self);
     /// Mark all tensors in this collection to be retrieved
     fn retrieve(&self);
+    /// Drop all tensors in this collection
+    fn drop(&self);
 }
 
 impl<S: Shape> MarkTensors for GraphTensor<S> {
@@ -266,6 +293,9 @@ impl<S: Shape> MarkTensors for GraphTensor<S> {
 
     fn retrieve(&self) {
         GraphTensor::retrieve(*self);
+    }
+    fn drop(&self) {
+        GraphTensor::drop(self);
     }
 }
 
@@ -281,6 +311,12 @@ impl<S: MarkTensors> MarkTensors for Vec<S> {
             t.retrieve();
         }
     }
+
+    fn drop(&self) {
+        for t in self {
+            t.drop();
+        }
+    }
 }
 impl<S: MarkTensors> MarkTensors for &[S] {
     fn keep(&self) {
@@ -292,6 +328,12 @@ impl<S: MarkTensors> MarkTensors for &[S] {
     fn retrieve(&self) {
         for t in *self {
             t.retrieve();
+        }
+    }
+
+    fn drop(&self) {
+        for t in *self {
+            t.drop();
         }
     }
 }
@@ -307,6 +349,9 @@ macro_rules! tuple_impls {
             }
             fn retrieve(&self) {
                 $(self.$idx.retrieve();)+
+            }
+            fn drop(&self) {
+                $(self.$idx.drop();)+
             }
         }
     };

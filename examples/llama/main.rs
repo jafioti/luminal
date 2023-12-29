@@ -61,7 +61,7 @@ fn main() {
     cache1.keep();
     loader::DfdxDeferredLoader::new("./examples/llama/setup/llama-7b-hf").load(&model, &mut cx1);
 
-    cx1.compile(<(PreGenericCompiler, DeviceCompiler, PostGenericCompiler)>::default());
+    cx1.compile(GenericCompiler::<DeviceCompiler>::default());
 
     // Cache model weights
     cx1.compile(RemapDownstream(
@@ -85,7 +85,7 @@ fn main() {
         kv_model.forward((single_inp, Some(cache_src.clone()), PhantomData::<Dyn<'t'>>));
     out.retrieve();
     cache_dest.keep();
-    cx2.compile(<(PreGenericCompiler, DeviceCompiler, PostGenericCompiler)>::default());
+    cx2.compile(GenericCompiler::<DeviceCompiler>::default());
 
     // Cache model weights
     cx2.compile(RemapDownstream(

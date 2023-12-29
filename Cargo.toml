@@ -12,21 +12,26 @@ cuda = ["dep:cudarc"]
 metal = ["dep:metal-rs"]
 
 [dependencies]
-luminal_macro = {path="./resources/luminal_macro"}
+luminal_macro = { path = "./resources/luminal_macro" }
 itertools = "0.11.0"
 matrixmultiply = "0.3.8"
 num-traits = "0.2.16"
-petgraph = {path="./resources/petgraph"} # Literally only need this because the free_node field of the stable graph is private
+petgraph = { path = "./resources/petgraph" } # Literally only need this because the free_node field of the stable graph is private
 rand = "0.8.5"
 strum = { version = "0.25.0", features = ["derive"] }
 urlencoding = "2.1.2"
 webbrowser = "0.8.10"
 dyn-clone = "1.0.12"
-cudarc = {path="./resources/cudarc", features=["cublas", "f16"], optional=true}
-metal-rs = {version="0.26.0", package="metal", optional=true, features=["mps"]}
+cudarc = { path = "./resources/cudarc", features = [
+    "cublas",
+    "f16",
+], optional = true }
+metal-rs = { version = "0.26.0", package = "metal", optional = true, features = [
+    "mps",
+] }
 safetensors = "0.3.1"
-memmap2 = "0.7.1"
-half = {version="2.3.1", features = ["num-traits", "rand_distr"]}
+memmap2 = { version = "0.7.1", features = ["stable_deref_trait"] }
+half = { version = "2.3.1", features = ["num-traits", "rand_distr"] }
 tinyvec = "1.6.0"
 term_size = "0.3.2"
 colored = "2.0.4"
@@ -36,5 +41,5 @@ gemm = "0.15.4"
 objc = "0.2.7"
 
 [dev-dependencies]
-dfdx = {version="0.13", features=["f16"]}
+dfdx = { version = "0.13", features = ["f16"] }
 rust_tokenizers = "8.1.0"
