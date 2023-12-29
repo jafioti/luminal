@@ -139,7 +139,7 @@ fn main() {
 
         let now = Instant::now();
         cx2.execute();
-        println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
+        println!("Forward Pass Took {}ms", now.elapsed().as_millis());
 
         let o = out.data();
         out.drop();
