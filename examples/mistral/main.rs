@@ -1,9 +1,12 @@
+use std::{marker::PhantomData, time::Instant};
+
 use colored::Colorize;
-use itertools::Itertools;
 use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
 mod model;
 
 use luminal::{prelude::*, shape::symbolic::Expression};
+
+use crate::model::KVCache;
 
 fn main() -> Result<(), String> {
     println!("Constructing graph...");
@@ -13,94 +16,159 @@ fn main() -> Result<(), String> {
     )
     .unwrap();
 
-    let file_paths = vec![
+    let mut cx1 = Graph::new();
+    let input = cx1.named_tensor::<(Const<1>, Dyn<'s'>)>("Input");
+    let model = model::MistralLM::initialize(&mut cx1);
+    let (logits, kv_cache) = model.forward((
+        input,
+        Option::<Vec<KVCache<Const<1>, Const<0>>>>::None,
+        PhantomData::<Dyn<'s'>>,
+    ));
+    let logits = logits
+        .slice((.., (Expression::from('s') - 1).., ..))
+        .retrieve();
+    kv_cache.keep();
+    SafeTensorLoader::new(vec![
         "./examples/mistral/setup/mistral-7b-hf/model-00001-of-00003.safetensors".to_string(),
         "./examples/mistral/setup/mistral-7b-hf/model-00002-of-00003.safetensors".to_string(),
         "./examples/mistral/setup/mistral-7b-hf/model-00003-of-00003.safetensors".to_string(),
-    ];
-
-    let mut cx = Graph::new();
-    let input = cx.named_tensor::<(Const<1>, Dyn<'s'>)>("Input");
-    let model = model::MistralLM::initialize(&mut cx);
-    let logits = model
-        .forward(input)
-        .slice((.., (Expression::from('s') - 1).., ..))
-        .retrieve();
-    SafeTensorLoader::new(file_paths).load(&model, &mut cx);
+    ])
+    .load(&model, &mut cx1);
+    let mut cx2 = Graph::new();
+    let single_input = cx2.named_tensor::<R2<1, 1>>("Input");
+    let kv_model = model::MistralLM::initialize(&mut cx2);
+    let cache_src: Vec<KVCache<Const<1>, Dyn<'p'>>> = (0..model::NUM_LAYERS)
+        .map(|_| {
+            (
+                cx2.named_tensor("Key Cache"),
+                cx2.named_tensor("Value Cache"),
+            )
+        })
+        .collect();
+    let (decode_logits, cache_dest) = kv_model.forward((
+        single_input,
+        Some(cache_src.clone()),
+        PhantomData::<Dyn<'t'>>,
+    ));
+    decode_logits.retrieve();
+    cache_dest.keep();
 
     println!("Compiling graph...");
-    cx.compile(GenericCompiler::<MetalFp16Compiler>::default());
+    cx1.compile(GenericCompiler::<MetalFp16Compiler>::default());
     // Cache model weights
-    cx.compile(RemapDownstream(
+    cx1.compile(RemapDownstream(
         state_dict(&model).values().copied().collect(),
     ));
-    keep_weights(&model, &mut cx);
+    keep_weights(&model, &mut cx1);
+
+    // Compile second graph
+    cx2.compile(GenericCompiler::<MetalFp16Compiler>::default());
+    // Cache model weights
+    cx2.compile(RemapDownstream(
+        state_dict(&kv_model).values().copied().collect(),
+    ));
+    keep_weights(&kv_model, &mut cx2);
+    delete_inputs(
+        &state_dict(&kv_model).values().copied().collect::<Vec<_>>(),
+        &mut cx2,
+    );
+    delete_inputs(
+        &cache_src
+            .iter()
+            .flat_map(|(k, v)| [k.id(), v.id()])
+            .collect::<Vec<_>>(),
+        &mut cx2,
+    );
 
     // Initial forward pass to load weights
     println!("Loading model...");
     input.set_dyn(vec![1.], vec![1, 1]);
-    cx.execute();
+    cx1.execute();
     logits.drop();
+    kv_cache.drop();
+
     // Now that weights are loaded, delete the loading nodes so they don't run again
     delete_inputs(
         &state_dict(&model).values().copied().collect::<Vec<_>>(),
-        &mut cx,
+        &mut cx1,
     );
 
-    // Run inference
+    // Run inference first pass
     let prompt = "Santa says: Merry";
-    let mut context_vector = encode(&tokenizer, prompt);
+    let mut input_ids = encode(&tokenizer, prompt);
 
     let mut completion = String::new();
-    let max_new_tokens = 4096 - context_vector.len();
-    for i in 0..max_new_tokens {
-        println!("########################### Iteration {i} ###########################");
-        input.set_dyn(context_vector.clone(), vec![1, context_vector.len()]);
-        cx.execute();
+    input.set_dyn(
+        input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
+        vec![1, input_ids.len()],
+    );
+    cx1.execute();
 
-        let output_id = sample_index(&logits.data());
-        context_vector.push(output_id as f32);
+    let output_id = sample_index(&logits.data());
+    input_ids.push(output_id);
 
-        // Decode token
-        let output_token = decode(&tokenizer, vec![output_id as f32]);
-        completion.push_str(&output_token);
+    // Decode token
+    completion.push_str(&decode(&tokenizer, &[output_id]));
+    println!("{}{}", prompt.on_black().white().bold(), completion.green());
 
+    // Transfer weights and kv cache
+    transfer_weights(&model, &mut cx1, &kv_model, &mut cx2);
+    for ((key_src, val_src), (key_dest, val_dest)) in kv_cache.into_iter().zip(cache_src.iter()) {
+        cx2.set_tensor(key_dest.id(), 0, cx1.get_tensor(key_src.id(), 0).unwrap());
+        cx2.set_tensor(val_dest.id(), 0, cx1.get_tensor(val_src.id(), 0).unwrap());
+    }
+
+    // Decode loop
+    for _ in 0..100 {
+        single_input.set(vec![*input_ids.last().unwrap() as f32]);
+        cx2.set_dyn_dim('p', input_ids.len() - 1);
+        cx2.set_dyn_dim('t', input_ids.len());
+
+        let now = Instant::now();
+        cx2.execute();
+        println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
+
+        // Sample tokens
+        let output_id = sample_index(&decode_logits.data());
+        decode_logits.drop();
+        completion.push_str(&decode(&tokenizer, &[output_id]));
+        input_ids.push(output_id);
         println!("{}{}", prompt.on_black().white().bold(), completion.green());
 
-        logits.drop();
+        // Swap caches
+        for ((src_k, src_v), (dest_k, dest_v)) in cache_src.iter().zip(cache_dest.iter()) {
+            // Move dest caches to src
+            cx2.swap_tensors(*src_k, *dest_k);
+            cx2.swap_tensors(*src_v, *dest_v);
+            // // Drop dest caches
+            // dest_k.drop();
+            // dest_v.drop();
+        }
     }
 
     Ok(())
 }
 
 // Method to encode text as vector
-pub fn encode(tokenizer: &SentencePieceBpeTokenizer, text: &str) -> Vec<f32> {
+pub fn encode(tokenizer: &SentencePieceBpeTokenizer, text: &str) -> Vec<i64> {
     let mut vector = tokenizer
         .encode(text, None, text.len(), &TruncationStrategy::LongestFirst, 0)
-        .token_ids
-        .iter()
-        .map(|&x| x as f32)
-        .collect_vec();
-
-    vector.insert(0, 1.0); // Start token
-
+        .token_ids;
+    vector.insert(0, 1); // Start token
     vector
 }
 
-pub fn decode(tokenizer: &SentencePieceBpeTokenizer, token_ids: Vec<f32>) -> String {
-    let binding = token_ids.iter().map(|i| *i as i64).collect_vec();
-    let token_ids = binding.as_slice();
-
+pub fn decode(tokenizer: &SentencePieceBpeTokenizer, token_ids: &[i64]) -> String {
     tokenizer
         .decode(token_ids, true, false)
         .replace("<0x0A>", "\n")
 }
 
 // Currently just an argmax, do actual sampling here
-fn sample_index(dist: &[f32]) -> usize {
+fn sample_index(dist: &[f32]) -> i64 {
     dist.iter()
         .enumerate()
         .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .unwrap()
-        .0
+        .0 as i64
 }
