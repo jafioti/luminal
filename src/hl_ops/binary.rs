@@ -129,11 +129,12 @@ impl<S: Shape> Mul<f32> for GraphTensor<S> {
     }
 }
 
+#[allow(clippy::suspicious_arithmetic_impl)]
 impl<S: Shape> Div<f32> for GraphTensor<S> {
     type Output = GraphTensor<S>;
 
     fn div(self, rhs: f32) -> Self::Output {
-        self / self.graph().constant(rhs).expand()
+        self * self.graph().constant(rhs.recip()).expand()
     }
 }
 

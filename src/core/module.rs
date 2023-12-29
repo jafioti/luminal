@@ -46,6 +46,9 @@ pub fn transfer_weights<M: SerializeModule>(
             }
             output_num += 1;
         }
+        if output_num == 0 {
+            panic!("{key} tensor wasn't found in the source graph!");
+        }
     }
 }
 

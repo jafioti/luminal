@@ -174,7 +174,7 @@ impl Compiler for CommandBufferCompiler {
                     .unwrap()
                     .downcast::<MetalKernelWrapper>()
                     .unwrap();
-                *graph.graph.node_weight_mut(*node).unwrap() = Box::new(CommandBufferWrapper {
+                *graph.graph.node_weight_mut(*node).unwrap() = Box::new(MetalKernelOperation {
                     wrapper,
                     dev: dev.clone(),
                     buffer: buffer.clone(),
@@ -212,49 +212,21 @@ impl Operator for ExecuteMetalKernels {
     }
 }
 
-#[derive(LuminalEq, Clone)]
-struct CommandBufferWrapper {
+#[derive(LuminalEq)]
+struct MetalKernelOperation {
     wrapper: Box<MetalKernelWrapper>,
     dev: Device,
     buffer: Arc<UnsafeCell<CommandBuffer>>,
     dyn_map: *const HashMap<char, usize>,
 }
 
-impl std::fmt::Debug for CommandBufferWrapper {
+impl std::fmt::Debug for MetalKernelOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.wrapper.0.fmt(f)
+        write!(f, "MetalKernel({:?})", self.wrapper.0)
     }
 }
 
-impl MetalKernelForward for CommandBufferWrapper {
-    fn intermediate_buffer_sizes(
-        &self,
-        input_shapes: &[ShapeTracker],
-    ) -> Vec<symbolic::BigExpression> {
-        self.wrapper.0.intermediate_buffer_sizes(input_shapes)
-    }
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<symbolic::BigExpression> {
-        self.wrapper.0.output_buffer_sizes(input_shapes)
-    }
-    fn metal_forward(
-        &self,
-        inputs: &[(&Buffer, ShapeTracker)],
-        dev: &Device,
-        _: &metal_rs::CommandBufferRef,
-        intermediate_buffers: &[&Buffer],
-        output_buffers: &[&Buffer],
-    ) {
-        self.wrapper.0.metal_forward(
-            inputs,
-            &dev,
-            unsafe { &*self.buffer.get() },
-            intermediate_buffers,
-            output_buffers,
-        );
-    }
-}
-
-impl Operator for CommandBufferWrapper {
+impl Operator for MetalKernelOperation {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         // For now let's allocate the required buffers here
         let inp_shapes = inp.iter().map(|(_, s)| *s).collect::<Vec<_>>();
@@ -284,7 +256,7 @@ impl Operator for CommandBufferWrapper {
             })
             .collect::<Vec<_>>();
         let output_buffers_ref = output_buffers.iter().collect::<Vec<_>>();
-        self.metal_forward(
+        self.wrapper.0.metal_forward(
             &inp.iter()
                 .map(|(t, sh)| {
                     (
@@ -302,15 +274,6 @@ impl Operator for CommandBufferWrapper {
             .into_iter()
             .map(|b| Tensor { data: Box::new(b) })
             .collect()
-    }
-
-    fn custom(&self, key: &str) -> Option<Box<dyn std::any::Any>> {
-        if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
-                self.clone(),
-            )))));
-        }
-        None
     }
 }
 

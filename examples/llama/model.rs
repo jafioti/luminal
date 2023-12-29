@@ -66,27 +66,20 @@ impl<
     >
     Module<(
         GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
-        GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
         BigExpression,
     )> for RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
 {
-    type Output = (
-        GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
-        GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
-    );
+    type Output = GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>;
 
     fn forward(
         &self,
-        (q, k, prev_seq): (
-            GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
+        (inp, prev_seq): (
             GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
             BigExpression,
         ),
     ) -> Self::Output {
         let (sin, cos) = self.get_sincos::<NUM_HEADS, Seq>(prev_seq);
-        let q_embed = (Self::rotate_half(q) * sin.expand()) + (q * cos.expand());
-        let k_embed = (Self::rotate_half(k) * sin.expand()) + (k * cos.expand());
-        (q_embed, k_embed)
+        (Self::rotate_half(inp) * sin.expand()) + (inp * cos.expand())
     }
 }
 
@@ -195,9 +188,10 @@ impl<
             .matmul(self.v_proj.permute())
             .reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
-        let (q, k) =
-            self.rotary_embed
-                .forward((q.permute(), k.permute(), PrevSeq::const_size().into()));
+        let q = self
+            .rotary_embed
+            .forward((q.permute(), PrevSeq::const_size().into()));
+        let k = self.rotary_embed.forward((k, PrevSeq::const_size().into()));
 
         let (k, v) = if let Some(cache) = cache {
             // Add KV cache

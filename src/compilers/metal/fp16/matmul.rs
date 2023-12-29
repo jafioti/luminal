@@ -43,7 +43,7 @@ static constant constexpr const int TN = {TN};
 kernel void kernel_vecmat(
     const device half* in_vec [[buffer(0)]],
     const device half* mat [[buffer(1)]],
-    device half* out_vec [[buffer(2)]],
+    device half* out_vec [[buffer(2)]], 
     const constant int& in_vec_size [[buffer(3)]],
     const constant int& out_vec_size [[buffer(4)]],
     threadgroup half* tgp_memory [[threadgroup(0)]],
@@ -52,7 +52,7 @@ kernel void kernel_vecmat(
     uint simd_gid [[simdgroup_index_in_threadgroup]],
     uint simd_lid [[thread_index_in_simdgroup]]) {{
 
-  // Appease compiler
+  // Appease compiler 
   (void)simd_gid;
   (void)simd_lid;
 
@@ -123,7 +123,7 @@ kernel void kernel_vecmat(
 
   // Threadgroup accumulation and writing out results
   if(lid.y == 0 && out_col < out_vec_size) {{
-
+    
     #pragma unroll(BM)
     for(int i = 1; i < BM; i++) {{
       #pragma unroll(TN)
@@ -151,6 +151,7 @@ impl MetalKernelForward for MetalVecMat {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![input_shapes[1].shape()[1].clone() * size_of::<f16>()]
     }
+
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
