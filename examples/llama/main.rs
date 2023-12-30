@@ -32,7 +32,7 @@ type DeviceCompiler = CPUCompiler;
 
 fn main() {
     let prompt = "Here is a python implementation of merge sort:";
-    let tokens_to_generate = 200;
+    let tokens_to_generate = 300;
 
     println!("Creating graph...");
     let tokenizer = SentencePieceBpeTokenizer::from_file(
