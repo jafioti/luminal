@@ -1,6 +1,15 @@
 #![allow(clippy::type_complexity)]
 use std::{marker::PhantomData, ops::Mul};
 
+// LLaMa 1 7B Config
+pub const VOCAB: usize = 32_000;
+pub const HEAD_DIM: usize = 128;
+pub const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
+pub const HIDDEN: usize = 4096;
+pub const INTERMEDIATE: usize = 11008;
+pub const HEADS: usize = 32;
+pub const LAYERS: usize = 1;
+
 use half::f16;
 use luminal::{
     nn::{embedding::Embedding, norm::RMSNorm},
