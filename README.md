@@ -26,16 +26,11 @@ println!("Result: {:?}", c);
 ```
 
 ## Getting Started
-**Simple Example**
-```bash
-cargo run --example simple
-```
-**Mistral**
+**Mistral 7B**
 ```bash
 sh examples/mistral/setup/setup.sh
 cargo run --release --example mistral
 ```
-
 
 ## Why does this look so different from other DL libraries?
 Most deep learning libraries are eager-first, meaning each op call directly operates on the data. In PyTorch, when you see `x + y`, the addition actually happens right there. This is great for debugging because it works exactly as most developers expect.
