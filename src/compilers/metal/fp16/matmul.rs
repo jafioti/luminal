@@ -43,7 +43,7 @@ static constant constexpr const int TN = {TN};
 kernel void kernel_vecmat(
     const device half* in_vec [[buffer(0)]],
     const device half* mat [[buffer(1)]],
-    device half* out_vec [[buffer(2)]], 
+    device half* out_vec [[buffer(2)]],
     const constant int& in_vec_size [[buffer(3)]],
     const constant int& out_vec_size [[buffer(4)]],
     threadgroup half* tgp_memory [[threadgroup(0)]],
@@ -52,7 +52,7 @@ kernel void kernel_vecmat(
     uint simd_gid [[simdgroup_index_in_threadgroup]],
     uint simd_lid [[thread_index_in_simdgroup]]) {{
 
-  // Appease compiler 
+  // Appease compiler
   (void)simd_gid;
   (void)simd_lid;
 
@@ -123,7 +123,7 @@ kernel void kernel_vecmat(
 
   // Threadgroup accumulation and writing out results
   if(lid.y == 0 && out_col < out_vec_size) {{
-    
+
     #pragma unroll(BM)
     for(int i = 1; i < BM; i++) {{
       #pragma unroll(TN)
@@ -147,7 +147,7 @@ kernel void kernel_vecmat(
     }
 }
 
-impl MetalKernelForward for MetalVecMat {
+impl MetalKernel for MetalVecMat {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![input_shapes[1].shape()[1].clone() * size_of::<f16>()]
     }
@@ -155,7 +155,6 @@ impl MetalKernelForward for MetalVecMat {
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -210,7 +209,6 @@ impl Operator for MetalVecMat {
                     (get_buffer_from_tensor(&inp[0].0), inp[0].1),
                     (get_buffer_from_tensor(&inp[1].0), inp[1].1),
                 ],
-                &self.device,
                 command_buffer,
                 &[],
                 &[&out],
@@ -321,7 +319,7 @@ kernel void kernel_matmul_2d(
     }
 }
 
-impl MetalKernelForward for MetalMatmul2D {
+impl MetalKernel for MetalMatmul2D {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         let (m, n) = (
             input_shapes[0].shape()[0].clone(),
@@ -332,7 +330,6 @@ impl MetalKernelForward for MetalMatmul2D {
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -393,7 +390,6 @@ impl Operator for MetalMatmul2D {
                     (get_buffer_from_tensor(&inp[0].0), inp[0].1),
                     (get_buffer_from_tensor(&inp[1].0), inp[1].1),
                 ],
-                &self.device,
                 command_buffer,
                 &[],
                 &[&out],
@@ -494,7 +490,7 @@ kernel void kernel_batch_matmul_2d(
     }
 }
 
-impl MetalKernelForward for MetalBatchMatmul2D {
+impl MetalKernel for MetalBatchMatmul2D {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         let (batch_size, m, n) = (
             input_shapes[0].shape()[0].clone(),
@@ -506,7 +502,6 @@ impl MetalKernelForward for MetalBatchMatmul2D {
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -571,7 +566,6 @@ impl Operator for MetalBatchMatmul2D {
                     (get_buffer_from_tensor(&inp[0].0), inp[0].1),
                     (get_buffer_from_tensor(&inp[1].0), inp[1].1),
                 ],
-                &self.2,
                 command_buffer,
                 &[],
                 &[&out],

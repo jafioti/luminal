@@ -1,6 +1,7 @@
 use crate::op::Function;
 use crate::prelude::{Graph, GraphTensor, Shape, Tensor};
 use half::{bf16, f16};
+use itertools::Itertools;
 use memmap2::MmapOptions;
 use petgraph::stable_graph::NodeIndex;
 use safetensors::tensor::{Dtype, View};
@@ -103,8 +104,10 @@ pub struct SafeTensorLoader {
 }
 
 impl SafeTensorLoader {
-    pub fn new(paths: Vec<String>) -> Self {
-        Self { paths }
+    pub fn new<S: ToString>(paths: &[S]) -> Self {
+        Self {
+            paths: paths.into_iter().map(|s| s.to_string()).collect(),
+        }
     }
 }
 

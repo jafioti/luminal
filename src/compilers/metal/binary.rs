@@ -39,8 +39,8 @@ impl<T: MetalFloat> MetalSub<T> {
 using namespace metal;
 kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
-        out[idx] = 
-            (({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}]) 
+        out[idx] =
+            (({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}])
             - (({b_valid_exp}) == 0 ? 0.0 : inp_b[{b_idx_exp}]);
     }}
 }}
@@ -64,14 +64,13 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
     }
 }
 
-impl<T> MetalKernelForward for MetalSub<T> {
+impl<T> MetalKernel for MetalSub<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![input_shapes[0].n_elements() * size_of::<T>()]
     }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -114,7 +113,6 @@ impl<T: MetalFloat> Operator for MetalSub<T> {
                     (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
                     (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
                 ],
-                &self.2,
                 command_buffer,
                 &[],
                 &[&out],
@@ -273,14 +271,13 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
     }
 }
 
-impl<T> MetalKernelForward for MetalEqual<T> {
+impl<T> MetalKernel for MetalEqual<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![input_shapes[0].n_elements() * size_of::<T>()]
     }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -324,7 +321,6 @@ impl<T: MetalFloat> Operator for MetalEqual<T> {
                     (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
                     (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
                 ],
-                &self.2,
                 command_buffer,
                 &[],
                 &[&out],

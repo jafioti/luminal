@@ -147,14 +147,13 @@ kernel void metal_arange(device {} *out [[buffer(0)]], device int& n_elements [[
     }
 }
 
-impl<T: MetalFloat> MetalKernelForward for MetalARange<T> {
+impl<T: MetalFloat> MetalKernel for MetalARange<T> {
     fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![self.3.clone() * std::mem::size_of::<f16>()]
     }
     fn metal_forward(
         &self,
         _: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -187,7 +186,7 @@ impl<T: MetalFloat> Operator for MetalARange<T> {
                 MTLResourceOptions::StorageModeShared,
             );
 
-            self.metal_forward(&[], &self.2, command_buffer, &[], &[&out]);
+            self.metal_forward(&[], command_buffer, &[], &[&out]);
 
             command_buffer.commit();
             command_buffer.wait_until_completed();
