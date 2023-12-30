@@ -28,8 +28,8 @@ println!("Result: {:?}", c);
 ## Getting Started
 **Mistral 7B**
 ```bash
-sh examples/mistral/setup/setup.sh
-cargo run --release --example mistral
+sh examples/mistral/setup/setup.sh # Download the model weights
+cargo run --release --example mistral # Run the model
 ```
 
 ## Why does this look so different from other DL libraries?
