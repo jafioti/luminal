@@ -28,8 +28,8 @@ println!("Result: {:?}", c);
 ## Getting Started
 **Mistral 7B**
 ```bash
-sh examples/mistral/setup/setup.sh # Download the model weights
-cargo run --release --example mistral # Run the model
+sh examples/mistral/setup/setup.sh     # Download the model weights
+cargo run --release --example mistral  # Run the model
 ```
 
 ## Why does this look so different from other DL libraries?
@@ -46,7 +46,7 @@ A consequence of this is that the actual computation that gets ran can be radica
 
 Of course if we want to insert dynamic control flow part-way through we can still split the network into multiple seperate graphs, which means this method doesn't preclude optimizations like KV caching, because the KV cached forward pass is just a seperate graph! See `examples/llama` for an example of a KV cache.
 
-Some huge benefits are now unlocked:
+Now we can do:
 - Aggressive kernel fusion
 - Shape-specific kernels compiled at runtime
 - Devices and Dtypes are handled through compilers (just run the CUDA compiler to convert the graph to use CUDA kernels, then the fp16 compiler to convert to half-precision kernels)
@@ -67,17 +67,17 @@ Once you've written all your computation code, run `cx.display()` to see the ent
 Currently luminal is extremely alpha. Please don't use this in prod.
 
 - Metal and Cuda are supported for running models on Macs and Nvidia GPUs respectively, in both full and half precision.
-- Llama 1 is implemented in `examples/llama`. See instructions above for running.
+- Mistral 7B and Llama 7B are implemented in `examples/`. See instructions above for running.
 - The llama example shows how to implement a loader for a custom format. Safetensors loaders are already implemented, and are the recommended way to load a model.
 - We have a small library of NN modules in `nn`, including transformers.
 - A signifigant amount of high-level ops are implemented in `hl_ops`. We are aiming to match the tinygrad / pytorch api.
-- Next release will bring a signifigant amount of compilers which should fuse primops into much faster ops. The aim for 0.3 is to be usably fast, not SOTA yet.
-- The aim for 0.4 is to achieve SOTA performance on macs, and near SOTA on single nvidia gpus, as well as support all mainstream models (Stable Diffusion, Whisper, Flamingo, etc.)
+- Next release will bring a signifigant amount of compilers which should fuse primops into much faster ops. The aim for 0.3 is to be usably fast, not SOTA yet (10-20 tok/s in fp16).
+- The aim for 0.4 is to achieve SOTA performance on macs (50 tok/s), and near SOTA on single nvidia gpus (>200 tok/s), as well as support all mainstream models (Whisper, Stable Diffusion, Yolo v8, etc.)
 
 Some things on the roadmap:
 - Optimize cuda and metal matmul kernels
+- Fine-grained metal and cuda IR
 - Build benchmarking suite to test against other libs
-- Write specialized Cuda and Metal kernels for full transformer architecture (FlashAttention, etc.)
 - Autograd engine
 - Beat PT 2.0 perf on LLM training
 - Write compiler for quantum photonic retro encabulator
