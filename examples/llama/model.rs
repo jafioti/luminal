@@ -8,7 +8,7 @@ pub const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
 pub const HIDDEN: usize = 4096;
 pub const INTERMEDIATE: usize = 11008;
 pub const HEADS: usize = 32;
-pub const LAYERS: usize = 1;
+pub const LAYERS: usize = 32;
 
 use half::f16;
 use luminal::{

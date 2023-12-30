@@ -16,6 +16,9 @@ type DeviceCompiler = CudaFp16Compiler;
 type DeviceCompiler = CPUCompiler;
 
 fn main() {
+    let prompt = "Here is a python implementation of merge sort:";
+    let tokens_to_generate = 200;
+
     println!("Creating graph...");
     let tokenizer = SentencePieceBpeTokenizer::from_file(
         "./examples/mistral/setup/mistral-7b-hf/tokenizer.model",
@@ -101,10 +104,8 @@ fn main() {
     );
 
     // Run inference first pass
-    let prompt = "Santa says: Merry";
     let mut input_ids = encode(&tokenizer, prompt);
 
-    let mut completion = String::new();
     input.set_dyn(
         input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
         vec![1, input_ids.len()],
@@ -117,8 +118,11 @@ fn main() {
     input_ids.push(output_id);
 
     // Decode token
-    completion.push_str(&decode(&tokenizer, &[output_id]));
-    print!("{}{}", prompt.white().bold(), completion.green());
+    print!(
+        "{}{}",
+        prompt.white().bold(),
+        decode(&tokenizer, &[output_id]).green()
+    );
     std::io::stdout().flush().unwrap();
 
     // Transfer weights and kv cache
@@ -130,7 +134,7 @@ fn main() {
 
     // Decode loop
     let mut token_decode_times = vec![];
-    for _ in 0..100 {
+    for _ in 0..tokens_to_generate {
         single_input.set(vec![*input_ids.last().unwrap() as f32]);
         cx2.set_dyn_dim('p', input_ids.len() - 1);
         cx2.set_dyn_dim('t', input_ids.len());
