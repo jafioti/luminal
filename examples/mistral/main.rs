@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, time::Instant};
+use std::{io::Write, marker::PhantomData, time::Instant};
 
 use colored::Colorize;
 use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
@@ -15,8 +15,8 @@ type DeviceCompiler = CudaFp16Compiler;
 #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
 type DeviceCompiler = CPUCompiler;
 
-fn main() -> Result<(), String> {
-    println!("Constructing graph...");
+fn main() {
+    println!("Creating graph...");
     let tokenizer = SentencePieceBpeTokenizer::from_file(
         "./examples/mistral/setup/mistral-7b-hf/tokenizer.model",
         false,
@@ -109,14 +109,17 @@ fn main() -> Result<(), String> {
         input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
         vec![1, input_ids.len()],
     );
+    let now = Instant::now();
     cx1.execute();
+    println!("Prompt processing took {}ms", now.elapsed().as_millis());
 
     let output_id = sample_index(&logits.data());
     input_ids.push(output_id);
 
     // Decode token
     completion.push_str(&decode(&tokenizer, &[output_id]));
-    println!("{}{}", prompt.on_black().white().bold(), completion.green());
+    print!("{}{}", prompt.white().bold(), completion.green());
+    std::io::stdout().flush().unwrap();
 
     // Transfer weights and kv cache
     transfer_weights(&model, &mut cx1, &kv_model, &mut cx2);
@@ -126,6 +129,7 @@ fn main() -> Result<(), String> {
     }
 
     // Decode loop
+    let mut token_decode_times = vec![];
     for _ in 0..100 {
         single_input.set(vec![*input_ids.last().unwrap() as f32]);
         cx2.set_dyn_dim('p', input_ids.len() - 1);
@@ -133,31 +137,32 @@ fn main() -> Result<(), String> {
 
         let now = Instant::now();
         cx2.execute();
-        println!("Forward Pass Took {:.2}s", now.elapsed().as_secs_f32());
+        token_decode_times.push(now.elapsed().as_millis());
 
         // Sample tokens
         let output_id = sample_index(&decode_logits.data());
         decode_logits.drop();
-        completion.push_str(&decode(&tokenizer, &[output_id]));
         input_ids.push(output_id);
-        println!("{}{}", prompt.on_black().white().bold(), completion.green());
+        print!("{}", decode(&tokenizer, &[output_id]).green());
+        std::io::stdout().flush().unwrap();
 
         // Swap caches
         for ((src_k, src_v), (dest_k, dest_v)) in cache_src.iter().zip(cache_dest.iter()) {
             // Move dest caches to src
             cx2.swap_tensors(*src_k, *dest_k);
             cx2.swap_tensors(*src_v, *dest_v);
-            // // Drop dest caches
-            // dest_k.drop();
-            // dest_v.drop();
+            // Drop dest caches
+            dest_k.drop();
+            dest_v.drop();
         }
     }
-
-    Ok(())
+    println!(
+        "\nAverage token generated in {}ms",
+        token_decode_times.iter().sum::<u128>() / token_decode_times.len() as u128
+    );
 }
 
-// Method to encode text as vector
-pub fn encode(tokenizer: &SentencePieceBpeTokenizer, text: &str) -> Vec<i64> {
+fn encode(tokenizer: &SentencePieceBpeTokenizer, text: &str) -> Vec<i64> {
     let mut vector = tokenizer
         .encode(text, None, text.len(), &TruncationStrategy::LongestFirst, 0)
         .token_ids;
@@ -165,7 +170,7 @@ pub fn encode(tokenizer: &SentencePieceBpeTokenizer, text: &str) -> Vec<i64> {
     vector
 }
 
-pub fn decode(tokenizer: &SentencePieceBpeTokenizer, token_ids: &[i64]) -> String {
+fn decode(tokenizer: &SentencePieceBpeTokenizer, token_ids: &[i64]) -> String {
     tokenizer
         .decode(token_ids, true, false)
         .replace("<0x0A>", "\n")

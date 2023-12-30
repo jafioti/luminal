@@ -1,25 +1,26 @@
-mod config;
 mod loader;
 mod model;
 
-use std::{marker::PhantomData, time::Instant};
+use std::{io::Write, marker::PhantomData, time::Instant};
 
-use luminal::prelude::*;
+use colored::Colorize;
+use luminal::{prelude::*, shape::symbolic::Expression};
 use model::LlamaForCausalLM;
 use rust_tokenizers::tokenizer::{
-    SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy::LongestFirst,
+    SentencePieceBpeTokenizer, Tokenizer,
+    TruncationStrategy::{self},
 };
 
 use crate::model::KVCache;
 
 type Model = LlamaForCausalLM<
-    { config::VOCAB },
-    { config::HEADS },
-    { config::HIDDEN },
-    { config::INTERMEDIATE },
-    { config::HEAD_DIM },
-    { config::HEAD_DIM_OVER_2 },
-    { config::LAYERS },
+    { model::VOCAB },
+    { model::HEADS },
+    { model::HIDDEN },
+    { model::INTERMEDIATE },
+    { model::HEAD_DIM },
+    { model::HEAD_DIM_OVER_2 },
+    { model::LAYERS },
 >;
 
 #[cfg(feature = "metal")]
@@ -37,7 +38,13 @@ fn main() {
     )
     .unwrap();
     let mut input = tokenizer
-        .encode(prompt, None, prompt.len(), &LongestFirst, 0)
+        .encode(
+            prompt,
+            None,
+            prompt.len(),
+            &TruncationStrategy::LongestFirst,
+            0,
+        )
         .token_ids
         .iter()
         .map(|&x| x as usize)
@@ -54,7 +61,7 @@ fn main() {
     );
     let (out1, cache1) = model.forward((
         inp,
-        Option::<Vec<KVCache<Const<1>, Const<0>, { config::HEADS }, { config::HEAD_DIM }>>>::None,
+        Option::<Vec<KVCache<Const<1>, Const<0>, { model::HEADS }, { model::HEAD_DIM }>>>::None,
         PhantomData::<Dyn<'s'>>,
     ));
     out1.retrieve();
@@ -72,8 +79,8 @@ fn main() {
     // Build KV cache forward graph
     let kv_model = Model::initialize(&mut cx2);
     let single_inp = cx2.named_tensor::<R2<1, 1>>("Input");
-    let cache_src: Vec<KVCache<Const<1>, Dyn<'p'>, { config::HEADS }, { config::HEAD_DIM }>> = (0
-        ..config::LAYERS)
+    let cache_src: Vec<KVCache<Const<1>, Dyn<'p'>, { model::HEADS }, { model::HEAD_DIM }>> = (0
+        ..model::LAYERS)
         .map(|_| {
             (
                 cx2.named_tensor("Key Cache"),
@@ -111,7 +118,7 @@ fn main() {
     cx1.execute_debug();
 
     let out1 = out1.data();
-    input.push(sample_index(&out1[out1.len() - 32_000..]));
+    input.push(sample_index(&out1[out1.len() - 32_000..]) as usize);
     println!(
         "{}",
         tokenizer
@@ -144,7 +151,7 @@ fn main() {
         let o = out.data();
         out.drop();
         // Sample tokens
-        input.push(sample_index(&o));
+        input.push(sample_index(&o) as usize);
         println!(
             "{}",
             tokenizer
@@ -168,11 +175,25 @@ fn main() {
     }
 }
 
+fn encode(tokenizer: &SentencePieceBpeTokenizer, text: &str) -> Vec<i64> {
+    let mut vector = tokenizer
+        .encode(text, None, text.len(), &TruncationStrategy::LongestFirst, 0)
+        .token_ids;
+    vector.insert(0, 1); // Start token
+    vector
+}
+
+fn decode(tokenizer: &SentencePieceBpeTokenizer, token_ids: &[i64]) -> String {
+    tokenizer
+        .decode(token_ids, true, false)
+        .replace("<0x0A>", "\n")
+}
+
 // Currently just an argmax, do actual sampling here
-fn sample_index(dist: &[f32]) -> usize {
+fn sample_index(dist: &[f32]) -> i64 {
     dist.iter()
         .enumerate()
         .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .unwrap()
-        .0
+        .0 as i64
 }
