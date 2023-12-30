@@ -7,10 +7,7 @@ use luminal::{
     shape::symbolic::{BigExpression, Expression},
 };
 
-//////////////////////////////////////////////
-///          Mistral 7B Config             ///
-//////////////////////////////////////////////
-
+// Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
 pub const NUM_LAYERS: usize = 32;
@@ -22,10 +19,6 @@ pub const N_ATTENTION_GROUPS: usize = N_HEADS / N_KV_HEADS;
 pub const HEAD_DIM: usize = HIDDEN_DIM / N_HEADS;
 pub const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
 pub const ATTN_PROJ_DIM: usize = HEAD_DIM * N_KV_HEADS;
-
-//////////////////////////////////////////////
-///              Model Structs             ///
-//////////////////////////////////////////////
 
 pub type KVCache<Batch, Seq> = (
     GraphTensor<(Batch, Const<N_KV_HEADS>, Seq, Const<HEAD_DIM>)>,

@@ -168,6 +168,10 @@ fn main() {
             dest_v.drop();
         }
     }
+    println!(
+        "\nAverage token generated in {}ms",
+        token_decode_times.iter().sum::<u128>() / token_decode_times.len() as u128
+    );
 }
 
 fn encode(tokenizer: &SentencePieceBpeTokenizer, text: &str) -> Vec<i64> {

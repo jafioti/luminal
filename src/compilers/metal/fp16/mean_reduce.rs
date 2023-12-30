@@ -64,7 +64,7 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
     }
 }
 
-impl MetalKernelForward for MetalMeanReduce {
+impl MetalKernel for MetalMeanReduce {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         let mut sh = input_shapes[0];
         sh.remove_dim(self.3);
@@ -73,7 +73,6 @@ impl MetalKernelForward for MetalMeanReduce {
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -121,13 +120,6 @@ impl Operator for MetalMeanReduce {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup buffers
-            let a = tensors[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Buffer>()
-                .unwrap();
             let mut sh = tensors[0].1;
             sh.remove_dim(self.3);
             let inp_size = sh.n_elements().to_usize().unwrap();
@@ -139,7 +131,12 @@ impl Operator for MetalMeanReduce {
             // Setup command queue / command buffer / encoder
             let command_buffer = self.1.new_command_buffer();
 
-            self.metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer, &[], &[&out]);
+            self.metal_forward(
+                &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
+                command_buffer,
+                &[],
+                &[&out],
+            );
 
             command_buffer.commit();
             command_buffer.wait_until_completed();

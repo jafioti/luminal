@@ -38,6 +38,16 @@ impl Data for Buffer {
     }
 }
 
+impl Data for Arc<Box<Buffer>> {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+}
+
 pub trait MetalFloat: Copy + 'static {
     fn to_f32(self) -> f32;
     fn from_f32(a: f32) -> Self;
@@ -75,7 +85,7 @@ impl MetalFloat for f16 {
     }
 }
 
-pub trait MetalKernelForward: Debug {
+pub trait MetalKernel: Debug {
     /// Annotate the buffer sizes of the intermediate buffers
     fn intermediate_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![]
@@ -86,15 +96,64 @@ pub trait MetalKernelForward: Debug {
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        dev: &Device,
         command_buffer: &CommandBufferRef,
         intermediate_buffers: &[&Buffer],
         output_buffers: &[&Buffer],
     );
+    fn without_command_buffer(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        intermediate_buffers: &[&Buffer],
+        output_buffers: &[&Buffer],
+    ) {
+        let dev = Device::system_default().unwrap();
+        let queue = dev.new_command_queue();
+        let command_buffer = queue.new_command_buffer();
+        self.metal_forward(inputs, command_buffer, intermediate_buffers, output_buffers);
+    }
+    fn without_storage_buffers(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        command_buffer: &CommandBufferRef,
+        dyn_map: &HashMap<char, usize>,
+    ) -> Vec<Buffer> {
+        let dev = Device::system_default().unwrap();
+        // Allocate storage buffers
+        let inp_shapes = inputs.iter().map(|(_, s)| *s).collect::<Vec<_>>();
+        let intermediate_buffers = self
+            .intermediate_buffer_sizes(&inp_shapes)
+            .into_iter()
+            .map(|n| {
+                dev.new_buffer(
+                    n.exec(dyn_map).unwrap() as u64,
+                    MTLResourceOptions::StorageModeShared,
+                )
+            })
+            .collect::<Vec<_>>();
+        let intermediate_buffers_ref = intermediate_buffers.iter().collect::<Vec<_>>();
+        let output_buffers = self
+            .output_buffer_sizes(&inp_shapes)
+            .into_iter()
+            .map(|n| {
+                dev.new_buffer(
+                    n.exec(dyn_map).unwrap() as u64,
+                    MTLResourceOptions::StorageModeShared,
+                )
+            })
+            .collect::<Vec<_>>();
+        let output_buffers_ref = output_buffers.iter().collect::<Vec<_>>();
+        self.metal_forward(
+            inputs,
+            command_buffer,
+            &intermediate_buffers_ref,
+            &output_buffers_ref,
+        );
+        output_buffers
+    }
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalKernelWrapper(pub Arc<Box<dyn MetalKernelForward>>);
+pub struct MetalKernelWrapper(pub Arc<Box<dyn MetalKernel>>);
 
 impl Default for MetalKernelWrapper {
     fn default() -> Self {
@@ -102,14 +161,13 @@ impl Default for MetalKernelWrapper {
     }
 }
 
-impl MetalKernelForward for () {
+impl MetalKernel for () {
     fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![]
     }
     fn metal_forward(
         &self,
         _: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         _: &CommandBufferRef,
         _: &[&Buffer],
         _: &[&Buffer],
@@ -262,10 +320,12 @@ fn get_idx_valid_exps(shape: ShapeTracker) -> (String, String) {
 }
 
 fn get_buffer_from_tensor<'a>(tensor: &'a InputTensor) -> &'a Buffer {
-    tensor
-        .borrowed()
-        .data
-        .as_any()
-        .downcast_ref::<Buffer>()
-        .unwrap()
+    let any = tensor.borrowed().data.as_any();
+    if let Some(b) = any.downcast_ref::<Buffer>() {
+        b
+    } else if let Some(b) = any.downcast_ref::<Arc<Box<Buffer>>>() {
+        b.as_ref()
+    } else {
+        panic!("Tensor does not contain a metal buffer");
+    }
 }

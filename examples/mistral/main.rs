@@ -16,7 +16,7 @@ type DeviceCompiler = CudaFp16Compiler;
 type DeviceCompiler = CPUCompiler;
 
 fn main() {
-    let prompt = "Here is a python implementation of merge sort:";
+    let prompt = "[INST]Please write a python implementation of merge sort.[/INST]";
     let tokens_to_generate = 200;
 
     println!("Creating graph...");
@@ -38,10 +38,10 @@ fn main() {
         .slice((.., (Expression::from('s') - 1).., ..))
         .retrieve();
     kv_cache.keep();
-    SafeTensorLoader::new(vec![
-        "./examples/mistral/setup/mistral-7b-hf/model-00001-of-00003.safetensors".to_string(),
-        "./examples/mistral/setup/mistral-7b-hf/model-00002-of-00003.safetensors".to_string(),
-        "./examples/mistral/setup/mistral-7b-hf/model-00003-of-00003.safetensors".to_string(),
+    SafeTensorLoader::new(&[
+        "./examples/mistral/setup/mistral-7b-hf/model-00001-of-00003.safetensors",
+        "./examples/mistral/setup/mistral-7b-hf/model-00002-of-00003.safetensors",
+        "./examples/mistral/setup/mistral-7b-hf/model-00003-of-00003.safetensors",
     ])
     .load(&model, &mut cx1);
     let mut cx2 = Graph::new();

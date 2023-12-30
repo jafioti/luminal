@@ -148,14 +148,13 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
     }
 }
 
-impl<T> MetalKernelForward for MetalContiguous<T> {
+impl<T> MetalKernel for MetalContiguous<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![input_shapes[0].contiguous().n_elements() * size_of::<T>()]
     }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -191,7 +190,6 @@ impl<T: MetalFloat> Operator for MetalContiguous<T> {
 
             self.metal_forward(
                 &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
-                &self.1,
                 command_buffer,
                 &[],
                 &[&out],
@@ -248,14 +246,13 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
     }
 }
 
-impl<T> MetalKernelForward for MetalLog2<T> {
+impl<T> MetalKernel for MetalLog2<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![input_shapes[0].n_physical_elements() * size_of::<T>()]
     }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -288,7 +285,6 @@ impl<T: MetalFloat> Operator for MetalLog2<T> {
 
             self.metal_forward(
                 &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
-                &self.2,
                 command_buffer,
                 &[],
                 &[&out],
@@ -344,14 +340,13 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
         Self(kernels[&name].clone(), queue, dev, Default::default())
     }
 }
-impl<T> MetalKernelForward for MetalExp2<T> {
+impl<T> MetalKernel for MetalExp2<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![input_shapes[0].n_physical_elements() * size_of::<T>()]
     }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -384,7 +379,6 @@ impl<T: MetalFloat> Operator for MetalExp2<T> {
             );
             self.metal_forward(
                 &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
-                &self.2,
                 command_buffer,
                 &[],
                 &[&out],
@@ -439,14 +433,13 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
         Self(kernels[&name].clone(), queue, dev, Default::default())
     }
 }
-impl<T> MetalKernelForward for MetalSin<T> {
+impl<T> MetalKernel for MetalSin<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![input_shapes[0].n_physical_elements() * size_of::<T>()]
     }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -480,7 +473,6 @@ impl<T: MetalFloat> Operator for MetalSin<T> {
 
             self.metal_forward(
                 &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
-                &self.2,
                 command_buffer,
                 &[],
                 &[&out],
@@ -535,14 +527,13 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
         Self(kernels[&name].clone(), queue, dev, Default::default())
     }
 }
-impl<T> MetalKernelForward for MetalSqrt<T> {
+impl<T> MetalKernel for MetalSqrt<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![input_shapes[0].n_physical_elements() * size_of::<T>()]
     }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -575,7 +566,6 @@ impl<T: MetalFloat> Operator for MetalSqrt<T> {
 
             self.metal_forward(
                 &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
-                &self.2,
                 command_buffer,
                 &[],
                 &[&out],
@@ -630,14 +620,13 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
         Self(kernels[&name].clone(), queue, dev, Default::default())
     }
 }
-impl<T> MetalKernelForward for MetalRecip<T> {
+impl<T> MetalKernel for MetalRecip<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![input_shapes[0].n_physical_elements() * size_of::<T>()]
     }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -670,7 +659,6 @@ impl<T: MetalFloat> Operator for MetalRecip<T> {
 
             self.metal_forward(
                 &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
-                &self.2,
                 command_buffer,
                 &[],
                 &[&out],
@@ -723,8 +711,8 @@ impl<T: MetalFloat> MetalAdd<T> {
 using namespace metal;
 kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
-        out[idx] = 
-            (({a_valid_exp}) == 0 ? 0.0h : inp_a[{a_idx_exp}]) 
+        out[idx] =
+            (({a_valid_exp}) == 0 ? 0.0h : inp_a[{a_idx_exp}])
             + (({b_valid_exp}) == 0 ? 0.0h : inp_b[{b_idx_exp}]);
     }}
 }}
@@ -748,14 +736,13 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
     }
 }
 
-impl<T> MetalKernelForward for MetalAdd<T> {
+impl<T> MetalKernel for MetalAdd<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![input_shapes[0].n_elements() * size_of::<T>()]
     }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -798,7 +785,6 @@ impl<T: MetalFloat> Operator for MetalAdd<T> {
                     (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
                     (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
                 ],
-                &self.2,
                 command_buffer,
                 &[],
                 &[&out],
@@ -851,8 +837,8 @@ impl<T: MetalFloat> MetalMul<T> {
 using namespace metal;
 kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
     if (idx < n_elements) {{
-        out[idx] = 
-            (({a_valid_exp}) == 0 ? 0.0h : inp_a[{a_idx_exp}]) 
+        out[idx] =
+            (({a_valid_exp}) == 0 ? 0.0h : inp_a[{a_idx_exp}])
             * (({b_valid_exp}) == 0 ? 0.0h : inp_b[{b_idx_exp}]);
     }}
 }}
@@ -875,14 +861,13 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
         )
     }
 }
-impl<T> MetalKernelForward for MetalMul<T> {
+impl<T> MetalKernel for MetalMul<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![input_shapes[0].n_elements() * size_of::<T>()]
     }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -926,7 +911,6 @@ impl<T: MetalFloat> Operator for MetalMul<T> {
                     (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
                     (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
                 ],
-                &self.2,
                 command_buffer,
                 &[],
                 &[&out],
@@ -1015,14 +999,13 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
     }
 }
 
-impl<T> MetalKernelForward for MetalLessThan<T> {
+impl<T> MetalKernel for MetalLessThan<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![input_shapes[0].n_elements() * size_of::<T>()]
     }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -1066,7 +1049,6 @@ impl<T: MetalFloat> Operator for MetalLessThan<T> {
                     (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
                     (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
                 ],
-                &self.2,
                 command_buffer,
                 &[],
                 &[&out],
@@ -1141,14 +1123,13 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
         )
     }
 }
-impl<T> MetalKernelForward for MetalMod<T> {
+impl<T> MetalKernel for MetalMod<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![input_shapes[0].n_elements() * size_of::<T>()]
     }
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -1192,7 +1173,6 @@ impl<T: MetalFloat> Operator for MetalMod<T> {
                     (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
                     (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
                 ],
-                &self.2,
                 command_buffer,
                 &[],
                 &[&out],
@@ -1276,7 +1256,7 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
     }
 }
 
-impl<T> MetalKernelForward for MetalSumReduce<T> {
+impl<T> MetalKernel for MetalSumReduce<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         let mut sh = input_shapes[0];
         sh.remove_dim(self.3);
@@ -1285,7 +1265,6 @@ impl<T> MetalKernelForward for MetalSumReduce<T> {
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -1343,7 +1322,6 @@ impl<T: MetalFloat> Operator for MetalSumReduce<T> {
 
             self.metal_forward(
                 &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
-                &self.2,
                 command_buffer,
                 &[],
                 &[&out],
@@ -1427,7 +1405,7 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
         )
     }
 }
-impl<T> MetalKernelForward for MetalMaxReduce<T> {
+impl<T> MetalKernel for MetalMaxReduce<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         let mut sh = input_shapes[0];
         sh.remove_dim(self.3);
@@ -1436,7 +1414,6 @@ impl<T> MetalKernelForward for MetalMaxReduce<T> {
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         _: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -1500,7 +1477,7 @@ impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
                 MTLResourceOptions::StorageModeShared,
             );
 
-            self.metal_forward(&[(a, tensors[0].1)], &self.2, command_buffer, &[], &[&out]);
+            self.metal_forward(&[(a, tensors[0].1)], command_buffer, &[], &[&out]);
 
             command_buffer.commit();
             command_buffer.wait_until_completed();

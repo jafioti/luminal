@@ -6,8 +6,10 @@ use std::{
 };
 
 use itertools::Itertools;
-use metal_rs::{Buffer, Device, MTLResourceOptions};
-use objc::rc::autoreleasepool;
+use metal_rs::{
+    objc::runtime::{objc_release, Object},
+    Buffer, CommandQueue, Device, MTLResourceOptions,
+};
 use petgraph::{
     algo::toposort,
     stable_graph::NodeIndex,
@@ -19,6 +21,8 @@ use crate::{
     op::{InputTensor, Operator},
     prelude::{symbolic::BigExpression, *},
 };
+
+use super::get_buffer_from_tensor;
 
 #[derive(Default, LuminalPrint)]
 pub struct StorageBufferCompiler;
@@ -184,15 +188,13 @@ impl Compiler for StorageBufferCompiler {
 
         // We now have the buffers to allocate, and the buffers needed for each op.
         // Let's create the allocator op and wrap all the metal ops
-        let dev = Device::system_default().unwrap();
         let shared_buffers = Arc::new(UnsafeCell::new(vec![]));
         let allocator = graph
             .add_op(AllocateMetalBuffers {
-                dev: dev.clone(),
+                dev: Device::system_default().unwrap(),
                 dyn_map: &graph.dyn_map,
                 buffer_sizes: buffers,
                 buffers: shared_buffers.clone(),
-                prev_dyn_map: HashMap::default(),
             })
             .finish();
         // Ensure allocator is ran before any nodes that use the buffers
@@ -236,7 +238,6 @@ impl Compiler for StorageBufferCompiler {
                 .unwrap();
             *graph.graph.node_weight_mut(node).unwrap() = Box::new(StorageBufferWrapper {
                 wrapper,
-                dev: dev.clone(),
                 buffers: shared_buffers.clone(),
                 output_buffers,
                 intermediate_buffers,
@@ -255,28 +256,36 @@ struct AllocateMetalBuffers {
     dev: Device,
     dyn_map: *const HashMap<char, usize>,
     buffer_sizes: Vec<BigExpression>,
-    buffers: Arc<UnsafeCell<Vec<Buffer>>>,
-    prev_dyn_map: HashMap<char, usize>,
+    buffers: Arc<UnsafeCell<Vec<Arc<Box<Buffer>>>>>,
 }
 
 impl Operator for AllocateMetalBuffers {
     fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let buffers = unsafe { &mut *self.buffers.get() };
-        // Allocate all buffers
         let dyn_map = unsafe { self.dyn_map.as_ref().unwrap() };
-        if *dyn_map != self.prev_dyn_map {
-            // Only allocate if dyn_map changed (should be done on a per-buffer basis)
+        // Allocate all buffers
+        if buffers.is_empty() {
             *buffers = self
                 .buffer_sizes
                 .iter()
                 .map(|e| {
-                    self.dev.new_buffer(
+                    Arc::new(Box::new(self.dev.new_buffer(
                         e.exec(dyn_map).unwrap() as u64,
                         MTLResourceOptions::StorageModeShared,
-                    )
+                    )))
                 })
                 .collect();
-            self.prev_dyn_map = dyn_map.clone();
+        } else {
+            for (size, buffer) in self.buffer_sizes.iter().zip(buffers) {
+                let size = size.exec(dyn_map).unwrap() as u64;
+                if buffer.length() != size {
+                    buffer.set_purgeable_state(metal_rs::MTLPurgeableState::Empty);
+                    *buffer = Arc::new(Box::new(
+                        self.dev
+                            .new_buffer(size, MTLResourceOptions::StorageModeShared),
+                    ));
+                }
+            }
         }
         vec![]
     }
@@ -285,8 +294,7 @@ impl Operator for AllocateMetalBuffers {
 #[derive(LuminalEq)]
 struct StorageBufferWrapper {
     wrapper: Box<MetalKernelWrapper>,
-    dev: Device,
-    buffers: Arc<UnsafeCell<Vec<Buffer>>>,
+    buffers: Arc<UnsafeCell<Vec<Arc<Box<Buffer>>>>>,
     intermediate_buffers: Vec<usize>,
     output_buffers: Vec<usize>,
 }
@@ -302,32 +310,24 @@ impl Operator for StorageBufferWrapper {
         let intermediate_buffers = self
             .intermediate_buffers
             .iter()
-            .map(|i| unsafe { &(*self.buffers.get())[*i] })
+            .map(|i| unsafe { (*(*self.buffers.get())[*i].as_ref()).as_ref() })
             .collect::<Vec<_>>();
         let output_buffers = self
             .output_buffers
             .iter()
-            .map(|i| unsafe { &(*self.buffers.get())[*i] })
+            .map(|i| unsafe { (*(*self.buffers.get())[*i].as_ref()).as_ref() })
             .collect::<Vec<_>>();
-        let queue = self.dev.new_command_queue();
-        self.wrapper.0.metal_forward(
+        self.wrapper.0.without_command_buffer(
             &inp.iter()
-                .map(|(t, sh)| {
-                    (
-                        t.borrowed().data.as_any().downcast_ref::<Buffer>().unwrap(),
-                        *sh,
-                    )
-                })
+                .map(|(t, sh)| (get_buffer_from_tensor(t), *sh))
                 .collect::<Vec<_>>(),
-            &self.dev,
-            queue.new_command_buffer(),
             &intermediate_buffers,
             &output_buffers,
         );
-        output_buffers
-            .into_iter()
-            .map(|b| Tensor {
-                data: Box::new(b.clone()), // This is dubious. Is cloning cheap?
+        self.output_buffers
+            .iter()
+            .map(|i| Tensor {
+                data: Box::new(unsafe { (*self.buffers.get())[*i].clone() }),
             })
             .collect()
     }

@@ -85,7 +85,7 @@ kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]
 }
 // TODO: Make epsilon a parameter
 
-impl MetalKernelForward for MetalRMSNorm {
+impl MetalKernel for MetalRMSNorm {
     fn intermediate_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         let mut meaned_shape = input_shapes[0];
         meaned_shape.remove_dim(meaned_shape.len() - 1);
@@ -98,7 +98,6 @@ impl MetalKernelForward for MetalRMSNorm {
     fn metal_forward(
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
-        _: &Device,
         command_buffer: &CommandBufferRef,
         intermediate_buffers: &[&Buffer],
         output_buffers: &[&Buffer],
@@ -173,13 +172,7 @@ impl Operator for MetalRMSNorm {
                 MTLResourceOptions::StorageModeShared,
             );
 
-            self.metal_forward(
-                &[(a, tensors[0].1)],
-                &self.2,
-                command_buffer,
-                &[&meaned],
-                &[&out],
-            );
+            self.metal_forward(&[(a, tensors[0].1)], command_buffer, &[&meaned], &[&out]);
 
             command_buffer.commit();
             command_buffer.wait_until_completed();

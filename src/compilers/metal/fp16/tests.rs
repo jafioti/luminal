@@ -1,8 +1,8 @@
 use dfdx::prelude::{Module as DfdxModule, *};
 use half::f16;
 use itertools::Itertools;
+use metal_rs::objc::rc::autoreleasepool;
 use num_traits::Float;
-use objc::rc::autoreleasepool;
 use rand::{rngs::StdRng, SeedableRng};
 
 use super::MetalFp16Compiler;
