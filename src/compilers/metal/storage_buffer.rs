@@ -137,52 +137,59 @@ impl Compiler for StorageBufferCompiler {
             // Assign output buffers
             for required_buffer in wrapper.0.output_buffer_sizes(&input_shapes) {
                 // Find an applicable buffer
-                // if let Some((buffer_index, source_node, _)) = first_pass[&node]
-                //     .1
-                //     .iter()
-                //     .filter(|i| available_buffers.contains_key(i))
-                //     .flat_map(|i| {
-                //         available_buffers[i]
-                //             .0
-                //             .iter()
-                //             .cloned()
-                //             .enumerate()
-                //             .map(|(o, b)| (o, *i, b))
-                //     })
-                //     .find(|(_, _, size)| *size == required_buffer)
-                // {
-                //     let buffer = buffer_map.get(&source_node).unwrap().0[buffer_index];
-                //     buffer_map.get_mut(&node).unwrap().0.push(buffer);
-                // } else {
-                // Allocate new buffer
-                buffer_map.get_mut(&node).unwrap().0.push(buffers.len());
-                buffers.push(required_buffer);
-                // }
+                if let Some((buffer_index, source_node, _)) = first_pass[&node]
+                    .1
+                    .iter()
+                    .filter(|i| available_buffers.contains_key(i))
+                    .flat_map(|i| {
+                        available_buffers[i]
+                            .0
+                            .iter()
+                            .cloned()
+                            .enumerate()
+                            .map(|(o, b)| (o, *i, b))
+                    })
+                    .find(|(_, _, size)| *size == required_buffer)
+                {
+                    let buffer = buffer_map.get(&source_node).unwrap().0[buffer_index];
+                    buffer_map.get_mut(&node).unwrap().0.push(buffer);
+                    // Remove this buffer from first_pass so it can't be used again
+                    for (_, v) in &mut first_pass {
+                        v.1.retain(|i| *i != source_node);
+                    }
+                } else {
+                    // Allocate new buffer
+                    buffer_map.get_mut(&node).unwrap().0.push(buffers.len());
+                    buffers.push(required_buffer);
+                }
             }
             // Assign intermediate buffers
             for required_buffer in wrapper.0.intermediate_buffer_sizes(&input_shapes) {
                 // Find an applicable buffer
-                // if let Some((buffer_index, source_node, _)) = first_pass[&node]
-                //     .1
-                //     .iter()
-                //     .filter(|i| available_buffers.contains_key(i))
-                //     .flat_map(|i| {
-                //         available_buffers[i]
-                //             .1
-                //             .iter()
-                //             .cloned()
-                //             .enumerate()
-                //             .map(|(o, b)| (o, *i, b))
-                //     })
-                //     .find(|(_, _, size)| *size == required_buffer)
-                // {
-                //     let buffer = buffer_map.get(&source_node).unwrap().1[buffer_index];
-                //     buffer_map.get_mut(&node).unwrap().1.push(buffer);
-                // } else {
-                // Allocate new buffer
-                buffer_map.get_mut(&node).unwrap().1.push(buffers.len());
-                buffers.push(required_buffer);
-                // }
+                if let Some((buffer_index, source_node, _)) = first_pass[&node]
+                    .1
+                    .iter()
+                    .filter(|i| available_buffers.contains_key(i))
+                    .flat_map(|i| {
+                        available_buffers[i]
+                            .1
+                            .iter()
+                            .cloned()
+                            .enumerate()
+                            .map(|(o, b)| (o, *i, b))
+                    })
+                    .find(|(_, _, size)| *size == required_buffer)
+                {
+                    let buffer = buffer_map.get(&source_node).unwrap().1[buffer_index];
+                    buffer_map.get_mut(&node).unwrap().1.push(buffer);
+                    for (_, v) in &mut first_pass {
+                        v.1.retain(|i| *i != source_node);
+                    }
+                } else {
+                    // Allocate new buffer
+                    buffer_map.get_mut(&node).unwrap().1.push(buffers.len());
+                    buffers.push(required_buffer);
+                }
             }
         }
 

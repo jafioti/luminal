@@ -16,8 +16,8 @@ type DeviceCompiler = CudaFp16Compiler;
 type DeviceCompiler = CPUCompiler;
 
 fn main() {
-    let prompt = "[INST]Please write a python implementation of merge sort.[/INST]";
-    let tokens_to_generate = 200;
+    let prompt = "[INST]Please write a python implementation of merge sort.[/INST]\n";
+    let tokens_to_generate = 300;
 
     println!("Creating graph...");
     let tokenizer = SentencePieceBpeTokenizer::from_file(
