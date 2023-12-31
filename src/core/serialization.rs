@@ -1,7 +1,6 @@
 use crate::op::Function;
 use crate::prelude::{Graph, GraphTensor, Shape, Tensor};
 use half::{bf16, f16};
-use itertools::Itertools;
 use memmap2::MmapOptions;
 use petgraph::stable_graph::NodeIndex;
 use safetensors::tensor::{Dtype, View};

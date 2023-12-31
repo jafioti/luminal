@@ -1,3 +1,5 @@
+// Lots of utilities used by compilers
+
 use std::{
     any::{Any, TypeId},
     collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
@@ -40,9 +42,20 @@ impl<C: Compiler + Debug> Compiler for TimedCompiler<C> {
         println!("Starting {compiler_name}");
         let start = std::time::Instant::now();
         self.0.compile(graph);
+        let finished_millis = start.elapsed().as_millis();
+        let minutes = finished_millis / 60_000;
+        let seconds = (finished_millis % 60_000) / 1000;
+        let millis = finished_millis % 1000;
         println!(
             "Finished {compiler_name} in {}",
-            format!("{:?}ms", start.elapsed().as_millis()).bold(),
+            if minutes > 0 {
+                format!("{minutes}m {seconds}s {millis}ms")
+            } else if seconds > 0 {
+                format!("{seconds}s {millis}ms")
+            } else {
+                format!("{millis}ms")
+            }
+            .bold()
         );
     }
 }
@@ -303,9 +316,6 @@ pub fn move_references(
     src: NodeIndex,
     trg: NodeIndex,
 ) {
-    // if id_remap.get(&trg).map(|e| *e == src).unwrap_or_default() {
-    //     id_remap.remove(&trg);
-    // } else {
     // Only remap if it isn't already remapped, otherwise it would invalidate the past remappig
     if let Entry::Vacant(e) = id_remap.entry(src) {
         // Create remap
@@ -319,7 +329,6 @@ pub fn move_references(
             to_retrieve.insert(trg);
         }
     }
-    // }
 }
 
 pub fn move_outgoing_edge<N, E: Clone>(
@@ -383,34 +392,42 @@ type SelectionGraph = petgraph::Graph<SelectOp, Option<u8>>;
 pub struct GraphSearch {
     selector: SelectionGraph,
     graph: *const Graph,
+    to_return: Vec<BTreeMap<NodeIndex, NodeIndex>>,
     already_returned: HashSet<BTreeMap<NodeIndex, NodeIndex>>,
 }
 
-impl Iterator for GraphSearch {
-    type Item = ();
-
-    fn next(&mut self) -> Option<Self::Item> {
+impl GraphSearch {
+    pub fn next_match(&mut self) -> bool {
         // Look through graph for pattern from selector
         let graph = unsafe { self.graph.as_ref().unwrap() };
 
-        if let Some(mapping) = match_nodes(&graph.graph, &self.selector, &self.already_returned) {
-            // Apply pattern to ptrs
-            for (selector_node, ptr) in self.selector.node_indices().flat_map(|n| {
-                self.selector
-                    .node_weight(n)
-                    .unwrap()
-                    .pointers
-                    .iter()
-                    .map(move |i| (n, *i))
-            }) {
-                unsafe {
-                    *ptr = mapping[&selector_node];
-                }
-            }
-            self.already_returned.insert(mapping);
-            return Some(());
+        if self.to_return.is_empty() {
+            self.to_return = match_nodes(&graph.graph, &self.selector, &self.already_returned);
         }
-        None
+        while let Some(mapping) = self.to_return.pop() {
+            if !self.already_returned.contains(&mapping) {
+                // Apply pattern to ptrs
+                for (selector_node, ptr) in self.selector.node_indices().flat_map(|n| {
+                    self.selector
+                        .node_weight(n)
+                        .unwrap()
+                        .pointers
+                        .iter()
+                        .map(move |i| (n, *i))
+                }) {
+                    unsafe {
+                        *ptr = mapping[&selector_node];
+                    }
+                }
+                self.already_returned.insert(mapping);
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn clear_cached_results(&mut self) {
+        self.to_return.clear();
     }
 }
 
@@ -418,9 +435,9 @@ fn match_nodes(
     g0: &MainGraph,
     g1: &SelectionGraph,
     already_returned: &HashSet<BTreeMap<NodeIndex, NodeIndex>>,
-) -> Option<BTreeMap<NodeIndex, NodeIndex>> {
+) -> Vec<BTreeMap<NodeIndex, NodeIndex>> {
     let Ok(topo_order) = toposort(g1, None) else {
-        return None;
+        return vec![];
     };
     let g1_nodes = g1.node_count();
     let predecessors_map = g0
@@ -435,9 +452,11 @@ fn match_nodes(
         .collect::<HashMap<_, _>>();
     let mut stack = VecDeque::new();
     stack.push_back((0, BTreeMap::new(), HashSet::<NodeIndex>::default()));
+    let mut mappings = vec![];
     while let Some((current_index, mut mapping, mut visited)) = stack.pop_back() {
         if mapping.len() == g1_nodes && !already_returned.contains(&mapping) {
-            return Some(mapping);
+            mappings.push(mapping);
+            continue;
         }
         if current_index >= topo_order.len() {
             continue;
@@ -473,7 +492,7 @@ fn match_nodes(
         }
     }
 
-    None
+    mappings
 }
 
 fn test_node(
@@ -566,9 +585,9 @@ pub struct SelectOp {
     check: Option<fn(&dyn Operator, &[ShapeTracker]) -> bool>,
     /// Shape constraint
     shape: Option<Vec<Vec<Expression>>>,
-    /// Fake constraint       
+    /// Fake constraint
     fake: Option<Vec<Vec<Option<bool>>>>,
-    /// Pointers      
+    /// Pointers
     pointers: Vec<*mut NodeIndex>,
 }
 
@@ -656,6 +675,7 @@ impl SelectEdge {
 
     pub fn search(self, graph: &Graph) -> GraphSearch {
         GraphSearch {
+            to_return: vec![],
             selector: self.graph,
             graph,
             already_returned: HashSet::new(),
@@ -692,10 +712,7 @@ mod tests {
             SelectOp::new().ty::<Log2>().ptr(&mut log),
         );
 
-        assert_eq!(
-            selector1.search(&cx).chain(selector2.search(&cx)).next(),
-            None
-        );
+        assert!(!selector1.search(&cx).next_match() && !selector2.search(&cx).next_match());
 
         // Matmul
         let s = SelectEdge::new(
@@ -703,6 +720,6 @@ mod tests {
             SelectOp::new().ty::<SumReduce>(),
         );
 
-        assert_eq!(s.search(&cx).next(), None);
+        assert!(!s.search(&cx).next_match());
     }
 }

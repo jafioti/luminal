@@ -6,7 +6,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use metal_rs::{Buffer, CommandBuffer, CommandQueue, Device, MTLResourceOptions};
+use metal_rs::{Buffer, CommandBuffer, CommandQueue, Device};
 use petgraph::{
     stable_graph::NodeIndex,
     visit::EdgeRef,

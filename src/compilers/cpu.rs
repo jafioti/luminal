@@ -40,7 +40,8 @@ impl Compiler for MatMul2DCompiler {
                 .check(|o, _| o.is_equal(&SumReduce(0)))
                 .ptr(&mut sum_reduce),
         );
-        for _ in s.search(graph) {
+        let mut searcher = s.search(graph);
+        while searcher.next_match() {
             if graph.no_delete.contains(&mul) {
                 // The intermediate mul can't be deleted
                 continue;
@@ -152,7 +153,8 @@ impl Compiler for BatchMatMul2DCompiler {
                 .check(|o, _| o.is_equal(&SumReduce(3)))
                 .ptr(&mut sum_reduce),
         );
-        for _ in s.search(graph) {
+        let mut searcher = s.search(graph);
+        while searcher.next_match() {
             if graph.no_delete.contains(&mul) {
                 // The intermediate mul can't be deleted
                 continue;

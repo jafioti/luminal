@@ -190,7 +190,8 @@ impl Compiler for MeanReduceCompiler {
             ),
         );
 
-        for _ in s.search(graph) {
+        let mut searcher = s.search(graph);
+        while searcher.next_match() {
             if graph.no_delete.contains(&sum_reduce)
                 || graph.no_delete.contains(&fake_sum_reduce)
                 || graph.no_delete.contains(&recip)

@@ -139,6 +139,7 @@ fn main() {
         cx2.set_tensor(key_dest.id(), 0, cx1.get_tensor(key_src.id(), 0).unwrap());
         cx2.set_tensor(val_dest.id(), 0, cx1.get_tensor(val_src.id(), 0).unwrap());
     }
+    drop(cx1);
 
     // Decode loop
     let mut token_decode_times = vec![];
