@@ -338,7 +338,8 @@ impl Compiler for MetalMatMulCompiler {
                 .ptr(&mut sum_reduce),
         );
 
-        for _ in s.search(graph) {
+        let mut searcher = s.search(graph);
+        while searcher.next_match() {
             if graph.no_delete.contains(&mul) {
                 // The intermediate mul can't be deleted
                 continue;
@@ -431,7 +432,8 @@ impl Compiler for MetalMatMulCompiler {
                 .ptr(&mut sum_reduce),
         );
         let mut batched_matmul = None;
-        for _ in s.search(graph) {
+        let mut searcher = s.search(graph);
+        while searcher.next_match() {
             if graph.no_delete.contains(&mul) {
                 // The intermediate mul can't be deleted
                 continue;

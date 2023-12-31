@@ -296,7 +296,8 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
             ),
         );
 
-        for _ in s.search(graph) {
+        let mut searcher = s.search(graph);
+        while searcher.next_match() {
             let arange_amount = {
                 let sh = graph
                     .graph

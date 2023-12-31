@@ -245,7 +245,8 @@ impl Compiler for RMSNormCompiler {
             SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul),
         );
 
-        for _ in s.search(graph) {
+        let mut searcher = s.search(graph);
+        while searcher.next_match() {
             if graph.no_delete.contains(&add)
                 || graph.no_delete.contains(&sqrt)
                 || graph.no_delete.contains(&recip)

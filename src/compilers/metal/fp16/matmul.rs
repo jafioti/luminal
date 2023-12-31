@@ -646,10 +646,9 @@ impl Compiler for MetalMatMulCompiler {
                 .ptr(&mut sum_reduce),
         );
         // Mul ([1, 1(fake?), N(fake), M] | [1, 1(fake), N, M]) -> SumReduce(2) -> [N]
-        for _ in vecmat_pattern
-            .search(graph)
-            .chain(batch_vecmat_pattern.search(graph))
-        {
+        let mut s1 = vecmat_pattern.search(graph);
+        let mut s2 = batch_vecmat_pattern.search(graph);
+        while s1.next_match() || s2.next_match() {
             if graph.no_delete.contains(&mul) {
                 // The intermediate mul can't be deleted
                 continue;
@@ -732,7 +731,8 @@ impl Compiler for MetalMatMulCompiler {
                 .ptr(&mut sum_reduce),
         );
 
-        for _ in matmul_pattern.search(graph) {
+        let mut searcher = matmul_pattern.search(graph);
+        while searcher.next_match() {
             if graph.no_delete.contains(&mul) {
                 // The intermediate mul can't be deleted
                 continue;
@@ -859,7 +859,8 @@ impl Compiler for MetalMatMulCompiler {
                 })
                 .ptr(&mut sum_reduce),
         );
-        for _ in s.search(graph) {
+        let mut searcher = s.search(graph);
+        while searcher.next_match() {
             if graph.no_delete.contains(&mul) {
                 // The intermediate mul can't be deleted
                 continue;

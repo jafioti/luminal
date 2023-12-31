@@ -6,10 +6,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use metal_rs::{
-    objc::runtime::{objc_release, Object},
-    Buffer, CommandQueue, Device, MTLResourceOptions,
-};
+use metal_rs::{Buffer, Device, MTLResourceOptions};
 use petgraph::{
     algo::toposort,
     stable_graph::NodeIndex,
@@ -263,7 +260,7 @@ struct AllocateMetalBuffers {
     dev: Device,
     dyn_map: *const HashMap<char, usize>,
     buffer_sizes: Vec<BigExpression>,
-    buffers: Arc<UnsafeCell<Vec<Arc<Box<Buffer>>>>>,
+    buffers: Arc<UnsafeCell<Vec<Buffer>>>,
 }
 
 impl Operator for AllocateMetalBuffers {
@@ -276,21 +273,21 @@ impl Operator for AllocateMetalBuffers {
                 .buffer_sizes
                 .iter()
                 .map(|e| {
-                    Arc::new(Box::new(self.dev.new_buffer(
+                    self.dev.new_buffer(
                         e.exec(dyn_map).unwrap() as u64,
                         MTLResourceOptions::StorageModeShared,
-                    )))
+                    )
                 })
                 .collect();
         } else {
             for (size, buffer) in self.buffer_sizes.iter().zip(buffers) {
                 let size = size.exec(dyn_map).unwrap() as u64;
                 if buffer.length() != size {
+                    // println!("reallocing {}", size);
                     buffer.set_purgeable_state(metal_rs::MTLPurgeableState::Empty);
-                    *buffer = Arc::new(Box::new(
-                        self.dev
-                            .new_buffer(size, MTLResourceOptions::StorageModeShared),
-                    ));
+                    *buffer = self
+                        .dev
+                        .new_buffer(size, MTLResourceOptions::StorageModeShared);
                 }
             }
         }
@@ -301,7 +298,7 @@ impl Operator for AllocateMetalBuffers {
 #[derive(LuminalEq)]
 struct StorageBufferWrapper {
     wrapper: Box<MetalKernelWrapper>,
-    buffers: Arc<UnsafeCell<Vec<Arc<Box<Buffer>>>>>,
+    buffers: Arc<UnsafeCell<Vec<Buffer>>>,
     intermediate_buffers: Vec<usize>,
     output_buffers: Vec<usize>,
 }
@@ -317,12 +314,12 @@ impl Operator for StorageBufferWrapper {
         let intermediate_buffers = self
             .intermediate_buffers
             .iter()
-            .map(|i| unsafe { (*(*self.buffers.get())[*i].as_ref()).as_ref() })
+            .map(|i| unsafe { &(*self.buffers.get())[*i] })
             .collect::<Vec<_>>();
         let output_buffers = self
             .output_buffers
             .iter()
-            .map(|i| unsafe { (*(*self.buffers.get())[*i].as_ref()).as_ref() })
+            .map(|i| unsafe { &(*self.buffers.get())[*i] })
             .collect::<Vec<_>>();
         self.wrapper.0.without_command_buffer(
             &inp.iter()

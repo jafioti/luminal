@@ -160,7 +160,8 @@ impl Compiler for MetalCosCompiler {
             ),
             SelectOp::new().ty::<MetalSin<f16>>().ptr(&mut sin),
         );
-        for _ in s.search(graph) {
+        let mut searcher = s.search(graph);
+        while searcher.next_match() {
             if graph.no_delete.contains(&const_neg_one)
                 || graph.no_delete.contains(&const_pi)
                 || graph.no_delete.contains(&mul)
@@ -328,7 +329,8 @@ impl Compiler for MetalExpCompiler {
             SelectOp::new().ty::<MetalExp2<f16>>().ptr(&mut exp2),
         );
 
-        for _ in s.search(graph) {
+        let mut searcher = s.search(graph);
+        while searcher.next_match() {
             if graph.no_delete.contains(&constant)
                 || graph.no_delete.contains(&mul)
                 || graph.no_delete.contains(&exp2)
@@ -475,7 +477,8 @@ impl Compiler for MetalGatherCompiler {
             })
             .ptr(&mut gather)
             .into();
-        for _ in s.search(graph) {
+        let mut searcher = s.search(graph);
+        while searcher.next_match() {
             let srcs = graph.get_sources(gather);
             let (indexes, weights_copy_from) = (srcs[0], srcs[1]);
             let copy_to = graph.get_dests(gather)[0].0;

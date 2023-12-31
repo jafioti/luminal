@@ -54,7 +54,8 @@ impl Compiler for UnarySequentialElimination {
             })
             .collect::<Vec<_>>()
         {
-            for _ in selector_graph.search(graph) {
+            let mut searcher = selector_graph.search(graph);
+            while searcher.next_match() {
                 if graph.no_delete.contains(&first)
                     || graph
                         .graph

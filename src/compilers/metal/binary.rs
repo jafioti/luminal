@@ -169,7 +169,8 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
             SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add),
         );
 
-        for _ in s.search(graph) {
+        let mut searcher = s.search(graph);
+        while searcher.next_match() {
             if check_no_delete(graph, &[neg_one, mul, add]) {
                 continue;
             }
@@ -389,7 +390,8 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
             ),
         );
 
-        for _ in s.search(graph) {
+        let mut searcher = s.search(graph);
+        while searcher.next_match() {
             let lt1_inputs = graph
                 .graph
                 .neighbors_directed(less_than1, Direction::Incoming)
@@ -458,6 +460,7 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
             graph.graph.remove_node(add);
             graph.graph.remove_node(one);
             graph.graph.remove_node(sub);
+            searcher.clear_cached_results();
         }
     }
 }
@@ -579,7 +582,8 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
                 .ty::<MetalSumReduce<T>>()
                 .ptr(&mut sum_reduce),
         );
-        for _ in s.search(graph) {
+        let mut searcher = s.search(graph);
+        while searcher.next_match() {
             if check_no_delete(graph, &[arange, equal, mul, sum_reduce]) {
                 continue;
             }
