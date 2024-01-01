@@ -361,31 +361,31 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
             NodeIndex::default(),
         );
         let s = SelectEdge::new(
-            SelectEdge::new(
-                SelectOp::new()
-                    .ty::<MetalLessThan<T>>()
-                    .ptr(&mut less_than1),
-                SelectEdge::new(
-                    SelectOp::new()
-                        .ty::<MetalLessThan<T>>()
-                        .ptr(&mut less_than2),
-                    SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add),
-                ),
-            ),
-            SelectEdge::new(
-                SelectOp::new()
-                    .check(|o, _| {
-                        if let Some(c) = o.as_any().downcast_ref::<MetalConstant<T>>() {
-                            if let ConstantValue::Float(f) = c.0 {
-                                f == 1.0
-                            } else {
-                                false
-                            }
+            SelectOp::new()
+                .check(|o, _| {
+                    if let Some(c) = o.as_any().downcast_ref::<MetalConstant<T>>() {
+                        if let ConstantValue::Float(f) = c.0 {
+                            f == 1.0
                         } else {
                             false
                         }
-                    })
-                    .ptr(&mut one),
+                    } else {
+                        false
+                    }
+                })
+                .ptr(&mut one),
+            SelectEdge::new(
+                SelectEdge::new(
+                    SelectOp::new()
+                        .ty::<MetalLessThan<T>>()
+                        .ptr(&mut less_than1),
+                    SelectEdge::new(
+                        SelectOp::new()
+                            .ty::<MetalLessThan<T>>()
+                            .ptr(&mut less_than2),
+                        SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add),
+                    ),
+                ),
                 SelectOp::new().ty::<MetalSub<T>>().ptr(&mut sub),
             ),
         );
