@@ -412,7 +412,7 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
                 .map(|e| e.source())
                 .collect::<Vec<_>>();
             let (a, b) = (inputs[0], inputs[1]);
-            if check_no_delete(graph, &[a, b, less_than1, less_than2, add, one, sub]) {
+            if check_no_delete(graph, &[less_than1, less_than2, add, one, sub]) {
                 continue;
             }
             let a_edge = graph

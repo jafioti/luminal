@@ -126,7 +126,7 @@ impl<T: MetalFloat> MetalContiguous<T> {
 #include <metal_stdlib>
 using namespace metal;
 kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]{}) {{
-    if (idx < n_elements && ({valid_exp} != 0)) {{
+    if (idx < n_elements && {valid_exp} != 0) {{
         out[idx] = inp[{idx_exp}];
     }}
 }}

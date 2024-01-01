@@ -54,7 +54,7 @@ impl<S: Shape> GraphTensor<S> {
 
     /// Dynamically reshape with annotations for the shape tracker
     pub fn dyn_reshape<N: Shape>(self, shape: Vec<Expression>) -> GraphTensor<N> {
-        let id = if !self.shape.is_contiguous() {
+        let id = if !self.shape.indexes.iter().enumerate().all(|(a, b)| a == *b) {
             // Insert contiguous call
             self.graph()
                 .add_op(op::Contiguous)

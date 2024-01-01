@@ -857,10 +857,13 @@ fn test_common_buffer() {
 fn test_embedding() {
     let mut cx = Graph::new();
     let batch = cx
-        .tensor::<R2<2, 3>>()
+        .named_tensor::<R2<2, 3>>("Batch")
         .set(vec![1.0, 0.0, 2.0, 1.0, 0.0, 1.0])
         .keep();
-    let a = cx.tensor::<R1<3>>().set(vec![1.0, 0.0, 1.0]).keep();
+    let a = cx
+        .named_tensor::<R1<3>>("Single")
+        .set(vec![1.0, 0.0, 1.0])
+        .keep();
 
     let model: crate::nn::embedding::Embedding<3, 4> = InitModule::initialize(&mut cx);
     model

@@ -21,7 +21,7 @@ pub type GenericCompiler<Inner = ((),)> = (PreGenericCompiler, Inner, PostGeneri
 pub type PostGenericCompiler = (
     UnarySequentialElimination,
     // RemoveUnusedNodes, // Broken right now, unclear why
-    // CSE, // This breaks compilers::metal::fp16::tests::test_encoder_block. I think it needs to take edge weights into account?
+    CSE,
 );
 
 pub type PreGenericCompiler = (RemoveSingleReductions,);
@@ -97,13 +97,16 @@ impl Compiler for CSE {
     fn compile(&self, graph: &mut Graph) {
         // Look for nodes that have the exact same srcs
         // Loop cause I'm lazy
-        loop {
-            let mut eliminated = false;
+        let mut eliminated = true;
+        while eliminated {
+            eliminated = false;
             let mut srcs_set = HashMap::new();
             for node in graph.graph.node_indices().collect_vec() {
-                let mut srcs = graph
+                let srcs = graph
                     .graph
                     .edges_directed(node, petgraph::Direction::Incoming)
+                    .filter(|e| !e.weight().is_schedule())
+                    .sorted_by_key(|e| e.weight().as_data().unwrap().0)
                     .map(|e| e.source())
                     .collect_vec();
 
@@ -117,9 +120,6 @@ impl Compiler for CSE {
                 {
                     continue;
                 }
-
-                // If order doesn't matter, make sure different ordered srcs match by sorting
-                srcs.sort();
 
                 if let Some(other_node) = srcs_set.get(&srcs) {
                     let a = graph.graph.node_weight(node).unwrap();
@@ -154,10 +154,6 @@ impl Compiler for CSE {
                     }
                 }
                 srcs_set.insert(srcs, node);
-            }
-
-            if !eliminated {
-                break;
             }
         }
     }
