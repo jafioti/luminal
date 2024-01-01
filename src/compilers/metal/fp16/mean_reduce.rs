@@ -159,7 +159,7 @@ impl Operator for MetalMeanReduce {
 }
 
 /// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceCompiler.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct MeanReduceCompiler;
 
 impl Compiler for MeanReduceCompiler {

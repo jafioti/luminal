@@ -590,7 +590,7 @@ impl Operator for MetalBatchMatmul2D {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct MetalMatMulCompiler;
 
 impl Compiler for MetalMatMulCompiler {

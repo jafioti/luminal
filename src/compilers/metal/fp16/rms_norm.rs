@@ -195,7 +195,7 @@ impl Operator for MetalRMSNorm {
 }
 
 /// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceCompiler.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct RMSNormCompiler;
 
 impl Compiler for RMSNormCompiler {
