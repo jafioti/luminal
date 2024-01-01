@@ -237,7 +237,7 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
         );
 
         // TODO: Make sure this actually checks the shape transformations to ensure pooling happens
-        let s = SelectEdge::new(
+        let pattern = SelectEdge::new(
             SelectEdge::new(
                 SelectEdge::new(
                     SelectEdge::new(
@@ -296,7 +296,7 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
             ),
         );
 
-        let mut searcher = s.search(graph);
+        let mut searcher = pattern.search(graph);
         while searcher.next_match() {
             let arange_amount = {
                 let sh = graph

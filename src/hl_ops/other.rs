@@ -54,7 +54,16 @@ impl Graph {
 
     /// ARange from 0 to N
     pub fn arange<N: Dimension>(&mut self) -> GraphTensor<(N,)> {
-        self.constant(1.).expand().cumsum_last_dim() - 1.
+        if N::const_size()
+            .to_usize()
+            .map(|i| i == 1)
+            .unwrap_or_default()
+        {
+            // Single number ARange is just 0
+            self.constant(0.).expand()
+        } else {
+            self.constant(1.).expand().cumsum_last_dim() - 1.
+        }
     }
 
     /// Lower left-hand triangle of 1s
