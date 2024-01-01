@@ -29,6 +29,7 @@ impl<S: Shape> GraphTensor<S> {
 }
 
 impl Graph {
+    /// A scalar constant
     pub fn constant(&mut self, i: f32) -> GraphTensor<R0> {
         GraphTensor::from_id(
             self.add_op(Constant(ConstantValue::Float(i), &self.dyn_map))
@@ -38,6 +39,7 @@ impl Graph {
         )
     }
 
+    /// A scalar constant evaluated from an expression at runtime
     pub fn constant_expr(&mut self, expr: BigExpression) -> GraphTensor<R0> {
         GraphTensor::from_id(
             self.add_op(Constant(
@@ -52,11 +54,6 @@ impl Graph {
 
     /// ARange from 0 to N
     pub fn arange<N: Dimension>(&mut self) -> GraphTensor<(N,)> {
-        self.constant(1.).expand().cumsum_last_dim() - 1.
-    }
-
-    // arange but with shape
-    pub fn arange_<S: Shape>(&mut self) -> GraphTensor<S> {
         self.constant(1.).expand().cumsum_last_dim() - 1.
     }
 
@@ -81,18 +78,15 @@ impl Graph {
     }
 }
 
-// Gather batch of batches from 2D embedding matrix
 impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
-    pub fn gather<S1: Dimension, S2: Dimension>(
-        self,
-        indexes: GraphTensor<(S1, S2)>,
-    ) -> GraphTensor<(S1, S2, Const<DIM>)> {
+    /// Gather a batch of vectors from a matrix
+    pub fn gather<B: Dimension>(self, indexes: GraphTensor<(B,)>) -> GraphTensor<(B, Const<DIM>)> {
         let one_hot = indexes
             .graph()
             .arange::<S>()
-            .expand::<(S1, S2, S), _>()
+            .expand::<(B, S), _>()
             .equals(indexes.expand());
-        (one_hot.expand::<(S1, S2, S, Const<DIM>), _>() * self.expand()).sum_reduce::<_, Axis<2>>()
+        (one_hot.expand::<(B, S, Const<DIM>), _>() * self.expand()).sum_reduce::<_, Axis<1>>()
     }
 }
 

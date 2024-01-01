@@ -596,7 +596,7 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
                 .as_data()
                 .unwrap()
                 .2
-                .shape()[3]
+                .shape()[2]
                 .to_usize()
                 .unwrap();
             let gather = graph

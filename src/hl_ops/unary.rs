@@ -36,10 +36,11 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Natural log
-    pub fn log(self) -> GraphTensor<S> {
+    pub fn ln(self) -> GraphTensor<S> {
         self.log_2() * f32::ln(2.)
     }
 
+    /// Take the reciprocal of each element
     pub fn recip(self) -> GraphTensor<S> {
         let new_id = self
             .graph()
@@ -49,6 +50,7 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
 
+    /// The sin(x) function
     pub fn sin(self) -> GraphTensor<S> {
         let new_id = self
             .graph()
@@ -58,10 +60,12 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
 
+    /// The cos(x) function
     pub fn cos(self) -> GraphTensor<S> {
         (-self + (std::f32::consts::PI / 2.)).sin()
     }
 
+    /// The square root function
     pub fn sqrt(self) -> GraphTensor<S> {
         let new_id = self
             .graph()
@@ -71,6 +75,7 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
 
+    /// Applies a layer norm along an axis
     pub fn layer_norm<const DIM: isize>(self) -> GraphTensor<S>
     where
         <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
@@ -88,6 +93,7 @@ impl<S: Shape> GraphTensor<S> {
         centered / std.expand()
     }
 
+    /// Applies a softmax function along an axis
     pub fn softmax<const DIM: isize>(self) -> GraphTensor<S>
     where
         <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
@@ -102,20 +108,32 @@ impl<S: Shape> GraphTensor<S> {
         exp / exp_sum.expand()
     }
 
+    /// Get the indicies of the max elements along the last axis
+    pub fn argmax(self) -> GraphTensor<<S as ReduceShape<<S as Shape>::LastAxis>>::Reduced> {
+        let x_equal = self.equals(self.max_reduce::<_, S::LastAxis>().expand());
+        // ARange to shape
+        let r = self.graph().constant(1.).expand().cumsum_last_dim() - 1.;
+        (x_equal * r).max_reduce::<_, S::LastAxis>()
+    }
+
+    /// Take the absolute value
     pub fn abs(self) -> GraphTensor<S> {
         self.relu() + (-self).relu()
     }
 
+    /// Get the sign of each element, '1' for positive and '-1' for negative
     pub fn sign(self) -> GraphTensor<S> {
         self / (self.abs() + 1e-10)
     }
 
-    // Approximate, see full impl here: https://github.com/tinygrad/tinygrad/blob/a32c67760140dd26b60d7932268f2e62e96a66e0/tinygrad/tensor.py#L568
+    /// Raise the tensor to a power
+    /// Approximate, see full impl here: https://github.com/tinygrad/tinygrad/blob/a32c67760140dd26b60d7932268f2e62e96a66e0/tinygrad/tensor.py#L568
     pub fn pow(self, e: f32) -> GraphTensor<S> {
-        self.abs().log().mul(e).exp()
+        self.abs().ln().mul(e).exp()
     }
-    // 1 / (b ^ x)
-    pub fn pow2(self, base: f32) -> GraphTensor<S> {
+
+    /// 1 / (base ^ x)
+    pub fn inv_pow(self, base: f32) -> GraphTensor<S> {
         self.mul(base.abs().ln()).exp()
     }
 
