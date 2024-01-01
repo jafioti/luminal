@@ -217,24 +217,26 @@ impl Compiler for RMSNormCompiler {
             SelectEdge::new(
                 SelectEdge::new(
                     SelectEdge::new(
-                        SelectOp::new()
-                            .check(|op, _| {
-                                if let Some(c) = op.as_any().downcast_ref::<MetalConstant<f16>>() {
-                                    if let ConstantValue::Float(v) = c.0 {
-                                        v <= 1e-4 && v > 0.0
+                        SelectEdge::new(
+                            SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut square),
+                            SelectOp::new().ty::<MetalMeanReduce>().ptr(&mut mean),
+                        ),
+                        SelectEdge::new(
+                            SelectOp::new()
+                                .check(|op, _| {
+                                    if let Some(c) =
+                                        op.as_any().downcast_ref::<MetalConstant<f16>>()
+                                    {
+                                        if let ConstantValue::Float(v) = c.0 {
+                                            v <= 1e-4 && v > 0.0
+                                        } else {
+                                            false
+                                        }
                                     } else {
                                         false
                                     }
-                                } else {
-                                    false
-                                }
-                            })
-                            .ptr(&mut epsilon),
-                        SelectEdge::new(
-                            SelectEdge::new(
-                                SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut square),
-                                SelectOp::new().ty::<MetalMeanReduce>().ptr(&mut mean),
-                            ),
+                                })
+                                .ptr(&mut epsilon),
                             SelectOp::new().ty::<MetalAdd<f16>>().ptr(&mut add),
                         ),
                     ),

@@ -2,7 +2,7 @@
 
 use std::{
     any::{Any, TypeId},
-    collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
+    collections::{hash_map::Entry, HashMap, HashSet},
     fmt::Debug,
 };
 
@@ -392,8 +392,9 @@ type SelectionGraph = petgraph::Graph<SelectOp, Option<u8>>;
 pub struct GraphSearch {
     selector: SelectionGraph,
     graph: *const Graph,
-    to_return: Vec<BTreeMap<NodeIndex, NodeIndex>>,
-    already_returned: HashSet<BTreeMap<NodeIndex, NodeIndex>>,
+    to_return: Vec<HashMap<NodeIndex, NodeIndex>>,
+    returned_anchors: HashSet<NodeIndex>,
+    anchor: NodeIndex,
 }
 
 impl GraphSearch {
@@ -402,26 +403,37 @@ impl GraphSearch {
         let graph = unsafe { self.graph.as_ref().unwrap() };
 
         if self.to_return.is_empty() {
-            self.to_return = match_nodes(&graph.graph, &self.selector, &self.already_returned);
-        }
-        while let Some(mapping) = self.to_return.pop() {
-            if !self.already_returned.contains(&mapping) {
-                // Apply pattern to ptrs
-                for (selector_node, ptr) in self.selector.node_indices().flat_map(|n| {
-                    self.selector
-                        .node_weight(n)
-                        .unwrap()
-                        .pointers
-                        .iter()
-                        .map(move |i| (n, *i))
-                }) {
-                    unsafe {
-                        *ptr = mapping[&selector_node];
+            // Replenish to_return
+            let select_op = self.selector.node_weight(self.anchor).unwrap();
+            for node in graph.graph.node_indices() {
+                if !self.returned_anchors.contains(&node)
+                    && test_node(select_op, &graph.graph, node)
+                {
+                    // Backtrack to check if this is a match
+                    if let Some(mapping) =
+                        backtrack_match(self.anchor, &self.selector, node, &graph.graph)
+                    {
+                        self.to_return.push(mapping);
                     }
                 }
-                self.already_returned.insert(mapping);
-                return true;
             }
+        }
+        while let Some(mapping) = self.to_return.pop() {
+            // Apply pattern to ptrs
+            for (selector_node, ptr) in self.selector.node_indices().flat_map(|n| {
+                self.selector
+                    .node_weight(n)
+                    .unwrap()
+                    .pointers
+                    .iter()
+                    .map(move |i| (n, *i))
+            }) {
+                unsafe {
+                    *ptr = mapping[&selector_node];
+                }
+            }
+            self.returned_anchors.insert(mapping[&self.anchor]);
+            return true;
         }
         false
     }
@@ -431,68 +443,67 @@ impl GraphSearch {
     }
 }
 
-fn match_nodes(
-    g0: &MainGraph,
-    g1: &SelectionGraph,
-    already_returned: &HashSet<BTreeMap<NodeIndex, NodeIndex>>,
-) -> Vec<BTreeMap<NodeIndex, NodeIndex>> {
-    let Ok(topo_order) = toposort(g1, None) else {
-        return vec![];
+fn backtrack_match(
+    select_node: NodeIndex,
+    select_graph: &SelectionGraph,
+    main_node: NodeIndex,
+    graph: &MainGraph,
+) -> Option<HashMap<NodeIndex, NodeIndex>> {
+    // Dfs backward through both the selector graph and the main graph
+    let mut mapping = HashMap::new();
+    mapping.insert(select_node, main_node);
+    let mut select_stack = select_graph
+        .neighbors_directed(select_node, Direction::Incoming)
+        .sorted()
+        .rev()
+        .collect_vec();
+    let Some(mut select_node) = select_stack.pop() else {
+        return Some(mapping);
     };
-    let g1_nodes = g1.node_count();
-    let predecessors_map = g0
-        .node_indices()
-        .map(|node| {
-            (
-                node,
-                g0.neighbors_directed(node, Direction::Incoming)
-                    .collect::<BTreeSet<_>>(),
-            )
-        })
-        .collect::<HashMap<_, _>>();
-    let mut stack = VecDeque::new();
-    stack.push_back((0, BTreeMap::new(), HashSet::<NodeIndex>::default()));
-    let mut mappings = vec![];
-    while let Some((current_index, mut mapping, mut visited)) = stack.pop_back() {
-        if mapping.len() == g1_nodes && !already_returned.contains(&mapping) {
-            mappings.push(mapping);
-            continue;
-        }
-        if current_index >= topo_order.len() {
-            continue;
-        }
-        let node_g1 = topo_order[current_index];
-        for node_g0 in g0.node_indices() {
-            if !visited.contains(&node_g0) {
-                // Get predecesors in g0
-                let predecessors = &predecessors_map[&node_g0];
-
-                // Check if all g1 predecessors are present in g0
-                let predecessors_match =
-                    g1.neighbors_directed(node_g1, Direction::Incoming)
-                        .all(|pred_g1| {
-                            mapping
-                                .get(&pred_g1)
-                                .map(|i| predecessors.contains(i))
-                                .unwrap_or_default()
-                        });
-
-                // If so, record this node as visited, map it and take a step down the toposort
-                if predecessors_match && test_node(g1.node_weight(node_g1).unwrap(), g0, node_g0) {
-                    visited.insert(node_g0);
-                    mapping.insert(node_g1, node_g0);
-
-                    stack.push_back((current_index + 1, mapping.clone(), visited.clone()));
-
-                    // Couldnt find a downstream match, unmark and unmap this node
-                    visited.remove(&node_g0);
-                    mapping.remove(&node_g1);
-                }
+    select_stack.extend(
+        select_graph
+            .neighbors_directed(select_node, Direction::Incoming)
+            .sorted()
+            .rev(),
+    );
+    let mut main_stack = graph
+        .edges_directed(main_node, Direction::Incoming)
+        .filter(|e| !e.weight().is_schedule())
+        .sorted_by_key(|e| e.weight().as_data().unwrap().0)
+        .map(|e| e.source())
+        .rev()
+        .collect_vec();
+    while let Some(main_node) = main_stack.pop() {
+        // Check if main == current_select_node
+        if test_node(
+            select_graph.node_weight(select_node).unwrap(),
+            graph,
+            main_node,
+        ) {
+            // Add to mapping and step select stack order
+            mapping.insert(select_node, main_node);
+            if mapping.len() == select_graph.node_count() {
+                return Some(mapping);
             }
+            select_node = select_stack.pop().unwrap();
+            select_stack.extend(
+                select_graph
+                    .neighbors_directed(select_node, Direction::Incoming)
+                    .sorted()
+                    .rev(),
+            );
+            // Continue dfs on main graph
+            main_stack.extend(
+                graph
+                    .edges_directed(main_node, Direction::Incoming)
+                    .filter(|e| !e.weight().is_schedule())
+                    .sorted_by_key(|e| e.weight().as_data().unwrap().0)
+                    .map(|e| e.source())
+                    .rev(),
+            );
         }
     }
-
-    mappings
+    None
 }
 
 fn test_node(
@@ -674,11 +685,13 @@ impl SelectEdge {
     }
 
     pub fn search(self, graph: &Graph) -> GraphSearch {
+        let anchor = *toposort(&self.graph, None).unwrap().last().unwrap();
         GraphSearch {
             to_return: vec![],
             selector: self.graph,
             graph,
-            already_returned: HashSet::new(),
+            returned_anchors: HashSet::new(),
+            anchor,
         }
     }
 }

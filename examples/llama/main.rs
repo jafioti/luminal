@@ -120,7 +120,9 @@ fn main() {
         input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
         vec![1, input_ids.len()],
     );
+    let now = Instant::now();
     cx1.execute();
+    println!("Prompt processing took {}ms", now.elapsed().as_millis());
 
     let output_id = sample_index(&logits.data());
     input_ids.push(output_id);
