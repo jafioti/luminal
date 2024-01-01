@@ -135,7 +135,7 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> InitModule
             let theta = 1000000.0;
             let mut rope_graph = Graph::new();
             let frequencies = (rope_graph.arange::<Dyn<'h'>>() * 2.0) / (head_dim as f32);
-            let frequencies = frequencies.pow2(theta).recip().retrieve();
+            let frequencies = frequencies.inv_pow(theta).recip().retrieve();
 
             rope_graph.set_dyn_dim('h', head_dim / 2);
             rope_graph.execute();
