@@ -35,7 +35,7 @@ impl<S: Dimension, const N: usize, const DIM: usize> Module<GraphTensor<(S,)>>
     type Output = GraphTensor<(S, Const<DIM>)>;
 
     fn forward(&self, input: GraphTensor<(S,)>) -> Self::Output {
-        <Self as Module<GraphTensor<(Const<1>, S)>>>::forward(self, input.expand()).max_reduce()
+        self.weight.gather(input)
     }
 }
 
