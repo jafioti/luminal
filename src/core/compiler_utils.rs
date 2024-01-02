@@ -19,29 +19,92 @@ use regex::Regex;
 use crate::{
     graph::Graph,
     op::Operator,
-    prelude::{Dependency, MainGraph, ShapeTracker},
+    prelude::{Dependency, MainGraph, Shape, ShapeTracker},
 };
 
-use super::shape::symbolic::Expression;
+use super::{graph_tensor::GraphTensor, shape::symbolic::Expression};
+
+pub trait ToIds {
+    fn to_ids(&mut self) -> Vec<&mut NodeIndex>;
+}
+
+impl<S: Shape> ToIds for GraphTensor<S> {
+    fn to_ids(&mut self) -> Vec<&mut NodeIndex> {
+        vec![&mut self.id]
+    }
+}
+impl<T: ToIds> ToIds for &mut Vec<T> {
+    fn to_ids(&mut self) -> Vec<&mut NodeIndex> {
+        self.iter_mut().flat_map(|i| i.to_ids()).collect()
+    }
+}
+impl<T: ToIds> ToIds for &mut [T] {
+    fn to_ids(&mut self) -> Vec<&mut NodeIndex> {
+        self.iter_mut().flat_map(|i| i.to_ids()).collect()
+    }
+}
+
+impl<T: ToIds> ToIds for &mut T {
+    fn to_ids(&mut self) -> Vec<&mut NodeIndex> {
+        (*self).to_ids()
+    }
+}
+impl ToIds for () {
+    fn to_ids(&mut self) -> Vec<&mut NodeIndex> {
+        vec![]
+    }
+}
+
+macro_rules! tuple_impls {
+    ([$($name:ident),+] , [$($idx:tt),+]) => {
+        impl<
+        $($name:
+            ToIds, )+
+        > ToIds for ($($name,)+) {
+            fn to_ids(&mut self) -> Vec<&mut NodeIndex> {
+                let mut v = vec![];
+                $(v.append(&mut self.$idx.to_ids());)+
+                v
+            }
+        }
+    };
+}
+
+tuple_impls!([M1], [0]);
+tuple_impls!([M1, M2], [0, 1]);
+tuple_impls!([M1, M2, M3], [0, 1, 2]);
+tuple_impls!([M1, M2, M3, M4], [0, 1, 2, 3]);
+tuple_impls!([M1, M2, M3, M4, M5], [0, 1, 2, 3, 4]);
+tuple_impls!([M1, M2, M3, M4, M5, M6], [0, 1, 2, 3, 4, 5]);
+tuple_impls!([M1, M2, M3, M4, M5, M6, M7], [0, 1, 2, 3, 4, 5, 6]);
+tuple_impls!([M1, M2, M3, M4, M5, M6, M7, M8], [0, 1, 2, 3, 4, 5, 6, 7]);
+tuple_impls!(
+    [M1, M2, M3, M4, M5, M6, M7, M8, M9],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8]
+);
+tuple_impls!(
+    [M1, M2, M3, M4, M5, M6, M7, M8, M9, M10],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+);
 
 pub trait Compiler {
     /// Run a compilation pass
-    fn compile(&self, graph: &mut Graph);
+    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T);
 }
 
 impl Compiler for () {
-    fn compile(&self, _: &mut Graph) {}
+    fn compile<T: ToIds>(&self, _: &mut Graph, _: T) {}
 }
 
 /// Wrap this around a compiler to measure the time it takes to compile
 pub struct TimedCompiler<C: Compiler + Debug>(C);
 
 impl<C: Compiler + Debug> Compiler for TimedCompiler<C> {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
         let compiler_name = format!("{:?}", self.0).bold();
         println!("Starting {compiler_name}");
         let start = std::time::Instant::now();
-        self.0.compile(graph);
+        self.0.compile(graph, remap);
         let finished_millis = start.elapsed().as_millis();
         let minutes = finished_millis / 60_000;
         let seconds = (finished_millis % 60_000) / 1000;
@@ -72,8 +135,8 @@ macro_rules! tuple_impls {
         $($name:
             Compiler, )+
         > Compiler for ($($name,)+) {
-            fn compile(&self, graph: &mut Graph) {
-                $(self.$idx.compile(graph);)+
+            fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
+                $(self.$idx.compile(graph, &mut remap);)+
             }
         }
     };
@@ -418,7 +481,7 @@ impl GraphSearch {
                 }
             }
         }
-        while let Some(mapping) = self.to_return.pop() {
+        if let Some(mapping) = self.to_return.pop() {
             // Apply pattern to ptrs
             for (selector_node, ptr) in self.selector.node_indices().flat_map(|n| {
                 self.selector

@@ -25,7 +25,7 @@ use super::get_buffer_from_tensor;
 pub struct StorageBufferCompiler;
 
 impl Compiler for StorageBufferCompiler {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<To: ToIds>(&self, graph: &mut Graph, remap: To) {
         // First pass - get clear sets for each node
         #[allow(clippy::type_complexity)]
         let mut first_pass: HashMap<
@@ -344,13 +344,13 @@ fn test_shared_buffers() {
     let b = a.exp_2();
     let c = a.log_2() * b;
     let d = b.recip();
-    let e = (c + d).retrieve();
+    let mut e = (c + d).retrieve();
 
     cx.execute();
     let e_unopt = e.data();
     e.drop();
 
-    cx.compile(MetalFp16Compiler::default());
+    cx.compile(MetalFp16Compiler::default(), &mut e);
     cx.execute();
 
     assert_close_precision(&e.data(), &e_unopt, 2);

@@ -594,7 +594,7 @@ impl Operator for MetalBatchMatmul2D {
 pub struct MetalMatMulCompiler;
 
 impl Compiler for MetalMatMulCompiler {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
@@ -984,11 +984,14 @@ mod tests {
         const N: usize = 256;
         let mut cx = Graph::new();
         let (a_vec, b_vec) = (random_vec(M), random_vec(M * N));
-        let a = cx.named_tensor::<R2<1, M>>("Vec").set(a_vec.clone());
-        let b = cx.named_tensor::<R2<M, N>>("Mat").set(b_vec.clone());
-        let c = a.matmul(b).retrieve();
+        let mut a = cx.named_tensor::<R2<1, M>>("Vec").set(a_vec.clone());
+        let mut b = cx.named_tensor::<R2<M, N>>("Mat").set(b_vec.clone());
+        let mut c = a.matmul(b).retrieve();
 
-        cx.compile(GenericCompiler::<MetalFp16Compiler>::default());
+        cx.compile(
+            GenericCompiler::<MetalFp16Compiler>::default(),
+            (&mut a, &mut b, &mut c),
+        );
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -1005,11 +1008,14 @@ mod tests {
         const N: usize = 256;
         let mut cx = Graph::new();
         let (a_vec, b_vec) = (random_vec(M), random_vec(M * N));
-        let a = cx.named_tensor::<R3<1, 1, M>>("Vec").set(a_vec.clone());
-        let b = cx.named_tensor::<R2<M, N>>("Mat").set(b_vec.clone());
-        let c = a.matmul(b).retrieve();
+        let mut a = cx.named_tensor::<R3<1, 1, M>>("Vec").set(a_vec.clone());
+        let mut b = cx.named_tensor::<R2<M, N>>("Mat").set(b_vec.clone());
+        let mut c = a.matmul(b).retrieve();
 
-        cx.compile(GenericCompiler::<MetalFp16Compiler>::default());
+        cx.compile(
+            GenericCompiler::<MetalFp16Compiler>::default(),
+            (&mut a, &mut b, &mut c),
+        );
         // cx.display();
         cx.execute();
 

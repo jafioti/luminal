@@ -1502,7 +1502,7 @@ impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
 pub struct PrimitiveCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<To: ToIds>(&self, graph: &mut Graph, remap: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         // Go through the graph and insert copy ops

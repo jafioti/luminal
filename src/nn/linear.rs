@@ -78,22 +78,21 @@ mod tests {
     #[test]
     fn test_linear() {
         let mut cx = Graph::new();
-        let batch = cx.tensor::<R2<2, 3>>();
-        let a = cx.tensor::<R1<3>>();
+        let batch = cx
+            .tensor::<R2<2, 3>>()
+            .set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+        let a = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
 
         let model: Linear<3, 4> = Linear::initialize(&mut cx);
-        let b = model.forward(a).retrieve();
-        let batch_out = model.forward(batch).retrieve();
-
-        a.set(vec![1.0, 2.0, 3.0]);
-        batch.set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+        let mut b = model.forward(a).retrieve();
+        let mut batch_out = model.forward(batch).retrieve();
 
         cx.execute();
 
         let unoptimized_b = b.data();
         let unoptimized_batch_out = batch_out.data();
 
-        cx.compile(PostGenericCompiler::default());
+        cx.compile(PostGenericCompiler::default(), (&mut b, &mut batch_out));
         cx.execute();
 
         assert_close(&unoptimized_b, &b.data());

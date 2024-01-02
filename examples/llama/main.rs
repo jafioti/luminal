@@ -44,21 +44,21 @@ fn main() {
     let mut cx1 = Graph::new(); // Prompt processing graph
     let mut cx2 = Graph::new(); // Token generation graph
     let model = Model::initialize(&mut cx1);
-    let input = cx1.named_tensor::<(Const<1>, Dyn<'s'>)>("Input");
-    let (logits, kv_cache) = model.forward((
+    let mut input = cx1.named_tensor::<(Const<1>, Dyn<'s'>)>("Input");
+    let (logits, mut kv_cache) = model.forward((
         input,
         Option::<Vec<KVCache<Const<1>, Const<0>, { model::HEADS }, { model::HEAD_DIM }>>>::None,
         PhantomData::<Dyn<'s'>>,
     ));
-    let logits = logits
+    let mut logits = logits
         .slice((.., (Expression::from('s') - 1).., ..))
         .retrieve();
     kv_cache.keep();
     loader::DfdxDeferredLoader::new("./examples/llama/setup/llama-7b-hf").load(&model, &mut cx1);
 
     let kv_model = Model::initialize(&mut cx2);
-    let single_input = cx2.named_tensor::<R2<1, 1>>("Input");
-    let cache_src: Vec<KVCache<Const<1>, Dyn<'p'>, { model::HEADS }, { model::HEAD_DIM }>> = (0
+    let mut single_input = cx2.named_tensor::<R2<1, 1>>("Input");
+    let mut cache_src: Vec<KVCache<Const<1>, Dyn<'p'>, { model::HEADS }, { model::HEAD_DIM }>> = (0
         ..model::LAYERS)
         .map(|_| {
             (
@@ -67,7 +67,7 @@ fn main() {
             )
         })
         .collect();
-    let (decode_logits, cache_dest) = kv_model.forward((
+    let (mut decode_logits, mut cache_dest) = kv_model.forward((
         single_input,
         Some(cache_src.clone()),
         PhantomData::<Dyn<'t'>>,
@@ -76,19 +76,37 @@ fn main() {
     cache_dest.keep();
 
     println!("Compiling graph...");
-    cx1.compile(GenericCompiler::<DeviceCompiler>::default());
+    cx1.compile(
+        GenericCompiler::<DeviceCompiler>::default(),
+        &mut (&mut input, &mut logits, &mut kv_cache),
+    );
     // Cache model weights
-    cx1.compile(RemapDownstream(
-        state_dict(&model).values().copied().collect(),
-    ));
+    cx1.compile(
+        RemapDownstream(state_dict(&model).values().copied().collect()),
+        &mut (&mut input, &mut logits, &mut kv_cache),
+    );
     keep_weights(&model, &mut cx1);
 
     // Compile second graph
-    cx2.compile(GenericCompiler::<DeviceCompiler>::default());
+    cx2.compile(
+        GenericCompiler::<DeviceCompiler>::default(),
+        &mut (
+            &mut single_input,
+            &mut decode_logits,
+            &mut cache_src,
+            &mut cache_dest,
+        ),
+    );
     // Cache model weights
-    cx2.compile(RemapDownstream(
-        state_dict(&kv_model).values().copied().collect(),
-    ));
+    cx2.compile(
+        RemapDownstream(state_dict(&kv_model).values().copied().collect()),
+        &mut (
+            &mut single_input,
+            &mut decode_logits,
+            &mut cache_src,
+            &mut cache_dest,
+        ),
+    );
     keep_weights(&kv_model, &mut cx2);
     delete_inputs(
         &state_dict(&kv_model).values().copied().collect::<Vec<_>>(),

@@ -16,6 +16,8 @@ use colored::Colorize;
 use itertools::Itertools;
 use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Direction};
 
+use super::compiler_utils::ToIds;
+
 pub type MainGraph = StableGraph<Box<dyn Operator>, Dependency>;
 
 #[derive(Debug, Default)]
@@ -42,7 +44,7 @@ pub enum Dependency {
         output_order: u8,
         shape: ShapeTracker,
     },
-    /// Implicit dependency for ordering
+    /// Explicit dependency for ordering
     Schedule,
 }
 
@@ -107,8 +109,8 @@ impl Graph {
     }
 
     /// Compile the graph using the given compiler
-    pub fn compile<C: Compiler>(&mut self, compiler: C) {
-        compiler.compile(self);
+    pub fn compile<T: ToIds, C: Compiler>(&mut self, compiler: C, remap: T) {
+        compiler.compile(self, remap);
         self.toposort();
     }
 

@@ -16,7 +16,7 @@ use super::binary::MetalSub;
 pub struct CopyCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for CopyCompiler<T> {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<To: ToIds>(&self, graph: &mut Graph, remap: To) {
         for (first, second) in graph
             .graph
             .edge_indices()
@@ -213,7 +213,7 @@ impl<T: MetalFloat> Operator for MetalARange<T> {
 pub struct ARangeCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<To: ToIds>(&self, graph: &mut Graph, remap: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let (

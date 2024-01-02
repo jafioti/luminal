@@ -31,7 +31,7 @@ pub type PreGenericCompiler = (RemoveSingleReductions,);
 pub struct UnarySequentialElimination;
 
 impl Compiler for UnarySequentialElimination {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
         // Here are all the complementary ops that should be removed
         let sequences = [
             (TypeId::of::<Log2>(), TypeId::of::<Exp2>()),
@@ -94,7 +94,7 @@ impl Compiler for UnarySequentialElimination {
 pub struct CSE;
 
 impl Compiler for CSE {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
         // Look for nodes that have the exact same srcs
         // Loop cause I'm lazy
         let mut eliminated = true;
@@ -164,7 +164,7 @@ impl Compiler for CSE {
 pub struct RemoveSingleReductions;
 
 impl Compiler for RemoveSingleReductions {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
         for node in graph.graph.node_indices().collect::<Vec<_>>() {
             let dim = if let Some(red) = graph
                 .graph
@@ -226,7 +226,7 @@ impl Compiler for RemoveSingleReductions {
 pub struct RemoveUnusedNodes;
 
 impl Compiler for RemoveUnusedNodes {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
         // Reverse topo sort
         for node in graph.graph.node_indices().collect::<Vec<_>>() {
             if graph
@@ -247,7 +247,7 @@ impl Compiler for RemoveUnusedNodes {
 pub struct DepthFirst;
 
 impl Compiler for DepthFirst {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
         fn toposort(
             id: NodeIndex,
             graph: &StableGraph<Box<dyn Operator>, Dependency>,
@@ -303,7 +303,7 @@ impl Compiler for DepthFirst {
 pub struct RemapDownstream(pub Vec<NodeIndex>);
 
 impl Compiler for RemapDownstream {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
         let set = self.0.iter().copied().collect::<HashSet<_>>();
         // Loop through state dict tensors marked as no_delete
         for mut node in self
@@ -364,10 +364,9 @@ mod tests {
     fn test_log_exp() {
         let mut cx = Graph::new();
         let a = cx.tensor::<R0>();
-        let b = a.log_2().exp_2();
-        b.retrieve();
+        let _ = a.log_2().exp_2().retrieve();
 
-        cx.compile(GenericCompiler::<()>::default());
+        cx.compile(GenericCompiler::<()>::default(), ());
         assert_eq!(cx.graph.node_count(), 1);
     }
 }

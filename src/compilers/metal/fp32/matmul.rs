@@ -308,7 +308,7 @@ impl Operator for MetalBatchMatmul2D {
 pub struct MetalMatMulCompiler;
 
 impl Compiler for MetalMatMulCompiler {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
         let dev = Device::system_default().unwrap();
         // Look for the matmul pattern
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
