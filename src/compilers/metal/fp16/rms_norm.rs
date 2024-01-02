@@ -199,7 +199,7 @@ impl Operator for MetalRMSNorm {
 pub struct RMSNormCompiler;
 
 impl Compiler for RMSNormCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
         let dev = Device::system_default().unwrap();
         // Look for the RMSNorm pattern
         // mul(recip(sqrt(add(mean_reduce(mul(x, x)), 1e-6))), x)
@@ -293,7 +293,7 @@ impl Compiler for RMSNormCompiler {
             // Create edges to dests
             move_outgoing_edge(mul, rms_norm, &mut graph.graph);
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 mul,

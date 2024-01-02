@@ -31,7 +31,7 @@ pub type PreGenericCompiler = (RemoveSingleReductions,);
 pub struct UnarySequentialElimination;
 
 impl Compiler for UnarySequentialElimination {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
         // Here are all the complementary ops that should be removed
         let sequences = [
             (TypeId::of::<Log2>(), TypeId::of::<Exp2>()),
@@ -76,7 +76,7 @@ impl Compiler for UnarySequentialElimination {
 
                 move_outgoing_edge(last, pre_node, &mut graph.graph);
                 move_references(
-                    &mut graph.id_remap,
+                    &mut remap,
                     &mut graph.no_delete,
                     &mut graph.to_retrieve,
                     last,
@@ -94,7 +94,7 @@ impl Compiler for UnarySequentialElimination {
 pub struct CSE;
 
 impl Compiler for CSE {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
         // Look for nodes that have the exact same srcs
         // Loop cause I'm lazy
         let mut eliminated = true;
@@ -141,7 +141,7 @@ impl Compiler for CSE {
                         move_outgoing_edge(node, *other_node, &mut graph.graph);
                         // Transfer all references to node over to other node
                         move_references(
-                            &mut graph.id_remap,
+                            &mut remap,
                             &mut graph.no_delete,
                             &mut graph.to_retrieve,
                             node,
@@ -164,7 +164,7 @@ impl Compiler for CSE {
 pub struct RemoveSingleReductions;
 
 impl Compiler for RemoveSingleReductions {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
         for node in graph.graph.node_indices().collect::<Vec<_>>() {
             let dim = if let Some(red) = graph
                 .graph
@@ -207,7 +207,7 @@ impl Compiler for RemoveSingleReductions {
                         .next()
                         .unwrap();
                     move_references(
-                        &mut graph.id_remap,
+                        &mut remap,
                         &mut graph.no_delete,
                         &mut graph.to_retrieve,
                         node,
@@ -226,7 +226,7 @@ impl Compiler for RemoveSingleReductions {
 pub struct RemoveUnusedNodes;
 
 impl Compiler for RemoveUnusedNodes {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, _: T) {
         // Reverse topo sort
         for node in graph.graph.node_indices().collect::<Vec<_>>() {
             if graph
@@ -247,7 +247,7 @@ impl Compiler for RemoveUnusedNodes {
 pub struct DepthFirst;
 
 impl Compiler for DepthFirst {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, _: T) {
         fn toposort(
             id: NodeIndex,
             graph: &StableGraph<Box<dyn Operator>, Dependency>,
@@ -303,15 +303,10 @@ impl Compiler for DepthFirst {
 pub struct RemapDownstream(pub Vec<NodeIndex>);
 
 impl Compiler for RemapDownstream {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
         let set = self.0.iter().copied().collect::<HashSet<_>>();
         // Loop through state dict tensors marked as no_delete
-        for mut node in self
-            .0
-            .iter()
-            .map(|i| remap_id(*i, &graph.id_remap))
-            .collect::<Vec<_>>()
-        {
+        for mut node in self.0.iter().copied() {
             // Go downstream as far as possible along a single stream of ops
             while graph
                 .graph
@@ -329,7 +324,11 @@ impl Compiler for RemapDownstream {
                     break;
                 }
                 // Remap node to new node
-                graph.id_remap.insert(node, new_node);
+                for id in remap.to_ids() {
+                    if *id == node {
+                        *id = new_node;
+                    }
+                }
                 node = new_node;
             }
         }

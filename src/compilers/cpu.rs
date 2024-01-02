@@ -18,7 +18,7 @@ pub type MatMulCompiler = (MatMul2DCompiler, BatchMatMul2DCompiler);
 pub struct MatMul2DCompiler;
 
 impl Compiler for MatMul2DCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
         // Look for the matmul pattern
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
@@ -61,14 +61,14 @@ impl Compiler for MatMul2DCompiler {
             // Create edges to dests
             move_outgoing_edge(sum_reduce, new_op, &mut graph.graph);
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 sum_reduce,
                 new_op,
             );
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 mul,
@@ -131,7 +131,7 @@ impl Operator for MatMul2D {
 pub struct BatchMatMul2DCompiler;
 
 impl Compiler for BatchMatMul2DCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
         // Look for the matmul pattern
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
@@ -175,14 +175,14 @@ impl Compiler for BatchMatMul2DCompiler {
             // Create edges to dests
             move_outgoing_edge(sum_reduce, new_op, &mut graph.graph);
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 sum_reduce,
                 new_op,
             );
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 mul,
@@ -256,7 +256,7 @@ impl Operator for BatchedMatMul2D {
 pub struct UnaryFusionCompiler;
 
 impl Compiler for UnaryFusionCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
         fn is_unary(op: &dyn Any) -> Option<fn(f32) -> f32> {
             if op.is::<Exp2>() {
                 Some(|i| i.exp2())
@@ -323,7 +323,7 @@ impl Compiler for UnaryFusionCompiler {
                     // Remove other node
                     move_outgoing_edge(outgoing_target, id, &mut graph.graph);
                     move_references(
-                        &mut graph.id_remap,
+                        &mut remap,
                         &mut graph.no_delete,
                         &mut graph.to_retrieve,
                         outgoing_target,

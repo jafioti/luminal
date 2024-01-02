@@ -25,7 +25,7 @@ use super::get_buffer_from_tensor;
 pub struct StorageBufferCompiler;
 
 impl Compiler for StorageBufferCompiler {
-    fn compile<To: ToIds>(&self, graph: &mut Graph, remap: To) {
+    fn compile<To: ToIds>(&self, graph: &mut Graph, _: To) {
         // First pass - get clear sets for each node
         #[allow(clippy::type_complexity)]
         let mut first_pass: HashMap<
@@ -115,7 +115,7 @@ impl Compiler for StorageBufferCompiler {
         let mut buffer_map = HashMap::new();
         let mut used = HashSet::<NodeIndex>::new();
         for node in &toposort {
-            if graph.no_delete.contains(&node) {
+            if graph.no_delete.contains(node) {
                 continue;
             }
             let Some(Ok(wrapper)) = graph
@@ -152,12 +152,12 @@ impl Compiler for StorageBufferCompiler {
                     .find(|(_, _, size)| *size == required_buffer)
                 {
                     let buffer = buffer_map.get(&source_node).unwrap().0[buffer_index];
-                    buffer_map.get_mut(&node).unwrap().0.push(buffer);
+                    buffer_map.get_mut(node).unwrap().0.push(buffer);
                     // Remove this buffer from first_pass so it can't be used again
                     used.insert(source_node);
                 } else {
                     // Allocate new buffer
-                    buffer_map.get_mut(&node).unwrap().0.push(buffers.len());
+                    buffer_map.get_mut(node).unwrap().0.push(buffers.len());
                     buffers.push(required_buffer);
                 }
             }
@@ -180,11 +180,11 @@ impl Compiler for StorageBufferCompiler {
                     .find(|(_, _, size)| *size == required_buffer)
                 {
                     let buffer = buffer_map.get(&source_node).unwrap().1[buffer_index];
-                    buffer_map.get_mut(&node).unwrap().1.push(buffer);
+                    buffer_map.get_mut(node).unwrap().1.push(buffer);
                     used.insert(source_node);
                 } else {
                     // Allocate new buffer
-                    buffer_map.get_mut(&node).unwrap().1.push(buffers.len());
+                    buffer_map.get_mut(node).unwrap().1.push(buffers.len());
                     buffers.push(required_buffer);
                 }
             }

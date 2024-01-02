@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
-use crate::prelude::{remap_id, Graph, SerializeModule, Serializer};
+use crate::prelude::{Graph, SerializeModule, Serializer};
 
 /// A module that can initialize it's variables on the graph
 pub trait InitModule {
@@ -29,14 +29,10 @@ pub fn transfer_weights<M: SerializeModule>(
 ) {
     let src_state_dict = state_dict(src_model);
     let dest_state_dict = state_dict(dest_model);
-    for (key, mut src_ind) in src_state_dict {
-        src_ind = remap_id(src_ind, &src_graph.id_remap);
-        let dest_ind = remap_id(
-            *dest_state_dict.get(&key).unwrap_or_else(|| {
-                panic!("{key} was in the source model but not in the dest model!")
-            }),
-            &dest_graph.id_remap,
-        );
+    for (key, src_ind) in src_state_dict {
+        let dest_ind = *dest_state_dict
+            .get(&key)
+            .unwrap_or_else(|| panic!("{key} was in the source model but not in the dest model!"));
         let mut output_num = 0;
         loop {
             if let Some(tensor) = src_graph.tensors.remove(&(src_ind, output_num)) {
@@ -55,7 +51,7 @@ pub fn transfer_weights<M: SerializeModule>(
 /// Delete all incoming nodes to this set of nodes
 pub fn delete_inputs(nodes: &[NodeIndex], graph: &mut Graph) {
     for node in nodes {
-        delete_upstream(graph, remap_id(*node, &graph.id_remap));
+        delete_upstream(graph, *node);
     }
     graph.toposort();
 }
@@ -75,7 +71,6 @@ fn delete_upstream(graph: &mut Graph, node: NodeIndex) {
 
 pub fn keep_weights<M: SerializeModule>(model: &M, graph: &mut Graph) {
     for node in state_dict(model).values() {
-        let id = remap_id(*node, &graph.id_remap);
-        graph.no_delete.insert(id);
+        graph.no_delete.insert(*node);
     }
 }

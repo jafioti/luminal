@@ -105,7 +105,7 @@ impl Operator for MetalCos {
 pub struct MetalCosCompiler;
 
 impl Compiler for MetalCosCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
         let dev = Device::system_default().unwrap();
         // Look for the cos pattern
         // sin(add(mul(const_neg_one, x), const_pi_over_2))
@@ -186,7 +186,7 @@ impl Compiler for MetalCosCompiler {
             // Create edges to dests
             move_outgoing_edge(sin, cos, &mut graph.graph);
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 sin,
@@ -299,7 +299,7 @@ impl Operator for MetalExp {
 pub struct MetalExpCompiler;
 
 impl Compiler for MetalExpCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
         let dev = Device::system_default().unwrap();
         // Look for the exp pattern
         // exp2(mul(x, const))
@@ -353,7 +353,7 @@ impl Compiler for MetalExpCompiler {
             // Create edges to dests
             move_outgoing_edge(exp2, exp, &mut graph.graph);
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 exp2,
@@ -461,7 +461,7 @@ impl Operator for MetalGather {
 pub struct MetalGatherCompiler;
 
 impl Compiler for MetalGatherCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
         let dev = Device::system_default().unwrap();
         // Look for the exp pattern
         // exp2(mul(x, const))
@@ -501,21 +501,21 @@ impl Compiler for MetalGatherCompiler {
             // Create edges to dests
             move_outgoing_edge(copy_to, new_gather, &mut graph.graph);
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 gather,
                 new_gather,
             );
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 weights_copy_from.0,
                 new_gather,
             );
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 copy_to,

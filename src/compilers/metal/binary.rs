@@ -141,7 +141,7 @@ impl<T: MetalFloat> Operator for MetalSub<T> {
 pub struct MetalSubtractionCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
-    fn compile<To: ToIds>(&self, graph: &mut Graph, remap: To) {
+    fn compile<To: ToIds>(&self, graph: &mut Graph, _: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let (mut neg_one, mut mul, mut add) = (
@@ -350,7 +350,7 @@ impl<T: MetalFloat> Operator for MetalEqual<T> {
 pub struct MetalEqualCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
-    fn compile<To: ToIds>(&self, graph: &mut Graph, remap: To) {
+    fn compile<To: ToIds>(&self, graph: &mut Graph, _: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let (mut less_than1, mut less_than2, mut add, mut one, mut sub) = (
@@ -556,7 +556,7 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
 pub struct MetalGatherCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
-    fn compile<To: ToIds>(&self, graph: &mut Graph, remap: To) {
+    fn compile<To: ToIds>(&self, graph: &mut Graph, _: To) {
         let dev = Device::system_default().unwrap();
         let (mut ind_copy, mut arange, mut equal, mut mul, mut sum_reduce) = (
             NodeIndex::default(),
@@ -608,7 +608,6 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
             move_outgoing_edge(sum_reduce, gather, &mut graph.graph);
             graph.graph.remove_node(arange);
             graph.graph.remove_node(ind_copy);
-            graph.id_remap.retain(|_, v| *v != ind_copy);
             graph.graph.remove_node(mul);
             graph.graph.remove_node(sum_reduce);
         }

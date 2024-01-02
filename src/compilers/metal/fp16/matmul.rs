@@ -594,7 +594,7 @@ impl Operator for MetalBatchMatmul2D {
 pub struct MetalMatMulCompiler;
 
 impl Compiler for MetalMatMulCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
@@ -691,7 +691,7 @@ impl Compiler for MetalMatMulCompiler {
             // Create edges to dests
             move_outgoing_edge(sum_reduce, matmul_op, &mut graph.graph);
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 sum_reduce,
@@ -821,7 +821,7 @@ impl Compiler for MetalMatMulCompiler {
             // Create edges to dests
             move_outgoing_edge(sum_reduce, matmul_op, &mut graph.graph);
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 sum_reduce,
@@ -961,7 +961,7 @@ impl Compiler for MetalMatMulCompiler {
             // Create edges to dests
             move_outgoing_edge(sum_reduce, matmul_op, &mut graph.graph);
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 sum_reduce,

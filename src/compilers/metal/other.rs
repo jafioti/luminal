@@ -16,7 +16,7 @@ use super::binary::MetalSub;
 pub struct CopyCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for CopyCompiler<T> {
-    fn compile<To: ToIds>(&self, graph: &mut Graph, remap: To) {
+    fn compile<To: ToIds>(&self, graph: &mut Graph, mut remap: To) {
         for (first, second) in graph
             .graph
             .edge_indices()
@@ -80,14 +80,13 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
             };
             move_outgoing_edge(second, source.0, &mut graph.graph);
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 second,
                 source.0,
             );
             graph.graph.remove_node(second);
-            graph.id_remap.retain(|_, v| *v != second);
             for dest in graph
                 .get_dests(first)
                 .iter()
@@ -96,17 +95,15 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
             {
                 move_outgoing_edge(dest, source.0, &mut graph.graph);
                 move_references(
-                    &mut graph.id_remap,
+                    &mut remap,
                     &mut graph.no_delete,
                     &mut graph.to_retrieve,
                     dest,
                     source.0,
                 );
                 graph.graph.remove_node(dest);
-                graph.id_remap.retain(|_, v| *v != dest);
             }
             graph.graph.remove_node(first);
-            graph.id_remap.retain(|_, v| *v != first);
         }
     }
 }
@@ -213,7 +210,7 @@ impl<T: MetalFloat> Operator for MetalARange<T> {
 pub struct ARangeCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
-    fn compile<To: ToIds>(&self, graph: &mut Graph, remap: To) {
+    fn compile<To: ToIds>(&self, graph: &mut Graph, _: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let (
