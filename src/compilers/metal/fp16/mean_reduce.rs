@@ -163,7 +163,7 @@ impl Operator for MetalMeanReduce {
 pub struct MeanReduceCompiler;
 
 impl Compiler for MeanReduceCompiler {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         // Look for the mean-reduce pattern

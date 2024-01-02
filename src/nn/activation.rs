@@ -107,19 +107,22 @@ mod tests {
             .weight
             .set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
         model.2.weight.set(vec![1., 2., 3., 1., 2., 3., 1., 2.]);
-        let b = model.forward(a);
-        let batch_out = model.forward(batch);
+        let mut b = model
+            .forward(a)
+            .set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0])
+            .retrieve();
+        let mut batch_out = model.forward(batch).retrieve();
 
         a.set(vec![1.0, 2.0, 3.0]);
-        batch.set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
-        b.retrieve();
-        batch_out.retrieve();
         cx.execute();
 
         let unoptimized_b = b.data();
         let unoptimized_batch_out = batch_out.data();
 
-        cx.compile(<(PostGenericCompiler, CPUCompiler)>::default());
+        cx.compile(
+            <(PostGenericCompiler, CPUCompiler)>::default(),
+            (&mut b, &mut batch_out),
+        );
         cx.execute();
 
         assert_close(&unoptimized_b, &b.data());

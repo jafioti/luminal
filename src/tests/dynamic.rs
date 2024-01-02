@@ -101,14 +101,14 @@ fn test_feedforward() {
         .weight
         .set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
     model.2.weight.set(vec![1., 2., 3., 1., 2., 3., 1., 2.]);
-    let batch_out = model.forward(batch).retrieve();
+    let mut batch_out = model.forward(batch).retrieve();
 
     cx.execute();
 
     let unoptimized_batch_out = batch_out.data();
     batch_out.drop();
 
-    cx.compile(<CPUCompiler>::default());
+    cx.compile(<CPUCompiler>::default(), &mut batch_out);
     cx.execute();
     assert_close(&unoptimized_batch_out, &batch_out.data());
 

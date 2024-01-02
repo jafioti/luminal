@@ -105,7 +105,7 @@ impl Operator for MetalCos {
 pub struct MetalCosCompiler;
 
 impl Compiler for MetalCosCompiler {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
         let dev = Device::system_default().unwrap();
         // Look for the cos pattern
         // sin(add(mul(const_neg_one, x), const_pi_over_2))
@@ -299,7 +299,7 @@ impl Operator for MetalExp {
 pub struct MetalExpCompiler;
 
 impl Compiler for MetalExpCompiler {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
         let dev = Device::system_default().unwrap();
         // Look for the exp pattern
         // exp2(mul(x, const))
@@ -461,7 +461,7 @@ impl Operator for MetalGather {
 pub struct MetalGatherCompiler;
 
 impl Compiler for MetalGatherCompiler {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
         let dev = Device::system_default().unwrap();
         // Look for the exp pattern
         // exp2(mul(x, const))

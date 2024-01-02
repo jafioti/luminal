@@ -20,21 +20,19 @@ fn main() {
     let g = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
     let e = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
 
-    let a = (b * c + g).retrieve();
-    let d = (b * c / e).exp_2().log_2().retrieve();
+    let mut a = (b * c + g).retrieve();
+    let mut d = (b * c / e).exp_2().log_2().retrieve();
 
     cx.execute();
 
     let unoptimized_a = a.data();
     let unoptimized_d = d.data();
 
-    cx.compile(PostGenericCompiler::default());
+    cx.compile(PostGenericCompiler::default(), (&mut a, &mut d));
 
     cx.execute();
-    let a = a.data();
-    let d = d.data();
-    assert_close(&unoptimized_a, &a);
-    assert_close(&unoptimized_d, &d);
+    assert_close(&unoptimized_a, &a.data());
+    assert_close(&unoptimized_d, &d.data());
 }
 
 #[test]
@@ -43,13 +41,13 @@ fn test_matmul() {
     let b = cx.tensor::<R2<3, 1>>().set(vec![1.0, 2.0, 3.0]);
     let c = cx.tensor::<R2<1, 4>>().set(vec![1.0, 2.0, 3.0, 3.0]);
 
-    let a = b.matmul(c).retrieve();
+    let mut a = b.matmul(c).retrieve();
 
     cx.execute();
 
     let unoptimized_a = a.data();
 
-    cx.compile(PostGenericCompiler::default());
+    cx.compile(PostGenericCompiler::default(), &mut a);
     cx.execute();
 
     assert_exact(&unoptimized_a, &a.data());
@@ -140,9 +138,13 @@ macro_rules! test_imports {
                 Axis as LAxis, Const as LConst, *,
             },
             tests::{
-                assert_close, assert_close_precision, assert_exact,
-                harness::{test_compilers_close, test_compilers_exact},
-                random_vec, random_vec_rng, test_graphs,
+                assert_close,
+                assert_close_precision,
+                assert_exact,
+                // harness::{test_compilers_close, test_compilers_exact},
+                random_vec,
+                random_vec_rng,
+                test_graphs,
             },
         };
     };

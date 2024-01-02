@@ -100,9 +100,9 @@ mod tests {
         let (a_vec, b_vec) = (random_vec(3), random_vec(6));
         let a = cx.tensor::<R1<3>>().set(a_vec.clone());
         let b = cx.tensor::<R2<3, 2>>().set(b_vec.clone());
-        let c = a.matmul(b).retrieve();
+        let mut c = a.matmul(b).retrieve();
 
-        cx.compile(PreGenericCompiler::default());
+        cx.compile(PreGenericCompiler::default(), &mut c);
         cx.execute();
 
         let d_dev = Cpu::default();

@@ -105,7 +105,7 @@ pub struct SafeTensorLoader {
 impl SafeTensorLoader {
     pub fn new<S: ToString>(paths: &[S]) -> Self {
         Self {
-            paths: paths.into_iter().map(|s| s.to_string()).collect(),
+            paths: paths.iter().map(|s| s.to_string()).collect(),
         }
     }
 }
@@ -257,16 +257,15 @@ mod tests {
         StateDictLoader::new(state_dict).load(&model, &mut cx);
         let enc = cx.tensor::<R2<24, 32>>();
         let trg = cx.tensor::<R2<20, 32>>();
-        let out2 = model.forward((trg, enc));
+        let mut out2 = model.forward((trg, enc));
 
         enc.set(enc_data);
         trg.set(trg_data);
         out2.retrieve();
 
-        cx.compile(<(CPUCompiler, PostGenericCompiler)>::default());
+        cx.compile(<(CPUCompiler, PostGenericCompiler)>::default(), &mut out2);
         cx.execute();
 
-        let out2 = out2.data();
-        assert_close(&out1, &out2);
+        assert_close(&out1, &out2.data());
     }
 }

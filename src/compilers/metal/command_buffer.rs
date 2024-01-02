@@ -24,7 +24,7 @@ use super::get_buffer_from_tensor;
 pub struct CommandBufferCompiler;
 
 impl Compiler for CommandBufferCompiler {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
         let is_metal: HashSet<NodeIndex> = graph
             .graph
             .node_indices()
@@ -296,13 +296,13 @@ fn test_common_buffer() {
     let a = cx.tensor::<R1<5>>().set(random_vec(5)).keep();
     let b = cx.tensor::<R1<5>>().set(random_vec(5)).keep();
     let c = cx.tensor::<R1<5>>().set(random_vec(5)).keep();
-    let d = ((a + b) * c).retrieve();
+    let mut d = ((a + b) * c).retrieve();
 
     cx.execute();
     let d_unopt = d.data();
     d.drop();
 
-    cx.compile(MetalFp16Compiler::default());
+    cx.compile(MetalFp16Compiler::default(), &mut d);
     cx.execute();
 
     assert_close(&d.data(), &d_unopt);

@@ -141,7 +141,7 @@ impl<T: MetalFloat> Operator for MetalSub<T> {
 pub struct MetalSubtractionCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<To: ToIds>(&self, graph: &mut Graph, remap: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let (mut neg_one, mut mul, mut add) = (
@@ -350,7 +350,7 @@ impl<T: MetalFloat> Operator for MetalEqual<T> {
 pub struct MetalEqualCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<To: ToIds>(&self, graph: &mut Graph, remap: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let (mut less_than1, mut less_than2, mut add, mut one, mut sub) = (
@@ -556,7 +556,7 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
 pub struct MetalGatherCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<To: ToIds>(&self, graph: &mut Graph, remap: To) {
         let dev = Device::system_default().unwrap();
         let (mut ind_copy, mut arange, mut equal, mut mul, mut sum_reduce) = (
             NodeIndex::default(),
@@ -625,8 +625,8 @@ mod tests {
             .tensor::<R1<10>>()
             .set(vec![1., 2., 3., 4., 5., 6., 7., 8., 9., 10.]);
         let b = cx.tensor::<R0>().set(vec![1.]);
-        let c = (a - b.expand()).retrieve();
-        let d = (-a + b.expand()).retrieve();
+        let mut c = (a - b.expand()).retrieve();
+        let mut d = (-a + b.expand()).retrieve();
 
         cx.execute();
 
@@ -635,7 +635,7 @@ mod tests {
         let unopt_d = d.data();
         d.drop();
 
-        cx.compile(MetalFp16Compiler::default());
+        cx.compile(MetalFp16Compiler::default(), (&mut c, &mut d));
         cx.execute();
 
         assert_close(&unopt_c, &c.data());

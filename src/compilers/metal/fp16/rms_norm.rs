@@ -199,7 +199,7 @@ impl Operator for MetalRMSNorm {
 pub struct RMSNormCompiler;
 
 impl Compiler for RMSNormCompiler {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
         let dev = Device::system_default().unwrap();
         // Look for the RMSNorm pattern
         // mul(recip(sqrt(add(mean_reduce(mul(x, x)), 1e-6))), x)
