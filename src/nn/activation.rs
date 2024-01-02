@@ -98,8 +98,10 @@ mod tests {
     fn test_relu_and_linear() {
         // Test single and batch, unoptimized and optimized
         let mut cx = Graph::new();
-        let batch = cx.tensor::<R2<2, 3>>();
-        let a = cx.tensor::<R1<3>>();
+        let batch = cx
+            .tensor::<R2<2, 3>>()
+            .set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+        let a = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
 
         let model: (Linear<3, 4>, ReLU, Linear<4, 2>) = InitModule::initialize(&mut cx);
         model
@@ -107,13 +109,9 @@ mod tests {
             .weight
             .set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
         model.2.weight.set(vec![1., 2., 3., 1., 2., 3., 1., 2.]);
-        let mut b = model
-            .forward(a)
-            .set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0])
-            .retrieve();
+        let mut b = model.forward(a).retrieve();
         let mut batch_out = model.forward(batch).retrieve();
 
-        a.set(vec![1.0, 2.0, 3.0]);
         cx.execute();
 
         let unoptimized_b = b.data();
