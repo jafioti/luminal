@@ -1,7 +1,7 @@
 use crate::{
     graph::Graph,
     op::{self, Function},
-    prelude::{remap_id, Data},
+    prelude::Data,
     shape::*,
     tensor::Tensor,
 };
@@ -32,27 +32,22 @@ impl<S: Shape> GraphTensor<S> {
         }
     }
 
-    /// Get remapped graph id of this node
-    pub fn id(&self) -> NodeIndex {
-        remap_id(self.id, &self.graph().id_remap)
-    }
-
     /// Mark this tensor to not be deleted
     pub fn keep(self) -> Self {
-        self.graph().no_delete.insert(self.id());
+        self.graph().no_delete.insert(self.id);
         self
     }
 
     /// Mark this tensor to be retrieved later
     pub fn retrieve(self) -> Self {
         self.keep();
-        self.graph().to_retrieve.insert(self.id());
+        self.graph().to_retrieve.insert(self.id);
         self
     }
 
     /// Remove this tensor's data from the graph.
     pub fn drop(&self) {
-        self.graph().tensors.remove(&(self.id(), 0));
+        self.graph().tensors.remove(&(self.id, 0));
     }
 
     #[allow(clippy::mut_from_ref)]

@@ -1502,7 +1502,7 @@ impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
 pub struct PrimitiveCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
-    fn compile<To: ToIds>(&self, graph: &mut Graph, remap: To) {
+    fn compile<To: ToIds>(&self, graph: &mut Graph, mut remap: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         // Go through the graph and insert copy ops
@@ -1543,7 +1543,7 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
             }
 
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 function_node,
@@ -1608,7 +1608,6 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                     .neighbors_directed(output_node, petgraph::Direction::Incoming)
                     .next()
                     .unwrap();
-                graph.id_remap.remove(&src);
                 graph.no_delete.remove(&output_node);
                 graph.to_retrieve.remove(&output_node);
                 graph.no_delete.insert(src);
@@ -1621,7 +1620,7 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                     .finish();
 
                 move_references(
-                    &mut graph.id_remap,
+                    &mut remap,
                     &mut graph.no_delete,
                     &mut graph.to_retrieve,
                     output_node,

@@ -115,7 +115,7 @@ fn main() {
     delete_inputs(
         &cache_src
             .iter()
-            .flat_map(|(k, v)| [k.id(), v.id()])
+            .flat_map(|(k, v)| [k.id, v.id])
             .collect::<Vec<_>>(),
         &mut cx2,
     );
@@ -156,8 +156,8 @@ fn main() {
     // Transfer weights and kv cache
     transfer_weights(&model, &mut cx1, &kv_model, &mut cx2);
     for ((key_src, val_src), (key_dest, val_dest)) in kv_cache.into_iter().zip(cache_src.iter()) {
-        cx2.set_tensor(key_dest.id(), 0, cx1.get_tensor(key_src.id(), 0).unwrap());
-        cx2.set_tensor(val_dest.id(), 0, cx1.get_tensor(val_src.id(), 0).unwrap());
+        cx2.set_tensor(key_dest.id, 0, cx1.get_tensor(key_src.id, 0).unwrap());
+        cx2.set_tensor(val_dest.id, 0, cx1.get_tensor(val_src.id, 0).unwrap());
     }
     drop(cx1);
 

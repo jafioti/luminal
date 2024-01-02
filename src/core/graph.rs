@@ -23,7 +23,6 @@ pub type MainGraph = StableGraph<Box<dyn Operator>, Dependency>;
 #[derive(Debug, Default)]
 pub struct Graph {
     pub tensors: HashMap<(NodeIndex, u8), Tensor>,
-    pub id_remap: HashMap<NodeIndex, NodeIndex>,
     pub dyn_map: HashMap<char, usize>,
     /// Edge weights: (Input index, Output index, Input shape)
     pub graph: MainGraph,
@@ -74,17 +73,16 @@ impl Graph {
 
     pub fn get_tensor(&mut self, id: NodeIndex, ind: u8) -> Option<Tensor> {
         // Walk through remap
-        self.tensors.remove(&(remap_id(id, &self.id_remap), ind))
+        self.tensors.remove(&(id, ind))
     }
 
     pub fn get_tensor_ref(&self, id: NodeIndex, ind: u8) -> Option<&Tensor> {
         // Walk through remap
-        self.tensors.get(&(remap_id(id, &self.id_remap), ind))
+        self.tensors.get(&(id, ind))
     }
 
     pub fn set_tensor(&mut self, id: NodeIndex, ind: u8, tensor: Tensor) {
-        self.tensors
-            .insert((remap_id(id, &self.id_remap), ind), tensor);
+        self.tensors.insert((id, ind), tensor);
     }
 
     pub fn set_dyn_dim(&mut self, dim: char, val: usize) {
@@ -138,13 +136,13 @@ impl Graph {
     /// Swap the tensors with these ids
     pub fn swap_tensors<A: Shape, B: Shape>(&mut self, a: GraphTensor<A>, b: GraphTensor<B>) {
         // Swap tensors
-        let a_t = self.tensors.remove(&(a.id(), 0)); // Assume 0th output for now
-        let b_t = self.tensors.remove(&(b.id(), 0));
+        let a_t = self.tensors.remove(&(a.id, 0)); // Assume 0th output for now
+        let b_t = self.tensors.remove(&(b.id, 0));
         if let Some(a_t) = a_t {
-            self.tensors.insert((b.id(), 0), a_t);
+            self.tensors.insert((b.id, 0), a_t);
         }
         if let Some(b_t) = b_t {
-            self.tensors.insert((a.id(), 0), b_t);
+            self.tensors.insert((a.id, 0), b_t);
         }
     }
 
@@ -393,12 +391,4 @@ fn get_source_tensors<'a>(
         ));
     }
     srcs
-}
-
-/// Walk through remap to get new id
-pub fn remap_id(mut id: NodeIndex, map: &HashMap<NodeIndex<u32>, NodeIndex<u32>>) -> NodeIndex {
-    while let Some(new_id) = map.get(&id) {
-        id = *new_id;
-    }
-    id
 }

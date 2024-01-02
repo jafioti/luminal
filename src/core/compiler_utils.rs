@@ -2,7 +2,7 @@
 
 use std::{
     any::{Any, TypeId},
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fmt::Debug,
 };
 
@@ -372,25 +372,25 @@ impl<'a> NewOp<'a> {
 }
 
 /// Transfer all external references from one node to another (this may happen because one node is about to be removed / merged into another)
-pub fn move_references(
-    id_remap: &mut HashMap<NodeIndex, NodeIndex>,
+pub fn move_references<T: ToIds>(
+    mut ids: T,
     no_delete: &mut HashSet<NodeIndex<u32>>,
     to_retrieve: &mut HashSet<NodeIndex<u32>>,
     src: NodeIndex,
     trg: NodeIndex,
 ) {
-    // Only remap if it isn't already remapped, otherwise it would invalidate the past remappig
-    if let Entry::Vacant(e) = id_remap.entry(src) {
-        // Create remap
-        e.insert(trg);
-        // Transfer no_delete
-        if no_delete.remove(&src) {
-            no_delete.insert(trg);
+    for id in ids.to_ids() {
+        if *id == src {
+            *id = trg;
         }
-        // Transfer to_retrieve
-        if to_retrieve.remove(&src) {
-            to_retrieve.insert(trg);
-        }
+    }
+    // Transfer no_delete
+    if no_delete.remove(&src) {
+        no_delete.insert(trg);
+    }
+    // Transfer to_retrieve
+    if to_retrieve.remove(&src) {
+        to_retrieve.insert(trg);
     }
 }
 

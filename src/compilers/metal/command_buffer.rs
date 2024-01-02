@@ -24,7 +24,7 @@ use super::get_buffer_from_tensor;
 pub struct CommandBufferCompiler;
 
 impl Compiler for CommandBufferCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
+    fn compile<T: ToIds>(&self, graph: &mut Graph, _: T) {
         let is_metal: HashSet<NodeIndex> = graph
             .graph
             .node_indices()
@@ -279,6 +279,7 @@ impl Operator for CommandBufferWrapper {
         .collect()
     }
 
+    #[allow(clippy::arc_with_non_send_sync)]
     fn custom(&self, key: &str) -> Option<Box<dyn std::any::Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
