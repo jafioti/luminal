@@ -608,6 +608,7 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
             move_outgoing_edge(sum_reduce, gather, &mut graph.graph);
             graph.graph.remove_node(arange);
             graph.graph.remove_node(ind_copy);
+            graph.id_remap.retain(|_, v| *v != ind_copy);
             graph.graph.remove_node(mul);
             graph.graph.remove_node(sum_reduce);
         }
