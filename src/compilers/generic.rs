@@ -304,6 +304,7 @@ pub struct RemapDownstream(pub Vec<NodeIndex>);
 
 impl Compiler for RemapDownstream {
     fn compile(&self, graph: &mut Graph) {
+        let set = self.0.iter().copied().collect::<HashSet<_>>();
         // Loop through state dict tensors marked as no_delete
         for mut node in self
             .0
@@ -324,12 +325,7 @@ impl Compiler for RemapDownstream {
                     .next()
                     .unwrap()
                     .target();
-                if graph
-                    .graph
-                    .edges_directed(new_node, Direction::Incoming)
-                    .count()
-                    > 1
-                {
+                if !is_from_set(new_node, graph, &set) {
                     break;
                 }
                 // Remap node to new node
@@ -338,6 +334,27 @@ impl Compiler for RemapDownstream {
             }
         }
     }
+}
+
+fn is_from_set(node: NodeIndex, graph: &Graph, set: &HashSet<NodeIndex>) -> bool {
+    // Reverse dfs upward
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        if !set.contains(&node) {
+            let mut new_nodes = graph
+                .graph
+                .edges_directed(node, Direction::Incoming)
+                .filter(|e| !e.weight().is_schedule())
+                .map(|e| e.source())
+                .collect_vec();
+            if new_nodes.is_empty() {
+                // Node isn't from set and doesn't have upstream nodes
+                return false;
+            }
+            stack.append(&mut new_nodes);
+        }
+    }
+    true
 }
 
 #[cfg(test)]

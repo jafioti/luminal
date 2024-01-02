@@ -16,7 +16,7 @@ type DeviceCompiler = CudaFp16Compiler;
 type DeviceCompiler = CPUCompiler;
 
 fn main() {
-    let prompt = "[INST]Please write a python implementation of merge sort.[/INST]\n";
+    let prompt = "[INST]Here is a python implementation of merge sort:[/INST]\n";
     let tokens_to_generate = 300;
 
     println!("Creating graph...");
@@ -121,7 +121,7 @@ fn main() {
     print!(
         "{}{}",
         prompt.white().bold(),
-        decode(&tokenizer, &[output_id]).green()
+        decode(&tokenizer, &[output_id]).bright_green()
     );
     std::io::stdout().flush().unwrap();
 
@@ -148,7 +148,7 @@ fn main() {
         let output_id = sample_index(&decode_logits.data());
         decode_logits.drop();
         input_ids.push(output_id);
-        print!("{}", decode(&tokenizer, &[output_id]).green());
+        print!("{}", decode(&tokenizer, &[output_id]).bright_green());
         std::io::stdout().flush().unwrap();
 
         // Swap caches
