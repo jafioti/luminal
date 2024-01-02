@@ -7,5 +7,5 @@ pub type MetalFp32Compiler = (
     super::command_buffer::CommandBufferCompiler,
 );
 
-// #[cfg(test)]
-// mod tests;
+#[cfg(test)]
+mod tests;
