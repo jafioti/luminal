@@ -22,5 +22,5 @@ pub type MetalFp16Compiler = (
     super::storage_buffer::StorageBufferCompiler,
 );
 
-// #[cfg(test)]
-// mod tests;
+#[cfg(test)]
+mod tests;

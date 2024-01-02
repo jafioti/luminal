@@ -1542,13 +1542,13 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                 graph.to_retrieve.insert(copy_node);
             }
 
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                function_node,
-                copy_node,
-            );
+            // move_references(
+            //     &mut remap,
+            //     &mut graph.no_delete,
+            //     &mut graph.to_retrieve,
+            //     function_node,
+            //     copy_node,
+            // );
 
             // Insert copy from device for function inputs
             for (source, edge, edge_weight) in graph
