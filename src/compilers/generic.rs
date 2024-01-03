@@ -324,7 +324,7 @@ impl Compiler for RemapDownstream {
                     break;
                 }
                 // Remap node to new node
-                for id in remap.to_ids() {
+                for id in remap.to_ids_mut() {
                     if *id == node {
                         *id = new_node;
                     }

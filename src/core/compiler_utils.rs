@@ -25,32 +25,50 @@ use crate::{
 use super::{graph_tensor::GraphTensor, shape::symbolic::Expression};
 
 pub trait ToIds {
-    fn to_ids(&mut self) -> Vec<&mut NodeIndex>;
+    fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex>;
+    fn to_ids(&self) -> Vec<NodeIndex>;
 }
 
 impl<S: Shape> ToIds for GraphTensor<S> {
-    fn to_ids(&mut self) -> Vec<&mut NodeIndex> {
+    fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
         vec![&mut self.id]
     }
+    fn to_ids(&self) -> Vec<NodeIndex> {
+        vec![self.id]
+    }
 }
-impl<T: ToIds> ToIds for &mut Vec<T> {
-    fn to_ids(&mut self) -> Vec<&mut NodeIndex> {
-        self.iter_mut().flat_map(|i| i.to_ids()).collect()
+impl<T: ToIds> ToIds for Vec<T> {
+    fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
+        self.iter_mut().flat_map(|i| i.to_ids_mut()).collect()
+    }
+    fn to_ids(&self) -> Vec<NodeIndex> {
+        self.iter().flat_map(|i| i.to_ids()).collect()
     }
 }
 impl<T: ToIds> ToIds for &mut [T] {
-    fn to_ids(&mut self) -> Vec<&mut NodeIndex> {
-        self.iter_mut().flat_map(|i| i.to_ids()).collect()
+    fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
+        self.iter_mut().flat_map(|i| i.to_ids_mut()).collect()
+    }
+
+    fn to_ids(&self) -> Vec<NodeIndex> {
+        self.iter().flat_map(|i| i.to_ids()).collect()
     }
 }
 
 impl<T: ToIds> ToIds for &mut T {
-    fn to_ids(&mut self) -> Vec<&mut NodeIndex> {
-        (*self).to_ids()
+    fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
+        (*self).to_ids_mut()
+    }
+
+    fn to_ids(&self) -> Vec<NodeIndex> {
+        <T as ToIds>::to_ids(*self)
     }
 }
 impl ToIds for () {
-    fn to_ids(&mut self) -> Vec<&mut NodeIndex> {
+    fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
+        vec![]
+    }
+    fn to_ids(&self) -> Vec<NodeIndex> {
         vec![]
     }
 }
@@ -61,7 +79,12 @@ macro_rules! tuple_impls {
         $($name:
             ToIds, )+
         > ToIds for ($($name,)+) {
-            fn to_ids(&mut self) -> Vec<&mut NodeIndex> {
+            fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
+                let mut v = vec![];
+                $(v.append(&mut self.$idx.to_ids_mut());)+
+                v
+            }
+            fn to_ids(&self) -> Vec<NodeIndex> {
                 let mut v = vec![];
                 $(v.append(&mut self.$idx.to_ids());)+
                 v
@@ -251,9 +274,9 @@ impl Graph {
         display_graph(&g, &e, &[]);
     }
 
-    pub fn display_group(&self, group: &[NodeIndex]) {
+    pub fn display_set(&self, set: &[NodeIndex]) {
         let (g, e, id_map) = self.debug_graph(false);
-        display_graph(&g, &e, &group.iter().map(|i| id_map[i]).collect::<Vec<_>>());
+        display_graph(&g, &e, &set.iter().map(|i| id_map[i]).collect::<Vec<_>>());
     }
 
     /// Get the sources of a node given it's id
@@ -379,7 +402,7 @@ pub fn move_references<T: ToIds>(
     src: NodeIndex,
     trg: NodeIndex,
 ) {
-    for id in ids.to_ids() {
+    for id in ids.to_ids_mut() {
         if *id == src {
             *id = trg;
         }

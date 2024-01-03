@@ -42,7 +42,6 @@ fn main() {
     .unwrap();
 
     let mut cx1 = Graph::new(); // Prompt processing graph
-    let mut cx2 = Graph::new(); // Token generation graph
     let model = Model::initialize(&mut cx1);
     let mut input = cx1.named_tensor::<(Const<1>, Dyn<'s'>)>("Input");
     let (logits, mut kv_cache) = model.forward((
@@ -56,6 +55,7 @@ fn main() {
     kv_cache.keep();
     loader::DfdxDeferredLoader::new("./examples/llama/setup/llama-7b-hf").load(&model, &mut cx1);
 
+    let mut cx2 = Graph::new(); // Token generation graph
     let kv_model = Model::initialize(&mut cx2);
     let mut single_input = cx2.named_tensor::<R2<1, 1>>("Input");
     let mut cache_src: Vec<KVCache<Const<1>, Dyn<'p'>, { model::HEADS }, { model::HEAD_DIM }>> = (0
@@ -78,47 +78,27 @@ fn main() {
     println!("Compiling graph...");
     cx1.compile(
         GenericCompiler::<DeviceCompiler>::default(),
-        &mut (&mut input, &mut logits, &mut kv_cache),
+        (&mut input, &mut logits, &mut kv_cache),
     );
-    // Cache model weights
-    cx1.compile(
-        RemapDownstream(state_dict(&model).values().copied().collect()),
-        &mut (&mut input, &mut logits, &mut kv_cache),
-    );
-    keep_weights(&model, &mut cx1);
+    let model_weights = downstream(&state_set(&model), &cx1);
+    cx1.no_delete.extend(model_weights.clone());
 
     // Compile second graph
     cx2.compile(
         GenericCompiler::<DeviceCompiler>::default(),
-        &mut (
+        (
             &mut single_input,
             &mut decode_logits,
             &mut cache_src,
             &mut cache_dest,
         ),
     );
-    // Cache model weights
-    cx2.compile(
-        RemapDownstream(state_dict(&kv_model).values().copied().collect()),
-        &mut (
-            &mut single_input,
-            &mut decode_logits,
-            &mut cache_src,
-            &mut cache_dest,
-        ),
-    );
-    keep_weights(&kv_model, &mut cx2);
-    delete_inputs(
-        &state_dict(&kv_model).values().copied().collect::<Vec<_>>(),
-        &mut cx2,
-    );
-    delete_inputs(
-        &cache_src
-            .iter()
-            .flat_map(|(k, v)| [k.id, v.id])
-            .collect::<Vec<_>>(),
-        &mut cx2,
-    );
+    let kv_model_weights = downstream(&state_set(&kv_model), &cx2);
+    cx2.no_delete.extend(kv_model_weights.clone());
+    let cache_src_set = downstream(&cache_src.to_ids(), &cx2);
+    let cache_dest_set = cache_dest.to_ids();
+    delete_inputs(&kv_model_weights, &mut cx2);
+    delete_inputs(&cache_src_set, &mut cx2);
 
     // Initial forward pass to load weights
     println!("Loading model...");
@@ -128,10 +108,7 @@ fn main() {
     kv_cache.drop();
 
     // Now that weights are loaded, delete the loading nodes so they don't run again
-    delete_inputs(
-        &state_dict(&model).values().copied().collect::<Vec<_>>(),
-        &mut cx1,
-    );
+    delete_inputs(&model_weights, &mut cx1);
 
     let mut input_ids = encode(&tokenizer, prompt);
     input.set_dyn(
@@ -149,16 +126,13 @@ fn main() {
     print!(
         "{}{}",
         prompt.white().bold(),
-        decode(&tokenizer, &[output_id]).green()
+        decode(&tokenizer, &[output_id]).bright_green()
     );
     std::io::stdout().flush().unwrap();
 
     // Transfer weights and kv cache
-    transfer_weights(&model, &mut cx1, &kv_model, &mut cx2);
-    for ((key_src, val_src), (key_dest, val_dest)) in kv_cache.into_iter().zip(cache_src.iter()) {
-        cx2.set_tensor(key_dest.id, 0, cx1.get_tensor(key_src.id, 0).unwrap());
-        cx2.set_tensor(val_dest.id, 0, cx1.get_tensor(val_src.id, 0).unwrap());
-    }
+    transfer_data(&model_weights, &mut cx1, &kv_model_weights, &mut cx2);
+    transfer_data(&kv_cache.to_ids(), &mut cx1, &cache_src_set, &mut cx2);
     drop(cx1);
 
     // Decode loop
@@ -176,18 +150,11 @@ fn main() {
         let output_id = sample_index(&decode_logits.data());
         decode_logits.drop();
         input_ids.push(output_id);
-        print!("{}", decode(&tokenizer, &[output_id]).green());
+        print!("{}", decode(&tokenizer, &[output_id]).bright_green());
         std::io::stdout().flush().unwrap();
 
         // Swap caches
-        for ((src_k, src_v), (dest_k, dest_v)) in cache_src.iter().zip(cache_dest.iter()) {
-            // Move dest caches to src
-            cx2.swap_tensors(*src_k, *dest_k);
-            cx2.swap_tensors(*src_v, *dest_v);
-            // Drop dest caches
-            dest_k.drop();
-            dest_v.drop();
-        }
+        transfer_data_same_graph(&cache_dest_set, &cache_src_set, &mut cx2);
     }
     println!(
         "\nAverage token generated in {}ms",
