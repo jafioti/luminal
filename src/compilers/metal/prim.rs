@@ -79,13 +79,18 @@ impl<T: MetalFloat> Operator for MetalCopyFromDevice<T> {
     }
 }
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEq, Clone)]
 pub struct MetalConstant<T>(
     pub ConstantValue,
     pub Device,
     *const HashMap<char, usize>,
     PhantomData<T>,
 );
+impl<T> Debug for MetalConstant<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MetalConstant({:?})", self.0)
+    }
+}
 
 impl<T: MetalFloat> Operator for MetalConstant<T> {
     fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {

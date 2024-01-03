@@ -186,7 +186,6 @@ tuple_impls!(
 
 impl Graph {
     pub fn add_op<O: Operator + 'static>(&mut self, op: O) -> NewOp {
-        self.graph.free_node = NodeIndex::end(); // Prevent reuse of deleted indexes (screws up remapping)
         NewOp {
             new_op_id: self.graph.add_node(Box::new(op)),
             graph_ref: self,
