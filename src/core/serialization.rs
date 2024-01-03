@@ -33,11 +33,8 @@ pub struct StateDictSaver;
 impl Saver for StateDictSaver {
     type Saved = HashMap<String, Tensor>;
     fn save<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Saved {
-        let mut serializer = Serializer::default();
-        model.serialize(&mut serializer);
         // Attempt to get all tensor data from the graph
-        serializer
-            .state
+        state_dict(model)
             .into_iter()
             .map(|(k, v)| (k, graph.get_tensor(v, 0).unwrap()))
             .collect()
@@ -60,11 +57,8 @@ impl SafeTensorSaver {
 impl Saver for SafeTensorSaver {
     type Saved = Result<(), SafeTensorError>;
     fn save<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Saved {
-        let mut serializer = Serializer::default();
-        model.serialize(&mut serializer);
         // Attempt to get all tensor data from the graph
-        let state_dict: HashMap<_, _> = serializer
-            .state
+        let state_dict: HashMap<_, _> = state_dict(model)
             .into_iter()
             .map(|(k, v)| (k, graph.get_tensor_ref(v, 0).unwrap()))
             .collect();
@@ -85,10 +79,7 @@ impl StateDictLoader {
 
 impl Loader for StateDictLoader {
     fn load<M: SerializeModule>(mut self, model: &M, graph: &mut Graph) {
-        let mut serializer = Serializer::default();
-        model.serialize(&mut serializer);
-
-        for (s, n) in serializer.state {
+        for (s, n) in state_dict(model) {
             let t = self.state_dict.remove(&s).unwrap();
             graph.no_delete.insert(n);
             graph.tensors.insert((n, 0), t);
