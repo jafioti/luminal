@@ -464,57 +464,52 @@ fn test_matmul_transpose() {
 fn test_relu_and_linear() {
     // Test single and batch, unoptimized and optimized
     let mut cx = Graph::new();
+    let input_data = random_vec(32);
+    let w1 = random_vec(32 * 64);
+    let w2 = random_vec(32 * 64);
     let batch = cx
-        .tensor::<R2<2, 3>>()
-        .set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
-    let a = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
+        .named_tensor::<R2<2, 32>>("Batch")
+        .set(random_vec(32 * 2));
+    let a = cx.named_tensor::<R1<32>>("Single").set(input_data.clone());
 
-    let model: (Linear<3, 4>, ReLU, Linear<4, 2>) = InitModule::initialize(&mut cx);
-    model
-        .0
-        .weight
-        .set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
-    model.2.weight.set(vec![1., 2., 3., 1., 2., 3., 1., 2.]);
+    let model: (Linear<32, 64>, ReLU, Linear<64, 32>) = InitModule::initialize(&mut cx);
+    model.0.weight.set(w1.clone());
+    model.2.weight.set(w2.clone());
     let mut b = model.forward(a).retrieve();
     let mut batch_out = model.forward(batch).retrieve();
-
     cx.execute();
 
     let unoptimized_b = b.data();
     let unoptimized_batch_out = batch_out.data();
+    b.drop();
+    batch_out.drop();
     cx.compile(
         <(MetalFp32Compiler, PostGenericCompiler)>::default(),
         (&mut b, &mut batch_out),
     );
     cx.execute();
 
-    assert_close(&unoptimized_b, &b.data());
-    assert_close(&unoptimized_batch_out, &batch_out.data());
+    assert_close_precision(&unoptimized_b, &b.data(), 2);
+    assert_close_precision(&unoptimized_batch_out, &batch_out.data(), 2);
 
     // Test against dfdx
     let dev = Cpu::default();
     let mut model = <(
-        dfdx::nn::modules::builders::UnbiasedLinear<3, 4>,
+        dfdx::nn::modules::builders::UnbiasedLinear<32, 64>,
         dfdx::nn::modules::builders::ReLU,
-        dfdx::nn::modules::builders::UnbiasedLinear<4, 2>,
+        dfdx::nn::modules::builders::UnbiasedLinear<64, 32>,
     )>::build_on_device(&dev);
     // Set weights
     model.0.weight = dev
-        .tensor_from_vec(
-            vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.],
-            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<4>),
-        )
+        .tensor_from_vec(w1, (dfdx::shapes::Const::<32>, dfdx::shapes::Const::<64>))
         .permute();
     model.2.weight = dev
-        .tensor_from_vec(
-            vec![1., 2., 3., 1., 2., 3., 1., 2.],
-            (dfdx::shapes::Const::<4>, dfdx::shapes::Const::<2>),
-        )
+        .tensor_from_vec(w2, (dfdx::shapes::Const::<64>, dfdx::shapes::Const::<32>))
         .permute();
-    let a = dev.tensor_from_vec(vec![1.0, 2.0, 3.0], (dfdx::shapes::Const::<3>,));
+    let a = dev.tensor_from_vec(input_data, (dfdx::shapes::Const::<32>,));
     let out = model.forward(a);
 
-    assert_close(&unoptimized_b, &out.as_vec());
+    assert_close_precision(&unoptimized_b, &out.as_vec(), 2);
 }
 
 #[test]
