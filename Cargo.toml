@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 #default = ["cuda"]
 default = ["metal"]
 cuda = ["dep:cudarc"]
-metal = ["dep:metal-rs"]
+metal = ["dep:metal-rs", "dep:block"]
 
 [dependencies]
 luminal_macro = { path = "./resources/luminal_macro" }
@@ -29,6 +29,7 @@ cudarc = { path = "./resources/cudarc", features = [
 metal-rs = { version = "0.26.0", package = "metal", optional = true, features = [
     "mps",
 ] }
+block = {version="0.1.6", optional = true}
 safetensors = "0.3.1"
 memmap2 = { version = "0.7.1", features = ["stable_deref_trait"] }
 half = { version = "2.3.1", features = ["num-traits", "rand_distr"] }

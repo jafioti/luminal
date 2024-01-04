@@ -3,6 +3,7 @@ use std::{
 };
 
 use super::*;
+use block::ConcreteBlock;
 use metal_rs::*;
 use objc::rc::autoreleasepool;
 use petgraph::visit::EdgeRef;
@@ -39,11 +40,20 @@ impl<T: MetalFloat> Operator for MetalCopyToDevice<T> {
             .copied()
             .map(MetalFloat::from_f32)
             .collect::<Vec<T>>();
-        let buffer = self.0.new_buffer_with_data(
-            unsafe { std::mem::transmute(data.as_ptr()) },
-            (data.len() * std::mem::size_of::<T>()) as u64,
+        let data_ptr = data.as_ptr() as *mut _;
+        let data_len = data.len();
+        let buffer = self.0.new_buffer_with_bytes_no_copy(
+            data_ptr,
+            (data_len * std::mem::size_of::<T>()) as u64,
             MTLResourceOptions::StorageModeShared,
+            // This causes a double free, so I guess metal frees it?
+            // Some(&ConcreteBlock::new(|_, _| {
+            //     let data = unsafe { Vec::from_raw_parts(data_ptr, data_len, data_len) };
+            //     drop(data);
+            // })),
+            None,
         );
+        data.leak(); // Is this ok? I don't know if metal frees the data once the buffer is discarded
         vec![Tensor {
             data: Box::new(buffer),
         }]
