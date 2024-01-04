@@ -67,12 +67,11 @@ mod tests {
         model
             .weight
             .set(vec![1.1, 2., 3., 1., 2., 3., 14., 2., 33., 1., 2., 3.]);
-        let b = model.forward(a).retrieve();
-        let batch_out = model.forward(batch).retrieve();
+        let mut b = model.forward(a).retrieve();
+        let mut batch_out = model.forward(batch).retrieve();
 
         // Uncommenting these lines causes the test to crash
-        // a.retrieve();
-        // cx.compile(<(PreGenericCompiler, MetalFp16Compiler, PostGenericCompiler)>::default());
+        cx.compile(GenericCompiler::<()>::default(), (&mut b, &mut batch_out));
 
         cx.execute();
 
