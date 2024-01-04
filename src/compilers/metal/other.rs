@@ -16,7 +16,7 @@ use super::binary::MetalSub;
 pub struct CopyCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for CopyCompiler<T> {
-    fn compile<To: ToIds>(&self, graph: &mut Graph, mut remap: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
         for (first, second) in graph
             .graph
             .edge_indices()
@@ -210,7 +210,7 @@ impl<T: MetalFloat> Operator for MetalARange<T> {
 pub struct ARangeCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
-    fn compile<To: ToIds>(&self, graph: &mut Graph, _: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let (
@@ -234,64 +234,34 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
         );
 
         // TODO: Make sure this actually checks the shape transformations to ensure pooling happens
-        let pattern = SelectEdge::new(
-            SelectEdge::new(
-                SelectEdge::new(
-                    SelectEdge::new(
-                        SelectEdge::new(
-                            SelectEdge::new(
-                                SelectOp::new()
-                                    .check(|o, _| {
-                                        if let Some(c) =
-                                            o.as_any().downcast_ref::<MetalConstant<f16>>()
-                                        {
-                                            if let ConstantValue::Float(f) = c.0 {
-                                                f == 1.0
-                                            } else {
-                                                false
-                                            }
-                                        } else {
-                                            false
-                                        }
-                                    })
-                                    .ptr(&mut one_const),
-                                SelectOp::new()
-                                    .ty::<MetalContiguous<f16>>()
-                                    .ptr(&mut contig1),
-                            ),
-                            SelectOp::new()
-                                .ty::<MetalContiguous<f16>>()
-                                .ptr(&mut contig2),
-                        ),
-                        SelectOp::new()
-                            .ty::<MetalContiguous<f16>>()
-                            .ptr(&mut contig3),
-                    ),
-                    SelectOp::new()
-                        .ty::<MetalContiguous<f16>>()
-                        .ptr(&mut contig4),
-                ),
+        let one = SelectOp::new().check(|o, _| {
+            if let Some(c) = o.as_any().downcast_ref::<MetalConstant<f16>>() {
+                if let ConstantValue::Float(f) = c.0 {
+                    f == 1.0
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        });
+        let contig = SelectOp::new().ty::<MetalContiguous<f16>>();
+        let pattern = one
+            .clone()
+            .ptr(&mut one_const)
+            .edge(contig.clone().ptr(&mut contig1))
+            .edge(contig.clone().ptr(&mut contig2))
+            .edge(contig.clone().ptr(&mut contig3))
+            .edge(contig.clone().ptr(&mut contig4))
+            .edge(
                 SelectOp::new()
                     .ty::<MetalSumReduce<f16>>()
                     .ptr(&mut sum_reduce),
-            ),
-            SelectEdge::new(
-                SelectOp::new()
-                    .check(|o, _| {
-                        if let Some(c) = o.as_any().downcast_ref::<MetalConstant<f16>>() {
-                            if let ConstantValue::Float(f) = c.0 {
-                                f == 1.0
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    })
-                    .ptr(&mut subtraction_constant),
-                SelectOp::new().ty::<MetalSub<f16>>().ptr(&mut subtraction),
-            ),
-        );
+            )
+            .edge(
+                one.ptr(&mut subtraction_constant)
+                    .edge(SelectOp::new().ty::<MetalSub<f16>>().ptr(&mut subtraction)),
+            );
 
         let mut searcher = pattern.search(graph);
         while searcher.next_match() {

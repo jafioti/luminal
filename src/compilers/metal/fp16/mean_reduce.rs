@@ -163,7 +163,7 @@ impl Operator for MetalMeanReduce {
 pub struct MeanReduceCompiler;
 
 impl Compiler for MeanReduceCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         // Look for the mean-reduce pattern
@@ -175,20 +175,16 @@ impl Compiler for MeanReduceCompiler {
             NodeIndex::default(),
         );
 
-        let s = SelectEdge::new(
-            SelectOp::new()
-                .ty::<MetalSumReduce<f16>>()
-                .ptr(&mut sum_reduce),
-            SelectEdge::new(
-                SelectEdge::new(
-                    SelectOp::new()
-                        .ty::<MetalConstant<f16>>()
-                        .ptr(&mut fake_sum_reduce),
-                    SelectOp::new().ty::<MetalRecip<f16>>().ptr(&mut recip),
-                ),
-                SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul),
-            ),
-        );
+        let s = SelectOp::new()
+            .ty::<MetalSumReduce<f16>>()
+            .ptr(&mut sum_reduce)
+            .edge(
+                SelectOp::new()
+                    .ty::<MetalConstant<f16>>()
+                    .ptr(&mut fake_sum_reduce)
+                    .edge(SelectOp::new().ty::<MetalRecip<f16>>().ptr(&mut recip))
+                    .edge(SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul)),
+            );
 
         let mut searcher = s.search(graph);
         while searcher.next_match() {

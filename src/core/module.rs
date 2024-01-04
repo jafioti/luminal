@@ -5,6 +5,8 @@ use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
 
 use crate::prelude::{Graph, SerializeModule, Serializer};
 
+use super::compiler_utils::ToIds;
+
 /// A module that can initialize it's variables on the graph
 pub trait InitModule {
     fn initialize(cx: &mut Graph) -> Self;
@@ -33,36 +35,36 @@ pub fn state_set<M: SerializeModule>(model: &M) -> Vec<NodeIndex> {
 }
 
 /// Transfer data from one set of nodes in one graph to another set in another graph
-pub fn transfer_data(
-    srcs: &[NodeIndex],
+pub fn transfer_data<A: ToIds, B: ToIds>(
+    srcs: A,
     src_graph: &mut Graph,
-    dests: &[NodeIndex],
+    dests: B,
     dest_graph: &mut Graph,
 ) {
-    for (src, dest) in srcs.iter().zip(dests.iter()) {
+    for (src, dest) in srcs.to_ids().into_iter().zip(dests.to_ids().into_iter()) {
         let mut output_num = 0;
-        while let Some(tensor) = src_graph.tensors.remove(&(*src, output_num)) {
-            dest_graph.tensors.insert((*dest, output_num), tensor);
+        while let Some(tensor) = src_graph.tensors.remove(&(src, output_num)) {
+            dest_graph.tensors.insert((dest, output_num), tensor);
             output_num += 1;
         }
     }
 }
 
 /// Transfer data from one set of nodes to another set in the same graph
-pub fn transfer_data_same_graph(srcs: &[NodeIndex], dests: &[NodeIndex], graph: &mut Graph) {
-    for (src, dest) in srcs.iter().zip(dests.iter()) {
+pub fn transfer_data_same_graph<A: ToIds, B: ToIds>(srcs: A, dests: B, graph: &mut Graph) {
+    for (src, dest) in srcs.to_ids().into_iter().zip(dests.to_ids().into_iter()) {
         let mut output_num = 0;
-        while let Some(tensor) = graph.tensors.remove(&(*src, output_num)) {
-            graph.tensors.insert((*dest, output_num), tensor);
+        while let Some(tensor) = graph.tensors.remove(&(src, output_num)) {
+            graph.tensors.insert((dest, output_num), tensor);
             output_num += 1;
         }
     }
 }
 
 /// Delete all incoming nodes to this set of nodes
-pub fn delete_inputs(nodes: &[NodeIndex], graph: &mut Graph) {
-    for node in nodes {
-        delete_upstream(graph, *node);
+pub fn delete_inputs<T: ToIds>(nodes: T, graph: &mut Graph) {
+    for node in nodes.to_ids() {
+        delete_upstream(graph, node);
     }
     graph.toposort();
 }
@@ -81,12 +83,12 @@ fn delete_upstream(graph: &mut Graph, node: NodeIndex) {
 }
 
 /// Get the downstream set from an original set, in a deterministic order
-pub fn downstream(nodes: &[NodeIndex], graph: &Graph) -> Vec<NodeIndex> {
-    let orig_set = nodes.iter().copied().collect::<HashSet<_>>();
+pub fn downstream<T: ToIds>(nodes: T, graph: &Graph) -> Vec<NodeIndex> {
+    let orig_set = nodes.to_ids().into_iter().collect::<HashSet<_>>();
     let mut fin = vec![];
     let mut added = HashSet::new();
     // Loop through nodes
-    for mut node in nodes.iter().copied() {
+    for mut node in nodes.to_ids() {
         // Go downstream as far as possible along a single stream of ops
         while graph
             .graph

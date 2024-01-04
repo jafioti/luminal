@@ -24,50 +24,66 @@ use crate::{
 
 use super::{graph_tensor::GraphTensor, shape::symbolic::Expression};
 
-pub trait ToIds {
+pub trait ToIdsMut {
     fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex>;
+}
+
+pub trait ToIds {
     fn to_ids(&self) -> Vec<NodeIndex>;
 }
 
-impl<S: Shape> ToIds for GraphTensor<S> {
+impl<S: Shape> ToIdsMut for GraphTensor<S> {
     fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
         vec![&mut self.id]
     }
+}
+impl<S: Shape> ToIds for GraphTensor<S> {
     fn to_ids(&self) -> Vec<NodeIndex> {
         vec![self.id]
     }
 }
-impl<T: ToIds> ToIds for Vec<T> {
+impl<T: ToIdsMut> ToIdsMut for Vec<T> {
     fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
         self.iter_mut().flat_map(|i| i.to_ids_mut()).collect()
     }
+}
+impl<T: ToIds> ToIds for Vec<T> {
     fn to_ids(&self) -> Vec<NodeIndex> {
         self.iter().flat_map(|i| i.to_ids()).collect()
+    }
+}
+impl<T: ToIdsMut> ToIdsMut for &mut [T] {
+    fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
+        self.iter_mut().flat_map(|i| i.to_ids_mut()).collect()
     }
 }
 impl<T: ToIds> ToIds for &mut [T] {
-    fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
-        self.iter_mut().flat_map(|i| i.to_ids_mut()).collect()
-    }
-
     fn to_ids(&self) -> Vec<NodeIndex> {
         self.iter().flat_map(|i| i.to_ids()).collect()
     }
 }
 
-impl<T: ToIds> ToIds for &mut T {
+impl<T: ToIdsMut> ToIdsMut for &mut T {
     fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
         (*self).to_ids_mut()
     }
-
+}
+impl<T: ToIds> ToIds for &T {
     fn to_ids(&self) -> Vec<NodeIndex> {
         <T as ToIds>::to_ids(*self)
     }
 }
-impl ToIds for () {
+impl ToIds for NodeIndex {
+    fn to_ids(&self) -> Vec<NodeIndex> {
+        vec![*self]
+    }
+}
+impl ToIdsMut for () {
     fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
         vec![]
     }
+}
+impl ToIds for () {
     fn to_ids(&self) -> Vec<NodeIndex> {
         vec![]
     }
@@ -77,13 +93,18 @@ macro_rules! tuple_impls {
     ([$($name:ident),+] , [$($idx:tt),+]) => {
         impl<
         $($name:
-            ToIds, )+
-        > ToIds for ($($name,)+) {
+            ToIdsMut, )+
+        > ToIdsMut for ($($name,)+) {
             fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
                 let mut v = vec![];
                 $(v.append(&mut self.$idx.to_ids_mut());)+
                 v
             }
+        }
+        impl<
+        $($name:
+            ToIds, )+
+        > ToIds for ($($name,)+) {
             fn to_ids(&self) -> Vec<NodeIndex> {
                 let mut v = vec![];
                 $(v.append(&mut self.$idx.to_ids());)+
@@ -112,18 +133,18 @@ tuple_impls!(
 
 pub trait Compiler {
     /// Run a compilation pass
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T);
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, remap: T);
 }
 
 impl Compiler for () {
-    fn compile<T: ToIds>(&self, _: &mut Graph, _: T) {}
+    fn compile<T: ToIdsMut>(&self, _: &mut Graph, _: T) {}
 }
 
 /// Wrap this around a compiler to measure the time it takes to compile
 pub struct TimedCompiler<C: Compiler + Debug>(C);
 
 impl<C: Compiler + Debug> Compiler for TimedCompiler<C> {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, remap: T) {
         let compiler_name = format!("{:?}", self.0).bold();
         println!("Starting {compiler_name}");
         let start = std::time::Instant::now();
@@ -158,7 +179,7 @@ macro_rules! tuple_impls {
         $($name:
             Compiler, )+
         > Compiler for ($($name,)+) {
-            fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
+            fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
                 $(self.$idx.compile(graph, &mut remap);)+
             }
         }
@@ -394,7 +415,7 @@ impl<'a> NewOp<'a> {
 }
 
 /// Transfer all external references from one node to another (this may happen because one node is about to be removed / merged into another)
-pub fn move_references<T: ToIds>(
+pub fn move_references<T: ToIdsMut>(
     mut ids: T,
     no_delete: &mut HashSet<NodeIndex<u32>>,
     to_retrieve: &mut HashSet<NodeIndex<u32>>,
@@ -722,6 +743,11 @@ impl SelectOp {
         self.pointers.push(ptr);
         self
     }
+
+    /// Connect this op with another op
+    pub fn edge<T: Into<SelectEdge>>(self, node: T) -> SelectEdge {
+        SelectEdge::new(self, node)
+    }
 }
 
 #[derive(Clone)]
@@ -779,6 +805,11 @@ impl SelectEdge {
             anchor,
         }
     }
+
+    /// Connect this op with another op
+    pub fn edge<T: Into<SelectEdge>>(self, node: T) -> Self {
+        Self::new(self, node)
+    }
 }
 
 pub fn check_no_delete(graph: &Graph, nodes: &[NodeIndex]) -> bool {
@@ -801,22 +832,19 @@ mod tests {
         let cx = Graph::default();
         // Exp -> Log or Log -> Exp
         let (mut exp, mut log) = (NodeIndex::default(), NodeIndex::default());
-        let selector1 = SelectEdge::new(
-            SelectOp::new().ty::<Log2>().ptr(&mut log),
-            SelectOp::new().ty::<Exp2>().ptr(&mut exp),
-        );
-        let selector2 = SelectEdge::new(
+        let (exp_select, log_select) = (
             SelectOp::new().ty::<Exp2>().ptr(&mut exp),
             SelectOp::new().ty::<Log2>().ptr(&mut log),
         );
+        let selector1 = log_select.clone().edge(exp_select.clone());
+        let selector2 = exp_select.edge(log_select);
 
         assert!(!selector1.search(&cx).next_match() && !selector2.search(&cx).next_match());
 
         // Matmul
-        let s = SelectEdge::new(
-            SelectOp::new().ty::<Mul>(),
-            SelectOp::new().ty::<SumReduce>(),
-        );
+        let s = SelectOp::new()
+            .ty::<Mul>()
+            .edge(SelectOp::new().ty::<SumReduce>());
 
         assert!(!s.search(&cx).next_match());
     }

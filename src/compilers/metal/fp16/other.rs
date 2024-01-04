@@ -2,12 +2,12 @@ use std::{mem::size_of, sync::Arc};
 
 use half::f16;
 use num_traits::FloatConst;
-use petgraph::stable_graph::NodeIndex;
+use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
 use crate::{
     compilers::metal::{prim::*, *},
     op::{ConstantValue, InputTensor, Operator},
-    prelude::*,
+    prelude::{metal::binary::MetalSub, *},
 };
 
 use metal_rs::{objc::rc::autoreleasepool, *};
@@ -105,21 +105,20 @@ impl Operator for MetalCos {
 pub struct MetalCosCompiler;
 
 impl Compiler for MetalCosCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         let dev = Device::system_default().unwrap();
         // Look for the cos pattern
         // sin(add(mul(const_neg_one, x), const_pi_over_2))
-        let (mut const_neg_one, mut const_pi, mut mul, mut add, mut sin, mut x) = (
-            NodeIndex::default(),
-            NodeIndex::default(),
+        let (mut const_pi, mut sub, mut sin, mut x) = (
             NodeIndex::default(),
             NodeIndex::default(),
             NodeIndex::default(),
             NodeIndex::default(),
         );
 
-        let s = SelectEdge::new(
-            SelectEdge::new(
+        let s = SelectOp::new()
+            .ptr(&mut x)
+            .edge(
                 SelectOp::new()
                     .check(|op, _| {
                         if let Some(c) = op.as_any().downcast_ref::<MetalConstant<f16>>() {
@@ -132,41 +131,14 @@ impl Compiler for MetalCosCompiler {
                             false
                         }
                     })
-                    .ptr(&mut const_pi),
-                SelectEdge::new(
-                    SelectEdge::new(
-                        SelectOp::new().ptr(&mut x),
-                        SelectEdge::new(
-                            SelectOp::new()
-                                .check(|op, _| {
-                                    if let Some(c) =
-                                        op.as_any().downcast_ref::<MetalConstant<f16>>()
-                                    {
-                                        if let ConstantValue::Float(v) = c.0 {
-                                            v == -1.0
-                                        } else {
-                                            false
-                                        }
-                                    } else {
-                                        false
-                                    }
-                                })
-                                .ptr(&mut const_neg_one),
-                            SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul),
-                        ),
-                    ),
-                    SelectOp::new().ty::<MetalAdd<f16>>().ptr(&mut add),
-                ),
-            ),
-            SelectOp::new().ty::<MetalSin<f16>>().ptr(&mut sin),
-        );
+                    .ptr(&mut const_pi)
+                    .edge(SelectOp::new().ty::<MetalSub<f16>>().ptr(&mut sub)),
+            )
+            .edge(SelectOp::new().ty::<MetalSin<f16>>().ptr(&mut sin));
+
         let mut searcher = s.search(graph);
         while searcher.next_match() {
-            if graph.no_delete.contains(&const_neg_one)
-                || graph.no_delete.contains(&const_pi)
-                || graph.no_delete.contains(&mul)
-                || graph.no_delete.contains(&add)
-            {
+            if check_no_delete(graph, &[const_pi, sub]) {
                 // An intermediate node can't be deleted
                 continue;
             }
@@ -174,8 +146,12 @@ impl Compiler for MetalCosCompiler {
             // Insert cos op
             let shape = graph
                 .graph
-                .edges_directed(mul, petgraph::Direction::Incoming)
-                .find_map(|e| e.weight().as_data())
+                .edges_directed(sub, petgraph::Direction::Incoming)
+                .filter(|e| !e.weight().is_schedule())
+                .find(|e| e.source() != const_pi)
+                .unwrap()
+                .weight()
+                .as_data()
                 .unwrap()
                 .2;
             let cos = graph
@@ -194,9 +170,7 @@ impl Compiler for MetalCosCompiler {
             );
 
             // Remove the old ops
-            graph.graph.remove_node(mul);
-            graph.graph.remove_node(add);
-            graph.graph.remove_node(const_neg_one);
+            graph.graph.remove_node(sub);
             graph.graph.remove_node(const_pi);
             graph.graph.remove_node(sin);
         }
@@ -299,7 +273,7 @@ impl Operator for MetalExp {
 pub struct MetalExpCompiler;
 
 impl Compiler for MetalExpCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         let dev = Device::system_default().unwrap();
         // Look for the exp pattern
         // exp2(mul(x, const))
@@ -309,25 +283,21 @@ impl Compiler for MetalExpCompiler {
             NodeIndex::default(),
         );
 
-        let s = SelectEdge::new(
-            SelectEdge::new(
-                SelectOp::new()
-                    .check(|op, _| {
-                        if let Some(c) = op.as_any().downcast_ref::<MetalConstant<f16>>() {
-                            if let ConstantValue::Float(v) = c.0 {
-                                v == 1.0 / f32::ln(2.)
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    })
-                    .ptr(&mut constant),
-                SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul),
-            ),
-            SelectOp::new().ty::<MetalExp2<f16>>().ptr(&mut exp2),
-        );
+        let s = SelectOp::new()
+            .check(|op, _| {
+                if let Some(c) = op.as_any().downcast_ref::<MetalConstant<f16>>() {
+                    if let ConstantValue::Float(v) = c.0 {
+                        v == 1.0 / f32::ln(2.)
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            })
+            .ptr(&mut constant)
+            .edge(SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul))
+            .edge(SelectOp::new().ty::<MetalExp2<f16>>().ptr(&mut exp2));
 
         let mut searcher = s.search(graph);
         while searcher.next_match() {
@@ -461,7 +431,7 @@ impl Operator for MetalGather {
 pub struct MetalGatherCompiler;
 
 impl Compiler for MetalGatherCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         let dev = Device::system_default().unwrap();
         // Look for the exp pattern
         // exp2(mul(x, const))

@@ -24,7 +24,7 @@ use super::get_buffer_from_tensor;
 pub struct CommandBufferCompiler;
 
 impl Compiler for CommandBufferCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, _: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, _: T) {
         let is_metal: HashSet<NodeIndex> = graph
             .graph
             .node_indices()

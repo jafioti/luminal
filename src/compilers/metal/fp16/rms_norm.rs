@@ -199,7 +199,7 @@ impl Operator for MetalRMSNorm {
 pub struct RMSNormCompiler;
 
 impl Compiler for RMSNormCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         let dev = Device::system_default().unwrap();
         // Look for the RMSNorm pattern
         // mul(recip(sqrt(add(mean_reduce(mul(x, x)), 1e-6))), x)
@@ -213,50 +213,33 @@ impl Compiler for RMSNormCompiler {
             NodeIndex::default(),
         );
 
-        let s = SelectEdge::new(
-            SelectEdge::new(
-                SelectEdge::new(
-                    SelectEdge::new(
-                        SelectEdge::new(
-                            SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut square),
-                            SelectOp::new().ty::<MetalMeanReduce>().ptr(&mut mean),
-                        ),
-                        SelectEdge::new(
-                            SelectOp::new()
-                                .check(|op, _| {
-                                    if let Some(c) =
-                                        op.as_any().downcast_ref::<MetalConstant<f16>>()
-                                    {
-                                        if let ConstantValue::Float(v) = c.0 {
-                                            v <= 1e-4 && v > 0.0
-                                        } else {
-                                            false
-                                        }
-                                    } else {
-                                        false
-                                    }
-                                })
-                                .ptr(&mut epsilon),
-                            SelectOp::new().ty::<MetalAdd<f16>>().ptr(&mut add),
-                        ),
-                    ),
-                    SelectOp::new().ty::<MetalSqrt<f16>>().ptr(&mut sqrt),
-                ),
-                SelectOp::new().ty::<MetalRecip<f16>>().ptr(&mut recip),
-            ),
-            SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul),
-        );
+        let s = SelectOp::new()
+            .ty::<MetalMul<f16>>()
+            .ptr(&mut square)
+            .edge(SelectOp::new().ty::<MetalMeanReduce>().ptr(&mut mean))
+            .edge(
+                SelectOp::new()
+                    .check(|op, _| {
+                        if let Some(c) = op.as_any().downcast_ref::<MetalConstant<f16>>() {
+                            if let ConstantValue::Float(v) = c.0 {
+                                v <= 1e-4 && v > 0.0
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    })
+                    .ptr(&mut epsilon)
+                    .edge(SelectOp::new().ty::<MetalAdd<f16>>().ptr(&mut add)),
+            )
+            .edge(SelectOp::new().ty::<MetalSqrt<f16>>().ptr(&mut sqrt))
+            .edge(SelectOp::new().ty::<MetalRecip<f16>>().ptr(&mut recip))
+            .edge(SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul));
 
         let mut searcher = s.search(graph);
         while searcher.next_match() {
-            if graph.no_delete.contains(&add)
-                || graph.no_delete.contains(&sqrt)
-                || graph.no_delete.contains(&recip)
-                || graph.no_delete.contains(&mul)
-                || graph.no_delete.contains(&epsilon)
-                || graph.no_delete.contains(&square)
-                || graph.no_delete.contains(&mean)
-            {
+            if check_no_delete(graph, &[add, sqrt, recip, mul, epsilon, square, mean]) {
                 // An intermediate node can't be deleted
                 continue;
             }

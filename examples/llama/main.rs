@@ -95,7 +95,7 @@ fn main() {
     );
     let kv_model_weights = downstream(&state_set(&kv_model), &cx2);
     cx2.no_delete.extend(kv_model_weights.clone());
-    let cache_src_set = downstream(&cache_src.to_ids(), &cx2);
+    let cache_src_set = downstream(&cache_src, &cx2);
     let cache_dest_set = cache_dest.to_ids();
     delete_inputs(&kv_model_weights, &mut cx2);
     delete_inputs(&cache_src_set, &mut cx2);
@@ -132,7 +132,7 @@ fn main() {
 
     // Transfer weights and kv cache
     transfer_data(&model_weights, &mut cx1, &kv_model_weights, &mut cx2);
-    transfer_data(&kv_cache.to_ids(), &mut cx1, &cache_src_set, &mut cx2);
+    transfer_data(&kv_cache, &mut cx1, &cache_src_set, &mut cx2);
     drop(cx1);
 
     // Decode loop

@@ -308,35 +308,35 @@ impl Operator for MetalBatchMatmul2D {
 pub struct MetalMatMulCompiler;
 
 impl Compiler for MetalMatMulCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         let dev = Device::system_default().unwrap();
         // Look for the matmul pattern
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        let s = SelectEdge::new(
-            SelectOp::new()
-                .ty::<MetalMul<f32>>()
-                .shapes(vec![
-                    vec!['A'.into(), 'C'.into(), 'B'.into()],
-                    vec!['A'.into(), 'C'.into(), 'B'.into()],
-                ])
-                .fakes(vec![
-                    vec![Some(false), Some(true), Some(false)],
-                    vec![Some(true), Some(false), Some(false)],
-                ])
-                .ptr(&mut mul),
-            SelectOp::new()
-                .ty::<MetalSumReduce<f32>>()
-                .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f32>>() {
-                        o.3 == 2
-                    } else {
-                        false
-                    }
-                })
-                .ptr(&mut sum_reduce),
-        );
+        let s = SelectOp::new()
+            .ty::<MetalMul<f32>>()
+            .shapes(vec![
+                vec!['A'.into(), 'C'.into(), 'B'.into()],
+                vec!['A'.into(), 'C'.into(), 'B'.into()],
+            ])
+            .fakes(vec![
+                vec![Some(false), Some(true), Some(false)],
+                vec![Some(true), Some(false), Some(false)],
+            ])
+            .ptr(&mut mul)
+            .edge(
+                SelectOp::new()
+                    .ty::<MetalSumReduce<f32>>()
+                    .check(|o, _| {
+                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f32>>() {
+                            o.3 == 2
+                        } else {
+                            false
+                        }
+                    })
+                    .ptr(&mut sum_reduce),
+            );
 
         let mut searcher = s.search(graph);
         while searcher.next_match() {
@@ -408,29 +408,29 @@ impl Compiler for MetalMatMulCompiler {
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        let s = SelectEdge::new(
-            SelectOp::new()
-                .ty::<MetalMul<f32>>()
-                .shapes(vec![
-                    vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
-                    vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
-                ])
-                .fakes(vec![
-                    vec![Some(false), Some(false), Some(true), Some(false)],
-                    vec![Some(true), Some(true), Some(false), Some(false)],
-                ])
-                .ptr(&mut mul),
-            SelectOp::new()
-                .ty::<MetalSumReduce<f32>>()
-                .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f32>>() {
-                        o.3 == 3
-                    } else {
-                        false
-                    }
-                })
-                .ptr(&mut sum_reduce),
-        );
+        let s = SelectOp::new()
+            .ty::<MetalMul<f32>>()
+            .shapes(vec![
+                vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
+                vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
+            ])
+            .fakes(vec![
+                vec![Some(false), Some(false), Some(true), Some(false)],
+                vec![Some(true), Some(true), Some(false), Some(false)],
+            ])
+            .ptr(&mut mul)
+            .edge(
+                SelectOp::new()
+                    .ty::<MetalSumReduce<f32>>()
+                    .check(|o, _| {
+                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f32>>() {
+                            o.3 == 3
+                        } else {
+                            false
+                        }
+                    })
+                    .ptr(&mut sum_reduce),
+            );
         let mut batched_matmul = None;
         let mut searcher = s.search(graph);
         while searcher.next_match() {
