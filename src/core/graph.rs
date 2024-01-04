@@ -16,7 +16,7 @@ use colored::Colorize;
 use itertools::Itertools;
 use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Direction};
 
-use super::compiler_utils::ToIds;
+use super::compiler_utils::{ToIds, ToIdsMut};
 
 pub type MainGraph = StableGraph<Box<dyn Operator>, Dependency>;
 
@@ -106,7 +106,7 @@ impl Graph {
     }
 
     /// Compile the graph using the given compiler
-    pub fn compile<T: ToIds, C: Compiler>(&mut self, compiler: C, remap: T) {
+    pub fn compile<T: ToIdsMut, C: Compiler>(&mut self, compiler: C, remap: T) {
         compiler.compile(self, remap);
         self.toposort();
     }

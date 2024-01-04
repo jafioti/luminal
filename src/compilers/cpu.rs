@@ -18,28 +18,28 @@ pub type MatMulCompiler = (MatMul2DCompiler, BatchMatMul2DCompiler);
 pub struct MatMul2DCompiler;
 
 impl Compiler for MatMul2DCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         // Look for the matmul pattern
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        let s = SelectEdge::new(
-            SelectOp::new()
-                .ty::<Mul>()
-                .shapes(vec![
-                    vec!['A'.into(), 'C'.into(), 'B'.into()],
-                    vec!['A'.into(), 'C'.into(), 'B'.into()],
-                ])
-                .fakes(vec![
-                    vec![Some(false), Some(true), Some(false)],
-                    vec![Some(true), Some(false), Some(false)],
-                ])
-                .ptr(&mut mul),
-            SelectOp::new()
-                .ty::<SumReduce>()
-                .check(|o, _| o.is_equal(&SumReduce(0)))
-                .ptr(&mut sum_reduce),
-        );
+        let s = SelectOp::new()
+            .ty::<Mul>()
+            .shapes(vec![
+                vec!['A'.into(), 'C'.into(), 'B'.into()],
+                vec!['A'.into(), 'C'.into(), 'B'.into()],
+            ])
+            .fakes(vec![
+                vec![Some(false), Some(true), Some(false)],
+                vec![Some(true), Some(false), Some(false)],
+            ])
+            .ptr(&mut mul)
+            .edge(
+                SelectOp::new()
+                    .ty::<SumReduce>()
+                    .check(|o, _| o.is_equal(&SumReduce(0)))
+                    .ptr(&mut sum_reduce),
+            );
         let mut searcher = s.search(graph);
         while searcher.next_match() {
             if graph.no_delete.contains(&mul) {
@@ -131,28 +131,28 @@ impl Operator for MatMul2D {
 pub struct BatchMatMul2DCompiler;
 
 impl Compiler for BatchMatMul2DCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         // Look for the matmul pattern
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        let s = SelectEdge::new(
-            SelectOp::new()
-                .ty::<Mul>()
-                .shapes(vec![
-                    vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
-                    vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
-                ])
-                .fakes(vec![
-                    vec![Some(false), Some(false), Some(true), Some(false)],
-                    vec![Some(true), Some(true), Some(false), Some(false)],
-                ])
-                .ptr(&mut mul),
-            SelectOp::new()
-                .ty::<SumReduce>()
-                .check(|o, _| o.is_equal(&SumReduce(3)))
-                .ptr(&mut sum_reduce),
-        );
+        let s = SelectOp::new()
+            .ty::<Mul>()
+            .shapes(vec![
+                vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
+                vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
+            ])
+            .fakes(vec![
+                vec![Some(false), Some(false), Some(true), Some(false)],
+                vec![Some(true), Some(true), Some(false), Some(false)],
+            ])
+            .ptr(&mut mul)
+            .edge(
+                SelectOp::new()
+                    .ty::<SumReduce>()
+                    .check(|o, _| o.is_equal(&SumReduce(3)))
+                    .ptr(&mut sum_reduce),
+            );
         let mut searcher = s.search(graph);
         while searcher.next_match() {
             if graph.no_delete.contains(&mul) {
@@ -256,7 +256,7 @@ impl Operator for BatchedMatMul2D {
 pub struct UnaryFusionCompiler;
 
 impl Compiler for UnaryFusionCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         fn is_unary(op: &dyn Any) -> Option<fn(f32) -> f32> {
             if op.is::<Exp2>() {
                 Some(|i| i.exp2())

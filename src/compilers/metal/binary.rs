@@ -141,7 +141,7 @@ impl<T: MetalFloat> Operator for MetalSub<T> {
 pub struct MetalSubtractionCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
-    fn compile<To: ToIds>(&self, graph: &mut Graph, _: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let (mut neg_one, mut mul, mut add) = (
@@ -149,25 +149,21 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
             NodeIndex::default(),
             NodeIndex::default(),
         );
-        let s = SelectEdge::new(
-            SelectEdge::new(
-                SelectOp::new()
-                    .check(|o, _| {
-                        if let Some(c) = o.as_any().downcast_ref::<MetalConstant<T>>() {
-                            if let ConstantValue::Float(f) = c.0 {
-                                f == -1.
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    })
-                    .ptr(&mut neg_one),
-                SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul),
-            ),
-            SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add),
-        );
+        let s = SelectOp::new()
+            .check(|o, _| {
+                if let Some(c) = o.as_any().downcast_ref::<MetalConstant<T>>() {
+                    if let ConstantValue::Float(f) = c.0 {
+                        f == -1.
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            })
+            .ptr(&mut neg_one)
+            .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul))
+            .edge(SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add));
 
         let mut searcher = s.search(graph);
         while searcher.next_match() {
@@ -350,7 +346,7 @@ impl<T: MetalFloat> Operator for MetalEqual<T> {
 pub struct MetalEqualCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
-    fn compile<To: ToIds>(&self, graph: &mut Graph, _: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let (mut less_than1, mut less_than2, mut add, mut one, mut sub) = (
@@ -360,35 +356,31 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
             NodeIndex::default(),
             NodeIndex::default(),
         );
-        let s = SelectEdge::new(
-            SelectOp::new()
-                .check(|o, _| {
-                    if let Some(c) = o.as_any().downcast_ref::<MetalConstant<T>>() {
-                        if let ConstantValue::Float(f) = c.0 {
-                            f == 1.0
-                        } else {
-                            false
-                        }
+        let s = SelectOp::new()
+            .check(|o, _| {
+                if let Some(c) = o.as_any().downcast_ref::<MetalConstant<T>>() {
+                    if let ConstantValue::Float(f) = c.0 {
+                        f == 1.0
                     } else {
                         false
                     }
-                })
-                .ptr(&mut one),
-            SelectEdge::new(
-                SelectEdge::new(
-                    SelectOp::new()
-                        .ty::<MetalLessThan<T>>()
-                        .ptr(&mut less_than1),
-                    SelectEdge::new(
+                } else {
+                    false
+                }
+            })
+            .ptr(&mut one)
+            .edge(
+                SelectOp::new()
+                    .ty::<MetalLessThan<T>>()
+                    .ptr(&mut less_than1)
+                    .edge(
                         SelectOp::new()
                             .ty::<MetalLessThan<T>>()
-                            .ptr(&mut less_than2),
-                        SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add),
-                    ),
-                ),
-                SelectOp::new().ty::<MetalSub<T>>().ptr(&mut sub),
-            ),
-        );
+                            .ptr(&mut less_than2)
+                            .edge(SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add)),
+                    )
+                    .edge(SelectOp::new().ty::<MetalSub<T>>().ptr(&mut sub)),
+            );
 
         let mut searcher = s.search(graph);
         while searcher.next_match() {
@@ -556,7 +548,7 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
 pub struct MetalGatherCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
-    fn compile<To: ToIds>(&self, graph: &mut Graph, _: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = Device::system_default().unwrap();
         let (mut ind_copy, mut arange, mut equal, mut mul, mut sum_reduce) = (
             NodeIndex::default(),
@@ -565,23 +557,21 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
             NodeIndex::default(),
             NodeIndex::default(),
         );
-        let s = SelectEdge::new(
-            SelectEdge::new(
-                SelectEdge::new(
-                    SelectOp::new().ty::<MetalARange<T>>().ptr(&mut arange),
-                    SelectEdge::new(
-                        SelectOp::new()
-                            .ty::<MetalCopyToDevice<T>>()
-                            .ptr(&mut ind_copy),
-                        SelectOp::new().ty::<MetalEqual<T>>().ptr(&mut equal),
-                    ),
-                ),
-                SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul),
-            ),
-            SelectOp::new()
-                .ty::<MetalSumReduce<T>>()
-                .ptr(&mut sum_reduce),
-        );
+        let s = SelectOp::new()
+            .ty::<MetalARange<T>>()
+            .ptr(&mut arange)
+            .edge(
+                SelectOp::new()
+                    .ty::<MetalCopyToDevice<T>>()
+                    .ptr(&mut ind_copy)
+                    .edge(SelectOp::new().ty::<MetalEqual<T>>().ptr(&mut equal)),
+            )
+            .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul))
+            .edge(
+                SelectOp::new()
+                    .ty::<MetalSumReduce<T>>()
+                    .ptr(&mut sum_reduce),
+            );
         let mut searcher = s.search(graph);
         while searcher.next_match() {
             if check_no_delete(graph, &[arange, equal, mul, sum_reduce]) {

@@ -594,57 +594,57 @@ impl Operator for MetalBatchMatmul2D {
 pub struct MetalMatMulCompiler;
 
 impl Compiler for MetalMatMulCompiler {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
 
         // Look for vetmat pattern
         // Mul ([1(fake), N(fake), M] | [1(fake), N, M]) -> SumReduce(2) -> [N]
-        let vecmat_pattern = SelectEdge::new(
-            SelectOp::new()
-                .ty::<MetalMul<f16>>()
-                .shapes(vec![
-                    vec![1.into(), 'N'.into(), 'M'.into()],
-                    vec![1.into(), 'N'.into(), 'M'.into()],
-                ])
-                .fakes(vec![
-                    vec![None, Some(true), Some(false)],
-                    vec![Some(true), Some(false), Some(false)],
-                ])
-                .ptr(&mut mul),
-            SelectOp::new()
-                .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
-                        o.3 == 2
-                    } else {
-                        false
-                    }
-                })
-                .ptr(&mut sum_reduce),
-        );
-        let batch_vecmat_pattern = SelectEdge::new(
-            SelectOp::new()
-                .ty::<MetalMul<f16>>()
-                .shapes(vec![
-                    vec![1.into(), 1.into(), 'N'.into(), 'M'.into()],
-                    vec![1.into(), 1.into(), 'N'.into(), 'M'.into()],
-                ])
-                .fakes(vec![
-                    vec![None, None, Some(true), Some(false)],
-                    vec![None, Some(true), Some(false), Some(false)],
-                ])
-                .ptr(&mut mul),
-            SelectOp::new()
-                .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
-                        o.3 == 3
-                    } else {
-                        false
-                    }
-                })
-                .ptr(&mut sum_reduce),
-        );
+        let vecmat_pattern = SelectOp::new()
+            .ty::<MetalMul<f16>>()
+            .shapes(vec![
+                vec![1.into(), 'N'.into(), 'M'.into()],
+                vec![1.into(), 'N'.into(), 'M'.into()],
+            ])
+            .fakes(vec![
+                vec![None, Some(true), Some(false)],
+                vec![Some(true), Some(false), Some(false)],
+            ])
+            .ptr(&mut mul)
+            .edge(
+                SelectOp::new()
+                    .check(|o, _| {
+                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
+                            o.3 == 2
+                        } else {
+                            false
+                        }
+                    })
+                    .ptr(&mut sum_reduce),
+            );
+        let batch_vecmat_pattern = SelectOp::new()
+            .ty::<MetalMul<f16>>()
+            .shapes(vec![
+                vec![1.into(), 1.into(), 'N'.into(), 'M'.into()],
+                vec![1.into(), 1.into(), 'N'.into(), 'M'.into()],
+            ])
+            .fakes(vec![
+                vec![None, None, Some(true), Some(false)],
+                vec![None, Some(true), Some(false), Some(false)],
+            ])
+            .ptr(&mut mul)
+            .edge(
+                SelectOp::new()
+                    .check(|o, _| {
+                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
+                            o.3 == 3
+                        } else {
+                            false
+                        }
+                    })
+                    .ptr(&mut sum_reduce),
+            );
         // Mul ([1, 1(fake?), N(fake), M] | [1, 1(fake), N, M]) -> SumReduce(2) -> [N]
         let mut s1 = vecmat_pattern.search(graph);
         let mut s2 = batch_vecmat_pattern.search(graph);
@@ -708,28 +708,28 @@ impl Compiler for MetalMatMulCompiler {
         // or batch matmul where 1st or 2nd dim is 1
         // Mul ([1, M, N(fake), K] | [1, M(fake), N, K]) -> SumReduce(3) -> [1, M, N] // BMM batch size 1
         // Mul ([B, 1, N(fake), K] | [B, 1(fake), N, K]) -> SumReduce(3) -> [B, 1, N] // Batch vecmat
-        let matmul_pattern = SelectEdge::new(
-            SelectOp::new()
-                .ty::<MetalMul<f16>>()
-                .shapes(vec![
-                    vec!['M'.into(), 'N'.into(), 'K'.into()],
-                    vec!['M'.into(), 'N'.into(), 'K'.into()],
-                ])
-                .fakes(vec![
-                    vec![Some(false), Some(true), Some(false)],
-                    vec![Some(true), Some(false), Some(false)],
-                ])
-                .ptr(&mut mul),
-            SelectOp::new()
-                .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
-                        o.3 == 2
-                    } else {
-                        false
-                    }
-                })
-                .ptr(&mut sum_reduce),
-        );
+        let matmul_pattern = SelectOp::new()
+            .ty::<MetalMul<f16>>()
+            .shapes(vec![
+                vec!['M'.into(), 'N'.into(), 'K'.into()],
+                vec!['M'.into(), 'N'.into(), 'K'.into()],
+            ])
+            .fakes(vec![
+                vec![Some(false), Some(true), Some(false)],
+                vec![Some(true), Some(false), Some(false)],
+            ])
+            .ptr(&mut mul)
+            .edge(
+                SelectOp::new()
+                    .check(|o, _| {
+                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
+                            o.3 == 2
+                        } else {
+                            false
+                        }
+                    })
+                    .ptr(&mut sum_reduce),
+            );
 
         let mut searcher = matmul_pattern.search(graph);
         while searcher.next_match() {
@@ -836,29 +836,29 @@ impl Compiler for MetalMatMulCompiler {
         // Look for the batch matmul pattern
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        let s = SelectEdge::new(
-            SelectOp::new()
-                .ty::<MetalMul<f16>>()
-                .shapes(vec![
-                    vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
-                    vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
-                ])
-                .fakes(vec![
-                    vec![Some(false), Some(false), Some(true), Some(false)],
-                    vec![Some(true), Some(true), Some(false), Some(false)],
-                ])
-                .ptr(&mut mul),
-            SelectOp::new()
-                .ty::<MetalSumReduce<f16>>()
-                .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
-                        o.3 == 3
-                    } else {
-                        false
-                    }
-                })
-                .ptr(&mut sum_reduce),
-        );
+        let s = SelectOp::new()
+            .ty::<MetalMul<f16>>()
+            .shapes(vec![
+                vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
+                vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
+            ])
+            .fakes(vec![
+                vec![Some(false), Some(false), Some(true), Some(false)],
+                vec![Some(true), Some(true), Some(false), Some(false)],
+            ])
+            .ptr(&mut mul)
+            .edge(
+                SelectOp::new()
+                    .ty::<MetalSumReduce<f16>>()
+                    .check(|o, _| {
+                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
+                            o.3 == 3
+                        } else {
+                            false
+                        }
+                    })
+                    .ptr(&mut sum_reduce),
+            );
         let mut searcher = s.search(graph);
         while searcher.next_match() {
             if graph.no_delete.contains(&mul) {

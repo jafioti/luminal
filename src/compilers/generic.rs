@@ -31,7 +31,7 @@ pub type PreGenericCompiler = (RemoveSingleReductions,);
 pub struct UnarySequentialElimination;
 
 impl Compiler for UnarySequentialElimination {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         // Here are all the complementary ops that should be removed
         let sequences = [
             (TypeId::of::<Log2>(), TypeId::of::<Exp2>()),
@@ -42,15 +42,11 @@ impl Compiler for UnarySequentialElimination {
             .into_iter()
             .flat_map(|(f, l)| {
                 // Construct two searches: in order and reversed
-                let a = SelectEdge::new(
+                let (f_sel, l_sel) = (
                     SelectOp::new().type_id(f).ptr(&mut first),
                     SelectOp::new().type_id(l).ptr(&mut last),
                 );
-                let b = SelectEdge::new(
-                    SelectOp::new().type_id(l).ptr(&mut first),
-                    SelectOp::new().type_id(f).ptr(&mut last),
-                );
-                [a, b]
+                [f_sel.clone().edge(l_sel.clone()), l_sel.edge(f_sel)]
             })
             .collect::<Vec<_>>()
         {
@@ -94,7 +90,7 @@ impl Compiler for UnarySequentialElimination {
 pub struct CSE;
 
 impl Compiler for CSE {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         // Look for nodes that have the exact same srcs
         // Loop cause I'm lazy
         let mut eliminated = true;
@@ -164,7 +160,7 @@ impl Compiler for CSE {
 pub struct RemoveSingleReductions;
 
 impl Compiler for RemoveSingleReductions {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         for node in graph.graph.node_indices().collect::<Vec<_>>() {
             let dim = if let Some(red) = graph
                 .graph
@@ -226,7 +222,7 @@ impl Compiler for RemoveSingleReductions {
 pub struct RemoveUnusedNodes;
 
 impl Compiler for RemoveUnusedNodes {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, _: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, _: T) {
         // Reverse topo sort
         for node in graph.graph.node_indices().collect::<Vec<_>>() {
             if graph
@@ -247,7 +243,7 @@ impl Compiler for RemoveUnusedNodes {
 pub struct DepthFirst;
 
 impl Compiler for DepthFirst {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, _: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, _: T) {
         fn toposort(
             id: NodeIndex,
             graph: &StableGraph<Box<dyn Operator>, Dependency>,
@@ -303,7 +299,7 @@ impl Compiler for DepthFirst {
 pub struct RemapDownstream(pub Vec<NodeIndex>);
 
 impl Compiler for RemapDownstream {
-    fn compile<T: ToIds>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         let set = self.0.iter().copied().collect::<HashSet<_>>();
         // Loop through state dict tensors marked as no_delete
         for mut node in self.0.iter().copied() {
