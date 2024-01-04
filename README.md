@@ -15,10 +15,10 @@ let b = cx.tensor::<R2<1, 4>>()
     .set(vec![1.0, 2.0, 3.0, 4.0]);
 
 // Do stuff...
-let c = a.matmul(b).retrieve();
+let mut c = a.matmul(b).retrieve();
 
 // Compile and run graph
-cx.compile(GenericCompiler::<()>::default());
+cx.compile(GenericCompiler::<()>::default(), &mut c);
 cx.execute();
 
 // Get result
