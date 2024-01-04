@@ -94,10 +94,12 @@ fn main() {
 
     // Initial forward pass to load weights
     println!("Loading model...");
+    let now = Instant::now();
     input.set_dyn(vec![1.], vec![1, 1]);
     cx1.execute();
     logits.drop();
     kv_cache.drop();
+    println!("Model loading took {}ms", now.elapsed().as_millis());
 
     // Now that weights are loaded, delete the loading nodes so they don't run again
     delete_inputs(&model_weights, &mut cx1);
@@ -126,7 +128,7 @@ fn main() {
 
     // Transfer weights and kv cache
     transfer_data(&model_weights, &mut cx1, &kv_model_weights, &mut cx2);
-    transfer_data(&kv_cache.to_ids(), &mut cx1, &cache_src_set, &mut cx2);
+    transfer_data(&kv_cache, &mut cx1, &cache_src_set, &mut cx2);
     drop(cx1);
 
     // Decode loop
