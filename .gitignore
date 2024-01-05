@@ -7,3 +7,4 @@ Cargo.lock
 *.npz
 /**/llama-7b-hf
 /**/mistral-7b-hf
+/**/setup_weights/target
