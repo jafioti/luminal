@@ -2,6 +2,7 @@ use std::{io::Write, marker::PhantomData, time::Instant};
 
 use colored::Colorize;
 use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
+mod loader;
 mod model;
 
 use luminal::{prelude::*, shape::symbolic::Expression};
@@ -40,10 +41,10 @@ fn main() {
     kv_cache.keep();
 
     // Set up model loading
-    SafeTensorLoader::new(&[
-        "./examples/mistral/setup/mistral-7b-hf/model-00001-of-00003.safetensors",
-        "./examples/mistral/setup/mistral-7b-hf/model-00002-of-00003.safetensors",
-        "./examples/mistral/setup/mistral-7b-hf/model-00003-of-00003.safetensors",
+    loader::MetalFp16SafetensorsLoader::new(&[
+        "./examples/mistral/setup/mistral-7b-hf/converted-model-00001-of-00003.safetensors",
+        "./examples/mistral/setup/mistral-7b-hf/converted-model-00002-of-00003.safetensors",
+        "./examples/mistral/setup/mistral-7b-hf/converted-model-00003-of-00003.safetensors",
     ])
     .load(&model, &mut cx1);
 

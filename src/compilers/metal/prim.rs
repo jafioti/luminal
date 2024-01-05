@@ -3,7 +3,6 @@ use std::{
 };
 
 use super::*;
-use block::ConcreteBlock;
 use metal_rs::*;
 use objc::rc::autoreleasepool;
 use petgraph::visit::EdgeRef;

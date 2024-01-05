@@ -26,9 +26,9 @@ pub type KVCache<Batch, Seq> = (
 );
 
 pub struct Mlp<const I: usize, const H: usize> {
-    pub gate_proj: GraphTensor<(Const<I>, Const<H>)>,
-    pub down_proj: GraphTensor<(Const<H>, Const<I>)>,
-    pub up_proj: GraphTensor<(Const<I>, Const<H>)>,
+    pub gate_proj: GraphTensor<(Const<H>, Const<I>)>,
+    pub down_proj: GraphTensor<(Const<I>, Const<H>)>,
+    pub up_proj: GraphTensor<(Const<H>, Const<I>)>,
 }
 
 impl<Sh: Shape, Im: Shape, const I: usize, const H: usize> Module<GraphTensor<Sh>> for Mlp<I, H>
@@ -39,9 +39,9 @@ where
     type Output = GraphTensor<Sh>;
 
     fn forward(&self, input: GraphTensor<Sh>) -> Self::Output {
-        let gate = input.matmul(self.gate_proj.permute()).swish();
-        let up = input.matmul(self.up_proj.permute()) * gate;
-        up.matmul(self.down_proj.permute())
+        let gate = input.matmul(self.gate_proj).swish();
+        let up = input.matmul(self.up_proj) * gate;
+        up.matmul(self.down_proj)
     }
 }
 
@@ -153,8 +153,8 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> InitModule
 
 pub struct SelfAttention {
     pub q_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
-    pub k_proj: GraphTensor<R2<ATTN_PROJ_DIM, HIDDEN_DIM>>,
-    pub v_proj: GraphTensor<R2<ATTN_PROJ_DIM, HIDDEN_DIM>>,
+    pub k_proj: GraphTensor<R2<HIDDEN_DIM, ATTN_PROJ_DIM>>,
+    pub v_proj: GraphTensor<R2<HIDDEN_DIM, ATTN_PROJ_DIM>>,
     pub o_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
     pub rotary_embeddings: RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>,
 }
@@ -180,15 +180,15 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     ) -> Self::Output {
         // Apply the Projections
         let query_states = x
-            .matmul(self.q_proj.permute())
+            .matmul(self.q_proj)
             .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let key_states = x
-            .matmul(self.k_proj.permute())
+            .matmul(self.k_proj)
             .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let value_states = x
-            .matmul(self.v_proj.permute())
+            .matmul(self.v_proj)
             .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
@@ -234,7 +234,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
                 .matmul(repeated_value_states)
                 .permute::<_, Axes4<0, 2, 1, 3>>()
                 .reshape::<(Batch, CurSeq, Const<HIDDEN_DIM>)>()
-                .matmul(self.o_proj.permute()),
+                .matmul(self.o_proj),
             (key_states, value_states),
         )
     }
@@ -341,7 +341,7 @@ pub struct MistralLM {
     // Final Norm layer
     pub norm: RMSNorm<HIDDEN_DIM>,
     // LM Head Layer
-    pub lm_head: GraphTensor<R2<VOCAB_SIZE, HIDDEN_DIM>>,
+    pub lm_head: GraphTensor<R2<HIDDEN_DIM, VOCAB_SIZE>>,
 }
 
 impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
@@ -377,7 +377,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         }
         hidden_states = self.norm.forward(hidden_states);
 
-        (hidden_states.matmul(self.lm_head.permute()), new_caches)
+        (hidden_states.matmul(self.lm_head), new_caches)
     }
 }
 

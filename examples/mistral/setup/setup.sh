@@ -30,7 +30,7 @@ echo "Downloading Tokenizer"
 curl --location https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.2/resolve/main/tokenizer.model?download=true --output $SCRIPT_DIR/mistral-7b-hf/tokenizer.model
 
 
-echo "Downloading Model Files" 
+echo "Downloading Model Files"
 
 curl\
 	--parallel --parallel-immediate --parallel-max 3\
@@ -38,4 +38,7 @@ curl\
 	--location https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.2/resolve/main/model-00002-of-00003.safetensors?download=true --output $SCRIPT_DIR/mistral-7b-hf/model-00002-of-00003.safetensors\
 	--location https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.2/resolve/main/model-00003-of-00003.safetensors?download=true --output $SCRIPT_DIR/mistral-7b-hf/model-00003-of-00003.safetensors
 
-echo "Done Downloading Model" 
+echo "Done Downloading Model"
+
+# Convert model weights
+cargo run --manifest-path $SCRIPT_DIR/setup_weights/Cargo.toml --release
