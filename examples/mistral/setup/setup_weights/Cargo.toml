@@ -1,0 +1,11 @@
+[package]
+name = "setup_weights"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+safetensors = "0.4.1"
+memmap2 = { version = "0.7.1", features = ["stable_deref_trait"] }
+half = { version = "2.3.1", features = ["num-traits", "rand_distr"] }
