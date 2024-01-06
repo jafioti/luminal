@@ -1,10 +1,11 @@
 use std::marker::PhantomData;
 
 use objc::rc::autoreleasepool;
-use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
+use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
 
 use crate::{
     compilers::metal::{prim::*, *},
+    constant_select_op,
     op::{ConstantValue, Operator},
     prelude::*,
 };
@@ -234,20 +235,8 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
         );
 
         // TODO: Make sure this actually checks the shape transformations to ensure pooling happens
-        let one = SelectOp::new().check(|o, _| {
-            if let Some(c) = o.as_any().downcast_ref::<MetalConstant<f16>>() {
-                if let ConstantValue::Float(f) = c.0 {
-                    f == 1.0
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        });
         let contig = SelectOp::new().ty::<MetalContiguous<f16>>();
-        let pattern = one
-            .clone()
+        let pre_sub_pattern = constant_select_op!(1.0)
             .ptr(&mut one_const)
             .edge(contig.clone().ptr(&mut contig1))
             .edge(contig.clone().ptr(&mut contig2))
@@ -257,14 +246,24 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
                 SelectOp::new()
                     .ty::<MetalSumReduce<f16>>()
                     .ptr(&mut sum_reduce),
-            )
-            .edge(
-                one.ptr(&mut subtraction_constant)
-                    .edge(SelectOp::new().ty::<MetalSub<f16>>().ptr(&mut subtraction)),
             );
+        let mut s1 = pre_sub_pattern
+            .clone()
+            .edge(
+                constant_select_op!(1.0)
+                    .ptr(&mut subtraction_constant)
+                    .edge(SelectOp::new().ty::<MetalSub<f16>>().ptr(&mut subtraction)),
+            )
+            .search(graph);
+        let mut s2 = pre_sub_pattern
+            .edge(
+                constant_select_op!(-1.0)
+                    .ptr(&mut subtraction_constant)
+                    .edge(SelectOp::new().ty::<MetalAdd<f16>>().ptr(&mut subtraction)),
+            )
+            .search(graph);
 
-        let mut searcher = pattern.search(graph);
-        while searcher.next_match() {
+        while s1.next_match() || s2.next_match() {
             let arange_amount = {
                 let sh = graph
                     .graph
@@ -300,6 +299,63 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
             graph.graph.remove_node(sum_reduce);
             graph.graph.remove_node(subtraction);
             graph.graph.remove_node(subtraction_constant);
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ContiguousElimination<T>(PhantomData<T>);
+
+impl<T: MetalFloat> Compiler for ContiguousElimination<T> {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+        // Look for contiguous calls going to ops that can accept non-contiguous inputs (marked non_contiguous)
+        let (mut contig, mut op) = (NodeIndex::default(), NodeIndex::default());
+        let pattern = SelectOp::new()
+            .ty::<MetalContiguous<T>>()
+            .ptr(&mut contig)
+            .edge(
+                SelectOp::new()
+                    .check(|op, _| op.custom("non_contiguous").is_some())
+                    .ptr(&mut op),
+            );
+        let mut selector = pattern.search(graph);
+        while selector.next_match() {
+            if graph.no_delete.contains(&contig)
+                || graph
+                    .graph
+                    .edges_directed(contig, Direction::Outgoing)
+                    .count()
+                    > 1
+            {
+                continue;
+            }
+            // Shape going from contig to op
+            let second_shape = graph
+                .graph
+                .edges_connecting(contig, op)
+                .find_map(|e| e.weight().as_data())
+                .unwrap()
+                .2;
+            if second_shape.is_contiguous()
+                && !second_shape.is_sliced()
+                && !second_shape.is_padded()
+            {
+                let source = graph
+                    .graph
+                    .neighbors_directed(contig, petgraph::Direction::Incoming)
+                    .next()
+                    .unwrap();
+                move_incoming_edge(contig, op, &mut graph.graph);
+                move_references(
+                    &mut remap,
+                    &mut graph.no_delete,
+                    &mut graph.to_retrieve,
+                    contig,
+                    source,
+                );
+                graph.graph.remove_node(contig);
+                selector.clear_cached_results();
+            }
         }
     }
 }

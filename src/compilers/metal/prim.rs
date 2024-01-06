@@ -86,6 +86,14 @@ impl<T: MetalFloat> Operator for MetalCopyFromDevice<T> {
             data: Box::new(data),
         }]
     }
+
+    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
+        }
+        None
+    }
 }
 
 #[derive(LuminalEq, Clone)]
@@ -224,6 +232,10 @@ impl<T: MetalFloat> Operator for MetalContiguous<T> {
                 self.clone(),
             )))));
         }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
+        }
         None
     }
 }
@@ -319,6 +331,10 @@ impl<T: MetalFloat> Operator for MetalLog2<T> {
                 self.clone(),
             )))));
         }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
+        }
         None
     }
 }
@@ -412,6 +428,10 @@ impl<T: MetalFloat> Operator for MetalExp2<T> {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
+        }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
         }
         None
     }
@@ -507,6 +527,10 @@ impl<T: MetalFloat> Operator for MetalSin<T> {
                 self.clone(),
             )))));
         }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
+        }
         None
     }
 }
@@ -600,6 +624,10 @@ impl<T: MetalFloat> Operator for MetalSqrt<T> {
                 self.clone(),
             )))));
         }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
+        }
         None
     }
 }
@@ -692,6 +720,10 @@ impl<T: MetalFloat> Operator for MetalRecip<T> {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
+        }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
         }
         None
     }
@@ -819,6 +851,10 @@ impl<T: MetalFloat> Operator for MetalAdd<T> {
                 self.clone(),
             )))));
         }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
+        }
         None
     }
 }
@@ -944,6 +980,10 @@ impl<T: MetalFloat> Operator for MetalMul<T> {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
+        }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
         }
         None
     }
@@ -1083,6 +1123,10 @@ impl<T: MetalFloat> Operator for MetalLessThan<T> {
                 self.clone(),
             )))));
         }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
+        }
         None
     }
 }
@@ -1206,6 +1250,10 @@ impl<T: MetalFloat> Operator for MetalMod<T> {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
+        }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
         }
         None
     }
@@ -1355,6 +1403,10 @@ impl<T: MetalFloat> Operator for MetalSumReduce<T> {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
+        }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
         }
         None
     }
@@ -1507,6 +1559,10 @@ impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
+        }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
         }
         None
     }
