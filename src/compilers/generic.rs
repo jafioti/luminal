@@ -11,7 +11,10 @@ use petgraph::{
 };
 
 use crate::{
-    op::{Exp2, Function, Log2, MaxReduce, Operator, Recip, SumReduce},
+    op::{
+        Add, Constant, ConstantValue, Exp2, Function, Log2, MaxReduce, Mul, Operator, Recip,
+        SumReduce,
+    },
     prelude::*,
 };
 
@@ -24,7 +27,7 @@ pub type PostGenericCompiler = (
     CSE,
 );
 
-pub type PreGenericCompiler = (RemoveSingleReductions,);
+pub type PreGenericCompiler = (RemoveSingleReductions, ArithmeticElimination);
 
 /// Eliminate complementary unary sequential operations like `x.log().exp()`
 #[derive(Debug, Default)]
@@ -363,5 +366,120 @@ mod tests {
 
         cx.compile(GenericCompiler::<()>::default(), ());
         assert_eq!(cx.graph.node_count(), 1);
+    }
+}
+
+/// Remove stuff like x + 0 and x * 1
+#[derive(Debug, Default)]
+pub struct ArithmeticElimination;
+
+impl Compiler for ArithmeticElimination {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
+        // x + 0, 0 + x
+        let (mut x, mut add, mut zero) = (
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+        );
+        let zero_pat = SelectOp::new()
+            .check(|o, _| {
+                if let Some(o) = o.as_any().downcast_ref::<Constant>() {
+                    if let ConstantValue::Float(c) = o.0 {
+                        c == 0.0
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            })
+            .ptr(&mut zero);
+        let mut selector1 = SelectOp::new()
+            .ptr(&mut x)
+            .edge(
+                zero_pat
+                    .clone()
+                    .edge(SelectOp::new().ty::<Add>().ptr(&mut add)),
+            )
+            .search(graph);
+        let mut selector2 = zero_pat
+            .edge(
+                SelectOp::new()
+                    .ptr(&mut x)
+                    .edge(SelectOp::new().ty::<Add>().ptr(&mut add)),
+            )
+            .search(graph);
+        while selector1.next_match() || selector2.next_match() {
+            if graph.no_delete.contains(&zero)
+                || graph
+                    .graph
+                    .edges_directed(zero, Direction::Outgoing)
+                    .count()
+                    > 1
+            {
+                continue;
+            }
+            move_outgoing_edge(add, x, &mut graph.graph);
+            move_references(
+                &mut remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                add,
+                x,
+            );
+            graph.graph.remove_node(zero);
+            graph.graph.remove_node(add);
+        }
+        // x * 1, 1 * x
+        let (mut a, mut mul, mut one) = (
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+        );
+        let one_pat = SelectOp::new()
+            .check(|o, _| {
+                if let Some(o) = o.as_any().downcast_ref::<Constant>() {
+                    if let ConstantValue::Float(c) = o.0 {
+                        c == 1.0
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            })
+            .ptr(&mut one);
+        let mut selector1 = SelectOp::new()
+            .ptr(&mut a)
+            .edge(
+                one_pat
+                    .clone()
+                    .edge(SelectOp::new().ty::<Mul>().ptr(&mut mul)),
+            )
+            .search(graph);
+        let mut selector2 = one_pat
+            .edge(
+                SelectOp::new()
+                    .ptr(&mut a)
+                    .edge(SelectOp::new().ty::<Mul>().ptr(&mut mul)),
+            )
+            .search(graph);
+        while selector1.next_match() || selector2.next_match() {
+            if graph.no_delete.contains(&one)
+                || graph.graph.edges_directed(one, Direction::Outgoing).count() > 1
+            {
+                continue;
+            }
+            move_outgoing_edge(mul, a, &mut graph.graph);
+            move_references(
+                &mut remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                mul,
+                a,
+            );
+            graph.graph.remove_node(one);
+            graph.graph.remove_node(mul);
+        }
     }
 }

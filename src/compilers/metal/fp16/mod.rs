@@ -18,6 +18,7 @@ pub type MetalFp16Compiler = (
     mean_reduce::MeanReduceCompiler,
     rms_norm::RMSNormCompiler,
     super::other::CopyCompiler<f16>,
+    // super::other::ContiguousElimination<f16>,
     super::command_buffer::CommandBufferCompiler,
     super::storage_buffer::StorageBufferCompiler,
 );

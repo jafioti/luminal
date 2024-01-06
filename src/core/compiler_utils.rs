@@ -591,20 +591,26 @@ fn backtrack_match(
             if mapping.len() == select_graph.node_count() {
                 return Some(mapping);
             }
+            if select_graph
+                .neighbors_directed(select_node, Direction::Incoming)
+                .count()
+                > 0
+            {
+                // We're moving downstream, so move downstream on the main graph
+                main_stack.extend(
+                    graph
+                        .edges_directed(main_node, Direction::Incoming)
+                        .filter(|e| !e.weight().is_schedule())
+                        .sorted_by_key(|e| e.weight().as_data().unwrap().0)
+                        .map(|e| e.source())
+                        .rev(),
+                );
+            }
             select_node = select_stack.pop().unwrap();
             select_stack.extend(
                 select_graph
                     .neighbors_directed(select_node, Direction::Incoming)
                     .sorted()
-                    .rev(),
-            );
-            // Continue dfs on main graph
-            main_stack.extend(
-                graph
-                    .edges_directed(main_node, Direction::Incoming)
-                    .filter(|e| !e.weight().is_schedule())
-                    .sorted_by_key(|e| e.weight().as_data().unwrap().0)
-                    .map(|e| e.source())
                     .rev(),
             );
         }
@@ -706,6 +712,23 @@ pub struct SelectOp {
     fake: Option<Vec<Vec<Option<bool>>>>,
     /// Pointers
     pointers: Vec<*mut NodeIndex>,
+}
+
+#[macro_export]
+macro_rules! constant_select_op {
+    ($i: expr) => {
+        SelectOp::new().check(|o, _| {
+            if let Some(c) = o.as_any().downcast_ref::<MetalConstant<f16>>() {
+                if let ConstantValue::Float(f) = c.0 {
+                    f == $i
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        })
+    };
 }
 
 impl SelectOp {
