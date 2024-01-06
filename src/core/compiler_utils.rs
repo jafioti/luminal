@@ -497,7 +497,7 @@ type SelectionGraph = petgraph::Graph<SelectOp, Option<u8>>;
 
 pub struct GraphSearch {
     selector: SelectionGraph,
-    graph: *const Graph,
+    graph: *mut Graph,
     to_return: Vec<HashMap<NodeIndex, NodeIndex>>,
     returned_anchors: HashSet<NodeIndex>,
     anchor: NodeIndex,
@@ -506,18 +506,18 @@ pub struct GraphSearch {
 impl GraphSearch {
     pub fn next_match(&mut self) -> bool {
         // Look through graph for pattern from selector
-        let graph = unsafe { self.graph.as_ref().unwrap() };
+        let graph = unsafe { self.graph.as_mut().unwrap() };
 
         if self.to_return.is_empty() {
             // Replenish to_return
             let select_op = self.selector.node_weight(self.anchor).unwrap();
-            for node in graph.graph.node_indices() {
+            for node in graph.graph.node_indices().collect::<Vec<_>>() {
                 if !self.returned_anchors.contains(&node)
-                    && test_node(select_op, &graph.graph, node)
+                    && test_node(select_op, &mut graph.graph, node)
                 {
                     // Backtrack to check if this is a match
                     if let Some(mapping) =
-                        backtrack_match(self.anchor, &self.selector, node, &graph.graph)
+                        backtrack_match(self.anchor, &self.selector, node, &mut graph.graph)
                     {
                         self.to_return.push(mapping);
                     }
@@ -553,7 +553,7 @@ fn backtrack_match(
     select_node: NodeIndex,
     select_graph: &SelectionGraph,
     main_node: NodeIndex,
-    graph: &MainGraph,
+    graph: &mut MainGraph,
 ) -> Option<HashMap<NodeIndex, NodeIndex>> {
     // Dfs backward through both the selector graph and the main graph
     let mut mapping = HashMap::new();
@@ -626,22 +626,22 @@ fn test_node(
         fake,
         pointers: _,
     }: &SelectOp,
-    graph: &MainGraph,
+    graph: &mut MainGraph,
     graph_node: NodeIndex,
 ) -> bool {
-    let current_weight = graph.node_weight(graph_node).unwrap();
-    // Test type
-    if let Some(ty) = type_id {
-        if current_weight.as_any().type_id() != *ty {
-            return false;
-        }
-    }
     let input_shapes = graph
         .edges_directed(graph_node, petgraph::Direction::Incoming)
         .filter_map(|e| e.weight().as_data())
         .sorted_by_key(|e| e.0)
         .map(|e| e.2)
         .collect::<Vec<_>>();
+    let current_weight = graph.node_weight_mut(graph_node).unwrap();
+    // Test type
+    if let Some(ty) = type_id {
+        if current_weight.as_any().type_id() != *ty {
+            return false;
+        }
+    }
 
     // Test shape
     if let Some(shape) = shape {
@@ -692,7 +692,7 @@ fn test_node(
 
     // Run check
     if let Some(check) = check {
-        if !check(current_weight.as_ref(), &input_shapes) {
+        if !check(current_weight.as_mut(), &input_shapes) {
             return false;
         }
     }
@@ -705,7 +705,7 @@ pub struct SelectOp {
     type_id: Option<TypeId>,
     /// Check constraint
     #[allow(clippy::type_complexity)]
-    check: Option<fn(&dyn Operator, &[ShapeTracker]) -> bool>,
+    check: Option<fn(&mut dyn Operator, &[ShapeTracker]) -> bool>,
     /// Shape constraint
     shape: Option<Vec<Vec<Expression>>>,
     /// Fake constraint
@@ -747,7 +747,7 @@ impl SelectOp {
         self
     }
     /// Constrain the op to a checking function
-    pub fn check(mut self, check: fn(&dyn Operator, &[ShapeTracker]) -> bool) -> Self {
+    pub fn check(mut self, check: fn(&mut dyn Operator, &[ShapeTracker]) -> bool) -> Self {
         self.check = Some(check);
         self
     }
@@ -818,7 +818,7 @@ impl SelectEdge {
         Self::internal_new(a, Some(out), b)
     }
 
-    pub fn search(self, graph: &Graph) -> GraphSearch {
+    pub fn search(self, graph: &mut Graph) -> GraphSearch {
         let anchor = *toposort(&self.graph, None).unwrap().last().unwrap();
         GraphSearch {
             to_return: vec![],
@@ -852,7 +852,7 @@ mod tests {
 
     #[test]
     fn test_graph_selector() {
-        let cx = Graph::default();
+        let mut cx = Graph::default();
         // Exp -> Log or Log -> Exp
         let (mut exp, mut log) = (NodeIndex::default(), NodeIndex::default());
         let (exp_select, log_select) = (
@@ -862,13 +862,13 @@ mod tests {
         let selector1 = log_select.clone().edge(exp_select.clone());
         let selector2 = exp_select.edge(log_select);
 
-        assert!(!selector1.search(&cx).next_match() && !selector2.search(&cx).next_match());
+        assert!(!selector1.search(&mut cx).next_match() && !selector2.search(&mut cx).next_match());
 
         // Matmul
         let s = SelectOp::new()
             .ty::<Mul>()
             .edge(SelectOp::new().ty::<SumReduce>());
 
-        assert!(!s.search(&cx).next_match());
+        assert!(!s.search(&mut cx).next_match());
     }
 }

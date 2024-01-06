@@ -91,11 +91,15 @@ impl Operator for MetalCos {
         })
     }
 
-    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
+        }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
         }
         None
     }
@@ -258,11 +262,15 @@ impl Operator for MetalExp {
         })
     }
 
-    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
+        }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
         }
         None
     }

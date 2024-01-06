@@ -33,7 +33,7 @@ impl<'a> InputTensor<'a> {
 pub trait Operator: Debug + TraitObjEq {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor>;
     #[allow(unused)]
-    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
         None
     }
 }
