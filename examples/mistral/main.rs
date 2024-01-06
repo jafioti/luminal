@@ -132,8 +132,6 @@ fn main() {
     transfer_data(&kv_cache, &mut cx1, &cache_src_set, &mut cx2);
     drop(cx1);
 
-    // cx2.display_set(&[NodeIndex::new(51), NodeIndex::new(85), NodeIndex::new(87)]);
-
     // Decode loop
     let mut token_decode_times = vec![];
     for _ in 0..tokens_to_generate {
