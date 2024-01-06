@@ -195,7 +195,7 @@ impl<T: MetalFloat> Operator for MetalARange<T> {
         })
     }
 
-    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             #[allow(clippy::arc_with_non_send_sync)]
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
@@ -315,7 +315,7 @@ impl<T: MetalFloat> Compiler for ContiguousElimination<T> {
             .ptr(&mut contig)
             .edge(
                 SelectOp::new()
-                    .check(|op, _| op.custom("non_contiguous").is_some())
+                    .check(|op, _| op.custom("non_contiguous", Box::new(())).is_some())
                     .ptr(&mut op),
             );
         let mut selector = pattern.search(graph);
@@ -330,12 +330,19 @@ impl<T: MetalFloat> Compiler for ContiguousElimination<T> {
                 continue;
             }
             // Shape going from contig to op
+            // let first_shape = graph
+            //     .graph
+            //     .edges_directed(contig, Direction::Incoming)
+            //     .find_map(|e| e.weight().as_data())
+            //     .unwrap()
+            //     .2;
             let second_shape = graph
                 .graph
                 .edges_connecting(contig, op)
                 .find_map(|e| e.weight().as_data())
                 .unwrap()
                 .2;
+            // Here we should check if second shape and first shape are mergeable instead of just checking if second_shape is contiguous
             if second_shape.is_contiguous()
                 && !second_shape.is_sliced()
                 && !second_shape.is_padded()
@@ -354,7 +361,16 @@ impl<T: MetalFloat> Compiler for ContiguousElimination<T> {
                     source,
                 );
                 graph.graph.remove_node(contig);
-                selector.clear_cached_results();
+                let new_shapes = graph
+                    .get_sources(op)
+                    .into_iter()
+                    .map(|(_, _, s)| s)
+                    .collect::<Vec<_>>();
+                graph
+                    .graph
+                    .node_weight_mut(op)
+                    .unwrap()
+                    .custom("recompile_shapes", Box::new(new_shapes));
             }
         }
     }

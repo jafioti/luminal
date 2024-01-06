@@ -127,11 +127,27 @@ impl<T: MetalFloat> Operator for MetalSub<T> {
         })
     }
 
-    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
+        }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
+        }
+        if key == "recompile_shapes" {
+            if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
+                *self = Self::new(
+                    input_shapes[0],
+                    input_shapes[1],
+                    self.2.clone(),
+                    self.1.clone(),
+                    &mut HashMap::new(),
+                    self.6,
+                )
+            }
         }
         None
     }
@@ -332,11 +348,27 @@ impl<T: MetalFloat> Operator for MetalEqual<T> {
         })
     }
 
-    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
+        }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
+        }
+        if key == "recompile_shapes" {
+            if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
+                *self = Self::new(
+                    input_shapes[0],
+                    input_shapes[1],
+                    self.2.clone(),
+                    self.1.clone(),
+                    &mut HashMap::new(),
+                    self.6,
+                )
+            }
         }
         None
     }

@@ -223,7 +223,7 @@ impl Operator for MetalVecMat {
         })
     }
 
-    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
@@ -404,7 +404,7 @@ impl Operator for MetalMatmul2D {
         })
     }
 
-    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
@@ -580,7 +580,7 @@ impl Operator for MetalBatchMatmul2D {
         })
     }
 
-    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),

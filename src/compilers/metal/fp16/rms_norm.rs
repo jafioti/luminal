@@ -19,6 +19,7 @@ pub struct MetalRMSNorm(
     ComputePipelineState, // RMSNorm kernel
     Device,
     ShapeTracker, // Input shape
+    f32,          // Epsilon
     *const HashMap<char, usize>,
 );
 
@@ -79,6 +80,7 @@ kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]
             compile_function(&rms_norm_code_name, &rms_norm_code, &dev),
             dev,
             inp_shape,
+            epsilon,
             dyn_map,
         )
     }
@@ -127,7 +129,7 @@ impl MetalKernel for MetalRMSNorm {
         encoder.set_int(3, front_size as u32);
         encoder.set_int(4, back_size as u32);
         encoder.set_int(5, dim_size as u32);
-        input_dyn_dims(&[self.3], unsafe { self.4.as_ref().unwrap() }, encoder, 6);
+        input_dyn_dims(&[self.3], unsafe { self.5.as_ref().unwrap() }, encoder, 6);
 
         encoder.dispatch_1d(meaned_elements);
         encoder.end_encoding();
@@ -141,7 +143,7 @@ impl MetalKernel for MetalRMSNorm {
         encoder.set_buffer(1, Some(inputs[0].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, inputs[0].1.n_elements().to_usize().unwrap() as u32);
-        input_dyn_dims(&[self.3], unsafe { self.4.as_ref().unwrap() }, encoder, 4);
+        input_dyn_dims(&[self.3], unsafe { self.5.as_ref().unwrap() }, encoder, 4);
 
         // Execute
         encoder.dispatch_1d(inputs[0].1.n_elements().to_usize().unwrap());
@@ -183,12 +185,21 @@ impl Operator for MetalRMSNorm {
         })
     }
 
-    fn custom(&self, key: &str) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             #[allow(clippy::arc_with_non_send_sync)]
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
+        }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
+        }
+        if key == "recompile_shapes" {
+            if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
+                *self = Self::new(self.4, self.2.clone(), input_shapes[0], self.5)
+            }
         }
         None
     }

@@ -1,4 +1,5 @@
 use std::{
+    any::Any,
     cell::UnsafeCell,
     collections::{HashMap, HashSet},
     fmt::Debug,
@@ -28,12 +29,14 @@ impl Compiler for CommandBufferCompiler {
         let is_metal: HashSet<NodeIndex> = graph
             .graph
             .node_indices()
+            .collect::<Vec<_>>()
+            .into_iter()
             .filter(|i| {
                 graph
                     .graph
-                    .node_weight(*i)
+                    .node_weight_mut(*i)
                     .unwrap()
-                    .custom("metal")
+                    .custom("metal", Box::new(()))
                     .is_some()
             })
             .collect();
@@ -170,9 +173,9 @@ impl Compiler for CommandBufferCompiler {
                 // Wrap node in MetalKernelOperation
                 let wrapper = graph
                     .graph
-                    .node_weight(*node)
+                    .node_weight_mut(*node)
                     .unwrap()
-                    .custom("metal")
+                    .custom("metal", Box::new(()))
                     .unwrap()
                     .downcast::<MetalKernelWrapper>()
                     .unwrap();
@@ -280,7 +283,7 @@ impl Operator for CommandBufferWrapper {
     }
 
     #[allow(clippy::arc_with_non_send_sync)]
-    fn custom(&self, key: &str) -> Option<Box<dyn std::any::Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),

@@ -86,12 +86,14 @@ impl Compiler for StorageBufferCompiler {
             .graph
             .node_indices()
             .filter(|n| !graph.no_delete.contains(n))
+            .collect::<Vec<_>>()
+            .into_iter()
             .filter_map(|n| {
                 if let Some(Ok(wrapper)) = graph
                     .graph
-                    .node_weight(n)
+                    .node_weight_mut(n)
                     .unwrap()
-                    .custom("metal")
+                    .custom("metal", Box::new(()))
                     .map(|n| n.downcast::<MetalKernelWrapper>())
                 {
                     Some((n, wrapper))
@@ -99,6 +101,8 @@ impl Compiler for StorageBufferCompiler {
                     None
                 }
             })
+            .collect::<Vec<_>>()
+            .into_iter()
             .map(|(n, wrapper)| {
                 let input_shapes = graph
                     .get_sources(n)
@@ -120,9 +124,9 @@ impl Compiler for StorageBufferCompiler {
             }
             let Some(Ok(wrapper)) = graph
                 .graph
-                .node_weight(*node)
+                .node_weight_mut(*node)
                 .unwrap()
-                .custom("metal")
+                .custom("metal", Box::new(()))
                 .map(|e| e.downcast::<MetalKernelWrapper>())
             else {
                 continue;
@@ -234,9 +238,9 @@ impl Compiler for StorageBufferCompiler {
         {
             let wrapper = graph
                 .graph
-                .node_weight(node)
+                .node_weight_mut(node)
                 .unwrap()
-                .custom("metal")
+                .custom("metal", Box::new(()))
                 .unwrap()
                 .downcast::<MetalKernelWrapper>()
                 .unwrap();
