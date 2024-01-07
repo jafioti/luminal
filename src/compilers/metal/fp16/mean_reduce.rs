@@ -18,7 +18,7 @@ pub struct MetalMeanReduce(
     CommandQueue,
     Device,
     usize,
-    ShapeTracker,
+    Vec<char>,
     *const HashMap<char, usize>,
 );
 
@@ -31,11 +31,12 @@ impl MetalMeanReduce {
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
+        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape], 6);
         let mut code = format!(
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device int& n_elements [[buffer(2)]], device int& front_size [[buffer(3)]], device int& back_size [[buffer(4)]], device int& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device int& n_elements [[buffer(2)]], device int& front_size [[buffer(3)]], device int& back_size [[buffer(4)]], device int& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{rendered}) {{
     if (i_ < n_elements) {{
         int a_ = i_ / back_size;
         int b_ = i_ % back_size;
@@ -49,8 +50,7 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
         out[i_] = (half)(reduce_value / (float)dim_size);
     }}
 }}
-", render_dyn_dim_inputs(&[shape], 6),
-        );
+");
         code = code.replace("mkernel", "kernel_mean_reduce");
 
         Self(
@@ -58,7 +58,7 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
             queue,
             dev,
             dim,
-            shape,
+            dyn_symbols,
             dyn_map,
         )
     }
@@ -108,7 +108,7 @@ impl MetalKernel for MetalMeanReduce {
         encoder.set_int(3, front_size as u32);
         encoder.set_int(4, back_size as u32);
         encoder.set_int(5, dim_size as u32);
-        input_dyn_dims(&[self.4], unsafe { self.5.as_ref().unwrap() }, encoder, 6);
+        input_dyn_dims(&self.4, unsafe { self.5.as_ref().unwrap() }, encoder, 6);
 
         // Execute
         encoder.dispatch_1d(inp_size);

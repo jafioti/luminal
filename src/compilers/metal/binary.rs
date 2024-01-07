@@ -16,8 +16,7 @@ pub struct MetalSub<T>(
     ComputePipelineState,
     CommandQueue,
     Device,
-    ShapeTracker,
-    ShapeTracker,
+    Vec<char>,
     PhantomData<T>,
     *const HashMap<char, usize>,
 );
@@ -33,19 +32,20 @@ impl<T: MetalFloat> MetalSub<T> {
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
+        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
+        let type_name = T::type_name();
         let mut code = format!(
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} *inp_b [[buffer(1)]], device {type_name} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{rendered}) {{
     if (idx < n_elements) {{
         out[idx] =
             (({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}])
             - (({b_valid_exp}) == 0 ? 0.0 : inp_b[{b_idx_exp}]);
     }}
 }}
-", T::type_name(), T::type_name(), T::type_name(), render_dyn_dim_inputs(&[a_shape, b_shape], 4),
-        );
+");
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("mkernel", &name);
 
@@ -56,8 +56,7 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
             kernels[&name].clone(),
             queue,
             dev,
-            a_shape,
-            b_shape,
+            dyn_symbols,
             Default::default(),
             dyn_map,
         )
@@ -85,12 +84,7 @@ impl<T> MetalKernel for MetalSub<T> {
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(
-            &[self.3, self.4],
-            unsafe { self.6.as_ref().unwrap() },
-            encoder,
-            4,
-        );
+        input_dyn_dims(&self.3, unsafe { self.5.as_ref().unwrap() }, &encoder, 4);
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -143,7 +137,7 @@ impl<T: MetalFloat> Operator for MetalSub<T> {
                     self.2.clone(),
                     self.1.clone(),
                     &mut HashMap::new(),
-                    self.6,
+                    self.5,
                 )
             }
         }
@@ -234,8 +228,7 @@ pub struct MetalEqual<T>(
     ComputePipelineState,
     CommandQueue,
     Device,
-    ShapeTracker,
-    ShapeTracker,
+    Vec<char>,
     PhantomData<T>,
     *const HashMap<char, usize>,
 );
@@ -251,19 +244,20 @@ impl<T: MetalFloat> MetalEqual<T> {
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
+        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
+        let type_name = T::type_name();
         let mut code = format!(
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} *inp_b [[buffer(1)]], device {type_name} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{rendered}) {{
     if (idx < n_elements) {{
-        {} a_val = (({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}]);
-        {} b_val = (({b_valid_exp}) == 0 ? 0.0 : inp_b[{b_idx_exp}]);
-        out[idx] = ({})(a_val == b_val);
+        {type_name} a_val = (({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}]);
+        {type_name} b_val = (({b_valid_exp}) == 0 ? 0.0 : inp_b[{b_idx_exp}]);
+        out[idx] = ({type_name})(a_val == b_val);
     }}
 }}
-", T::type_name(), T::type_name(), T::type_name(), render_dyn_dim_inputs(&[a_shape, b_shape], 4), T::type_name(), T::type_name(), T::type_name(),
-        );
+");
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("mkernel", &name);
 
@@ -274,8 +268,7 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
             kernels[&name].clone(),
             queue,
             dev,
-            a_shape,
-            b_shape,
+            dyn_symbols,
             Default::default(),
             dyn_map,
         )
@@ -304,12 +297,7 @@ impl<T> MetalKernel for MetalEqual<T> {
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, inp_size as u32);
-        input_dyn_dims(
-            &[self.3, self.4],
-            unsafe { self.6.as_ref().unwrap() },
-            encoder,
-            4,
-        );
+        input_dyn_dims(&self.3, unsafe { self.5.as_ref().unwrap() }, &encoder, 4);
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -362,7 +350,7 @@ impl<T: MetalFloat> Operator for MetalEqual<T> {
                     self.2.clone(),
                     self.1.clone(),
                     &mut HashMap::new(),
-                    self.6,
+                    self.5,
                 )
             }
         }
@@ -496,16 +484,16 @@ pub struct MetalGather<T> {
 
 impl<T: MetalFloat> MetalGather<T> {
     fn new(device: Device, queue: CommandQueue, embed_dim: usize) -> Self {
+        let type_name = T::type_name();
         Self {pipeline: compile_function("metal_gather", &format!(
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void metal_gather(device float *inp [[buffer(0)]], device {} *weights [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_embeddings [[buffer(3)]], device int& embedding_dim [[buffer(4)]], uint2 i_ [[thread_position_in_grid]]) {{
+kernel void metal_gather(device float *inp [[buffer(0)]], device {type_name} *weights [[buffer(1)]], device {type_name} *out [[buffer(2)]], device int& n_embeddings [[buffer(3)]], device int& embedding_dim [[buffer(4)]], uint2 i_ [[thread_position_in_grid]]) {{
     if (i_.x < n_embeddings && i_.y < embedding_dim) {{
         out[i_.x * embedding_dim + i_.y] = weights[(int)inp[i_.x] * embedding_dim + i_.y];
     }}
-}}", T::type_name(), T::type_name()
-        ), &device), device, embed_dim, queue, _phantom: Default::default()}
+}}"), &device), device, embed_dim, queue, _phantom: Default::default()}
     }
 }
 
