@@ -173,10 +173,8 @@ mod tests {
     fn test_exp() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.tensor::<R2<2, 3>>();
-        a.set(a_data.clone());
-        let b = a.exp();
-        b.retrieve();
+        let a = cx.tensor::<R2<2, 3>>().set(a_data.clone());
+        let b = a.exp().retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -190,12 +188,9 @@ mod tests {
     fn test_layer_norm() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.tensor::<R2<2, 3>>();
-        a.set(a_data.clone());
-        let b = a.layer_norm::<0>();
-        let c = a.layer_norm::<1>();
-        b.retrieve();
-        c.retrieve();
+        let a = cx.tensor::<R2<2, 3>>().set(a_data.clone());
+        let b = a.layer_norm::<0>().retrieve();
+        let c = a.layer_norm::<1>().retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -211,10 +206,8 @@ mod tests {
     fn test_softmax() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.tensor::<R2<2, 3>>();
-        a.set(a_data.clone());
-        let b = a.softmax::<1>();
-        b.retrieve();
+        let a = cx.tensor::<R2<2, 3>>().set(a_data.clone());
+        let b = a.softmax::<1>().retrieve();
 
         cx.execute();
 
@@ -230,10 +223,8 @@ mod tests {
     fn test_sin() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.tensor::<R2<2, 3>>();
-        a.set(a_data.clone());
-        let b = a.sin();
-        b.retrieve();
+        let a = cx.tensor::<R2<2, 3>>().set(a_data.clone());
+        let b = a.sin().retrieve();
 
         cx.execute();
 
@@ -249,10 +240,8 @@ mod tests {
     fn test_cos() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.tensor::<R2<2, 3>>();
-        a.set(a_data.clone());
-        let b = a.cos();
-        b.retrieve();
+        let a = cx.tensor::<R2<2, 3>>().set(a_data.clone());
+        let b = a.cos().retrieve();
 
         cx.execute();
 
@@ -266,10 +255,10 @@ mod tests {
     fn test_relu() {
         let mut cx = Graph::new();
         let a_data = random_vec(4);
-        let a = cx.tensor::<(Dyn<'a'>, Dyn<'b'>)>();
-        a.set_dyn(a_data.clone(), vec![2, 2]);
-        let b = a.relu();
-        b.retrieve();
+        let a = cx
+            .tensor::<(Dyn<'a'>, Dyn<'b'>)>()
+            .set_dyn(a_data.clone(), vec![2, 2]);
+        let b = a.relu().retrieve();
 
         cx.execute();
 
@@ -283,10 +272,10 @@ mod tests {
     fn test_sigmoid() {
         let mut cx = Graph::new();
         let a_data = random_vec(4);
-        let a = cx.tensor::<(Dyn<'a'>, Dyn<'b'>)>();
-        a.set_dyn(a_data.clone(), vec![2, 2]);
-        let b = a.sigmoid();
-        b.retrieve();
+        let a = cx
+            .tensor::<(Dyn<'a'>, Dyn<'b'>)>()
+            .set_dyn(a_data.clone(), vec![2, 2]);
+        let b = a.sigmoid().retrieve();
 
         cx.execute();
 
@@ -297,13 +286,29 @@ mod tests {
     }
 
     #[test]
+    fn test_swish() {
+        let mut cx = Graph::new();
+        let a_data = random_vec(4);
+        let a = cx
+            .tensor::<(Dyn<'a'>, Dyn<'b'>)>()
+            .set_dyn(a_data.clone(), vec![2, 2]);
+        let b = a.swish().retrieve();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<2>));
+        let d_b = d_a.clone() * d_a.sigmoid();
+        assert_close(&b.data(), &d_b.as_vec());
+    }
+
+    #[test]
     fn test_tanh() {
         let mut cx = Graph::new();
         let a_data = random_vec(4);
-        let a = cx.tensor::<(Dyn<'a'>, Dyn<'b'>)>();
-        a.set_dyn(a_data.clone(), vec![2, 2]);
-        let b = a.tanh();
-        b.retrieve();
+        let a = cx
+            .tensor::<(Dyn<'a'>, Dyn<'b'>)>()
+            .set_dyn(a_data.clone(), vec![2, 2]);
+        let b = a.tanh().retrieve();
 
         cx.execute();
 
