@@ -123,7 +123,7 @@ impl Operator for MatMul2D {
             );
         }
 
-        vec![Tensor { data: Box::new(c) }]
+        vec![Tensor::new(c)]
     }
 }
 
@@ -247,7 +247,7 @@ impl Operator for BatchedMatMul2D {
             }
         }
 
-        vec![Tensor { data: Box::new(c) }]
+        vec![Tensor::new(c)]
     }
 }
 

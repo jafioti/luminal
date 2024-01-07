@@ -217,9 +217,7 @@ impl Operator for MetalVecMat {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -398,9 +396,7 @@ impl Operator for MetalMatmul2D {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -574,9 +570,7 @@ impl Operator for MetalBatchMatmul2D {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -616,7 +610,7 @@ impl Compiler for MetalMatMulCompiler {
                 SelectOp::new()
                     .check(|o, _| {
                         if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
-                            o.3 == 2
+                            o.dim == 2
                         } else {
                             false
                         }
@@ -638,7 +632,7 @@ impl Compiler for MetalMatMulCompiler {
                 SelectOp::new()
                     .check(|o, _| {
                         if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
-                            o.3 == 3
+                            o.dim == 3
                         } else {
                             false
                         }
@@ -674,6 +668,7 @@ impl Compiler for MetalMatMulCompiler {
                     .add_op(MetalContiguous::<f16>::new(
                         src2_shape,
                         dev.clone(),
+                        queue.clone(),
                         &mut HashMap::new(),
                         &graph.dyn_map,
                     ))
@@ -723,7 +718,7 @@ impl Compiler for MetalMatMulCompiler {
                 SelectOp::new()
                     .check(|o, _| {
                         if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
-                            o.3 == 2
+                            o.dim == 2
                         } else {
                             false
                         }
@@ -775,6 +770,7 @@ impl Compiler for MetalMatMulCompiler {
                     .add_op(MetalContiguous::<f16>::new(
                         src1_shape,
                         dev.clone(),
+                        queue.clone(),
                         &mut HashMap::new(),
                         &graph.dyn_map,
                     ))
@@ -787,6 +783,7 @@ impl Compiler for MetalMatMulCompiler {
                     .add_op(MetalContiguous::<f16>::new(
                         src2_shape,
                         dev.clone(),
+                        queue.clone(),
                         &mut HashMap::new(),
                         &graph.dyn_map,
                     ))
@@ -811,6 +808,7 @@ impl Compiler for MetalMatMulCompiler {
                     .add_op(MetalContiguous::<f16>::new(
                         new_shape,
                         dev.clone(),
+                        queue.clone(),
                         &mut HashMap::new(),
                         &graph.dyn_map,
                     ))
@@ -852,7 +850,7 @@ impl Compiler for MetalMatMulCompiler {
                     .ty::<MetalSumReduce<f16>>()
                     .check(|o, _| {
                         if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
-                            o.3 == 3
+                            o.dim == 3
                         } else {
                             false
                         }
@@ -907,6 +905,7 @@ impl Compiler for MetalMatMulCompiler {
                     .add_op(MetalContiguous::<f16>::new(
                         src1_shape,
                         dev.clone(),
+                        queue.clone(),
                         &mut HashMap::new(),
                         &graph.dyn_map,
                     ))
@@ -919,6 +918,7 @@ impl Compiler for MetalMatMulCompiler {
                     .add_op(MetalContiguous::<f16>::new(
                         src2_shape,
                         dev.clone(),
+                        queue.clone(),
                         &mut HashMap::new(),
                         &graph.dyn_map,
                     ))
@@ -951,6 +951,7 @@ impl Compiler for MetalMatMulCompiler {
                     .add_op(MetalContiguous::<f16>::new(
                         new_shape,
                         dev.clone(),
+                        queue.clone(),
                         &mut HashMap::new(),
                         &graph.dyn_map,
                     ))

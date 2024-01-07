@@ -85,9 +85,7 @@ impl Operator for MetalCos {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -256,9 +254,7 @@ impl Operator for MetalExp {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -427,9 +423,7 @@ impl Operator for MetalGather {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 }

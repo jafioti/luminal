@@ -11,6 +11,11 @@ default = ["metal"]
 cuda = ["dep:cudarc"]
 metal = ["dep:metal-rs", "dep:block"]
 
+[[example]]
+name = "mistral"
+path = "examples/mistral/main.rs"
+required-features = ["metal"]
+
 [dependencies]
 luminal_macro = { path = "./resources/luminal_macro" }
 itertools = "0.11.0"
@@ -26,7 +31,7 @@ cudarc = { path = "./resources/cudarc", features = [
     "cublas",
     "f16",
 ], optional = true }
-metal-rs = { version = "0.26.0", package = "metal", optional = true, features = [
+metal-rs = { version = "0.27.0", package = "metal", optional = true, features = [
     "mps",
 ] }
 block = {version="0.1.6", optional = true}

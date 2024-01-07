@@ -141,9 +141,7 @@ impl Operator for MetalMeanReduce {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -217,7 +215,7 @@ impl Compiler for MeanReduceCompiler {
                 .as_any()
                 .downcast_ref::<MetalSumReduce<f16>>()
                 .unwrap()
-                .3;
+                .dim;
             // Insert MeanReduce op
             let src = graph.get_sources(sum_reduce)[0];
             let mean_reduce = graph
