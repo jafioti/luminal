@@ -419,7 +419,14 @@ impl Compiler for ArithmeticElimination {
             {
                 continue;
             }
-            move_outgoing_edge(add, x, &mut graph.graph);
+            for output in graph
+                .get_dests(add)
+                .into_iter()
+                .map(|(o, _)| o)
+                .collect::<Vec<_>>()
+            {
+                move_incoming_edge(add, output, &mut graph.graph);
+            }
             move_references(
                 &mut remap,
                 &mut graph.no_delete,
@@ -470,7 +477,14 @@ impl Compiler for ArithmeticElimination {
             {
                 continue;
             }
-            move_outgoing_edge(mul, a, &mut graph.graph);
+            for output in graph
+                .get_dests(mul)
+                .into_iter()
+                .map(|(o, _)| o)
+                .collect::<Vec<_>>()
+            {
+                move_incoming_edge(mul, output, &mut graph.graph);
+            }
             move_references(
                 &mut remap,
                 &mut graph.no_delete,
