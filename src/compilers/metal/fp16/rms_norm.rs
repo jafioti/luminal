@@ -14,19 +14,21 @@ use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Special kernel for efficient rms norming
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalRMSNorm(
-    ComputePipelineState, // Square-Mean kernel
-    ComputePipelineState, // RMSNorm kernel
-    Device,
-    ShapeTracker, // Input shape
-    f32,          // Epsilon
-    *const HashMap<char, usize>,
-);
+pub struct MetalRMSNorm {
+    square_mean_pipeline: ComputePipelineState, // Square-Mean kernel
+    rms_norm_pipeline: ComputePipelineState,    // RMSNorm kernel
+    device: Device,
+    queue: CommandQueue,
+    shape: ShapeTracker, // Input shape
+    epsilon: f32,        // Epsilon
+    dyn_map: *const HashMap<char, usize>,
+}
 
 impl MetalRMSNorm {
     fn new(
         epsilon: f32,
-        dev: Device,
+        device: Device,
+        queue: CommandQueue,
         inp_shape: ShapeTracker,
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
@@ -75,17 +77,21 @@ kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]
         let rms_norm_code_name = format!("kernel_{}", hash(&rms_norm_code));
         rms_norm_code = rms_norm_code.replace("mkernel", &rms_norm_code_name);
 
-        Self(
-            compile_function(&square_mean_code_name, &square_mean_code, &dev),
-            compile_function(&rms_norm_code_name, &rms_norm_code, &dev),
-            dev,
-            inp_shape,
+        Self {
+            square_mean_pipeline: compile_function(
+                &square_mean_code_name,
+                &square_mean_code,
+                &device,
+            ),
+            rms_norm_pipeline: compile_function(&rms_norm_code_name, &rms_norm_code, &device),
+            device,
+            queue,
+            shape: inp_shape,
             epsilon,
             dyn_map,
-        )
+        }
     }
 }
-// TODO: Make epsilon a parameter
 
 impl MetalKernel for MetalRMSNorm {
     fn intermediate_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
@@ -119,7 +125,7 @@ impl MetalKernel for MetalRMSNorm {
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.square_mean_pipeline);
         let meaned_elements = meaned_shape.n_elements().to_usize().unwrap();
 
         // Set inputs
@@ -129,21 +135,31 @@ impl MetalKernel for MetalRMSNorm {
         encoder.set_int(3, front_size as u32);
         encoder.set_int(4, back_size as u32);
         encoder.set_int(5, dim_size as u32);
-        input_dyn_dims(&[self.3], unsafe { self.5.as_ref().unwrap() }, encoder, 6);
+        input_dyn_dims(
+            &[self.shape],
+            unsafe { self.dyn_map.as_ref().unwrap() },
+            encoder,
+            6,
+        );
 
         encoder.dispatch_1d(meaned_elements);
         encoder.end_encoding();
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.1);
+        encoder.set_compute_pipeline_state(&self.rms_norm_pipeline);
 
         // Set inputs
         encoder.set_buffer(0, Some(intermediate_buffers[0]), 0);
         encoder.set_buffer(1, Some(inputs[0].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, inputs[0].1.n_elements().to_usize().unwrap() as u32);
-        input_dyn_dims(&[self.3], unsafe { self.5.as_ref().unwrap() }, encoder, 4);
+        input_dyn_dims(
+            &[self.shape],
+            unsafe { self.dyn_map.as_ref().unwrap() },
+            encoder,
+            4,
+        );
 
         // Execute
         encoder.dispatch_1d(inputs[0].1.n_elements().to_usize().unwrap());
@@ -154,8 +170,7 @@ impl MetalKernel for MetalRMSNorm {
 impl Operator for MetalRMSNorm {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let command_queue = self.2.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            let command_buffer = self.queue.new_command_buffer();
             let a = tensors[0]
                 .0
                 .borrowed()
@@ -165,11 +180,11 @@ impl Operator for MetalRMSNorm {
                 .unwrap();
             let mut meaned_shape = tensors[0].1;
             meaned_shape.remove_dim(meaned_shape.len() - 1);
-            let meaned = self.2.new_buffer(
+            let meaned = self.device.new_buffer(
                 (meaned_shape.n_elements().to_usize().unwrap() * size_of::<f32>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
-            let out = self.2.new_buffer(
+            let out = self.device.new_buffer(
                 (tensors[0].1.n_elements().to_usize().unwrap() * size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -196,7 +211,13 @@ impl Operator for MetalRMSNorm {
         }
         if key == "recompile_shapes" {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
-                *self = Self::new(self.4, self.2.clone(), input_shapes[0], self.5)
+                *self = Self::new(
+                    self.epsilon,
+                    self.device.clone(),
+                    self.queue.clone(),
+                    input_shapes[0],
+                    self.dyn_map,
+                )
             }
         }
         None
@@ -210,6 +231,7 @@ pub struct RMSNormCompiler;
 impl Compiler for RMSNormCompiler {
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         let dev = Device::system_default().unwrap();
+        let queue = dev.new_command_queue();
         // Look for the RMSNorm pattern
         // mul(recip(sqrt(add(mean_reduce(mul(x, x)), 1e-6))), x)
         let (mut square, mut mean, mut add, mut sqrt, mut recip, mut mul, mut epsilon) = (
@@ -276,6 +298,7 @@ impl Compiler for RMSNormCompiler {
                 .add_op(MetalRMSNorm::new(
                     epsilon_num,
                     dev.clone(),
+                    queue.clone(),
                     x.2,
                     &graph.dyn_map,
                 ))
