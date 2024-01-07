@@ -278,7 +278,7 @@ impl Operator for CommandBufferWrapper {
             unsafe { self.dyn_map.as_ref().unwrap() },
         )
         .into_iter()
-        .map(|b| Tensor { data: Box::new(b) })
+        .map(|b| Tensor::new(b))
         .collect()
     }
 

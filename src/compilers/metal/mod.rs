@@ -236,29 +236,18 @@ impl SetInt for ComputeCommandEncoderRef {
 }
 
 fn input_dyn_dims(
-    shapes: &[ShapeTracker],
+    dyn_symbols: &[char],
     dyn_map: &HashMap<char, usize>,
     encoder: &ComputeCommandEncoderRef,
     index: usize,
 ) {
-    for (i, symb) in shapes
-        .iter()
-        .flat_map(|s| {
-            s.dims
-                .into_iter()
-                .chain(s.padding.into_iter().flat_map(|i| [i.0, i.1]))
-                .chain(s.slices.into_iter().flat_map(|i| [i.0, i.1]))
-        })
-        .flat_map(|e| e.to_symbols())
-        .unique()
-        .enumerate()
-    {
-        encoder.set_int(i + index, dyn_map[&symb] as u32);
+    for (i, s) in dyn_symbols.iter().enumerate() {
+        encoder.set_int(i + index, dyn_map[s] as u32);
     }
 }
 
-fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> String {
-    shapes
+fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> (Vec<char>, String) {
+    let symbols: Vec<char> = shapes
         .iter()
         .flat_map(|st| {
             st.shape()
@@ -272,11 +261,17 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> String {
         })
         .flat_map(|d| d.to_symbols())
         .unique()
-        .enumerate()
-        .fold(String::default(), |mut acc, (i, c)| {
-            write!(&mut acc, ", device int& {c} [[buffer({})]]", i + offset).unwrap();
-            acc
-        })
+        .collect();
+    (
+        symbols.clone(),
+        symbols
+            .into_iter()
+            .enumerate()
+            .fold(String::default(), |mut acc, (i, c)| {
+                write!(&mut acc, ", device int& {c} [[buffer({})]]", i + offset).unwrap();
+                acc
+            }),
+    )
 }
 
 fn expr_to_metal_string(expr: BigExpression) -> String {
@@ -320,12 +315,10 @@ fn get_idx_valid_exps(shape: ShapeTracker) -> (String, String) {
 }
 
 fn get_buffer_from_tensor<'a>(tensor: &'a InputTensor) -> &'a Buffer {
-    let any = tensor.borrowed().data.as_any();
-    if let Some(b) = any.downcast_ref::<Buffer>() {
-        b
-    } else if let Some(b) = any.downcast_ref::<Arc<Box<Buffer>>>() {
-        b.as_ref()
-    } else {
-        panic!("Tensor does not contain a metal buffer");
-    }
+    tensor
+        .borrowed()
+        .data
+        .as_any()
+        .downcast_ref::<Buffer>()
+        .expect("Tensor does not contain a metal buffer")
 }

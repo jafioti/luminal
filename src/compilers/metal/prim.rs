@@ -132,7 +132,7 @@ pub struct MetalContiguous<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
     device: Device,
-    shape: ShapeTracker,
+    dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
     dyn_map: *const HashMap<char, usize>,
 }
@@ -146,16 +146,17 @@ impl<T: MetalFloat> MetalContiguous<T> {
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
+        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape], 3);
+        let type_name = T::type_name();
         let mut code = format!("
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]{rendered}) {{
     if (idx < n_elements && {valid_exp} != 0) {{
         out[idx] = inp[{idx_exp}];
     }}
 }}
-", T::type_name(), T::type_name(), render_dyn_dim_inputs(&[shape], 3),
-        );
+");
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("mkernel", &name);
 
@@ -166,7 +167,7 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
             pipeline: kernels[&name].clone(),
             queue,
             device: dev,
-            shape,
+            dyn_symbols,
             _phantom: Default::default(),
             dyn_map,
         }
@@ -194,7 +195,7 @@ impl<T> MetalKernel for MetalContiguous<T> {
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
         encoder.set_int(2, inp_size as u32);
         input_dyn_dims(
-            &[self.shape],
+            &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
             encoder,
             3,
@@ -767,9 +768,8 @@ pub struct MetalAdd<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
     device: Device,
-    a_shape: ShapeTracker,
-    b_shape: ShapeTracker,
     _phantom: PhantomData<T>,
+    dyn_symbols: Vec<char>,
     dyn_map: *const HashMap<char, usize>,
 }
 
@@ -784,18 +784,19 @@ impl<T: MetalFloat> MetalAdd<T> {
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
+        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
         let mut code = format!(
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{rendered}) {{
     if (idx < n_elements) {{
         out[idx] =
             (({a_valid_exp}) == 0 ? 0.0h : inp_a[{a_idx_exp}])
             + (({b_valid_exp}) == 0 ? 0.0h : inp_b[{b_idx_exp}]);
     }}
 }}
-", T::type_name(), T::type_name(), T::type_name(), render_dyn_dim_inputs(&[a_shape, b_shape], 4),
+", T::type_name(), T::type_name(), T::type_name()
         );
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("mkernel", &name);
@@ -807,8 +808,7 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
             pipeline: kernels[&name].clone(),
             queue,
             device,
-            a_shape,
-            b_shape,
+            dyn_symbols,
             _phantom: Default::default(),
             dyn_map,
         }
@@ -837,12 +837,11 @@ impl<T> MetalKernel for MetalAdd<T> {
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, inp_size as u32);
         input_dyn_dims(
-            &[self.a_shape, self.b_shape],
+            &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
-            encoder,
+            &encoder,
             4,
         );
-
         // Execute
         encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
@@ -907,8 +906,7 @@ pub struct MetalMul<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
     device: Device,
-    a_shape: ShapeTracker,
-    b_shape: ShapeTracker,
+    dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
     dyn_map: *const HashMap<char, usize>,
 }
@@ -924,18 +922,19 @@ impl<T: MetalFloat> MetalMul<T> {
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
+        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
         let mut code = format!(
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{rendered}) {{
     if (idx < n_elements) {{
         out[idx] =
             (({a_valid_exp}) == 0 ? 0.0h : inp_a[{a_idx_exp}])
             * (({b_valid_exp}) == 0 ? 0.0h : inp_b[{b_idx_exp}]);
     }}
 }}
-", T::type_name(), T::type_name(), T::type_name(), render_dyn_dim_inputs(&[a_shape, b_shape], 4),
+", T::type_name(), T::type_name(), T::type_name()
         );
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("mkernel", &name);
@@ -947,8 +946,7 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
             pipeline: kernels[&name].clone(),
             queue,
             device,
-            a_shape,
-            b_shape,
+            dyn_symbols,
             _phantom: Default::default(),
             dyn_map,
         }
@@ -977,9 +975,9 @@ impl<T> MetalKernel for MetalMul<T> {
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, inp_size as u32);
         input_dyn_dims(
-            &[self.a_shape, self.b_shape],
+            &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
-            encoder,
+            &encoder,
             4,
         );
 
@@ -1047,8 +1045,7 @@ pub struct MetalLessThan<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
     device: Device,
-    a_shape: ShapeTracker,
-    b_shape: ShapeTracker,
+    dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
     dyn_map: *const HashMap<char, usize>,
 }
@@ -1065,11 +1062,12 @@ impl<T: MetalFloat> MetalLessThan<T> {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
         let type_name = T::type_name();
+        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
         let mut code = format!(
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} *inp_b [[buffer(1)]], device {type_name} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} *inp_b [[buffer(1)]], device {type_name} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{rendered}) {{
     if (idx < n_elements) {{
         {type_name} a_t = 0.0h;
         {type_name} b_t = 0.0h;
@@ -1086,7 +1084,7 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
         }}
     }}
 }}
-", render_dyn_dim_inputs(&[a_shape, b_shape], 4), if T::is_f32() {"1.0"} else {"1.0h"},if T::is_f32() {"0.0"} else {"0.0h"},
+", if T::is_f32() {"1.0"} else {"1.0h"},if T::is_f32() {"0.0"} else {"0.0h"},
         );
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("mkernel", &name);
@@ -1098,8 +1096,7 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
             pipeline: kernels[&name].clone(),
             queue,
             device,
-            a_shape,
-            b_shape,
+            dyn_symbols,
             _phantom: Default::default(),
             dyn_map,
         }
@@ -1129,9 +1126,9 @@ impl<T> MetalKernel for MetalLessThan<T> {
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, inp_size as u32);
         input_dyn_dims(
-            &[self.a_shape, self.b_shape],
+            &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
-            encoder,
+            &encoder,
             4,
         );
 
@@ -1199,8 +1196,7 @@ pub struct MetalMod<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
     device: Device,
-    a_shape: ShapeTracker,
-    b_shape: ShapeTracker,
+    dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
     dyn_map: *const HashMap<char, usize>,
 }
@@ -1216,17 +1212,18 @@ impl<T: MetalFloat> MetalMod<T> {
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
+        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
+        let type_name = T::type_name();
         let mut code = format!(
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} *inp_b [[buffer(1)]], device {type_name} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{rendered}) {{
     if (idx < n_elements) {{
         out[idx] = fmod(({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}], ({b_valid_exp}) == 0 ? 0.0 : inp_b[{b_idx_exp}]);
     }}
 }}
-", T::type_name(), T::type_name(), T::type_name(), render_dyn_dim_inputs(&[a_shape, b_shape], 4),
-        );
+");
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("mkernel", &name);
 
@@ -1237,8 +1234,7 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
             pipeline: kernels[&name].clone(),
             queue,
             device,
-            a_shape,
-            b_shape,
+            dyn_symbols,
             _phantom: Default::default(),
             dyn_map,
         }
@@ -1267,12 +1263,11 @@ impl<T> MetalKernel for MetalMod<T> {
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, inp_size as u32);
         input_dyn_dims(
-            &[self.a_shape, self.b_shape],
+            &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
-            encoder,
+            &encoder,
             4,
         );
-
         // Execute
         encoder.dispatch_1d(inp_size);
         encoder.end_encoding();
@@ -1338,7 +1333,7 @@ pub struct MetalSumReduce<T> {
     queue: CommandQueue,
     device: Device,
     pub dim: usize,
-    shape: ShapeTracker,
+    dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
     dyn_map: *const HashMap<char, usize>,
 }
@@ -1353,15 +1348,17 @@ impl<T: MetalFloat> MetalSumReduce<T> {
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
+        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape], 6);
+        let type_name = T::type_name();
         let mut code = format!(
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], device int& front_size [[buffer(3)]], device int& back_size [[buffer(4)]], device int& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], device int& front_size [[buffer(3)]], device int& back_size [[buffer(4)]], device int& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{rendered}) {{
     if (i_ < n_elements) {{
         int a_ = i_ / back_size;
         int b_ = i_ % back_size;
-        {} reduce_value = 0.0;
+        {type_name} reduce_value = 0.0;
         for (int c_ = 0; c_ < dim_size; c_++) {{
             uint idx = a_ * dim_size * back_size + c_ * back_size + b_;
             if (({valid_exp}) != 0) {{
@@ -1371,8 +1368,7 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
         out[i_] = reduce_value;
     }}
 }}
-", T::type_name(), T::type_name(), render_dyn_dim_inputs(&[shape], 6), T::type_name(),
-        );
+");
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("mkernel", &name);
 
@@ -1384,7 +1380,7 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
             queue,
             device,
             dim,
-            shape,
+            dyn_symbols,
             _phantom: Default::default(),
             dyn_map,
         }
@@ -1435,9 +1431,9 @@ impl<T> MetalKernel for MetalSumReduce<T> {
         encoder.set_int(4, back_size as u32);
         encoder.set_int(5, dim_size as u32);
         input_dyn_dims(
-            &[self.shape],
+            &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
-            encoder,
+            &encoder,
             6,
         );
 
@@ -1506,7 +1502,7 @@ pub struct MetalMaxReduce<T> {
     queue: CommandQueue,
     device: Device,
     dim: usize,
-    shape: ShapeTracker,
+    dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
     dyn_map: *const HashMap<char, usize>,
 }
@@ -1521,15 +1517,17 @@ impl<T: MetalFloat> MetalMaxReduce<T> {
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
+        let type_name = T::type_name();
+        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape], 6);
         let mut code = format!(
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], device int& front_size [[buffer(3)]], device int& back_size [[buffer(4)]], device int& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], device int& front_size [[buffer(3)]], device int& back_size [[buffer(4)]], device int& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{rendered}) {{
     if (i_ < n_elements) {{
         int a_ = i_ / back_size;
         int b_ = i_ % back_size;
-        {} reduce_value = -{};
+        {type_name} reduce_value = -{};
         for (int c_ = 0; c_ < dim_size; c_++) {{
             uint idx = a_ * dim_size * back_size + c_ * back_size + b_;
             if (({valid_exp}) != 0) {{
@@ -1540,7 +1538,7 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
         out[i_] = reduce_value;
     }}
 }}
-", T::type_name(), T::type_name(), render_dyn_dim_inputs(&[shape], 6), T::type_name(), if T::is_f32() {"(float)0x7f800000"} else {"MAXHALF"},
+", if T::is_f32() {"(float)0x7f800000"} else {"MAXHALF"},
         );
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("mkernel", &name);
@@ -1553,7 +1551,7 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
             queue,
             device,
             dim,
-            shape,
+            dyn_symbols,
             _phantom: Default::default(),
             dyn_map,
         }
@@ -1603,9 +1601,9 @@ impl<T> MetalKernel for MetalMaxReduce<T> {
         encoder.set_int(4, back_size as u32);
         encoder.set_int(5, dim_size as u32);
         input_dyn_dims(
-            &[self.shape],
+            &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
-            encoder,
+            &encoder,
             6,
         );
 

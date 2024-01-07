@@ -19,8 +19,8 @@ pub struct MetalRMSNorm {
     rms_norm_pipeline: ComputePipelineState,    // RMSNorm kernel
     device: Device,
     queue: CommandQueue,
-    shape: ShapeTracker, // Input shape
-    epsilon: f32,        // Epsilon
+    dyn_symbols: Vec<char>,
+    epsilon: f32, // Epsilon
     dyn_map: *const HashMap<char, usize>,
 }
 
@@ -33,11 +33,12 @@ impl MetalRMSNorm {
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(inp_shape);
+        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[inp_shape], 6);
         let mut square_mean_code = format!(
             "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device half *inp [[buffer(0)]], device float *out [[buffer(1)]], device int& n_elements [[buffer(2)]], device int& front_size [[buffer(3)]], device int& back_size [[buffer(4)]], device int& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device half *inp [[buffer(0)]], device float *out [[buffer(1)]], device int& n_elements [[buffer(2)]], device int& front_size [[buffer(3)]], device int& back_size [[buffer(4)]], device int& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{rendered}) {{
     if (i_ < n_elements) {{
         int a_ = i_ / back_size;
         int b_ = i_ % back_size;
@@ -53,8 +54,7 @@ kernel void mkernel(device half *inp [[buffer(0)]], device float *out [[buffer(1
         out[i_] = (reduce_value / (float)dim_size);
     }}
 }}
-", render_dyn_dim_inputs(&[inp_shape], 6),
-        );
+");
         let square_mean_code_name = format!("kernel_{}", hash(&square_mean_code));
         square_mean_code = square_mean_code.replace("mkernel", &square_mean_code_name);
 
@@ -62,18 +62,19 @@ kernel void mkernel(device half *inp [[buffer(0)]], device float *out [[buffer(1
         let meaned_size = meaned_shape.remove_dim(meaned_shape.len() - 1);
         meaned_shape.expand(meaned_shape.len(), meaned_size);
         let (meaned_idx_exp, _) = get_idx_valid_exps(meaned_shape);
+        let (_, rendered) = render_dyn_dim_inputs(&[inp_shape], 4);
         let mut rms_norm_code = format!("
 #include <metal_stdlib>
 using namespace metal;
 
-kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]], device half *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{}) {{
+kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]], device half *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{rendered}) {{
     if (idx < n_elements) {{
         float added = inp[{meaned_idx_exp}] + {epsilon};
         float sq = sqrt(added);
         float recip = 1.0f / sq;
         out[idx] = (half)(recip * (float)x[{idx_exp}]);
     }}
-}}", render_dyn_dim_inputs(&[inp_shape], 4));
+}}");
         let rms_norm_code_name = format!("kernel_{}", hash(&rms_norm_code));
         rms_norm_code = rms_norm_code.replace("mkernel", &rms_norm_code_name);
 
@@ -86,7 +87,7 @@ kernel void mkernel(device float *inp [[buffer(0)]], device half *x [[buffer(1)]
             rms_norm_pipeline: compile_function(&rms_norm_code_name, &rms_norm_code, &device),
             device,
             queue,
-            shape: inp_shape,
+            dyn_symbols,
             epsilon,
             dyn_map,
         }
@@ -136,7 +137,7 @@ impl MetalKernel for MetalRMSNorm {
         encoder.set_int(4, back_size as u32);
         encoder.set_int(5, dim_size as u32);
         input_dyn_dims(
-            &[self.shape],
+            &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
             encoder,
             6,
@@ -155,7 +156,7 @@ impl MetalKernel for MetalRMSNorm {
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, inputs[0].1.n_elements().to_usize().unwrap() as u32);
         input_dyn_dims(
-            &[self.shape],
+            &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
             encoder,
             4,
