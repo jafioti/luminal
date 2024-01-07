@@ -8,6 +8,14 @@ pub struct Tensor {
     pub data: Box<dyn Data>,
 }
 
+impl Tensor {
+    pub fn new<T: Data>(data: T) -> Self {
+        Self {
+            data: Box::new(data),
+        }
+    }
+}
+
 /// Some sort of data, for instance a Vec<f32> on CPU or CudaSlice<f32> on GPU
 pub trait Data: Any + Debug + DynClone {
     fn as_any(&self) -> &dyn Any;

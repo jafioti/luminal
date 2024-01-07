@@ -179,9 +179,7 @@ impl Operator for MetalRMSNorm {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 

@@ -99,7 +99,7 @@ impl<T: MetalFloat> Operator for MetalCopyFromDevice<T> {
 #[derive(LuminalEq, Clone)]
 pub struct MetalConstant<T>(
     pub ConstantValue,
-    pub Device,
+    Device,
     *const HashMap<char, usize>,
     PhantomData<T>,
 );
@@ -128,18 +128,20 @@ impl<T: MetalFloat> Operator for MetalConstant<T> {
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalContiguous<T>(
-    ComputePipelineState,
-    Device,
-    ShapeTracker,
-    PhantomData<T>,
-    *const HashMap<char, usize>,
-);
+pub struct MetalContiguous<T> {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    shape: ShapeTracker,
+    _phantom: PhantomData<T>,
+    dyn_map: *const HashMap<char, usize>,
+}
 
 impl<T: MetalFloat> MetalContiguous<T> {
     pub fn new(
         shape: ShapeTracker,
         dev: Device,
+        queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
@@ -160,13 +162,14 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
         if !kernels.contains_key(&name) {
             kernels.insert(name.clone(), compile_function(&name, &code, &dev));
         }
-        Self(
-            kernels[&name].clone(),
-            dev,
+        Self {
+            pipeline: kernels[&name].clone(),
+            queue,
+            device: dev,
             shape,
-            Default::default(),
+            _phantom: Default::default(),
             dyn_map,
-        )
+        }
     }
 }
 
@@ -184,13 +187,18 @@ impl<T> MetalKernel for MetalContiguous<T> {
         let inp_size = inputs[0].1.n_elements().to_usize().unwrap();
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.pipeline);
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
         encoder.set_int(2, inp_size as u32);
-        input_dyn_dims(&[self.2], unsafe { self.4.as_ref().unwrap() }, encoder, 3);
+        input_dyn_dims(
+            &[self.shape],
+            unsafe { self.dyn_map.as_ref().unwrap() },
+            encoder,
+            3,
+        );
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -201,15 +209,15 @@ impl<T> MetalKernel for MetalContiguous<T> {
 impl<T: MetalFloat> Operator for MetalContiguous<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            // Setup command queue / command buffer / encoder
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            // Setup command buffer and output buffer
+            let command_buffer = self.queue.new_command_buffer();
             let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
-            let out = self.1.new_buffer(
+            let out = self.device.new_buffer(
                 (inp_size * size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
 
+            // Schedule op on the command buffer
             self.metal_forward(
                 &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
                 command_buffer,
@@ -217,12 +225,11 @@ impl<T: MetalFloat> Operator for MetalContiguous<T> {
                 &[&out],
             );
 
+            // Run the command buffer
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -238,7 +245,13 @@ impl<T: MetalFloat> Operator for MetalContiguous<T> {
         }
         if key == "recompile_shapes" {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
-                *self = Self::new(input_shapes[0], self.1.clone(), &mut HashMap::new(), self.4)
+                *self = Self::new(
+                    input_shapes[0],
+                    self.device.clone(),
+                    self.queue.clone(),
+                    &mut HashMap::new(),
+                    self.dyn_map,
+                )
             }
         }
         None
@@ -246,16 +259,16 @@ impl<T: MetalFloat> Operator for MetalContiguous<T> {
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalLog2<T>(
-    pub ComputePipelineState,
-    CommandQueue,
-    Device,
-    PhantomData<T>,
-);
+pub struct MetalLog2<T> {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    _phantom: PhantomData<T>,
+}
 
 impl<T: MetalFloat> MetalLog2<T> {
     pub fn new(
-        dev: Device,
+        device: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
     ) -> Self {
@@ -271,9 +284,14 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
         code = code.replace("mkernel", &name);
 
         if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &dev));
+            kernels.insert(name.clone(), compile_function(&name, &code, &device));
         }
-        Self(kernels[&name].clone(), queue, dev, Default::default())
+        Self {
+            pipeline: kernels[&name].clone(),
+            queue,
+            device,
+            _phantom: Default::default(),
+        }
     }
 }
 
@@ -291,7 +309,7 @@ impl<T> MetalKernel for MetalLog2<T> {
         let inp_size = inputs[0].1.n_physical_elements().to_usize().unwrap();
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.pipeline);
 
         // Set function inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
@@ -307,9 +325,9 @@ impl<T> MetalKernel for MetalLog2<T> {
 impl<T: MetalFloat> Operator for MetalLog2<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let command_buffer = self.1.new_command_buffer();
+            let command_buffer = self.queue.new_command_buffer();
             let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
-            let out = self.2.new_buffer(
+            let out = self.device.new_buffer(
                 (inp_size * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -324,9 +342,7 @@ impl<T: MetalFloat> Operator for MetalLog2<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -345,16 +361,16 @@ impl<T: MetalFloat> Operator for MetalLog2<T> {
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalExp2<T>(
-    pub ComputePipelineState,
-    CommandQueue,
-    Device,
-    PhantomData<T>,
-);
+pub struct MetalExp2<T> {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    _phantom: PhantomData<T>,
+}
 
 impl<T: MetalFloat> MetalExp2<T> {
     pub fn new(
-        dev: Device,
+        device: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
     ) -> Self {
@@ -370,9 +386,14 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
         code = code.replace("mkernel", &name);
 
         if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &dev));
+            kernels.insert(name.clone(), compile_function(&name, &code, &device));
         }
-        Self(kernels[&name].clone(), queue, dev, Default::default())
+        Self {
+            pipeline: kernels[&name].clone(),
+            queue,
+            device,
+            _phantom: Default::default(),
+        }
     }
 }
 impl<T> MetalKernel for MetalExp2<T> {
@@ -389,7 +410,7 @@ impl<T> MetalKernel for MetalExp2<T> {
         let inp_size = inputs[0].1.n_physical_elements().to_usize().unwrap();
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.pipeline);
 
         // Set function inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
@@ -405,10 +426,10 @@ impl<T> MetalKernel for MetalExp2<T> {
 impl<T: MetalFloat> Operator for MetalExp2<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let command_buffer = self.1.new_command_buffer();
+            let command_buffer = self.queue.new_command_buffer();
 
             let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
-            let out = self.2.new_buffer(
+            let out = self.device.new_buffer(
                 (inp_size * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -422,9 +443,7 @@ impl<T: MetalFloat> Operator for MetalExp2<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -443,16 +462,16 @@ impl<T: MetalFloat> Operator for MetalExp2<T> {
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalSin<T>(
-    pub ComputePipelineState,
-    CommandQueue,
-    Device,
-    PhantomData<T>,
-);
+pub struct MetalSin<T> {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    _phantom: PhantomData<T>,
+}
 
 impl<T: MetalFloat> MetalSin<T> {
     pub fn new(
-        dev: Device,
+        device: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
     ) -> Self {
@@ -467,9 +486,14 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
         code = code.replace("mkernel", &name);
 
         if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &dev));
+            kernels.insert(name.clone(), compile_function(&name, &code, &device));
         }
-        Self(kernels[&name].clone(), queue, dev, Default::default())
+        Self {
+            pipeline: kernels[&name].clone(),
+            queue,
+            device,
+            _phantom: Default::default(),
+        }
     }
 }
 impl<T> MetalKernel for MetalSin<T> {
@@ -487,7 +511,7 @@ impl<T> MetalKernel for MetalSin<T> {
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.pipeline);
 
         // Set function inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
@@ -503,9 +527,9 @@ impl<T> MetalKernel for MetalSin<T> {
 impl<T: MetalFloat> Operator for MetalSin<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let command_buffer = self.1.new_command_buffer();
+            let command_buffer = self.queue.new_command_buffer();
             let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
-            let out = self.2.new_buffer(
+            let out = self.device.new_buffer(
                 (inp_size * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -520,9 +544,7 @@ impl<T: MetalFloat> Operator for MetalSin<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -541,16 +563,16 @@ impl<T: MetalFloat> Operator for MetalSin<T> {
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalSqrt<T>(
-    pub ComputePipelineState,
-    CommandQueue,
-    Device,
-    PhantomData<T>,
-);
+pub struct MetalSqrt<T> {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    _phantom: PhantomData<T>,
+}
 
 impl<T: MetalFloat> MetalSqrt<T> {
     pub fn new(
-        dev: Device,
+        device: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
     ) -> Self {
@@ -565,9 +587,14 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
         code = code.replace("mkernel", &name);
 
         if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &dev));
+            kernels.insert(name.clone(), compile_function(&name, &code, &device));
         }
-        Self(kernels[&name].clone(), queue, dev, Default::default())
+        Self {
+            pipeline: kernels[&name].clone(),
+            queue,
+            device,
+            _phantom: Default::default(),
+        }
     }
 }
 impl<T> MetalKernel for MetalSqrt<T> {
@@ -584,7 +611,7 @@ impl<T> MetalKernel for MetalSqrt<T> {
         let inp_size = inputs[0].1.n_physical_elements().to_usize().unwrap();
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.pipeline);
 
         // Set function inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
@@ -600,9 +627,9 @@ impl<T> MetalKernel for MetalSqrt<T> {
 impl<T: MetalFloat> Operator for MetalSqrt<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let command_buffer = self.1.new_command_buffer();
+            let command_buffer = self.queue.new_command_buffer();
             let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
-            let out = self.2.new_buffer(
+            let out = self.device.new_buffer(
                 (inp_size * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -617,9 +644,7 @@ impl<T: MetalFloat> Operator for MetalSqrt<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -638,16 +663,16 @@ impl<T: MetalFloat> Operator for MetalSqrt<T> {
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalRecip<T>(
-    pub ComputePipelineState,
-    CommandQueue,
-    Device,
-    PhantomData<T>,
-);
+pub struct MetalRecip<T> {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    _phantom: PhantomData<T>,
+}
 
 impl<T: MetalFloat> MetalRecip<T> {
     pub fn new(
-        dev: Device,
+        device: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
     ) -> Self {
@@ -662,9 +687,14 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
         code = code.replace("mkernel", &name);
 
         if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &dev));
+            kernels.insert(name.clone(), compile_function(&name, &code, &device));
         }
-        Self(kernels[&name].clone(), queue, dev, Default::default())
+        Self {
+            pipeline: kernels[&name].clone(),
+            queue,
+            device,
+            _phantom: Default::default(),
+        }
     }
 }
 impl<T> MetalKernel for MetalRecip<T> {
@@ -681,7 +711,7 @@ impl<T> MetalKernel for MetalRecip<T> {
         let inp_size = inputs[0].1.n_physical_elements().to_usize().unwrap();
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.pipeline);
 
         // Set function inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
@@ -697,9 +727,9 @@ impl<T> MetalKernel for MetalRecip<T> {
 impl<T: MetalFloat> Operator for MetalRecip<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let command_buffer = self.1.new_command_buffer();
+            let command_buffer = self.queue.new_command_buffer();
             let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
-            let out = self.2.new_buffer(
+            let out = self.device.new_buffer(
                 (inp_size * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -714,9 +744,7 @@ impl<T: MetalFloat> Operator for MetalRecip<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -735,21 +763,21 @@ impl<T: MetalFloat> Operator for MetalRecip<T> {
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalAdd<T>(
-    ComputePipelineState,
-    CommandQueue,
-    Device,
-    ShapeTracker,
-    ShapeTracker,
-    PhantomData<T>,
-    *const HashMap<char, usize>,
-);
+pub struct MetalAdd<T> {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    a_shape: ShapeTracker,
+    b_shape: ShapeTracker,
+    _phantom: PhantomData<T>,
+    dyn_map: *const HashMap<char, usize>,
+}
 
 impl<T: MetalFloat> MetalAdd<T> {
     pub fn new(
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
-        dev: Device,
+        device: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
         dyn_map: *const HashMap<char, usize>,
@@ -773,17 +801,17 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
         code = code.replace("mkernel", &name);
 
         if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &dev));
+            kernels.insert(name.clone(), compile_function(&name, &code, &device));
         }
-        Self(
-            kernels[&name].clone(),
+        Self {
+            pipeline: kernels[&name].clone(),
             queue,
-            dev,
+            device,
             a_shape,
             b_shape,
-            Default::default(),
+            _phantom: Default::default(),
             dyn_map,
-        )
+        }
     }
 }
 
@@ -801,7 +829,7 @@ impl<T> MetalKernel for MetalAdd<T> {
         let inp_size = inputs[0].1.n_elements().to_usize().unwrap();
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.pipeline);
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
@@ -809,8 +837,8 @@ impl<T> MetalKernel for MetalAdd<T> {
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, inp_size as u32);
         input_dyn_dims(
-            &[self.3, self.4],
-            unsafe { self.6.as_ref().unwrap() },
+            &[self.a_shape, self.b_shape],
+            unsafe { self.dyn_map.as_ref().unwrap() },
             encoder,
             4,
         );
@@ -824,9 +852,9 @@ impl<T> MetalKernel for MetalAdd<T> {
 impl<T: MetalFloat> Operator for MetalAdd<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let command_buffer = self.1.new_command_buffer();
+            let command_buffer = self.queue.new_command_buffer();
             let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
-            let out = self.2.new_buffer(
+            let out = self.device.new_buffer(
                 (inp_size * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -844,9 +872,7 @@ impl<T: MetalFloat> Operator for MetalAdd<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -865,10 +891,10 @@ impl<T: MetalFloat> Operator for MetalAdd<T> {
                 *self = Self::new(
                     input_shapes[0],
                     input_shapes[1],
-                    self.2.clone(),
-                    self.1.clone(),
+                    self.device.clone(),
+                    self.queue.clone(),
                     &mut HashMap::new(),
-                    self.6,
+                    self.dyn_map,
                 )
             }
         }
@@ -877,21 +903,21 @@ impl<T: MetalFloat> Operator for MetalAdd<T> {
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalMul<T>(
-    ComputePipelineState,
-    CommandQueue,
-    Device,
-    ShapeTracker,
-    ShapeTracker,
-    PhantomData<T>,
-    *const HashMap<char, usize>,
-);
+pub struct MetalMul<T> {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    a_shape: ShapeTracker,
+    b_shape: ShapeTracker,
+    _phantom: PhantomData<T>,
+    dyn_map: *const HashMap<char, usize>,
+}
 
 impl<T: MetalFloat> MetalMul<T> {
     pub fn new(
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
-        dev: Device,
+        device: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
         dyn_map: *const HashMap<char, usize>,
@@ -915,17 +941,17 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
         code = code.replace("mkernel", &name);
 
         if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &dev));
+            kernels.insert(name.clone(), compile_function(&name, &code, &device));
         }
-        Self(
-            kernels[&name].clone(),
+        Self {
+            pipeline: kernels[&name].clone(),
             queue,
-            dev,
+            device,
             a_shape,
             b_shape,
-            Default::default(),
+            _phantom: Default::default(),
             dyn_map,
-        )
+        }
     }
 }
 impl<T> MetalKernel for MetalMul<T> {
@@ -943,7 +969,7 @@ impl<T> MetalKernel for MetalMul<T> {
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.pipeline);
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
@@ -951,8 +977,8 @@ impl<T> MetalKernel for MetalMul<T> {
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, inp_size as u32);
         input_dyn_dims(
-            &[self.3, self.4],
-            unsafe { self.6.as_ref().unwrap() },
+            &[self.a_shape, self.b_shape],
+            unsafe { self.dyn_map.as_ref().unwrap() },
             encoder,
             4,
         );
@@ -966,9 +992,9 @@ impl<T> MetalKernel for MetalMul<T> {
 impl<T: MetalFloat> Operator for MetalMul<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let command_buffer = self.1.new_command_buffer();
+            let command_buffer = self.queue.new_command_buffer();
             let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
-            let out = self.2.new_buffer(
+            let out = self.device.new_buffer(
                 (inp_size * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -986,9 +1012,7 @@ impl<T: MetalFloat> Operator for MetalMul<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -1007,10 +1031,10 @@ impl<T: MetalFloat> Operator for MetalMul<T> {
                 *self = Self::new(
                     input_shapes[0],
                     input_shapes[1],
-                    self.2.clone(),
-                    self.1.clone(),
+                    self.device.clone(),
+                    self.queue.clone(),
                     &mut HashMap::new(),
-                    self.6,
+                    self.dyn_map,
                 )
             }
         }
@@ -1019,21 +1043,21 @@ impl<T: MetalFloat> Operator for MetalMul<T> {
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalLessThan<T>(
-    ComputePipelineState,
-    CommandQueue,
-    Device,
-    ShapeTracker,
-    ShapeTracker,
-    PhantomData<T>,
-    *const HashMap<char, usize>,
-);
+pub struct MetalLessThan<T> {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    a_shape: ShapeTracker,
+    b_shape: ShapeTracker,
+    _phantom: PhantomData<T>,
+    dyn_map: *const HashMap<char, usize>,
+}
 
 impl<T: MetalFloat> MetalLessThan<T> {
     pub fn new(
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
-        dev: Device,
+        device: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
         dyn_map: *const HashMap<char, usize>,
@@ -1068,17 +1092,17 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
         code = code.replace("mkernel", &name);
 
         if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &dev));
+            kernels.insert(name.clone(), compile_function(&name, &code, &device));
         }
-        Self(
-            kernels[&name].clone(),
+        Self {
+            pipeline: kernels[&name].clone(),
             queue,
-            dev,
+            device,
             a_shape,
             b_shape,
-            Default::default(),
+            _phantom: Default::default(),
             dyn_map,
-        )
+        }
     }
 }
 
@@ -1097,7 +1121,7 @@ impl<T> MetalKernel for MetalLessThan<T> {
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.pipeline);
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
@@ -1105,8 +1129,8 @@ impl<T> MetalKernel for MetalLessThan<T> {
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, inp_size as u32);
         input_dyn_dims(
-            &[self.3, self.4],
-            unsafe { self.6.as_ref().unwrap() },
+            &[self.a_shape, self.b_shape],
+            unsafe { self.dyn_map.as_ref().unwrap() },
             encoder,
             4,
         );
@@ -1120,9 +1144,9 @@ impl<T> MetalKernel for MetalLessThan<T> {
 impl<T: MetalFloat> Operator for MetalLessThan<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let command_buffer = self.1.new_command_buffer();
+            let command_buffer = self.queue.new_command_buffer();
             let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
-            let out = self.2.new_buffer(
+            let out = self.device.new_buffer(
                 (inp_size * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -1140,9 +1164,7 @@ impl<T: MetalFloat> Operator for MetalLessThan<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -1161,10 +1183,10 @@ impl<T: MetalFloat> Operator for MetalLessThan<T> {
                 *self = Self::new(
                     input_shapes[0],
                     input_shapes[1],
-                    self.2.clone(),
-                    self.1.clone(),
+                    self.device.clone(),
+                    self.queue.clone(),
                     &mut HashMap::new(),
-                    self.6,
+                    self.dyn_map,
                 )
             }
         }
@@ -1173,21 +1195,21 @@ impl<T: MetalFloat> Operator for MetalLessThan<T> {
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalMod<T>(
-    ComputePipelineState,
-    CommandQueue,
-    Device,
-    ShapeTracker,
-    ShapeTracker,
-    PhantomData<T>,
-    *const HashMap<char, usize>,
-);
+pub struct MetalMod<T> {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    a_shape: ShapeTracker,
+    b_shape: ShapeTracker,
+    _phantom: PhantomData<T>,
+    dyn_map: *const HashMap<char, usize>,
+}
 
 impl<T: MetalFloat> MetalMod<T> {
     pub fn new(
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
-        dev: Device,
+        device: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
         dyn_map: *const HashMap<char, usize>,
@@ -1209,17 +1231,17 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
         code = code.replace("mkernel", &name);
 
         if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &dev));
+            kernels.insert(name.clone(), compile_function(&name, &code, &device));
         }
-        Self(
-            kernels[&name].clone(),
+        Self {
+            pipeline: kernels[&name].clone(),
             queue,
-            dev,
+            device,
             a_shape,
             b_shape,
-            Default::default(),
+            _phantom: Default::default(),
             dyn_map,
-        )
+        }
     }
 }
 impl<T> MetalKernel for MetalMod<T> {
@@ -1237,7 +1259,7 @@ impl<T> MetalKernel for MetalMod<T> {
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.pipeline);
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
@@ -1245,8 +1267,8 @@ impl<T> MetalKernel for MetalMod<T> {
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_int(3, inp_size as u32);
         input_dyn_dims(
-            &[self.3, self.4],
-            unsafe { self.6.as_ref().unwrap() },
+            &[self.a_shape, self.b_shape],
+            unsafe { self.dyn_map.as_ref().unwrap() },
             encoder,
             4,
         );
@@ -1260,9 +1282,9 @@ impl<T> MetalKernel for MetalMod<T> {
 impl<T: MetalFloat> Operator for MetalMod<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let command_buffer = self.1.new_command_buffer();
+            let command_buffer = self.queue.new_command_buffer();
             let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
-            let out = self.2.new_buffer(
+            let out = self.device.new_buffer(
                 (inp_size * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -1280,9 +1302,7 @@ impl<T: MetalFloat> Operator for MetalMod<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -1301,10 +1321,10 @@ impl<T: MetalFloat> Operator for MetalMod<T> {
                 *self = Self::new(
                     input_shapes[0],
                     input_shapes[1],
-                    self.2.clone(),
-                    self.1.clone(),
+                    self.device.clone(),
+                    self.queue.clone(),
                     &mut HashMap::new(),
-                    self.6,
+                    self.dyn_map,
                 )
             }
         }
@@ -1313,21 +1333,21 @@ impl<T: MetalFloat> Operator for MetalMod<T> {
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalSumReduce<T>(
-    pub ComputePipelineState,
-    pub CommandQueue,
-    pub Device,
-    pub usize,
-    pub ShapeTracker,
-    pub PhantomData<T>,
-    pub *const HashMap<char, usize>,
-);
+pub struct MetalSumReduce<T> {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    pub dim: usize,
+    shape: ShapeTracker,
+    _phantom: PhantomData<T>,
+    dyn_map: *const HashMap<char, usize>,
+}
 
 impl<T: MetalFloat> MetalSumReduce<T> {
     pub fn new(
         shape: ShapeTracker,
         dim: usize,
-        dev: Device,
+        device: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
         dyn_map: *const HashMap<char, usize>,
@@ -1357,24 +1377,24 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
         code = code.replace("mkernel", &name);
 
         if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &dev));
+            kernels.insert(name.clone(), compile_function(&name, &code, &device));
         }
-        Self(
-            kernels[&name].clone(),
+        Self {
+            pipeline: kernels[&name].clone(),
             queue,
-            dev,
+            device,
             dim,
             shape,
-            Default::default(),
+            _phantom: Default::default(),
             dyn_map,
-        )
+        }
     }
 }
 
 impl<T> MetalKernel for MetalSumReduce<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         let mut sh = input_shapes[0];
-        sh.remove_dim(self.3);
+        sh.remove_dim(self.dim);
         vec![sh.n_elements() * size_of::<T>()]
     }
     fn metal_forward(
@@ -1385,27 +1405,27 @@ impl<T> MetalKernel for MetalSumReduce<T> {
         output_buffers: &[&Buffer],
     ) {
         let mut sh = inputs[0].1;
-        sh.remove_dim(self.3);
+        sh.remove_dim(self.dim);
         let inp_size = sh.n_elements().to_usize().unwrap();
         let front_size: usize = inputs[0]
             .1
             .shape()
             .iter()
-            .take(self.3)
+            .take(self.dim)
             .map(|i| i.to_usize().unwrap())
             .product();
         let back_size: usize = inputs[0]
             .1
             .shape()
             .iter()
-            .skip(self.3 + 1)
+            .skip(self.dim + 1)
             .map(|i| i.to_usize().unwrap())
             .product();
-        let dim_size = inputs[0].1.shape()[self.3].to_usize().unwrap();
+        let dim_size = inputs[0].1.shape()[self.dim].to_usize().unwrap();
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.pipeline);
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
@@ -1414,7 +1434,12 @@ impl<T> MetalKernel for MetalSumReduce<T> {
         encoder.set_int(3, front_size as u32);
         encoder.set_int(4, back_size as u32);
         encoder.set_int(5, dim_size as u32);
-        input_dyn_dims(&[self.4], unsafe { self.6.as_ref().unwrap() }, encoder, 6);
+        input_dyn_dims(
+            &[self.shape],
+            unsafe { self.dyn_map.as_ref().unwrap() },
+            encoder,
+            6,
+        );
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -1426,11 +1451,11 @@ impl<T: MetalFloat> Operator for MetalSumReduce<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup command queue / command buffer / encoder
-            let command_buffer = self.1.new_command_buffer();
+            let command_buffer = self.queue.new_command_buffer();
             let mut sh = tensors[0].1;
-            sh.remove_dim(self.3);
+            sh.remove_dim(self.dim);
             let inp_size = sh.n_elements().to_usize().unwrap();
-            let out = self.2.new_buffer(
+            let out = self.device.new_buffer(
                 (inp_size * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -1445,9 +1470,7 @@ impl<T: MetalFloat> Operator for MetalSumReduce<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -1465,11 +1488,11 @@ impl<T: MetalFloat> Operator for MetalSumReduce<T> {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
                 *self = Self::new(
                     input_shapes[0],
-                    self.3,
-                    self.2.clone(),
-                    self.1.clone(),
+                    self.dim,
+                    self.device.clone(),
+                    self.queue.clone(),
                     &mut HashMap::new(),
-                    self.6,
+                    self.dyn_map,
                 )
             }
         }
@@ -1478,21 +1501,21 @@ impl<T: MetalFloat> Operator for MetalSumReduce<T> {
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalMaxReduce<T>(
-    ComputePipelineState,
-    CommandQueue,
-    Device,
-    usize,
-    ShapeTracker,
-    PhantomData<T>,
-    *const HashMap<char, usize>,
-);
+pub struct MetalMaxReduce<T> {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    dim: usize,
+    shape: ShapeTracker,
+    _phantom: PhantomData<T>,
+    dyn_map: *const HashMap<char, usize>,
+}
 
 impl<T: MetalFloat> MetalMaxReduce<T> {
     pub fn new(
         shape: ShapeTracker,
         dim: usize,
-        dev: Device,
+        device: Device,
         queue: CommandQueue,
         kernels: &mut HashMap<String, ComputePipelineState>,
         dyn_map: *const HashMap<char, usize>,
@@ -1523,23 +1546,23 @@ kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], 
         code = code.replace("mkernel", &name);
 
         if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &dev));
+            kernels.insert(name.clone(), compile_function(&name, &code, &device));
         }
-        Self(
-            kernels[&name].clone(),
+        Self {
+            pipeline: kernels[&name].clone(),
             queue,
-            dev,
+            device,
             dim,
             shape,
-            Default::default(),
+            _phantom: Default::default(),
             dyn_map,
-        )
+        }
     }
 }
 impl<T> MetalKernel for MetalMaxReduce<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         let mut sh = input_shapes[0];
-        sh.remove_dim(self.3);
+        sh.remove_dim(self.dim);
         vec![sh.n_elements() * size_of::<T>()]
     }
     fn metal_forward(
@@ -1550,27 +1573,27 @@ impl<T> MetalKernel for MetalMaxReduce<T> {
         output_buffers: &[&Buffer],
     ) {
         let mut sh = inputs[0].1;
-        sh.remove_dim(self.3);
+        sh.remove_dim(self.dim);
         let inp_size = sh.contiguous().n_elements().to_usize().unwrap();
         let front_size: usize = inputs[0]
             .1
             .shape()
             .iter()
-            .take(self.3)
+            .take(self.dim)
             .map(|i| i.to_usize().unwrap())
             .product();
         let back_size: usize = inputs[0]
             .1
             .shape()
             .iter()
-            .skip(self.3 + 1)
+            .skip(self.dim + 1)
             .map(|i| i.to_usize().unwrap())
             .product();
-        let dim_size = inputs[0].1.shape()[self.3].to_usize().unwrap();
+        let dim_size = inputs[0].1.shape()[self.dim].to_usize().unwrap();
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.pipeline);
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
@@ -1579,7 +1602,12 @@ impl<T> MetalKernel for MetalMaxReduce<T> {
         encoder.set_int(3, front_size as u32);
         encoder.set_int(4, back_size as u32);
         encoder.set_int(5, dim_size as u32);
-        input_dyn_dims(&[self.4], unsafe { self.6.as_ref().unwrap() }, encoder, 6);
+        input_dyn_dims(
+            &[self.shape],
+            unsafe { self.dyn_map.as_ref().unwrap() },
+            encoder,
+            6,
+        );
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -1599,11 +1627,11 @@ impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
                 .unwrap();
 
             // Setup command queue / command buffer / encoder
-            let command_buffer = self.1.new_command_buffer();
+            let command_buffer = self.queue.new_command_buffer();
             let mut sh = tensors[0].1;
-            sh.remove_dim(self.3);
+            sh.remove_dim(self.dim);
             let inp_size = sh.n_elements().to_usize().unwrap();
-            let out = self.2.new_buffer(
+            let out = self.device.new_buffer(
                 (inp_size * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -1613,9 +1641,7 @@ impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -1633,11 +1659,11 @@ impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
                 *self = Self::new(
                     input_shapes[0],
-                    self.3,
-                    self.2.clone(),
-                    self.1.clone(),
+                    self.dim,
+                    self.device.clone(),
+                    self.queue.clone(),
                     &mut HashMap::new(),
-                    self.6,
+                    self.dyn_map,
                 )
             }
         }
@@ -1911,6 +1937,7 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                 *op_ref = Box::new(MetalContiguous::<T>::new(
                     src_shapes[0],
                     dev.clone(),
+                    queue.clone(),
                     &mut kernels,
                     &graph.dyn_map,
                 ));

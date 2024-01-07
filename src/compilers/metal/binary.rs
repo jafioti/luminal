@@ -121,9 +121,7 @@ impl<T: MetalFloat> Operator for MetalSub<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -342,9 +340,7 @@ impl<T: MetalFloat> Operator for MetalEqual<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 
@@ -569,9 +565,7 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 }

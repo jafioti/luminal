@@ -181,9 +181,7 @@ impl Operator for MetalMatmul2D {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 }
@@ -297,9 +295,7 @@ impl Operator for MetalBatchMatmul2D {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor {
-                data: Box::new(out),
-            }]
+            vec![Tensor::new(out)]
         })
     }
 }
@@ -310,6 +306,7 @@ pub struct MetalMatMulCompiler;
 impl Compiler for MetalMatMulCompiler {
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         let dev = Device::system_default().unwrap();
+        let queue = dev.new_command_queue();
         // Look for the matmul pattern
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
@@ -330,7 +327,7 @@ impl Compiler for MetalMatMulCompiler {
                     .ty::<MetalSumReduce<f32>>()
                     .check(|o, _| {
                         if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f32>>() {
-                            o.3 == 2
+                            o.dim == 2
                         } else {
                             false
                         }
@@ -357,6 +354,7 @@ impl Compiler for MetalMatMulCompiler {
                     .add_op(MetalContiguous::<f32>::new(
                         src1_shape,
                         dev.clone(),
+                        queue.clone(),
                         &mut HashMap::default(),
                         &graph.dyn_map,
                     ))
@@ -369,6 +367,7 @@ impl Compiler for MetalMatMulCompiler {
                     .add_op(MetalContiguous::<f32>::new(
                         src2_shape,
                         dev.clone(),
+                        queue.clone(),
                         &mut HashMap::default(),
                         &graph.dyn_map,
                     ))
@@ -424,7 +423,7 @@ impl Compiler for MetalMatMulCompiler {
                     .ty::<MetalSumReduce<f32>>()
                     .check(|o, _| {
                         if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f32>>() {
-                            o.3 == 3
+                            o.dim == 3
                         } else {
                             false
                         }
