@@ -486,11 +486,17 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalGather<T>(ComputePipelineState, Device, usize, PhantomData<T>);
+pub struct MetalGather<T> {
+    pipeline: ComputePipelineState,
+    device: Device,
+    queue: CommandQueue,
+    embed_dim: usize,
+    _phantom: PhantomData<T>,
+}
 
 impl<T: MetalFloat> MetalGather<T> {
-    fn new(dev: Device, embed_dim: usize) -> Self {
-        Self(compile_function("metal_gather", &format!(
+    fn new(device: Device, queue: CommandQueue, embed_dim: usize) -> Self {
+        Self {pipeline: compile_function("metal_gather", &format!(
             "
 #include <metal_stdlib>
 using namespace metal;
@@ -499,7 +505,7 @@ kernel void metal_gather(device float *inp [[buffer(0)]], device {} *weights [[b
         out[i_.x * embedding_dim + i_.y] = weights[(int)inp[i_.x] * embedding_dim + i_.y];
     }}
 }}", T::type_name(), T::type_name()
-        ), &dev), dev, embed_dim, Default::default())
+        ), &device), device, embed_dim, queue, _phantom: Default::default()}
     }
 }
 
@@ -514,7 +520,7 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
                 .as_any()
                 .downcast_ref::<Vec<f32>>()
                 .unwrap();
-            let index_buffer = self.1.new_buffer_with_data(
+            let index_buffer = self.device.new_buffer_with_data(
                 unsafe { std::mem::transmute(indexes.as_ptr()) },
                 (indexes.len() * std::mem::size_of::<f32>()) as u64,
                 MTLResourceOptions::StorageModeShared,
@@ -528,30 +534,29 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
                 .unwrap();
 
             // Setup command queue / command buffer / encoder
-            let command_queue = self.1.new_command_queue();
-            let command_buffer = command_queue.new_command_buffer();
+            let command_buffer = self.queue.new_command_buffer();
 
-            let out = self.1.new_buffer(
-                (indexes.len() * self.2 * std::mem::size_of::<f16>()) as u64,
+            let out = self.device.new_buffer(
+                (indexes.len() * self.embed_dim * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
 
             let encoder = command_buffer
                 .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-            encoder.set_compute_pipeline_state(&self.0);
+            encoder.set_compute_pipeline_state(&self.pipeline);
 
             // Set inputs
             encoder.set_buffer(0, Some(&index_buffer), 0);
             encoder.set_buffer(1, Some(b_inp), 0);
             encoder.set_buffer(2, Some(&out), 0);
             encoder.set_int(3, indexes.len() as u32);
-            encoder.set_int(4, self.2 as u32);
+            encoder.set_int(4, self.embed_dim as u32);
 
             // Execute
             encoder.dispatch_threads(
                 MTLSize {
                     width: indexes.len() as u64,
-                    height: self.2 as u64,
+                    height: self.embed_dim as u64,
                     depth: 1,
                 },
                 MTLSize {
@@ -576,6 +581,7 @@ pub struct MetalGatherCompiler<T: MetalFloat>(PhantomData<T>);
 impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = Device::system_default().unwrap();
+        let queue = dev.new_command_queue();
         let (mut ind_copy, mut arange, mut equal, mut mul, mut sum_reduce) = (
             NodeIndex::default(),
             NodeIndex::default(),
@@ -616,7 +622,11 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
                 .to_usize()
                 .unwrap();
             let gather = graph
-                .add_op(MetalGather::<T>::new(dev.clone(), embedding_dim))
+                .add_op(MetalGather::<T>::new(
+                    dev.clone(),
+                    queue.clone(),
+                    embedding_dim,
+                ))
                 .finish();
             move_incoming_edge(ind_copy, gather, &mut graph.graph);
             graph.graph.remove_node(equal);
