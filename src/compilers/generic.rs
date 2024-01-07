@@ -419,13 +419,43 @@ impl Compiler for ArithmeticElimination {
             {
                 continue;
             }
-            for output in graph
-                .get_dests(add)
-                .into_iter()
-                .map(|(o, _)| o)
-                .collect::<Vec<_>>()
-            {
-                move_incoming_edge(add, output, &mut graph.graph);
+            // Carry over outgoing edges
+            let input_shape = graph
+                .graph
+                .edges_connecting(x, add)
+                .find_map(|e| e.weight().as_data())
+                .unwrap()
+                .2;
+            if !input_shape.is_contiguous() || input_shape.is_padded() || input_shape.is_sliced() {
+                // If any output shape is non-contiguous, we need to keep the op for it's contiguous functionality TODO: replace with explicit contiguous op here
+                if graph
+                    .graph
+                    .edges_directed(add, Direction::Outgoing)
+                    .filter_map(|e| e.weight().as_data())
+                    .any(|(_, _, sh)| !sh.is_contiguous() || sh.is_padded() || sh.is_sliced())
+                {
+                    continue;
+                }
+                for (weight, target) in graph
+                    .graph
+                    .edges_directed(add, petgraph::Direction::Outgoing)
+                    .map(|e| (e.weight().clone(), e.target()))
+                    .collect::<Vec<_>>()
+                {
+                    if let Some(weight) = weight.as_data() {
+                        graph.graph.add_edge(
+                            x,
+                            target,
+                            Dependency::Data {
+                                input_order: weight.0,
+                                output_order: weight.1,
+                                shape: input_shape,
+                            },
+                        );
+                    }
+                }
+            } else {
+                move_outgoing_edge(add, x, &mut graph.graph);
             }
             move_references(
                 &mut remap,
@@ -477,13 +507,43 @@ impl Compiler for ArithmeticElimination {
             {
                 continue;
             }
-            for output in graph
-                .get_dests(mul)
-                .into_iter()
-                .map(|(o, _)| o)
-                .collect::<Vec<_>>()
-            {
-                move_incoming_edge(mul, output, &mut graph.graph);
+            // Carry over outgoing edges
+            let input_shape = graph
+                .graph
+                .edges_connecting(a, mul)
+                .find_map(|e| e.weight().as_data())
+                .unwrap()
+                .2;
+            if !input_shape.is_contiguous() || input_shape.is_padded() || input_shape.is_sliced() {
+                // If any output shape is non-contiguous, we need to keep the op for it's contiguous functionality TODO: replace with explicit contiguous op here
+                if graph
+                    .graph
+                    .edges_directed(mul, Direction::Outgoing)
+                    .filter_map(|e| e.weight().as_data())
+                    .any(|(_, _, sh)| !sh.is_contiguous() || sh.is_padded() || sh.is_sliced())
+                {
+                    continue;
+                }
+                for (weight, target) in graph
+                    .graph
+                    .edges_directed(mul, petgraph::Direction::Outgoing)
+                    .map(|e| (e.weight().clone(), e.target()))
+                    .collect::<Vec<_>>()
+                {
+                    if let Some(weight) = weight.as_data() {
+                        graph.graph.add_edge(
+                            a,
+                            target,
+                            Dependency::Data {
+                                input_order: weight.0,
+                                output_order: weight.1,
+                                shape: input_shape,
+                            },
+                        );
+                    }
+                }
+            } else {
+                move_outgoing_edge(mul, a, &mut graph.graph);
             }
             move_references(
                 &mut remap,
