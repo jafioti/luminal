@@ -70,7 +70,6 @@ mod tests {
         let mut b = model.forward(a).retrieve();
         let mut batch_out = model.forward(batch).retrieve();
 
-        // Uncommenting these lines causes the test to crash
         cx.compile(GenericCompiler::<()>::default(), (&mut b, &mut batch_out));
 
         cx.execute();
