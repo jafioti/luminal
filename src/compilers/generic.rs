@@ -18,16 +18,16 @@ use crate::{
     prelude::*,
 };
 
+/// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
 pub type GenericCompiler<Inner = ((),)> = (PreGenericCompiler, Inner, PostGenericCompiler);
 
-/// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
+pub type PreGenericCompiler = (RemoveSingleReductions, ArithmeticElimination);
+
 pub type PostGenericCompiler = (
     UnarySequentialElimination,
     // RemoveUnusedNodes, // Broken right now, unclear why
     CSE,
 );
-
-pub type PreGenericCompiler = (RemoveSingleReductions, ArithmeticElimination);
 
 /// Eliminate complementary unary sequential operations like `x.log().exp()`
 #[derive(Debug, Default)]
@@ -99,7 +99,7 @@ impl Compiler for CSE {
         let mut eliminated = true;
         while eliminated {
             eliminated = false;
-            let mut srcs_set = HashMap::new();
+            let mut srcs_set: HashMap<Vec<NodeIndex>, Vec<NodeIndex>> = HashMap::new();
             for node in graph.graph.node_indices().collect_vec() {
                 let srcs = graph
                     .graph
@@ -109,33 +109,39 @@ impl Compiler for CSE {
                     .map(|e| e.source())
                     .collect_vec();
 
-                if srcs.is_empty()
-                    || graph
-                        .graph
-                        .node_weight(node)
-                        .unwrap()
-                        .as_any()
-                        .is::<Function>()
+                if graph
+                    .graph
+                    .node_weight(node)
+                    .unwrap()
+                    .as_any()
+                    .is::<Function>()
                 {
                     continue;
                 }
 
-                if let Some(other_node) = srcs_set.get(&srcs) {
-                    let a = graph.graph.node_weight(node).unwrap();
-                    let b = graph.graph.node_weight(*other_node).unwrap();
-                    let a_src_shapes = graph
-                        .get_sources(node)
-                        .into_iter()
-                        .map(|(_, _, a)| a)
-                        .collect_vec();
-                    let b_src_shapes = graph
-                        .get_sources(*other_node)
-                        .into_iter()
-                        .map(|(_, _, a)| a)
-                        .collect_vec();
-                    if a.as_any().type_id() == b.as_any().type_id() && a_src_shapes == b_src_shapes
-                    // If the op, input shapes, and output shape is the same, we can combine them (UNCLEAR IF THIS IS TRUE, NEED PROPER PartialEq)
-                    {
+                if let Some(other_nodes) = srcs_set.get(&srcs) {
+                    for other_node in other_nodes {
+                        let a = graph.graph.node_weight(node).unwrap();
+                        let Some(b) = graph.graph.node_weight(*other_node) else {
+                            continue;
+                        };
+                        if !a.is_equal(b.as_ref()) {
+                            continue;
+                        }
+                        let a_src_shapes = graph
+                            .get_sources(node)
+                            .into_iter()
+                            .map(|(_, _, a)| a)
+                            .collect_vec();
+                        let b_src_shapes = graph
+                            .get_sources(*other_node)
+                            .into_iter()
+                            .map(|(_, _, a)| a)
+                            .collect_vec();
+                        if a_src_shapes != b_src_shapes {
+                            continue;
+                        }
+                        // If the op, input shapes, and output shape is the same, we can combine them (UNCLEAR IF THIS IS TRUE, NEED PROPER PartialEq)
                         // Carry over outgoing edges from node to other_node
                         move_outgoing_edge(node, *other_node, &mut graph.graph);
                         // Transfer all references to node over to other node
@@ -151,8 +157,15 @@ impl Compiler for CSE {
                         eliminated = true;
                         break;
                     }
+                    if eliminated {
+                        break;
+                    }
                 }
-                srcs_set.insert(srcs, node);
+                if let Some(nodes) = srcs_set.get_mut(&srcs) {
+                    nodes.push(node);
+                } else {
+                    srcs_set.insert(srcs, vec![node]);
+                }
             }
         }
     }
@@ -555,5 +568,6 @@ impl Compiler for ArithmeticElimination {
             graph.graph.remove_node(one);
             graph.graph.remove_node(mul);
         }
+        // graph.display();
     }
 }

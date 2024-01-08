@@ -216,11 +216,17 @@ impl Operator for ExecuteMetalKernels {
     }
 }
 
-#[derive(LuminalEq, Clone)]
+#[derive(Clone)]
 struct CommandBufferWrapper {
     wrapper: Box<MetalKernelWrapper>,
     buffer: Arc<UnsafeCell<CommandBuffer>>,
     dyn_map: *const HashMap<char, usize>,
+}
+
+impl PartialEq for CommandBufferWrapper {
+    fn eq(&self, other: &Self) -> bool {
+        self.wrapper.eq(&other.wrapper)
+    }
 }
 
 impl std::fmt::Debug for CommandBufferWrapper {
