@@ -470,7 +470,7 @@ pub fn move_incoming_edge<N, E: Clone>(
 pub trait TraitObjEq {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
-    fn is_equal(&self, _: &dyn TraitObjEq) -> bool;
+    fn is_equal(&self, _: &dyn Operator) -> bool;
 }
 
 // Implement TraitObjEq for all 'static types implementing PartialEq.
@@ -483,13 +483,14 @@ impl<S: 'static + PartialEq> TraitObjEq for S {
         self
     }
 
-    fn is_equal(&self, other: &dyn TraitObjEq) -> bool {
+    fn is_equal(&self, other: &dyn Operator) -> bool {
         // Do a type-safe casting. If the types are different,
         // return false, otherwise test the values for equality.
         other
             .as_any()
             .downcast_ref::<S>()
-            .map_or(false, |a| self == a)
+            .map(|a| self == a)
+            .unwrap_or_default()
     }
 }
 

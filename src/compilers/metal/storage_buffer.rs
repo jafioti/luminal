@@ -298,12 +298,17 @@ impl Operator for AllocateMetalBuffers {
     }
 }
 
-#[derive(LuminalEq)]
 struct StorageBufferWrapper {
     wrapper: Box<MetalKernelWrapper>,
     buffers: Arc<UnsafeCell<Vec<Buffer>>>,
     intermediate_buffers: Vec<usize>,
     output_buffers: Vec<usize>,
+}
+
+impl PartialEq for StorageBufferWrapper {
+    fn eq(&self, other: &Self) -> bool {
+        self.wrapper.eq(&other.wrapper)
+    }
 }
 
 impl std::fmt::Debug for StorageBufferWrapper {

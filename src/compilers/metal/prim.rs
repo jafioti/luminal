@@ -96,13 +96,20 @@ impl<T: MetalFloat> Operator for MetalCopyFromDevice<T> {
     }
 }
 
-#[derive(LuminalEq, Clone)]
+#[derive(Clone)]
 pub struct MetalConstant<T>(
     pub ConstantValue,
     Device,
     *const HashMap<char, usize>,
     PhantomData<T>,
 );
+
+impl<T> PartialEq for MetalConstant<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq(&other.0)
+    }
+}
+
 impl<T> Debug for MetalConstant<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "MetalConstant({:?})", self.0)
@@ -763,7 +770,7 @@ impl<T: MetalFloat> Operator for MetalRecip<T> {
     }
 }
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalPrint, Clone)]
 pub struct MetalAdd<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -771,6 +778,14 @@ pub struct MetalAdd<T> {
     _phantom: PhantomData<T>,
     dyn_symbols: Vec<char>,
     dyn_map: *const HashMap<char, usize>,
+    a_shape: ShapeTracker,
+    b_shape: ShapeTracker,
+}
+
+impl<T> PartialEq for MetalAdd<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.a_shape.eq(&other.a_shape) && self.b_shape.eq(&other.b_shape)
+    }
 }
 
 impl<T: MetalFloat> MetalAdd<T> {
@@ -811,6 +826,8 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
             dyn_symbols,
             _phantom: Default::default(),
             dyn_map,
+            a_shape,
+            b_shape,
         }
     }
 }
@@ -901,7 +918,7 @@ impl<T: MetalFloat> Operator for MetalAdd<T> {
     }
 }
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalPrint, Clone)]
 pub struct MetalMul<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -909,6 +926,14 @@ pub struct MetalMul<T> {
     dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
     dyn_map: *const HashMap<char, usize>,
+    a_shape: ShapeTracker,
+    b_shape: ShapeTracker,
+}
+
+impl<T> PartialEq for MetalMul<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.a_shape.eq(&other.a_shape) && self.b_shape.eq(&other.b_shape)
+    }
 }
 
 impl<T: MetalFloat> MetalMul<T> {
@@ -949,6 +974,8 @@ kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)
             dyn_symbols,
             _phantom: Default::default(),
             dyn_map,
+            a_shape,
+            b_shape,
         }
     }
 }
