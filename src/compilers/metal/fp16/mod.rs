@@ -2,7 +2,7 @@ use half::f16;
 
 mod matmul;
 mod mean_reduce;
-mod other;
+pub mod other;
 mod rms_norm;
 
 pub type MetalFp16Compiler = (
