@@ -476,16 +476,16 @@ impl Compiler for MetalSwishCompiler {
             NodeIndex::default(),
             NodeIndex::default(),
         );
-        let mut searcher = constant_select_op!(1.0)
+        let mut searcher = constant_select_op!(1.0, f16)
             .ptr(&mut one)
             .edge(
-                constant_select_op!(1.0)
+                constant_select_op!(1.0, f16)
                     .ptr(&mut one2)
                     .edge(
                         SelectOp::new()
                             .ptr(&mut x)
                             .edge(
-                                constant_select_op!(-1.0)
+                                constant_select_op!(-1.0, f16)
                                     .ptr(&mut neg_one)
                                     .edge(SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul1)),
                             )

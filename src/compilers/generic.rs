@@ -423,13 +423,7 @@ impl Compiler for ArithmeticElimination {
             )
             .search(graph);
         while selector1.next_match() || selector2.next_match() {
-            if graph.no_delete.contains(&zero)
-                || graph
-                    .graph
-                    .edges_directed(zero, Direction::Outgoing)
-                    .count()
-                    > 1
-            {
+            if graph.no_delete.contains(&zero) {
                 continue;
             }
             // Carry over outgoing edges
@@ -477,7 +471,14 @@ impl Compiler for ArithmeticElimination {
                 add,
                 x,
             );
-            graph.graph.remove_node(zero);
+            if graph
+                .graph
+                .edges_directed(zero, Direction::Outgoing)
+                .count()
+                == 1
+            {
+                graph.graph.remove_node(zero);
+            }
             graph.graph.remove_node(add);
         }
         // x * 1, 1 * x
@@ -515,9 +516,7 @@ impl Compiler for ArithmeticElimination {
             )
             .search(graph);
         while selector1.next_match() || selector2.next_match() {
-            if graph.no_delete.contains(&one)
-                || graph.graph.edges_directed(one, Direction::Outgoing).count() > 1
-            {
+            if graph.no_delete.contains(&one) {
                 continue;
             }
             // Carry over outgoing edges
@@ -565,7 +564,9 @@ impl Compiler for ArithmeticElimination {
                 mul,
                 a,
             );
-            graph.graph.remove_node(one);
+            if graph.graph.edges_directed(one, Direction::Outgoing).count() == 1 {
+                graph.graph.remove_node(one);
+            }
             graph.graph.remove_node(mul);
         }
         // graph.display();

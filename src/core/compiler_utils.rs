@@ -2,7 +2,7 @@
 
 use std::{
     any::{Any, TypeId},
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     fmt::Debug,
 };
 
@@ -551,72 +551,44 @@ impl GraphSearch {
 }
 
 fn backtrack_match(
-    select_node: NodeIndex,
-    select_graph: &SelectionGraph,
-    main_node: NodeIndex,
-    graph: &mut MainGraph,
+    pattern_root: NodeIndex,
+    pattern_graph: &SelectionGraph,
+    main_root: NodeIndex,
+    main_graph: &mut MainGraph,
 ) -> Option<HashMap<NodeIndex, NodeIndex>> {
-    // Dfs backward through both the selector graph and the main graph
-    let mut mapping = HashMap::new();
-    mapping.insert(select_node, main_node);
-    let mut select_stack = select_graph
-        .neighbors_directed(select_node, Direction::Incoming)
-        .sorted()
-        .rev()
-        .collect_vec();
-    let Some(mut select_node) = select_stack.pop() else {
-        return Some(mapping);
-    };
-    select_stack.extend(
-        select_graph
-            .neighbors_directed(select_node, Direction::Incoming)
-            .sorted()
-            .rev(),
-    );
-    let mut main_stack = graph
-        .edges_directed(main_node, Direction::Incoming)
-        .filter(|e| !e.weight().is_schedule())
-        .sorted_by_key(|e| e.weight().as_data().unwrap().0)
-        .map(|e| e.source())
-        .rev()
-        .collect_vec();
-    while let Some(main_node) = main_stack.pop() {
-        // Check if main == current_select_node
-        if test_node(
-            select_graph.node_weight(select_node).unwrap(),
-            graph,
-            main_node,
-        ) {
-            // Add to mapping and step select stack order
-            mapping.insert(select_node, main_node);
-            if mapping.len() == select_graph.node_count() {
-                return Some(mapping);
+    let mut matches = HashMap::new();
+    let mut stack = VecDeque::new();
+    matches.insert(pattern_root, main_root);
+    stack.push_back((pattern_root, main_root));
+
+    while let Some((pattern_node, main_node)) = stack.pop_back() {
+        let pattern_parents =
+            pattern_graph.neighbors_directed(pattern_node, petgraph::Direction::Incoming);
+        let main_parents = main_graph
+            .neighbors_directed(main_node, petgraph::Direction::Incoming)
+            .collect_vec();
+
+        'pattern_loop: for pattern_parent in pattern_parents {
+            for main_parent in &main_parents {
+                if matches.values().any(|&v| v == *main_parent) {
+                    continue;
+                }
+                if test_node(
+                    pattern_graph.node_weight(pattern_parent).unwrap(),
+                    main_graph,
+                    *main_parent,
+                ) {
+                    matches.insert(pattern_parent, *main_parent);
+                    stack.push_back((pattern_parent, *main_parent));
+                    continue 'pattern_loop;
+                }
             }
-            if select_graph
-                .neighbors_directed(select_node, Direction::Incoming)
-                .count()
-                > 0
-            {
-                // We're moving downstream, so move downstream on the main graph
-                main_stack.extend(
-                    graph
-                        .edges_directed(main_node, Direction::Incoming)
-                        .filter(|e| !e.weight().is_schedule())
-                        .sorted_by_key(|e| e.weight().as_data().unwrap().0)
-                        .map(|e| e.source())
-                        .rev(),
-                );
-            }
-            select_node = select_stack.pop().unwrap();
-            select_stack.extend(
-                select_graph
-                    .neighbors_directed(select_node, Direction::Incoming)
-                    .sorted()
-                    .rev(),
-            );
+            // If we reach here, no match was found for this pattern parent
+            return None;
         }
     }
-    None
+
+    Some(matches)
 }
 
 fn test_node(
@@ -717,11 +689,11 @@ pub struct SelectOp {
 
 #[macro_export]
 macro_rules! constant_select_op {
-    ($i: expr) => {
+    ($i: expr, $t: tt) => {
         SelectOp::new().check(|o, _| {
-            if let Some(c) = o.as_any().downcast_ref::<MetalConstant<f16>>() {
-                if let ConstantValue::Float(f) = c.0 {
-                    f == $i
+            if let Some(c) = o.as_any().downcast_ref::<MetalConstant<$t>>() {
+                if let crate::op::ConstantValue::Float(f) = c.0 {
+                    (f - $i).abs() < 0.0001
                 } else {
                     false
                 }

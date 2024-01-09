@@ -6,7 +6,7 @@ use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
 use crate::{
     compilers::metal::{prim::*, *},
     constant_select_op,
-    op::{ConstantValue, Operator},
+    op::Operator,
     prelude::*,
 };
 
@@ -233,8 +233,8 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
         );
 
         // TODO: Make sure this actually checks the shape transformations to ensure pooling happens
-        let contig = SelectOp::new().ty::<MetalContiguous<f16>>();
-        let pre_sub_pattern = constant_select_op!(1.0)
+        let contig = SelectOp::new().ty::<MetalContiguous<T>>();
+        let pre_sub_pattern = constant_select_op!(1.0, T)
             .ptr(&mut one_const)
             .edge(contig.clone().ptr(&mut contig1))
             .edge(contig.clone().ptr(&mut contig2))
@@ -242,22 +242,22 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
             .edge(contig.clone().ptr(&mut contig4))
             .edge(
                 SelectOp::new()
-                    .ty::<MetalSumReduce<f16>>()
+                    .ty::<MetalSumReduce<T>>()
                     .ptr(&mut sum_reduce),
             );
         let mut s1 = pre_sub_pattern
             .clone()
             .edge(
-                constant_select_op!(1.0)
+                constant_select_op!(1.0, T)
                     .ptr(&mut subtraction_constant)
-                    .edge(SelectOp::new().ty::<MetalSub<f16>>().ptr(&mut subtraction)),
+                    .edge(SelectOp::new().ty::<MetalSub<T>>().ptr(&mut subtraction)),
             )
             .search(graph);
         let mut s2 = pre_sub_pattern
             .edge(
-                constant_select_op!(-1.0)
+                constant_select_op!(-1.0, T)
                     .ptr(&mut subtraction_constant)
-                    .edge(SelectOp::new().ty::<MetalAdd<f16>>().ptr(&mut subtraction)),
+                    .edge(SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut subtraction)),
             )
             .search(graph);
 

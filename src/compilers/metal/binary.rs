@@ -5,6 +5,7 @@ use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
 
 use crate::{
     compilers::metal::{prim::*, *},
+    constant_select_op,
     op::{ConstantValue, Operator},
     prelude::*,
 };
@@ -157,23 +158,12 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
             NodeIndex::default(),
             NodeIndex::default(),
         );
-        let s = SelectOp::new()
-            .check(|o, _| {
-                if let Some(c) = o.as_any().downcast_ref::<MetalConstant<T>>() {
-                    if let ConstantValue::Float(f) = c.0 {
-                        f == -1.
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            })
+        let mut searcher = constant_select_op!(-1.0, T)
             .ptr(&mut neg_one)
             .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul))
-            .edge(SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add));
+            .edge(SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add))
+            .search(graph);
 
-        let mut searcher = s.search(graph);
         while searcher.next_match() {
             if check_no_delete(graph, &[neg_one, mul, add]) {
                 continue;
@@ -199,7 +189,10 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
                 .as_data()
                 .unwrap()
                 .2;
-            if b_final_shape != b_edge.2.contiguous() {
+            if !b_final_shape.is_contiguous()
+                || b_final_shape.is_sliced()
+                || b_final_shape.is_padded()
+            {
                 continue;
             }
             let sub = graph
@@ -216,7 +209,9 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
                 .finish();
             move_outgoing_edge(add, sub, &mut graph.graph);
 
-            graph.graph.remove_node(neg_one);
+            if graph.get_dests(neg_one).len() == 1 {
+                graph.graph.remove_node(neg_one);
+            }
             graph.graph.remove_node(mul);
             graph.graph.remove_node(add);
         }
