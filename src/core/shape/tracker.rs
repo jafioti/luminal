@@ -102,6 +102,9 @@ impl ShapeTracker {
     }
 
     pub fn index_expression(&self) -> BigExpression {
+        if self.is_contiguous() && !self.is_sliced() && !self.is_padded() {
+            return 'z'.into();
+        }
         // Create strides in original order
         let mut strides = self
             .dims
@@ -147,6 +150,9 @@ impl ShapeTracker {
 
     /// If this BigExpression evaluates to 0, the logical index is invalid. Otherwise it is valid
     pub fn valid_expression(&self) -> BigExpression {
+        if self.is_contiguous() && !self.is_sliced() && !self.is_padded() {
+            return 1.into();
+        }
         let mut ret = BigExpression::from(1);
         let mut acc = BigExpression::from(1);
         let logical = BigExpression::from('z');
