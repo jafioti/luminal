@@ -104,10 +104,10 @@ impl MetalKernel for MetalMeanReduce {
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
-        encoder.set_int(2, inp_size as u32);
-        encoder.set_int(3, front_size as u32);
-        encoder.set_int(4, back_size as u32);
-        encoder.set_int(5, dim_size as u32);
+        encoder.set_u32(2, inp_size as u32);
+        encoder.set_u32(3, front_size as u32);
+        encoder.set_u32(4, back_size as u32);
+        encoder.set_u32(5, dim_size as u32);
         input_dyn_dims(&self.4, unsafe { self.5.as_ref().unwrap() }, encoder, 6);
 
         // Execute

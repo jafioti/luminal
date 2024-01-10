@@ -18,7 +18,7 @@ type DeviceCompiler = CPUCompiler;
 
 fn main() {
     let prompt = "[INST]Write me a python implementation of merge sort[/INST]\n";
-    let tokens_to_generate = 150;
+    let tokens_to_generate = 50;
 
     let tokenizer = SentencePieceBpeTokenizer::from_file(
         "./examples/mistral/setup/mistral-7b-hf/tokenizer.model",

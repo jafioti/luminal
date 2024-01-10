@@ -84,7 +84,7 @@ impl<T> MetalKernel for MetalSub<T> {
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
-        encoder.set_int(3, inp_size as u32);
+        encoder.set_u32(3, inp_size as u32);
         input_dyn_dims(&self.3, unsafe { self.5.as_ref().unwrap() }, &encoder, 4);
 
         // Execute
@@ -291,7 +291,7 @@ impl<T> MetalKernel for MetalEqual<T> {
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
-        encoder.set_int(3, inp_size as u32);
+        encoder.set_u32(3, inp_size as u32);
         input_dyn_dims(&self.3, unsafe { self.5.as_ref().unwrap() }, &encoder, 4);
 
         // Execute
@@ -532,8 +532,8 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
             encoder.set_buffer(0, Some(&index_buffer), 0);
             encoder.set_buffer(1, Some(b_inp), 0);
             encoder.set_buffer(2, Some(&out), 0);
-            encoder.set_int(3, indexes.len() as u32);
-            encoder.set_int(4, self.embed_dim as u32);
+            encoder.set_u32(3, indexes.len() as u32);
+            encoder.set_u32(4, self.embed_dim as u32);
 
             // Execute
             encoder.dispatch_threads(
