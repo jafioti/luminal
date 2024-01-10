@@ -808,20 +808,19 @@ impl<T: MetalFloat> Compiler for MetalSwishCompiler<T> {
 
             // Check the if input to add is one
             let add_sources = graph.get_sources(add);
-            let (src1_index, _, _) = add_sources[0];
-            let (src2_index, _, _) = add_sources[1];
-
-            let src_index = if src1_index == exp {
-                src2_index
+            let src_index = if add_sources[0].0 == exp {
+                add_sources[0].0
             } else {
-                src1_index
+                add_sources[1].0
             };
-
-            let test_op = graph.graph.node_weight(src_index).unwrap();
-
             // If test op is not 1, we continue
-            let test_op = test_op.as_any().downcast_ref::<MetalConstant<T>>();
-            if let Some(test_op) = test_op {
+            if let Some(test_op) = graph
+                .graph
+                .node_weight(src_index)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<MetalConstant<T>>()
+            {
                 if test_op.0 != ConstantValue::Float(1.0) {
                     continue;
                 } else {
@@ -835,7 +834,6 @@ impl<T: MetalFloat> Compiler for MetalSwishCompiler<T> {
             let mul1_sources = graph.get_sources(mul1);
             let (src1_index, _, shape1) = mul1_sources[0];
             let (src2_index, _, shape2) = mul1_sources[1];
-
             let (src_index, shape) = if src1_index == neg_one {
                 (src2_index, shape2)
             } else {
@@ -852,6 +850,9 @@ impl<T: MetalFloat> Compiler for MetalSwishCompiler<T> {
             move_outgoing_edge(mul2, swish, &mut graph.graph);
 
             // Remove the old ops
+            if graph.get_dests(src_index).len() == 1 {
+                graph.graph.remove_node(src_index);
+            }
             graph.graph.remove_node(mul1);
             graph.graph.remove_node(mul2);
             graph.graph.remove_node(neg_one);
