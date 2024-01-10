@@ -19,12 +19,15 @@ use crate::{
 };
 
 /// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
-pub type GenericCompiler<Inner = ((),)> = (PreGenericCompiler, Inner, PostGenericCompiler);
+pub type GenericCompiler<Inner = ()> = (PreGenericCompiler, Inner, PostGenericCompiler);
 
-pub type PreGenericCompiler = (RemoveSingleReductions, ArithmeticElimination);
+pub type PreGenericCompiler = (
+    RemoveSingleReductions,
+    ArithmeticElimination,
+    UnarySequentialElimination,
+);
 
 pub type PostGenericCompiler = (
-    UnarySequentialElimination,
     // RemoveUnusedNodes, // Broken right now, unclear why
     CSE,
 );
@@ -382,7 +385,10 @@ mod tests {
     }
 }
 
-/// Remove stuff like x + 0 and x * 1
+/// **Reduces arithmetic expressions**
+///
+/// - Current: x + 0 => x, x * 1 => x
+/// - TODO: x / x => 1, x - x => 0, x * 0 => 0, x - 0 => x, x * 0 => 0, 0 / x => 0
 #[derive(Debug, Default)]
 pub struct ArithmeticElimination;
 
