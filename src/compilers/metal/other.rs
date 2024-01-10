@@ -78,7 +78,7 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
     }
 }
 
-/// Special kernel for efficient mean reduction
+/// Special kernel for producing aranges
 #[derive(LuminalEq, LuminalPrint, Clone)]
 pub struct MetalARange<T: MetalFloat>(
     ComputePipelineState,
@@ -96,15 +96,16 @@ impl<T: MetalFloat> MetalARange<T> {
         dim: BigExpression,
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
+        let type_name = T::type_name();
         Self(
             compile_function("metal_arange", &format!("
 #include <metal_stdlib>
 using namespace metal;
-kernel void metal_arange(device {} *out [[buffer(0)]], device int& n_elements [[buffer(1)]], uint idx [[thread_position_in_grid]]) {{
+kernel void metal_arange(device {type_name} *out [[buffer(0)]], device int& n_elements [[buffer(1)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
-        out[idx] = ({})idx;
+        out[idx] = ({type_name})idx;
     }}
-}}", T::type_name(), T::type_name()), &dev),
+}}"), &dev),
             queue,
             dev,
             dim,
@@ -145,7 +146,7 @@ impl<T: MetalFloat> MetalKernel for MetalARange<T> {
 impl<T: MetalFloat> Operator for MetalARange<T> {
     fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            // Setup command queue / command buffer / encoder
+            // Set up command buffer and output buffer
             let command_buffer = self.1.new_command_buffer();
             let size = self.3.exec(unsafe { self.4.as_ref().unwrap() }).unwrap();
             let out = self.2.new_buffer(
@@ -173,7 +174,7 @@ impl<T: MetalFloat> Operator for MetalARange<T> {
     }
 }
 
-/// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceCompiler.
+/// Replace the arange pattern with a special kernel. This must be ran **after** the subtraction compiler
 #[derive(Default, LuminalPrint)]
 pub struct ARangeCompiler<T: MetalFloat>(PhantomData<T>);
 
@@ -442,7 +443,6 @@ impl<T: MetalFloat> Operator for MetalExp<T> {
     }
 }
 
-/// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceCompiler.
 #[derive(Default, Debug)]
 pub struct MetalExpCompiler<T: MetalFloat>(PhantomData<T>);
 
@@ -502,7 +502,7 @@ impl<T: MetalFloat> Compiler for MetalExpCompiler<T> {
     }
 }
 
-/// Special kernel for cos
+/// Special kernel for swish activation
 #[derive(LuminalEq, LuminalPrint, Clone)]
 pub struct MetalSwish<T: MetalFloat> {
     pipeline: ComputePipelineState,
