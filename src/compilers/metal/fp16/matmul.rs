@@ -20,9 +20,7 @@ pub struct MetalVecMat {
 }
 
 const BM: u64 = 8;
-const BN: u64 = 8;
-const TM: u64 = 4;
-const TN: u64 = 4;
+const BN: u64 = 32;
 impl MetalVecMat {
     fn new(dev: &Device, queue: CommandQueue) -> Self {
         Self {
@@ -35,108 +33,51 @@ impl MetalVecMat {
 #include <metal_simdgroup>
 using namespace metal;
 
-static constant constexpr const int BM = {BM};
-static constant constexpr const int BN = {BN};
-static constant constexpr const int TM = {TM};
-static constant constexpr const int TN = {TN};
+#define BM {BM}
+#define BN {BN}
+#define TM 4
+#define TN 4
 
 kernel void kernel_vecmat(
-    const device half* in_vec [[buffer(0)]],
-    const device half* mat [[buffer(1)]],
-    device half* out_vec [[buffer(2)]],
-    const constant int& in_vec_size [[buffer(3)]],
-    const constant int& out_vec_size [[buffer(4)]],
-    threadgroup half* tgp_memory [[threadgroup(0)]],
+    const device half4* in_vec [[buffer(0)]],
+    const device half4* mat [[buffer(1)]],
+    device half4* out_vec [[buffer(2)]],
+    const constant int& in_vec_size_divided_by_4 [[buffer(3)]],
+    const constant int& out_vec_size_divided_by_4 [[buffer(4)]],
+    threadgroup half4* tgp_memory [[threadgroup(0)]],
     uint3 tid [[threadgroup_position_in_grid]],
-    uint3 lid [[thread_position_in_threadgroup]],
-    uint simd_gid [[simdgroup_index_in_threadgroup]],
-    uint simd_lid [[thread_index_in_simdgroup]]) {{
+    uint3 lid [[thread_position_in_threadgroup]]) {{
 
-  // Appease compiler
-  (void)simd_gid;
-  (void)simd_lid;
+    // Thread local accumulation results
+    half4 result = 0;
 
-  // Thread local accumulation results
-  half result[TN] = {{0}};
-  half inter[TN];
-  half v_coeff[TM];
+    // Threadgroup accumulation results
+    threadgroup half4* tgp_results = tgp_memory + lid.x * BM;
 
-  // Threadgroup accumulation results
-  threadgroup half* tgp_results = tgp_memory + lid.x * BM * TN;
-
-  uint out_col = (tid.x * BN + lid.x) * TN;
-  uint in_row = lid.y * TM;
-
-  // Edgecase handling
-  if (out_col < out_vec_size) {{
-
-    out_col = out_col + TN < out_vec_size ? out_col : out_vec_size - TN;
+    uint out_col = tid.x * BN + lid.x;
 
     // Per thread accumulation main loop
-    int bm = in_row;
-    for(; bm < in_vec_size; bm += BM * TM) {{
-      // Adding a threadgroup_barrier improves performance slightly
-      // This is possibly it may help exploit cache better
-      threadgroup_barrier(mem_flags::mem_none);
-
-      if(bm + TM <= in_vec_size) {{
+    for(int bm = lid.y; bm < in_vec_size_divided_by_4; bm += BM) {{
         #pragma unroll(TM)
         for(int tm = 0; tm < TM; tm++) {{
-          v_coeff[tm] = in_vec[bm + tm];
+            result += mat[(bm_tn * 4 + tm) * out_vec_size_divided_by_4 + out_col] * in_vec[bm][tm];
         }}
-        #pragma unroll(TM)
-        for(int tm = 0; tm < TM; tm++) {{
-          #pragma unroll(TN)
-          for(int tn = 0; tn < TN; tn++) {{
-            inter[tn] = mat[(bm + tm) * out_vec_size + out_col + tn];
-          }}
-          #pragma unroll(TN)
-          for(int tn = 0; tn < TN; tn++) {{
-            result[tn] += v_coeff[tm] * inter[tn];
-          }}
-        }}
-      }} else {{ // Edgecase handling
-        for(int tm = 0; bm + tm < in_vec_size; tm++) {{
-          v_coeff[tm] = in_vec[bm + tm];
-
-          #pragma unroll(TN)
-          for(int tn = 0; tn < TN; tn++) {{
-            inter[tn] = mat[(bm + tm) * out_vec_size + out_col + tn];
-          }}
-          #pragma unroll(TN)
-          for(int tn = 0; tn < TN; tn++) {{
-            result[tn] += v_coeff[tm] * inter[tn];
-          }}
-        }}
-      }}
-    }}
-  }}
-
-  // Threadgroup collection
-
-  #pragma unroll(TN)
-  for(int i = 0; i < TN; i++) {{
-    tgp_results[lid.y * TN + i] = result[i];
-  }}
-
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  // Threadgroup accumulation and writing out results
-  if(lid.y == 0 && out_col < out_vec_size) {{
-
-    #pragma unroll(BM)
-    for(int i = 1; i < BM; i++) {{
-      #pragma unroll(TN)
-      for(int j = 0; j < TN; j++) {{
-        result[j] += tgp_results[i * TN + j];
-      }}
     }}
 
-    #pragma unroll(TN)
-    for(int j = 0; j < TN; j++) {{
-      out_vec[out_col + j] = result[j];
+    // Threadgroup collection
+    tgp_results[lid.y] = result;
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    // Threadgroup accumulation and writing out results
+    if(lid.y == 0 && out_col * TN < out_vec_size_divided_by_4 * 4) {{
+        #pragma unroll(BM)
+        for(int i = 1; i < BM; i++) {{
+            result += tgp_results[i];
+        }}
+
+        out_vec[out_col] = result;
     }}
-  }}
 }}"
                 ),
                 dev,
@@ -171,14 +112,14 @@ impl MetalKernel for MetalVecMat {
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
-        encoder.set_int(3, m as u32);
-        encoder.set_int(4, n as u32);
-        encoder.set_threadgroup_memory_length(0, BN * TN * BM * TM);
+        encoder.set_u32(3, (m / 4) as u32);
+        encoder.set_u32(4, (n / 4) as u32);
+        encoder.set_threadgroup_memory_length(0, BN * BM * 8);
 
         encoder.set_compute_pipeline_state(&self.kernel);
         encoder.dispatch_thread_groups(
             MTLSize {
-                width: (n as u64).div_ceil(BN * TN),
+                width: (n as u64).div_ceil(BN * 4),
                 height: 1,
                 depth: 1,
             },
@@ -346,9 +287,9 @@ impl MetalKernel for MetalMatmul2D {
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
-        encoder.set_int(3, m as u32);
-        encoder.set_int(4, n as u32);
-        encoder.set_int(5, k as u32);
+        encoder.set_u32(3, m as u32);
+        encoder.set_u32(4, n as u32);
+        encoder.set_u32(5, k as u32);
 
         encoder.set_compute_pipeline_state(&self.simd_shader);
         encoder.dispatch_thread_groups(
@@ -518,9 +459,9 @@ impl MetalKernel for MetalBatchMatmul2D {
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
-        encoder.set_int(3, m as u32);
-        encoder.set_int(4, n as u32);
-        encoder.set_int(5, k as u32);
+        encoder.set_u32(3, m as u32);
+        encoder.set_u32(4, n as u32);
+        encoder.set_u32(5, k as u32);
 
         // Execute
         encoder.dispatch_thread_groups(

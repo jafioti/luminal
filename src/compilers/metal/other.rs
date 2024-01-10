@@ -166,7 +166,7 @@ impl<T: MetalFloat> MetalKernel for MetalARange<T> {
 
         // Set inputs
         encoder.set_buffer(0, Some(output_buffers[0]), 0);
-        encoder.set_int(1, size as u32);
+        encoder.set_u32(1, size as u32);
 
         // Execute
         encoder.dispatch_1d(size);
@@ -563,7 +563,7 @@ impl<T: MetalFloat> MetalKernel for MetalExp<T> {
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
-        encoder.set_int(2, inp_size as u32);
+        encoder.set_u32(2, inp_size as u32);
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -719,7 +719,7 @@ impl<T: MetalFloat> MetalKernel for MetalSwish<T> {
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
-        encoder.set_int(2, inp_size as u32);
+        encoder.set_u32(2, inp_size as u32);
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -903,7 +903,7 @@ impl<T: MetalFloat> MetalKernel for MetalCos<T> {
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
-        encoder.set_int(2, inp_size as u32);
+        encoder.set_u32(2, inp_size as u32);
 
         // Execute
         encoder.dispatch_1d(inp_size);

@@ -230,15 +230,55 @@ impl DispatchNElements for ComputeCommandEncoderRef {
 }
 
 trait SetInt {
-    fn set_int(&self, index: usize, value: u32);
+    fn set_i32(&self, index: usize, value: i32);
+    fn set_u32(&self, index: usize, value: u32);
+    fn set_f32(&self, index: usize, value: f32);
+    fn set_i64(&self, index: usize, value: i64);
+    fn set_u64(&self, index: usize, value: u64);
+    fn set_f64(&self, index: usize, value: f64);
 }
 
 impl SetInt for ComputeCommandEncoderRef {
-    fn set_int(&self, index: usize, value: u32) {
+    fn set_i32(&self, index: usize, value: i32) {
+        self.set_bytes(
+            index as u64,
+            std::mem::size_of::<i32>() as u64,
+            &value as *const i32 as *const _,
+        );
+    }
+    fn set_u32(&self, index: usize, value: u32) {
         self.set_bytes(
             index as u64,
             std::mem::size_of::<u32>() as u64,
             &value as *const u32 as *const _,
+        );
+    }
+    fn set_f32(&self, index: usize, value: f32) {
+        self.set_bytes(
+            index as u64,
+            std::mem::size_of::<f32>() as u64,
+            &value as *const f32 as *const _,
+        );
+    }
+    fn set_i64(&self, index: usize, value: i64) {
+        self.set_bytes(
+            index as u64,
+            std::mem::size_of::<i64>() as u64,
+            &value as *const i64 as *const _,
+        );
+    }
+    fn set_u64(&self, index: usize, value: u64) {
+        self.set_bytes(
+            index as u64,
+            std::mem::size_of::<u64>() as u64,
+            &value as *const u64 as *const _,
+        );
+    }
+    fn set_f64(&self, index: usize, value: f64) {
+        self.set_bytes(
+            index as u64,
+            std::mem::size_of::<f64>() as u64,
+            &value as *const f64 as *const _,
         );
     }
 }
@@ -250,7 +290,7 @@ fn input_dyn_dims(
     index: usize,
 ) {
     for (i, s) in dyn_symbols.iter().enumerate() {
-        encoder.set_int(i + index, dyn_map[s] as u32);
+        encoder.set_u32(i + index, dyn_map[s] as u32);
     }
 }
 

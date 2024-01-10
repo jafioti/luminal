@@ -24,13 +24,15 @@ pub struct MetalRMSNorm {
 impl MetalRMSNorm {
     fn new(epsilon: f32, device: Device, queue: CommandQueue) -> Self {
         let kernel_code = "#include <metal_stdlib>
+#define SIMD_WIDTH 32
+
 using namespace metal;
 kernel void kernel_rms_norm(
-        device const  void * src0,
-        device       half * dst,
-        constant   int64_t & ne00,
-        constant  uint64_t & nb01,
-        constant     float & eps,
+        device const  void * src0 [[buffer(0)]],
+        device       half * dst [[buffer(1)]],
+        constant   int64_t & ne00 [[buffer(2)]],
+        constant  uint64_t & nb01 [[buffer(3)]],
+        constant     float & eps [[buffer(4)]],
         threadgroup float  * buf [[threadgroup(0)]],
         uint tgpig[[threadgroup_position_in_grid]],
         uint tpitg[[thread_position_in_threadgroup]],
@@ -48,7 +50,7 @@ kernel void kernel_rms_norm(
     }
     all_sum = sumf[0] + sumf[1] + sumf[2] + sumf[3];
     all_sum = simd_sum(all_sum);
-    if (ntg > 32) {
+    if (ntg > SIMD_WIDTH) {
         if (sgitg == 0) {
             buf[tiisg] = 0.0f;
         }
@@ -104,21 +106,9 @@ impl MetalKernel for MetalRMSNorm {
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
-        encoder.set_bytes(
-            2,
-            size_of::<i64>() as u64,
-            &(ne00 as i64) as *const i64 as *const _,
-        );
-        encoder.set_bytes(
-            3,
-            size_of::<u64>() as u64,
-            &(nb01 as u64) as *const u64 as *const _,
-        );
-        encoder.set_bytes(
-            4,
-            size_of::<f32>() as u64,
-            &self.epsilon as *const f32 as *const _,
-        );
+        encoder.set_i64(2, ne00 as i64);
+        encoder.set_u64(3, nb01 as u64);
+        encoder.set_f32(4, self.epsilon);
 
         let mut nth = 32; // SIMD width
         while nth < ne00 / 4 && nth < 1024 {

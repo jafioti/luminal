@@ -200,7 +200,7 @@ impl<T> MetalKernel for MetalContiguous<T> {
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
-        encoder.set_int(2, inp_size as u32);
+        encoder.set_u32(2, inp_size as u32);
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
@@ -322,7 +322,7 @@ impl<T> MetalKernel for MetalLog2<T> {
         // Set function inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
-        encoder.set_int(2, inp_size as u32);
+        encoder.set_u32(2, inp_size as u32);
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -423,7 +423,7 @@ impl<T> MetalKernel for MetalExp2<T> {
         // Set function inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
-        encoder.set_int(2, inp_size as u32);
+        encoder.set_u32(2, inp_size as u32);
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -524,7 +524,7 @@ impl<T> MetalKernel for MetalSin<T> {
         // Set function inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
-        encoder.set_int(2, inp_size as u32);
+        encoder.set_u32(2, inp_size as u32);
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -624,7 +624,7 @@ impl<T> MetalKernel for MetalSqrt<T> {
         // Set function inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
-        encoder.set_int(2, inp_size as u32);
+        encoder.set_u32(2, inp_size as u32);
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -724,7 +724,7 @@ impl<T> MetalKernel for MetalRecip<T> {
         // Set function inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
-        encoder.set_int(2, inp_size as u32);
+        encoder.set_u32(2, inp_size as u32);
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -852,7 +852,7 @@ impl<T> MetalKernel for MetalAdd<T> {
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
-        encoder.set_int(3, inp_size as u32);
+        encoder.set_u32(3, inp_size as u32);
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
@@ -1000,7 +1000,7 @@ impl<T> MetalKernel for MetalMul<T> {
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
-        encoder.set_int(3, inp_size as u32);
+        encoder.set_u32(3, inp_size as u32);
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
@@ -1151,7 +1151,7 @@ impl<T> MetalKernel for MetalLessThan<T> {
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
-        encoder.set_int(3, inp_size as u32);
+        encoder.set_u32(3, inp_size as u32);
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
@@ -1288,7 +1288,7 @@ impl<T> MetalKernel for MetalMod<T> {
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
-        encoder.set_int(3, inp_size as u32);
+        encoder.set_u32(3, inp_size as u32);
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
@@ -1453,10 +1453,10 @@ impl<T> MetalKernel for MetalSumReduce<T> {
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
-        encoder.set_int(2, inp_size as u32);
-        encoder.set_int(3, front_size as u32);
-        encoder.set_int(4, back_size as u32);
-        encoder.set_int(5, dim_size as u32);
+        encoder.set_u32(2, inp_size as u32);
+        encoder.set_u32(3, front_size as u32);
+        encoder.set_u32(4, back_size as u32);
+        encoder.set_u32(5, dim_size as u32);
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
@@ -1623,10 +1623,10 @@ impl<T> MetalKernel for MetalMaxReduce<T> {
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
-        encoder.set_int(2, inp_size as u32);
-        encoder.set_int(3, front_size as u32);
-        encoder.set_int(4, back_size as u32);
-        encoder.set_int(5, dim_size as u32);
+        encoder.set_u32(2, inp_size as u32);
+        encoder.set_u32(3, front_size as u32);
+        encoder.set_u32(4, back_size as u32);
+        encoder.set_u32(5, dim_size as u32);
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },

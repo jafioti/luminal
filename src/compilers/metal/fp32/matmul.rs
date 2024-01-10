@@ -153,9 +153,9 @@ impl Operator for MetalMatmul2D {
             encoder.set_buffer(0, Some(a), 0);
             encoder.set_buffer(1, Some(b), 0);
             encoder.set_buffer(2, Some(&out), 0);
-            encoder.set_int(3, m as u32);
-            encoder.set_int(4, n as u32);
-            encoder.set_int(5, k as u32);
+            encoder.set_u32(3, m as u32);
+            encoder.set_u32(4, n as u32);
+            encoder.set_u32(5, k as u32);
 
             if k >= 16 && n >= 256 && ((n != 0) && (n & (n - 1)) == 0) {
                 encoder.set_compute_pipeline_state(&self.simd_shader);
@@ -279,15 +279,15 @@ impl Operator for MetalBatchMatmul2D {
             encoder.set_buffer(0, Some(a), 0);
             encoder.set_buffer(1, Some(b), 0);
             encoder.set_buffer(2, Some(&out), 0);
-            encoder.set_int(3, batch_size as u32);
-            encoder.set_int(4, m as u32);
-            encoder.set_int(5, k as u32);
-            encoder.set_int(6, n as u32);
-            encoder.set_int(7, a_row_major as u32);
-            encoder.set_int(8, b_row_major as u32);
-            encoder.set_int(9, a_strides[0].to_usize().unwrap() as u32);
-            encoder.set_int(10, 0);
-            encoder.set_int(11, (m * n) as u32);
+            encoder.set_u32(3, batch_size as u32);
+            encoder.set_u32(4, m as u32);
+            encoder.set_u32(5, k as u32);
+            encoder.set_u32(6, n as u32);
+            encoder.set_u32(7, a_row_major as u32);
+            encoder.set_u32(8, b_row_major as u32);
+            encoder.set_u32(9, a_strides[0].to_usize().unwrap() as u32);
+            encoder.set_u32(10, 0);
+            encoder.set_u32(11, (m * n) as u32);
 
             // Execute
             encoder.dispatch_1d(batch_size * n * m);
