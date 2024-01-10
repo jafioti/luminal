@@ -206,12 +206,12 @@ kernel void kernel_matmul_2d(
     data1 += block_pos.x * 32 * K;
     data2 += global_pos.y * 32;
 
-    simdgroup_float8x8 acc[4][4];
+    simdgroup_half8x8 acc[4][4];
     #pragma unroll(4)
     for (int i = 0; i < 4; ++i) {
         #pragma unroll(4)
         for (int j = 0; j < 4; ++j) {
-            acc[i][j] = simdgroup_float8x8(0);
+            acc[i][j] = simdgroup_half8x8(0);
         }
     }
 
@@ -381,12 +381,12 @@ kernel void kernel_batch_matmul_2d(
     data1 += M * K * block_pos.z + block_pos.x * 32 * K;
     data2 += global_pos.y * 32;
 
-    simdgroup_float8x8 acc[4][4];
+    simdgroup_half8x8 acc[4][4];
     #pragma unroll(4)
     for (int i = 0; i < 4; ++i) {
         #pragma unroll(4)
         for (int j = 0; j < 4; ++j) {
-            acc[i][j] = simdgroup_float8x8(0);
+            acc[i][j] = simdgroup_half8x8(0);
         }
     }
 
