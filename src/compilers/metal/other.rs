@@ -614,18 +614,13 @@ impl<T: MetalFloat> Compiler for MetalSwishCompiler<T> {
             NodeIndex::default(),
         );
 
-        let neg_one_node = constant_select_op!(-1.0, T).ptr(&mut neg_one);
-        let mul1_node = SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul1);
-        let mul2_node = SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul2);
-        let exp_node = SelectOp::new().ty::<MetalExp<T>>().ptr(&mut exp);
-        let recip_node = SelectOp::new().ty::<MetalRecip<T>>().ptr(&mut recip);
-        let add_node = SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add);
-        let mut searcher = neg_one_node
-            .edge(mul1_node)
-            .edge(exp_node)
-            .edge(add_node)
-            .edge(recip_node)
-            .edge(mul2_node)
+        let mut searcher = constant_select_op!(-1.0, T)
+            .ptr(&mut neg_one)
+            .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul1))
+            .edge(SelectOp::new().ty::<MetalExp<T>>().ptr(&mut exp))
+            .edge(SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add))
+            .edge(SelectOp::new().ty::<MetalRecip<T>>().ptr(&mut recip))
+            .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul2))
             .search(graph);
 
         while searcher.next_match() {
@@ -635,12 +630,12 @@ impl<T: MetalFloat> Compiler for MetalSwishCompiler<T> {
             }
 
             // Check the if input to add is one
-            let add_sources = graph.get_sources(add);
-            let src_index = if add_sources[0].0 == exp {
-                add_sources[0].0
-            } else {
-                add_sources[1].0
-            };
+            let src_index = graph
+                .get_sources(add)
+                .into_iter()
+                .find(|i| i.0 != exp)
+                .unwrap()
+                .0;
             // If test op is not 1, we continue
             if let Some(test_op) = graph
                 .graph
@@ -659,31 +654,34 @@ impl<T: MetalFloat> Compiler for MetalSwishCompiler<T> {
             }
 
             // Now we look for the input
-            let mul1_sources = graph.get_sources(mul1);
-            let (src1_index, _, shape1) = mul1_sources[0];
-            let (src2_index, _, shape2) = mul1_sources[1];
-            let (src_index, shape) = if src1_index == neg_one {
-                (src2_index, shape2)
-            } else {
-                (src1_index, shape1)
-            };
+            let (src_index, src_output, src_shape) = graph
+                .get_sources(mul1)
+                .into_iter()
+                .find(|i| i.0 != neg_one)
+                .unwrap();
+            if !graph
+                .get_sources(mul2)
+                .into_iter()
+                .any(|i| i.0 == src_index)
+            {
+                continue;
+            }
 
             // Insert swish op
             let swish = graph
                 .add_op(MetalSwish::<T>::new(dev.clone(), queue.clone()))
-                .input(src_index, 0, shape)
+                .input(src_index, src_output, src_shape)
                 .finish();
 
             // Create edges to dests
             move_outgoing_edge(mul2, swish, &mut graph.graph);
 
             // Remove the old ops
-            if graph.get_dests(src_index).len() == 1 {
-                graph.graph.remove_node(src_index);
+            if graph.get_dests(neg_one).len() == 1 {
+                graph.graph.remove_node(neg_one);
             }
             graph.graph.remove_node(mul1);
             graph.graph.remove_node(mul2);
-            graph.graph.remove_node(neg_one);
             graph.graph.remove_node(exp);
             graph.graph.remove_node(one);
             graph.graph.remove_node(add);

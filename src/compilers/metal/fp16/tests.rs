@@ -161,10 +161,7 @@ fn test_square() {
     let mut b = a * a;
     b.retrieve();
 
-    cx.compile(
-        <(MetalFp16Compiler, PostGenericCompiler)>::default(),
-        &mut b,
-    );
+    cx.compile(GenericCompiler::<MetalFp16Compiler>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -537,7 +534,7 @@ fn test_batch_matmul_transpose() {
     let mut a_t_b_t = a_t.permute::<_, LAxes3<0, 2, 1>>().matmul(b_t).retrieve();
 
     cx.compile(
-        <(MetalFp16Compiler, PostGenericCompiler)>::default(),
+        GenericCompiler::<MetalFp16Compiler>::default(),
         (&mut a_b, &mut a_b_t, &mut a_t_b, &mut a_t_b_t),
     );
     cx.execute();
@@ -587,7 +584,7 @@ fn test_matmul_transpose() {
     let mut a_t_b_t = a_t.permute::<_, LAxes2<1, 0>>().matmul(b_t).retrieve();
 
     cx.compile(
-        <(MetalFp16Compiler, PostGenericCompiler)>::default(),
+        GenericCompiler::<MetalFp16Compiler>::default(),
         (&mut a_b, &mut a_b_t, &mut a_t_b, &mut a_t_b_t),
     );
     cx.execute();
@@ -643,7 +640,7 @@ fn test_relu_and_linear() {
     b.drop();
     batch_out.drop();
     cx.compile(
-        <(MetalFp16Compiler, PostGenericCompiler)>::default(),
+        GenericCompiler::<MetalFp16Compiler>::default(),
         (&mut b, &mut batch_out),
     );
     cx.execute();
@@ -687,10 +684,7 @@ fn test_rms_norm() {
     model.weight.set(weight_data.clone());
     let mut b = model.forward(a).retrieve();
 
-    cx.compile(
-        <(MetalFp16Compiler, PostGenericCompiler)>::default(),
-        &mut b,
-    );
+    cx.compile(GenericCompiler::<MetalFp16Compiler>::default(), &mut b);
     cx.execute();
 
     // Test against dfdx
@@ -754,10 +748,7 @@ fn test_transformer_encoder_block() {
         .set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![1, 2, 3]);
     let mut b = model.forward(a).retrieve();
 
-    cx.compile(
-        <(MetalFp16Compiler, PostGenericCompiler)>::default(),
-        &mut b,
-    );
+    cx.compile(GenericCompiler::<MetalFp16Compiler>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();
