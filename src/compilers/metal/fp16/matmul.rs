@@ -60,7 +60,7 @@ kernel void kernel_vecmat(
     for(int bm = lid.y; bm < in_vec_size_divided_by_4; bm += BM) {{
         #pragma unroll(TM)
         for(int tm = 0; tm < TM; tm++) {{
-            result += mat[(bm_tn * 4 + tm) * out_vec_size_divided_by_4 + out_col] * in_vec[bm][tm];
+            result += mat[(bm * 4 + tm) * out_vec_size_divided_by_4 + out_col] * in_vec[bm][tm];
         }}
     }}
 
