@@ -73,6 +73,7 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
                 graph.graph.remove_node(dest);
             }
             graph.graph.remove_node(first);
+            selector.clear_cached_results();
         }
     }
 }
