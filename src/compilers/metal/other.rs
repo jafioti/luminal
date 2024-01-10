@@ -19,57 +19,24 @@ pub struct CopyCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for CopyCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
-        for (first, second) in graph
-            .graph
-            .edge_indices()
-            .filter_map(|e| graph.graph.edge_endpoints(e))
-            .filter(|(a, b)| {
-                (graph
-                    .graph
-                    .node_weight(*a)
-                    .unwrap()
-                    .as_any()
-                    .is::<MetalCopyToDevice<T>>()
-                    && graph
-                        .graph
-                        .node_weight(*b)
-                        .unwrap()
-                        .as_any()
-                        .is::<MetalCopyFromDevice<T>>())
-                    || (graph
-                        .graph
-                        .node_weight(*a)
-                        .unwrap()
-                        .as_any()
-                        .is::<MetalCopyFromDevice<T>>()
-                        && graph
-                            .graph
-                            .node_weight(*b)
-                            .unwrap()
-                            .as_any()
-                            .is::<MetalCopyToDevice<T>>())
-            })
-            .unique_by(|n| n.0)
-            .unique_by(|n| n.1)
-            .collect::<Vec<_>>()
-        {
+        let (mut first, mut second) = (NodeIndex::default(), NodeIndex::default());
+        let mut selector = SelectOp::new()
+            .ty::<MetalCopyToDevice<T>>()
+            .ptr(&mut first)
+            .edge(
+                SelectOp::new()
+                    .ty::<MetalCopyToDevice<T>>()
+                    .ptr(&mut second),
+            )
+            .search(graph);
+        while selector.next_match() {
+            // Ensure there are no dests from first that are not copies
             if graph
                 .graph
                 .edges_directed(first, petgraph::Direction::Outgoing)
-                .filter(|e| graph.graph.contains_node(e.target()))
                 .filter(|e| {
-                    !graph
-                        .graph
-                        .node_weight(e.target())
-                        .unwrap()
-                        .as_any()
-                        .is::<MetalCopyFromDevice<T>>()
-                        && !graph
-                            .graph
-                            .node_weight(e.target())
-                            .unwrap()
-                            .as_any()
-                            .is::<MetalCopyToDevice<T>>()
+                    let target = graph.graph.node_weight(e.target()).unwrap().as_any();
+                    !target.is::<MetalCopyFromDevice<T>>() && !target.is::<MetalCopyToDevice<T>>()
                 })
                 .count()
                 > 0
@@ -77,16 +44,16 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
             {
                 continue;
             }
-            let Some(source) = graph.get_sources(first).pop() else {
+            let Some((source, _, _)) = graph.get_sources(first).pop() else {
                 continue;
             };
-            move_outgoing_edge(second, source.0, &mut graph.graph);
+            move_outgoing_edge(second, source, &mut graph.graph);
             move_references(
                 &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 second,
-                source.0,
+                source,
             );
             graph.graph.remove_node(second);
             for dest in graph
@@ -95,13 +62,13 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
                 .map(|(i, _)| *i)
                 .collect::<Vec<_>>()
             {
-                move_outgoing_edge(dest, source.0, &mut graph.graph);
+                move_outgoing_edge(dest, source, &mut graph.graph);
                 move_references(
                     &mut remap,
                     &mut graph.no_delete,
                     &mut graph.to_retrieve,
                     dest,
-                    source.0,
+                    source,
                 );
                 graph.graph.remove_node(dest);
             }
@@ -374,146 +341,6 @@ impl<T: MetalFloat> Compiler for ContiguousElimination<T> {
         }
     }
 }
-
-// #[derive(LuminalEq, LuminalPrint, Clone)]
-// pub struct MetalSoftmax<T: MetalFloat> {
-//     pipeline: ComputePipelineState,
-//     queue: CommandQueue,
-//     device: Device,
-//     _phantom: PhantomData<T>,
-// }
-
-// impl<T: MetalFloat> MetalSoftmax<T> {
-//     fn new(device: Device, queue: CommandQueue) -> Self {
-//         Self {
-//             pipeline: compile_function(
-//                 "metal_softmax",
-//                 "
-// #include <metal_stdlib>
-// using namespace metal;
-// kernel void metal_softmax(device half *out [[buffer(0)]], device int& n_elements [[buffer(1)]], uint idx [[thread_position_in_grid]]) {
-// }",
-//                 &device,
-//             ),
-//             queue,
-//             device,
-//             _phantom: Default::default(),
-//         }
-//     }
-// }
-
-// impl<T: MetalFloat> MetalKernel for MetalSoftmax<T> {
-//     fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<BigExpression> {
-//         vec![BigExpression::from(0) * std::mem::size_of::<f16>()]
-//     }
-//     fn metal_forward(
-//         &self,
-//         _: &[(&Buffer, ShapeTracker)],
-//         _: &CommandBufferRef,
-//         _: &[&Buffer],
-//         _: &[&Buffer],
-//     ) {
-//         // let encoder =
-//         //     command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-//         // encoder.set_compute_pipeline_state(&self.pipeline);
-
-//         // // Set inputs
-//         // encoder.set_buffer(0, Some(output_buffers[0]), 0);
-//         // encoder.set_int(1, size as u32);
-
-//         // // Execute
-//         // encoder.dispatch_1d(size);
-//         // encoder.end_encoding();
-//     }
-// }
-
-// impl<T: MetalFloat> Operator for MetalSoftmax<T> {
-//     fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-//         // autoreleasepool(|| {
-//         //     // Setup command queue / command buffer / encoder
-//         //     let command_buffer = self.1.new_command_buffer();
-//         //     let size = self.3.exec(unsafe { self.4.as_ref().unwrap() }).unwrap();
-//         //     let out = self.2.new_buffer(
-//         //         (size * std::mem::size_of::<f16>()) as u64,
-//         //         MTLResourceOptions::StorageModeShared,
-//         //     );
-
-//         //     self.metal_forward(&[], command_buffer, &[], &[&out]);
-
-//         //     command_buffer.commit();
-//         //     command_buffer.wait_until_completed();
-
-//         //     vec![Tensor::new(out)]
-//         // })
-//         vec![]
-//     }
-
-//     fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
-//         if key == "metal" {
-//             #[allow(clippy::arc_with_non_send_sync)]
-//             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
-//                 self.clone(),
-//             )))));
-//         }
-//         None
-//     }
-// }
-
-// /// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceCompiler.
-// #[derive(Default, LuminalPrint)]
-// pub struct MetalSoftmaxCompiler<T: MetalFloat>(PhantomData<T>);
-
-// impl<T: MetalFloat> Compiler for MetalSoftmaxCompiler<T> {
-//     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
-//         let dev = Device::system_default().unwrap();
-//         let queue = dev.new_command_queue();
-//         let (mut x1, mut max_reduce, mut sub, mut exp, mut sum_reduce, mut recip, mut mul) = (
-//             NodeIndex::default(),
-//             NodeIndex::default(),
-//             NodeIndex::default(),
-//             NodeIndex::default(),
-//             NodeIndex::default(),
-//             NodeIndex::default(),
-//             NodeIndex::default(),
-//         );
-
-//         let mut searcher = SelectOp::new()
-//             .ptr(&mut x1)
-//             .edge(
-//                 SelectOp::new()
-//                     .ty::<MetalMaxReduce<T>>()
-//                     .ptr(&mut max_reduce),
-//             )
-//             .edge(SelectOp::new().ty::<MetalSub<T>>().ptr(&mut sub))
-//             .edge(SelectOp::new().ty::<MetalExp<T>>().ptr(&mut exp))
-//             .edge(
-//                 SelectOp::new()
-//                     .ty::<MetalSumReduce<T>>()
-//                     .ptr(&mut sum_reduce),
-//             )
-//             .edge(SelectOp::new().ty::<MetalRecip<T>>().ptr(&mut recip))
-//             .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul))
-//             .search(graph);
-
-//         while searcher.next_match() {
-//             if graph.get_sources(mul).iter().any(|(i, _, _)| *i == exp)
-//                 && graph.get_sources(sub).iter().any(|(i, _, _)| *i == x1)
-//             {
-//                 let softmax = graph
-//                     .add_op(MetalSoftmax::<T>::new(dev.clone(), queue.clone()))
-//                     .finish();
-//                 move_outgoing_edge(mul, softmax, &mut graph.graph);
-
-//                 graph.graph.remove_node(mul);
-//                 graph.graph.remove_node(recip);
-//                 graph.graph.remove_node(max_reduce);
-//                 graph.graph.remove_node(sum_reduce);
-//                 graph.graph.remove_node(sub);
-//                 graph.graph.remove_node(exp);
-//             }
-//         }
-//     }
-// }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
 pub struct MetalExp<T: MetalFloat> {
