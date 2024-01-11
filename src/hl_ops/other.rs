@@ -26,6 +26,11 @@ impl<S: Shape> GraphTensor<S> {
         pooled.shape.remove_dim(axis + 1);
         GraphTensor::from_id(final_id, pooled.shape, self.graph_ref)
     }
+
+    /// Cumulative product last dimension
+    pub fn cumprod_last_dim(self) -> Self {
+        self.ln().cumsum_last_dim().exp()
+    }
 }
 
 impl Graph {
@@ -110,6 +115,17 @@ mod tests {
         cx.execute();
 
         assert_exact(&arange.data(), &[0., 1., 2., 3., 4., 5., 6., 7., 8., 9.]);
+    }
+
+    #[test]
+    fn test_cumprod() {
+        let mut cx = Graph::new();
+
+        let a = cx.tensor::<R1<3>>().set(vec![3., 2., 5.]);
+        let b = a.cumprod_last_dim().retrieve();
+        cx.execute();
+
+        assert_close(&b.data(), &[3., 6., 30.]);
     }
 
     #[test]
