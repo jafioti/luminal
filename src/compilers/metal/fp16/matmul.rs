@@ -355,81 +355,19 @@ impl Operator for MetalMatmul2D {
 
 /// Multiplies a BxMxK matrix with a KxN matrix, resulting in a BxMxN matrix
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalBatchMatmul2D(ComputePipelineState, CommandQueue, Device);
+pub struct MLXMatmul(ComputePipelineState, CommandQueue, Device);
 
-impl MetalBatchMatmul2D {
+impl MLXMatmul {
     fn compile(dev: &Device) -> ComputePipelineState {
         compile_function(
-            "kernel_batch_matmul_2d",
-            "
-#include <metal_stdlib>
-#include <metal_simdgroup_matrix>
-#include <metal_simdgroup>
-using namespace metal;
-
-kernel void kernel_batch_matmul_2d(
-    device const half *data1 [[buffer(0)]],
-    device const half *data2 [[buffer(1)]],
-    device half *a [[buffer(2)]],
-    device int& M [[buffer(3)]],
-    device int& N [[buffer(4)]],
-    device int& K [[buffer(5)]],
-    uint3 block_pos [[threadgroup_position_in_grid]],
-    uint3 global_pos [[thread_position_in_grid]]
-) {
-    a += M * N * block_pos.z + block_pos.x * 32 * N + global_pos.y * 32;
-    data1 += M * K * block_pos.z + block_pos.x * 32 * K;
-    data2 += global_pos.y * 32;
-
-    simdgroup_half8x8 acc[4][4];
-    #pragma unroll(4)
-    for (int i = 0; i < 4; ++i) {
-        #pragma unroll(4)
-        for (int j = 0; j < 4; ++j) {
-            acc[i][j] = simdgroup_half8x8(0);
-        }
-    }
-
-    simdgroup_half8x8 A[4];
-    simdgroup_half8x8 B[4];
-    int k8 = 8 * K;
-    for (int k = 0; k < K; k+=8) {
-        threadgroup_barrier(mem_flags::mem_threadgroup);
-        device const half *d1 = data1 + k;
-        #pragma unroll(4)
-        for (int i = 0; i < 4; ++i) {
-            simdgroup_load(A[i], d1 + i * k8, K);
-            simdgroup_load(B[i], data2 + k * N + i * 8, N);
-        }
-
-        #pragma unroll(4)
-        for (int i = 0; i < 4; ++i) {
-            for (int j = 0; j < 4; ++j) {
-                simdgroup_multiply_accumulate(acc[i][j], A[j], B[i], acc[i][j]);
-            }
-        }
-    }
-
-    simdgroup_half8x8 temp = simdgroup_half8x8(0);
-    simdgroup_half8x8 ident = simdgroup_half8x8(1);
-    // Width
-    #pragma unroll(4)
-    for (int i = 0; i < 4; ++i) {
-        int n8i = i * 8 * N;
-        // Height
-        #pragma unroll(4)
-        for (int j = 0; j < 4; ++j) {
-            simdgroup_multiply(temp, acc[j][i], ident);
-            simdgroup_store(temp, a+(8*j+n8i), N);
-        }
-    }
-}",
+            "gemm_nn_float16_float16_bm32_bn32_bk16_wm2_wn2_MN_naligned_K_taligned",
+            include_str!("gemm.metal"),
             dev,
         )
     }
 }
 
-impl MetalKernel for MetalBatchMatmul2D {
+impl MetalKernel for MLXMatmul {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         let (batch_size, m, n) = (
             input_shapes[0].shape()[0].clone(),
@@ -461,28 +399,31 @@ impl MetalKernel for MetalBatchMatmul2D {
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
-        encoder.set_u32(3, m as u32);
-        encoder.set_u32(4, n as u32);
-        encoder.set_u32(5, k as u32);
+        encoder.set_i32(3, m as i32);
+        encoder.set_i32(4, n as i32);
+        encoder.set_i32(5, k as i32);
+        encoder.set_i32(6, (m * k) as i32);
+        encoder.set_i32(7, 0);
+        encoder.set_i32(8, (m * n) as i32);
 
         // Execute
         encoder.dispatch_thread_groups(
             MTLSize {
-                width: (m as u64).div_ceil(32),
-                height: (n as u64).div_ceil(32 * 8),
+                width: (n + 32 - 1).div_ceil(32) as u64,
+                height: (m + 32 - 1).div_ceil(32) as u64,
                 depth: batch_size as u64,
             },
             MTLSize {
                 width: 32,
-                height: 8,
-                depth: 1,
+                height: 2,
+                depth: 2,
             },
         );
         encoder.end_encoding();
     }
 }
 
-impl Operator for MetalBatchMatmul2D {
+impl Operator for MLXMatmul {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup command queue / command buffer / encoder
@@ -870,8 +811,8 @@ impl Compiler for MetalMatMulCompiler {
                 src2_shape = src2_shape.contiguous();
             }
             let mut matmul_op = graph
-                .add_op(MetalBatchMatmul2D(
-                    MetalBatchMatmul2D::compile(&dev),
+                .add_op(MLXMatmul(
+                    MLXMatmul::compile(&dev),
                     queue.clone(),
                     dev.clone(),
                 ))
