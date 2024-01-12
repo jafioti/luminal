@@ -57,24 +57,20 @@ impl MetalKernel for MatVec {
         encoder.set_i32(4, n as i32);
         encoder.set_i32(5, 0 as i32);
         encoder.set_i32(6, 0 as i32);
-        encoder.set_threadgroup_memory_length(0, BN * BM * 8);
+        encoder.set_threadgroup_memory_length(
+            0,
+            if inputs[1].1.is_contiguous() {
+                BN * BM * 4
+            } else {
+                BN * 8
+            },
+        );
 
         encoder.set_compute_pipeline_state(&self.pipeline);
+        let b = if inputs[1].1.is_contiguous() { BN } else { BM };
         encoder.dispatch_thread_groups(
-            MTLSize {
-                width: if inputs[1].1.is_contiguous() {
-                    (n as u64 + BN * 4 - 1).div_ceil(BN * 4)
-                } else {
-                    (n as u64 + BM * 4 - 1).div_ceil(BM * 4)
-                },
-                height: 1,
-                depth: 1,
-            },
-            MTLSize {
-                width: BN,
-                height: BM,
-                depth: 1,
-            },
+            MTLSize::new((n as u64 + b * 4 - 1).div_ceil(b * 4), 1, 1),
+            MTLSize::new(BN, BM, 1),
         );
         encoder.end_encoding();
     }
@@ -179,22 +175,18 @@ impl MetalKernel for Matmul {
         encoder.set_i32(3, m as i32);
         encoder.set_i32(4, n as i32);
         encoder.set_i32(5, k as i32);
-        encoder.set_i32(6, (m * k) as i32);
-        encoder.set_i32(7, 0);
-        encoder.set_i32(8, (m * n) as i32);
+        encoder.set_i32(6, (m * k) as i32); // A batch stride
+        encoder.set_i32(7, 0); // B batch stride
+        encoder.set_i32(8, (m * n) as i32); // C batch stride
 
         // Execute
         encoder.dispatch_thread_groups(
-            MTLSize {
-                width: (n + 32 - 1).div_ceil(32) as u64,
-                height: (m + 32 - 1).div_ceil(32) as u64,
-                depth: batch_size as u64,
-            },
-            MTLSize {
-                width: 32,
-                height: 2,
-                depth: 2,
-            },
+            MTLSize::new(
+                (n + 32 - 1).div_ceil(32) as u64,
+                (m + 32 - 1).div_ceil(32) as u64,
+                batch_size as u64,
+            ),
+            MTLSize::new(32, 2, 2),
         );
         encoder.end_encoding();
     }
