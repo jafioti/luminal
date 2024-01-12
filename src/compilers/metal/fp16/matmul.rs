@@ -13,84 +13,23 @@ use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Multiplies a M vector with a MxN matrix, resulting in a N vector. Expects the matrix to be NxM row-major
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalVecMat {
-    kernel: ComputePipelineState,
+pub struct MatVec {
+    pipeline: ComputePipelineState,
     queue: CommandQueue,
     device: Device,
 }
 
 const BM: u64 = 8;
 const BN: u64 = 32;
-impl MetalVecMat {
-    fn new(dev: &Device, queue: CommandQueue) -> Self {
-        Self {
-            kernel: compile_function(
-                "kernel_vecmat",
-                &format!(
-                    "
-#include <metal_stdlib>
-#include <metal_simdgroup_matrix>
-#include <metal_simdgroup>
-using namespace metal;
-
-#define BM {BM}
-#define BN {BN}
-#define TM 4
-#define TN 4
-
-kernel void kernel_vecmat(
-    const device half4* in_vec [[buffer(0)]],
-    const device half4* mat [[buffer(1)]],
-    device half4* out_vec [[buffer(2)]],
-    const constant int& in_vec_size [[buffer(3)]],
-    const constant int& out_vec_size [[buffer(4)]],
-    threadgroup half4* tgp_memory [[threadgroup(0)]],
-    uint3 tid [[threadgroup_position_in_grid]],
-    uint3 lid [[thread_position_in_threadgroup]]) {{
-
-    int in_vec_size_divided_by_4 = in_vec_size / 4;
-    int out_vec_size_divided_by_4 = out_vec_size / 4;
-    uint out_col = tid.x * BN + lid.x;
-
-    // Thread local accumulation results
-    half4 result = 0;
-
-    // Threadgroup accumulation results
-    threadgroup half4* tgp_results = tgp_memory + lid.x * BM;
-
-    // Per thread accumulation main loop
-    for(int bm = lid.y; bm < in_vec_size_divided_by_4; bm += BM) {{
-        #pragma unroll(TM)
-        for(int tm = 0; tm < TM; tm++) {{
-            result += mat[(bm * 4 + tm) * out_vec_size_divided_by_4 + out_col] * in_vec[bm][tm];
-        }}
-    }}
-
-    // Threadgroup collection
-    tgp_results[lid.y] = result;
-
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
-    // Threadgroup accumulation and writing out results
-    if(lid.y == 0 && out_col * TN < out_vec_size) {{
-        #pragma unroll(BM)
-        for(int i = 1; i < BM; i++) {{
-            result += tgp_results[i];
-        }}
-
-        out_vec[out_col] = result;
-    }}
-}}"
-                ),
-                dev,
-            ),
-            queue,
-            device: dev.clone(),
-        }
+impl MatVec {
+    fn compile(device: &Device) -> Library {
+        device
+            .new_library_with_source(include_str!("gemv.metal"), &CompileOptions::new())
+            .unwrap()
     }
 }
 
-impl MetalKernel for MetalVecMat {
+impl MetalKernel for MatVec {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![input_shapes[1].shape()[1].clone() * size_of::<f16>()]
     }
@@ -111,17 +50,23 @@ impl MetalKernel for MetalVecMat {
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
 
         // Set inputs
-        encoder.set_buffer(0, Some(inputs[0].0), 0);
-        encoder.set_buffer(1, Some(inputs[1].0), 0);
+        encoder.set_buffer(0, Some(inputs[1].0), 0);
+        encoder.set_buffer(1, Some(inputs[0].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
-        encoder.set_u32(3, m as u32);
-        encoder.set_u32(4, n as u32);
+        encoder.set_i32(3, m as i32);
+        encoder.set_i32(4, n as i32);
+        encoder.set_i32(5, 0 as i32);
+        encoder.set_i32(6, 0 as i32);
         encoder.set_threadgroup_memory_length(0, BN * BM * 8);
 
-        encoder.set_compute_pipeline_state(&self.kernel);
+        encoder.set_compute_pipeline_state(&self.pipeline);
         encoder.dispatch_thread_groups(
             MTLSize {
-                width: (n as u64).div_ceil(BN * 4),
+                width: if inputs[1].1.is_contiguous() {
+                    (n as u64 + BN * 4 - 1).div_ceil(BN * 4)
+                } else {
+                    (n as u64 + BM * 4 - 1).div_ceil(BM * 4)
+                },
                 height: 1,
                 depth: 1,
             },
@@ -135,7 +80,7 @@ impl MetalKernel for MetalVecMat {
     }
 }
 
-impl Operator for MetalVecMat {
+impl Operator for MatVec {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup command queue / command buffer / encoder
@@ -176,18 +121,16 @@ impl Operator for MetalVecMat {
 
 /// Multiplies a BxMxK matrix with a KxN matrix, resulting in a BxMxN matrix
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct Matmul(ComputePipelineState, CommandQueue, Device);
+pub struct Matmul {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+}
 
 impl Matmul {
     fn compile(dev: &Device) -> Library {
         dev.new_library_with_source(include_str!("gemm.metal"), &CompileOptions::new())
             .unwrap()
-
-        // compile_function(
-        //     "gemm_nn_float16_float16_bm32_bn32_bk16_wm2_wn2_MN_naligned_K_taligned",
-        //     include_str!("gemm.metal"),
-        //     dev,
-        // )
     }
 }
 
@@ -227,7 +170,7 @@ impl MetalKernel for Matmul {
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.pipeline);
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
@@ -261,7 +204,7 @@ impl Operator for Matmul {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup command queue / command buffer / encoder
-            let command_buffer = self.1.new_command_buffer();
+            let command_buffer = self.queue.new_command_buffer();
 
             let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
             let n = b_shape[1].to_usize().unwrap();
@@ -274,7 +217,7 @@ impl Operator for Matmul {
                 (0, a_shape[0].to_usize().unwrap())
             };
 
-            let out = self.2.new_buffer(
+            let out = self.device.new_buffer(
                 (batch_size * m * n * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -315,7 +258,7 @@ impl Compiler for MetalMatMulCompiler {
         let queue = dev.new_command_queue();
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
 
-        // Look for vetmat pattern
+        // Look for vecmat pattern
         // Mul ([1(fake), N(fake), M] | [1(fake), N, M]) -> SumReduce(2) -> [N]
         let vecmat_pattern = SelectOp::new()
             .ty::<MetalMul<f16>>()
@@ -364,6 +307,7 @@ impl Compiler for MetalMatMulCompiler {
         // Mul ([1, 1(fake?), N(fake), M] | [1, 1(fake), N, M]) -> SumReduce(2) -> [N]
         let mut s1 = vecmat_pattern.search(graph);
         let mut s2 = batch_vecmat_pattern.search(graph);
+        let matvec_library = MatVec::compile(&dev);
         while s1.next_match() || s2.next_match() {
             if graph.no_delete.contains(&mul) {
                 // The intermediate mul can't be deleted
@@ -385,7 +329,7 @@ impl Compiler for MetalMatMulCompiler {
             src2_shape.remove_dim(0);
             src2_shape.permute(&[1, 0]);
             // Src1: [M], Src2: [N, M]
-            if !src2_shape.is_contiguous() || src2_shape.is_sliced() || src2_shape.is_padded() {
+            if src2_shape.is_sliced() || src2_shape.is_padded() {
                 src2 = graph
                     .add_op(MetalContiguous::<f16>::new(
                         src2_shape,
@@ -398,8 +342,29 @@ impl Compiler for MetalMatMulCompiler {
                 src2_shape = src2_shape.contiguous();
             }
 
+            let pipeline_state_descriptor = ComputePipelineDescriptor::new();
+            pipeline_state_descriptor.set_compute_function(Some(
+                &matvec_library
+                    .get_function(
+                        &format!(
+                            "gemv_{}float16_bm{BM}_bn{BN}_tm4_tn4",
+                            if src2_shape.is_contiguous() { "t_" } else { "" }
+                        ),
+                        None,
+                    )
+                    .unwrap(),
+            ));
+            let pipeline = dev
+                .new_compute_pipeline_state_with_function(
+                    pipeline_state_descriptor.compute_function().unwrap(),
+                )
+                .unwrap();
             let matmul_op = graph
-                .add_op(MetalVecMat::new(&dev, queue.clone()))
+                .add_op(MatVec {
+                    pipeline,
+                    device: dev.clone(),
+                    queue: queue.clone(),
+                })
                 .input(src1, 0, src1_shape)
                 .input(src2, 0, src2_shape)
                 .finish();
@@ -529,7 +494,11 @@ impl Compiler for MetalMatMulCompiler {
                 )
                 .unwrap();
             let matmul_op = graph
-                .add_op(Matmul(pipeline, queue.clone(), dev.clone()))
+                .add_op(Matmul {
+                    pipeline,
+                    queue: queue.clone(),
+                    device: dev.clone(),
+                })
                 .input(src1, 0, src1_shape)
                 .input(src2, 0, src2_shape)
                 .finish();
@@ -556,13 +525,13 @@ mod tests {
     crate::test_imports!();
     #[test]
     fn test_matrix_vector() {
-        const M: usize = 256;
+        const M: usize = 53;
         const N: usize = 256;
         let mut cx = Graph::new();
         let (a_vec, b_vec) = (random_vec(M), random_vec(M * N));
         let mut a = cx.named_tensor::<R2<1, M>>("Vec").set(a_vec.clone());
-        let mut b = cx.named_tensor::<R2<M, N>>("Mat").set(b_vec.clone());
-        let mut c = a.matmul(b).retrieve();
+        let mut b = cx.named_tensor::<R2<N, M>>("Mat").set(b_vec.clone());
+        let mut c = a.matmul(b.permute()).retrieve();
 
         cx.compile(
             GenericCompiler::<MetalFp16Compiler>::default(),
@@ -572,8 +541,8 @@ mod tests {
 
         let d_dev = Cpu::default();
         let d_a = d_dev.tensor_from_vec(a_vec, (DConst::<M>,));
-        let d_b = d_dev.tensor_from_vec(b_vec, (DConst::<M>, DConst::<N>));
-        let d_c = d_a.matmul(d_b);
+        let d_b = d_dev.tensor_from_vec(b_vec, (DConst::<N>, DConst::<M>));
+        let d_c = d_a.matmul(d_b.permute());
 
         assert_close_precision(&c.data(), &d_c.as_vec(), 2);
     }
@@ -592,7 +561,6 @@ mod tests {
             GenericCompiler::<MetalFp16Compiler>::default(),
             (&mut a, &mut b, &mut c),
         );
-        // cx.display();
         cx.execute();
 
         let d_dev = Cpu::default();
