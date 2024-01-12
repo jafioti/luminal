@@ -23,7 +23,7 @@ use metal_rs::*;
 use crate::{
     op::InputTensor,
     prelude::{
-        symbolic::{BigExpression, Expression, Term},
+        symbolic::{BigExpression, Term},
         *,
     },
 };

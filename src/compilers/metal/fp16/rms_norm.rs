@@ -250,7 +250,6 @@ impl Compiler for RMSNormCompiler {
                         sh,
                         dev.clone(),
                         queue.clone(),
-                        &mut HashMap::new(),
                         &graph.dyn_map,
                     ))
                     .input(x, 0, sh)

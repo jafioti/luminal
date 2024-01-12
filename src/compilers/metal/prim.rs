@@ -147,15 +147,14 @@ pub struct MetalContiguous<T> {
 impl<T: MetalFloat> MetalContiguous<T> {
     pub fn new(
         shape: ShapeTracker,
-        dev: Device,
+        device: Device,
         queue: CommandQueue,
-        kernels: &mut HashMap<String, ComputePipelineState>,
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape], 3);
         let type_name = T::type_name();
-        let mut code = format!("
+        let code = format!("
 #include <metal_stdlib>
 using namespace metal;
 kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]{rendered}) {{
@@ -164,16 +163,10 @@ kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *o
     }}
 }}
 ");
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("mkernel", &name);
-
-        if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &dev));
-        }
         Self {
-            pipeline: kernels[&name].clone(),
+            pipeline: compile_function("mkernel", &code, &device),
             queue,
-            device: dev,
+            device,
             dyn_symbols,
             _phantom: Default::default(),
             dyn_map,
@@ -257,7 +250,6 @@ impl<T: MetalFloat> Operator for MetalContiguous<T> {
                     input_shapes[0],
                     self.device.clone(),
                     self.queue.clone(),
-                    &mut HashMap::new(),
                     self.dyn_map,
                 )
             }
@@ -275,27 +267,18 @@ pub struct MetalLog2<T> {
 }
 
 impl<T: MetalFloat> MetalLog2<T> {
-    pub fn new(
-        device: Device,
-        queue: CommandQueue,
-        kernels: &mut HashMap<String, ComputePipelineState>,
-    ) -> Self {
-        let mut code = format!("
+    pub fn new(device: Device, queue: CommandQueue) -> Self {
+        let type_name = T::type_name();
+        let code = format!("
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         out[idx] = log2(inp[idx]);
     }}
-}}", T::type_name(), T::type_name());
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("mkernel", &name);
-
-        if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &device));
-        }
+}}");
         Self {
-            pipeline: kernels[&name].clone(),
+            pipeline: compile_function("mkernel", &code, &device),
             queue,
             device,
             _phantom: Default::default(),
@@ -377,27 +360,18 @@ pub struct MetalExp2<T> {
 }
 
 impl<T: MetalFloat> MetalExp2<T> {
-    pub fn new(
-        device: Device,
-        queue: CommandQueue,
-        kernels: &mut HashMap<String, ComputePipelineState>,
-    ) -> Self {
-        let mut code = format!("
+    pub fn new(device: Device, queue: CommandQueue) -> Self {
+        let type_name = T::type_name();
+        let code = format!("
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         out[idx] = exp2(inp[idx]);
     }}
-}}", T::type_name(), T::type_name());
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("mkernel", &name);
-
-        if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &device));
-        }
+}}");
         Self {
-            pipeline: kernels[&name].clone(),
+            pipeline: compile_function("mkernel", &code, &device),
             queue,
             device,
             _phantom: Default::default(),
@@ -478,26 +452,17 @@ pub struct MetalSin<T> {
 }
 
 impl<T: MetalFloat> MetalSin<T> {
-    pub fn new(
-        device: Device,
-        queue: CommandQueue,
-        kernels: &mut HashMap<String, ComputePipelineState>,
-    ) -> Self {
-        let mut code = format!("#include <metal_stdlib>
+    pub fn new(device: Device, queue: CommandQueue) -> Self {
+        let type_name = T::type_name();
+        let code = format!("#include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
-        out[idx] = ({})sin((float)inp[idx]);
+        out[idx] = ({type_name})sin((float)inp[idx]);
     }}
-}}", T::type_name(), T::type_name(), T::type_name());
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("mkernel", &name);
-
-        if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &device));
-        }
+}}");
         Self {
-            pipeline: kernels[&name].clone(),
+            pipeline: compile_function("mkernel", &code, &device),
             queue,
             device,
             _phantom: Default::default(),
@@ -579,26 +544,18 @@ pub struct MetalSqrt<T> {
 }
 
 impl<T: MetalFloat> MetalSqrt<T> {
-    pub fn new(
-        device: Device,
-        queue: CommandQueue,
-        kernels: &mut HashMap<String, ComputePipelineState>,
-    ) -> Self {
-        let mut code = format!("#include <metal_stdlib>
+    pub fn new(device: Device, queue: CommandQueue) -> Self {
+        let type_name = T::type_name();
+        let code = format!("
+#include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         out[idx] = sqrt(inp[idx]);
     }}
-}}", T::type_name(), T::type_name());
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("mkernel", &name);
-
-        if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &device));
-        }
+}}");
         Self {
-            pipeline: kernels[&name].clone(),
+            pipeline: compile_function("mkernel", &code, &device),
             queue,
             device,
             _phantom: Default::default(),
@@ -679,26 +636,18 @@ pub struct MetalRecip<T> {
 }
 
 impl<T: MetalFloat> MetalRecip<T> {
-    pub fn new(
-        device: Device,
-        queue: CommandQueue,
-        kernels: &mut HashMap<String, ComputePipelineState>,
-    ) -> Self {
-        let mut code = format!("#include <metal_stdlib>
+    pub fn new(device: Device, queue: CommandQueue) -> Self {
+        let type_name = T::type_name();
+        let code = format!("
+#include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp [[buffer(0)]], device {} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         out[idx] = 1.0 / inp[idx];
     }}
-}}", T::type_name(), T::type_name());
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("mkernel", &name);
-
-        if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &device));
-        }
+}}");
         Self {
-            pipeline: kernels[&name].clone(),
+            pipeline: compile_function("mkernel", &code, &device),
             queue,
             device,
             _phantom: Default::default(),
@@ -770,7 +719,7 @@ impl<T: MetalFloat> Operator for MetalRecip<T> {
     }
 }
 
-#[derive(LuminalPrint, Clone)]
+#[derive(LuminalPrint, LuminalEq, Clone)]
 pub struct MetalAdd<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -778,14 +727,6 @@ pub struct MetalAdd<T> {
     _phantom: PhantomData<T>,
     dyn_symbols: Vec<char>,
     dyn_map: *const HashMap<char, usize>,
-    a_shape: ShapeTracker,
-    b_shape: ShapeTracker,
-}
-
-impl<T> PartialEq for MetalAdd<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.a_shape.eq(&other.a_shape) && self.b_shape.eq(&other.b_shape)
-    }
 }
 
 impl<T: MetalFloat> MetalAdd<T> {
@@ -794,40 +735,30 @@ impl<T: MetalFloat> MetalAdd<T> {
         b_shape: ShapeTracker,
         device: Device,
         queue: CommandQueue,
-        kernels: &mut HashMap<String, ComputePipelineState>,
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
-        let mut code = format!(
-            "
+        let type_name = T::type_name();
+        let code = format!("
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{rendered}) {{
+kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} *inp_b [[buffer(1)]], device {type_name} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{rendered}) {{
     if (idx < n_elements) {{
         out[idx] =
             (({a_valid_exp}) == 0 ? 0.0h : inp_a[{a_idx_exp}])
             + (({b_valid_exp}) == 0 ? 0.0h : inp_b[{b_idx_exp}]);
     }}
 }}
-", T::type_name(), T::type_name(), T::type_name()
-        );
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("mkernel", &name);
-
-        if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &device));
-        }
+");
         Self {
-            pipeline: kernels[&name].clone(),
+            pipeline: compile_function("mkernel", &code, &device),
             queue,
             device,
             dyn_symbols,
             _phantom: Default::default(),
             dyn_map,
-            a_shape,
-            b_shape,
         }
     }
 }
@@ -909,7 +840,6 @@ impl<T: MetalFloat> Operator for MetalAdd<T> {
                     input_shapes[1],
                     self.device.clone(),
                     self.queue.clone(),
-                    &mut HashMap::new(),
                     self.dyn_map,
                 )
             }
@@ -918,7 +848,7 @@ impl<T: MetalFloat> Operator for MetalAdd<T> {
     }
 }
 
-#[derive(LuminalPrint, Clone)]
+#[derive(LuminalPrint, LuminalEq, Clone)]
 pub struct MetalMul<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -926,14 +856,6 @@ pub struct MetalMul<T> {
     dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
     dyn_map: *const HashMap<char, usize>,
-    a_shape: ShapeTracker,
-    b_shape: ShapeTracker,
-}
-
-impl<T> PartialEq for MetalMul<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.a_shape.eq(&other.a_shape) && self.b_shape.eq(&other.b_shape)
-    }
 }
 
 impl<T: MetalFloat> MetalMul<T> {
@@ -942,40 +864,30 @@ impl<T: MetalFloat> MetalMul<T> {
         b_shape: ShapeTracker,
         device: Device,
         queue: CommandQueue,
-        kernels: &mut HashMap<String, ComputePipelineState>,
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
-        let mut code = format!(
-            "
+        let type_name = T::type_name();
+        let code = format!("
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {} *inp_a [[buffer(0)]], device {} *inp_b [[buffer(1)]], device {} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{rendered}) {{
+kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} *inp_b [[buffer(1)]], device {type_name} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{rendered}) {{
     if (idx < n_elements) {{
         out[idx] =
             (({a_valid_exp}) == 0 ? 0.0h : inp_a[{a_idx_exp}])
             * (({b_valid_exp}) == 0 ? 0.0h : inp_b[{b_idx_exp}]);
     }}
 }}
-", T::type_name(), T::type_name(), T::type_name()
-        );
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("mkernel", &name);
-
-        if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &device));
-        }
+");
         Self {
-            pipeline: kernels[&name].clone(),
+            pipeline: compile_function("mkernel", &code, &device),
             queue,
             device,
             dyn_symbols,
             _phantom: Default::default(),
             dyn_map,
-            a_shape,
-            b_shape,
         }
     }
 }
@@ -1058,7 +970,6 @@ impl<T: MetalFloat> Operator for MetalMul<T> {
                     input_shapes[1],
                     self.device.clone(),
                     self.queue.clone(),
-                    &mut HashMap::new(),
                     self.dyn_map,
                 )
             }
@@ -1083,15 +994,13 @@ impl<T: MetalFloat> MetalLessThan<T> {
         b_shape: ShapeTracker,
         device: Device,
         queue: CommandQueue,
-        kernels: &mut HashMap<String, ComputePipelineState>,
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
         let type_name = T::type_name();
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
-        let mut code = format!(
-            "
+        let code = format!("
 #include <metal_stdlib>
 using namespace metal;
 kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} *inp_b [[buffer(1)]], device {type_name} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{rendered}) {{
@@ -1113,14 +1022,8 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
 }}
 ", if T::is_f32() {"1.0"} else {"1.0h"},if T::is_f32() {"0.0"} else {"0.0h"},
         );
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("mkernel", &name);
-
-        if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &device));
-        }
         Self {
-            pipeline: kernels[&name].clone(),
+            pipeline: compile_function("mkernel", &code, &device),
             queue,
             device,
             dyn_symbols,
@@ -1209,7 +1112,6 @@ impl<T: MetalFloat> Operator for MetalLessThan<T> {
                     input_shapes[1],
                     self.device.clone(),
                     self.queue.clone(),
-                    &mut HashMap::new(),
                     self.dyn_map,
                 )
             }
@@ -1234,14 +1136,13 @@ impl<T: MetalFloat> MetalMod<T> {
         b_shape: ShapeTracker,
         device: Device,
         queue: CommandQueue,
-        kernels: &mut HashMap<String, ComputePipelineState>,
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
         let type_name = T::type_name();
-        let mut code = format!(
+        let code = format!(
             "
 #include <metal_stdlib>
 using namespace metal;
@@ -1251,14 +1152,8 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
     }}
 }}
 ");
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("mkernel", &name);
-
-        if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &device));
-        }
         Self {
-            pipeline: kernels[&name].clone(),
+            pipeline: compile_function("mkernel", &code, &device),
             queue,
             device,
             dyn_symbols,
@@ -1345,7 +1240,6 @@ impl<T: MetalFloat> Operator for MetalMod<T> {
                     input_shapes[1],
                     self.device.clone(),
                     self.queue.clone(),
-                    &mut HashMap::new(),
                     self.dyn_map,
                 )
             }
@@ -1371,14 +1265,12 @@ impl<T: MetalFloat> MetalSumReduce<T> {
         dim: usize,
         device: Device,
         queue: CommandQueue,
-        kernels: &mut HashMap<String, ComputePipelineState>,
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape], 6);
         let type_name = T::type_name();
-        let mut code = format!(
-            "
+        let code = format!("
 #include <metal_stdlib>
 using namespace metal;
 kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], device int& front_size [[buffer(3)]], device int& back_size [[buffer(4)]], device int& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{rendered}) {{
@@ -1396,14 +1288,8 @@ kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *o
     }}
 }}
 ");
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("mkernel", &name);
-
-        if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &device));
-        }
         Self {
-            pipeline: kernels[&name].clone(),
+            pipeline: compile_function("mkernel", &code, &device),
             queue,
             device,
             dim,
@@ -1514,7 +1400,6 @@ impl<T: MetalFloat> Operator for MetalSumReduce<T> {
                     self.dim,
                     self.device.clone(),
                     self.queue.clone(),
-                    &mut HashMap::new(),
                     self.dyn_map,
                 )
             }
@@ -1540,14 +1425,12 @@ impl<T: MetalFloat> MetalMaxReduce<T> {
         dim: usize,
         device: Device,
         queue: CommandQueue,
-        kernels: &mut HashMap<String, ComputePipelineState>,
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
         let type_name = T::type_name();
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape], 6);
-        let mut code = format!(
-            "
+        let code = format!("
 #include <metal_stdlib>
 using namespace metal;
 kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], device int& front_size [[buffer(3)]], device int& back_size [[buffer(4)]], device int& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{rendered}) {{
@@ -1567,14 +1450,8 @@ kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *o
 }}
 ", if T::is_f32() {"(float)0x7f800000"} else {"MAXHALF"},
         );
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("mkernel", &name);
-
-        if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &device));
-        }
         Self {
-            pipeline: kernels[&name].clone(),
+            pipeline: compile_function("mkernel", &code, &device),
             queue,
             device,
             dim,
@@ -1687,7 +1564,6 @@ impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
                     self.dim,
                     self.device.clone(),
                     self.queue.clone(),
-                    &mut HashMap::new(),
                     self.dyn_map,
                 )
             }
@@ -1860,7 +1736,6 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
         }
 
         // Swap primitive ops
-        let mut kernels = HashMap::new();
         for id in graph.graph.node_indices().collect::<Vec<_>>() {
             let src_shapes = graph
                 .graph
@@ -1872,17 +1747,9 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
             let op = graph.graph.node_weight(id).unwrap().as_any().type_id();
             let op_ref = graph.graph.node_weight_mut(id).unwrap();
             if is::<Log2>(op) {
-                *op_ref = Box::new(MetalLog2::<T>::new(
-                    dev.clone(),
-                    queue.clone(),
-                    &mut kernels,
-                ));
+                *op_ref = Box::new(MetalLog2::<T>::new(dev.clone(), queue.clone()));
             } else if is::<Exp2>(op) {
-                *op_ref = Box::new(MetalExp2::<T>::new(
-                    dev.clone(),
-                    queue.clone(),
-                    &mut kernels,
-                ));
+                *op_ref = Box::new(MetalExp2::<T>::new(dev.clone(), queue.clone()));
             } else if let Some(c) = op_ref.as_any().downcast_ref::<Constant>() {
                 *op_ref = Box::new(MetalConstant::<T>(
                     c.0.clone(),
@@ -1891,26 +1758,17 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                     Default::default(),
                 ));
             } else if is::<Sin>(op) {
-                *op_ref = Box::new(MetalSin::<T>::new(dev.clone(), queue.clone(), &mut kernels));
+                *op_ref = Box::new(MetalSin::<T>::new(dev.clone(), queue.clone()));
             } else if is::<Sqrt>(op) {
-                *op_ref = Box::new(MetalSqrt::<T>::new(
-                    dev.clone(),
-                    queue.clone(),
-                    &mut kernels,
-                ));
+                *op_ref = Box::new(MetalSqrt::<T>::new(dev.clone(), queue.clone()));
             } else if is::<Recip>(op) {
-                *op_ref = Box::new(MetalRecip::<T>::new(
-                    dev.clone(),
-                    queue.clone(),
-                    &mut kernels,
-                ));
+                *op_ref = Box::new(MetalRecip::<T>::new(dev.clone(), queue.clone()));
             } else if is::<Add>(op) {
                 *op_ref = Box::new(MetalAdd::<T>::new(
                     src_shapes[0],
                     src_shapes[1],
                     dev.clone(),
                     queue.clone(),
-                    &mut kernels,
                     &graph.dyn_map,
                 ));
             } else if is::<Mul>(op) {
@@ -1919,7 +1777,6 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                     src_shapes[1],
                     dev.clone(),
                     queue.clone(),
-                    &mut kernels,
                     &graph.dyn_map,
                 ));
             } else if is::<LessThan>(op) {
@@ -1928,7 +1785,6 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                     src_shapes[1],
                     dev.clone(),
                     queue.clone(),
-                    &mut kernels,
                     &graph.dyn_map,
                 ));
             } else if is::<Mod>(op) {
@@ -1937,7 +1793,6 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                     src_shapes[1],
                     dev.clone(),
                     queue.clone(),
-                    &mut kernels,
                     &graph.dyn_map,
                 ));
             } else if let Some(SumReduce(dim)) = op_ref.as_any().downcast_ref() {
@@ -1946,7 +1801,6 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                     *dim,
                     dev.clone(),
                     queue.clone(),
-                    &mut kernels,
                     &graph.dyn_map,
                 ));
             } else if let Some(MaxReduce(dim)) = op_ref.as_any().downcast_ref() {
@@ -1955,7 +1809,6 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                     *dim,
                     dev.clone(),
                     queue.clone(),
-                    &mut kernels,
                     &graph.dyn_map,
                 ));
             } else if is::<Contiguous>(op) {
@@ -1963,7 +1816,6 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                     src_shapes[0],
                     dev.clone(),
                     queue.clone(),
-                    &mut kernels,
                     &graph.dyn_map,
                 ));
             }
