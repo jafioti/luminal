@@ -491,6 +491,7 @@ impl Compiler for MetalMatMulCompiler {
                     .finish();
                 src2_shape = src2_shape.contiguous();
             }
+
             let matmul_op = if !src2_shape.is_contiguous() && false {
                 graph
                     .add_op(MatVec1Row {
