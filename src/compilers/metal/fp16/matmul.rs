@@ -43,11 +43,10 @@ kernel void matvec(
     device const half4* mat = (device const half4*)(mat_bytes + threadgroup_pos.x * M * 2 + chunk_offset);
     device const half4* vec = (device const half4*)(vec_bytes + chunk_offset);
 
-    half4 sum4 = 0;
+    half sum = 0;
     for (int i = simd_pos; i < M/32; i += 32) {
-        sum4 += mat[i] * vec[i];
+        for (int k = 0; k < 4; ++k) sum += mat[i][k] * vec[i][k];
     }
-    half sum = sum4[0] + sum4[1] + sum4[2] + sum4[3];
     half all_sum = simd_sum(sum);
     if (simd_pos == 0) {
         tgp_memory[thread_pos.z] = all_sum;
