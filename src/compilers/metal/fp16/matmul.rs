@@ -200,7 +200,7 @@ impl MetalKernel for Matmul {
                 input_shapes[0].shape()[1].clone(),
             )
         } else {
-            (0.into(), input_shapes[0].shape()[0].clone())
+            (1.into(), input_shapes[0].shape()[0].clone())
         };
         vec![BigExpression::from(m) * n * batch_size * size_of::<f16>()]
     }
@@ -222,7 +222,7 @@ impl MetalKernel for Matmul {
                 a_shape[1].to_usize().unwrap(),
             )
         } else {
-            (0, a_shape[0].to_usize().unwrap())
+            (1, a_shape[0].to_usize().unwrap())
         };
 
         let encoder =
@@ -264,10 +264,7 @@ impl Operator for Matmul {
             let command_buffer = self.1.new_command_buffer();
 
             let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
-            let (k, n) = (
-                b_shape[0].to_usize().unwrap(),
-                b_shape[1].to_usize().unwrap(),
-            );
+            let n = b_shape[1].to_usize().unwrap();
             let (batch_size, m) = if a_shape.len() == 3 {
                 (
                     a_shape[0].to_usize().unwrap(),
@@ -484,7 +481,9 @@ impl Compiler for MetalMatMulCompiler {
             let (mut src2, mut src2_shape) = (srcs[1].0, srcs[1].2);
             // Undo expansions and permute
             src1_shape.remove_dim(if src1_shape.len() == 4 { 2 } else { 1 });
-            src2_shape.remove_dim(1);
+            if src2_shape.len() == 4 {
+                src2_shape.remove_dim(1);
+            }
             src2_shape.remove_dim(0);
             src2_shape.permute(&[1, 0]);
             // Pad out N to multiple of 256 and K to 16
@@ -558,7 +557,6 @@ impl Compiler for MetalMatMulCompiler {
                     )
                     .unwrap(),
             ));
-
             let pipeline = dev
                 .new_compute_pipeline_state_with_function(
                     pipeline_state_descriptor.compute_function().unwrap(),
