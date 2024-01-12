@@ -32,17 +32,6 @@ fn main() {
                     .collect(),
                 _ => panic!("{:?} is not a supported dtype", tensor.dtype()),
             };
-            if weight_name.contains("q_proj") || weight_name.contains("o_proj") {
-                data = transpose(&data, 4096, 4096);
-            } else if weight_name.contains("k_proj") || weight_name.contains("v_proj") {
-                data = transpose(&data, 1024, 4096);
-            } else if weight_name.contains("gate_proj") || weight_name.contains("up_proj") {
-                data = transpose(&data, 14336, 4096);
-            } else if weight_name.contains("down_proj") {
-                data = transpose(&data, 4096, 14336);
-            } else if weight_name.contains("lm_head") {
-                data = transpose(&data, 32000, 4096);
-            }
             println!("Converted {weight_name}");
             let len = data.len();
             weights.insert(weight_name, Fp16Vec(data, vec![len]));
@@ -54,20 +43,6 @@ fn main() {
         )
         .unwrap();
     }
-}
-
-fn transpose(matrix: &Vec<f16>, rows: usize, cols: usize) -> Vec<f16> {
-    let mut transposed = vec![f16::ZERO; rows * cols];
-
-    for i in 0..rows {
-        for j in 0..cols {
-            let original_index = i * cols + j; // original index for row-major order
-            let transposed_index = j * rows + i; // transposed index for a row-major order matrix
-            transposed[transposed_index] = matrix[original_index];
-        }
-    }
-
-    transposed
 }
 
 struct Fp16Vec(Vec<f16>, Vec<usize>);
