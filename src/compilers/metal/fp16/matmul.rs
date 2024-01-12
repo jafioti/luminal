@@ -174,206 +174,34 @@ impl Operator for MetalVecMat {
     }
 }
 
-/// Multiplies a MxK matrix with a KxN matrix, resulting in a MxN matrix
-#[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalMatmul2D {
-    simd_shader: ComputePipelineState,
-    queue: CommandQueue,
-    device: Device,
-}
-
-impl MetalMatmul2D {
-    fn new(dev: &Device, queue: CommandQueue) -> Self {
-        let simd_shader = compile_function(
-            "kernel_matmul_2d",
-            "
-#include <metal_stdlib>
-#include <metal_simdgroup_matrix>
-#include <metal_simdgroup>
-using namespace metal;
-
-kernel void kernel_matmul_2d(
-    device const half *data1 [[buffer(0)]],
-    device const half *data2 [[buffer(1)]],
-    device half *a [[buffer(2)]],
-    device int& M [[buffer(3)]],
-    device int& N [[buffer(4)]],
-    device int& K [[buffer(5)]],
-    uint3 block_pos [[threadgroup_position_in_grid]],
-    uint3 global_pos [[thread_position_in_grid]]
-) {
-    a += block_pos.x * 32 * N + global_pos.y * 32;
-    data1 += block_pos.x * 32 * K;
-    data2 += global_pos.y * 32;
-
-    simdgroup_half8x8 acc[4][4];
-    #pragma unroll(4)
-    for (int i = 0; i < 4; ++i) {
-        #pragma unroll(4)
-        for (int j = 0; j < 4; ++j) {
-            acc[i][j] = simdgroup_half8x8(0);
-        }
-    }
-
-    simdgroup_half8x8 A[4];
-    simdgroup_half8x8 B[4];
-    int k8 = 8 * K;
-    for (int k = 0; k < K; k+=8) {
-        threadgroup_barrier(mem_flags::mem_threadgroup);
-        device const half *d1 = data1 + k;
-        #pragma unroll(4)
-        for (int i = 0; i < 4; ++i) {
-            simdgroup_load(A[i], d1 + i * k8, K);
-            simdgroup_load(B[i], data2 + k * N + i * 8, N);
-        }
-
-        #pragma unroll(4)
-        for (int i = 0; i < 4; ++i) {
-            #pragma unroll(4)
-            for (int j = 0; j < 4; ++j) {
-                simdgroup_multiply_accumulate(acc[i][j], A[j], B[i], acc[i][j]);
-            }
-        }
-    }
-
-    simdgroup_half8x8 temp = simdgroup_half8x8(0);
-    simdgroup_half8x8 ident = simdgroup_half8x8(1);
-    // Width
-    #pragma unroll(4)
-    for (int i = 0; i < 4; ++i) {
-        int n8i = i * 8 * N;
-        // Height
-        #pragma unroll(4)
-        for (int j = 0; j < 4; ++j) {
-            simdgroup_multiply(temp, acc[j][i], ident);
-            simdgroup_store(temp, a+(8*j+n8i), N);
-        }
-    }
-}",
-            dev,
-        );
-        Self {
-            simd_shader,
-            queue,
-            device: dev.clone(),
-        }
-    }
-}
-
-impl MetalKernel for MetalMatmul2D {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
-        let (m, n) = (
-            input_shapes[0].shape()[0].clone(),
-            input_shapes[1].shape()[1].clone(),
-        );
-        vec![BigExpression::from(m) * n * size_of::<f16>()]
-    }
-    fn metal_forward(
-        &self,
-        inputs: &[(&Buffer, ShapeTracker)],
-        command_buffer: &CommandBufferRef,
-        _: &[&Buffer],
-        output_buffers: &[&Buffer],
-    ) {
-        let (a_shape, b_shape) = (inputs[0].1.shape(), inputs[1].1.shape());
-        let (m, k, n) = (
-            a_shape[0].to_usize().unwrap(),
-            a_shape[1].to_usize().unwrap(),
-            b_shape[1].to_usize().unwrap(),
-        );
-
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-
-        // Set inputs
-        encoder.set_buffer(0, Some(inputs[0].0), 0);
-        encoder.set_buffer(1, Some(inputs[1].0), 0);
-        encoder.set_buffer(2, Some(output_buffers[0]), 0);
-        encoder.set_u32(3, m as u32);
-        encoder.set_u32(4, n as u32);
-        encoder.set_u32(5, k as u32);
-
-        encoder.set_compute_pipeline_state(&self.simd_shader);
-        encoder.dispatch_thread_groups(
-            MTLSize {
-                width: (m as u64).div_ceil(32),
-                height: (n as u64).div_ceil(32 * 8),
-                depth: 1,
-            },
-            MTLSize {
-                width: 32,
-                height: 8,
-                depth: 1,
-            },
-        );
-        encoder.end_encoding();
-    }
-}
-
-impl Operator for MetalMatmul2D {
-    fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        autoreleasepool(|| {
-            // Setup command queue / command buffer / encoder
-            let command_buffer = self.queue.new_command_buffer();
-
-            let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
-            let (m, n) = (
-                a_shape[0].to_usize().unwrap(),
-                b_shape[1].to_usize().unwrap(),
-            );
-
-            let out = self.device.new_buffer(
-                (m * n * std::mem::size_of::<f16>()) as u64,
-                MTLResourceOptions::StorageModeShared,
-            );
-            self.metal_forward(
-                &[
-                    (get_buffer_from_tensor(&inp[0].0), inp[0].1),
-                    (get_buffer_from_tensor(&inp[1].0), inp[1].1),
-                ],
-                command_buffer,
-                &[],
-                &[&out],
-            );
-
-            command_buffer.commit();
-            command_buffer.wait_until_completed();
-
-            vec![Tensor::new(out)]
-        })
-    }
-
-    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
-        if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
-                self.clone(),
-            )))));
-        }
-        None
-    }
-}
-
 /// Multiplies a BxMxK matrix with a KxN matrix, resulting in a BxMxN matrix
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MLXMatmul(ComputePipelineState, CommandQueue, Device);
+pub struct Matmul(ComputePipelineState, CommandQueue, Device);
 
-impl MLXMatmul {
-    fn compile(dev: &Device) -> ComputePipelineState {
-        compile_function(
-            "gemm_nn_float16_float16_bm32_bn32_bk16_wm2_wn2_MN_naligned_K_taligned",
-            include_str!("gemm.metal"),
-            dev,
-        )
+impl Matmul {
+    fn compile(dev: &Device) -> Library {
+        dev.new_library_with_source(include_str!("gemm.metal"), &CompileOptions::new())
+            .unwrap()
+
+        // compile_function(
+        //     "gemm_nn_float16_float16_bm32_bn32_bk16_wm2_wn2_MN_naligned_K_taligned",
+        //     include_str!("gemm.metal"),
+        //     dev,
+        // )
     }
 }
 
-impl MetalKernel for MLXMatmul {
+impl MetalKernel for Matmul {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
-        let (batch_size, m, n) = (
-            input_shapes[0].shape()[0].clone(),
-            input_shapes[0].shape()[1].clone(),
-            input_shapes[1].shape()[1].clone(),
-        );
+        let n = input_shapes[1].shape()[1].clone();
+        let (batch_size, m) = if input_shapes[0].len() == 3 {
+            (
+                input_shapes[0].shape()[0].clone(),
+                input_shapes[0].shape()[1].clone(),
+            )
+        } else {
+            (0.into(), input_shapes[0].shape()[0].clone())
+        };
         vec![BigExpression::from(m) * n * batch_size * size_of::<f16>()]
     }
     fn metal_forward(
@@ -384,12 +212,18 @@ impl MetalKernel for MLXMatmul {
         output_buffers: &[&Buffer],
     ) {
         let (a_shape, b_shape) = (inputs[0].1.shape(), inputs[1].1.shape());
-        let (batch_size, m, k, n) = (
-            a_shape[0].to_usize().unwrap(),
-            a_shape[1].to_usize().unwrap(),
-            a_shape[2].to_usize().unwrap(),
+        let (k, n) = (
+            b_shape[0].to_usize().unwrap(),
             b_shape[1].to_usize().unwrap(),
         );
+        let (batch_size, m) = if a_shape.len() == 3 {
+            (
+                a_shape[0].to_usize().unwrap(),
+                a_shape[1].to_usize().unwrap(),
+            )
+        } else {
+            (0, a_shape[0].to_usize().unwrap())
+        };
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
@@ -423,18 +257,25 @@ impl MetalKernel for MLXMatmul {
     }
 }
 
-impl Operator for MLXMatmul {
+impl Operator for Matmul {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup command queue / command buffer / encoder
             let command_buffer = self.1.new_command_buffer();
 
             let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
-            let (batch_size, m, n) = (
-                a_shape[0].to_usize().unwrap(),
-                a_shape[1].to_usize().unwrap(),
+            let (k, n) = (
+                b_shape[0].to_usize().unwrap(),
                 b_shape[1].to_usize().unwrap(),
             );
+            let (batch_size, m) = if a_shape.len() == 3 {
+                (
+                    a_shape[0].to_usize().unwrap(),
+                    a_shape[1].to_usize().unwrap(),
+                )
+            } else {
+                (0, a_shape[0].to_usize().unwrap())
+            };
 
             let out = self.2.new_buffer(
                 (batch_size * m * n * std::mem::size_of::<f16>()) as u64,
@@ -581,13 +422,10 @@ impl Compiler for MetalMatMulCompiler {
             graph.graph.remove_node(mul);
             graph.graph.remove_node(sum_reduce);
         }
-
         // Look for the matmul pattern
-        // Mul ([M, N(fake), K] | [M(fake), N, K]) -> SumReduce(2) -> [M, N]
-        // or batch matmul where 1st or 2nd dim is 1
-        // Mul ([1, M, N(fake), K] | [1, M(fake), N, K]) -> SumReduce(3) -> [1, M, N] // BMM batch size 1
-        // Mul ([B, 1, N(fake), K] | [B, 1(fake), N, K]) -> SumReduce(3) -> [B, 1, N] // Batch vecmat
-        let matmul_pattern = SelectOp::new()
+        // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
+        // Actually starts at [A,B] | [B, C]
+        let mut single_searcher = SelectOp::new()
             .ty::<MetalMul<f16>>()
             .shapes(vec![
                 vec!['M'.into(), 'N'.into(), 'K'.into()],
@@ -608,117 +446,9 @@ impl Compiler for MetalMatMulCompiler {
                         }
                     })
                     .ptr(&mut sum_reduce),
-            );
-
-        let mut searcher = matmul_pattern.search(graph);
-        while searcher.next_match() {
-            if graph.no_delete.contains(&mul) {
-                // The intermediate mul can't be deleted
-                continue;
-            }
-            // Insert MatMul2D op
-            let srcs = graph.get_sources(mul);
-            let (mut src1, mut src1_shape) = (srcs[0].0, srcs[0].2);
-            let (mut src2, mut src2_shape) = (srcs[1].0, srcs[1].2);
-            // Undo expansions and permute
-            src1_shape.remove_dim(1);
-            src2_shape.remove_dim(0);
-            src2_shape.permute(&[1, 0]);
-
-            // Pad out N to multiple of 256 and K to 16
-            let n_dim = src2_shape.dims[src2_shape.indexes[1]];
-            let k_dim = src1_shape.dims[src1_shape.indexes[1]];
-            let m_dim = src1_shape.dims[src1_shape.indexes[0]];
-            let k_padding = if k_dim.to_usize().map(|i| i % 16 != 0).unwrap_or(true) {
-                (k_dim + 15) / 16 * 16 - k_dim
-            } else {
-                0.into()
-            };
-            let mut padded = false;
-            let m_padding = if m_dim.to_usize().map(|i| i % 32 != 0).unwrap_or(true) {
-                padded = true;
-                (m_dim + 31) / 32 * 32 - m_dim
-            } else {
-                0.into()
-            };
-            let n_padding = if n_dim.to_usize().map(|i| i % 256 != 0).unwrap_or(true) {
-                padded = true;
-                (n_dim + 255) / 256 * 256 - n_dim
-            } else {
-                0.into()
-            };
-            src1_shape.pad(&[(0.into(), m_padding), (0.into(), k_padding)]);
-            src2_shape.pad(&[(0.into(), k_padding), (0.into(), n_padding)]);
-            if !src1_shape.is_contiguous() || src1_shape.is_sliced() || src1_shape.is_padded() {
-                src1 = graph
-                    .add_op(MetalContiguous::<f16>::new(
-                        src1_shape,
-                        dev.clone(),
-                        queue.clone(),
-                        &mut HashMap::new(),
-                        &graph.dyn_map,
-                    ))
-                    .input(src1, 0, src1_shape)
-                    .finish();
-                src1_shape = src1_shape.contiguous();
-            }
-            if !src2_shape.is_contiguous() || src2_shape.is_sliced() || src2_shape.is_padded() {
-                src2 = graph
-                    .add_op(MetalContiguous::<f16>::new(
-                        src2_shape,
-                        dev.clone(),
-                        queue.clone(),
-                        &mut HashMap::new(),
-                        &graph.dyn_map,
-                    ))
-                    .input(src2, 0, src2_shape)
-                    .finish();
-                src2_shape = src2_shape.contiguous();
-            }
-            let mut matmul_op = graph
-                .add_op(MetalMatmul2D::new(&dev, queue.clone()))
-                .input(src1, 0, src1_shape)
-                .input(src2, 0, src2_shape)
-                .finish();
-
-            // Slice back to original size
-            if padded {
-                let mut new_shape = ShapeTracker::new(&[
-                    src1_shape.shape()[0].clone().into(),
-                    src2_shape.shape()[1].clone().into(),
-                ]);
-                new_shape.slice(&[(0.into(), i32::MAX.into()), (0.into(), n_dim)]);
-                matmul_op = graph
-                    .add_op(MetalContiguous::<f16>::new(
-                        new_shape,
-                        dev.clone(),
-                        queue.clone(),
-                        &mut HashMap::new(),
-                        &graph.dyn_map,
-                    ))
-                    .input(matmul_op, 0, new_shape)
-                    .finish();
-            }
-
-            // Create edges to dests
-            move_outgoing_edge(sum_reduce, matmul_op, &mut graph.graph);
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                sum_reduce,
-                matmul_op,
-            );
-
-            // Remove the old ops
-            graph.graph.remove_node(mul);
-            graph.graph.remove_node(sum_reduce);
-        }
-
-        // Look for the batch matmul pattern
-        // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
-        // Actually starts at [A,B] | [B, C]
-        let s = SelectOp::new()
+            )
+            .search(graph);
+        let mut batch_searcher = SelectOp::new()
             .ty::<MetalMul<f16>>()
             .shapes(vec![
                 vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
@@ -740,26 +470,31 @@ impl Compiler for MetalMatMulCompiler {
                         }
                     })
                     .ptr(&mut sum_reduce),
-            );
-        let mut searcher = s.search(graph);
-        while searcher.next_match() {
+            )
+            .search(graph);
+        let matmul_library = Matmul::compile(&dev);
+        while single_searcher.next_match() || batch_searcher.next_match() {
             if graph.no_delete.contains(&mul) {
                 // The intermediate mul can't be deleted
                 continue;
             }
-            // Insert BatchMatMul2D op
+            // Insert Matmul op
             let srcs = graph.get_sources(mul);
             let (mut src1, mut src1_shape) = (srcs[0].0, srcs[0].2);
             let (mut src2, mut src2_shape) = (srcs[1].0, srcs[1].2);
             // Undo expansions and permute
-            src1_shape.remove_dim(2);
+            src1_shape.remove_dim(if src1_shape.len() == 4 { 2 } else { 1 });
             src2_shape.remove_dim(1);
             src2_shape.remove_dim(0);
             src2_shape.permute(&[1, 0]);
             // Pad out N to multiple of 256 and K to 16
             let n_dim = Expression::from(src2_shape.shape()[1].clone());
-            let k_dim = Expression::from(src1_shape.shape()[2].clone());
-            let m_dim = Expression::from(src1_shape.shape()[1].clone());
+            let k_dim = Expression::from(src2_shape.shape()[0].clone());
+            let m_dim = if src1_shape.len() == 3 {
+                Expression::from(src1_shape.shape()[1].clone())
+            } else {
+                Expression::from(src1_shape.shape()[0].clone())
+            };
             let mut padded = false;
             let k_padding = if k_dim.to_usize().map(|i| i % 16 != 0).unwrap_or(true) {
                 (k_dim + 15) / 16 * 16 - k_dim
@@ -778,11 +513,15 @@ impl Compiler for MetalMatMulCompiler {
             } else {
                 0.into()
             };
-            src1_shape.pad(&[
-                (0.into(), 0.into()),
-                (0.into(), m_padding),
-                (0.into(), k_padding),
-            ]);
+            if src1_shape.len() == 2 {
+                src1_shape.pad(&[(0.into(), m_padding), (0.into(), k_padding)]);
+            } else {
+                src1_shape.pad(&[
+                    (0.into(), 0.into()),
+                    (0.into(), m_padding),
+                    (0.into(), k_padding),
+                ]);
+            }
             src2_shape.pad(&[(0.into(), k_padding), (0.into(), n_padding)]);
             if !src1_shape.is_contiguous() || src1_shape.is_sliced() || src1_shape.is_padded() {
                 src1 = graph
@@ -810,27 +549,48 @@ impl Compiler for MetalMatMulCompiler {
                     .finish();
                 src2_shape = src2_shape.contiguous();
             }
+            let pipeline_state_descriptor = ComputePipelineDescriptor::new();
+            pipeline_state_descriptor.set_compute_function(Some(
+                &matmul_library
+                    .get_function(
+                        "gemm_nn_float16_float16_bm32_bn32_bk16_wm2_wn2_MN_naligned_K_taligned",
+                        None,
+                    )
+                    .unwrap(),
+            ));
+
+            let pipeline = dev
+                .new_compute_pipeline_state_with_function(
+                    pipeline_state_descriptor.compute_function().unwrap(),
+                )
+                .unwrap();
             let mut matmul_op = graph
-                .add_op(MLXMatmul(
-                    MLXMatmul::compile(&dev),
-                    queue.clone(),
-                    dev.clone(),
-                ))
+                .add_op(Matmul(pipeline, queue.clone(), dev.clone()))
                 .input(src1, 0, src1_shape)
                 .input(src2, 0, src2_shape)
                 .finish();
             // Slice back to original size
             if padded {
-                let mut new_shape = ShapeTracker::new(&[
-                    Expression::from(src1_shape.shape()[0].clone()),
-                    Expression::from(src1_shape.shape()[1].clone()),
-                    Expression::from(src2_shape.shape()[1].clone()),
-                ]);
-                new_shape.slice(&[
-                    (0.into(), i32::MAX.into()),
-                    (0.into(), m_dim),
-                    (0.into(), n_dim),
-                ]);
+                let new_shape = if src1_shape.len() == 3 {
+                    let mut n = ShapeTracker::new(&[
+                        Expression::from(src1_shape.shape()[0].clone()),
+                        Expression::from(src1_shape.shape()[1].clone()),
+                        Expression::from(src2_shape.shape()[1].clone()),
+                    ]);
+                    n.slice(&[
+                        (0.into(), i32::MAX.into()),
+                        (0.into(), m_dim),
+                        (0.into(), n_dim),
+                    ]);
+                    n
+                } else {
+                    let mut n = ShapeTracker::new(&[
+                        Expression::from(src1_shape.shape()[0].clone()),
+                        Expression::from(src2_shape.shape()[1].clone()),
+                    ]);
+                    n.slice(&[(0.into(), i32::MAX.into()), (0.into(), n_dim)]);
+                    n
+                };
                 matmul_op = graph
                     .add_op(MetalContiguous::<f16>::new(
                         new_shape,
