@@ -14,11 +14,12 @@ use std::{
 
 use colored::Colorize;
 use itertools::Itertools;
-use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Direction};
+use petgraph::{stable_graph::StableGraph, visit::EdgeRef, Direction};
 
 use super::compiler_utils::ToIdsMut;
 
 pub type MainGraph = StableGraph<Box<dyn Operator>, Dependency>;
+pub use petgraph::stable_graph::NodeIndex;
 
 #[derive(Debug, Default)]
 pub struct Graph {
