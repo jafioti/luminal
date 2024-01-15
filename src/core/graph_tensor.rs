@@ -34,20 +34,20 @@ impl<S: Shape> GraphTensor<S> {
 
     /// Mark this tensor to not be deleted
     pub fn keep(self) -> Self {
-        self.graph().no_delete.insert(self.id);
+        self.graph().keep_tensors(self.id);
         self
     }
 
     /// Mark this tensor to be retrieved later
     pub fn retrieve(self) -> Self {
         self.keep();
-        self.graph().to_retrieve.insert(self.id);
+        self.graph().retrieve_tensors(self.id);
         self
     }
 
     /// Remove this tensor's data from the graph.
     pub fn drop(&self) {
-        self.graph().tensors.remove(&(self.id, 0));
+        self.graph().drop_tensors(self.id);
     }
 
     #[allow(clippy::mut_from_ref)]

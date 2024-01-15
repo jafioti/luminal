@@ -16,7 +16,7 @@ use colored::Colorize;
 use itertools::Itertools;
 use petgraph::{stable_graph::StableGraph, visit::EdgeRef, Direction};
 
-use super::compiler_utils::ToIdsMut;
+use super::compiler_utils::{ToIds, ToIdsMut};
 
 pub type MainGraph = StableGraph<Box<dyn Operator>, Dependency>;
 pub use petgraph::stable_graph::NodeIndex;
@@ -80,6 +80,25 @@ impl Graph {
     pub fn get_tensor_ref(&self, id: NodeIndex, ind: u8) -> Option<&Tensor> {
         // Walk through remap
         self.tensors.get(&(id, ind))
+    }
+
+    pub fn drop_tensors<T: ToIds>(&mut self, tensors: T) {
+        for id in tensors.to_ids() {
+            self.tensors.remove(&(id, 0));
+        }
+    }
+
+    pub fn keep_tensors<T: ToIds>(&mut self, tensors: T) {
+        for id in tensors.to_ids() {
+            self.no_delete.insert(id);
+        }
+    }
+
+    pub fn retrieve_tensors<T: ToIds>(&mut self, tensors: T) {
+        for id in tensors.to_ids() {
+            self.no_delete.insert(id);
+            self.to_retrieve.insert(id);
+        }
     }
 
     pub fn set_tensor(&mut self, id: NodeIndex, ind: u8, tensor: Tensor) {
