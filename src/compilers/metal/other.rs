@@ -435,6 +435,9 @@ impl<T: MetalFloat> Operator for MetalExp<T> {
                 self.clone(),
             )))));
         }
+        if key == "elementwise" {
+            return Some(Box::new("exp(input0)".to_string()));
+        }
         // This op can accept non contiguous inputs
         if key == "non_contiguous" {
             return Some(Box::new(()));
@@ -587,6 +590,11 @@ impl<T: MetalFloat> Operator for MetalSwish<T> {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
+        }
+        if key == "elementwise" {
+            return Some(Box::new(
+                "input0 * (1.0h / (1.0h + exp(-input0)))".to_string(),
+            ));
         }
         // This op can accept non contiguous inputs
         if key == "non_contiguous" {
@@ -776,6 +784,9 @@ impl<T: MetalFloat> Operator for MetalCos<T> {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
+        }
+        if key == "elementwise" {
+            return Some(Box::new("cos(input0)".to_string()));
         }
         // This op can accept non contiguous inputs
         if key == "non_contiguous" {

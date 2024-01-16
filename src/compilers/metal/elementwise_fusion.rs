@@ -119,7 +119,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 // Render a into b as input to_input
                 fused_op.equation = fused_op
                     .equation
-                    .replace(&format!("input{to_input}"), &a_equation);
+                    .replace(&format!("input{to_input}"), &format!("({a_equation})"));
                 // Since we are removing the input from a, we must decrement all inputs larger than that
                 for i in to_input + 1..n_edges {
                     fused_op.equation = fused_op
@@ -130,7 +130,8 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 let mut b_equation = graph
                     .node_custom::<String, _>(b, "elementwise", ())
                     .unwrap();
-                b_equation = b_equation.replace(&format!("input{to_input}"), &a_equation);
+                b_equation =
+                    b_equation.replace(&format!("input{to_input}"), &format!("({a_equation})"));
                 // Since we are removing the input from a, we must decrement all inputs larger than that
                 for i in to_input + 1..n_edges {
                     b_equation =

@@ -343,6 +343,9 @@ impl<T: MetalFloat> Operator for MetalLog2<T> {
                 self.clone(),
             )))));
         }
+        if key == "elementwise" {
+            return Some(Box::new("log2(input0)".to_string()));
+        }
         // This op can accept non contiguous inputs
         if key == "non_contiguous" {
             return Some(Box::new(()));
@@ -625,6 +628,9 @@ impl<T: MetalFloat> Operator for MetalSqrt<T> {
                 self.clone(),
             )))));
         }
+        if key == "elementwise" {
+            return Some(Box::new("sqrt(input0)".to_string()));
+        }
         // This op can accept non contiguous inputs
         if key == "non_contiguous" {
             return Some(Box::new(()));
@@ -716,6 +722,9 @@ impl<T: MetalFloat> Operator for MetalRecip<T> {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
+        }
+        if key == "elementwise" {
+            return Some(Box::new("1.0 / input0".to_string()));
         }
         // This op can accept non contiguous inputs
         if key == "non_contiguous" {
@@ -838,6 +847,9 @@ impl<T: MetalFloat> Operator for MetalAdd<T> {
         // This op can accept non contiguous inputs
         if key == "non_contiguous" {
             return Some(Box::new(()));
+        }
+        if key == "elementwise" {
+            return Some(Box::new("input0 + input1".to_string()));
         }
         if key == "recompile_shapes" {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
@@ -968,6 +980,9 @@ impl<T: MetalFloat> Operator for MetalMul<T> {
         // This op can accept non contiguous inputs
         if key == "non_contiguous" {
             return Some(Box::new(()));
+        }
+        if key == "elementwise" {
+            return Some(Box::new("input0 * input1".to_string()));
         }
         if key == "recompile_shapes" {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
@@ -1111,6 +1126,9 @@ impl<T: MetalFloat> Operator for MetalLessThan<T> {
         if key == "non_contiguous" {
             return Some(Box::new(()));
         }
+        if key == "elementwise" {
+            return Some(Box::new("input0 < input1 ? 1.0 : 0.0".to_string()));
+        }
         if key == "recompile_shapes" {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
                 *self = Self::new(
@@ -1238,6 +1256,9 @@ impl<T: MetalFloat> Operator for MetalMod<T> {
         // This op can accept non contiguous inputs
         if key == "non_contiguous" {
             return Some(Box::new(()));
+        }
+        if key == "elementwise" {
+            return Some(Box::new("fmod(input0, input1)".to_string()));
         }
         if key == "recompile_shapes" {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {

@@ -130,6 +130,9 @@ impl<T: MetalFloat> Operator for MetalSub<T> {
         if key == "non_contiguous" {
             return Some(Box::new(()));
         }
+        if key == "elementwise" {
+            return Some(Box::new("input0 - input1".to_string()));
+        }
         if key == "recompile_shapes" {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
                 *self = Self::new(
@@ -336,6 +339,9 @@ impl<T: MetalFloat> Operator for MetalEqual<T> {
         // This op can accept non contiguous inputs
         if key == "non_contiguous" {
             return Some(Box::new(()));
+        }
+        if key == "elementwise" {
+            return Some(Box::new("input0 == input1 ? 1.0 : 0.0".to_string()));
         }
         if key == "recompile_shapes" {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
