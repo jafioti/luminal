@@ -140,10 +140,34 @@ impl Compiler for () {
     fn compile<T: ToIdsMut>(&self, _: &mut Graph, _: T) {}
 }
 
-/// Wrap this around a compiler to measure the time it takes to compile
-pub struct TimedCompiler<C: Compiler + Debug>(C);
+/// Wrap this around a compiler to rerun the compiler until it doesn't change the graph anymore
+pub struct Looped<C: Compiler + Debug>(C);
 
-impl<C: Compiler + Debug> Compiler for TimedCompiler<C> {
+impl<C: Compiler + Debug> Compiler for Looped<C> {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
+        graph.toposort();
+        let mut linearized = graph.linearized_graph.clone();
+        loop {
+            self.0.compile(graph, &mut remap);
+            graph.toposort();
+            if linearized == graph.linearized_graph {
+                break;
+            }
+            linearized = graph.linearized_graph.clone();
+        }
+    }
+}
+
+impl<C: Default + Compiler + Debug> Default for Looped<C> {
+    fn default() -> Self {
+        Self(C::default())
+    }
+}
+
+/// Wrap this around a compiler to measure the time it takes to compile
+pub struct Timed<C: Compiler + Debug>(C);
+
+impl<C: Compiler + Debug> Compiler for Timed<C> {
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, remap: T) {
         let compiler_name = format!("{:?}", self.0).bold();
         println!("Starting {compiler_name}");
@@ -167,7 +191,7 @@ impl<C: Compiler + Debug> Compiler for TimedCompiler<C> {
     }
 }
 
-impl<C: Default + Compiler + Debug> Default for TimedCompiler<C> {
+impl<C: Default + Compiler + Debug> Default for Timed<C> {
     fn default() -> Self {
         Self(C::default())
     }
