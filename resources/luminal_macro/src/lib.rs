@@ -17,7 +17,7 @@ pub fn luminal_eq(input: TokenStream) -> TokenStream {
 
     // Create the expanded trait implementation
     let expanded = quote! {
-        impl #impl_generics PartialEq for #name #ty_generics #where_clause {
+        impl #impl_generics core::cmp::PartialEq for #name #ty_generics #where_clause {
             fn eq(&self, _other: &Self) -> bool {
                 false
             }
@@ -41,7 +41,7 @@ pub fn luminal_print(input: TokenStream) -> TokenStream {
 
     // Create an identifier for the trait implementation
     let gen = quote! {
-        impl #impl_generics Debug for #name #ty_generics #where_clause {
+        impl #impl_generics std::fmt::Debug for #name #ty_generics #where_clause {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(f, stringify!(#name))
             }

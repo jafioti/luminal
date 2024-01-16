@@ -12,6 +12,7 @@ pub mod fp16;
 pub use fp16::*;
 mod binary;
 mod command_buffer;
+mod elementwise_fusion;
 mod other;
 mod prim;
 mod storage_buffer;
