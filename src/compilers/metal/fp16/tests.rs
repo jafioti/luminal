@@ -32,6 +32,22 @@ fn test_contiguous() {
 }
 
 #[test]
+fn test_constant() {
+    let mut cx = Graph::new();
+    let a = cx.constant_expr('a'.into());
+    let mut a = (a * a).retrieve();
+    cx.compile(MetalFp16Compiler::default(), &mut a);
+
+    cx.set_dyn_dim('a', 10);
+    cx.execute();
+    assert_exact(&a.data(), &[100.0]);
+    a.drop();
+    cx.set_dyn_dim('a', 25);
+    cx.execute();
+    assert_exact(&a.data(), &[625.0]);
+}
+
+#[test]
 fn test_log2() {
     let mut cx = Graph::new();
     let data = random_vec(3);
