@@ -64,14 +64,8 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
             // Fuse into a FusedElementwiseOp
             let new_op;
             let mut a_equation = graph
-                .graph
-                .node_weight_mut(a)
-                .unwrap()
-                .custom("elementwise", Box::<()>::default())
-                .unwrap()
-                .downcast_ref::<String>()
-                .unwrap()
-                .clone();
+                .node_custom::<String, _>(a, "elementwise", ())
+                .unwrap();
             let mut n_edges = graph
                 .graph
                 .edges_directed(a, Direction::Incoming)
@@ -131,14 +125,8 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 }
             } else {
                 let mut b_equation = graph
-                    .graph
-                    .node_weight_mut(b)
-                    .unwrap()
-                    .custom("elementwise", Box::<()>::default())
-                    .unwrap()
-                    .downcast_ref::<String>()
-                    .unwrap()
-                    .clone();
+                    .node_custom::<String, _>(b, "elementwise", ())
+                    .unwrap();
                 b_equation = b_equation.replace(&format!("input{to_input}"), &a_equation);
                 // Since we are removing the input from a, we must decrement all inputs larger than that
                 for i in to_input..n_edges {

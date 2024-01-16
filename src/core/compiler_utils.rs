@@ -242,6 +242,23 @@ impl Graph {
         self.graph.add_edge(a, b, Dependency::Schedule);
     }
 
+    /// Run the custom function on a node and get an output
+    pub fn node_custom<O: 'static, I: 'static>(
+        &mut self,
+        node: NodeIndex,
+        key: &str,
+        input: I,
+    ) -> Option<O> {
+        let Some(node_weight) = self.graph.node_weight_mut(node) else {
+            return None;
+        };
+
+        node_weight
+            .custom(key, Box::new(input))
+            .map(|o| o.downcast::<O>().ok().map(|o| *o))
+            .flatten()
+    }
+
     /// Convert to debug-viewable graph
     pub fn debug_graph(
         &self,
