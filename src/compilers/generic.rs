@@ -378,7 +378,7 @@ mod tests {
     fn test_log_exp() {
         let mut cx = Graph::new();
         let a = cx.tensor::<R0>();
-        let _ = a.log_2().exp_2().retrieve();
+        let _ = a.log2().exp2().retrieve();
 
         cx.compile(GenericCompiler::<()>::default(), ());
         assert_eq!(cx.graph.node_count(), 1);

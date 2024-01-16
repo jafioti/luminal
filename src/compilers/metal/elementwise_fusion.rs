@@ -14,7 +14,10 @@ use crate::{
 
 use self::symbolic::BigExpression;
 
-use super::{compile_function, input_dyn_dims, render_dyn_dim_inputs, DispatchNElements};
+use super::{
+    compile_function, get_idx_valid_exps, input_dyn_dims, render_dyn_dim_inputs, DispatchNElements,
+    SetInt,
+};
 
 #[derive(Default, Debug)]
 pub struct ElementwiseFusionCompiler<T>(PhantomData<T>);
@@ -118,7 +121,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     .equation
                     .replace(&format!("input{to_input}"), &a_equation);
                 // Since we are removing the input from a, we must decrement all inputs larger than that
-                for i in to_input..n_edges {
+                for i in to_input + 1..n_edges {
                     fused_op.equation = fused_op
                         .equation
                         .replace(&format!("input{i}"), &format!("input{}", i - 1));
@@ -129,7 +132,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     .unwrap();
                 b_equation = b_equation.replace(&format!("input{to_input}"), &a_equation);
                 // Since we are removing the input from a, we must decrement all inputs larger than that
-                for i in to_input..n_edges {
+                for i in to_input + 1..n_edges {
                     b_equation =
                         b_equation.replace(&format!("input{i}"), &format!("input{}", i - 1));
                 }
@@ -145,6 +148,16 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                         _phantom: Default::default(),
                     })
                     .finish();
+                move_incoming_edge(b, new_op, &mut graph.graph);
+                move_outgoing_edge(b, new_op, &mut graph.graph);
+                move_references(
+                    &mut remap,
+                    &mut graph.no_delete,
+                    &mut graph.to_retrieve,
+                    b,
+                    new_op,
+                );
+                graph.graph.remove_node(b);
             }
             // Remove a
             move_references(
@@ -190,22 +203,31 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
             {
                 let (dyn_chars, rendered) =
                     render_dyn_dim_inputs(&edges.iter().map(|i| i.2).collect_vec(), 0);
+                for (inp_ind, _, sh) in &edges {
+                    let (ind, val) = get_idx_valid_exps(*sh);
+                    op.equation = op.equation.replace(
+                        &format!("input{inp_ind}"),
+                        &format!("({val} != 0) ? input{inp_ind}[{ind}] : 0.0"),
+                    );
+                }
                 let kernel = format!(
                     "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel({} uint idx [[thread_position_in_grid]]{rendered}) {{
-    if (idx < n_element) {{
+kernel void mkernel({} device {type_name} *out [[buffer({})]], device uint& n_elements [[buffer({})]], uint idx [[thread_position_in_grid]]{rendered}) {{
+    if (idx < n_elements) {{
         out[idx] = {};
     }}
 }}",
                     edges
                         .iter()
                         .map(|(inp_ind, _, _)| format!(
-                            "device {type_name}* input{inp_ind} [buffer({inp_ind})],"
+                            "device {type_name}* input{inp_ind} [[buffer({inp_ind})]],"
                         ))
                         .collect_vec()
                         .join(" "),
+                    edges.len(),
+                    edges.len() + 1,
                     op.equation
                 );
                 op.kernel = Some(compile_function("mkernel", &kernel, &device));
@@ -239,21 +261,22 @@ impl<T> MetalKernel for FusedElementwiseOp<T> {
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
         encoder.set_compute_pipeline_state(self.kernel.as_ref().unwrap());
+        let out_size = inputs[0].1.n_physical_elements().to_usize().unwrap();
 
         // Set function inputs
         for (i, (buf, _)) in inputs.iter().enumerate() {
             encoder.set_buffer(i as u64, Some(*buf), 0);
         }
         encoder.set_buffer(inputs.len() as u64, Some(output_buffers[0]), 0);
+        encoder.set_u32(inputs.len() + 1, out_size as u32);
         input_dyn_dims(
             &self.dyn_chars,
             unsafe { self.dyn_map.as_ref().unwrap() },
             &encoder,
-            inputs.len() + 1,
+            inputs.len() + 2,
         );
 
         // Execute
-        let out_size = inputs[0].1.n_physical_elements().to_usize().unwrap();
         encoder.dispatch_1d(out_size);
         encoder.end_encoding();
     }
@@ -301,5 +324,25 @@ impl<T: MetalFloat> Operator for FusedElementwiseOp<T> {
             return Some(Box::new(self.equation.clone()));
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    crate::test_imports!();
+    #[test]
+    fn test_fusion() {
+        let mut cx = Graph::new();
+        let a = cx.tensor::<R1<10>>().set(random_vec(10)).keep();
+        let mut b = a.exp2().sin().retrieve();
+
+        cx.execute();
+        let unopt_b = b.data();
+        b.drop();
+
+        cx.compile(GenericCompiler::<MetalFp16Compiler>::default(), &mut b);
+        cx.execute();
+
+        assert_close(&b.data(), &unopt_b);
     }
 }

@@ -32,7 +32,7 @@ fn test_log2() {
     let mut cx = Graph::new();
     let data = random_vec(3);
     let a = cx.tensor::<R1<3>>().set(data.clone());
-    let mut b = a.log_2().retrieve();
+    let mut b = a.log2().retrieve();
 
     cx.compile(MetalFp32Compiler::default(), &mut b);
     cx.execute();
@@ -48,7 +48,7 @@ fn test_exp2() {
     let mut cx = Graph::new();
     let data = random_vec(3);
     let a = cx.tensor::<R1<3>>().set(data.clone());
-    let mut b = a.exp_2().retrieve();
+    let mut b = a.exp2().retrieve();
 
     cx.compile(MetalFp32Compiler::default(), &mut b);
     cx.execute();

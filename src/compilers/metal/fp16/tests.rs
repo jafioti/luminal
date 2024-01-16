@@ -52,7 +52,7 @@ fn test_log2() {
     let mut cx = Graph::new();
     let data = random_vec(3);
     let a = cx.tensor::<R1<3>>().set(data.clone());
-    let mut b = a.log_2().retrieve();
+    let mut b = a.log2().retrieve();
 
     cx.compile(MetalFp16Compiler::default(), &mut b);
     cx.execute();
@@ -71,7 +71,7 @@ fn test_exp2() {
     let mut cx = Graph::new();
     let data = random_vec(3);
     let a = cx.tensor::<R1<3>>().set(data.clone());
-    let mut b = a.exp_2().retrieve();
+    let mut b = a.exp2().retrieve();
 
     cx.compile(MetalFp16Compiler::default(), &mut b);
     cx.execute();
@@ -834,7 +834,7 @@ fn test_common_buffer() {
     let a1 = cx.tensor::<R1<32>>();
     a1.set(data.clone());
     let exped = a * a1;
-    let mut b = exped.log_2().retrieve();
+    let mut b = exped.log2().retrieve();
     let mut c = exped.sin().retrieve();
 
     cx.compile(MetalFp16Compiler::default(), (&mut b, &mut c));

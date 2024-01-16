@@ -21,7 +21,7 @@ fn main() {
     let e = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
 
     let mut a = (b * c + g).retrieve();
-    let mut d = (b * c / e).exp_2().log_2().retrieve();
+    let mut d = (b * c / e).exp2().log2().retrieve();
 
     cx.execute();
 

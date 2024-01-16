@@ -11,7 +11,7 @@ impl<S: Shape> Neg for GraphTensor<S> {
 
 impl<S: Shape> GraphTensor<S> {
     /// Base 2 log
-    pub fn log_2(self) -> GraphTensor<S> {
+    pub fn log2(self) -> GraphTensor<S> {
         let new_id = self
             .graph()
             .add_op(op::Log2)
@@ -21,7 +21,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Base 2 exp
-    pub fn exp_2(self) -> GraphTensor<S> {
+    pub fn exp2(self) -> GraphTensor<S> {
         let new_id = self
             .graph()
             .add_op(op::Exp2)
@@ -32,12 +32,12 @@ impl<S: Shape> GraphTensor<S> {
 
     /// Natural exp
     pub fn exp(self) -> GraphTensor<S> {
-        (self * (1.0 / f32::ln(2.))).exp_2()
+        (self * (1.0 / f32::ln(2.))).exp2()
     }
 
     /// Natural log
     pub fn ln(self) -> GraphTensor<S> {
-        self.log_2() * f32::ln(2.)
+        self.log2() * f32::ln(2.)
     }
 
     /// Take the reciprocal of each element

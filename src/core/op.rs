@@ -639,7 +639,7 @@ mod tests {
         let mut cx = Graph::new();
         let a = cx.tensor::<R1<3>>();
         a.set(vec![1., 2., 3.]);
-        let b = a.log_2();
+        let b = a.log2();
         b.retrieve();
         cx.execute();
 
@@ -658,7 +658,7 @@ mod tests {
         let mut cx = Graph::new();
         let a = cx.tensor::<R1<3>>();
         a.set(vec![1., 2., 3.]);
-        let b = a.exp_2();
+        let b = a.exp2();
         b.retrieve();
         cx.execute();
 

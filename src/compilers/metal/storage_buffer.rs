@@ -349,8 +349,8 @@ fn test_shared_buffers() {
     crate::test_imports!();
     let mut cx = Graph::new();
     let a = cx.tensor::<R1<5>>().set(random_vec(5)).keep();
-    let b = a.exp_2();
-    let c = a.log_2() * b;
+    let b = a.exp2();
+    let c = a.log2() * b;
     let d = b.recip();
     let mut e = (c + d).retrieve();
 
