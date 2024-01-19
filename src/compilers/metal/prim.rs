@@ -1127,7 +1127,7 @@ impl<T: MetalFloat> Operator for MetalLessThan<T> {
             return Some(Box::new(()));
         }
         if key == "elementwise" {
-            return Some(Box::new("input0 < input1 ? 1.0 : 0.0".to_string()));
+            return Some(Box::new("(float)(input0 < input1)".to_string()));
         }
         if key == "recompile_shapes" {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {

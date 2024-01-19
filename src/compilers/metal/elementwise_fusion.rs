@@ -107,7 +107,6 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     .find(|(src, _, out_ind, _)| *src == input_edge.0 && *out_ind == input_edge.2)
                     .is_none()
                 {
-                    println!("Adding edge {curr_input}");
                     // Move all edges >= curr_input up by one
                     for edge in graph
                         .graph
@@ -134,35 +133,9 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                         },
                     );
                     curr_input += 1;
-                    println!(
-                        "Current: {:?}",
-                        graph
-                            .graph
-                            .edges_directed(b, Direction::Incoming)
-                            .filter_map(|e| e.weight().as_data())
-                            .map(|w| w.0)
-                            .collect_vec()
-                    );
                 }
             }
             // Alter a_equation to reflect the correct input indexes
-            println!("Pre equation: {a_equation}");
-            println!(
-                "Ind: {:?}",
-                graph
-                    .graph
-                    .edges_directed(a, Direction::Incoming)
-                    .map(|e| e.source())
-                    .collect_vec()
-            );
-            println!(
-                "Ind2: {:?}",
-                graph
-                    .graph
-                    .edges_directed(b, Direction::Incoming)
-                    .map(|e| (e.source(), e.weight().as_data().unwrap().0))
-                    .collect_vec()
-            );
             let mut replacements = vec![];
             for input_edge in graph
                 .graph
@@ -176,11 +149,9 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     .filter_map(|e| e.weight().as_data().map(|(a, b, c)| (e.source(), a, b, c)))
                     .find(|(src, _, out_ind, _)| *src == input_edge.0 && *out_ind == input_edge.2)
                     .unwrap();
-                println!("replacing {} with {}", input_edge.1, n.1);
                 replacements.push((format!("input{}", input_edge.1), format!("input{}", n.1)));
             }
             a_equation = multi_replace(&a_equation, &replacements);
-            println!("Post equation: {a_equation}");
 
             if let Some(fused_op) = graph
                 .graph
@@ -195,22 +166,12 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 fused_op.equation = fused_op
                     .equation
                     .replace(&format!("input{to_input}"), &format!("({a_equation})"));
-                println!(
-                    "B edges: {:?}",
-                    graph
-                        .graph
-                        .edges_directed(new_op, Direction::Incoming)
-                        .filter_map(|e| e.weight().as_data())
-                        .map(|w| w.0)
-                        .collect_vec()
-                );
             } else {
                 let mut b_equation = graph
                     .node_custom::<String, _>(b, "elementwise", ())
                     .unwrap();
                 b_equation =
                     b_equation.replace(&format!("input{to_input}"), &format!("({a_equation})"));
-                println!("Eq: {}", b_equation);
                 // B is not a fused op, let's create a new one
                 new_op = graph
                     .add_op(FusedElementwiseOp::<T> {
@@ -234,15 +195,6 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 );
                 graph.graph.remove_node(b);
                 fused_ops.remove(&b);
-                println!(
-                    "New Op edges: {:?}",
-                    graph
-                        .graph
-                        .edges_directed(new_op, Direction::Incoming)
-                        .filter_map(|e| e.weight().as_data())
-                        .map(|w| w.0)
-                        .collect_vec()
-                );
             }
             // Remove a
             move_references(
@@ -256,7 +208,6 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
             fused_ops.remove(&a);
             fused_ops.insert(new_op);
             selector.reset();
-            println!("Finished {}", new_op.index());
         }
         // Compile all the kernels we placed
         let type_name = T::type_name();
@@ -266,19 +217,6 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 .edges_directed(fused_op, Direction::Incoming)
                 .filter_map(|e| e.weight().as_data())
                 .collect_vec();
-            println!("Node: {:?}", fused_op);
-            println!(
-                "Edges: {:?}",
-                graph
-                    .graph
-                    .edges_directed(fused_op, Direction::Incoming)
-                    .sorted_by_key(|e| e.weight().as_data().unwrap().0)
-                    .map(|e| (
-                        e.source(),
-                        format!("{:?}", graph.graph.node_weight(e.source()))
-                    ))
-                    .collect_vec()
-            );
             if let Some(op) = graph
                 .graph
                 .node_weight_mut(fused_op)
@@ -295,12 +233,17 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     if sh.is_contiguous() && !sh.is_sliced() && !sh.is_padded() {
                         op.equation = op.equation.replace(
                             &format!("input{inp_ind}"),
-                            &format!("input{inp_ind}[{ind}]"),
+                            &format!("(float)input{inp_ind}[{ind}]"),
+                        );
+                    } else if !sh.is_sliced() && !sh.is_padded() {
+                        op.equation = op.equation.replace(
+                            &format!("input{inp_ind}"),
+                            &format!("(float)input{inp_ind}[{ind}]"),
                         );
                     } else {
                         op.equation = op.equation.replace(
                             &format!("input{inp_ind}"),
-                            &format!("(({val} != 0) ? input{inp_ind}[{ind}] : 0.0)"),
+                            &format!("(({val} != 0) ? (float)input{inp_ind}[{ind}] : 0.0)"),
                         );
                     }
                 }
@@ -310,7 +253,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
 using namespace metal;
 kernel void mkernel({} device {type_name} *out [[buffer({})]], device uint& n_elements [[buffer({})]], uint idx [[thread_position_in_grid]]{rendered}) {{
     if (idx < n_elements) {{
-        out[idx] = {};
+        out[idx] = ({type_name})({});
     }}
 }}",
                     edges
@@ -324,7 +267,6 @@ kernel void mkernel({} device {type_name} *out [[buffer({})]], device uint& n_el
                     edges.len() + 1,
                     op.equation
                 );
-                println!("{kernel}");
                 op.kernel = Some(compile_function("mkernel", &kernel, &device));
                 op.dyn_chars = dyn_chars;
             }
@@ -372,7 +314,13 @@ pub struct FusedElementwiseOp<T> {
 }
 impl<T> MetalKernel for FusedElementwiseOp<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
-        vec![input_shapes[0].n_physical_elements() * std::mem::size_of::<T>()]
+        if input_shapes.len() == 1 {
+            // Assume since it's a unary op, we're outputting 1-1 elements from input
+            vec![input_shapes[0].n_physical_elements() * std::mem::size_of::<T>()]
+        } else {
+            // If it isn't a unary op, output the contiguous buffer length
+            vec![input_shapes[0].n_elements() * std::mem::size_of::<T>()]
+        }
     }
     fn metal_forward(
         &self,
@@ -384,7 +332,11 @@ impl<T> MetalKernel for FusedElementwiseOp<T> {
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
         encoder.set_compute_pipeline_state(self.kernel.as_ref().unwrap());
-        let out_size = inputs[0].1.n_physical_elements().to_usize().unwrap();
+        let out_size = inputs
+            .iter()
+            .map(|i| i.1.n_elements().to_usize().unwrap())
+            .max()
+            .unwrap();
 
         // Set function inputs
         for (i, (buf, _)) in inputs.iter().enumerate() {
@@ -465,7 +417,6 @@ mod tests {
         c.drop();
 
         cx.compile(GenericCompiler::<MetalFp16Compiler>::default(), &mut c);
-        // cx.display();
         cx.execute();
 
         assert_close(&c.data(), &unopt_c);

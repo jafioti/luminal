@@ -595,6 +595,7 @@ impl GraphSearch {
     }
 }
 
+/// TODO: This should return **all** possible matches stemming from these roots, not just the first
 fn backtrack_match(
     pattern_root: NodeIndex,
     pattern_graph: &SelectionGraph,
