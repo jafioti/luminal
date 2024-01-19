@@ -589,6 +589,10 @@ impl GraphSearch {
     pub fn clear_cached_results(&mut self) {
         self.to_return.clear();
     }
+    pub fn reset(&mut self) {
+        self.clear_cached_results();
+        self.returned_anchors.clear();
+    }
 }
 
 fn backtrack_match(

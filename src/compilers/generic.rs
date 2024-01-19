@@ -29,7 +29,8 @@ pub type PreGenericCompiler = (
 
 pub type PostGenericCompiler = (
     // RemoveUnusedNodes, // Broken right now, unclear why
-    CSE,
+    // CSE,
+    (),
 );
 
 /// Eliminate complementary unary sequential operations like `x.log().exp()`
