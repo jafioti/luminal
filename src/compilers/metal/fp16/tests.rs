@@ -454,40 +454,41 @@ fn test_matmul() {
     }
 }
 
-// #[test]
-// fn test_attn_matmul() {
-//     let mut cx = Graph::new();
-//     let mut rng = StdRng::seed_from_u64(0);
-//     let a_data = random_vec_rng(32 * 11 * 128, &mut rng);
-//     let b_data = random_vec_rng(32 * 11 * 128, &mut rng);
-//     let a = cx.new_tensor::<R4<1, 32, 11, 128>>("Input");
-//     a.set(a_data.clone());
-//     a.keep();
-//     let b = cx.new_tensor::<R4<1, 32, 128, 11>>("Input");
-//     b.set(b_data.clone());
-//     b.keep();
-//     let c = a.matmul(b);
-//     c.retrieve();
+#[test]
+fn test_attn_matmul() {
+    let mut cx = Graph::new();
+    let mut rng = StdRng::seed_from_u64(0);
+    let a_data = random_vec_rng(32 * 11 * 128, &mut rng);
+    let b_data = random_vec_rng(32 * 11 * 128, &mut rng);
+    let a = cx
+        .named_tensor::<R4<1, 32, 11, 128>>("Input")
+        .set(a_data.clone())
+        .keep();
+    let b = cx
+        .named_tensor::<R4<1, 32, 128, 11>>("Input")
+        .set(b_data.clone())
+        .keep();
+    let mut c = a.matmul(b).retrieve();
 
-//     cx.compile(MetalFp16Compiler::default());
-//     cx.execute();
+    cx.compile(MetalFp16Compiler::default(), &mut c);
+    cx.execute();
 
-//     let d_dev = Cpu::default();
-//     let d_a = d_dev
-//         .tensor_from_vec(
-//             a_data,
-//             (DConst::<1>, DConst::<32>, DConst::<11>, DConst::<128>),
-//         )
-//         .to_dtype::<f16>();
-//     let d_b = d_dev
-//         .tensor_from_vec(
-//             b_data,
-//             (DConst::<1>, DConst::<32>, DConst::<128>, DConst::<11>),
-//         )
-//         .to_dtype::<f16>();
-//     let d_c = d_a.matmul(d_b);
-//     assert_exact(&c.data(), &d_c.to_dtype::<f32>().as_vec());
-// }
+    let d_dev = Cpu::default();
+    let d_a = d_dev
+        .tensor_from_vec(
+            a_data,
+            (DConst::<1>, DConst::<32>, DConst::<11>, DConst::<128>),
+        )
+        .to_dtype::<f16>();
+    let d_b = d_dev
+        .tensor_from_vec(
+            b_data,
+            (DConst::<1>, DConst::<32>, DConst::<128>, DConst::<11>),
+        )
+        .to_dtype::<f16>();
+    let d_c = d_a.matmul(d_b);
+    assert_exact(&c.data(), &d_c.to_dtype::<f32>().as_vec());
+}
 
 #[test]
 fn test_batch_matmul() {
@@ -710,17 +711,13 @@ fn test_rms_norm() {
         .to_dtype::<f16>();
     let a = dev
         .tensor_from_vec(inp_data, (DConst::<15>, DConst::<4>))
-        .to_dtype::<f16>()
-        .to_dtype::<f32>();
+        .to_dtype::<f16>();
     let var_f32 = a.clone().square().mean::<_, DAxis<1>>();
     let inv_std_f32 = (var_f32 + 1e-6).sqrt().recip();
     let x_f32 = inv_std_f32.broadcast() * a;
     let out = weight.broadcast() * x_f32.to_dtype::<f16>();
 
-    assert_exact(
-        &b.data().into_iter().map(f16::from_f32).collect::<Vec<_>>(),
-        &out.as_vec(),
-    );
+    assert_close(&b.data(), &out.to_dtype::<f32>().as_vec());
 }
 
 #[test]
@@ -821,7 +818,6 @@ fn test_transformer_encoder_block() {
     let d_a = d_dev.tensor_from_vec(vec![-1., 2., 3., 3., 3., -1.], (DConst::<2>, DConst::<3>));
     let d_b = d_model.forward(d_a);
 
-    // Annoyingly dfdx transformer encoder outputs 0s in fp16 mode, so we need to use the fp32 mode. Result ends up being close enough
     assert_close(&b.data(), &d_b.as_vec());
 }
 

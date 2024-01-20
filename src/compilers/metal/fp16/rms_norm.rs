@@ -100,8 +100,9 @@ impl MetalKernel for MetalRMSNorm {
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
         encoder.set_compute_pipeline_state(&self.pipeline);
-        let ne00 = inputs[0].1.shape()[2].to_usize().unwrap();
-        let nb01 = inputs[0].1.strides()[1].to_usize().unwrap() * size_of::<f16>();
+        let n_dims = inputs[0].1.len();
+        let ne00 = inputs[0].1.shape()[n_dims - 1].to_usize().unwrap();
+        let nb01 = inputs[0].1.strides()[n_dims - 2].to_usize().unwrap() * size_of::<f16>();
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);

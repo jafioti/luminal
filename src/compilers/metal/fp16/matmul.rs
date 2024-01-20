@@ -50,16 +50,15 @@ const BM: u64 = 8;
 const BN: u64 = 32;
 impl MetalKernel for Matmul {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
-        let n = input_shapes[1].shape()[1].clone();
-        let (batch_size, m) = if input_shapes[0].len() == 3 {
-            (
-                input_shapes[0].shape()[0].clone(),
-                input_shapes[0].shape()[1].clone(),
-            )
-        } else {
-            (1.into(), input_shapes[0].shape()[0].clone())
-        };
-        vec![BigExpression::from(m) * n * batch_size * size_of::<f16>()]
+        let m = input_shapes[0].shape()[input_shapes[0].len() - 2].clone();
+        let n = input_shapes[1].shape()[input_shapes[1].len() - 1].clone();
+        let batch_size = input_shapes[0]
+            .shape()
+            .into_iter()
+            .take(input_shapes[0].len() - 2)
+            .product::<BigExpression>()
+            .max(BigExpression::from(1));
+        vec![batch_size * m * n * size_of::<f16>()]
     }
     fn metal_forward(
         &self,
@@ -69,18 +68,17 @@ impl MetalKernel for Matmul {
         output_buffers: &[&Buffer],
     ) {
         let (a_shape, b_shape) = (inputs[0].1.shape(), inputs[1].1.shape());
-        let (k, n) = (
-            b_shape[0].to_usize().unwrap(),
-            b_shape[1].to_usize().unwrap(),
-        );
-        let (batch_size, m) = if a_shape.len() == 3 {
-            (
-                a_shape[0].to_usize().unwrap(),
-                a_shape[1].to_usize().unwrap(),
-            )
-        } else {
-            (1, a_shape[0].to_usize().unwrap())
-        };
+        let a_dims = a_shape.len();
+        let m = a_shape[a_dims - 2].to_usize().unwrap();
+        let batch_size = a_shape
+            .iter()
+            .take(a_dims - 2)
+            .map(|i| i.to_usize().unwrap())
+            .product::<usize>()
+            .max(1);
+        let b_dims = b_shape.len();
+        let k = b_shape[b_dims - 2].to_usize().unwrap();
+        let n = b_shape[b_dims - 1].to_usize().unwrap();
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
@@ -119,7 +117,14 @@ impl MetalKernel for Matmul {
             encoder.set_i32(4, n as i32);
             encoder.set_i32(5, k as i32);
             encoder.set_i32(6, (m * k) as i32); // A batch stride
-            encoder.set_i32(7, 0); // B batch stride
+            encoder.set_i32(
+                7,
+                if inputs[1].1.len() == 2 {
+                    0
+                } else {
+                    (k * n) as i32
+                },
+            ); // B batch stride
             encoder.set_i32(8, (m * n) as i32); // C batch stride
 
             // Execute
@@ -228,7 +233,7 @@ impl Compiler for MetalMatMulCompiler {
             ])
             .fakes(vec![
                 vec![Some(false), Some(false), Some(true), Some(false)],
-                vec![Some(true), Some(true), Some(false), Some(false)],
+                vec![None, Some(true), Some(false), Some(false)],
             ])
             .ptr(&mut mul)
             .edge(
@@ -244,8 +249,41 @@ impl Compiler for MetalMatMulCompiler {
                     .ptr(&mut sum_reduce),
             )
             .search(graph);
+        let mut batch_batch_searcher = SelectOp::new()
+            .ty::<MetalMul<f16>>()
+            .shapes(vec![
+                vec!['E'.into(), 'D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
+                vec!['E'.into(), 'D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
+            ])
+            .fakes(vec![
+                vec![
+                    Some(false),
+                    Some(false),
+                    Some(false),
+                    Some(true),
+                    Some(false),
+                ],
+                vec![None, None, Some(true), Some(false), Some(false)],
+            ])
+            .ptr(&mut mul)
+            .edge(
+                SelectOp::new()
+                    .ty::<MetalSumReduce<f16>>()
+                    .check(|o, _| {
+                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
+                            o.dim == 4
+                        } else {
+                            false
+                        }
+                    })
+                    .ptr(&mut sum_reduce),
+            )
+            .search(graph);
         let (matmul_library, matvec_library) = compile_libs(&dev);
-        while single_searcher.next_match() || batch_searcher.next_match() {
+        while single_searcher.next_match()
+            || batch_searcher.next_match()
+            || batch_batch_searcher.next_match()
+        {
             if graph.no_delete.contains(&mul) {
                 // The intermediate mul can't be deleted
                 continue;
@@ -255,14 +293,18 @@ impl Compiler for MetalMatMulCompiler {
             let (mut src1, mut src1_shape) = (srcs[0].0, srcs[0].2);
             let (mut src2, mut src2_shape) = (srcs[1].0, srcs[1].2);
             // Undo expansions and permute
-            src1_shape.remove_dim(if src1_shape.len() == 4 { 2 } else { 1 });
-            if src2_shape.len() == 4 {
-                src2_shape.remove_dim(1);
-            }
-            src2_shape.remove_dim(0);
-            src2_shape.permute(&[1, 0]);
+            src1_shape.remove_dim(src1_shape.len() - 2);
+            src2_shape.remove_dim(src2_shape.len() - 3);
+            let mut dims = (0..src2_shape.len()).collect_vec();
+            dims.swap(src2_shape.len() - 2, src2_shape.len() - 1);
+            src2_shape.permute(&dims);
             // If src1 is padded or sliced, or batch dim isn't first, we need to make it contiguous
-            if (src1_shape.len() == 3 && src1_shape.indexes[0] != 0)
+            if (src1_shape
+                .indexes
+                .iter()
+                .take(src1_shape.len() - 2)
+                .enumerate()
+                .any(|(a, b)| a != *b))
                 || src1_shape.is_sliced()
                 || src1_shape.is_padded()
             {
@@ -277,8 +319,11 @@ impl Compiler for MetalMatMulCompiler {
                     .finish();
                 src1_shape = src1_shape.contiguous();
             }
-            // If src1 is padded or sliced we need to make it contiguous
-            if src2_shape.is_sliced() || src2_shape.is_padded() {
+            // If src2 is padded or sliced, or batch dim isn't first, we need to make it contiguous
+            if (src2_shape.len() == 3 && src2_shape.indexes[0] != 0)
+                || src2_shape.is_sliced()
+                || src2_shape.is_padded()
+            {
                 src2 = graph
                     .add_op(MetalContiguous::<f16>::new(
                         src2_shape,

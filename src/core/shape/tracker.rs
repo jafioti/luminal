@@ -185,9 +185,9 @@ impl ShapeTracker {
             .into_iter()
             .map(|i| (i, BigExpression::from(self.dims[i])))
             // Add pads
-            .map(|(ind, dim)| (ind, dim + self.padding[ind].0 + self.padding[ind].1))
+            .map(|(i, dim)| (i, dim + self.padding[i].0 + self.padding[i].1))
             // Slice
-            .map(|(ind, dim)| dim.min(self.slices[ind].1) - self.slices[ind].0)
+            .map(|(i, dim)| dim.min(self.slices[i].1) - self.slices[i].0)
             .product();
         if r == 0.into() {
             1.into()
