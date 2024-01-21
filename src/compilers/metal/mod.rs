@@ -12,11 +12,10 @@ mod binary;
 mod command_buffer;
 mod elementwise_fusion;
 mod matmul;
-mod mean_reduce;
 mod other;
 mod prim;
-mod std_norm;
 mod storage_buffer;
+mod unary;
 
 use half::f16;
 use itertools::Itertools;
@@ -38,10 +37,10 @@ pub type MetalCompiler<T> = (
         other::ARangeCompiler<T>,
         binary::MetalGatherCompiler<T>,
     ),
-    other::MetalExpCompiler<T>,
+    unary::MetalExpCompiler<T>,
     matmul::MetalMatMulCompiler<T>,
-    mean_reduce::MeanReduceCompiler<T>,
-    std_norm::StdNormCompiler<T>,
+    unary::MeanReduceCompiler<T>,
+    unary::StdNormCompiler<T>,
     other::CopyCompiler<T>,
     other::ContiguousElimination<T>,
     elementwise_fusion::ElementwiseFusionCompiler<T>,
