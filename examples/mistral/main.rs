@@ -1,6 +1,7 @@
 use std::{io::Write, marker::PhantomData, time::Instant};
 
 use colored::Colorize;
+use half::f16;
 use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
 mod loader;
 mod model;
@@ -10,7 +11,7 @@ use luminal::{prelude::*, shape::symbolic::Expression};
 use crate::model::KVCache;
 
 #[cfg(feature = "metal")]
-type DeviceCompiler = MetalFp16Compiler;
+type DeviceCompiler = MetalCompiler<f16>;
 #[cfg(feature = "cuda")]
 type DeviceCompiler = CudaFp16Compiler;
 #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]

@@ -1,11 +1,9 @@
 use dfdx::prelude::{Module as DfdxModule, *};
-use half::f16;
 use itertools::Itertools;
 use metal_rs::objc::rc::autoreleasepool;
 use num_traits::Float;
 use rand::{rngs::StdRng, SeedableRng};
 
-use super::MetalFp16Compiler;
 use crate::{
     nn::{activation::ReLU, linear::Linear, norm::RMSNorm},
     prelude::{symbolic::Expression, Module, *},
@@ -19,7 +17,7 @@ fn test_contiguous() {
     let data = random_vec(12);
     let a = cx.tensor::<R2<3, 4>>().set(data.clone());
     let mut b = a.permute::<R2<4, 3>, _>().reshape::<R2<12, 1>>().retrieve();
-    cx.compile(MetalFp16Compiler::default(), &mut b);
+    cx.compile(MetalCompiler::<f16>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -36,7 +34,7 @@ fn test_constant() {
     let mut cx = Graph::new();
     let a = cx.constant_expr('a'.into());
     let mut a = (a * a).retrieve();
-    cx.compile(MetalFp16Compiler::default(), &mut a);
+    cx.compile(MetalCompiler::<f16>::default(), &mut a);
 
     cx.set_dyn_dim('a', 10);
     cx.execute();
@@ -54,7 +52,7 @@ fn test_log2() {
     let a = cx.tensor::<R1<3>>().set(data.clone());
     let mut b = a.log2().retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), &mut b);
+    cx.compile(MetalCompiler::<f16>::default(), &mut b);
     cx.execute();
 
     assert_close(
@@ -73,7 +71,7 @@ fn test_exp2() {
     let a = cx.tensor::<R1<3>>().set(data.clone());
     let mut b = a.exp2().retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), &mut b);
+    cx.compile(MetalCompiler::<f16>::default(), &mut b);
     cx.execute();
 
     assert_close(
@@ -87,7 +85,7 @@ fn test_recip() {
     let mut cx = Graph::new();
     let a = cx.tensor::<R1<3>>().set(vec![1., 2., 4096.]);
     let mut b = a.recip().retrieve();
-    cx.compile(MetalFp16Compiler::default(), &mut b);
+    cx.compile(MetalCompiler::<f16>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -102,7 +100,7 @@ fn test_sin() {
     let mut cx = Graph::new();
     let a = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
     let mut b = a.sin().retrieve();
-    cx.compile(MetalFp16Compiler::default(), &mut b);
+    cx.compile(MetalCompiler::<f16>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -118,7 +116,7 @@ fn test_sqrt() {
     let a = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
     let mut b = a / a.sqrt();
     b.retrieve();
-    cx.compile(MetalFp16Compiler::default(), &mut b);
+    cx.compile(MetalCompiler::<f16>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -136,7 +134,7 @@ fn test_add() {
     let mut c = a + b;
     c.retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f16>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -155,7 +153,7 @@ fn test_sub() {
     let mut c = a - b;
     c.retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f16>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -177,7 +175,7 @@ fn test_square() {
     let mut b = a * a;
     b.retrieve();
 
-    cx.compile(GenericCompiler::<MetalFp16Compiler>::default(), &mut b);
+    cx.compile(GenericCompiler::<MetalCompiler<f16>>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -204,7 +202,7 @@ fn test_mul() {
     let mut c = a * b;
     c.retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f16>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -224,7 +222,7 @@ fn test_mul2() {
     let b = cx.tensor::<R0>().set(vec![0.57735026]);
     let mut c = (a * b.expand()).retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f16>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -245,7 +243,7 @@ fn test_div() {
     let mut c = a / b;
     c.retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f16>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -263,7 +261,7 @@ fn test_max() {
     let b = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
     let mut c = a.max(b).retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f16>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -284,7 +282,7 @@ fn test_mod() {
     let mut c = a % b;
     c.retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f16>::default(), &mut c);
     cx.execute();
 
     // No dfdx equivalent
@@ -310,7 +308,7 @@ fn test_sum_reduce() {
     let mut c = a.sum_reduce::<_, LAxis<1>>().retrieve();
     let mut d = a.sum_reduce::<_, LAxis<0>>().retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), (&mut b, &mut c, &mut d));
+    cx.compile(MetalCompiler::<f16>::default(), (&mut b, &mut c, &mut d));
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -332,7 +330,7 @@ fn test_sum_reduce2() {
     let a = cx.tensor::<R5<1, 32, 10, 10, 128>>().set(data.clone());
     let mut d = a.sum_reduce::<_, LAxis<2>>().retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), &mut d);
+    cx.compile(MetalCompiler::<f16>::default(), &mut d);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -362,7 +360,7 @@ fn test_max_reduce() {
     let mut c = a.max_reduce::<_, LAxis<1>>().retrieve();
     let mut d = a.max_reduce::<_, LAxis<0>>().retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), (&mut b, &mut c, &mut d));
+    cx.compile(MetalCompiler::<f16>::default(), (&mut b, &mut c, &mut d));
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -386,7 +384,7 @@ fn test_mean_reduce() {
     let mut c = a.mean_reduce::<_, LAxis<1>>().retrieve();
     let mut d = a.mean_reduce::<_, LAxis<0>>().retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), (&mut b, &mut c, &mut d));
+    cx.compile(MetalCompiler::<f16>::default(), (&mut b, &mut c, &mut d));
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -410,7 +408,7 @@ fn test_matmul_simple() {
     let b = cx.tensor::<R2<256, 256>>().set(b_data.clone());
     let mut c = a.matmul(b).retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f16>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -440,7 +438,7 @@ fn test_matmul() {
                         .set_dyn(b_data.clone(), vec![k, n]);
                     let mut c = a.matmul(b).retrieve();
 
-                    cx.compile(MetalFp16Compiler::default(), &mut c);
+                    cx.compile(MetalCompiler::<f16>::default(), &mut c);
                     cx.execute();
 
                     let d_a = d_dev.tensor_from_vec(a_data, (m, k));
@@ -470,7 +468,7 @@ fn test_attn_matmul() {
         .keep();
     let mut c = a.matmul(b).retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f16>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -509,7 +507,7 @@ fn test_batch_matmul() {
                         .set_dyn(b_data.clone(), vec![k, n]);
                     let mut c = a.matmul(b).retrieve();
 
-                    cx.compile(MetalFp16Compiler::default(), &mut c);
+                    cx.compile(MetalCompiler::<f16>::default(), &mut c);
                     cx.execute();
 
                     let d_dev = Cpu::default();
@@ -551,7 +549,7 @@ fn test_batch_matmul_transpose() {
     let mut a_t_b_t = a_t.permute::<_, LAxes3<0, 2, 1>>().matmul(b_t).retrieve();
 
     cx.compile(
-        GenericCompiler::<MetalFp16Compiler>::default(),
+        GenericCompiler::<MetalCompiler<f16>>::default(),
         (&mut a_b, &mut a_b_t, &mut a_t_b, &mut a_t_b_t),
     );
     cx.execute();
@@ -601,7 +599,7 @@ fn test_matmul_transpose() {
     let mut a_t_b_t = a_t.permute::<_, LAxes2<1, 0>>().matmul(b_t).retrieve();
 
     cx.compile(
-        GenericCompiler::<MetalFp16Compiler>::default(),
+        GenericCompiler::<MetalCompiler<f16>>::default(),
         (&mut a_b, &mut a_b_t, &mut a_t_b, &mut a_t_b_t),
     );
     cx.execute();
@@ -657,7 +655,7 @@ fn test_relu_and_linear() {
     b.drop();
     batch_out.drop();
     cx.compile(
-        GenericCompiler::<MetalFp16Compiler>::default(),
+        GenericCompiler::<MetalCompiler<f16>>::default(),
         (&mut b, &mut batch_out),
     );
     cx.execute();
@@ -701,7 +699,7 @@ fn test_rms_norm() {
     model.weight.set(weight_data.clone());
     let mut b = model.forward(a).retrieve();
 
-    cx.compile(GenericCompiler::<MetalFp16Compiler>::default(), &mut b);
+    cx.compile(GenericCompiler::<MetalCompiler<f16>>::default(), &mut b);
     cx.execute();
 
     // Test against dfdx
@@ -728,7 +726,7 @@ fn test_layer_norm() {
     let mut b = a.layer_norm::<0>(1e-5).retrieve();
     let mut c = a.layer_norm::<2>(1e-5).retrieve();
     cx.compile(
-        GenericCompiler::<MetalFp16Compiler>::default(),
+        GenericCompiler::<MetalCompiler<f16>>::default(),
         (&mut b, &mut c),
     );
     cx.execute();
@@ -771,7 +769,7 @@ fn test_transformer_encoder_block() {
     let unopt_b = b.data();
     b.drop();
 
-    cx.compile(GenericCompiler::<MetalFp16Compiler>::default(), &mut b);
+    cx.compile(GenericCompiler::<MetalCompiler<f16>>::default(), &mut b);
     cx.execute();
     assert_close_precision(&unopt_b, &b.data(), 2);
 
@@ -827,7 +825,7 @@ fn test_common_buffer() {
     let mut b = exped.log2().retrieve();
     let mut c = exped.sin().retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), (&mut b, &mut c));
+    cx.compile(MetalCompiler::<f16>::default(), (&mut b, &mut c));
     cx.execute();
 }
 
@@ -850,7 +848,7 @@ fn test_embedding() {
     let mut b = model.forward(a).retrieve();
     let mut batch_out = model.forward(batch).retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), (&mut b, &mut batch_out));
+    cx.compile(MetalCompiler::<f16>::default(), (&mut b, &mut batch_out));
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -881,7 +879,7 @@ fn test_slice() {
         .contiguous()
         .retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f16>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -904,7 +902,7 @@ fn test_pad() {
         .contiguous()
         .retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f16>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -934,7 +932,7 @@ fn test_pad_contig() {
     let mut c: GraphTensor<(Dyn<'M'>, Dyn<'K'>)> =
         (a.slice((.., ..Expression::from(k))).realize() / 1.0).retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), (&mut a, &mut b, &mut c));
+    cx.compile(MetalCompiler::<f16>::default(), (&mut a, &mut b, &mut c));
     cx.execute();
 
     // Close because b and c are going through 16 bits, while a is not
@@ -954,7 +952,7 @@ fn test_movement() {
         .contiguous()
         .retrieve();
 
-    cx.compile(MetalFp16Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f16>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();

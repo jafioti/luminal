@@ -358,7 +358,7 @@ fn test_shared_buffers() {
     let e_unopt = e.data();
     e.drop();
 
-    cx.compile(MetalFp16Compiler::default(), &mut e);
+    cx.compile(MetalCompiler::<f16>::default(), &mut e);
     cx.execute();
 
     assert_close_precision(&e.data(), &e_unopt, 2);

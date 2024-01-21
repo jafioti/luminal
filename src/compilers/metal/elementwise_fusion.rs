@@ -438,6 +438,8 @@ impl<T: MetalFloat> Operator for FusedElementwiseOp<T> {
 
 #[cfg(test)]
 mod tests {
+    use half::f16;
+
     crate::test_imports!();
     #[test]
     fn test_fusion() {
@@ -450,7 +452,7 @@ mod tests {
         let unopt_c = c.data();
         c.drop();
 
-        cx.compile(GenericCompiler::<MetalFp16Compiler>::default(), &mut c);
+        cx.compile(GenericCompiler::<MetalCompiler<f16>>::default(), &mut c);
         cx.execute();
 
         assert_close(&c.data(), &unopt_c);

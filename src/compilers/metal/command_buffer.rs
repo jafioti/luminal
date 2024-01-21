@@ -301,6 +301,8 @@ impl Operator for CommandBufferWrapper {
 #[cfg(test)]
 #[test]
 fn test_common_buffer() {
+    use half::f16;
+
     crate::test_imports!();
     let mut cx = Graph::new();
     let a = cx.tensor::<R1<5>>().set(random_vec(5)).keep();
@@ -312,7 +314,7 @@ fn test_common_buffer() {
     let d_unopt = d.data();
     d.drop();
 
-    cx.compile(MetalFp16Compiler::default(), &mut d);
+    cx.compile(MetalCompiler::<f16>::default(), &mut d);
     cx.execute();
 
     assert_close(&d.data(), &d_unopt);

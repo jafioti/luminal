@@ -379,6 +379,8 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
 
 #[cfg(test)]
 mod tests {
+    use half::f16;
+
     crate::test_imports!();
     #[test]
     fn test_matrix_vector() {
@@ -391,7 +393,7 @@ mod tests {
         let mut c = a.matmul(b.permute()).retrieve();
 
         cx.compile(
-            GenericCompiler::<MetalFp16Compiler>::default(),
+            GenericCompiler::<MetalCompiler<f16>>::default(),
             (&mut a, &mut b, &mut c),
         );
         cx.execute();
@@ -415,7 +417,7 @@ mod tests {
         let mut c = a.matmul(b).retrieve();
 
         cx.compile(
-            GenericCompiler::<MetalFp16Compiler>::default(),
+            GenericCompiler::<MetalCompiler<f16>>::default(),
             (&mut a, &mut b, &mut c),
         );
         cx.execute();

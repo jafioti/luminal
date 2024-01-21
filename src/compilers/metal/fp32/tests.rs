@@ -1,5 +1,4 @@
 use dfdx::prelude::{Module as DfdxModule, *};
-use half::f16;
 use itertools::Itertools;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
@@ -68,7 +67,7 @@ fn test_recip() {
     cx.execute();
 
     let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([1., 2., 4096.]).to_dtype::<f16>();
+    let d_a = d_dev.tensor([1., 2., 4096.]);
     let d_b = d_a.recip();
 
     assert_close(&b.data(), &d_b.to_dtype::<f32>().as_vec());
@@ -83,7 +82,7 @@ fn test_sin() {
     cx.execute();
 
     let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([1., 2., 3.]).to_dtype::<f16>();
+    let d_a = d_dev.tensor([1., 2., 3.]);
     let d_b = d_a.sin();
 
     assert_close(&b.data(), &d_b.to_dtype::<f32>().as_vec());
@@ -98,7 +97,7 @@ fn test_sqrt() {
     cx.execute();
 
     let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([1., 2., 3.]).to_dtype::<f16>();
+    let d_a = d_dev.tensor([1., 2., 3.]);
     let d_b = d_a.sqrt();
 
     assert_close(&b.data(), &d_b.to_dtype::<f32>().as_vec());
@@ -155,7 +154,7 @@ fn test_square() {
     let mut b = a * a;
     b.retrieve();
 
-    cx.compile(GenericCompiler::<MetalFp16Compiler>::default(), &mut b);
+    cx.compile(GenericCompiler::<MetalCompiler<f32>>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -481,7 +480,7 @@ fn test_relu_and_linear() {
     b.drop();
     batch_out.drop();
     cx.compile(
-        GenericCompiler::<MetalFp16Compiler>::default(),
+        GenericCompiler::<MetalCompiler<f32>>::default(),
         (&mut b, &mut batch_out),
     );
     cx.execute();
@@ -550,7 +549,7 @@ fn test_transformer_encoder_block() {
         .set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![1, 2, 3]);
     let mut b = model.forward(a).retrieve();
 
-    cx.compile(GenericCompiler::<MetalFp16Compiler>::default(), &mut b);
+    cx.compile(GenericCompiler::<MetalCompiler<f32>>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();

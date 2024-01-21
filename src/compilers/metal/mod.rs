@@ -32,6 +32,27 @@ use crate::{
     },
 };
 
+pub type MetalCompiler<T> = (
+    prim::PrimitiveCompiler<T>,
+    (
+        binary::MetalSubtractionCompiler<T>,
+        binary::MetalEqualCompiler<T>,
+        other::ARangeCompiler<T>,
+        binary::MetalGatherCompiler<T>,
+    ),
+    other::MetalExpCompiler<T>,
+    matmul::MetalMatMulCompiler<T>,
+    mean_reduce::MeanReduceCompiler<T>,
+    std_norm::StdNormCompiler<T>,
+    other::CopyCompiler<T>,
+    other::ContiguousElimination<T>,
+    elementwise_fusion::ElementwiseFusionCompiler<T>,
+    (
+        command_buffer::CommandBufferCompiler,
+        storage_buffer::StorageBufferCompiler,
+    ),
+);
+
 impl Data for Buffer {
     fn as_any(&self) -> &dyn std::any::Any {
         self

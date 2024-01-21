@@ -631,6 +631,8 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
 
 #[cfg(test)]
 mod tests {
+    use half::f16;
+
     crate::test_imports!();
     #[test]
     fn test_subtraction() {
@@ -649,7 +651,7 @@ mod tests {
         let unopt_d = d.data();
         d.drop();
 
-        cx.compile(MetalFp16Compiler::default(), (&mut c, &mut d));
+        cx.compile(MetalCompiler::<f16>::default(), (&mut c, &mut d));
         cx.execute();
 
         assert_close(&unopt_c, &c.data());
