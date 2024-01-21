@@ -298,6 +298,7 @@ impl Operator for CommandBufferWrapper {
     }
 }
 
+#[cfg(test)]
 #[test]
 fn test_common_buffer() {
     crate::test_imports!();

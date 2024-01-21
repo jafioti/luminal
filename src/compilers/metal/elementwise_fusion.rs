@@ -75,6 +75,19 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 .node_custom::<String, _>(a, "elementwise", ())
                 .unwrap();
             let mut curr_input = to_input;
+            // Keep track of original edges to a and b
+            let a_orig_edges = graph
+                .graph
+                .edges_directed(a, Direction::Incoming)
+                .filter_map(|e| e.weight().as_data().map(|(i, ind, _)| (e.source(), i, ind)))
+                .sorted_by_key(|i| i.1)
+                .collect::<Vec<_>>();
+            let b_orig_edges = graph
+                .graph
+                .edges_directed(b, Direction::Incoming)
+                .filter_map(|e| e.weight().as_data().map(|(i, ind, _)| (e.source(), i, ind)))
+                .sorted_by_key(|i| i.1)
+                .collect::<Vec<_>>();
             // Remove edge a -> b, and decrement indexes of all edges higher than it
             graph.graph.remove_edge(edge_id);
             for edge in graph
@@ -137,21 +150,29 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
             }
             // Alter a_equation to reflect the correct input indexes
             let mut replacements = vec![];
-            for input_edge in graph
-                .graph
-                .edges_directed(a, Direction::Incoming)
-                .filter_map(|e| e.weight().as_data().map(|(a, b, c)| (e.source(), a, b, c)))
-                .sorted_by_key(|i| i.1)
-            {
+            for (src, inp_ind, out_ind) in a_orig_edges {
                 let n = graph
                     .graph
                     .edges_directed(b, Direction::Incoming)
                     .filter_map(|e| e.weight().as_data().map(|(a, b, c)| (e.source(), a, b, c)))
-                    .find(|(src, _, out_ind, _)| *src == input_edge.0 && *out_ind == input_edge.2)
+                    .find(|(c_src, _, c_out_ind, _)| *c_src == src && *c_out_ind == out_ind)
                     .unwrap();
-                replacements.push((format!("input{}", input_edge.1), format!("input{}", n.1)));
+                replacements.push((format!("input{inp_ind}"), format!("input{}", n.1)));
             }
             a_equation = multi_replace(&a_equation, &replacements);
+            // Alter b_equation to reflect the correct input indexes
+            replacements.clear();
+            for (src, inp_ind, out_ind) in b_orig_edges {
+                if inp_ind > to_input {
+                    let n = graph
+                        .graph
+                        .edges_directed(b, Direction::Incoming)
+                        .filter_map(|e| e.weight().as_data().map(|(a, b, c)| (e.source(), a, b, c)))
+                        .find(|(c_src, _, c_out_ind, _)| *c_src == src && *c_out_ind == out_ind)
+                        .unwrap();
+                    replacements.push((format!("input{inp_ind}"), format!("input{}", n.1)));
+                }
+            }
 
             if let Some(fused_op) = graph
                 .graph
@@ -163,15 +184,14 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 // B is already fused, just combine with b
                 new_op = b;
                 // Render a into b as input to_input
-                fused_op.equation = fused_op
-                    .equation
+                fused_op.equation = multi_replace(&fused_op.equation, &replacements)
                     .replace(&format!("input{to_input}"), &format!("({a_equation})"));
             } else {
                 let mut b_equation = graph
                     .node_custom::<String, _>(b, "elementwise", ())
                     .unwrap();
-                b_equation =
-                    b_equation.replace(&format!("input{to_input}"), &format!("({a_equation})"));
+                b_equation = multi_replace(&b_equation, &replacements)
+                    .replace(&format!("input{to_input}"), &format!("({a_equation})"));
                 // B is not a fused op, let's create a new one
                 new_op = graph
                     .add_op(FusedElementwiseOp::<T> {

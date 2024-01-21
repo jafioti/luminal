@@ -21,7 +21,7 @@ pub type MetalFp16Compiler = (
     std_norm::StdNormCompiler,
     super::other::CopyCompiler<f16>,
     super::other::ContiguousElimination<f16>,
-    // super::elementwise_fusion::ElementwiseFusionCompiler<f16>,
+    super::elementwise_fusion::ElementwiseFusionCompiler<f16>,
     (
         super::command_buffer::CommandBufferCompiler,
         super::storage_buffer::StorageBufferCompiler,
