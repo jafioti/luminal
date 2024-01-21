@@ -144,7 +144,7 @@ fn main() {
         input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
         vec![1, input_ids.len()],
     );
-    print!("Loading model");
+    print!("Processing Prompt");
     io::stdout().flush().unwrap();
     let now = Instant::now();
     cx1.execute();
