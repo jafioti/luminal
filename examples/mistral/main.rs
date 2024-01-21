@@ -1,5 +1,11 @@
-use std::{io::Write, marker::PhantomData, time::Instant};
+use std::{
+    env,
+    io::{self, Write},
+    marker::PhantomData,
+    time::Instant,
+};
 
+use clap::{Args, Parser};
 use colored::Colorize;
 use half::f16;
 use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
@@ -17,21 +23,23 @@ type DeviceCompiler = CudaFp16Compiler;
 #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
 type DeviceCompiler = CPUCompiler;
 
+// Command args parser
+#[derive(Debug, Parser)]
+#[command(author, version, about, long_about = None)]
+pub struct CLIArgs {
+    /// Number of tokens to generate
+    #[clap(short = 't', long = "gen_tokens", default_value = "128")]
+    gen_tokens: i32,
+
+    /// Prompt for the model
+    #[clap(short = 'p', long = "prompt", default_value = include_str!("prompts/shakespeare.txt"))]
+    prompt: String,
+}
+
 fn main() {
-    // let prompt = "[INST]Write me a python implementation of merge sort[/INST]\n";
-    let prompt = "
-# Three Laws of Robotics
-
-**The Three Laws of Robotics** (often shortened to **The Three Laws** or **Asimov's Laws**) are a set of rules devised by science fiction author Isaac Asimov, which were to be followed by robots in several of his stories. The rules were introduced in his 1942 short story \"Runaround\" (included in the 1950 collection I, Robot), although similar restrictions had been implied in earlier stories.
-
-## The Laws
-
-The Three Laws, presented to be from the fictional \"Handbook of Robotics, 56th Edition, 2058 A.D.\", are:
-    - The First Law: A robot may not injure a human being or, through inaction, allow a human being to come to harm.
-    - The Second Law: A robot must obey the orders given it by human beings except where such orders would conflict with the First Law.
-    - The Third Law: A robot must protect its own existence as long as such protection does not conflict with the First or Second Law.
-";
-    let tokens_to_generate = 128;
+    let cli_args = CLIArgs::parse();
+    let prompt = cli_args.prompt.as_str();
+    let tokens_to_generate = cli_args.gen_tokens;
 
     let tokenizer = SentencePieceBpeTokenizer::from_file(
         "./examples/mistral/setup/mistral-7b-hf/tokenizer.model",
@@ -39,7 +47,9 @@ The Three Laws, presented to be from the fictional \"Handbook of Robotics, 56th 
     )
     .unwrap();
 
-    println!("Creating graph...");
+    print!("Defining Graphs");
+    io::stdout().flush().unwrap();
+    let now = Instant::now();
     let mut cx1 = Graph::new();
     let mut input = cx1.named_tensor::<(Const<1>, Dyn<'s'>)>("Input");
     let model = model::MistralLM::initialize(&mut cx1);
@@ -80,15 +90,22 @@ The Three Laws, presented to be from the fictional \"Handbook of Robotics, 56th 
     ));
     decode_logits.retrieve();
     cache_dest.keep();
+    println!("\t - {}ms", now.elapsed().as_millis());
 
-    println!("Compiling graph...");
+    print!("Compiling Prompt Processing Graph");
+    io::stdout().flush().unwrap();
+    let now = Instant::now();
     cx1.compile(
         GenericCompiler::<DeviceCompiler>::default(),
         (&mut input, &mut logits, &mut kv_cache),
     );
     let model_weights = downstream(&state_set(&model), &cx1);
     cx1.no_delete.extend(model_weights.clone());
+    println!("\t - {}ms", now.elapsed().as_millis());
 
+    print!("Compiling Token Generation Graph");
+    io::stdout().flush().unwrap();
+    let now = Instant::now();
     // Compile second graph
     cx2.compile(
         GenericCompiler::<DeviceCompiler>::default(),
@@ -105,15 +122,17 @@ The Three Laws, presented to be from the fictional \"Handbook of Robotics, 56th 
     let cache_dest_set = cache_dest.to_ids();
     delete_inputs(&kv_model_weights, &mut cx2);
     delete_inputs(&cache_src_set, &mut cx2);
+    println!("\t - {}ms", now.elapsed().as_millis());
 
     // Initial forward pass to load weights
-    println!("Loading model...");
+    print!("Loading model");
+    io::stdout().flush().unwrap();
     let now = Instant::now();
     input.set_dyn(vec![1.], vec![1, 1]);
     cx1.execute();
     logits.drop();
     kv_cache.drop();
-    println!("Model loading took {}ms", now.elapsed().as_millis());
+    println!("\t - {}ms", now.elapsed().as_millis());
 
     // Now that weights are loaded, delete the loading nodes so they don't run again
     delete_inputs(&model_weights, &mut cx1);
@@ -125,9 +144,14 @@ The Three Laws, presented to be from the fictional \"Handbook of Robotics, 56th 
         input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
         vec![1, input_ids.len()],
     );
+    print!("Loading model");
+    io::stdout().flush().unwrap();
     let now = Instant::now();
     cx1.execute();
-    println!("Prompt processing took {}ms", now.elapsed().as_millis());
+    let elapsed_ms = now.elapsed().as_millis();
+    let n_prompt_tokens = input_ids.len();
+    let pp_speed = 1000.0 * (n_prompt_tokens as f64) / (elapsed_ms as f64);
+    println!("\t - {}ms ({:.2} tok/s)", elapsed_ms, pp_speed);
 
     let output_id = sample_index(&logits.data());
     input_ids.push(output_id);
@@ -138,7 +162,7 @@ The Three Laws, presented to be from the fictional \"Handbook of Robotics, 56th 
         prompt.white().bold(),
         decode(&tokenizer, &[output_id]).bright_green()
     );
-    std::io::stdout().flush().unwrap();
+    io::stdout().flush().unwrap();
 
     // Transfer weights and kv cache
     transfer_data(&model_weights, &mut cx1, &kv_model_weights, &mut cx2);
@@ -161,7 +185,7 @@ The Three Laws, presented to be from the fictional \"Handbook of Robotics, 56th 
         decode_logits.drop();
         input_ids.push(output_id);
         print!("{}", decode(&tokenizer, &[output_id]).bright_green());
-        std::io::stdout().flush().unwrap();
+        io::stdout().flush().unwrap();
 
         // Swap caches
         transfer_data_same_graph(&cache_dest_set, &cache_src_set, &mut cx2);
