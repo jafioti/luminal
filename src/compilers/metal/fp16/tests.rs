@@ -812,7 +812,7 @@ fn test_transformer_encoder_block() {
     let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<32>));
     let d_b = d_model.forward(d_a);
 
-    assert_close(&b.data(), &d_b.as_vec());
+    assert_close_precision(&b.data(), &d_b.as_vec(), 2);
 }
 
 #[test]

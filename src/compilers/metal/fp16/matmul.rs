@@ -299,12 +299,12 @@ impl Compiler for MetalMatMulCompiler {
             dims.swap(src2_shape.len() - 2, src2_shape.len() - 1);
             src2_shape.permute(&dims);
             // If src1 is padded or sliced, or batch dim isn't first, we need to make it contiguous
-            if (src1_shape
+            if src1_shape
                 .indexes
                 .iter()
                 .take(src1_shape.len() - 2)
                 .enumerate()
-                .any(|(a, b)| a != *b))
+                .any(|(a, b)| a != *b)
                 || src1_shape.is_sliced()
                 || src1_shape.is_padded()
             {
@@ -320,7 +320,12 @@ impl Compiler for MetalMatMulCompiler {
                 src1_shape = src1_shape.contiguous();
             }
             // If src2 is padded or sliced, or batch dim isn't first, we need to make it contiguous
-            if (src2_shape.len() == 3 && src2_shape.indexes[0] != 0)
+            if src2_shape
+                .indexes
+                .iter()
+                .take(src2_shape.len() - 2)
+                .enumerate()
+                .any(|(a, b)| a != *b)
                 || src2_shape.is_sliced()
                 || src2_shape.is_padded()
             {

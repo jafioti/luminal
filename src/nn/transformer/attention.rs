@@ -177,7 +177,7 @@ impl<
         let tokens: GraphTensor<(B, S2, Const<V_DIM>)> = weights
             .matmul(values)
             .permute::<_, Axes4<0, 2, 1, 3>>()
-            .dyn_reshape(vec![B::const_size(), S2::const_size(), V_DIM.into()]);
+            .reshape();
         self.w_o.forward(tokens)
     }
 }
