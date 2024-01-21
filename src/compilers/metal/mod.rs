@@ -13,6 +13,7 @@ pub use fp16::*;
 mod binary;
 mod command_buffer;
 mod elementwise_fusion;
+mod matmul;
 mod other;
 mod prim;
 mod storage_buffer;

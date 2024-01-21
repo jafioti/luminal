@@ -520,9 +520,9 @@ impl<T: MetalFloat> MetalCos<T> {
         Self {
             pipeline: compile_function("kernel_metal_cos", &format!("#include <metal_stdlib>
 using namespace metal;
-kernel void kernel_metal_cos(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint i_ [[thread_position_in_grid]]) {{
-    if (i_ < n_elements) {{
-        out[i_] = cos(inp[i_]);
+kernel void kernel_metal_cos(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+    if (idx < n_elements) {{
+        out[idx] = cos(inp[idx]);
     }}
 }}"), &device),
             device,

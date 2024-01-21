@@ -1,6 +1,5 @@
 use half::f16;
 
-mod matmul;
 mod mean_reduce;
 mod std_norm;
 
@@ -13,7 +12,7 @@ pub type MetalFp16Compiler = (
         super::binary::MetalGatherCompiler<f16>,
     ),
     super::other::MetalExpCompiler<f16>,
-    matmul::MetalMatMulCompiler,
+    super::matmul::MetalMatMulCompiler<f16>,
     mean_reduce::MeanReduceCompiler,
     std_norm::StdNormCompiler,
     super::other::CopyCompiler<f16>,

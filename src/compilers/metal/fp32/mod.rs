@@ -1,8 +1,6 @@
-mod matmul;
-
 pub type MetalFp32Compiler = (
     super::prim::PrimitiveCompiler<f32>,
-    matmul::MetalMatMulCompiler,
+    super::matmul::MetalMatMulCompiler<f32>,
     super::other::CopyCompiler<f32>,
     super::command_buffer::CommandBufferCompiler,
 );

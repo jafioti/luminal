@@ -1,6 +1,5 @@
-use std::{mem::size_of, sync::Arc};
+use std::{marker::PhantomData, mem::size_of, sync::Arc};
 
-use half::f16;
 use petgraph::stable_graph::NodeIndex;
 
 use crate::{
@@ -13,22 +12,18 @@ use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Multiplies a BxMxK matrix with a KxN matrix, resulting in a BxMxN matrix
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct Matmul {
+pub struct Matmul<T> {
     matmul_pipeline: ComputePipelineState,
     matvec_pipeline: ComputePipelineState,
     queue: CommandQueue,
     device: Device,
+    _phantom: PhantomData<T>,
 }
 
-fn compile_libs(device: &Device) -> (Library, Library) {
-    (
-        device
-            .new_library_with_source(include_str!("gemm.metal"), &CompileOptions::new())
-            .unwrap(),
-        device
-            .new_library_with_source(include_str!("gemv.metal"), &CompileOptions::new())
-            .unwrap(),
-    )
+fn compile_lib(device: &Device, source: &str) -> Library {
+    device
+        .new_library_with_source(source, &CompileOptions::new())
+        .unwrap()
 }
 
 fn select_function_from_lib(
@@ -48,7 +43,7 @@ fn select_function_from_lib(
 
 const BM: u64 = 8;
 const BN: u64 = 32;
-impl MetalKernel for Matmul {
+impl<T> MetalKernel for Matmul<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         let m = input_shapes[0].shape()[input_shapes[0].len() - 2].clone();
         let n = input_shapes[1].shape()[input_shapes[1].len() - 1].clone();
@@ -58,7 +53,7 @@ impl MetalKernel for Matmul {
             .take(input_shapes[0].len() - 2)
             .product::<BigExpression>()
             .max(BigExpression::from(1));
-        vec![batch_size * m * n * size_of::<f16>()]
+        vec![batch_size * m * n * size_of::<T>()]
     }
     fn metal_forward(
         &self,
@@ -141,7 +136,7 @@ impl MetalKernel for Matmul {
     }
 }
 
-impl Operator for Matmul {
+impl<T: 'static + Clone> Operator for Matmul<T> {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup command queue / command buffer / encoder
@@ -159,7 +154,7 @@ impl Operator for Matmul {
             };
 
             let out = self.device.new_buffer(
-                (batch_size * m * n * std::mem::size_of::<f16>()) as u64,
+                (batch_size * m * n * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
 
@@ -191,10 +186,10 @@ impl Operator for Matmul {
 }
 
 #[derive(Default, Debug)]
-pub struct MetalMatMulCompiler;
+pub struct MetalMatMulCompiler<T>(PhantomData<T>);
 
-impl Compiler for MetalMatMulCompiler {
-    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
+impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
@@ -203,7 +198,7 @@ impl Compiler for MetalMatMulCompiler {
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
         let mut single_searcher = SelectOp::new()
-            .ty::<MetalMul<f16>>()
+            .ty::<MetalMul<T>>()
             .shapes(vec![
                 vec!['M'.into(), 'N'.into(), 'K'.into()],
                 vec!['M'.into(), 'N'.into(), 'K'.into()],
@@ -216,7 +211,7 @@ impl Compiler for MetalMatMulCompiler {
             .edge(
                 SelectOp::new()
                     .check(|o, _| {
-                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
+                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<T>>() {
                             o.dim == 2
                         } else {
                             false
@@ -226,7 +221,7 @@ impl Compiler for MetalMatMulCompiler {
             )
             .search(graph);
         let mut batch_searcher = SelectOp::new()
-            .ty::<MetalMul<f16>>()
+            .ty::<MetalMul<T>>()
             .shapes(vec![
                 vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
                 vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
@@ -238,9 +233,9 @@ impl Compiler for MetalMatMulCompiler {
             .ptr(&mut mul)
             .edge(
                 SelectOp::new()
-                    .ty::<MetalSumReduce<f16>>()
+                    .ty::<MetalSumReduce<T>>()
                     .check(|o, _| {
-                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
+                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<T>>() {
                             o.dim == 3
                         } else {
                             false
@@ -250,7 +245,7 @@ impl Compiler for MetalMatMulCompiler {
             )
             .search(graph);
         let mut batch_batch_searcher = SelectOp::new()
-            .ty::<MetalMul<f16>>()
+            .ty::<MetalMul<T>>()
             .shapes(vec![
                 vec!['E'.into(), 'D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
                 vec!['E'.into(), 'D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
@@ -268,9 +263,9 @@ impl Compiler for MetalMatMulCompiler {
             .ptr(&mut mul)
             .edge(
                 SelectOp::new()
-                    .ty::<MetalSumReduce<f16>>()
+                    .ty::<MetalSumReduce<T>>()
                     .check(|o, _| {
-                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<f16>>() {
+                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<T>>() {
                             o.dim == 4
                         } else {
                             false
@@ -279,7 +274,8 @@ impl Compiler for MetalMatMulCompiler {
                     .ptr(&mut sum_reduce),
             )
             .search(graph);
-        let (matmul_library, matvec_library) = compile_libs(&dev);
+        let matmul_library = compile_lib(&dev, include_str!("kernels/gemm.metal"));
+        let matvec_library = compile_lib(&dev, include_str!("kernels/gemv.metal"));
         while single_searcher.next_match()
             || batch_searcher.next_match()
             || batch_batch_searcher.next_match()
@@ -309,7 +305,7 @@ impl Compiler for MetalMatMulCompiler {
                 || src1_shape.is_padded()
             {
                 src1 = graph
-                    .add_op(MetalContiguous::<f16>::new(
+                    .add_op(MetalContiguous::<T>::new(
                         src1_shape,
                         dev.clone(),
                         queue.clone(),
@@ -330,7 +326,7 @@ impl Compiler for MetalMatMulCompiler {
                 || src2_shape.is_padded()
             {
                 src2 = graph
-                    .add_op(MetalContiguous::<f16>::new(
+                    .add_op(MetalContiguous::<T>::new(
                         src2_shape,
                         dev.clone(),
                         queue.clone(),
@@ -340,23 +336,25 @@ impl Compiler for MetalMatMulCompiler {
                     .finish();
                 src2_shape = src2_shape.contiguous();
             }
+            let type_name = if T::is_f32() { "float32" } else { "float16" };
             let matmul_op = graph
-                .add_op(Matmul {
+                .add_op(Matmul::<T> {
                     matmul_pipeline: select_function_from_lib(
                         &matmul_library,
-                        &format!( "gemm_{}{}_float16_float16_bm32_bn32_bk16_wm2_wn2_MN_naligned_K_taligned", if src1_shape.is_contiguous() {"n"} else {"t"}, if src2_shape.is_contiguous() {"n"} else {"t"}),
+                        &format!( "gemm_{}{}_{type_name}_{type_name}_bm{BM}_bn{BN}_bk16_wm2_wn2_MN_naligned_K_taligned", if src1_shape.is_contiguous() {"n"} else {"t"}, if src2_shape.is_contiguous() {"n"} else {"t"}),
                         &dev
                     ),
                     matvec_pipeline: select_function_from_lib(
                         &matvec_library,
                         &format!(
-                            "gemv_{}float16_bm{BM}_bn{BN}_tm4_tn4",
+                            "gemv_{}{type_name}_bm{BM}_bn{BN}_tm4_tn4",
                             if src2_shape.is_contiguous() { "t_" } else { "" }
                         ),
                         &dev
                     ),
                     queue: queue.clone(),
                     device: dev.clone(),
+                    _phantom: Default::default()
                 })
                 .input(src1, 0, src1_shape)
                 .input(src2, 0, src2_shape)
