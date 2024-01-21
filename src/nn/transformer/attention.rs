@@ -53,7 +53,7 @@ impl<
     fn forward(&self, input: GraphTensor<(S, Const<DIM>)>) -> Self::Output {
         // Pass to batched forward
         <Self as Module<GraphTensor<(Const<1>, S, Const<DIM>)>>>::forward(self, input.expand())
-            .max_reduce()
+            .reshape()
     }
 }
 
@@ -87,7 +87,7 @@ impl<
             GraphTensor<(Const<1>, S1, Const<DIM>)>,
             GraphTensor<(Const<1>, S, Const<DIM>)>,
         )>>::forward(self, (k.expand(), q.expand(), v.expand()))
-        .max_reduce()
+        .reshape()
     }
 }
 

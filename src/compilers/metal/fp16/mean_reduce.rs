@@ -17,7 +17,7 @@ pub struct MetalMeanReduce(
     ComputePipelineState,
     CommandQueue,
     Device,
-    usize,
+    pub usize,
     Vec<char>,
     *const HashMap<char, usize>,
 );

@@ -2,7 +2,7 @@ use half::f16;
 
 mod matmul;
 mod mean_reduce;
-mod rms_norm;
+mod std_norm;
 
 pub type MetalFp16Compiler = (
     super::prim::PrimitiveCompiler<f16>,
@@ -18,7 +18,7 @@ pub type MetalFp16Compiler = (
     ),
     matmul::MetalMatMulCompiler,
     mean_reduce::MeanReduceCompiler,
-    rms_norm::RMSNormCompiler,
+    std_norm::StdNormCompiler,
     super::other::CopyCompiler<f16>,
     super::other::ContiguousElimination<f16>,
     // super::elementwise_fusion::ElementwiseFusionCompiler<f16>,

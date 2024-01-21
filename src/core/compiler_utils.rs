@@ -89,6 +89,12 @@ impl ToIds for () {
     }
 }
 
+impl<T: ToIds> ToIds for HashMap<String, T> {
+    fn to_ids(&self) -> Vec<NodeIndex> {
+        self.values().flat_map(|i| i.to_ids()).collect()
+    }
+}
+
 macro_rules! tuple_impls {
     ([$($name:ident),+] , [$($idx:tt),+]) => {
         impl<

@@ -75,22 +75,39 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
 
-    /// Applies a layer norm along an axis
-    pub fn layer_norm<const DIM: isize>(self) -> GraphTensor<S>
+    /// Scale so std is 1.0
+    pub fn std_norm<const DIM: isize>(self, epsilon: f32) -> GraphTensor<S>
     where
         <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
         S: ReduceShape<Axis<DIM>>,
     {
-        let centered = self
-            - self
-                .mean_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
-                .expand();
-        let std = centered
-            .mul(centered)
+        (self * self)
             .mean_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
-            .add(1e-5)
-            .sqrt();
-        centered / std.expand()
+            .add(epsilon)
+            .sqrt()
+            .recip()
+            .expand()
+            .mul(self)
+    }
+
+    /// Center so mean is 0.0
+    pub fn mean_norm<const DIM: isize>(self) -> GraphTensor<S>
+    where
+        <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
+        S: ReduceShape<Axis<DIM>>,
+    {
+        self - self
+            .mean_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
+            .expand()
+    }
+
+    /// Applies a layer norm along an axis
+    pub fn layer_norm<const DIM: isize>(self, epsilon: f32) -> GraphTensor<S>
+    where
+        <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
+        S: ReduceShape<Axis<DIM>>,
+    {
+        self.mean_norm().std_norm(epsilon)
     }
 
     /// Applies a softmax function along an axis
@@ -189,8 +206,8 @@ mod tests {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
         let a = cx.tensor::<R2<2, 3>>().set(a_data.clone());
-        let b = a.layer_norm::<0>().retrieve();
-        let c = a.layer_norm::<1>().retrieve();
+        let b = a.layer_norm::<0>(1e-5).retrieve();
+        let c = a.layer_norm::<1>(1e-5).retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
