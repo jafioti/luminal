@@ -12,10 +12,7 @@ pub type MetalFp16Compiler = (
         super::other::ARangeCompiler<f16>,
         super::binary::MetalGatherCompiler<f16>,
     ),
-    (
-        super::other::MetalExpCompiler<f16>,
-        super::other::MetalSwishCompiler<f16>,
-    ),
+    super::other::MetalExpCompiler<f16>,
     matmul::MetalMatMulCompiler,
     mean_reduce::MeanReduceCompiler,
     std_norm::StdNormCompiler,
