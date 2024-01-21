@@ -1,11 +1,10 @@
 use std::{
-    env,
     io::{self, Write},
     marker::PhantomData,
     time::Instant,
 };
 
-use clap::{Args, Parser};
+use clap::Parser;
 use colored::Colorize;
 use half::f16;
 use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};

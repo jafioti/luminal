@@ -17,7 +17,6 @@ path = "examples/mistral/main.rs"
 required-features = ["metal"]
 
 [dependencies]
-clap = { version = "4.4.18", features = ["derive"] }
 luminal_macro = { path = "./resources/luminal_macro" }
 itertools = "0.11.0"
 matrixmultiply = "0.3.8"
@@ -49,3 +48,4 @@ gemm = "0.15.4"
 [dev-dependencies]
 dfdx = { version = "0.13", features = ["f16"] }
 rust_tokenizers = "8.1.0"
+clap = { version = "4.4.18", features = ["derive"] }
