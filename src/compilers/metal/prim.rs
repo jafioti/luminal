@@ -132,6 +132,15 @@ impl<T: MetalFloat> Operator for MetalConstant<T> {
             )),
         }]
     }
+
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        if key == "elementwise" {
+            if let ConstantValue::Float(f) = self.0 {
+                return Some(Box::new(f.to_string()));
+            }
+        }
+        None
+    }
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]

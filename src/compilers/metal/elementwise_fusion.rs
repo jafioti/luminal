@@ -20,8 +20,8 @@ use crate::{
 use self::symbolic::BigExpression;
 
 use super::{
-    compile_function, get_idx_valid_exps, input_dyn_dims, render_dyn_dim_inputs, DispatchNElements,
-    SetInt,
+    compile_function, get_idx_valid_exps, input_dyn_dims, prim::MetalConstant,
+    render_dyn_dim_inputs, DispatchNElements, SetInt,
 };
 
 #[derive(Default, Debug)]
@@ -47,12 +47,18 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
         while selector.next_match() {
             // More than one connecting edge
             if graph.no_delete.contains(&a)
-                || graph
+                || (graph
                     .graph
                     .edges_directed(a, Direction::Outgoing)
                     .filter(|e| !e.weight().is_schedule())
                     .count()
                     > 1
+                    && !graph
+                        .graph
+                        .node_weight(a)
+                        .unwrap()
+                        .as_any()
+                        .is::<MetalConstant<T>>())
             {
                 continue;
             }
@@ -224,7 +230,15 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 a,
                 new_op,
             );
-            graph.graph.remove_node(a);
+            if graph
+                .graph
+                .edges_directed(a, Direction::Outgoing)
+                .filter(|e| !e.weight().is_schedule())
+                .count()
+                == 0
+            {
+                graph.graph.remove_node(a);
+            }
             fused_ops.remove(&a);
             fused_ops.insert(new_op);
             selector.reset();
