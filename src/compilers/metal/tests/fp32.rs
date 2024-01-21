@@ -2,7 +2,6 @@ use dfdx::prelude::{Module as DfdxModule, *};
 use itertools::Itertools;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
-use super::MetalFp32Compiler;
 use crate::{
     nn::{activation::ReLU, linear::Linear},
     prelude::{Module, *},
@@ -16,7 +15,7 @@ fn test_contiguous() {
     let data = random_vec(12);
     let a = cx.tensor::<R2<3, 4>>().set(data.clone());
     let mut b = a.permute::<R2<4, 3>, _>().reshape::<R2<12, 1>>().retrieve();
-    cx.compile(MetalFp32Compiler::default(), &mut b);
+    cx.compile(MetalCompiler::<f32>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -33,7 +32,7 @@ fn test_log2() {
     let a = cx.tensor::<R1<3>>().set(data.clone());
     let mut b = a.log2().retrieve();
 
-    cx.compile(MetalFp32Compiler::default(), &mut b);
+    cx.compile(MetalCompiler::<f32>::default(), &mut b);
     cx.execute();
 
     assert_close(
@@ -49,7 +48,7 @@ fn test_exp2() {
     let a = cx.tensor::<R1<3>>().set(data.clone());
     let mut b = a.exp2().retrieve();
 
-    cx.compile(MetalFp32Compiler::default(), &mut b);
+    cx.compile(MetalCompiler::<f32>::default(), &mut b);
     cx.execute();
 
     assert_close(
@@ -63,7 +62,7 @@ fn test_recip() {
     let mut cx = Graph::new();
     let a = cx.tensor::<R1<3>>().set(vec![1., 2., 4096.]);
     let mut b = a.recip().retrieve();
-    cx.compile(MetalFp32Compiler::default(), &mut b);
+    cx.compile(MetalCompiler::<f32>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -78,7 +77,7 @@ fn test_sin() {
     let mut cx = Graph::new();
     let a = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
     let mut b = a.sin().retrieve();
-    cx.compile(MetalFp32Compiler::default(), &mut b);
+    cx.compile(MetalCompiler::<f32>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -93,7 +92,7 @@ fn test_sqrt() {
     let mut cx = Graph::new();
     let a = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
     let mut b = a.sqrt().retrieve();
-    cx.compile(MetalFp32Compiler::default(), &mut b);
+    cx.compile(MetalCompiler::<f32>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -111,7 +110,7 @@ fn test_add() {
     let mut c = a + b;
     c.retrieve();
 
-    cx.compile(MetalFp32Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f32>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -130,7 +129,7 @@ fn test_sub() {
     let mut c = a - b;
     c.retrieve();
 
-    cx.compile(MetalFp32Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f32>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -179,7 +178,7 @@ fn test_mul() {
     let mut c = a * b;
     c.retrieve();
 
-    cx.compile(MetalFp32Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f32>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -205,7 +204,7 @@ fn test_mul2() {
     let mut c = a * b.expand();
     c.retrieve();
 
-    cx.compile(MetalFp32Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f32>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -224,7 +223,7 @@ fn test_div() {
     let mut c = a / b;
     c.retrieve();
 
-    cx.compile(MetalFp32Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f32>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -242,7 +241,7 @@ fn test_max() {
     let b = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
     let mut c = a.max(b).retrieve();
 
-    cx.compile(MetalFp32Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f32>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -263,7 +262,7 @@ fn test_mod() {
     let mut c = a % b;
     c.retrieve();
 
-    cx.compile(MetalFp32Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f32>::default(), &mut c);
     cx.execute();
 
     // No dfdx equivalent
@@ -290,7 +289,7 @@ fn test_sum_reduce() {
     let mut c = a.sum_reduce::<_, LAxis<0>>().retrieve();
     let mut d = a.sum_reduce::<_, LAxis<2>>().retrieve();
 
-    cx.compile(MetalFp32Compiler::default(), (&mut b, &mut c, &mut d));
+    cx.compile(MetalCompiler::<f32>::default(), (&mut b, &mut c, &mut d));
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -314,7 +313,7 @@ fn test_max_reduce() {
     let mut c = a.max_reduce::<_, LAxis<0>>().retrieve();
     let mut d = a.max_reduce::<_, LAxis<2>>().retrieve();
 
-    cx.compile(MetalFp32Compiler::default(), (&mut b, &mut c, &mut d));
+    cx.compile(MetalCompiler::<f32>::default(), (&mut b, &mut c, &mut d));
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -335,7 +334,7 @@ fn test_mean_reduce() {
     let a = cx.tensor::<R3<1, 10, 4096>>().set(data.clone());
     let mut b = a.mean_reduce::<_, LAxis<2>>().retrieve();
 
-    cx.compile(MetalFp32Compiler::default(), &mut b);
+    cx.compile(MetalCompiler::<f32>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -353,7 +352,7 @@ fn test_matmul_simple() {
     let b = cx.tensor::<R2<256, 256>>().set(b_data.clone());
     let mut c = a.matmul(b).retrieve();
 
-    cx.compile(MetalFp32Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f32>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -373,7 +372,7 @@ fn test_matmul() {
     let b = cx.tensor::<R2<512, 512>>().set(b_data.clone());
     let mut c = a.matmul(b).retrieve();
 
-    cx.compile(MetalFp32Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f32>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -395,7 +394,7 @@ fn test_batch_matmul() {
         .set(vec![1., 2., 3., 1., 1., 2., 1., 2., -1., -2., 1., 2.]);
     let mut c = a.matmul(b).retrieve();
 
-    cx.compile(MetalFp32Compiler::default(), &mut c);
+    cx.compile(MetalCompiler::<f32>::default(), &mut c);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -432,7 +431,7 @@ fn test_matmul_transpose() {
     let mut a_t_b_t = a_t.permute::<_, LAxes2<1, 0>>().matmul(b_t).retrieve();
 
     cx.compile(
-        MetalFp32Compiler::default(),
+        MetalCompiler::<f32>::default(),
         (&mut a_b, &mut a_b_t, &mut a_t_b, &mut a_t_b_t),
     );
     cx.execute();

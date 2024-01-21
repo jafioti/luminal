@@ -6,10 +6,9 @@ use std::{
     sync::Arc,
 };
 
-mod fp32;
-pub use fp32::*;
-pub mod fp16;
-pub use fp16::*;
+#[cfg(test)]
+mod tests;
+
 mod binary;
 mod command_buffer;
 mod elementwise_fusion;
