@@ -1,6 +1,5 @@
-use std::{mem::size_of, sync::Arc};
+use std::{marker::PhantomData, mem::size_of, sync::Arc};
 
-use half::f16;
 use petgraph::stable_graph::NodeIndex;
 
 use crate::{
@@ -9,63 +8,67 @@ use crate::{
     prelude::*,
 };
 
-use super::mean_reduce::MetalMeanReduce;
 use metal_rs::{objc::rc::autoreleasepool, *};
+
+use mean_reduce::MetalMeanReduce;
 
 /// Special kernel for efficient std norming
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalStdNorm {
+pub struct MetalStdNorm<T> {
     pipeline: ComputePipelineState,
     device: Device,
     queue: CommandQueue,
     epsilon: f32, // Epsilon
+    _phantom: PhantomData<T>,
 }
 
-impl MetalStdNorm {
+impl<T: MetalFloat> MetalStdNorm<T> {
     fn new(epsilon: f32, device: Device, queue: CommandQueue) -> Self {
-        let kernel_code = "#include <metal_stdlib>
+        let type_name = T::type_name();
+        let kernel_code = format!("#include <metal_stdlib>
 #define SIMD_WIDTH 32
 
 using namespace metal;
 kernel void kernel_std_norm(
-        device const  half * src0 [[buffer(0)]],
-        device       half * dst [[buffer(1)]],
+        device const  {type_name} * src0 [[buffer(0)]],
+        device       {type_name} * dst [[buffer(1)]],
         constant   int64_t & row_size [[buffer(2)]],
         constant     float & eps [[buffer(3)]],
         threadgroup float  * buf [[threadgroup(0)]],
         uint threadgroup_pos[[threadgroup_position_in_grid]],
-        uint simdgroup_pos[[thread_index_in_simdgroup]]) {
-    device const half4 * x = (device const half4 *) (src0 + threadgroup_pos * row_size);
+        uint simdgroup_pos[[thread_index_in_simdgroup]]) {{
+    device const {type_name}4 * x = (device const {type_name}4 *) (src0 + threadgroup_pos * row_size);
 
     float4 sumf = 0;
 
     // parallel sum
-    for (int i = simdgroup_pos; i < row_size/4; i += SIMD_WIDTH) {
+    for (int i = simdgroup_pos; i < row_size/4; i += SIMD_WIDTH) {{
         sumf += (float4)x[i] * (float4)x[i];
-    }
+    }}
     float all_sum = sumf[0] + sumf[1] + sumf[2] + sumf[3];
     all_sum = simd_sum(all_sum);
     const float mean  = all_sum/row_size;
     const float scale = 1.0f/sqrt(mean + eps);
 
     device half4 * y = (device half4 *) (dst + threadgroup_pos * row_size);
-    for (int i = simdgroup_pos; i < row_size/4; i += SIMD_WIDTH) {
-        y[i] = (half4)(x[i] * scale);
-    }
-}";
+    for (int i = simdgroup_pos; i < row_size/4; i += SIMD_WIDTH) {{
+        y[i] = ({type_name}4)(x[i] * scale);
+    }}
+}}");
 
         Self {
-            pipeline: compile_function(&"kernel_std_norm", kernel_code, &device),
+            pipeline: compile_function(&"kernel_std_norm", &kernel_code, &device),
             device,
             queue,
             epsilon,
+            _phantom: Default::default(),
         }
     }
 }
 
-impl MetalKernel for MetalStdNorm {
+impl<T> MetalKernel for MetalStdNorm<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
-        vec![input_shapes[0].n_elements() * size_of::<f16>()]
+        vec![input_shapes[0].n_elements() * size_of::<T>()]
     }
 
     fn metal_forward(
@@ -109,7 +112,7 @@ impl MetalKernel for MetalStdNorm {
     }
 }
 
-impl Operator for MetalStdNorm {
+impl<T: 'static + Clone> Operator for MetalStdNorm<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_buffer = self.queue.new_command_buffer();
@@ -121,7 +124,7 @@ impl Operator for MetalStdNorm {
                 .downcast_ref::<Buffer>()
                 .unwrap();
             let out = self.device.new_buffer(
-                (tensors[0].1.n_elements().to_usize().unwrap() * size_of::<f16>()) as u64,
+                (tensors[0].1.n_elements().to_usize().unwrap() * size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
 
@@ -147,10 +150,10 @@ impl Operator for MetalStdNorm {
 
 /// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceCompiler.
 #[derive(Default, Debug)]
-pub struct StdNormCompiler;
+pub struct StdNormCompiler<T>(PhantomData<T>);
 
-impl Compiler for StdNormCompiler {
-    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
+impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         // Look for the RMSNorm pattern
@@ -166,13 +169,13 @@ impl Compiler for StdNormCompiler {
         );
 
         let s = SelectOp::new()
-            .ty::<MetalMul<f16>>()
+            .ty::<MetalMul<T>>()
             .ptr(&mut square)
-            .edge(SelectOp::new().ty::<MetalMeanReduce>().ptr(&mut mean))
+            .edge(SelectOp::new().ty::<MetalMeanReduce<T>>().ptr(&mut mean))
             .edge(
                 SelectOp::new()
                     .check(|op, _| {
-                        if let Some(c) = op.as_any().downcast_ref::<MetalConstant<f16>>() {
+                        if let Some(c) = op.as_any().downcast_ref::<MetalConstant<T>>() {
                             if let ConstantValue::Float(v) = c.0 {
                                 v <= 1e-4 && v > 0.0
                             } else {
@@ -183,11 +186,11 @@ impl Compiler for StdNormCompiler {
                         }
                     })
                     .ptr(&mut epsilon)
-                    .edge(SelectOp::new().ty::<MetalAdd<f16>>().ptr(&mut add)),
+                    .edge(SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add)),
             )
-            .edge(SelectOp::new().ty::<MetalSqrt<f16>>().ptr(&mut sqrt))
-            .edge(SelectOp::new().ty::<MetalRecip<f16>>().ptr(&mut recip))
-            .edge(SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul));
+            .edge(SelectOp::new().ty::<MetalSqrt<T>>().ptr(&mut sqrt))
+            .edge(SelectOp::new().ty::<MetalRecip<T>>().ptr(&mut recip))
+            .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul));
 
         let mut searcher = s.search(graph);
         while searcher.next_match() {
@@ -200,7 +203,7 @@ impl Compiler for StdNormCompiler {
                 .node_weight(epsilon)
                 .unwrap()
                 .as_any()
-                .downcast_ref::<MetalConstant<f16>>()
+                .downcast_ref::<MetalConstant<T>>()
                 .unwrap()
                 .0
             else {
@@ -212,7 +215,7 @@ impl Compiler for StdNormCompiler {
                 .node_weight(mean)
                 .unwrap()
                 .as_any()
-                .downcast_ref::<MetalMeanReduce>()
+                .downcast_ref::<MetalMeanReduce<T>>()
             {
                 if mean_reduce.3 != sh.len() - 1 {
                     continue;
@@ -238,7 +241,7 @@ impl Compiler for StdNormCompiler {
             // Input must be contiguous
             if !sh.is_contiguous() || sh.is_sliced() || sh.is_padded() {
                 x = graph
-                    .add_op(MetalContiguous::<f16>::new(
+                    .add_op(MetalContiguous::<T>::new(
                         sh,
                         dev.clone(),
                         queue.clone(),
@@ -251,7 +254,11 @@ impl Compiler for StdNormCompiler {
 
             // Insert RMSNorm op
             let rms_norm = graph
-                .add_op(MetalStdNorm::new(epsilon_num, dev.clone(), queue.clone()))
+                .add_op(MetalStdNorm::<T>::new(
+                    epsilon_num,
+                    dev.clone(),
+                    queue.clone(),
+                ))
                 .input(x, 0, sh)
                 .finish();
 

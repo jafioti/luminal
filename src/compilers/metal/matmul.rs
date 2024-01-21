@@ -341,7 +341,7 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
                 .add_op(Matmul::<T> {
                     matmul_pipeline: select_function_from_lib(
                         &matmul_library,
-                        &format!( "gemm_{}{}_{type_name}_{type_name}_bm{BM}_bn{BN}_bk16_wm2_wn2_MN_naligned_K_taligned", if src1_shape.is_contiguous() {"n"} else {"t"}, if src2_shape.is_contiguous() {"n"} else {"t"}),
+                        &format!( "gemm_{}{}_{type_name}_{type_name}_bm32_bn32_bk16_wm2_wn2_MN_naligned_K_taligned", if src1_shape.is_contiguous() {"n"} else {"t"}, if src2_shape.is_contiguous() {"n"} else {"t"}),
                         &dev
                     ),
                     matvec_pipeline: select_function_from_lib(

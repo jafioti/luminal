@@ -14,8 +14,10 @@ mod binary;
 mod command_buffer;
 mod elementwise_fusion;
 mod matmul;
+mod mean_reduce;
 mod other;
 mod prim;
+mod std_norm;
 mod storage_buffer;
 
 use half::f16;

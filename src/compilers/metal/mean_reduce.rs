@@ -1,4 +1,4 @@
-use std::{mem::size_of, sync::Arc};
+use std::{marker::PhantomData, mem::size_of, sync::Arc};
 
 use half::f16;
 use petgraph::stable_graph::NodeIndex;
@@ -13,16 +13,17 @@ use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Special kernel for efficient mean reduction
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalMeanReduce(
+pub struct MetalMeanReduce<T>(
     ComputePipelineState,
     CommandQueue,
     Device,
     pub usize,
     Vec<char>,
     *const HashMap<char, usize>,
+    PhantomData<T>,
 );
 
-impl MetalMeanReduce {
+impl<T: MetalFloat> MetalMeanReduce<T> {
     fn new(
         dev: Device,
         queue: CommandQueue,
@@ -32,11 +33,11 @@ impl MetalMeanReduce {
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape], 6);
-        let mut code = format!(
-            "
+        let type_name = T::type_name();
+        let mut code = format!("
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)]], device int& n_elements [[buffer(2)]], device int& front_size [[buffer(3)]], device int& back_size [[buffer(4)]], device int& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{rendered}) {{
+kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device int& n_elements [[buffer(2)]], device int& front_size [[buffer(3)]], device int& back_size [[buffer(4)]], device int& dim_size [[buffer(5)]], uint i_ [[thread_position_in_grid]]{rendered}) {{
     if (i_ < n_elements) {{
         int a_ = i_ / back_size;
         int b_ = i_ % back_size;
@@ -47,10 +48,9 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
                 reduce_value += (float)inp[{idx_exp}];
             }}
         }}
-        out[i_] = (half)(reduce_value / (float)dim_size);
+        out[i_] = ({type_name})(reduce_value / (float)dim_size);
     }}
-}}
-");
+}}");
         code = code.replace("mkernel", "kernel_mean_reduce");
 
         Self(
@@ -60,15 +60,16 @@ kernel void mkernel(device half *inp [[buffer(0)]], device half *out [[buffer(1)
             dim,
             dyn_symbols,
             dyn_map,
+            Default::default(),
         )
     }
 }
 
-impl MetalKernel for MetalMeanReduce {
+impl<T> MetalKernel for MetalMeanReduce<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         let mut sh = input_shapes[0];
         sh.remove_dim(self.3);
-        vec![sh.n_elements() * size_of::<f16>()]
+        vec![sh.n_elements() * size_of::<T>()]
     }
     fn metal_forward(
         &self,
@@ -116,7 +117,7 @@ impl MetalKernel for MetalMeanReduce {
     }
 }
 
-impl Operator for MetalMeanReduce {
+impl<T: MetalFloat> Operator for MetalMeanReduce<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup buffers
@@ -158,7 +159,7 @@ impl Operator for MetalMeanReduce {
         }
         if key == "recompile_shapes" {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
-                *self = Self::new(
+                *self = MetalMeanReduce::<T>::new(
                     self.2.clone(),
                     self.1.clone(),
                     self.3,
@@ -173,10 +174,10 @@ impl Operator for MetalMeanReduce {
 
 /// Replace the mean reduce pattern with a special kernel. This is meant to be ran **after** the FakeSumReduceCompiler.
 #[derive(Default, Debug)]
-pub struct MeanReduceCompiler;
+pub struct MeanReduceCompiler<T>(PhantomData<T>);
 
-impl Compiler for MeanReduceCompiler {
-    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
+impl<T: MetalFloat> Compiler for MeanReduceCompiler<T> {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         // Look for the mean-reduce pattern
@@ -189,14 +190,14 @@ impl Compiler for MeanReduceCompiler {
         );
 
         let s = SelectOp::new()
-            .ty::<MetalSumReduce<f16>>()
+            .ty::<MetalSumReduce<T>>()
             .ptr(&mut sum_reduce)
             .edge(
                 SelectOp::new()
-                    .ty::<MetalConstant<f16>>()
+                    .ty::<MetalConstant<T>>()
                     .ptr(&mut fake_sum_reduce)
-                    .edge(SelectOp::new().ty::<MetalRecip<f16>>().ptr(&mut recip))
-                    .edge(SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul)),
+                    .edge(SelectOp::new().ty::<MetalRecip<T>>().ptr(&mut recip))
+                    .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul)),
             );
 
         let mut searcher = s.search(graph);
@@ -213,13 +214,13 @@ impl Compiler for MeanReduceCompiler {
                 .node_weight(sum_reduce)
                 .unwrap()
                 .as_any()
-                .downcast_ref::<MetalSumReduce<f16>>()
+                .downcast_ref::<MetalSumReduce<T>>()
                 .unwrap()
                 .dim;
             // Insert MeanReduce op
             let src = graph.get_sources(sum_reduce)[0];
             let mean_reduce = graph
-                .add_op(MetalMeanReduce::new(
+                .add_op(MetalMeanReduce::<T>::new(
                     dev.clone(),
                     queue.clone(),
                     dim,
