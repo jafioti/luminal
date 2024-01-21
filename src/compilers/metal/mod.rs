@@ -1,8 +1,7 @@
 use std::{
     any::{Any, TypeId},
-    collections::{hash_map::DefaultHasher, HashMap},
+    collections::HashMap,
     fmt::{Debug, Write},
-    hash::{Hash, Hasher},
     sync::Arc,
 };
 
@@ -224,12 +223,6 @@ fn compile_function(name: &str, code: &str, device: &Device) -> ComputePipelineS
 
 fn is<T: Any>(type_id: TypeId) -> bool {
     type_id == TypeId::of::<T>()
-}
-
-fn hash<T: Hash>(obj: T) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    obj.hash(&mut hasher);
-    hasher.finish()
 }
 
 trait DispatchNElements {

@@ -13,29 +13,28 @@ use crate::{
 use super::other::MetalARange;
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalSub<T>(
-    ComputePipelineState,
-    CommandQueue,
-    Device,
-    Vec<char>,
-    PhantomData<T>,
-    *const HashMap<char, usize>,
-);
+pub struct MetalSub<T> {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    dyn_symbols: Vec<char>,
+    dyn_map: *const HashMap<char, usize>,
+    _phantom: PhantomData<T>,
+}
 
 impl<T: MetalFloat> MetalSub<T> {
     pub fn new(
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
-        dev: Device,
+        device: Device,
         queue: CommandQueue,
-        kernels: &mut HashMap<String, ComputePipelineState>,
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
         let type_name = T::type_name();
-        let mut code = format!(
+        let code = format!(
             "
 #include <metal_stdlib>
 using namespace metal;
@@ -47,20 +46,14 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
     }}
 }}
 ");
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("mkernel", &name);
-
-        if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &dev));
-        }
-        Self(
-            kernels[&name].clone(),
+        Self {
+            pipeline: compile_function("mkernel", &code, &device),
             queue,
-            dev,
+            device,
             dyn_symbols,
-            Default::default(),
             dyn_map,
-        )
+            _phantom: Default::default(),
+        }
     }
 }
 
@@ -78,14 +71,19 @@ impl<T> MetalKernel for MetalSub<T> {
         let inp_size = inputs[0].1.n_elements().to_usize().unwrap();
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.pipeline);
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_u32(3, inp_size as u32);
-        input_dyn_dims(&self.3, unsafe { self.5.as_ref().unwrap() }, &encoder, 4);
+        input_dyn_dims(
+            &self.dyn_symbols,
+            unsafe { self.dyn_map.as_ref().unwrap() },
+            &encoder,
+            4,
+        );
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -96,9 +94,9 @@ impl<T> MetalKernel for MetalSub<T> {
 impl<T: MetalFloat> Operator for MetalSub<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let command_buffer = self.1.new_command_buffer();
+            let command_buffer = self.queue.new_command_buffer();
             let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
-            let out = self.2.new_buffer(
+            let out = self.device.new_buffer(
                 (inp_size * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -138,10 +136,9 @@ impl<T: MetalFloat> Operator for MetalSub<T> {
                 *self = Self::new(
                     input_shapes[0],
                     input_shapes[1],
-                    self.2.clone(),
-                    self.1.clone(),
-                    &mut HashMap::new(),
-                    self.5,
+                    self.device.clone(),
+                    self.queue.clone(),
+                    self.dyn_map,
                 )
             }
         }
@@ -204,7 +201,6 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
                     b_edge.2,
                     dev.clone(),
                     queue.clone(),
-                    &mut HashMap::new(),
                     &graph.dyn_map,
                 ))
                 .input(a, a_edge.1, a_edge.2)
@@ -222,29 +218,28 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
 }
 
 #[derive(LuminalEq, LuminalPrint, Clone)]
-pub struct MetalEqual<T>(
-    ComputePipelineState,
-    CommandQueue,
-    Device,
-    Vec<char>,
-    PhantomData<T>,
-    *const HashMap<char, usize>,
-);
+pub struct MetalEqual<T> {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    dyn_symbols: Vec<char>,
+    dyn_map: *const HashMap<char, usize>,
+    _phantom: PhantomData<T>,
+}
 
 impl<T: MetalFloat> MetalEqual<T> {
     pub fn new(
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
-        dev: Device,
+        device: Device,
         queue: CommandQueue,
-        kernels: &mut HashMap<String, ComputePipelineState>,
         dyn_map: *const HashMap<char, usize>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
         let type_name = T::type_name();
-        let mut code = format!(
+        let code = format!(
             "
 #include <metal_stdlib>
 using namespace metal;
@@ -256,20 +251,14 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
     }}
 }}
 ");
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("mkernel", &name);
-
-        if !kernels.contains_key(&name) {
-            kernels.insert(name.clone(), compile_function(&name, &code, &dev));
-        }
-        Self(
-            kernels[&name].clone(),
+        Self {
+            pipeline: compile_function("mkernel", &code, &device),
             queue,
-            dev,
+            device,
             dyn_symbols,
-            Default::default(),
             dyn_map,
-        )
+            _phantom: Default::default(),
+        }
     }
 }
 
@@ -288,14 +277,19 @@ impl<T> MetalKernel for MetalEqual<T> {
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.pipeline);
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(inputs[1].0), 0);
         encoder.set_buffer(2, Some(output_buffers[0]), 0);
         encoder.set_u32(3, inp_size as u32);
-        input_dyn_dims(&self.3, unsafe { self.5.as_ref().unwrap() }, &encoder, 4);
+        input_dyn_dims(
+            &self.dyn_symbols,
+            unsafe { self.dyn_map.as_ref().unwrap() },
+            &encoder,
+            4,
+        );
 
         // Execute
         encoder.dispatch_1d(inp_size);
@@ -306,9 +300,9 @@ impl<T> MetalKernel for MetalEqual<T> {
 impl<T: MetalFloat> Operator for MetalEqual<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let command_buffer = self.1.new_command_buffer();
+            let command_buffer = self.queue.new_command_buffer();
             let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
-            let out = self.2.new_buffer(
+            let out = self.device.new_buffer(
                 (inp_size * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -348,10 +342,9 @@ impl<T: MetalFloat> Operator for MetalEqual<T> {
                 *self = Self::new(
                     input_shapes[0],
                     input_shapes[1],
-                    self.2.clone(),
-                    self.1.clone(),
-                    &mut HashMap::new(),
-                    self.5,
+                    self.device.clone(),
+                    self.queue.clone(),
+                    self.dyn_map,
                 )
             }
         }
@@ -456,7 +449,6 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
                     b_edge.2,
                     dev.clone(),
                     queue.clone(),
-                    &mut HashMap::new(),
                     &graph.dyn_map,
                 ))
                 .input(a, a_edge.1, a_edge.2)
