@@ -4,8 +4,8 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput};
 
-#[proc_macro_derive(LuminalEq)]
-pub fn luminal_eq(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(LuminalEqFalse)]
+pub fn luminal_eq_false(input: TokenStream) -> TokenStream {
     // Parse the input tokens into a syntax tree
     let input = parse_macro_input!(input as DeriveInput);
 
@@ -20,6 +20,32 @@ pub fn luminal_eq(input: TokenStream) -> TokenStream {
         impl #impl_generics core::cmp::PartialEq for #name #ty_generics #where_clause {
             fn eq(&self, _other: &Self) -> bool {
                 false
+            }
+        }
+
+        impl #impl_generics Eq for #name #ty_generics #where_clause {}
+    };
+
+    // Hand the output tokens back to the compiler
+    TokenStream::from(expanded)
+}
+
+#[proc_macro_derive(LuminalEqTrue)]
+pub fn luminal_eq_true(input: TokenStream) -> TokenStream {
+    // Parse the input tokens into a syntax tree
+    let input = parse_macro_input!(input as DeriveInput);
+
+    // Extract the ident and generics from the input
+    let name = &input.ident;
+
+    // Generics with expanded where clause
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    // Create the expanded trait implementation
+    let expanded = quote! {
+        impl #impl_generics core::cmp::PartialEq for #name #ty_generics #where_clause {
+            fn eq(&self, _other: &Self) -> bool {
+                true
             }
         }
 

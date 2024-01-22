@@ -88,7 +88,7 @@ impl<
             BigExpression,
         ),
     ) -> Self::Output {
-        let (sin, cos) = self.get_sincos::<NUM_HEADS, Seq>(prev_seq);
+        let (sin, cos) = self.get_sincos::<NUM_HEADS, Seq>(inp.graph(), prev_seq);
         (Self::rotate_half(inp) * sin.expand()) + (inp * cos.expand())
     }
 }
@@ -99,17 +99,16 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
     #[allow(clippy::type_complexity)]
     fn get_sincos<const NUM_HEADS: usize, Seq: Dimension>(
         &self,
+        graph_ref: &mut Graph,
         prev_seq: BigExpression,
     ) -> (
         GraphTensor<(Seq, Const<HEAD_DIM>)>,
         GraphTensor<(Seq, Const<HEAD_DIM>)>,
     ) {
-        let t = self.inv_freq.graph().arange::<Seq>()
-            + self.inv_freq.graph().constant_expr(prev_seq).expand();
-        let freqs = t.expand::<(Seq, Const<1>), _>().matmul(
-            self.inv_freq
-                .expand::<(Const<1>, Const<HEAD_DIM_OVER_2>), _>(),
-        );
+        let t = graph_ref.arange::<Seq>() + graph_ref.constant_expr(prev_seq).expand();
+        let freqs = t
+            .expand::<(_, Const<1>), _>()
+            .matmul(self.inv_freq.expand());
         let emb = freqs.concat_along::<(Seq, Const<HEAD_DIM>), Axis<1>, _>(freqs);
         (emb.sin().reshape(), emb.cos().reshape())
     }
@@ -131,22 +130,19 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> InitModule
     for RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
 {
     fn initialize(cx: &mut Graph) -> Self {
-        fn compute_inv_freq(head_dim: usize) -> Vec<f32> {
-            let theta = 1000000.0;
-            let mut rope_graph = Graph::new();
-            let frequencies = (rope_graph.arange::<Dyn<'h'>>() * 2.0) / (head_dim as f32);
-            let frequencies = frequencies.inv_pow(theta).recip().retrieve();
+        // let mut rope_graph = Graph::new();
+        let frequencies = (cx.arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
+        let frequencies = frequencies.inv_pow(1000000.0).recip().contiguous();
 
-            rope_graph.set_dyn_dim('h', head_dim / 2);
-            rope_graph.execute();
+        // rope_graph.compile(
+        //     GenericCompiler::<MetalCompiler<f16>>::default(),
+        //     &mut frequencies,
+        // );
+        // rope_graph.execute();
 
-            frequencies.data()
-        }
         Self {
-            inv_freq: cx
-                .named_tensor("Inv Freq")
-                .set(compute_inv_freq(HEAD_DIM))
-                .keep(),
+            // inv_freq: cx.named_tensor("Inv Freq").set(frequencies.data()).keep(),
+            inv_freq: frequencies.keep(),
         }
     }
 }

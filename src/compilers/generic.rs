@@ -19,16 +19,10 @@ use crate::{
 };
 
 /// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
-pub type GenericCompiler<Inner = ()> = (PreGenericCompiler, Inner, PostGenericCompiler);
-
-pub type PreGenericCompiler = (
+pub type GenericCompiler = (
     RemoveSingleReductions,
     ArithmeticElimination,
     UnarySequentialElimination,
-);
-
-pub type PostGenericCompiler = (
-    // RemoveUnusedNodes, // Broken right now, unclear why
     CSE,
 );
 
@@ -104,14 +98,6 @@ impl Compiler for CSE {
             eliminated = false;
             let mut srcs_set: HashMap<Vec<NodeIndex>, Vec<NodeIndex>> = HashMap::new();
             for node in graph.graph.node_indices().collect_vec() {
-                let srcs = graph
-                    .graph
-                    .edges_directed(node, petgraph::Direction::Incoming)
-                    .filter(|e| !e.weight().is_schedule())
-                    .sorted_by_key(|e| e.weight().as_data().unwrap().0)
-                    .map(|e| e.source())
-                    .collect_vec();
-
                 if graph
                     .graph
                     .node_weight(node)
@@ -121,6 +107,13 @@ impl Compiler for CSE {
                 {
                     continue;
                 }
+                let srcs = graph
+                    .graph
+                    .edges_directed(node, petgraph::Direction::Incoming)
+                    .filter(|e| !e.weight().is_schedule())
+                    .sorted_by_key(|e| e.weight().as_data().unwrap().0)
+                    .map(|e| e.source())
+                    .collect_vec();
 
                 if let Some(other_nodes) = srcs_set.get(&srcs) {
                     for other_node in other_nodes {
@@ -170,6 +163,7 @@ impl Compiler for CSE {
                     srcs_set.insert(srcs, vec![node]);
                 }
             }
+            srcs_set.clear();
         }
     }
 }
@@ -380,7 +374,7 @@ mod tests {
         let a = cx.tensor::<R0>();
         let _ = a.log2().exp2().retrieve();
 
-        cx.compile(GenericCompiler::<()>::default(), ());
+        cx.compile(GenericCompiler::default(), ());
         assert_eq!(cx.graph.node_count(), 1);
     }
 }

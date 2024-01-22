@@ -78,7 +78,7 @@ fn main() {
 
     println!("Compiling graph...");
     cx1.compile(
-        GenericCompiler::<DeviceCompiler>::default(),
+        <(GenericCompiler, DeviceCompiler)>::default(),
         (&mut input, &mut logits, &mut kv_cache),
     );
     let model_weights = downstream(&state_set(&model), &cx1);
@@ -86,7 +86,7 @@ fn main() {
 
     // Compile second graph
     cx2.compile(
-        GenericCompiler::<DeviceCompiler>::default(),
+        <(GenericCompiler, DeviceCompiler)>::default(),
         (
             &mut single_input,
             &mut decode_logits,

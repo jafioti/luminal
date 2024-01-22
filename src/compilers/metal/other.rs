@@ -78,7 +78,7 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
 }
 
 /// Special kernel for producing aranges
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalARange<T: MetalFloat>(
     ComputePipelineState,
     CommandQueue,
@@ -87,6 +87,18 @@ pub struct MetalARange<T: MetalFloat>(
     *const HashMap<char, usize>,
     PhantomData<T>,
 );
+
+impl<T: MetalFloat> Debug for MetalARange<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MetalARange({:?})", self.3)
+    }
+}
+
+impl<T: MetalFloat> PartialEq for MetalARange<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.3.eq(&other.3)
+    }
+}
 
 impl<T: MetalFloat> MetalARange<T> {
     fn new(
@@ -258,14 +270,16 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
                 .finish();
             move_outgoing_edge(subtraction, arange_op, &mut graph.graph);
 
-            graph.graph.remove_node(one_const);
-            graph.graph.remove_node(contig1);
-            graph.graph.remove_node(contig2);
-            graph.graph.remove_node(contig3);
-            graph.graph.remove_node(contig4);
-            graph.graph.remove_node(sum_reduce);
             graph.graph.remove_node(subtraction);
-            graph.graph.remove_node(subtraction_constant);
+            graph.safe_remove_node(subtraction_constant, 0);
+            graph.safe_remove_node(sum_reduce, 0);
+            graph.safe_remove_node(contig4, 0);
+            graph.safe_remove_node(contig3, 0);
+            graph.safe_remove_node(contig2, 0);
+            graph.safe_remove_node(contig1, 0);
+            graph.safe_remove_node(one_const, 0);
+            s1.clear_cached_results();
+            s2.clear_cached_results();
         }
     }
 }
@@ -338,6 +352,7 @@ impl<T: MetalFloat> Compiler for ContiguousElimination<T> {
                     .node_weight_mut(op)
                     .unwrap()
                     .custom("recompile_shapes", Box::new(new_shapes));
+                selector.clear_cached_results();
             }
         }
     }

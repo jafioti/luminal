@@ -346,6 +346,19 @@ impl Graph {
         display_graph(&g, &e, &set.iter().map(|i| id_map[i]).collect::<Vec<_>>());
     }
 
+    /// Remove node if it only has n dests
+    pub fn safe_remove_node(&mut self, node: NodeIndex, dests: usize) {
+        if self
+            .graph
+            .edges_directed(node, Direction::Outgoing)
+            .filter(|e| !e.weight().is_schedule())
+            .count()
+            <= dests
+        {
+            self.graph.remove_node(node);
+        }
+    }
+
     /// Get the sources of a node given it's id
     #[allow(clippy::type_complexity, clippy::borrowed_box)]
     pub fn get_sources(&self, node_id: NodeIndex) -> Vec<(NodeIndex, u8, ShapeTracker)> {
@@ -617,7 +630,9 @@ fn backtrack_match(
         let pattern_parents =
             pattern_graph.neighbors_directed(pattern_node, petgraph::Direction::Incoming);
         let main_parents = main_graph
-            .neighbors_directed(main_node, petgraph::Direction::Incoming)
+            .edges_directed(main_node, petgraph::Direction::Incoming)
+            .filter(|e| !e.weight().is_schedule())
+            .map(|e| e.source())
             .collect_vec();
 
         'pattern_loop: for pattern_parent in pattern_parents {

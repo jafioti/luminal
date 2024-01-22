@@ -153,7 +153,7 @@ fn test_square() {
     let mut b = a * a;
     b.retrieve();
 
-    cx.compile(GenericCompiler::<MetalCompiler<f32>>::default(), &mut b);
+    cx.compile(<(GenericCompiler, MetalCompiler<f32>)>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -479,7 +479,7 @@ fn test_relu_and_linear() {
     b.drop();
     batch_out.drop();
     cx.compile(
-        GenericCompiler::<MetalCompiler<f32>>::default(),
+        <(GenericCompiler, MetalCompiler<f32>)>::default(),
         (&mut b, &mut batch_out),
     );
     cx.execute();
@@ -548,7 +548,7 @@ fn test_transformer_encoder_block() {
         .set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![1, 2, 3]);
     let mut b = model.forward(a).retrieve();
 
-    cx.compile(GenericCompiler::<MetalCompiler<f32>>::default(), &mut b);
+    cx.compile(<(GenericCompiler, MetalCompiler<f32>)>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();

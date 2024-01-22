@@ -336,7 +336,7 @@ fn multi_replace(input: &str, replacements: &[(String, String)]) -> String {
     output
 }
 
-#[derive(LuminalPrint, LuminalEq, Clone)]
+#[derive(LuminalPrint, LuminalEqFalse, Clone)]
 pub struct FusedElementwiseOp<T> {
     kernel: Option<ComputePipelineState>,
     dyn_map: *const HashMap<char, usize>,
@@ -452,7 +452,7 @@ mod tests {
         let unopt_c = c.data();
         c.drop();
 
-        cx.compile(GenericCompiler::<MetalCompiler<f16>>::default(), &mut c);
+        cx.compile(<(GenericCompiler, MetalCompiler<f16>)>::default(), &mut c);
         cx.execute();
 
         assert_close(&c.data(), &unopt_c);

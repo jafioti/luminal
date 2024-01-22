@@ -102,7 +102,7 @@ mod tests {
         let b = cx.tensor::<R2<3, 2>>().set(b_vec.clone());
         let mut c = a.matmul(b).retrieve();
 
-        cx.compile(PreGenericCompiler::default(), &mut c);
+        cx.compile(GenericCompiler::default(), &mut c);
         cx.execute();
 
         let d_dev = Cpu::default();

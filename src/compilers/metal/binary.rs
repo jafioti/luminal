@@ -6,13 +6,13 @@ use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
 use crate::{
     compilers::metal::{prim::*, *},
     constant_select_op,
-    op::{ConstantValue, Operator},
+    op::Operator,
     prelude::*,
 };
 
 use super::other::MetalARange;
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEqTrue, LuminalPrint, Clone)]
 pub struct MetalSub<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -217,7 +217,7 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
     }
 }
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEqTrue, LuminalPrint, Clone)]
 pub struct MetalEqual<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -366,31 +366,18 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
             NodeIndex::default(),
             NodeIndex::default(),
         );
-        let s = SelectOp::new()
-            .check(|o, _| {
-                if let Some(c) = o.as_any().downcast_ref::<MetalConstant<T>>() {
-                    if let ConstantValue::Float(f) = c.0 {
-                        f == 1.0
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            })
-            .ptr(&mut one)
-            .edge(
-                SelectOp::new()
-                    .ty::<MetalLessThan<T>>()
-                    .ptr(&mut less_than1)
-                    .edge(
-                        SelectOp::new()
-                            .ty::<MetalLessThan<T>>()
-                            .ptr(&mut less_than2)
-                            .edge(SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add)),
-                    )
-                    .edge(SelectOp::new().ty::<MetalSub<T>>().ptr(&mut sub)),
-            );
+        let s = constant_select_op!(1.0, T).ptr(&mut one).edge(
+            SelectOp::new()
+                .ty::<MetalLessThan<T>>()
+                .ptr(&mut less_than1)
+                .edge(
+                    SelectOp::new()
+                        .ty::<MetalLessThan<T>>()
+                        .ptr(&mut less_than2)
+                        .edge(SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add)),
+                )
+                .edge(SelectOp::new().ty::<MetalSub<T>>().ptr(&mut sub)),
+        );
 
         let mut searcher = s.search(graph);
         while searcher.next_match() {
@@ -456,17 +443,17 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
                 .finish();
             move_outgoing_edge(sub, equals, &mut graph.graph);
 
-            graph.graph.remove_node(less_than1);
-            graph.graph.remove_node(less_than2);
-            graph.graph.remove_node(add);
-            graph.graph.remove_node(one);
             graph.graph.remove_node(sub);
+            graph.safe_remove_node(add, 0);
+            graph.safe_remove_node(one, 0);
+            graph.safe_remove_node(less_than2, 0);
+            graph.safe_remove_node(less_than1, 0);
             searcher.clear_cached_results();
         }
     }
 }
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEqFalse, LuminalPrint, Clone)]
 pub struct MetalGather<T> {
     pipeline: ComputePipelineState,
     device: Device,
@@ -610,13 +597,13 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
                 ))
                 .finish();
             move_incoming_edge(ind_copy, gather, &mut graph.graph);
-            graph.graph.remove_node(equal);
+            graph.safe_remove_node(equal, 1);
             move_incoming_edge(mul, gather, &mut graph.graph);
             move_outgoing_edge(sum_reduce, gather, &mut graph.graph);
-            graph.graph.remove_node(arange);
-            graph.graph.remove_node(ind_copy);
-            graph.graph.remove_node(mul);
             graph.graph.remove_node(sum_reduce);
+            graph.safe_remove_node(mul, 0);
+            graph.safe_remove_node(ind_copy, 0);
+            graph.safe_remove_node(arange, 0);
         }
     }
 }

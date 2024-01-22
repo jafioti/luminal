@@ -16,7 +16,7 @@ use metal_rs::{objc::rc::autoreleasepool, *};
 use super::binary::MetalSub;
 
 /// Special kernel for efficient mean reduction
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalPrint, Clone)]
 pub struct MetalMeanReduce<T>(
     ComputePipelineState,
     CommandQueue,
@@ -26,6 +26,12 @@ pub struct MetalMeanReduce<T>(
     *const HashMap<char, usize>,
     PhantomData<T>,
 );
+
+impl<T> PartialEq for MetalMeanReduce<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.3 == other.3
+    }
+}
 
 impl<T: MetalFloat> MetalMeanReduce<T> {
     fn new(
@@ -246,21 +252,27 @@ impl<T: MetalFloat> Compiler for MeanReduceCompiler<T> {
 
             // Remove the old ops
             graph.graph.remove_node(mul);
-            graph.graph.remove_node(sum_reduce);
-            graph.graph.remove_node(recip);
-            graph.graph.remove_node(fake_sum_reduce);
+            graph.safe_remove_node(recip, 0);
+            graph.safe_remove_node(fake_sum_reduce, 0);
+            graph.safe_remove_node(sum_reduce, 0);
         }
     }
 }
 
 /// Special kernel for efficient std norming
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalPrint, Clone)]
 pub struct MetalStdNorm<T> {
     pipeline: ComputePipelineState,
     device: Device,
     queue: CommandQueue,
     epsilon: f32, // Epsilon
     _phantom: PhantomData<T>,
+}
+
+impl<T> PartialEq for MetalStdNorm<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.epsilon == other.epsilon
+    }
 }
 
 impl<T: MetalFloat> MetalStdNorm<T> {
@@ -418,7 +430,7 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
                     .check(|op, _| {
                         if let Some(c) = op.as_any().downcast_ref::<MetalConstant<T>>() {
                             if let ConstantValue::Float(v) = c.0 {
-                                v <= 1e-4 && v > 0.0
+                                v <= 1e-3 && v > 0.0
                             } else {
                                 false
                             }
@@ -515,17 +527,17 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
 
             // Remove the old ops
             graph.graph.remove_node(mul);
-            graph.graph.remove_node(add);
-            graph.graph.remove_node(recip);
-            graph.graph.remove_node(epsilon);
-            graph.graph.remove_node(sqrt);
-            graph.graph.remove_node(square);
-            graph.graph.remove_node(mean);
+            graph.safe_remove_node(recip, 0);
+            graph.safe_remove_node(sqrt, 0);
+            graph.safe_remove_node(add, 0);
+            graph.safe_remove_node(epsilon, 0);
+            graph.safe_remove_node(mean, 0);
+            graph.safe_remove_node(square, 0);
         }
     }
 }
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEqTrue, LuminalPrint, Clone)]
 pub struct MetalExp<T: MetalFloat> {
     pipeline: ComputePipelineState,
     device: Device,
@@ -679,15 +691,15 @@ impl<T: MetalFloat> Compiler for MetalExpCompiler<T> {
             );
 
             // Remove the old ops
-            graph.graph.remove_node(mul);
-            graph.graph.remove_node(constant);
             graph.graph.remove_node(exp2);
+            graph.safe_remove_node(mul, 0);
+            graph.safe_remove_node(constant, 0);
         }
     }
 }
 
 /// Special kernel for cos
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEqTrue, LuminalPrint, Clone)]
 pub struct MetalCos<T: MetalFloat> {
     pipeline: ComputePipelineState,
     device: Device,
