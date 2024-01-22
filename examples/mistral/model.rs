@@ -69,7 +69,7 @@ fn apply_rotary_embeddings<const N_HEADS: usize, Batch: Dimension, Seq: Dimensio
 ) -> GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)> {
     // Get embedding
     let freqs = (input.graph().arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
-    let freqs = freqs.inv_pow(1000000.0).recip().contiguous();
+    let freqs = freqs.inv_pow(1000000.0).recip();
     let t = input.graph().arange::<Seq>() + input.graph().constant_expr(prev_seq).expand();
     let freqs = t.expand::<(_, Const<1>), _>().matmul(freqs.expand());
     let emb = freqs.concat_along::<(Seq, Const<HEAD_DIM>), Axis<1>, _>(freqs);
