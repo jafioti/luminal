@@ -253,9 +253,9 @@ impl ShapeTracker {
         self.indexes
             .into_iter()
             .map(|i| {
-                (BigExpression::from(self.dims[i]) + self.padding[i].0 + self.padding[i].1)
+                (BigExpression::from(self.dims[i]) + self.padding[i].0 - self.slices[i].0
+                    + self.padding[i].1)
                     .min(self.slices[i].1)
-                    - self.slices[i].0
             })
             .collect()
     }
@@ -271,12 +271,18 @@ impl ShapeTracker {
     /// Add padding
     pub fn pad(&mut self, padding: &[(Expression, Expression)]) {
         for (i, (s, e)) in padding.iter().enumerate() {
-            if e.to_usize().map(|n| n != 0).unwrap_or(true)
+            if (e.to_usize().map(|n| n != 0).unwrap_or(true)
                 && self.slices[self.indexes[i]]
                     .1
                     .to_usize()
                     .map(|n| n as i32 != i32::MAX)
-                    .unwrap_or(true)
+                    .unwrap_or(true))
+                || (s.to_usize().map(|n| n != 0).unwrap_or(true)
+                    && self.slices[self.indexes[i]]
+                        .0
+                        .to_usize()
+                        .map(|n| n as i32 != 0)
+                        .unwrap_or(true))
             {
                 panic!("Adding padding to a slice isn't supported")
             }

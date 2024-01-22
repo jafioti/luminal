@@ -94,7 +94,16 @@ impl<S: Shape> GraphTensor<S> {
         mut self,
         slice: Slice,
     ) -> GraphTensor<Slice::OutputShape> {
-        self.shape.slice(&slice.to_range_vec());
+        let ranges = slice.to_range_vec();
+        // This exists because currently padding and slicing on the same dimension (even on opposite sides) is unsupported
+        if ranges.iter().zip(self.shape.indexes).any(|(range, ind)| {
+            (range.0 != 0.into() || range.1 != i32::MAX.into())
+                && (self.shape.padding[self.shape.indexes[ind]].0 != 0.into()
+                    || self.shape.padding[self.shape.indexes[ind]].1 != 0.into())
+        }) {
+            self = self.contiguous();
+        }
+        self.shape.slice(&ranges);
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
@@ -175,12 +184,19 @@ impl<S: Shape> GraphTensor<S> {
         mut self,
         ranges: &[(Start, End)],
     ) -> GraphTensor<Dst> {
-        self.shape.pad(
-            &ranges
-                .iter()
-                .map(|i| (i.0.into(), i.1.into()))
-                .collect::<Vec<_>>(),
-        );
+        let ranges = ranges
+            .iter()
+            .map(|i| (i.0.into(), i.1.into()))
+            .collect::<Vec<_>>();
+        // This exists because currently padding and slicing on the same dimension (even on opposite sides) is unsupported
+        if ranges.iter().zip(self.shape.indexes).any(|(range, ind)| {
+            (range.0 != 0.into() || range.1 != 0.into())
+                && (self.shape.slices[self.shape.indexes[ind]].0 != 0.into()
+                    || self.shape.slices[self.shape.indexes[ind]].1 != i32::MAX.into())
+        }) {
+            self = self.contiguous();
+        }
+        self.shape.pad(&ranges);
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 

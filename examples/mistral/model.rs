@@ -75,12 +75,8 @@ fn apply_rotary_embeddings<const N_HEADS: usize, Batch: Dimension, Seq: Dimensio
     let emb = freqs.concat_along::<(Seq, Const<HEAD_DIM>), Axis<1>, _>(freqs);
 
     // Rotate input
-    let x1 = input
-        .slice((.., .., .., ..Expression::from(HEAD_DIM_OVER_2)))
-        .contiguous();
-    let x2 = input
-        .slice((.., .., .., Expression::from(HEAD_DIM_OVER_2)..))
-        .contiguous();
+    let x1 = input.slice((.., .., .., ..Expression::from(HEAD_DIM_OVER_2)));
+    let x2 = input.slice((.., .., .., Expression::from(HEAD_DIM_OVER_2)..));
     let rotated_input = (-x2).concat_along::<(_, _, _, Const<HEAD_DIM>), Axis<3>, _>(x1);
 
     // Final calculation
@@ -211,27 +207,25 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     );
     fn forward(
         &self,
-        (x, cache, _): (
+        (mut x, cache, _): (
             GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
             Option<KVCache<Batch, PrevSeq>>,
             PhantomData<TotSeq>,
         ),
     ) -> Self::Output {
         // Attention
-        let mut residual = x;
-        let (mut x, cache) =
+        let (y, cache) =
             self.attention
                 .forward((self.attention_norm.forward(x), cache, PhantomData::<TotSeq>));
 
         // Residual Addition
-        x += residual;
+        x += y;
 
         // Feed Forward
-        residual = x;
-        x = self.feed_forward.forward(self.feed_forward_norm.forward(x));
+        let y = self.feed_forward.forward(self.feed_forward_norm.forward(x));
 
         // Residual Addition
-        (x + residual, cache)
+        (x + y, cache)
     }
 }
 
