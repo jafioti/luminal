@@ -408,7 +408,7 @@ mod tests {
         cx.execute();
 
         let unoptimized_c = c.data();
-        cx.compile(<(CPUCompiler, PostGenericCompiler)>::default(), &mut c);
+        cx.compile(CPUCompiler::default(), &mut c);
         cx.execute();
         assert_close(&c.data(), &unoptimized_c);
     }

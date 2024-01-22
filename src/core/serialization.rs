@@ -239,7 +239,7 @@ mod tests {
         trg.set(trg_data);
         out2.retrieve();
 
-        cx.compile(<(CPUCompiler, PostGenericCompiler)>::default(), &mut out2);
+        cx.compile(CPUCompiler::default(), &mut out2);
         cx.execute();
 
         assert_close(&out1, &out2.data());

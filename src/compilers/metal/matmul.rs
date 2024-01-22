@@ -11,7 +11,7 @@ use crate::{
 use metal_rs::{objc::rc::autoreleasepool, *};
 
 /// Multiplies a BxMxK matrix with a KxN matrix, resulting in a BxMxN matrix
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEqFalse, LuminalPrint, Clone)]
 pub struct Matmul<T> {
     matmul_pipeline: ComputePipelineState,
     matvec_pipeline: ComputePipelineState,
@@ -393,7 +393,7 @@ mod tests {
         let mut c = a.matmul(b.permute()).retrieve();
 
         cx.compile(
-            GenericCompiler::<MetalCompiler<f16>>::default(),
+            <(GenericCompiler, MetalCompiler<f16>)>::default(),
             (&mut a, &mut b, &mut c),
         );
         cx.execute();
@@ -417,7 +417,7 @@ mod tests {
         let mut c = a.matmul(b).retrieve();
 
         cx.compile(
-            GenericCompiler::<MetalCompiler<f16>>::default(),
+            <(GenericCompiler, MetalCompiler<f16>)>::default(),
             (&mut a, &mut b, &mut c),
         );
         cx.execute();

@@ -13,7 +13,7 @@ use crate::{
 };
 
 /// Copy a tensor to the GPU
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEqTrue, LuminalPrint, Clone)]
 pub struct MetalCopyToDevice<T>(Device, PhantomData<T>);
 
 impl<T> MetalCopyToDevice<T> {
@@ -60,7 +60,7 @@ impl<T: MetalFloat> Operator for MetalCopyToDevice<T> {
 }
 
 /// Copy a tensor from the GPU
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEqTrue, LuminalPrint, Clone)]
 pub struct MetalCopyFromDevice<T>(Device, PhantomData<T>);
 
 impl<T> MetalCopyFromDevice<T> {
@@ -143,7 +143,7 @@ impl<T: MetalFloat> Operator for MetalConstant<T> {
     }
 }
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEqTrue, LuminalPrint, Clone)]
 pub struct MetalContiguous<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -267,7 +267,7 @@ impl<T: MetalFloat> Operator for MetalContiguous<T> {
     }
 }
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEqTrue, LuminalPrint, Clone)]
 pub struct MetalLog2<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -363,7 +363,7 @@ impl<T: MetalFloat> Operator for MetalLog2<T> {
     }
 }
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEqTrue, LuminalPrint, Clone)]
 pub struct MetalExp2<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -458,7 +458,7 @@ impl<T: MetalFloat> Operator for MetalExp2<T> {
     }
 }
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEqTrue, LuminalPrint, Clone)]
 pub struct MetalSin<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -553,7 +553,7 @@ impl<T: MetalFloat> Operator for MetalSin<T> {
     }
 }
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEqTrue, LuminalPrint, Clone)]
 pub struct MetalSqrt<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -648,7 +648,7 @@ impl<T: MetalFloat> Operator for MetalSqrt<T> {
     }
 }
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEqTrue, LuminalPrint, Clone)]
 pub struct MetalRecip<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -743,7 +743,7 @@ impl<T: MetalFloat> Operator for MetalRecip<T> {
     }
 }
 
-#[derive(LuminalPrint, LuminalEq, Clone)]
+#[derive(LuminalPrint, LuminalEqTrue, Clone)]
 pub struct MetalAdd<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -875,7 +875,7 @@ impl<T: MetalFloat> Operator for MetalAdd<T> {
     }
 }
 
-#[derive(LuminalPrint, LuminalEq, Clone)]
+#[derive(LuminalPrint, LuminalEqTrue, Clone)]
 pub struct MetalMul<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -1008,7 +1008,7 @@ impl<T: MetalFloat> Operator for MetalMul<T> {
     }
 }
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEqTrue, LuminalPrint, Clone)]
 pub struct MetalLessThan<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -1153,7 +1153,7 @@ impl<T: MetalFloat> Operator for MetalLessThan<T> {
     }
 }
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalEqTrue, LuminalPrint, Clone)]
 pub struct MetalMod<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -1284,7 +1284,7 @@ impl<T: MetalFloat> Operator for MetalMod<T> {
     }
 }
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalPrint, Clone)]
 pub struct MetalSumReduce<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -1293,6 +1293,12 @@ pub struct MetalSumReduce<T> {
     dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
     dyn_map: *const HashMap<char, usize>,
+}
+
+impl<T> PartialEq for MetalSumReduce<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.dim == other.dim
+    }
 }
 
 impl<T: MetalFloat> MetalSumReduce<T> {
@@ -1444,7 +1450,7 @@ impl<T: MetalFloat> Operator for MetalSumReduce<T> {
     }
 }
 
-#[derive(LuminalEq, LuminalPrint, Clone)]
+#[derive(LuminalPrint, Clone)]
 pub struct MetalMaxReduce<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -1453,6 +1459,12 @@ pub struct MetalMaxReduce<T> {
     dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
     dyn_map: *const HashMap<char, usize>,
+}
+
+impl<T> PartialEq for MetalMaxReduce<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.dim == other.dim
+    }
 }
 
 impl<T: MetalFloat> MetalMaxReduce<T> {

@@ -174,16 +174,8 @@ pub trait MetalKernel: Debug {
     }
 }
 
-#[derive(LuminalPrint, Clone)]
+#[derive(LuminalPrint, LuminalEqFalse, Clone)]
 pub struct MetalKernelWrapper(pub Arc<Box<dyn MetalKernel>>);
-
-// TODO: This is like the worst thing in the world. Please don't do this.
-// MetalKernelWrapper doesn't need an actual PartialEq if we can move CSE to beforehand, which requires much more robust compilers
-impl PartialEq for MetalKernelWrapper {
-    fn eq(&self, other: &Self) -> bool {
-        format!("{self:?}") == format!("{other:?}")
-    }
-}
 
 impl Default for MetalKernelWrapper {
     fn default() -> Self {

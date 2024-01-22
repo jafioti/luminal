@@ -63,92 +63,28 @@ impl<const I: usize, const H: usize> SerializeModule for Mlp<I, H> {
     }
 }
 
-pub struct RotaryEmbedding<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> {
-    pub inv_freq: GraphTensor<R1<HEAD_DIM_OVER_2>>,
-}
+fn apply_rotary_embeddings<const N_HEADS: usize, Batch: Dimension, Seq: Dimension>(
+    input: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)>,
+    prev_seq: BigExpression,
+) -> GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)> {
+    // Get embedding
+    let freqs = (input.graph().arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
+    let freqs = freqs.inv_pow(1000000.0).recip();
+    let t = input.graph().arange::<Seq>() + input.graph().constant_expr(prev_seq).expand();
+    let freqs = t.expand::<(_, Const<1>), _>().matmul(freqs.expand());
+    let emb = freqs.concat_along::<(Seq, Const<HEAD_DIM>), Axis<1>, _>(freqs);
 
-impl<
-        Batch: Dimension,
-        const NUM_HEADS: usize,
-        Seq: Dimension,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-    >
-    Module<(
-        GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
-        BigExpression,
-    )> for RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
-{
-    type Output = GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>;
+    // Rotate input
+    let x1 = input
+        .slice((.., .., .., ..Expression::from(HEAD_DIM_OVER_2)))
+        .contiguous();
+    let x2 = input
+        .slice((.., .., .., Expression::from(HEAD_DIM_OVER_2)..))
+        .contiguous();
+    let rotated_input = (-x2).concat_along::<(_, _, _, Const<HEAD_DIM>), Axis<3>, _>(x1);
 
-    fn forward(
-        &self,
-        (inp, prev_seq): (
-            GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
-            BigExpression,
-        ),
-    ) -> Self::Output {
-        let (sin, cos) = self.get_sincos::<NUM_HEADS, Seq>(prev_seq);
-        (Self::rotate_half(inp) * sin.expand()) + (inp * cos.expand())
-    }
-}
-
-impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
-    RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
-{
-    #[allow(clippy::type_complexity)]
-    fn get_sincos<const NUM_HEADS: usize, Seq: Dimension>(
-        &self,
-        prev_seq: BigExpression,
-    ) -> (
-        GraphTensor<(Seq, Const<HEAD_DIM>)>,
-        GraphTensor<(Seq, Const<HEAD_DIM>)>,
-    ) {
-        let t = self.inv_freq.graph().arange::<Seq>()
-            + self.inv_freq.graph().constant_expr(prev_seq).expand();
-        let freqs = t.expand::<(Seq, Const<1>), _>().matmul(
-            self.inv_freq
-                .expand::<(Const<1>, Const<HEAD_DIM_OVER_2>), _>(),
-        );
-        let emb = freqs.concat_along::<(Seq, Const<HEAD_DIM>), Axis<1>, _>(freqs);
-        (emb.sin().reshape(), emb.cos().reshape())
-    }
-
-    fn rotate_half<Batch: Dimension, NumHeads: Dimension, Seq: Dimension>(
-        x: GraphTensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>)>,
-    ) -> GraphTensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>)> {
-        let x1 = x
-            .slice((.., .., .., ..Expression::from(HEAD_DIM_OVER_2)))
-            .contiguous();
-        let x2 = x
-            .slice((.., .., .., Expression::from(HEAD_DIM_OVER_2)..))
-            .contiguous();
-        (-x2).concat_along::<(Batch, NumHeads, Seq, Const<HEAD_DIM>), Axis<3>, _>(x1)
-    }
-}
-
-impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> InitModule
-    for RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
-{
-    fn initialize(cx: &mut Graph) -> Self {
-        fn compute_inv_freq(head_dim: usize) -> Vec<f32> {
-            let theta = 1000000.0;
-            let mut rope_graph = Graph::new();
-            let frequencies = (rope_graph.arange::<Dyn<'h'>>() * 2.0) / (head_dim as f32);
-            let frequencies = frequencies.inv_pow(theta).recip().retrieve();
-
-            rope_graph.set_dyn_dim('h', head_dim / 2);
-            rope_graph.execute();
-
-            frequencies.data()
-        }
-        Self {
-            inv_freq: cx
-                .named_tensor("Inv Freq")
-                .set(compute_inv_freq(HEAD_DIM))
-                .keep(),
-        }
-    }
+    // Final calculation
+    rotated_input * emb.sin().expand() + input * emb.cos().expand()
 }
 
 pub struct SelfAttention {
@@ -156,7 +92,6 @@ pub struct SelfAttention {
     pub k_proj: GraphTensor<R2<ATTN_PROJ_DIM, HIDDEN_DIM>>,
     pub v_proj: GraphTensor<R2<ATTN_PROJ_DIM, HIDDEN_DIM>>,
     pub o_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
-    pub rotary_embeddings: RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>,
 }
 
 impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
@@ -193,12 +128,8 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         // Apply the Rotary Embeddings
-        let query_states = self
-            .rotary_embeddings
-            .forward((query_states, PrevSeq::const_size().into()));
-        let key_states = self
-            .rotary_embeddings
-            .forward((key_states, PrevSeq::const_size().into()));
+        let query_states = apply_rotary_embeddings(query_states, PrevSeq::const_size().into());
+        let key_states = apply_rotary_embeddings(key_states, PrevSeq::const_size().into());
 
         // Add KV cache
         let (key_states, value_states) = if let Some((k_cache, v_cache)) = cache {
@@ -247,7 +178,6 @@ impl InitModule for SelfAttention {
             k_proj: cx.named_tensor("K Proj"),
             v_proj: cx.named_tensor("V Proj"),
             o_proj: cx.named_tensor("O Proj"),
-            rotary_embeddings: InitModule::initialize(cx),
         }
     }
 }

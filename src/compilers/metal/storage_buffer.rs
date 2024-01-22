@@ -258,7 +258,7 @@ fn btreeset_intersection<T: Ord>(mut a: BTreeSet<T>, b: &BTreeSet<T>) -> BTreeSe
     a
 }
 
-#[derive(LuminalEq, LuminalPrint)]
+#[derive(LuminalEqFalse, LuminalPrint)]
 struct AllocateMetalBuffers {
     dev: Device,
     dyn_map: *const HashMap<char, usize>,
@@ -297,17 +297,12 @@ impl Operator for AllocateMetalBuffers {
     }
 }
 
+#[derive(LuminalEqFalse)]
 struct StorageBufferWrapper {
     wrapper: Box<MetalKernelWrapper>,
     buffers: Arc<UnsafeCell<Vec<Buffer>>>,
     intermediate_buffers: Vec<usize>,
     output_buffers: Vec<usize>,
-}
-
-impl PartialEq for StorageBufferWrapper {
-    fn eq(&self, other: &Self) -> bool {
-        self.wrapper.eq(&other.wrapper)
-    }
 }
 
 impl std::fmt::Debug for StorageBufferWrapper {
