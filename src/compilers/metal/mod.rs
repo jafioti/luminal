@@ -200,13 +200,15 @@ impl MetalKernel for () {
 }
 
 fn compile_lib(device: &Device, source: &str) -> Library {
+    let options = CompileOptions::new();
+    options.set_fast_math_enabled(true);
     device
         .new_library_with_source(
             &source.replace(
                 "KERNEL_PATH",
                 &format!("{}/src/compilers/metal/kernels", env!("CARGO_MANIFEST_DIR")),
             ),
-            &CompileOptions::new(),
+            &options,
         )
         .unwrap()
 }
