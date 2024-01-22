@@ -32,15 +32,17 @@ use crate::{
 pub type MetalCompiler<T> = (
     prim::PrimitiveCompiler<T>,
     (
+        unary::MetalCosCompiler<T>,
         binary::MetalSubtractionCompiler<T>,
         binary::MetalEqualCompiler<T>,
         other::ARangeCompiler<T>,
         binary::MetalGatherCompiler<T>,
+        unary::MetalExpCompiler<T>,
+        unary::MeanReduceCompiler<T>,
+        unary::StdNormCompiler<T>,
+        unary::SoftmaxCompiler<T>,
     ),
-    unary::MetalExpCompiler<T>,
     matmul::MetalMatMulCompiler<T>,
-    unary::MeanReduceCompiler<T>,
-    unary::StdNormCompiler<T>,
     other::CopyCompiler<T>,
     other::ContiguousElimination<T>,
     elementwise_fusion::ElementwiseFusionCompiler<T>,
@@ -197,19 +199,30 @@ impl MetalKernel for () {
     }
 }
 
-fn compile_function(name: &str, code: &str, device: &Device) -> ComputePipelineState {
-    let library = device
-        .new_library_with_source(code, &CompileOptions::new())
-        .unwrap();
+fn compile_lib(device: &Device, source: &str) -> Library {
+    device
+        .new_library_with_source(source, &CompileOptions::new())
+        .unwrap()
+}
+
+fn select_function_from_lib(
+    lib: &Library,
+    function: &str,
+    device: &Device,
+) -> ComputePipelineState {
     let pipeline_state_descriptor = ComputePipelineDescriptor::new();
     pipeline_state_descriptor
-        .set_compute_function(Some(&library.get_function(name, None).unwrap()));
-
+        .set_compute_function(Some(&lib.get_function(function, None).unwrap()));
     device
         .new_compute_pipeline_state_with_function(
             pipeline_state_descriptor.compute_function().unwrap(),
         )
         .unwrap()
+}
+
+fn compile_function(name: &str, code: &str, device: &Device) -> ComputePipelineState {
+    let library = compile_lib(device, code);
+    select_function_from_lib(&library, name, device)
 }
 
 fn is<T: Any>(type_id: TypeId) -> bool {

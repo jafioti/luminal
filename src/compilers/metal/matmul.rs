@@ -20,27 +20,6 @@ pub struct Matmul<T> {
     _phantom: PhantomData<T>,
 }
 
-fn compile_lib(device: &Device, source: &str) -> Library {
-    device
-        .new_library_with_source(source, &CompileOptions::new())
-        .unwrap()
-}
-
-fn select_function_from_lib(
-    lib: &Library,
-    function: &str,
-    device: &Device,
-) -> ComputePipelineState {
-    let pipeline_state_descriptor = ComputePipelineDescriptor::new();
-    pipeline_state_descriptor
-        .set_compute_function(Some(&lib.get_function(function, None).unwrap()));
-    device
-        .new_compute_pipeline_state_with_function(
-            pipeline_state_descriptor.compute_function().unwrap(),
-        )
-        .unwrap()
-}
-
 const BM: u64 = 8;
 const BN: u64 = 32;
 impl<T> MetalKernel for Matmul<T> {

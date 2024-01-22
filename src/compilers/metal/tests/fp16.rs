@@ -30,6 +30,24 @@ fn test_contiguous() {
 }
 
 #[test]
+fn test_softmax() {
+    let mut cx = Graph::new();
+    let data = random_vec(12);
+    let a = cx.tensor::<R2<1, 12>>().set(data.clone());
+    let mut b = a.softmax::<1>().retrieve();
+    cx.compile(MetalCompiler::<f16>::default(), &mut b);
+    cx.execute();
+
+    let d_dev = Cpu::default();
+    let d_a = d_dev
+        .tensor_from_vec(data, (DConst::<1>, DConst::<12>))
+        .to_dtype::<f16>();
+    let d_b = d_a.softmax::<DAxis<1>>();
+
+    assert_close(&b.data(), &d_b.to_dtype::<f32>().as_vec());
+}
+
+#[test]
 fn test_constant() {
     let mut cx = Graph::new();
     let a = cx.constant_expr('a'.into());

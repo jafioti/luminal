@@ -78,7 +78,7 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
 }
 
 /// Special kernel for producing aranges
-#[derive(Clone)]
+#[derive(Clone, LuminalEqFalse)]
 pub struct MetalARange<T: MetalFloat>(
     ComputePipelineState,
     CommandQueue,
@@ -91,12 +91,6 @@ pub struct MetalARange<T: MetalFloat>(
 impl<T: MetalFloat> Debug for MetalARange<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "MetalARange({:?})", self.3)
-    }
-}
-
-impl<T: MetalFloat> PartialEq for MetalARange<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.3.eq(&other.3)
     }
 }
 

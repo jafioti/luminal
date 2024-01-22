@@ -861,3 +861,180 @@ impl<T: MetalFloat> Compiler for MetalCosCompiler<T> {
         }
     }
 }
+
+/// Special kernel for efficient softmax. Currently only works on the last dim
+#[derive(LuminalPrint, LuminalEqTrue, Clone)]
+pub struct MetalSoftmax<T> {
+    single_row_pipeline: ComputePipelineState,
+    looped_pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    _phantom: PhantomData<T>,
+}
+
+const SOFTMAX_N_READS: usize = 4;
+const SOFTMAX_LOOPED_LIMIT: usize = 4096;
+const SIMD_SIZE: usize = 32;
+impl<T> MetalKernel for MetalSoftmax<T> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+        vec![input_shapes[0].n_elements() * size_of::<T>()]
+    }
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        command_buffer: &CommandBufferRef,
+        _: &[&Buffer],
+        output_buffers: &[&Buffer],
+    ) {
+        let batch_size = inputs[0]
+            .1
+            .shape()
+            .iter()
+            .take(inputs[0].1.len() - 1)
+            .map(|i| i.to_usize().unwrap())
+            .product::<usize>()
+            .max(1);
+        let axis_size = inputs[0].1.shape().last().unwrap().to_usize().unwrap();
+
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(output_buffers[0]), 0);
+        encoder.set_i32(2, axis_size as i32);
+        encoder.set_threadgroup_memory_length(0, (SIMD_SIZE * std::mem::size_of::<u32>()) as u64);
+        if axis_size <= SOFTMAX_LOOPED_LIMIT {
+            encoder.set_compute_pipeline_state(&self.single_row_pipeline);
+            let threadgroup_needed = (axis_size + SOFTMAX_N_READS - 1) / SOFTMAX_N_READS;
+            let simds_needed = (threadgroup_needed + SIMD_SIZE - 1) / SIMD_SIZE;
+            let threadgroup_size = SIMD_SIZE * simds_needed;
+            let n_threads = batch_size * threadgroup_size;
+            encoder.dispatch_threads(
+                MTLSize::new(n_threads as u64, 1, 1),
+                MTLSize::new(threadgroup_size as u64, 1, 1),
+            );
+        } else {
+            encoder.set_compute_pipeline_state(&self.looped_pipeline);
+            encoder.dispatch_1d(batch_size * axis_size);
+        }
+        encoder.end_encoding();
+    }
+}
+
+impl<T: MetalFloat> Operator for MetalSoftmax<T> {
+    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        autoreleasepool(|| {
+            // Setup buffers
+            let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
+            let out = self
+                .device
+                .new_buffer(inp_size as u64, MTLResourceOptions::StorageModeShared);
+
+            // Setup command queue / command buffer / encoder
+            let command_buffer = self.queue.new_command_buffer();
+
+            self.metal_forward(
+                &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
+                command_buffer,
+                &[],
+                &[&out],
+            );
+
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
+
+            vec![Tensor::new(out)]
+        })
+    }
+
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            #[allow(clippy::arc_with_non_send_sync)]
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
+        }
+        None
+    }
+}
+
+/// Replace the softmax pattern with a special kernel.
+#[derive(Default, Debug)]
+pub struct SoftmaxCompiler<T>(PhantomData<T>);
+
+impl<T: MetalFloat> Compiler for SoftmaxCompiler<T> {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+        let dev = Device::system_default().unwrap();
+        let queue = dev.new_command_queue();
+        // Look for the mean-reduce pattern
+        // mul(recip(fake_sum_reduce(const_ones)), sum_reduce(x))
+        let (mut max_reduce, mut sub, mut exp, mut sum_reduce, mut recip, mut mul) = (
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+        );
+
+        let s = SelectOp::new()
+            .ty::<MetalMaxReduce<T>>()
+            .ptr(&mut max_reduce)
+            .edge(SelectOp::new().ty::<MetalSub<T>>().ptr(&mut sub))
+            .edge(SelectOp::new().ty::<MetalExp<T>>().ptr(&mut exp))
+            .edge(
+                SelectOp::new()
+                    .ty::<MetalSumReduce<T>>()
+                    .ptr(&mut sum_reduce),
+            )
+            .edge(SelectOp::new().ty::<MetalRecip<T>>().ptr(&mut recip))
+            .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul));
+
+        let lib = compile_lib(&dev, include_str!("kernels/softmax.metal"));
+        let type_name = if T::is_f32() { "float32" } else { "float16" };
+        let mut searcher = s.search(graph);
+        while searcher.next_match() {
+            if check_no_delete(graph, &[max_reduce, sub, exp, sum_reduce, recip]) {
+                // An intermediate node can't be deleted
+                continue;
+            }
+            // Insert Softmax op
+            let src = graph.get_sources(max_reduce)[0];
+            let mean_reduce = graph
+                .add_op(MetalSoftmax::<T> {
+                    device: dev.clone(),
+                    queue: queue.clone(),
+                    _phantom: Default::default(),
+                    single_row_pipeline: select_function_from_lib(
+                        &lib,
+                        &format!("softmax_{type_name}"),
+                        &dev,
+                    ),
+                    looped_pipeline: select_function_from_lib(
+                        &lib,
+                        &format!("softmax_looped_{type_name}"),
+                        &dev,
+                    ),
+                })
+                .input(src.0, 0, src.2)
+                .finish();
+
+            // Create edges to dests
+            move_outgoing_edge(mul, mean_reduce, &mut graph.graph);
+            move_references(
+                &mut remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                mul,
+                mean_reduce,
+            );
+
+            // Remove the old ops
+            graph.graph.remove_node(mul);
+            graph.safe_remove_node(recip, 0);
+            graph.safe_remove_node(sum_reduce, 0);
+            graph.safe_remove_node(exp, 0);
+            graph.safe_remove_node(sub, 0);
+            graph.safe_remove_node(max_reduce, 0);
+        }
+    }
+}
