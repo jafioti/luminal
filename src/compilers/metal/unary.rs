@@ -1046,7 +1046,6 @@ pub struct MetalRotate<T> {
     queue: CommandQueue,
     device: Device,
     _phantom: PhantomData<T>,
-    axis_size: usize,
 }
 
 impl<T: MetalFloat> MetalRotate<T> {
@@ -1069,7 +1068,6 @@ kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *o
 "), &device),
             device,
             queue,
-            axis_size,
             _phantom: Default::default()
         }
     }
@@ -1242,10 +1240,21 @@ impl<T: MetalFloat> Compiler for RotateCompiler<T> {
                 a.1 .2.slices[i].1 = i32::MAX.into();
             }
             // Insert op
-            let rotate = graph
+            let mut rotate = graph
                 .add_op(MetalRotate::<T>::new(axis_size, dev.clone(), queue.clone()))
                 .input(a.0, 0, a.1 .2)
                 .finish();
+            if !a.1 .2.is_contiguous() {
+                rotate = graph
+                    .add_op(MetalContiguous::<T>::new(
+                        a.1 .2,
+                        dev.clone(),
+                        queue.clone(),
+                        &graph.dyn_map,
+                    ))
+                    .input(rotate, 0, a.1 .2)
+                    .finish();
+            }
 
             // Create edges to dests
             move_outgoing_edge(add, rotate, &mut graph.graph);
