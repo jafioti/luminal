@@ -50,16 +50,19 @@ fn test_softmax() {
 #[test]
 fn test_rotate() {
     let mut cx = Graph::new();
-    let data = random_vec(32 * 128);
+    const D: usize = 2;
+    const S: usize = 2;
+    const H: usize = 2;
+    let data = random_vec(D * S * H);
     let a = cx
-        .tensor::<R4<1, 1, 32, 128>>()
-        .set(data.clone())
+        .tensor::<R4<1, D, S, H>>()
+        .set(data)
         .keep()
         .permute::<_, LAxes4<0, 2, 1, 3>>();
-    let x1 = a.slice((.., .., .., ..Expression::from(64)));
-    let x2 = a.slice((.., .., .., Expression::from(64)..));
+    let x1 = a.slice((.., .., .., ..Expression::from(H / 2)));
+    let x2 = a.slice((.., .., .., Expression::from(H / 2)..));
     let mut rotated_a = (-x2)
-        .concat_along::<R4<1, 32, 1, 128>, LAxis<3>, _>(x1)
+        .concat_along::<R4<1, S, D, H>, LAxis<3>, _>(x1)
         .retrieve();
     cx.execute();
     let unopt = rotated_a.data();

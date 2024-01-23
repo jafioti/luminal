@@ -123,6 +123,28 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         // Apply the Rotary Embeddings
+        // Get embedding
+        // let freqs =
+        //     (key_states.graph().arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
+        // let freqs = freqs.inv_pow(1000000.0).recip();
+        // let t = key_states.graph().arange::<CurSeq>()
+        //     + key_states
+        //         .graph()
+        //         .constant_expr(PrevSeq::const_size().into())
+        //         .expand();
+        // let freqs = t.expand::<(_, Const<1>), _>().matmul(freqs.expand());
+        // let emb = freqs.concat_along::<(CurSeq, Const<HEAD_DIM>), Axis<1>, _>(freqs);
+
+        // // Rotate input
+        // let x1 = key_states.slice((.., .., .., ..Expression::from(HEAD_DIM_OVER_2)));
+        // let x2 = key_states.slice((.., .., .., Expression::from(HEAD_DIM_OVER_2)..));
+        // let rotated_input = (-x2).concat_along::<(_, _, _, Const<HEAD_DIM>), Axis<3>, _>(x1);
+        // if cache.is_some() {
+        //     rotated_input.print("");
+        // }
+
+        // Final calculation
+        // let key_states = rotated_input * emb.sin().expand() + key_states * emb.cos().expand();
         let query_states = apply_rotary_embeddings(query_states, PrevSeq::const_size().into());
         let key_states = apply_rotary_embeddings(key_states, PrevSeq::const_size().into());
 

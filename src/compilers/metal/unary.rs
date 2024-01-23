@@ -1046,7 +1046,6 @@ pub struct MetalRotate<T> {
     queue: CommandQueue,
     device: Device,
     _phantom: PhantomData<T>,
-    axis_size: usize,
 }
 
 impl<T: MetalFloat> MetalRotate<T> {
@@ -1060,7 +1059,7 @@ using namespace metal;
 kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         if ((idx % {axis_size}) < {half_size}) {{
-            out[idx] = -inp[idx + {half_size}];
+            out[idx] = ({type_name})-(float)inp[idx + {half_size}];
         }} else {{
             out[idx] = inp[idx - {half_size}];
         }}
@@ -1069,7 +1068,6 @@ kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *o
 "), &device),
             device,
             queue,
-            axis_size,
             _phantom: Default::default()
         }
     }
@@ -1086,9 +1084,7 @@ impl<T> MetalKernel for MetalRotate<T> {
         _: &[&Buffer],
         output_buffers: &[&Buffer],
     ) {
-        let mut sh = inputs[0].1;
-        sh.remove_dim(3);
-        let n_elements = sh.n_elements().to_usize().unwrap() * self.axis_size;
+        let n_elements = inputs[0].1.n_physical_elements().to_usize().unwrap();
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
         encoder.set_buffer(0, Some(inputs[0].0), 0);
@@ -1244,10 +1240,21 @@ impl<T: MetalFloat> Compiler for RotateCompiler<T> {
                 a.1 .2.slices[i].1 = i32::MAX.into();
             }
             // Insert op
-            let rotate = graph
+            let mut rotate = graph
                 .add_op(MetalRotate::<T>::new(axis_size, dev.clone(), queue.clone()))
                 .input(a.0, 0, a.1 .2)
                 .finish();
+            if !a.1 .2.is_contiguous() {
+                rotate = graph
+                    .add_op(MetalContiguous::<T>::new(
+                        a.1 .2,
+                        dev.clone(),
+                        queue.clone(),
+                        &graph.dyn_map,
+                    ))
+                    .input(rotate, 0, a.1 .2)
+                    .finish();
+            }
 
             // Create edges to dests
             move_outgoing_edge(add, rotate, &mut graph.graph);
