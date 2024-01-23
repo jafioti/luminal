@@ -71,6 +71,36 @@ fn test_rotate() {
 }
 
 #[test]
+fn test_rotate2() {
+    let mut cx = Graph::new();
+    const D: usize = 2;
+    const S: usize = 2;
+    const H: usize = 2;
+    let data = random_vec(D * S * H);
+    let a = cx
+        .tensor::<R4<1, D, S, H>>()
+        .set(data.clone())
+        .keep()
+        .permute::<_, LAxes4<0, 2, 1, 3>>();
+    let x1 = a.slice((.., .., .., ..Expression::from(H / 2)));
+    let x2 = a.slice((.., .., .., Expression::from(H / 2)..));
+    let mut rotated_a = (-x2)
+        .concat_along::<R4<1, S, D, H>, LAxis<3>, _>(x1)
+        .retrieve();
+    cx.execute();
+    let unopt = rotated_a.data();
+
+    cx.compile(MetalCompiler::<f16>::default(), &mut rotated_a);
+    cx.execute();
+
+    println!("data:      {:?}", data);
+    println!("unopt:     {:?}", unopt);
+    println!("rotated_a: {:?}", rotated_a.data());
+
+    assert_close(&unopt, &rotated_a.data());
+}
+
+#[test]
 fn test_constant() {
     let mut cx = Graph::new();
     let a = cx.constant_expr('a'.into());

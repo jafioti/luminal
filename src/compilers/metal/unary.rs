@@ -1060,7 +1060,7 @@ using namespace metal;
 kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         if ((idx % {axis_size}) < {half_size}) {{
-            out[idx] = -inp[idx + {half_size}];
+            out[idx] = ({type_name})-(float)inp[idx + {half_size}];
         }} else {{
             out[idx] = inp[idx - {half_size}];
         }}
@@ -1086,9 +1086,7 @@ impl<T> MetalKernel for MetalRotate<T> {
         _: &[&Buffer],
         output_buffers: &[&Buffer],
     ) {
-        let mut sh = inputs[0].1;
-        sh.remove_dim(3);
-        let n_elements = sh.n_elements().to_usize().unwrap() * self.axis_size;
+        let n_elements = inputs[0].1.n_physical_elements().to_usize().unwrap();
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
         encoder.set_buffer(0, Some(inputs[0].0), 0);
