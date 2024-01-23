@@ -86,3 +86,6 @@ Some things on the roadmap:
 - Beat PT 2.0 perf on LLM training
 - Write compiler for quantum photonic retro encabulator
 - Build dyson swarm
+
+# License
+Licensed under the Apache License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0 or the MIT license http://opensource.org/licenses/MIT, at your option. This file may not be copied, modified, or distributed except according to those terms.
