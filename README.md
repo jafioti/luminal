@@ -14,11 +14,11 @@ let a = cx.tensor::<R2<3, 1>>()
 let b = cx.tensor::<R2<1, 4>>()
     .set(vec![1.0, 2.0, 3.0, 4.0]);
 
-// Do stuff...
+// Do math...
 let mut c = a.matmul(b).retrieve();
 
 // Compile and run graph
-cx.compile(GenericCompiler::<()>::default(), &mut c);
+cx.compile(GenericCompiler::default(), &mut c);
 cx.execute();
 
 // Get result
@@ -61,7 +61,10 @@ Accelerators are free to implement their own custom ops and their own compilers.
 All operations are shape checked at compile time, so no more shape mismatches! Credit for this goes to [dfdx](https://github.com/coreylowman/dfdx).
 
 ## View the Graph
-Once you've written all your computation code, run `cx.display()` to see the entire computation graph in all it's glory. Pretty messy looking! Now run `cx.compile(GenericCompiler::<()>::default())` and display the graph again. Much better.
+Once you've written all your computation code, run `cx.display()` to see the entire computation graph in all it's glory. Pretty messy looking! Now run `cx.compile(GenericCompiler::default())` and display the graph again. Much better.
+
+## Validated against Pytorch
+Correctness matters. So we write as much tests as possible to cover all ops and verify they work the same as an equivalent Pytorch implementation.
 
 ## Where are we?
 Currently luminal is extremely alpha. Please don't use this in prod.
@@ -70,15 +73,16 @@ Currently luminal is extremely alpha. Please don't use this in prod.
 - Mistral 7B and Llama 7B are implemented in `examples/`. See instructions above for running.
 - The llama example shows how to implement a loader for a custom format. Safetensors loaders are already implemented, and are the recommended way to load a model.
 - We have a small library of NN modules in `nn`, including transformers.
-- A signifigant amount of high-level ops are implemented in `hl_ops`. We are aiming to match the tinygrad / pytorch api.
-- Next release will bring a signifigant amount of compilers which should fuse primops into much faster ops. The aim for 0.3 is to be usably fast, not SOTA yet (10-20 tok/s in fp16).
-- The aim for 0.4 is to achieve SOTA performance on macs (50 tok/s), and near SOTA on single nvidia gpus (>200 tok/s), as well as support all mainstream models (Whisper, Stable Diffusion, Yolo v8, etc.)
+- A signifigant amount of high-level ops are implemented in `hl_ops`. We are aiming to match the most used ~80% of the pytorch api.
+- Next release will bring a signifigant amount of compilers which should fuse primops into much faster ops. The aim for 0.2 is to be usably fast, not SOTA yet (10-20 tok/s in fp16).
+- The aim for 0.3 is to achieve SOTA performance on an M1 pro (50 tok/s), and near SOTA on single nvidia gpus (>200 tok/s), as well as support all mainstream models (Whisper, Stable Diffusion, Yolo v8, etc.)
 
 Some things on the roadmap:
 - Optimize cuda and metal matmul kernels
 - Fine-grained metal and cuda IR
 - Build benchmarking suite to test against other libs
 - Autograd engine
+- Distributed data, pipeline and tensor parallel.
 - Beat PT 2.0 perf on LLM training
 - Write compiler for quantum photonic retro encabulator
 - Build dyson swarm
