@@ -1,6 +1,5 @@
 use std::marker::PhantomData;
 
-use half::f16;
 use luminal::{
     nn::{embedding::Embedding, norm::RMSNorm},
     prelude::*,
@@ -139,25 +138,23 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
 
         // Repeat the KV States for Grouped-Query Attention
         let repeated_key_states = key_states
-            .expand::<(_, _, Const<N_ATTENTION_GROUPS>, _, _), Axis<2>>()
-            .reshape::<(Batch, Const<N_HEADS>, TotSeq, Const<HEAD_DIM>)>()
-            .permute::<_, Axes4<0, 1, 3, 2>>();
-
+            .expand::<(_, _, Const<N_ATTENTION_GROUPS>, _, _), _>()
+            .reshape::<(Batch, Const<N_HEADS>, TotSeq, Const<HEAD_DIM>)>();
         let repeated_value_states = value_states
-            .expand::<(_, _, Const<N_ATTENTION_GROUPS>, _, _), Axis<2>>()
+            .expand::<(_, _, Const<N_ATTENTION_GROUPS>, _, _), _>()
             .reshape::<(Batch, Const<N_HEADS>, TotSeq, Const<HEAD_DIM>)>();
 
-        let mut attention_weights = query_states.matmul(repeated_key_states);
+        let mut attention_weights = query_states.matmul(repeated_key_states.permute());
         attention_weights = attention_weights * (HEAD_DIM as f32).sqrt().recip();
         // We only mask on a non-kv cache pass
         if cache.is_none() {
             let attention_mask = self.k_proj.graph().triu::<CurSeq, TotSeq>(1) * f16::MIN.to_f32();
             attention_weights += attention_mask.expand();
         }
-        attention_weights = attention_weights.softmax::<3>();
 
         (
             attention_weights
+                .softmax::<3>()
                 .matmul(repeated_value_states)
                 .permute::<_, Axes4<0, 2, 1, 3>>()
                 .reshape::<(Batch, CurSeq, Const<HIDDEN_DIM>)>()
