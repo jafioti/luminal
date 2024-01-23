@@ -48,6 +48,29 @@ fn test_softmax() {
 }
 
 #[test]
+fn test_rotate() {
+    let mut cx = Graph::new();
+    let data = random_vec(32 * 128);
+    let a = cx
+        .tensor::<R4<1, 1, 32, 128>>()
+        .set(data.clone())
+        .keep()
+        .permute::<_, LAxes4<0, 2, 1, 3>>();
+    let x1 = a.slice((.., .., .., ..Expression::from(64)));
+    let x2 = a.slice((.., .., .., Expression::from(64)..));
+    let mut rotated_a = (-x2)
+        .concat_along::<R4<1, 32, 1, 128>, LAxis<3>, _>(x1)
+        .retrieve();
+    cx.execute();
+    let unopt = rotated_a.data();
+
+    cx.compile(MetalCompiler::<f16>::default(), &mut rotated_a);
+    cx.execute();
+
+    assert_close(&unopt, &rotated_a.data());
+}
+
+#[test]
 fn test_constant() {
     let mut cx = Graph::new();
     let a = cx.constant_expr('a'.into());

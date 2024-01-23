@@ -1038,3 +1038,232 @@ impl<T: MetalFloat> Compiler for SoftmaxCompiler<T> {
         }
     }
 }
+
+/// Special kernel for rotating. Probably shouldn't exist, seeing as it's only for rotary embeddings
+#[derive(LuminalPrint, LuminalEqTrue, Clone)]
+pub struct MetalRotate<T> {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    _phantom: PhantomData<T>,
+    axis_size: usize,
+}
+
+impl<T: MetalFloat> MetalRotate<T> {
+    fn new(axis_size: usize, device: Device, queue: CommandQueue) -> Self {
+        let half_size = axis_size / 2;
+        let type_name = T::type_name();
+        Self {
+            pipeline: compile_function("mkernel", &format!("
+#include <metal_stdlib>
+using namespace metal;
+kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+    if (idx < n_elements) {{
+        if ((idx % {axis_size}) < {half_size}) {{
+            out[idx] = -inp[idx + {half_size}];
+        }} else {{
+            out[idx] = inp[idx - {half_size}];
+        }}
+    }}
+}}
+"), &device),
+            device,
+            queue,
+            axis_size,
+            _phantom: Default::default()
+        }
+    }
+}
+
+impl<T> MetalKernel for MetalRotate<T> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+        vec![input_shapes[0].n_physical_elements() * size_of::<T>()]
+    }
+    fn metal_forward(
+        &self,
+        inputs: &[(&Buffer, ShapeTracker)],
+        command_buffer: &CommandBufferRef,
+        _: &[&Buffer],
+        output_buffers: &[&Buffer],
+    ) {
+        let mut sh = inputs[0].1;
+        sh.remove_dim(3);
+        let n_elements = sh.n_elements().to_usize().unwrap() * self.axis_size;
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        encoder.set_buffer(0, Some(inputs[0].0), 0);
+        encoder.set_buffer(1, Some(output_buffers[0]), 0);
+        encoder.set_u32(2, n_elements as u32);
+        encoder.set_compute_pipeline_state(&self.pipeline);
+        encoder.dispatch_1d(n_elements);
+        encoder.end_encoding();
+    }
+}
+
+impl<T: MetalFloat> Operator for MetalRotate<T> {
+    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        autoreleasepool(|| {
+            // Setup buffers
+            let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
+            let out = self
+                .device
+                .new_buffer(inp_size as u64, MTLResourceOptions::StorageModeShared);
+
+            // Setup command queue / command buffer / encoder
+            let command_buffer = self.queue.new_command_buffer();
+
+            self.metal_forward(
+                &[(get_buffer_from_tensor(&tensors[0].0), tensors[0].1)],
+                command_buffer,
+                &[],
+                &[&out],
+            );
+
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
+
+            vec![Tensor::new(out)]
+        })
+    }
+
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        if key == "metal" {
+            #[allow(clippy::arc_with_non_send_sync)]
+            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
+                self.clone(),
+            )))));
+        }
+        None
+    }
+}
+
+/// Replace the rotate pattern with a special kernel.
+#[derive(Default, Debug)]
+pub struct RotateCompiler<T>(PhantomData<T>);
+
+impl<T: MetalFloat> Compiler for RotateCompiler<T> {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+        let dev = Device::system_default().unwrap();
+        let queue = dev.new_command_queue();
+        let (mut neg_one, mut add, mut mul, mut contig) = (
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+            NodeIndex::default(),
+        );
+
+        let mut searcher = constant_select_op!(-1.0, T)
+            .ptr(&mut neg_one)
+            .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul))
+            .edge(
+                SelectOp::new()
+                    .ty::<MetalContiguous<T>>()
+                    .ptr(&mut contig)
+                    .edge(SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add)),
+            )
+            .search(graph);
+        while searcher.next_match() {
+            if check_no_delete(graph, &[mul]) {
+                // An intermediate node can't be deleted
+                continue;
+            }
+            // Check shapes
+            let a_shape_first = graph
+                .graph
+                .edges_directed(mul, petgraph::Direction::Incoming)
+                .find(|e| e.source() != neg_one)
+                .unwrap()
+                .weight()
+                .as_data()
+                .unwrap()
+                .2;
+            let Some(axis_size) = a_shape_first.dims[a_shape_first.indexes[3]].to_usize() else {
+                continue;
+            };
+            let b_shape_first = graph
+                .graph
+                .edges_directed(contig, petgraph::Direction::Incoming)
+                .next()
+                .unwrap()
+                .weight()
+                .as_data()
+                .unwrap()
+                .2;
+            let a_shape_last = graph
+                .graph
+                .edges_connecting(mul, add)
+                .next()
+                .unwrap()
+                .weight()
+                .as_data()
+                .unwrap()
+                .2;
+            let b_shape_last = graph
+                .graph
+                .edges_connecting(contig, add)
+                .next()
+                .unwrap()
+                .weight()
+                .as_data()
+                .unwrap()
+                .2;
+            if a_shape_first.len() != 4
+                || a_shape_first.slices[a_shape_first.indexes[3]]
+                    .0
+                    .to_usize()
+                    .map(|i| i != axis_size / 2)
+                    .unwrap_or(true)
+                || b_shape_first.slices[b_shape_first.indexes[3]]
+                    .1
+                    .to_usize()
+                    .map(|i| i != axis_size / 2)
+                    .unwrap_or(true)
+                || a_shape_last.padding[a_shape_last.indexes[3]]
+                    .1
+                    .to_usize()
+                    .map(|i| i != axis_size / 2)
+                    .unwrap_or(true)
+                || b_shape_last.padding[b_shape_last.indexes[3]]
+                    .0
+                    .to_usize()
+                    .map(|i| i != axis_size / 2)
+                    .unwrap_or(true)
+            {
+                continue;
+            }
+            let mut a = graph
+                .graph
+                .edges_directed(mul, petgraph::Direction::Incoming)
+                .find(|e| e.source() != neg_one)
+                .map(|e| (e.source(), e.weight().as_data().unwrap()))
+                .unwrap();
+            for i in 0..a.1 .2.len() {
+                a.1 .2.padding[i].0 = 0.into();
+                a.1 .2.padding[i].1 = 0.into();
+                a.1 .2.slices[i].0 = 0.into();
+                a.1 .2.slices[i].1 = i32::MAX.into();
+            }
+            // Insert op
+            let rotate = graph
+                .add_op(MetalRotate::<T>::new(axis_size, dev.clone(), queue.clone()))
+                .input(a.0, 0, a.1 .2)
+                .finish();
+
+            // Create edges to dests
+            move_outgoing_edge(add, rotate, &mut graph.graph);
+            move_references(
+                &mut remap,
+                &mut graph.no_delete,
+                &mut graph.to_retrieve,
+                add,
+                rotate,
+            );
+
+            // Remove the old ops
+            graph.graph.remove_node(add);
+            graph.safe_remove_node(mul, 0);
+            graph.safe_remove_node(neg_one, 0);
+            graph.safe_remove_node(contig, 0);
+        }
+    }
+}

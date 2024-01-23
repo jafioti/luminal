@@ -41,6 +41,7 @@ pub type MetalCompiler<T> = (
         unary::MeanReduceCompiler<T>,
         unary::StdNormCompiler<T>,
         unary::SoftmaxCompiler<T>,
+        // unary::RotateCompiler<T>,
     ),
     matmul::MetalMatMulCompiler<T>,
     other::CopyCompiler<T>,
