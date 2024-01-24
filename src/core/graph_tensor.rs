@@ -15,15 +15,11 @@ pub struct GraphTensor<S: Shape> {
     pub id: NodeIndex,
     pub graph_ref: *mut Graph,
     pub(crate) _phantom: PhantomData<S>,
-    pub shape: crate::core::shape::tracker::ShapeTracker,
+    pub shape: ShapeTracker,
 }
 
 impl<S: Shape> GraphTensor<S> {
-    pub fn from_id(
-        id: NodeIndex,
-        shape: crate::core::shape::tracker::ShapeTracker,
-        graph_ref: *mut Graph,
-    ) -> Self {
+    pub fn from_id(id: NodeIndex, shape: ShapeTracker, graph_ref: *mut Graph) -> Self {
         Self {
             id,
             graph_ref,
@@ -108,7 +104,8 @@ impl<S: Shape> GraphTensor<S> {
 
     /// Get the contiguous data of the tensor
     pub fn data(&self) -> Vec<f32> {
-        let st = self.shape.resolve_global_dyn_dims(&self.graph().dyn_map);
+        let mut st = self.shape;
+        st.resolve_global_dyn_dims(&self.graph().dyn_map);
         let tensor = self.graph().get_tensor_ref(self.id, 0).unwrap();
         let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; st.n_elements().to_usize().unwrap()];

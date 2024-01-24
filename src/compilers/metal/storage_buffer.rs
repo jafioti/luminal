@@ -285,7 +285,7 @@ impl Operator for AllocateMetalBuffers {
         } else {
             for (size, buffer) in self.buffer_sizes.iter().zip(buffers) {
                 let size = size.exec(dyn_map).unwrap() as u64;
-                if buffer.length() != size {
+                if buffer.length() < size {
                     buffer.set_purgeable_state(metal_rs::MTLPurgeableState::Empty);
                     *buffer = self
                         .dev

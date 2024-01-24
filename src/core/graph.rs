@@ -182,12 +182,7 @@ impl Graph {
 
     /// Clear any remaining tensors that may be around from old executions
     pub fn reset(&mut self) {
-        // (This is where we should do the tensor caching!)
-        for (t, i) in self.tensors.keys().copied().collect_vec() {
-            if !self.no_delete.contains(&t) {
-                self.tensors.remove(&(t, i));
-            }
-        }
+        self.tensors.retain(|(n, _), _| self.no_delete.contains(n));
     }
 
     /// Execute the graph.
@@ -197,6 +192,7 @@ impl Graph {
             self.toposort();
         }
         let mut remaining_consumers = self.create_remaining_customers_map();
+        let mut dim_stack = Vec::new();
 
         for (node, src_ids) in self.linearized_graph.as_ref().unwrap() {
             if self.tensors.contains_key(&(*node, 0)) {
@@ -212,7 +208,7 @@ impl Graph {
 
             // Substitute in the dyn dims
             for (_, st) in srcs.iter_mut() {
-                *st = st.resolve_global_dyn_dims(&self.dyn_map);
+                st.resolve_global_dyn_dims_stack(&self.dyn_map, &mut dim_stack);
             }
 
             // Execute
@@ -235,6 +231,7 @@ impl Graph {
         if self.linearized_graph.is_none() {
             self.toposort();
         }
+        let mut dim_stack = Vec::new();
         for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
             if self.tensors.contains_key(&(*node, 0)) {
                 continue;
@@ -246,7 +243,7 @@ impl Graph {
 
             // Substitute in the dyn dims
             for (_, st) in srcs.iter_mut() {
-                *st = st.resolve_global_dyn_dims(&self.dyn_map);
+                st.resolve_global_dyn_dims_stack(&self.dyn_map, &mut dim_stack);
             }
 
             // All sources are ready, execute
@@ -263,6 +260,7 @@ impl Graph {
         if self.linearized_graph.is_none() {
             self.toposort();
         }
+        let mut dim_stack = Vec::new();
         let mut remaining_consumers = self.create_remaining_customers_map();
         let mut op_times = HashMap::new();
 
@@ -289,7 +287,7 @@ impl Graph {
 
             // Substitute in the dyn dims
             for (_, st) in srcs.iter_mut() {
-                *st = st.resolve_global_dyn_dims(&self.dyn_map);
+                st.resolve_global_dyn_dims_stack(&self.dyn_map, &mut dim_stack);
             }
 
             // All sources are ready

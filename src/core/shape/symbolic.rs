@@ -446,7 +446,14 @@ impl<S: ExpressionStorage> GenericExpression<S> {
     }
     /// Evaluate the expression given variables.
     pub fn exec(&self, variables: &HashMap<char, usize>) -> Option<usize> {
-        let mut stack = Vec::new();
+        self.exec_stack(variables, &mut Vec::new())
+    }
+    /// Evaluate the expression given variables. This function requires a stack to be given for use as storage
+    pub fn exec_stack(
+        &self,
+        variables: &HashMap<char, usize>,
+        stack: &mut Vec<i32>,
+    ) -> Option<usize> {
         for term in self.terms.clone() {
             match term {
                 Term::Num(n) => stack.push(n),

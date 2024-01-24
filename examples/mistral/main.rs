@@ -31,7 +31,7 @@ The Three Laws, presented to be from the fictional \"Handbook of Robotics, 56th 
     - The Second Law: A robot must obey the orders given it by human beings except where such orders would conflict with the First Law.
     - The Third Law: A robot must protect its own existence as long as such protection does not conflict with the First or Second Law.
 ";
-    let tokens_to_generate = 128;
+    let tokens_to_generate = 256;
 
     let tokenizer = SentencePieceBpeTokenizer::from_file(
         "./examples/mistral/setup/mistral-7b-hf/tokenizer.model",
