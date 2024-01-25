@@ -1070,29 +1070,45 @@ pub struct MetalRotate<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
     device: Device,
+    dyn_symbols: Vec<char>,
+    dyn_map: *const HashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
 
 impl<T: MetalFloat> MetalRotate<T> {
-    fn new(axis_size: usize, device: Device, queue: CommandQueue) -> Self {
+    fn new(
+        axis_size: usize,
+        shape: ShapeTracker,
+        device: Device,
+        queue: CommandQueue,
+        dyn_map: *const HashMap<char, usize>,
+    ) -> Self {
         let half_size = axis_size / 2;
         let type_name = T::type_name();
+        let (index, valid) = get_idx_valid_exps(shape);
+        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape], 3);
         Self {
             pipeline: compile_function("mkernel", &format!("
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]) {{
+kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]{rendered}) {{
     if (idx < n_elements) {{
+        uint orig_idx = idx;
+        idx = {index};
         if ((idx % {axis_size}) < {half_size}) {{
-            out[idx] = ({type_name})-(float)inp[idx + {half_size}];
+            idx += {half_size};
+            out[orig_idx] = ({valid} != 0) ? -inp[idx] : 0.0;
         }} else {{
-            out[idx] = inp[idx - {half_size}];
+            idx -= {half_size};
+            out[orig_idx] = ({valid} != 0) ? inp[idx]: 0.0;
         }}
     }}
 }}
 "), &device),
             device,
             queue,
+            dyn_symbols,
+            dyn_map,
             _phantom: Default::default()
         }
     }
@@ -1115,6 +1131,12 @@ impl<T> MetalKernel for MetalRotate<T> {
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
         encoder.set_u32(2, n_elements as u32);
+        input_dyn_dims(
+            &self.dyn_symbols,
+            unsafe { self.dyn_map.as_ref().unwrap() },
+            &encoder,
+            3,
+        );
         encoder.set_compute_pipeline_state(&self.pipeline);
         encoder.dispatch_1d(n_elements);
         encoder.end_encoding();
@@ -1265,21 +1287,16 @@ impl<T: MetalFloat> Compiler for RotateCompiler<T> {
                 a.1 .2.slices[i].1 = i32::MAX.into();
             }
             // Insert op
-            let mut rotate = graph
-                .add_op(MetalRotate::<T>::new(axis_size, dev.clone(), queue.clone()))
+            let rotate = graph
+                .add_op(MetalRotate::<T>::new(
+                    axis_size,
+                    a.1 .2,
+                    dev.clone(),
+                    queue.clone(),
+                    &graph.dyn_map,
+                ))
                 .input(a.0, 0, a.1 .2)
                 .finish();
-            if !a.1 .2.is_contiguous() {
-                rotate = graph
-                    .add_op(MetalContiguous::<T>::new(
-                        a.1 .2,
-                        dev.clone(),
-                        queue.clone(),
-                        &graph.dyn_map,
-                    ))
-                    .input(rotate, 0, a.1 .2)
-                    .finish();
-            }
 
             // Create edges to dests
             move_outgoing_edge(add, rotate, &mut graph.graph);
