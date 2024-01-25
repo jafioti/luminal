@@ -1068,6 +1068,7 @@ impl<T: MetalFloat> Compiler for SoftmaxCompiler<T> {
 #[derive(LuminalPrint, LuminalEqTrue, Clone)]
 pub struct MetalRotate<T> {
     pipeline: ComputePipelineState,
+    axis_size: usize,
     queue: CommandQueue,
     device: Device,
     dyn_symbols: Vec<char>,
@@ -1108,6 +1109,7 @@ kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *o
             device,
             queue,
             dyn_symbols,
+            axis_size,
             dyn_map,
             _phantom: Default::default()
         }
@@ -1169,12 +1171,27 @@ impl<T: MetalFloat> Operator for MetalRotate<T> {
         })
     }
 
-    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             #[allow(clippy::arc_with_non_send_sync)]
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
+        }
+        // This op can accept non contiguous inputs
+        if key == "non_contiguous" {
+            return Some(Box::new(()));
+        }
+        if key == "recompile_shapes" {
+            if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
+                *self = Self::new(
+                    self.axis_size,
+                    input_shapes[0],
+                    self.device.clone(),
+                    self.queue.clone(),
+                    self.dyn_map,
+                );
+            }
         }
         None
     }
