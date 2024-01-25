@@ -122,29 +122,6 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        // Apply the Rotary Embeddings
-        // Get embedding
-        // let freqs =
-        //     (key_states.graph().arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
-        // let freqs = freqs.inv_pow(1000000.0).recip();
-        // let t = key_states.graph().arange::<CurSeq>()
-        //     + key_states
-        //         .graph()
-        //         .constant_expr(PrevSeq::const_size().into())
-        //         .expand();
-        // let freqs = t.expand::<(_, Const<1>), _>().matmul(freqs.expand());
-        // let emb = freqs.concat_along::<(CurSeq, Const<HEAD_DIM>), Axis<1>, _>(freqs);
-
-        // // Rotate input
-        // let x1 = key_states.slice((.., .., .., ..Expression::from(HEAD_DIM_OVER_2)));
-        // let x2 = key_states.slice((.., .., .., Expression::from(HEAD_DIM_OVER_2)..));
-        // let rotated_input = (-x2).concat_along::<(_, _, _, Const<HEAD_DIM>), Axis<3>, _>(x1);
-        // if cache.is_some() {
-        //     rotated_input.print("");
-        // }
-
-        // Final calculation
-        // let key_states = rotated_input * emb.sin().expand() + key_states * emb.cos().expand();
         let query_states = apply_rotary_embeddings(query_states, PrevSeq::const_size().into());
         let key_states = apply_rotary_embeddings(key_states, PrevSeq::const_size().into());
 
@@ -181,7 +158,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
                 .permute::<_, Axes4<0, 2, 1, 3>>()
                 .reshape::<(Batch, CurSeq, Const<HIDDEN_DIM>)>()
                 .matmul(self.o_proj.permute()),
-            (key_states, value_states),
+            (key_states.contiguous(), value_states.contiguous()), // Cache needs to be contiguous for transferring to another graph
         )
     }
 }
@@ -310,13 +287,13 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
 
         let mut new_caches = vec![];
         for (i, layer) in self.layers.iter().enumerate() {
-            let (new_hidden_states, (k_cache, v_cache)) = layer.forward((
+            let (new_hidden_states, new_cache) = layer.forward((
                 hidden_states,
                 cache.as_ref().map(|c| c[i]),
                 PhantomData::<TotSeq>,
             ));
             hidden_states = new_hidden_states;
-            new_caches.push((k_cache.contiguous(), v_cache.contiguous()));
+            new_caches.push(new_cache);
         }
         hidden_states = self.norm.forward(hidden_states);
 

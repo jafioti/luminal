@@ -288,23 +288,44 @@ kernel void kernel_std_norm(
         constant   int64_t & row_size [[buffer(2)]],
         constant     float & eps [[buffer(3)]],
         threadgroup float  * buf [[threadgroup(0)]],
-        uint threadgroup_pos[[threadgroup_position_in_grid]],
-        uint simdgroup_pos[[thread_index_in_simdgroup]]) {{
-    device const {type_name}4 * x = (device const {type_name}4 *) (src0 + threadgroup_pos * row_size);
+        uint threadgroup_position_in_grid[[threadgroup_position_in_grid]],
+        uint thread_position_in_threadgroup[[thread_position_in_threadgroup]],
+        uint simdgroup_index_in_threadgroup[[simdgroup_index_in_threadgroup]],
+        uint thread_index_in_simdgroup[[thread_index_in_simdgroup]],
+        uint threads_per_threadgroup[[threads_per_threadgroup]]) {{
+    device const {type_name}4 * x = (device const {type_name}4 *) (src0 + threadgroup_position_in_grid * row_size);
 
     float4 sumf = 0;
 
     // parallel sum
-    for (int i = simdgroup_pos; i < row_size/4; i += SIMD_WIDTH) {{
+    for (int i = thread_position_in_threadgroup; i < row_size/4; i += threads_per_threadgroup) {{
         sumf += (float4)x[i] * (float4)x[i];
     }}
     float all_sum = sumf[0] + sumf[1] + sumf[2] + sumf[3];
     all_sum = simd_sum(all_sum);
+
+    if (threads_per_threadgroup > SIMD_WIDTH) {{
+        if (simdgroup_index_in_threadgroup == 0) {{
+            buf[thread_index_in_simdgroup] = 0.0f;
+        }}
+
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+
+        if (thread_index_in_simdgroup == 0) {{
+            buf[simdgroup_index_in_threadgroup] = all_sum;
+        }}
+
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+
+        all_sum = buf[thread_index_in_simdgroup];
+        all_sum = simd_sum(all_sum);
+    }}
+
     const float mean  = all_sum/row_size;
     const float scale = 1.0f/sqrt(mean + eps);
 
-    device half4 * y = (device half4 *) (dst + threadgroup_pos * row_size);
-    for (int i = simdgroup_pos; i < row_size/4; i += SIMD_WIDTH) {{
+    device half4 * y = (device half4 *) (dst + threadgroup_position_in_grid * row_size);
+    for (int i = thread_position_in_threadgroup; i < row_size/4; i += threads_per_threadgroup) {{
         y[i] = ({type_name}4)(x[i] * scale);
     }}
 }}");
@@ -348,6 +369,10 @@ impl<T> MetalKernel for MetalStdNorm<T> {
             .take(inputs[0].1.len() - 1)
             .map(|i| i.to_usize().unwrap())
             .product::<usize>();
+        let mut nth = 32; // SIMD width
+        while nth < row_size / 4 && nth < 1024 {
+            nth *= 2;
+        }
         encoder.set_threadgroup_memory_length(0, 32 * size_of::<f32>() as u64);
         encoder.dispatch_thread_groups(
             MTLSize {
@@ -356,7 +381,7 @@ impl<T> MetalKernel for MetalStdNorm<T> {
                 depth: 1,
             },
             MTLSize {
-                width: 32.min(row_size / 4) as u64,
+                width: nth as u64,
                 height: 1,
                 depth: 1,
             },

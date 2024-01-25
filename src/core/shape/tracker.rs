@@ -292,19 +292,27 @@ impl ShapeTracker {
     }
 
     /// Given a dyn dim map, resolve global dyn dims into known dims
-    pub fn resolve_global_dyn_dims(mut self, dyn_dim_map: &HashMap<char, usize>) -> Self {
+    pub fn resolve_global_dyn_dims(&mut self, dyn_dim_map: &HashMap<char, usize>) {
+        self.resolve_global_dyn_dims_stack(dyn_dim_map, &mut Vec::new());
+    }
+
+    /// Given a dyn dim map, resolve global dyn dims into known dims. This function requires a stack to work with
+    pub fn resolve_global_dyn_dims_stack(
+        &mut self,
+        dyn_dim_map: &HashMap<char, usize>,
+        stack: &mut Vec<i32>,
+    ) {
         for d in self.dims.iter_mut() {
-            *d = d.exec(dyn_dim_map).unwrap().into();
+            *d = d.exec_stack(dyn_dim_map, stack).unwrap().into();
         }
         for (a, b) in self.padding.iter_mut() {
-            *a = a.exec(dyn_dim_map).unwrap().into();
-            *b = b.exec(dyn_dim_map).unwrap().into();
+            *a = a.exec_stack(dyn_dim_map, stack).unwrap().into();
+            *b = b.exec_stack(dyn_dim_map, stack).unwrap().into();
         }
         for (a, b) in self.slices.iter_mut() {
-            *a = a.exec(dyn_dim_map).unwrap().into();
-            *b = b.exec(dyn_dim_map).unwrap().into();
+            *a = a.exec_stack(dyn_dim_map, stack).unwrap().into();
+            *b = b.exec_stack(dyn_dim_map, stack).unwrap().into();
         }
-        self
     }
 
     pub fn is_sliced(&self) -> bool {

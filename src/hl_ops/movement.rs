@@ -37,35 +37,27 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
-    pub fn reshape<N: Shape>(self) -> GraphTensor<N> {
-        let id = if !self.shape.is_contiguous() {
+    pub fn reshape<N: Shape>(mut self) -> GraphTensor<N> {
+        if !self.shape.is_contiguous() {
             // Insert contiguous call
-            self.graph()
-                .add_op(op::Contiguous)
-                .input(self.id, 0, self.shape)
-                .finish()
-        } else {
-            // Already contiguous
-            self.id
-        };
+            self = self.contiguous();
+        }
 
-        GraphTensor::from_id(id, ShapeTracker::new(&N::realized_shape()), self.graph_ref)
+        GraphTensor::from_id(
+            self.id,
+            ShapeTracker::new(&N::realized_shape()),
+            self.graph_ref,
+        )
     }
 
     /// Dynamically reshape with annotations for the shape tracker
-    pub fn dyn_reshape<N: Shape>(self, shape: Vec<Expression>) -> GraphTensor<N> {
-        let id = if !self.shape.indexes.iter().enumerate().all(|(a, b)| a == *b) {
+    pub fn dyn_reshape<N: Shape>(mut self, shape: Vec<Expression>) -> GraphTensor<N> {
+        if !self.shape.indexes.iter().enumerate().all(|(a, b)| a == *b) {
             // Insert contiguous call
-            self.graph()
-                .add_op(op::Contiguous)
-                .input(self.id, 0, self.shape)
-                .finish()
-        } else {
-            // Already contiguous
-            self.id
-        };
+            self = self.contiguous();
+        }
 
-        GraphTensor::from_id(id, ShapeTracker::new(&shape), self.graph_ref)
+        GraphTensor::from_id(self.id, ShapeTracker::new(&shape), self.graph_ref)
     }
 
     pub fn realize<Dst: Shape<Concrete = <<S as HasShape>::Shape as Shape>::Concrete>>(
