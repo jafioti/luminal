@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Mul};
 
 use luminal::{
     nn::{embedding::Embedding, norm::RMSNorm},
@@ -109,57 +109,61 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         ),
     ) -> Self::Output {
         // Apply the Projections
-        let query_states = x
+        let queries = x
             .matmul(self.q_proj.permute())
             .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
-        let key_states = x
+        let keys = x
             .matmul(self.k_proj.permute())
             .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
-        let value_states = x
+        let values = x
             .matmul(self.v_proj.permute())
             .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        let query_states = apply_rotary_embeddings(query_states, PrevSeq::const_size().into());
-        let key_states = apply_rotary_embeddings(key_states, PrevSeq::const_size().into());
+        // Rotary embed queries and keys
+        let queries = apply_rotary_embeddings(queries, PrevSeq::const_size().into());
+        let keys = apply_rotary_embeddings(keys, PrevSeq::const_size().into());
 
         // Add KV cache
-        let (key_states, value_states) = if let Some((k_cache, v_cache)) = cache {
+        let (keys, values) = if let Some((k_cache, v_cache)) = cache {
             (
-                k_cache.concat_along::<_, Axis<2>, _>(key_states),
-                v_cache.concat_along::<_, Axis<2>, _>(value_states),
+                k_cache.concat_along::<_, Axis<2>, _>(keys),
+                v_cache.concat_along::<_, Axis<2>, _>(values),
             )
         } else {
-            (key_states.realize(), value_states.realize())
+            (keys.realize(), values.contiguous().realize())
         };
 
         // Repeat the KV States for Grouped-Query Attention
-        let repeated_key_states = key_states
-            .expand::<(_, _, Const<N_ATTENTION_GROUPS>, _, _), _>()
-            .reshape::<(Batch, Const<N_HEADS>, TotSeq, Const<HEAD_DIM>)>();
-        let repeated_value_states = value_states
-            .expand::<(_, _, Const<N_ATTENTION_GROUPS>, _, _), _>()
-            .reshape::<(Batch, Const<N_HEADS>, TotSeq, Const<HEAD_DIM>)>();
+        let repeated_keys = keys.expand::<(_, _, Const<N_ATTENTION_GROUPS>, _, _), _>();
+        let repeated_values = values.expand::<(_, _, Const<N_ATTENTION_GROUPS>, _, _), _>();
 
-        let mut attention_weights = query_states.matmul(repeated_key_states.permute());
-        attention_weights = attention_weights * (HEAD_DIM as f32).sqrt().recip();
+        // Calculate attention weights
+        let mut attention_weights = queries
+            .reshape::<(_, Const<N_KV_HEADS>, Const<N_ATTENTION_GROUPS>, _, _)>() // Split query heads into groups
+            .matmul(repeated_keys.permute())
+            .mul((HEAD_DIM as f32).sqrt().recip());
+
         // We only mask on a non-kv cache pass
         if cache.is_none() {
             let attention_mask = self.k_proj.graph().triu::<CurSeq, TotSeq>(1) * f16::MIN.to_f32();
             attention_weights += attention_mask.expand();
         }
 
-        (
-            attention_weights
-                .softmax::<3>()
-                .matmul(repeated_value_states)
-                .permute::<_, Axes4<0, 2, 1, 3>>()
-                .reshape::<(Batch, CurSeq, Const<HIDDEN_DIM>)>()
-                .matmul(self.o_proj.permute()),
-            (key_states.contiguous(), value_states.contiguous()), // Cache needs to be contiguous for transferring to another graph
-        )
+        // Calculate final outputs
+        let output = attention_weights
+            .softmax::<4>()
+            // Apply distribution to values
+            .matmul(repeated_values)
+            // Merge heads
+            .permute::<_, Axes5<0, 3, 1, 2, 4>>()
+            .reshape::<(Batch, CurSeq, Const<HIDDEN_DIM>)>()
+            // Apply output projection
+            .matmul(self.o_proj.permute());
+
+        (output, (keys.contiguous(), values.contiguous())) // Cache needs to be contiguous for transferring to another graph
     }
 }
 
@@ -283,21 +287,22 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             PhantomData<TotSeq>,
         ),
     ) -> Self::Output {
-        let mut hidden_states = self.embedding.forward(input);
+        // Embed tokens
+        let mut x = self.embedding.forward(input);
 
+        // Run through layers and collect new caches
         let mut new_caches = vec![];
+        let mut new_cache;
         for (i, layer) in self.layers.iter().enumerate() {
-            let (new_hidden_states, new_cache) = layer.forward((
-                hidden_states,
-                cache.as_ref().map(|c| c[i]),
-                PhantomData::<TotSeq>,
-            ));
-            hidden_states = new_hidden_states;
+            (x, new_cache) =
+                layer.forward((x, cache.as_ref().map(|c| c[i]), PhantomData::<TotSeq>));
             new_caches.push(new_cache);
         }
-        hidden_states = self.norm.forward(hidden_states);
 
-        (hidden_states.matmul(self.lm_head.permute()), new_caches)
+        // Run through last norm and output projection
+        let output = self.norm.forward(x).matmul(self.lm_head.permute());
+
+        (output, new_caches)
     }
 }
 

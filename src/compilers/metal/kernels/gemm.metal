@@ -27,8 +27,9 @@ template <typename T,
     const constant int &N [[buffer(4)]],
     const constant int &K [[buffer(5)]],
     const constant int &batch_stride_a [[buffer(6)]],
-    const constant int &batch_stride_b [[buffer(7)]],
-    const constant int &batch_stride_c [[buffer(8)]],
+    const constant int& batch_stride_b [[buffer(7)]],
+    const constant int& batch_size_b [[buffer(8)]],
+    const constant int& batch_stride_c [[buffer(9)]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]],
     uint3 tid [[threadgroup_position_in_grid]],
@@ -41,7 +42,7 @@ template <typename T,
     gemm_kernel::run(
       A, B, C,
       M, N, K,
-      batch_stride_a, batch_stride_b, batch_stride_c,
+      batch_stride_a, batch_stride_b, batch_size_b, batch_stride_c,
       tgp_memory,
       simd_lane_id, simd_group_id, tid, lid
     );
@@ -61,8 +62,9 @@ template <typename T,
       const constant int &N [[buffer(4)]], \
       const constant int &K [[buffer(5)]], \
       const constant int &batch_stride_a [[buffer(6)]], \
-      const constant int &batch_stride_b [[buffer(7)]], \
-      const constant int &batch_stride_c [[buffer(8)]], \
+      const constant int& batch_stride_b [[buffer(7)]], \
+      const constant int& batch_size_b [[buffer(8)]], \
+      const constant int& batch_stride_c [[buffer(9)]], \
       uint simd_lane_id [[thread_index_in_simdgroup]], \
       uint simd_group_id [[simdgroup_index_in_threadgroup]], \
       uint3 tid [[threadgroup_position_in_grid]], \

@@ -1,6 +1,6 @@
 // Copyright © 2023 Apple Inc.
 
-#pragma once
+// #pragma once
 
 #include <metal_simdgroup>
 #include <metal_simdgroup_matrix>
@@ -362,7 +362,8 @@ struct GEMMKernel {
       const constant int& K [[buffer(5)]],
       const constant int& batch_stride_a [[buffer(6)]],
       const constant int& batch_stride_b [[buffer(7)]],
-      const constant int& batch_stride_c [[buffer(8)]],
+      const constant int& batch_size_b [[buffer(8)]],
+      const constant int& batch_stride_c [[buffer(9)]],
       threadgroup T* tgp_memory [[threadgroup(0)]],
       uint simd_lane_id [[thread_index_in_simdgroup]],
       uint simd_group_id [[simdgroup_index_in_threadgroup]],
@@ -373,7 +374,7 @@ struct GEMMKernel {
 
     // Adjust for batch
     A += batch_stride_a * tid.z;
-    B += batch_stride_b * tid.z;
+    B += (batch_stride_b * (int)floor((float)(tid.z / batch_size_b)));
     C += batch_stride_c * tid.z;
 
     // Adjust for transpose

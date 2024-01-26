@@ -83,6 +83,23 @@ impl<A: Dimension, B: Dimension, C: Dimension, D: Dimension, E: Dimension> Matmu
     }
 }
 
+// ABCDExABCEF -> ABCDF
+impl<A: Dimension, B: Dimension, C: Dimension, D: Dimension, E: Dimension, F: Dimension>
+    Matmul<(A, B, C, E, F)> for GraphTensor<(A, B, C, D, E)>
+{
+    type Output = GraphTensor<(A, B, C, D, F)>;
+    fn matmul(self, rhs: GraphTensor<(A, B, C, E, F)>) -> Self::Output {
+        // Reshape
+        let w: GraphTensor<(A, B, C, F, E)> = rhs.permute::<_, Axes5<0, 1, 2, 4, 3>>();
+
+        // Broadcasted Multiply
+        let mul = self.expand::<(A, B, C, D, F, E), _>() * w.expand::<(A, B, C, D, F, E), _>();
+
+        // Sum Reduce
+        mul.sum_reduce::<_, Axis<5>>()
+    }
+}
+
 impl<A: Dimension> GraphTensor<(A,)> {
     /// Simple dot product of two vectors
     pub fn dot(self, rhs: GraphTensor<(A,)>) -> GraphTensor<R0> {

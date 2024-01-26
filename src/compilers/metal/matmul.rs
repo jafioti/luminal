@@ -50,6 +50,10 @@ impl<T> MetalKernel for Matmul<T> {
             .map(|i| i.to_usize().unwrap())
             .product::<usize>()
             .max(1);
+        // if m == 1 && a_shape.len() > 2 {
+        //     m *= a_shape[a_shape.len() - 3].to_usize().unwrap();
+        //     batch_size /= m;
+        // }
         let b_dims = b_shape.len();
         let k = b_shape[b_dims - 2].to_usize().unwrap();
         let n = b_shape[b_dims - 1].to_usize().unwrap();
@@ -82,6 +86,8 @@ impl<T> MetalKernel for Matmul<T> {
         } else {
             // Matmul
             encoder.set_compute_pipeline_state(&self.matmul_pipeline);
+            // println!("A Shape: {:?}", inputs[0].1);
+            // println!("M: {m} N: {n} K: {k}");
 
             // Set inputs
             encoder.set_buffer(0, Some(inputs[0].0), 0);
@@ -91,15 +97,34 @@ impl<T> MetalKernel for Matmul<T> {
             encoder.set_i32(4, n as i32);
             encoder.set_i32(5, k as i32);
             encoder.set_i32(6, (m * k) as i32); // A batch stride
-            encoder.set_i32(
-                7,
-                if inputs[1].1.len() == 2 {
-                    0
-                } else {
-                    (k * n) as i32
-                },
-            ); // B batch stride
-            encoder.set_i32(8, (m * n) as i32); // C batch stride
+            encoder.set_i32(7, (k * n) as i32); // B batch stride
+            if inputs[1].1.len() > 2 // 3D or larger
+                && inputs[1].1.fake[inputs[1].1.indexes[inputs[1].1.len() - 3]] // 3rd to last dimension is fake
+                && inputs[1]
+                    .1
+                    .indexes
+                    .iter()
+                    .take(inputs[1].1.len().saturating_sub(4))
+                    .any(|i| !inputs[1].1.fake[*i])
+            // At least one non-fake dimension before 3rd to last
+            {
+                // println!(
+                //     "M: {m} N: {n} K: {k} Stride 1: 0 Stride 2: {} Size 2: {}",
+                //     k * n,
+                //     inputs[1].1.shape()[inputs[1].1.len() - 3]
+                //         .to_usize()
+                //         .unwrap()
+                // );
+                encoder.set_i32(
+                    8,
+                    inputs[1].1.shape()[inputs[1].1.len() - 3]
+                        .to_usize()
+                        .unwrap() as i32,
+                ); // B batch size 2
+            } else {
+                encoder.set_i32(8, 1 as i32); // B batch size
+            }
+            encoder.set_i32(9, (m * n) as i32); // C batch stride
 
             // Execute
             encoder.dispatch_thread_groups(
@@ -176,7 +201,7 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
         // Look for the matmul pattern
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        let mut single_searcher = SelectOp::new()
+        let mut searcher_2d = SelectOp::new()
             .ty::<MetalMul<T>>()
             .shapes(vec![
                 vec!['M'.into(), 'N'.into(), 'K'.into()],
@@ -199,7 +224,7 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
                     .ptr(&mut sum_reduce),
             )
             .search(graph);
-        let mut batch_searcher = SelectOp::new()
+        let mut searcher_3d = SelectOp::new()
             .ty::<MetalMul<T>>()
             .shapes(vec![
                 vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
@@ -223,7 +248,7 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
                     .ptr(&mut sum_reduce),
             )
             .search(graph);
-        let mut batch_batch_searcher = SelectOp::new()
+        let mut searcher_4d = SelectOp::new()
             .ty::<MetalMul<T>>()
             .shapes(vec![
                 vec!['E'.into(), 'D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
@@ -253,11 +278,57 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
                     .ptr(&mut sum_reduce),
             )
             .search(graph);
+        let mut searcher_5d = SelectOp::new()
+            .ty::<MetalMul<T>>()
+            .shapes(vec![
+                vec![
+                    'F'.into(),
+                    'E'.into(),
+                    'D'.into(),
+                    'A'.into(),
+                    'C'.into(),
+                    'B'.into(),
+                ],
+                vec![
+                    'F'.into(),
+                    'E'.into(),
+                    'D'.into(),
+                    'A'.into(),
+                    'C'.into(),
+                    'B'.into(),
+                ],
+            ])
+            .fakes(vec![
+                vec![
+                    Some(false),
+                    Some(false),
+                    Some(false),
+                    Some(false),
+                    Some(true),
+                    Some(false),
+                ],
+                vec![None, None, None, Some(true), Some(false), Some(false)],
+            ])
+            .ptr(&mut mul)
+            .edge(
+                SelectOp::new()
+                    .ty::<MetalSumReduce<T>>()
+                    .check(|o, _| {
+                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<T>>() {
+                            o.dim == 5
+                        } else {
+                            false
+                        }
+                    })
+                    .ptr(&mut sum_reduce),
+            )
+            .search(graph);
         let matmul_library = compile_lib(&dev, include_str!("kernels/gemm.metal"));
         let matvec_library = compile_lib(&dev, include_str!("kernels/gemv.metal"));
-        while single_searcher.next_match()
-            || batch_searcher.next_match()
-            || batch_batch_searcher.next_match()
+        while searcher_2d.next_match()
+            || searcher_3d.next_match()
+            || searcher_4d.next_match()
+            || searcher_5d.next_match()
         {
             if graph.no_delete.contains(&mul) {
                 // The intermediate mul can't be deleted
@@ -299,6 +370,7 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
                 .indexes
                 .iter()
                 .take(src2_shape.len() - 2)
+                .filter(|i| !src2_shape.fake[**i])
                 .enumerate()
                 .any(|(a, b)| a != *b)
                 || src2_shape.is_sliced()
@@ -320,7 +392,7 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
                 .add_op(Matmul::<T> {
                     matmul_pipeline: select_function_from_lib(
                         &matmul_library,
-                        &format!( "gemm_{}{}_{type_name}_{type_name}_bm32_bn32_bk16_wm2_wn2_MN_naligned_K_taligned", if src1_shape.is_contiguous() {"n"} else {"t"}, if src2_shape.is_contiguous() {"n"} else {"t"}),
+                        &format!( "gemm_{}{}_{type_name}_{type_name}_bm32_bn32_bk16_wm2_wn2_MN_naligned_K_taligned", if src1_shape.is_contiguous() {"n"} else {"t"}, if src2_shape.indexes[src2_shape.len() - 1] > src2_shape.indexes[src2_shape.len() - 2] {"n"} else {"t"}),
                         &dev
                     ),
                     matvec_pipeline: select_function_from_lib(
