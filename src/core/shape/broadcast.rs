@@ -91,7 +91,7 @@ where
         let mut new_strides: Dst::Concrete = Default::default();
         let mut j = 0;
         for i in 0..Dst::NUM_DIMS {
-            if !Ax::as_array().into_iter().any(|x| x == i as isize) {
+            if !Ax::as_array().into_iter().any(|x| x == i) {
                 new_strides[i] = strides[j];
                 j += 1;
             }

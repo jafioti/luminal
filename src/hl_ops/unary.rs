@@ -76,7 +76,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Scale so std is 1.0
-    pub fn std_norm<const DIM: isize>(self, epsilon: f32) -> GraphTensor<S>
+    pub fn std_norm<const DIM: usize>(self, epsilon: f32) -> GraphTensor<S>
     where
         <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
         S: ReduceShape<Axis<DIM>>,
@@ -91,7 +91,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Center so mean is 0.0
-    pub fn mean_norm<const DIM: isize>(self) -> GraphTensor<S>
+    pub fn mean_norm<const DIM: usize>(self) -> GraphTensor<S>
     where
         <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
         S: ReduceShape<Axis<DIM>>,
@@ -102,7 +102,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Applies a layer norm along an axis
-    pub fn layer_norm<const DIM: isize>(self, epsilon: f32) -> GraphTensor<S>
+    pub fn layer_norm<const DIM: usize>(self, epsilon: f32) -> GraphTensor<S>
     where
         <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
         S: ReduceShape<Axis<DIM>>,
@@ -111,7 +111,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Applies a softmax function along an axis
-    pub fn softmax<const DIM: isize>(self) -> GraphTensor<S>
+    pub fn softmax<const DIM: usize>(self) -> GraphTensor<S>
     where
         <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
         S: ReduceShape<Axis<DIM>>,

@@ -3,15 +3,15 @@ use std::ops::Mul;
 use crate::prelude::*;
 
 /// A simple layer norm layer. Calls `tensor.layer_norm::<DIM>()`.
-pub struct LayerNorm<const DIM: isize>;
+pub struct LayerNorm<const DIM: usize>;
 
-impl<const DIM: isize> InitModule for LayerNorm<DIM> {
+impl<const DIM: usize> InitModule for LayerNorm<DIM> {
     fn initialize(_: &mut crate::prelude::Graph) -> Self {
         Self
     }
 }
 
-impl<const DIM: isize, S: ConstShape> Module<GraphTensor<S>> for LayerNorm<DIM>
+impl<const DIM: usize, S: ConstShape> Module<GraphTensor<S>> for LayerNorm<DIM>
 where
     S: ReduceShape<Axis<DIM>>,
     <S as ReduceShape<Axis<DIM>>>::Reduced: ConstShape,
@@ -22,7 +22,7 @@ where
     }
 }
 
-impl<const DIM: isize> SerializeModule for LayerNorm<DIM> {
+impl<const DIM: usize> SerializeModule for LayerNorm<DIM> {
     fn serialize(&self, _: &mut Serializer) {}
 }
 

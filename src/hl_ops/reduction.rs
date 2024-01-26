@@ -16,11 +16,11 @@ impl<S: Shape> GraphTensor<S> {
         for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
             new_id = self
                 .graph()
-                .add_op(op::SumReduce(dim as usize))
+                .add_op(op::SumReduce(dim))
                 .input(new_id, 0, shape)
                 .finish();
             // Reduce shape
-            shape.remove_dim(dim as usize);
+            shape.remove_dim(dim);
         }
         GraphTensor::from_id(new_id, shape, self.graph_ref)
     }
@@ -35,11 +35,11 @@ impl<S: Shape> GraphTensor<S> {
         for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
             new_id = self
                 .graph()
-                .add_op(op::MaxReduce(dim as usize))
+                .add_op(op::MaxReduce(dim))
                 .input(new_id, 0, shape)
                 .finish();
             // Reduce shape
-            shape.remove_dim(dim as usize);
+            shape.remove_dim(dim);
         }
         GraphTensor::from_id(new_id, shape, self.graph_ref)
     }
@@ -54,15 +54,12 @@ impl<S: Shape> GraphTensor<S> {
             // Sum reduce
             node_id = self
                 .graph()
-                .add_op(op::SumReduce(dim as usize))
+                .add_op(op::SumReduce(dim))
                 .input(node_id, 0, shape)
                 .finish();
 
             // Divide by size of dimension
-            let div_tensor = self
-                .graph()
-                .constant_expr(shape.remove_dim(dim as usize).into())
-                .id;
+            let div_tensor = self.graph().constant_expr(shape.remove_dim(dim).into()).id;
             let mul_tensor = self
                 .graph()
                 .add_op(op::Recip)

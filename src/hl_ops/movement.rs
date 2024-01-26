@@ -11,12 +11,8 @@ impl<S: Shape> GraphTensor<S> {
     where
         S: PermuteShapeTo<Dst, Ax>,
     {
-        self.shape.permute(
-            &Ax::as_array()
-                .into_iter()
-                .map(|i| i as usize)
-                .collect::<Vec<_>>(),
-        );
+        self.shape
+            .permute(&Ax::as_array().into_iter().collect::<Vec<_>>());
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
@@ -26,10 +22,7 @@ impl<S: Shape> GraphTensor<S> {
     {
         let new_dims = Dst::realized_shape();
         if !new_dims.is_empty() {
-            for (i, dim) in Ax::as_array()
-                .into_iter()
-                .map(|i| (i as usize, new_dims[i as usize]))
-            {
+            for (i, dim) in Ax::as_array().into_iter().map(|i| (i, new_dims[i])) {
                 self.shape.expand(i, dim);
             }
         }
@@ -192,11 +185,11 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
-    pub fn concat_along<Dst: Shape, Ax: Axes<Array = [isize; 1]>, Rhs: Shape>(
+    pub fn concat_along<Dst: Shape, Ax: Axes<Array = [usize; 1]>, Rhs: Shape>(
         self,
         rhs: GraphTensor<Rhs>,
     ) -> GraphTensor<Dst> {
-        let dim = Ax::as_array()[0] as usize;
+        let dim = Ax::as_array()[0];
         // Create padding
         let mut a_padding = vec![(Expression::default(), Expression::default()); self.shape.len()];
         a_padding[dim].1 = rhs.shape.shape()[dim].clone().into();

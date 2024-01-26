@@ -2,15 +2,15 @@ use super::*;
 
 /// Represents indices into the dimensions of shapes
 pub trait Axes: 'static + Default + Copy + Clone {
-    type Array: IntoIterator<Item = isize>;
+    type Array: IntoIterator<Item = usize>;
     fn as_array() -> Self::Array;
 }
 
 /// A singular axis, e.g. `Axis<0>` or `Axis<1>`
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Axis<const I: isize>;
-impl<const I: isize> Axes for Axis<I> {
-    type Array = [isize; 1];
+pub struct Axis<const I: usize>;
+impl<const I: usize> Axes for Axis<I> {
+    type Array = [usize; 1];
     #[inline(always)]
     fn as_array() -> Self::Array {
         [I]
@@ -19,9 +19,9 @@ impl<const I: isize> Axes for Axis<I> {
 
 /// A set of 2 axes, e.g. `Axes2<0, 1>`, or `Axes2<1, 3>`.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Axes2<const I: isize, const J: isize>;
-impl<const I: isize, const J: isize> Axes for Axes2<I, J> {
-    type Array = [isize; 2];
+pub struct Axes2<const I: usize, const J: usize>;
+impl<const I: usize, const J: usize> Axes for Axes2<I, J> {
+    type Array = [usize; 2];
     #[inline(always)]
     fn as_array() -> Self::Array {
         [I, J]
@@ -30,9 +30,9 @@ impl<const I: isize, const J: isize> Axes for Axes2<I, J> {
 
 /// A set of 3 axes, e.g. `Axes3<1, 3, 4>`
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Axes3<const I: isize, const J: isize, const K: isize>;
-impl<const I: isize, const J: isize, const K: isize> Axes for Axes3<I, J, K> {
-    type Array = [isize; 3];
+pub struct Axes3<const I: usize, const J: usize, const K: usize>;
+impl<const I: usize, const J: usize, const K: usize> Axes for Axes3<I, J, K> {
+    type Array = [usize; 3];
     #[inline(always)]
     fn as_array() -> Self::Array {
         [I, J, K]
@@ -41,9 +41,9 @@ impl<const I: isize, const J: isize, const K: isize> Axes for Axes3<I, J, K> {
 
 /// A set of 4 axes
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Axes4<const I: isize, const J: isize, const K: isize, const L: isize>;
-impl<const I: isize, const J: isize, const K: isize, const L: isize> Axes for Axes4<I, J, K, L> {
-    type Array = [isize; 4];
+pub struct Axes4<const I: usize, const J: usize, const K: usize, const L: usize>;
+impl<const I: usize, const J: usize, const K: usize, const L: usize> Axes for Axes4<I, J, K, L> {
+    type Array = [usize; 4];
     #[inline(always)]
     fn as_array() -> Self::Array {
         [I, J, K, L]
@@ -52,11 +52,11 @@ impl<const I: isize, const J: isize, const K: isize, const L: isize> Axes for Ax
 
 /// A set of 5 axes
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Axes5<const I: isize, const J: isize, const K: isize, const L: isize, const M: isize>;
-impl<const I: isize, const J: isize, const K: isize, const L: isize, const M: isize> Axes
+pub struct Axes5<const I: usize, const J: usize, const K: usize, const L: usize, const M: usize>;
+impl<const I: usize, const J: usize, const K: usize, const L: usize, const M: usize> Axes
     for Axes5<I, J, K, L, M>
 {
-    type Array = [isize; 5];
+    type Array = [usize; 5];
     #[inline(always)]
     fn as_array() -> Self::Array {
         [I, J, K, L, M]
@@ -66,12 +66,12 @@ impl<const I: isize, const J: isize, const K: isize, const L: isize, const M: is
 /// A set of 6 axes
 #[rustfmt::skip]
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Axes6<const I: isize, const J: isize, const K: isize, const L: isize, const M: isize, const N: isize>;
+pub struct Axes6<const I: usize, const J: usize, const K: usize, const L: usize, const M: usize, const N: usize>;
 #[rustfmt::skip]
-impl<const I: isize, const J: isize, const K: isize, const L: isize, const M: isize, const N: isize> Axes
+impl<const I: usize, const J: usize, const K: usize, const L: usize, const M: usize, const N: usize> Axes
     for Axes6<I, J, K, L, M, N>
 {
-    type Array = [isize; 6];
+    type Array = [usize; 6];
     #[inline(always)]
     fn as_array() -> Self::Array {
         [I, J, K, L, M, N]
@@ -115,24 +115,24 @@ impl_has_axis!((D1, D2, D3, D4, D5, D6), 6, 3);
 impl_has_axis!((D1, D2, D3, D4, D5, D6), 6, 4);
 impl_has_axis!((D1, D2, D3, D4, D5, D6), 6, 5);
 
-impl<const I: isize, const J: isize, S> HasAxes<Axes2<I, J>> for S where
+impl<const I: usize, const J: usize, S> HasAxes<Axes2<I, J>> for S where
     Self: HasAxes<Axis<I>> + HasAxes<Axis<J>>
 {
 }
 
-impl<const I: isize, const J: isize, const K: isize, S> HasAxes<Axes3<I, J, K>> for S where
+impl<const I: usize, const J: usize, const K: usize, S> HasAxes<Axes3<I, J, K>> for S where
     Self: HasAxes<Axis<I>> + HasAxes<Axis<J>> + HasAxes<Axis<K>>
 {
 }
 
-impl<const I: isize, const J: isize, const K: isize, const L: isize, S> HasAxes<Axes4<I, J, K, L>>
+impl<const I: usize, const J: usize, const K: usize, const L: usize, S> HasAxes<Axes4<I, J, K, L>>
     for S
 where
     Self: HasAxes<Axis<I>> + HasAxes<Axis<J>> + HasAxes<Axis<K>> + HasAxes<Axis<L>>,
 {
 }
 
-impl<const I: isize, const J: isize, const K: isize, const L: isize, const M: isize, S>
+impl<const I: usize, const J: usize, const K: usize, const L: usize, const M: usize, S>
     HasAxes<Axes5<I, J, K, L, M>> for S
 where
     Self: HasAxes<Axis<I>>
@@ -144,12 +144,12 @@ where
 }
 
 impl<
-        const I: isize,
-        const J: isize,
-        const K: isize,
-        const L: isize,
-        const M: isize,
-        const N: isize,
+        const I: usize,
+        const J: usize,
+        const K: usize,
+        const L: usize,
+        const M: usize,
+        const N: usize,
         S,
     > HasAxes<Axes6<I, J, K, L, M, N>> for S
 where
