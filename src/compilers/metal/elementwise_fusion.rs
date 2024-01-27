@@ -1,9 +1,5 @@
-use std::{
-    any::Any,
-    collections::{HashMap, HashSet},
-    marker::PhantomData,
-    sync::Arc,
-};
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::{any::Any, marker::PhantomData, sync::Arc};
 
 use itertools::Itertools;
 use metal_rs::{
@@ -42,7 +38,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     .ptr(&mut b),
             )
             .search(graph);
-        let mut fused_ops = HashSet::new();
+        let mut fused_ops = FxHashSet::default();
 
         while selector.next_match() {
             // More than one connecting edge
@@ -339,7 +335,7 @@ fn multi_replace(input: &str, replacements: &[(String, String)]) -> String {
 #[derive(LuminalPrint, LuminalEqFalse, Clone)]
 pub struct FusedElementwiseOp<T> {
     kernel: Option<ComputePipelineState>,
-    dyn_map: *const HashMap<char, usize>,
+    dyn_map: *const FxHashMap<char, usize>,
     dyn_chars: Vec<char>,
     equation: String,
     queue: CommandQueue,

@@ -1,6 +1,5 @@
 use std::{
     any::{Any, TypeId},
-    collections::HashMap,
     fmt::{Debug, Write},
     sync::Arc,
 };
@@ -20,6 +19,7 @@ mod unary;
 use half::f16;
 use itertools::Itertools;
 use metal_rs::*;
+use rustc_hash::FxHashMap;
 
 use crate::{
     op::InputTensor,
@@ -140,7 +140,7 @@ pub trait MetalKernel: Debug {
         &self,
         inputs: &[(&Buffer, ShapeTracker)],
         command_buffer: &CommandBufferRef,
-        dyn_map: &HashMap<char, usize>,
+        dyn_map: &FxHashMap<char, usize>,
     ) -> Vec<Buffer> {
         let dev = Device::system_default().unwrap();
         // Allocate storage buffers
@@ -253,12 +253,12 @@ impl DispatchNElements for ComputeCommandEncoderRef {
     fn dispatch_1d(&self, n: usize) {
         self.dispatch_thread_groups(
             MTLSize {
-                width: n.div_ceil(256) as u64,
+                width: n.div_ceil(1024) as u64,
                 height: 1,
                 depth: 1,
             },
             MTLSize {
-                width: 256,
+                width: 1024,
                 height: 1,
                 depth: 1,
             },
@@ -322,7 +322,7 @@ impl SetInt for ComputeCommandEncoderRef {
 
 fn input_dyn_dims(
     dyn_symbols: &[char],
-    dyn_map: &HashMap<char, usize>,
+    dyn_map: &FxHashMap<char, usize>,
     encoder: &ComputeCommandEncoderRef,
     index: usize,
 ) {

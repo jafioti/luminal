@@ -1,6 +1,6 @@
 use std::{
     cell::UnsafeCell,
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
 
@@ -12,6 +12,7 @@ use petgraph::{
     visit::EdgeRef,
     Direction::{self},
 };
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     op::{InputTensor, Operator},
@@ -27,13 +28,13 @@ impl Compiler for StorageBufferCompiler {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         // First pass - get clear sets for each node
         #[allow(clippy::type_complexity)]
-        let mut first_pass: HashMap<
+        let mut first_pass: FxHashMap<
             NodeIndex,
             (
                 BTreeMap<NodeIndex, BTreeSet<NodeIndex>>,
                 BTreeSet<NodeIndex>,
             ),
-        > = HashMap::new();
+        > = FxHashMap::default();
         let toposort = toposort(&graph.graph, None).unwrap();
         // Loop through nodes in graph
         for node in &toposort {
@@ -112,11 +113,11 @@ impl Compiler for StorageBufferCompiler {
                 let intermediate_buffers = wrapper.0.intermediate_buffer_sizes(&input_shapes);
                 (n, (output_buffers, intermediate_buffers))
             })
-            .collect::<HashMap<_, _>>();
+            .collect::<FxHashMap<_, _>>();
         // Loop through nodes in graph
         let mut buffers = vec![];
-        let mut buffer_map = HashMap::new();
-        let mut used = HashSet::<NodeIndex>::new();
+        let mut buffer_map = FxHashMap::default();
+        let mut used = FxHashSet::<NodeIndex>::default();
         for node in &toposort {
             if graph.no_delete.contains(node) {
                 continue;
@@ -261,7 +262,7 @@ fn btreeset_intersection<T: Ord>(mut a: BTreeSet<T>, b: &BTreeSet<T>) -> BTreeSe
 #[derive(LuminalEqFalse, LuminalPrint)]
 struct AllocateMetalBuffers {
     dev: Device,
-    dyn_map: *const HashMap<char, usize>,
+    dyn_map: *const FxHashMap<char, usize>,
     buffer_sizes: Vec<BigExpression>,
     buffers: Arc<UnsafeCell<Vec<Buffer>>>,
 }
@@ -272,17 +273,19 @@ impl Operator for AllocateMetalBuffers {
         let dyn_map = unsafe { self.dyn_map.as_ref().unwrap() };
         // Allocate all buffers
         if buffers.is_empty() {
+            let mut dyn_map = dyn_map.clone();
+            dyn_map.insert('t', 1000);
             *buffers = self
                 .buffer_sizes
                 .iter()
                 .map(|e| {
                     self.dev.new_buffer(
-                        e.exec(dyn_map).unwrap() as u64,
+                        e.exec(&dyn_map).unwrap() as u64,
                         MTLResourceOptions::StorageModeShared,
                     )
                 })
                 .collect();
-        } else {
+        } else if !dyn_map.contains_key(&'t') {
             for (size, buffer) in self.buffer_sizes.iter().zip(buffers) {
                 let size = size.exec(dyn_map).unwrap() as u64;
                 if buffer.length() < size {
@@ -313,15 +316,16 @@ impl std::fmt::Debug for StorageBufferWrapper {
 
 impl Operator for StorageBufferWrapper {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let buffers = unsafe { self.buffers.get().as_ref().unwrap() };
         let intermediate_buffers = self
             .intermediate_buffers
             .iter()
-            .map(|i| unsafe { &(*self.buffers.get())[*i] })
+            .map(|i| &buffers[*i])
             .collect::<Vec<_>>();
         let output_buffers = self
             .output_buffers
             .iter()
-            .map(|i| unsafe { &(*self.buffers.get())[*i] })
+            .map(|i| &buffers[*i])
             .collect::<Vec<_>>();
         self.wrapper.0.without_command_buffer(
             &inp.iter()
@@ -330,10 +334,10 @@ impl Operator for StorageBufferWrapper {
             &intermediate_buffers,
             &output_buffers,
         );
-        self.output_buffers
+        output_buffers
             .iter()
-            .map(|i| Tensor {
-                data: Box::new(unsafe { (*self.buffers.get())[*i].clone() }),
+            .map(|buf| Tensor {
+                data: Box::new((*buf).clone()),
             })
             .collect()
     }

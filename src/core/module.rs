@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use itertools::Itertools;
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
@@ -19,7 +19,7 @@ pub trait Module<I> {
 }
 
 /// Mapping from weight name to node id
-pub fn state_dict<M: SerializeModule>(model: &M) -> HashMap<String, NodeIndex> {
+pub fn state_dict<M: SerializeModule>(model: &M) -> FxHashMap<String, NodeIndex> {
     let mut s = Serializer::default();
     model.serialize(&mut s);
     s.state
@@ -84,9 +84,9 @@ fn delete_upstream(graph: &mut Graph, node: NodeIndex) {
 
 /// Get the downstream set from an original set, in a deterministic order
 pub fn downstream<T: ToIds>(nodes: T, graph: &Graph) -> Vec<NodeIndex> {
-    let orig_set = nodes.to_ids().into_iter().collect::<HashSet<_>>();
+    let orig_set = nodes.to_ids().into_iter().collect::<FxHashSet<_>>();
     let mut fin = vec![];
-    let mut added = HashSet::new();
+    let mut added = FxHashSet::default();
     // Loop through nodes
     for mut node in nodes.to_ids() {
         // Go downstream as far as possible along a single stream of ops
@@ -116,7 +116,7 @@ pub fn downstream<T: ToIds>(nodes: T, graph: &Graph) -> Vec<NodeIndex> {
     fin
 }
 
-fn is_from_set(node: NodeIndex, graph: &Graph, set: &HashSet<NodeIndex>) -> bool {
+fn is_from_set(node: NodeIndex, graph: &Graph, set: &FxHashSet<NodeIndex>) -> bool {
     // Reverse dfs upward
     let mut stack = vec![node];
     while let Some(node) = stack.pop() {

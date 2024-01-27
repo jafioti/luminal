@@ -86,8 +86,6 @@ impl<T> MetalKernel for Matmul<T> {
         } else {
             // Matmul
             encoder.set_compute_pipeline_state(&self.matmul_pipeline);
-            // println!("A Shape: {:?}", inputs[0].1);
-            // println!("M: {m} N: {n} K: {k}");
 
             // Set inputs
             encoder.set_buffer(0, Some(inputs[0].0), 0);
@@ -108,13 +106,6 @@ impl<T> MetalKernel for Matmul<T> {
                     .any(|i| !inputs[1].1.fake[*i])
             // At least one non-fake dimension before 3rd to last
             {
-                // println!(
-                //     "M: {m} N: {n} K: {k} Stride 1: 0 Stride 2: {} Size 2: {}",
-                //     k * n,
-                //     inputs[1].1.shape()[inputs[1].1.len() - 3]
-                //         .to_usize()
-                //         .unwrap()
-                // );
                 encoder.set_i32(
                     8,
                     inputs[1].1.shape()[inputs[1].1.len() - 3]

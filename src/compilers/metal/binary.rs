@@ -2,6 +2,7 @@ use std::{marker::PhantomData, mem::size_of};
 
 use objc::rc::autoreleasepool;
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
+use rustc_hash::FxHashMap;
 
 use crate::{
     compilers::metal::{prim::*, *},
@@ -18,7 +19,7 @@ pub struct MetalSub<T> {
     queue: CommandQueue,
     device: Device,
     dyn_symbols: Vec<char>,
-    dyn_map: *const HashMap<char, usize>,
+    dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
 
@@ -28,7 +29,7 @@ impl<T: MetalFloat> MetalSub<T> {
         b_shape: ShapeTracker,
         device: Device,
         queue: CommandQueue,
-        dyn_map: *const HashMap<char, usize>,
+        dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
@@ -223,7 +224,7 @@ pub struct MetalEqual<T> {
     queue: CommandQueue,
     device: Device,
     dyn_symbols: Vec<char>,
-    dyn_map: *const HashMap<char, usize>,
+    dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
 
@@ -233,7 +234,7 @@ impl<T: MetalFloat> MetalEqual<T> {
         b_shape: ShapeTracker,
         device: Device,
         queue: CommandQueue,
-        dyn_map: *const HashMap<char, usize>,
+        dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);

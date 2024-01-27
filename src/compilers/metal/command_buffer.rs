@@ -1,9 +1,4 @@
-use std::{
-    any::Any,
-    cell::UnsafeCell,
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{any::Any, cell::UnsafeCell, sync::Arc};
 
 use itertools::Itertools;
 use metal_rs::{Buffer, CommandBuffer, CommandQueue, Device};
@@ -12,6 +7,7 @@ use petgraph::{
     visit::EdgeRef,
     Direction::{self},
 };
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     op::{InputTensor, Operator},
@@ -25,7 +21,7 @@ pub struct CommandBufferCompiler;
 
 impl Compiler for CommandBufferCompiler {
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, _: T) {
-        let is_metal: HashSet<NodeIndex> = graph
+        let is_metal: FxHashSet<NodeIndex> = graph
             .graph
             .node_indices()
             .collect::<Vec<_>>()
@@ -40,7 +36,7 @@ impl Compiler for CommandBufferCompiler {
             })
             .collect();
         // Do forward pass
-        let mut forward_map: HashMap<NodeIndex, usize> = HashMap::new();
+        let mut forward_map: FxHashMap<NodeIndex, usize> = FxHashMap::default();
         for node in graph
             .graph
             .node_indices()
@@ -77,7 +73,7 @@ impl Compiler for CommandBufferCompiler {
         }
 
         // Do backward pass
-        let mut backward_map: HashMap<NodeIndex, usize> = HashMap::new();
+        let mut backward_map: FxHashMap<NodeIndex, usize> = FxHashMap::default();
         for node in graph
             .graph
             .node_indices()
@@ -119,17 +115,17 @@ impl Compiler for CommandBufferCompiler {
             .group_by(|(_, v)| **v)
             .into_iter()
             .map(|(k, g)| (k, g.count()))
-            .collect::<HashMap<_, _>>();
+            .collect::<FxHashMap<_, _>>();
         let backward_sets = backward_map
             .iter()
             .sorted_by_key(|(_, v)| **v)
             .group_by(|(_, v)| **v)
             .into_iter()
             .map(|(k, g)| (k, g.count()))
-            .collect::<HashMap<_, _>>();
+            .collect::<FxHashMap<_, _>>();
 
         // Assign nodes to sets
-        let mut node_sets: HashMap<(bool, usize), HashSet<NodeIndex>> = HashMap::new();
+        let mut node_sets: FxHashMap<(bool, usize), FxHashSet<NodeIndex>> = FxHashMap::default();
         for node in graph.graph.node_indices().filter(|i| is_metal.contains(i)) {
             let forward_bigger =
                 forward_sets[&forward_map[&node]] >= backward_sets[&backward_map[&node]];
@@ -145,7 +141,11 @@ impl Compiler for CommandBufferCompiler {
                 .and_modify(|set| {
                     set.insert(node);
                 })
-                .or_insert(HashSet::from([node]));
+                .or_insert({
+                    let mut set = FxHashSet::default();
+                    set.insert(node);
+                    set
+                });
         }
         // Add sets to graph
         let dev = Device::system_default().unwrap();
@@ -219,7 +219,7 @@ impl Operator for ExecuteMetalKernels {
 struct CommandBufferWrapper {
     wrapper: Box<MetalKernelWrapper>,
     buffer: Arc<UnsafeCell<CommandBuffer>>,
-    dyn_map: *const HashMap<char, usize>,
+    dyn_map: *const FxHashMap<char, usize>,
 }
 
 impl std::fmt::Debug for CommandBufferWrapper {

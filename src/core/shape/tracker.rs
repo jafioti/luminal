@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-
+use rustc_hash::FxHashMap;
 use tinyvec::ArrayVec;
 
 use super::symbolic::{BigExpression, Expression};
@@ -292,14 +291,14 @@ impl ShapeTracker {
     }
 
     /// Given a dyn dim map, resolve global dyn dims into known dims
-    pub fn resolve_global_dyn_dims(&mut self, dyn_dim_map: &HashMap<char, usize>) {
+    pub fn resolve_global_dyn_dims(&mut self, dyn_dim_map: &FxHashMap<char, usize>) {
         self.resolve_global_dyn_dims_stack(dyn_dim_map, &mut Vec::new());
     }
 
     /// Given a dyn dim map, resolve global dyn dims into known dims. This function requires a stack to work with
     pub fn resolve_global_dyn_dims_stack(
         &mut self,
-        dyn_dim_map: &HashMap<char, usize>,
+        dyn_dim_map: &FxHashMap<char, usize>,
         stack: &mut Vec<i32>,
     ) {
         for d in self.dims.iter_mut() {

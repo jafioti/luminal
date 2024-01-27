@@ -3,12 +3,12 @@
 
 use std::{
     cmp::Ordering,
-    collections::HashMap,
     fmt::Debug,
     ops::{Add, BitAnd, BitOr, Div, IndexMut, Mul, Rem, Sub},
 };
 
 use itertools::Itertools;
+use rustc_hash::FxHashMap;
 use tinyvec::ArrayVec;
 
 /// A symbolic expression stored on the stack
@@ -332,12 +332,12 @@ fn reduce_triples<S: ExpressionStorage>(mut expr: GenericExpression<S>) -> Gener
 }
 
 fn reduce_add_sub<S: ExpressionStorage>(expr: GenericExpression<S>) -> GenericExpression<S> {
-    let mut stack: Vec<HashMap<Term, i32>> = Vec::new();
+    let mut stack: Vec<FxHashMap<Term, i32>> = Vec::new();
 
-    for term in expr.terms.clone().into_iter() {
+    for term in expr.terms.clone() {
         match term {
             Term::Num(_) | Term::Var(_) => {
-                stack.push(HashMap::from([(term, 1)]));
+                stack.push([(term, 1)].into_iter().collect());
             }
             Term::Add | Term::Sub => {
                 // Pop the last two expressions
@@ -408,12 +408,12 @@ fn reduce_add_sub<S: ExpressionStorage>(expr: GenericExpression<S>) -> GenericEx
     GenericExpression { terms: s }
 }
 
-fn negate(mut expr: HashMap<Term, i32>) -> HashMap<Term, i32> {
+fn negate(mut expr: FxHashMap<Term, i32>) -> FxHashMap<Term, i32> {
     expr.values_mut().for_each(|i| *i = -*i);
     expr
 }
 
-fn combine(expr: &mut HashMap<Term, i32>, other: HashMap<Term, i32>) {
+fn combine(expr: &mut FxHashMap<Term, i32>, other: FxHashMap<Term, i32>) {
     for (k, v) in other {
         if let Some(x) = expr.get_mut(&k) {
             *x += v;
@@ -423,17 +423,20 @@ fn combine(expr: &mut HashMap<Term, i32>, other: HashMap<Term, i32>) {
     }
 }
 
-impl<S: ExpressionStorage> GenericExpression<S> {
+impl<S: ExpressionStorage> GenericExpression<S>
+where
+    for<'a> &'a S: IntoIterator<Item = &'a Term>,
+{
     /// Evaluate the expression with no variables. Returns Some(value) if no variables are required, otherwise returns None.
     pub fn to_usize(&self) -> Option<usize> {
-        self.exec(&HashMap::default())
+        self.exec(&FxHashMap::default())
     }
     /// Evaluate the expression with one value for all variables.
     pub fn exec_single_var(&self, value: usize) -> usize {
         let mut stack = Vec::new();
-        for term in self.terms.clone() {
+        for term in &self.terms {
             match term {
-                Term::Num(n) => stack.push(n),
+                Term::Num(n) => stack.push(*n),
                 Term::Var(_) => stack.push(value as i32),
                 _ => {
                     let a = stack.pop().unwrap();
@@ -445,18 +448,18 @@ impl<S: ExpressionStorage> GenericExpression<S> {
         stack.pop().unwrap() as usize
     }
     /// Evaluate the expression given variables.
-    pub fn exec(&self, variables: &HashMap<char, usize>) -> Option<usize> {
+    pub fn exec(&self, variables: &FxHashMap<char, usize>) -> Option<usize> {
         self.exec_stack(variables, &mut Vec::new())
     }
     /// Evaluate the expression given variables. This function requires a stack to be given for use as storage
     pub fn exec_stack(
         &self,
-        variables: &HashMap<char, usize>,
+        variables: &FxHashMap<char, usize>,
         stack: &mut Vec<i32>,
     ) -> Option<usize> {
-        for term in self.terms.clone() {
+        for term in &self.terms {
             match term {
-                Term::Num(n) => stack.push(n),
+                Term::Num(n) => stack.push(*n),
                 Term::Var(c) => {
                     if let Some(n) = variables.get(&c) {
                         stack.push(*n as i32)
@@ -711,10 +714,10 @@ mod tests {
     #[test]
     fn test_expressions() {
         let n = (Expression::from('x') + Term::Num(255)) / Term::Num(256) * Term::Num(256);
-        assert_eq!(n.exec(&HashMap::from([('x', 767)])).unwrap(), 768);
+        assert_eq!(n.exec(&[('x', 767)].into_iter().collect()).unwrap(), 768);
 
         let n = (Expression::from('x') + Term::Num(255)) / Term::Num(256) * Term::Num(256);
-        assert_eq!(n.exec(&HashMap::from([('x', 767)])).unwrap(), 768);
+        assert_eq!(n.exec(&[('x', 767)].into_iter().collect()).unwrap(), 768);
     }
 
     #[test]

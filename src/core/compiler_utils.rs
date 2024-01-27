@@ -2,7 +2,7 @@
 
 use std::{
     any::{Any, TypeId},
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashSet, VecDeque},
     fmt::Debug,
 };
 
@@ -15,6 +15,7 @@ use petgraph::{
     Direction,
 };
 use regex::Regex;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     graph::Graph,
@@ -89,7 +90,7 @@ impl ToIds for () {
     }
 }
 
-impl<T: ToIds> ToIds for HashMap<String, T> {
+impl<T: ToIds> ToIds for FxHashMap<String, T> {
     fn to_ids(&self) -> Vec<NodeIndex> {
         self.values().flat_map(|i| i.to_ids()).collect()
     }
@@ -272,10 +273,10 @@ impl Graph {
     ) -> (
         StableGraph<String, u8>,
         Vec<EdgeIndex>,
-        HashMap<NodeIndex, NodeIndex>,
+        FxHashMap<NodeIndex, NodeIndex>,
     ) {
         let mut new_graph = StableGraph::default();
-        let mut id_map = HashMap::new();
+        let mut id_map = FxHashMap::default();
         for (id, node) in self.graph.node_indices().zip(self.graph.node_weights()) {
             id_map.insert(id, new_graph.add_node(format!("{node:?}")));
         }
@@ -429,7 +430,7 @@ impl JoinGraph for petgraph::stable_graph::StableGraph<String, u8, petgraph::Dir
         mut self,
         rhs: &petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32>,
     ) -> Self {
-        let mut id_map = HashMap::new(); // We track the node id remapping here so they don't overlap
+        let mut id_map = FxHashMap::default(); // We track the node id remapping here so they don't overlap
         for (index, node) in rhs.node_indices().zip(rhs.node_weights()) {
             id_map.insert(index, self.add_node(node.clone()));
         }
@@ -477,8 +478,8 @@ impl<'a> NewOp<'a> {
 /// Transfer all external references from one node to another (this may happen because one node is about to be removed / merged into another)
 pub fn move_references<T: ToIdsMut>(
     mut ids: T,
-    no_delete: &mut HashSet<NodeIndex<u32>>,
-    to_retrieve: &mut HashSet<NodeIndex<u32>>,
+    no_delete: &mut FxHashSet<NodeIndex<u32>>,
+    to_retrieve: &mut FxHashSet<NodeIndex<u32>>,
     src: NodeIndex,
     trg: NodeIndex,
 ) {
@@ -559,7 +560,7 @@ type SelectionGraph = petgraph::Graph<SelectOp, Option<u8>>;
 pub struct GraphSearch {
     selector: SelectionGraph,
     graph: *mut Graph,
-    to_return: Vec<HashMap<NodeIndex, NodeIndex>>,
+    to_return: Vec<FxHashMap<NodeIndex, NodeIndex>>,
     returned_anchors: HashSet<NodeIndex>,
     anchor: NodeIndex,
 }
@@ -620,8 +621,8 @@ fn backtrack_match(
     pattern_graph: &SelectionGraph,
     main_root: NodeIndex,
     main_graph: &mut MainGraph,
-) -> Option<HashMap<NodeIndex, NodeIndex>> {
-    let mut matches = HashMap::new();
+) -> Option<FxHashMap<NodeIndex, NodeIndex>> {
+    let mut matches = FxHashMap::default();
     let mut stack = VecDeque::new();
     matches.insert(pattern_root, main_root);
     stack.push_back((pattern_root, main_root));
@@ -685,7 +686,7 @@ fn test_node(
 
     // Test shape
     if let Some(shape) = shape {
-        let mut shape_map = HashMap::new();
+        let mut shape_map = FxHashMap::default();
         if shape.len() != input_shapes.len() {
             return false;
         }
@@ -832,7 +833,7 @@ impl SelectEdge {
         let mut a = a.into();
         let b = b.into();
         // Add b graph to a graph
-        let mut node_map = HashMap::new();
+        let mut node_map = FxHashMap::default();
         for node in b.graph.node_indices() {
             let new_node = a.graph.add_node(b.graph.node_weight(node).unwrap().clone());
             node_map.insert(node, new_node);

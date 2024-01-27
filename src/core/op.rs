@@ -1,6 +1,6 @@
 #![allow(clippy::needless_range_loop)]
 
-use std::{any::Any, collections::HashMap, fmt::Debug};
+use std::{any::Any, fmt::Debug};
 
 use crate::{
     prelude::{tracker::ShapeTracker, TraitObjEq},
@@ -8,6 +8,7 @@ use crate::{
 };
 
 use super::shape::symbolic::BigExpression;
+use rustc_hash::FxHashMap;
 
 pub enum InputTensor<'a> {
     Owned(Tensor),
@@ -125,7 +126,7 @@ pub enum ConstantValue {
 
 /// Produces a single number constant from an expression or a float
 #[derive(Clone, PartialEq)]
-pub struct Constant(pub ConstantValue, pub *const HashMap<char, usize>);
+pub struct Constant(pub ConstantValue, pub *const FxHashMap<char, usize>);
 impl Debug for Constant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Constant(",)?;

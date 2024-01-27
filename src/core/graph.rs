@@ -7,14 +7,12 @@ use crate::{
     shape::*,
     tensor::Tensor,
 };
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    io::Write,
-};
+use std::io::Write;
 
 use colored::Colorize;
 use itertools::Itertools;
 use petgraph::{stable_graph::StableGraph, visit::EdgeRef, Direction};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::compiler_utils::{ToIds, ToIdsMut};
 
@@ -23,16 +21,17 @@ pub use petgraph::stable_graph::NodeIndex;
 
 #[derive(Debug, Default)]
 pub struct Graph {
-    pub tensors: HashMap<(NodeIndex, u8), Tensor>,
-    pub dyn_map: HashMap<char, usize>,
+    pub tensors: rustc_hash::FxHashMap<(NodeIndex, u8), Tensor>,
+    pub dyn_map: rustc_hash::FxHashMap<char, usize>,
     /// Edge weights: (Input index, Output index, Input shape)
     pub graph: MainGraph,
-    pub no_delete: HashSet<NodeIndex>,
+    pub no_delete: rustc_hash::FxHashSet<NodeIndex>,
     /// Mark tensors that need to be retrieved later (mostly for optimizers to insert copy back calls, the graph itself doesn't treat these differently)
-    pub to_retrieve: HashSet<NodeIndex>,
+    pub to_retrieve: rustc_hash::FxHashSet<NodeIndex>,
     /// A list of current node to run, source nodes, and view nodes to delete after execution.
     #[allow(clippy::type_complexity)]
     pub(crate) linearized_graph: Option<Vec<(NodeIndex, Vec<((NodeIndex, u8), ShapeTracker)>)>>,
+    consumers_map: Option<FxHashMap<(NodeIndex, u8), usize>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -150,6 +149,7 @@ impl Graph {
                 })
                 .collect(),
         );
+        self.create_remaining_customers_map();
     }
 
     /// Swap the tensors with these ids
@@ -165,19 +165,21 @@ impl Graph {
         }
     }
 
-    fn create_remaining_customers_map(&self) -> HashMap<(NodeIndex, u8), usize> {
-        self.graph
-            .node_indices()
-            .flat_map(|i| {
-                self.graph
-                    .edges_directed(i, Direction::Outgoing)
-                    .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i)))
-                    .group_by(|(_, (_, i, _))| *i)
-                    .into_iter()
-                    .map(|(ind, g)| ((i, ind), g.count()))
-                    .collect::<Vec<_>>()
-            })
-            .collect()
+    fn create_remaining_customers_map(&mut self) {
+        self.consumers_map = Some(
+            self.graph
+                .node_indices()
+                .flat_map(|i| {
+                    self.graph
+                        .edges_directed(i, Direction::Outgoing)
+                        .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i)))
+                        .group_by(|(_, (_, i, _))| *i)
+                        .into_iter()
+                        .map(|(ind, g)| ((i, ind), g.count()))
+                        .collect::<Vec<_>>()
+                })
+                .collect(),
+        );
     }
 
     /// Clear any remaining tensors that may be around from old executions
@@ -191,19 +193,22 @@ impl Graph {
         if self.linearized_graph.is_none() {
             self.toposort();
         }
-        let mut remaining_consumers = self.create_remaining_customers_map();
+        let mut remaining_consumers = self.consumers_map.as_ref().unwrap().clone();
         let mut dim_stack = Vec::new();
 
         for (node, src_ids) in self.linearized_graph.as_ref().unwrap() {
             if self.tensors.contains_key(&(*node, 0)) {
                 continue;
             }
+            // println!("Running {:?}", self.graph.node_weight(*node).unwrap());
 
-            let mut srcs = get_source_tensors(
+            let mut srcs = Vec::new();
+            get_source_tensors(
                 &self.no_delete,
                 &mut self.tensors,
                 src_ids,
                 &remaining_consumers,
+                &mut srcs,
             );
 
             // Substitute in the dyn dims
@@ -261,8 +266,9 @@ impl Graph {
             self.toposort();
         }
         let mut dim_stack = Vec::new();
-        let mut remaining_consumers = self.create_remaining_customers_map();
-        let mut op_times = HashMap::new();
+        let tensors_ptr = &mut self.tensors as *mut _;
+        let mut remaining_consumers = self.consumers_map.as_ref().unwrap().clone();
+        let mut op_times = FxHashMap::default();
 
         println!(
             "{:->2$} Executing {:->2$}",
@@ -278,11 +284,13 @@ impl Graph {
             let op_name = format!("{:?}", self.graph.node_weight(*node).unwrap());
             print!("{}", op_name.bold().bright_green());
 
-            let mut srcs = get_source_tensors(
+            let mut srcs = Vec::new();
+            get_source_tensors(
                 &self.no_delete,
-                &mut self.tensors,
+                tensors_ptr,
                 src_ids,
                 &remaining_consumers,
+                &mut srcs,
             );
 
             // Substitute in the dyn dims
@@ -378,34 +386,23 @@ impl Graph {
 }
 
 fn get_source_tensors<'a>(
-    no_delete: &HashSet<NodeIndex>,
-    tensors: &'a mut HashMap<(NodeIndex, u8), Tensor>,
+    no_delete: &FxHashSet<NodeIndex>,
+    tensors: *mut FxHashMap<(NodeIndex, u8), Tensor>,
     src_ids: &[((NodeIndex, u8), ShapeTracker)],
-    remaining_consumers: &HashMap<(NodeIndex, u8), usize>,
-) -> Vec<(InputTensor<'a>, ShapeTracker)> {
-    // This needs to be done in a weird way with sperate queues to satisfy the borrow checker (all mutable calls to self.tensors happen before references are taken)
-    let mut owned = VecDeque::default();
-    let mut refs = VecDeque::default();
-    for (i, (id, _)) in src_ids.iter().enumerate() {
+    remaining_consumers: &FxHashMap<(NodeIndex, u8), usize>,
+    srcs: &mut Vec<(InputTensor<'a>, ShapeTracker)>,
+) {
+    for (id, sh) in src_ids {
         if remaining_consumers[id] == 1 && !no_delete.contains(&id.0) {
-            owned.push_back((InputTensor::Owned(tensors.remove(id).unwrap()), i));
+            srcs.push((
+                InputTensor::Owned(unsafe { tensors.as_mut().unwrap() }.remove(id).unwrap()),
+                *sh,
+            ));
+        } else {
+            srcs.push((
+                InputTensor::Borrowed(unsafe { tensors.as_ref().unwrap() }.get(id).unwrap()),
+                *sh,
+            ));
         }
     }
-    for (i, (id, _)) in src_ids.iter().enumerate() {
-        if remaining_consumers[id] != 1 || no_delete.contains(&id.0) {
-            refs.push_back((InputTensor::Borrowed(tensors.get(id).unwrap()), i));
-        }
-    }
-    let mut srcs = vec![];
-    for (i, (_, st)) in src_ids.iter().enumerate() {
-        srcs.push((
-            if owned.front().map(|(_, ind)| *ind == i).unwrap_or_default() {
-                owned.pop_front().unwrap().0
-            } else {
-                refs.pop_front().unwrap().0
-            },
-            *st,
-        ));
-    }
-    srcs
 }

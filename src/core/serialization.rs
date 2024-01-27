@@ -3,10 +3,10 @@ use crate::prelude::{Graph, GraphTensor, Shape, Tensor};
 use half::{bf16, f16};
 use memmap2::MmapOptions;
 use petgraph::stable_graph::NodeIndex;
+use rustc_hash::FxHashMap;
 use safetensors::tensor::{Dtype, View};
 use safetensors::{SafeTensorError, SafeTensors};
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fs::File;
 
 use super::module::state_dict;
@@ -31,7 +31,7 @@ pub trait Saver {
 pub struct StateDictSaver;
 
 impl Saver for StateDictSaver {
-    type Saved = HashMap<String, Tensor>;
+    type Saved = FxHashMap<String, Tensor>;
     fn save<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Saved {
         // Attempt to get all tensor data from the graph
         state_dict(model)
@@ -58,7 +58,7 @@ impl Saver for SafeTensorSaver {
     type Saved = Result<(), SafeTensorError>;
     fn save<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Saved {
         // Attempt to get all tensor data from the graph
-        let state_dict: HashMap<_, _> = state_dict(model)
+        let state_dict: FxHashMap<_, _> = state_dict(model)
             .into_iter()
             .map(|(k, v)| (k, graph.get_tensor_ref(v, 0).unwrap()))
             .collect();
@@ -68,11 +68,11 @@ impl Saver for SafeTensorSaver {
 
 /// Load the model from a state dict
 pub struct StateDictLoader {
-    state_dict: HashMap<String, Tensor>,
+    state_dict: FxHashMap<String, Tensor>,
 }
 
 impl StateDictLoader {
-    pub fn new(state_dict: HashMap<String, Tensor>) -> Self {
+    pub fn new(state_dict: FxHashMap<String, Tensor>) -> Self {
         Self { state_dict }
     }
 }
@@ -148,7 +148,7 @@ impl Loader for SafeTensorLoader {
 #[derive(Debug, Default)]
 pub struct Serializer {
     current_path: Vec<String>,
-    pub state: HashMap<String, NodeIndex>,
+    pub state: FxHashMap<String, NodeIndex>,
 }
 
 impl Serializer {

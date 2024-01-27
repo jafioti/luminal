@@ -23,7 +23,7 @@ pub struct MetalMeanReduce<T>(
     Device,
     pub usize,
     Vec<char>,
-    *const HashMap<char, usize>,
+    *const FxHashMap<char, usize>,
     PhantomData<T>,
 );
 
@@ -39,7 +39,7 @@ impl<T: MetalFloat> MetalMeanReduce<T> {
         queue: CommandQueue,
         dim: usize,
         shape: ShapeTracker,
-        dyn_map: *const HashMap<char, usize>,
+        dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape], 6);
@@ -1072,7 +1072,7 @@ pub struct MetalRotate<T> {
     queue: CommandQueue,
     device: Device,
     dyn_symbols: Vec<char>,
-    dyn_map: *const HashMap<char, usize>,
+    dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
 
@@ -1082,7 +1082,7 @@ impl<T: MetalFloat> MetalRotate<T> {
         shape: ShapeTracker,
         device: Device,
         queue: CommandQueue,
-        dyn_map: *const HashMap<char, usize>,
+        dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let half_size = axis_size / 2;
         let type_name = T::type_name();

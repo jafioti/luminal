@@ -1,11 +1,10 @@
-use std::{
-    any::Any, collections::HashMap, fmt::Debug, marker::PhantomData, mem::size_of, sync::Arc,
-};
+use std::{any::Any, fmt::Debug, marker::PhantomData, mem::size_of, sync::Arc};
 
 use super::*;
 use metal_rs::*;
 use objc::rc::autoreleasepool;
 use petgraph::visit::EdgeRef;
+use rustc_hash::FxHashMap;
 
 use crate::{
     op::{Function as LFunction, *},
@@ -100,7 +99,7 @@ impl<T: MetalFloat> Operator for MetalCopyFromDevice<T> {
 pub struct MetalConstant<T>(
     pub ConstantValue,
     Device,
-    *const HashMap<char, usize>,
+    *const FxHashMap<char, usize>,
     PhantomData<T>,
 );
 
@@ -150,7 +149,7 @@ pub struct MetalContiguous<T> {
     device: Device,
     dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
-    dyn_map: *const HashMap<char, usize>,
+    dyn_map: *const FxHashMap<char, usize>,
 }
 
 impl<T: MetalFloat> MetalContiguous<T> {
@@ -158,7 +157,7 @@ impl<T: MetalFloat> MetalContiguous<T> {
         shape: ShapeTracker,
         device: Device,
         queue: CommandQueue,
-        dyn_map: *const HashMap<char, usize>,
+        dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape], 3);
@@ -750,7 +749,7 @@ pub struct MetalAdd<T> {
     device: Device,
     _phantom: PhantomData<T>,
     dyn_symbols: Vec<char>,
-    dyn_map: *const HashMap<char, usize>,
+    dyn_map: *const FxHashMap<char, usize>,
 }
 
 impl<T: MetalFloat> MetalAdd<T> {
@@ -759,7 +758,7 @@ impl<T: MetalFloat> MetalAdd<T> {
         b_shape: ShapeTracker,
         device: Device,
         queue: CommandQueue,
-        dyn_map: *const HashMap<char, usize>,
+        dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
@@ -882,7 +881,7 @@ pub struct MetalMul<T> {
     device: Device,
     dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
-    dyn_map: *const HashMap<char, usize>,
+    dyn_map: *const FxHashMap<char, usize>,
 }
 
 impl<T: MetalFloat> MetalMul<T> {
@@ -891,7 +890,7 @@ impl<T: MetalFloat> MetalMul<T> {
         b_shape: ShapeTracker,
         device: Device,
         queue: CommandQueue,
-        dyn_map: *const HashMap<char, usize>,
+        dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
@@ -1015,7 +1014,7 @@ pub struct MetalLessThan<T> {
     device: Device,
     dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
-    dyn_map: *const HashMap<char, usize>,
+    dyn_map: *const FxHashMap<char, usize>,
 }
 
 impl<T: MetalFloat> MetalLessThan<T> {
@@ -1024,7 +1023,7 @@ impl<T: MetalFloat> MetalLessThan<T> {
         b_shape: ShapeTracker,
         device: Device,
         queue: CommandQueue,
-        dyn_map: *const HashMap<char, usize>,
+        dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
@@ -1160,7 +1159,7 @@ pub struct MetalMod<T> {
     device: Device,
     dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
-    dyn_map: *const HashMap<char, usize>,
+    dyn_map: *const FxHashMap<char, usize>,
 }
 
 impl<T: MetalFloat> MetalMod<T> {
@@ -1169,7 +1168,7 @@ impl<T: MetalFloat> MetalMod<T> {
         b_shape: ShapeTracker,
         device: Device,
         queue: CommandQueue,
-        dyn_map: *const HashMap<char, usize>,
+        dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
         let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
@@ -1292,7 +1291,7 @@ pub struct MetalSumReduce<T> {
     pub dim: usize,
     dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
-    dyn_map: *const HashMap<char, usize>,
+    dyn_map: *const FxHashMap<char, usize>,
 }
 
 impl<T> PartialEq for MetalSumReduce<T> {
@@ -1307,7 +1306,7 @@ impl<T: MetalFloat> MetalSumReduce<T> {
         dim: usize,
         device: Device,
         queue: CommandQueue,
-        dyn_map: *const HashMap<char, usize>,
+        dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape], 6);
@@ -1458,7 +1457,7 @@ pub struct MetalMaxReduce<T> {
     dim: usize,
     dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
-    dyn_map: *const HashMap<char, usize>,
+    dyn_map: *const FxHashMap<char, usize>,
 }
 
 impl<T> PartialEq for MetalMaxReduce<T> {
@@ -1473,7 +1472,7 @@ impl<T: MetalFloat> MetalMaxReduce<T> {
         dim: usize,
         device: Device,
         queue: CommandQueue,
-        dyn_map: *const HashMap<char, usize>,
+        dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
         let type_name = T::type_name();

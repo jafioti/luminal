@@ -84,7 +84,7 @@ pub struct MetalARange<T: MetalFloat>(
     CommandQueue,
     Device,
     BigExpression,
-    *const HashMap<char, usize>,
+    *const FxHashMap<char, usize>,
     PhantomData<T>,
 );
 
@@ -99,7 +99,7 @@ impl<T: MetalFloat> MetalARange<T> {
         dev: Device,
         queue: CommandQueue,
         dim: BigExpression,
-        dyn_map: *const HashMap<char, usize>,
+        dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let type_name = T::type_name();
         Self(
