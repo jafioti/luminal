@@ -1,7 +1,7 @@
 [package]
 name = "luminal"
-version = "0.1.1"
-edition = "2021"
+version = "0.2.0"
+edition = "2024"
 description = "Deep learning at the speed of light."
 license = "MIT OR Apache-2.0"
 
@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 #default = ["cuda"]
 default = ["metal"]
 cuda = ["dep:cudarc"]
-metal = ["dep:metal-rs", "dep:block"]
+metal = ["dep:metal-rs"]
 
 [[example]]
 name = "mistral"
@@ -23,18 +23,11 @@ matrixmultiply = "0.3.8"
 num-traits = "0.2.16"
 petgraph = "0.6.4"
 rand = "0.8.5"
-strum = { version = "0.25.0", features = ["derive"] }
 urlencoding = "2.1.2"
 webbrowser = "0.8.10"
 dyn-clone = "1.0.12"
-cudarc = { path = "./resources/cudarc", features = [
-    "cublas",
-    "f16",
-], optional = true }
-metal-rs = { version = "0.27.0", package = "metal", optional = true, features = [
-    "mps",
-] }
-block = { version = "0.1.6", optional = true }
+cudarc = { path = "./resources/cudarc", features = ["cublas", "f16"], optional = true }
+metal-rs = { version = "0.27.0", package = "metal", features = ["mps"], optional = true }
 safetensors = "0.3.1"
 memmap2 = { version = "0.7.1", features = ["stable_deref_trait"] }
 half = { version = "2.3.1", features = ["num-traits", "rand_distr"] }
@@ -42,8 +35,6 @@ tinyvec = "1.6.0"
 term_size = "0.3.2"
 colored = "2.0.4"
 regex = "1.9.5"
-num = "0.4.1"
-gemm = "0.15.4"
 
 [dev-dependencies]
 dfdx = { version = "0.13", features = ["f16"] }
