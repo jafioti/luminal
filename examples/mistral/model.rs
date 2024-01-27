@@ -148,8 +148,8 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
 
         // We only mask on a non-kv cache pass
         if cache.is_none() {
-            let attention_mask = self.k_proj.graph().triu::<CurSeq, TotSeq>(1) * f16::MIN.to_f32();
-            attention_weights += attention_mask.expand();
+            let attention_mask = self.k_proj.graph().triu::<TotSeq>(1) * f16::MIN.to_f32();
+            attention_weights += attention_mask.realize::<(CurSeq, TotSeq)>().expand();
         }
 
         // Calculate final outputs

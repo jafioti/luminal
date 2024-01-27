@@ -220,8 +220,8 @@ impl<
             .mul((HEAD_DIM as f64).sqrt().recip() as f32);
         // We only mask on a non-kv cache pass
         if cache.is_none() {
-            let attention_mask = self.k_proj.graph().triu::<CurSeq, TotSeq>(1) * f16::MIN.to_f32();
-            w += attention_mask.expand();
+            let attention_mask = self.k_proj.graph().triu::<CurSeq>(1) * f16::MIN.to_f32();
+            w += attention_mask.realize::<(CurSeq, TotSeq)>().expand(); // CurSeq and TotSeq are guarenteed to be the same size here
         }
         w = w.softmax::<3>();
 

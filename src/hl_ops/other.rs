@@ -71,12 +71,12 @@ impl Graph {
         }
     }
 
-    /// Lower left-hand triangle of 1s
+    /// Lower left-hand triangle of 1s. Currently required to be square
     ///
     /// Same API as https://pytorch.org/docs/stable/generated/torch.tril
-    pub fn tril<H: Dimension, W: Dimension>(&mut self, diagonal: i32) -> GraphTensor<(H, W)> {
-        let horizontal = self.arange::<W>().expand::<(H, W), _>();
-        let vertical = self.arange::<H>().expand::<(H, W), _>();
+    pub fn tril<S: Dimension>(&mut self, diagonal: i32) -> GraphTensor<(S, S)> {
+        let horizontal = self.arange::<S>().expand::<(S, S), Axis<0>>();
+        let vertical = self.arange::<S>().expand::<(S, S), Axis<1>>();
 
         (horizontal + self.constant(-(diagonal as f32 + 1.)).expand()).less_than(vertical)
     }
@@ -84,9 +84,9 @@ impl Graph {
     /// Upper right-hand triangle of 1s
     ///
     /// Same API as https://pytorch.org/docs/stable/generated/torch.triu
-    pub fn triu<H: Dimension, W: Dimension>(&mut self, diagonal: i32) -> GraphTensor<(H, W)> {
-        let horizontal = self.arange::<W>().expand::<(H, W), _>();
-        let vertical = self.arange::<H>().expand::<(H, W), _>();
+    pub fn triu<S: Dimension>(&mut self, diagonal: i32) -> GraphTensor<(S, S)> {
+        let horizontal = self.arange::<S>().expand::<(S, S), Axis<0>>();
+        let vertical = self.arange::<S>().expand::<(S, S), Axis<1>>();
 
         (horizontal + self.constant(-(diagonal as f32 - 1.)).expand()).greater_than(vertical)
     }
@@ -144,7 +144,7 @@ mod tests {
     fn test_tril() {
         let mut cx = Graph::new();
 
-        let triangle = cx.tril::<LConst<5>, LConst<5>>(1).retrieve();
+        let triangle = cx.tril::<LConst<5>>(1).retrieve();
 
         cx.execute();
 
@@ -167,9 +167,9 @@ mod tests {
     fn test_triu() {
         let mut cx = Graph::new();
 
-        let a = cx.triu::<LConst<3>, LConst<3>>(-1).retrieve();
-        let b = cx.triu::<LConst<3>, LConst<3>>(0).retrieve();
-        let c = cx.triu::<LConst<3>, LConst<3>>(1).retrieve();
+        let a = cx.triu::<LConst<3>>(-1).retrieve();
+        let b = cx.triu::<LConst<3>>(0).retrieve();
+        let c = cx.triu::<LConst<3>>(1).retrieve();
 
         cx.execute();
 
