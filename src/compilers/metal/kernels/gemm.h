@@ -374,7 +374,7 @@ struct GEMMKernel {
 
     // Adjust for batch
     A += batch_stride_a * tid.z;
-    B += (batch_stride_b * (int)floor((float)(tid.z / batch_size_b)));
+    B += batch_stride_b * (tid.z / batch_size_b);
     C += batch_stride_c * tid.z;
 
     // Adjust for transpose
