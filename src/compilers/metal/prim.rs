@@ -262,6 +262,9 @@ impl<T: MetalFloat> Operator for MetalContiguous<T> {
                 )
             }
         }
+        if key == "elementwise" {
+            return Some(Box::new("input0".to_string()));
+        }
         None
     }
 }
@@ -856,9 +859,6 @@ impl<T: MetalFloat> Operator for MetalAdd<T> {
         if key == "non_contiguous" {
             return Some(Box::new(()));
         }
-        if key == "elementwise" {
-            return Some(Box::new("input0 + input1".to_string()));
-        }
         if key == "recompile_shapes" {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
                 *self = Self::new(
@@ -869,6 +869,9 @@ impl<T: MetalFloat> Operator for MetalAdd<T> {
                     self.dyn_map,
                 )
             }
+        }
+        if key == "elementwise" {
+            return Some(Box::new("input0 + input1".to_string()));
         }
         None
     }
@@ -989,9 +992,6 @@ impl<T: MetalFloat> Operator for MetalMul<T> {
         if key == "non_contiguous" {
             return Some(Box::new(()));
         }
-        if key == "elementwise" {
-            return Some(Box::new("input0 * input1".to_string()));
-        }
         if key == "recompile_shapes" {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
                 *self = Self::new(
@@ -1002,6 +1002,9 @@ impl<T: MetalFloat> Operator for MetalMul<T> {
                     self.dyn_map,
                 )
             }
+        }
+        if key == "elementwise" {
+            return Some(Box::new("input0 * input1".to_string()));
         }
         None
     }
@@ -1134,9 +1137,6 @@ impl<T: MetalFloat> Operator for MetalLessThan<T> {
         if key == "non_contiguous" {
             return Some(Box::new(()));
         }
-        if key == "elementwise" {
-            return Some(Box::new("(float)(input0 < input1)".to_string()));
-        }
         if key == "recompile_shapes" {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
                 *self = Self::new(
@@ -1147,6 +1147,9 @@ impl<T: MetalFloat> Operator for MetalLessThan<T> {
                     self.dyn_map,
                 )
             }
+        }
+        if key == "elementwise" {
+            return Some(Box::new("(float)(input0 < input1)".to_string()));
         }
         None
     }
@@ -1265,9 +1268,6 @@ impl<T: MetalFloat> Operator for MetalMod<T> {
         if key == "non_contiguous" {
             return Some(Box::new(()));
         }
-        if key == "elementwise" {
-            return Some(Box::new("fmod(input0, input1)".to_string()));
-        }
         if key == "recompile_shapes" {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
                 *self = Self::new(
@@ -1278,6 +1278,9 @@ impl<T: MetalFloat> Operator for MetalMod<T> {
                     self.dyn_map,
                 )
             }
+        }
+        if key == "elementwise" {
+            return Some(Box::new("fmod(input0, input1)".to_string()));
         }
         None
     }

@@ -274,7 +274,7 @@ impl Operator for AllocateMetalBuffers {
         // Allocate all buffers
         if buffers.is_empty() {
             let mut dyn_map = dyn_map.clone();
-            dyn_map.insert('t', 1000);
+            dyn_map.insert('t', 1000); // Shouldn't be here, just for debug
             *buffers = self
                 .buffer_sizes
                 .iter()
