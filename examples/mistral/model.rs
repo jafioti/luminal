@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ops::Mul};
+use std::{marker::PhantomData, ops::Div};
 
 use luminal::{
     nn::{embedding::Embedding, norm::RMSNorm},
@@ -144,7 +144,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         let mut attention_weights = queries
             .reshape::<(_, Const<N_KV_HEADS>, Const<N_ATTENTION_GROUPS>, _, _)>() // Split query heads into groups
             .matmul(repeated_keys.permute())
-            .mul((HEAD_DIM as f32).sqrt().recip());
+            .div((HEAD_DIM as f32).sqrt());
 
         // We only mask on a non-kv cache pass
         if cache.is_none() {

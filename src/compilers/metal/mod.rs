@@ -160,10 +160,12 @@ pub trait MetalKernel: Debug {
             .output_buffer_sizes(&inp_shapes)
             .into_iter()
             .map(|n| {
-                dev.new_buffer(
+                let b = dev.new_buffer(
                     n.exec(dyn_map).unwrap() as u64,
                     MTLResourceOptions::StorageModeShared,
-                )
+                );
+                // println!("Allocated {} bytes", n.exec(dyn_map).unwrap());
+                b
             })
             .collect::<Vec<_>>();
         let output_buffers_ref = output_buffers.iter().collect::<Vec<_>>();

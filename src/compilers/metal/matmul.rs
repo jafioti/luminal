@@ -41,22 +41,30 @@ impl<T> MetalKernel for Matmul<T> {
         _: &[&Buffer],
         output_buffers: &[&Buffer],
     ) {
-        let (a_shape, b_shape) = (inputs[0].1.shape(), inputs[1].1.shape());
+        let (a_shape, b_shape) = (
+            inputs[0]
+                .1
+                .shape()
+                .into_iter()
+                .map(|i| i.to_usize().unwrap())
+                .collect::<Vec<_>>(),
+            inputs[1]
+                .1
+                .shape()
+                .into_iter()
+                .map(|i| i.to_usize().unwrap())
+                .collect::<Vec<_>>(),
+        );
         let a_dims = a_shape.len();
-        let m = a_shape[a_dims - 2].to_usize().unwrap();
-        let batch_size = a_shape
-            .iter()
-            .take(a_dims - 2)
-            .map(|i| i.to_usize().unwrap())
-            .product::<usize>()
-            .max(1);
+        let m = a_shape[a_dims - 2];
+        let batch_size = a_shape.iter().take(a_dims - 2).product::<usize>().max(1);
         // if m == 1 && a_shape.len() > 2 {
-        //     m *= a_shape[a_shape.len() - 3].to_usize().unwrap();
+        //     m *= a_shape[a_shape.len() - 3];
         //     batch_size /= m;
         // }
         let b_dims = b_shape.len();
-        let k = b_shape[b_dims - 2].to_usize().unwrap();
-        let n = b_shape[b_dims - 1].to_usize().unwrap();
+        let k = b_shape[b_dims - 2];
+        let n = b_shape[b_dims - 1];
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
@@ -106,12 +114,8 @@ impl<T> MetalKernel for Matmul<T> {
                     .any(|i| !inputs[1].1.fake[*i])
             // At least one non-fake dimension before 3rd to last
             {
-                encoder.set_i32(
-                    8,
-                    inputs[1].1.shape()[inputs[1].1.len() - 3]
-                        .to_usize()
-                        .unwrap() as i32,
-                ); // B batch size 2
+                encoder.set_i32(8, b_shape[inputs[1].1.len() - 3] as i32);
+            // B batch size 2
             } else {
                 encoder.set_i32(8, 1 as i32); // B batch size
             }

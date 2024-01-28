@@ -37,8 +37,6 @@ pub struct CLIArgs {
 
 fn main() {
     let cli_args = CLIArgs::parse();
-    let prompt = cli_args.prompt.as_str();
-    let tokens_to_generate = cli_args.gen_tokens;
 
     let tokenizer = SentencePieceBpeTokenizer::from_file(
         "./examples/mistral/setup/mistral-7b-hf/tokenizer.model",
@@ -137,7 +135,7 @@ fn main() {
     delete_inputs(&model_weights, &mut cx1);
 
     // Run inference first pass
-    let mut input_ids = encode(&tokenizer, prompt);
+    let mut input_ids = encode(&tokenizer, &cli_args.prompt);
 
     input.set_dyn(
         input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
@@ -158,7 +156,7 @@ fn main() {
     // Decode token
     print!(
         "{}{}",
-        prompt.white().bold(),
+        cli_args.prompt.white().bold(),
         decode(&tokenizer, &[output_id]).bright_green()
     );
     io::stdout().flush().unwrap();
@@ -170,7 +168,7 @@ fn main() {
 
     // Decode loop
     let mut token_decode_times = vec![];
-    for _ in 0..tokens_to_generate {
+    for _ in 0..cli_args.gen_tokens {
         single_input.set(vec![*input_ids.last().unwrap() as f32]);
         cx2.set_dyn_dim('p', input_ids.len() - 1);
         cx2.set_dyn_dim('t', input_ids.len());

@@ -143,6 +143,7 @@ impl Compiler for StorageBufferCompiler {
                 if let Some((buffer_index, source_node, _)) = first_pass[&node]
                     .1
                     .iter()
+                    .filter(|i| !graph.no_delete.contains(i))
                     .filter(|i| !used.contains(i))
                     .filter(|i| available_buffers.contains_key(i))
                     .flat_map(|i| {
@@ -171,6 +172,7 @@ impl Compiler for StorageBufferCompiler {
                 if let Some((buffer_index, source_node, _)) = first_pass[&node]
                     .1
                     .iter()
+                    .filter(|i| !graph.no_delete.contains(i))
                     .filter(|i| !used.contains(i))
                     .filter(|i| available_buffers.contains_key(i))
                     .flat_map(|i| {
@@ -273,26 +275,28 @@ impl Operator for AllocateMetalBuffers {
         let dyn_map = unsafe { self.dyn_map.as_ref().unwrap() };
         // Allocate all buffers
         if buffers.is_empty() {
-            let mut dyn_map = dyn_map.clone();
-            dyn_map.insert('t', 1000); // Shouldn't be here, just for debug
             *buffers = self
                 .buffer_sizes
                 .iter()
                 .map(|e| {
                     self.dev.new_buffer(
-                        e.exec(&dyn_map).unwrap() as u64,
+                        e.exec(dyn_map).unwrap() as u64,
                         MTLResourceOptions::StorageModeShared,
                     )
                 })
                 .collect();
-        } else if !dyn_map.contains_key(&'t') {
+        } else {
             for (size, buffer) in self.buffer_sizes.iter().zip(buffers) {
                 let size = size.exec(dyn_map).unwrap() as u64;
                 if buffer.length() < size {
-                    buffer.set_purgeable_state(metal_rs::MTLPurgeableState::Empty);
+                    // Similar allocation strategy to Rust's Vec
+                    let mut length = buffer.length();
+                    while length < size {
+                        length *= 2;
+                    }
                     *buffer = self
                         .dev
-                        .new_buffer(size, MTLResourceOptions::StorageModeShared);
+                        .new_buffer(length, MTLResourceOptions::StorageModeShared);
                 }
             }
         }

@@ -44,14 +44,8 @@ impl<T: MetalFloat> Operator for MetalCopyToDevice<T> {
             data_ptr,
             (data_len * std::mem::size_of::<T>()) as u64,
             MTLResourceOptions::StorageModeShared,
-            // This causes a double free, so I guess metal frees it?
-            // Some(&ConcreteBlock::new(|_, _| {
-            //     let data = unsafe { Vec::from_raw_parts(data_ptr, data_len, data_len) };
-            //     drop(data);
-            // })),
             None,
         );
-        data.leak(); // Is this ok? I don't know if metal frees the data once the buffer is discarded
         vec![Tensor {
             data: Box::new(buffer),
         }]
