@@ -321,7 +321,7 @@ impl Operator for AllocateMetalBuffers {
         } else {
             for (size, buffer) in self.buffer_sizes.iter().zip(buffers) {
                 let size = size.exec(dyn_map).unwrap() as u64;
-                if buffer.length() < size {
+                if buffer.length() < size || buffer.length() > size * 2 {
                     // TODO: For some reason this causes bad outputs. Maybe we are relying on buffer length somewhere? We shouldn't be.
                     // Also, it seems we are getting the benifits of this without actually doing it. Maybe metal is doing it in the background?
                     // Similar allocation strategy to Rust's Vec
