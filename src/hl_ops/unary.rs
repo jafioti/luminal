@@ -274,7 +274,7 @@ mod tests {
         let a_data = random_vec(4);
         let a = cx
             .tensor::<(Dyn<'a'>, Dyn<'b'>)>()
-            .set_dyn(a_data.clone(), vec![2, 2]);
+            .set_dyn(a_data.clone(), &[2, 2]);
         let b = a.relu().retrieve();
 
         cx.execute();
@@ -291,7 +291,7 @@ mod tests {
         let a_data = random_vec(4);
         let a = cx
             .tensor::<(Dyn<'a'>, Dyn<'b'>)>()
-            .set_dyn(a_data.clone(), vec![2, 2]);
+            .set_dyn(a_data.clone(), &[2, 2]);
         let b = a.sigmoid().retrieve();
 
         cx.execute();
@@ -308,7 +308,7 @@ mod tests {
         let a_data = random_vec(4);
         let a = cx
             .tensor::<(Dyn<'a'>, Dyn<'b'>)>()
-            .set_dyn(a_data.clone(), vec![2, 2]);
+            .set_dyn(a_data.clone(), &[2, 2]);
         let b = a.swish().retrieve();
         cx.execute();
 
@@ -324,7 +324,7 @@ mod tests {
         let a_data = random_vec(4);
         let a = cx
             .tensor::<(Dyn<'a'>, Dyn<'b'>)>()
-            .set_dyn(a_data.clone(), vec![2, 2]);
+            .set_dyn(a_data.clone(), &[2, 2]);
         let b = a.tanh().retrieve();
 
         cx.execute();

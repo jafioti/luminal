@@ -149,7 +149,7 @@ fn test_square() {
         .collect::<Vec<f32>>();
     let a = cx
         .tensor::<(Dyn<'b'>, Dyn<'s'>, crate::prelude::Const<4096>)>()
-        .set_dyn(data.clone(), vec![1, 10, 4096]);
+        .set_dyn(data.clone(), &[1, 10, 4096]);
     let mut b = a * a;
     b.retrieve();
 
@@ -199,7 +199,7 @@ fn test_mul2() {
             Dyn<'a'>,
             Dyn<'a'>,
         )>()
-        .set_dyn(vec![82.4, 783.0, 99.6, 974.5], vec![1, 1, 2, 2]);
+        .set_dyn(vec![82.4, 783.0, 99.6, 974.5], &[1, 1, 2, 2]);
     let b = cx.tensor::<R0>().set(vec![0.57735026]);
     let mut c = a * b.expand();
     c.retrieve();
@@ -545,7 +545,7 @@ fn test_transformer_encoder_block() {
 
     let a = cx
         .tensor::<(Dyn<'b'>, Dyn<'a'>, crate::prelude::Const<3>)>()
-        .set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![1, 2, 3]);
+        .set_dyn(vec![-1., 2., 3., 3., 3., -1.], &[1, 2, 3]);
     let mut b = model.forward(a).retrieve();
 
     cx.compile(<(GenericCompiler, MetalCompiler<f32>)>::default(), &mut b);

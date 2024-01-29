@@ -103,7 +103,7 @@ fn main() {
 
     // Initial forward pass to load weights
     println!("Loading model...");
-    input.set_dyn(vec![1.], vec![1, 1]);
+    input.set_dyn(vec![1.], &[1, 1]);
     cx1.execute();
     logits.drop();
     kv_cache.drop();
@@ -114,7 +114,7 @@ fn main() {
     let mut input_ids = encode(&tokenizer, prompt);
     input.set_dyn(
         input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
-        vec![1, input_ids.len()],
+        &[1, input_ids.len()],
     );
     let now = Instant::now();
     cx1.execute();

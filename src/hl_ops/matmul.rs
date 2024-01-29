@@ -198,10 +198,10 @@ mod tests {
         let mut cx = Graph::new();
         let (a_data, b_data) = (random_vec(4), random_vec(6));
         let a = cx.tensor::<(Dyn<'a'>, Dyn<'b'>)>();
-        a.set_dyn(a_data.clone(), vec![2, 2]);
+        a.set_dyn(a_data.clone(), &[2, 2]);
         let a = a.expand::<(LConst<1>, Dyn<'a'>, Dyn<'b'>), _>();
         let b = cx.tensor::<(LConst<1>, Dyn<'b'>, LConst<3>)>();
-        b.set_dyn(b_data.clone(), vec![1, 2, 3]);
+        b.set_dyn(b_data.clone(), &[1, 2, 3]);
         let c = a.matmul(b);
         c.retrieve();
 

@@ -20,7 +20,7 @@ fn test_movement() {
     let mut cx = Graph::new();
     let a = cx.tensor::<(Const<3>, Dyn<'a'>, Const<2>)>().set_dyn(
         vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.],
-        vec![3, 2, 2],
+        &[3, 2, 2],
     );
     let b = a
         .reshape::<(Const<6>, Dyn<'a'>)>()
@@ -46,7 +46,7 @@ fn test_matmul() {
     let mut cx = Graph::new();
     let a = cx
         .tensor::<(Dyn<'a'>, Const<3>)>()
-        .set_dyn(vec![1., 2., 3., 1., 2., 3.], vec![2, 3]);
+        .set_dyn(vec![1., 2., 3., 1., 2., 3.], &[2, 3]);
     let b = cx
         .tensor::<R2<3, 3>>()
         .set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3.]);
@@ -68,7 +68,7 @@ fn test_batch_matmul() {
     let mut cx = Graph::new();
     let a = cx.tensor::<(Dyn<'a'>, Dyn<'b'>, Const<2>)>().set_dyn(
         vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.],
-        vec![2, 3, 2],
+        &[2, 3, 2],
     );
     let b = cx
         .tensor::<R2<2, 4>>()
@@ -94,7 +94,7 @@ fn test_feedforward() {
     let mut cx = Graph::new();
     let batch = cx
         .tensor::<(Dyn<'a'>, Const<3>)>()
-        .set_dyn(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0], vec![2, 3]);
+        .set_dyn(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0], &[2, 3]);
     let model: (Linear<3, 4>, ReLU, Linear<4, 2>) = InitModule::initialize(&mut cx);
     model
         .0

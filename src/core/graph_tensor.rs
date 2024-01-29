@@ -52,8 +52,15 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Set the value of the tensor, with dynamic dimensions.
-    pub fn set_dyn<T: Data + Clone>(self, data: T, shape: Vec<usize>) -> Self {
+    ///
+    /// TODO: shape should be a const sized array. Blocked by https://github.com/rust-lang/rust/issues/60551
+    pub fn set_dyn<T: Data + Clone>(self, data: T, shape: &[usize]) -> Self {
         // Report dyn dim values to graph dyn map
+        assert_eq!(
+            S::realized_shape().len(),
+            shape.len(),
+            "Number of dimensions don't match!"
+        );
         for (d, s) in S::realized_shape().iter().zip(shape.iter()) {
             if let Some(c) = d.to_symbols().pop() {
                 self.graph().dyn_map.insert(c, *s);
@@ -273,6 +280,8 @@ pub trait MarkTensors {
     fn retrieve(&self);
     /// Drop all tensors in this collection
     fn drop(&self);
+    /// Set data
+    fn set_dyn<T: Data + Clone>(&self, data: T, shape: &[usize]);
 }
 
 impl<S: Shape> MarkTensors for GraphTensor<S> {
@@ -285,6 +294,9 @@ impl<S: Shape> MarkTensors for GraphTensor<S> {
     }
     fn drop(&self) {
         GraphTensor::drop(self);
+    }
+    fn set_dyn<T: Data + Clone>(&self, data: T, shape: &[usize]) {
+        GraphTensor::set_dyn(*self, data, shape);
     }
 }
 
@@ -306,6 +318,11 @@ impl<S: MarkTensors> MarkTensors for Vec<S> {
             t.drop();
         }
     }
+    fn set_dyn<T: Data + Clone>(&self, data: T, shape: &[usize]) {
+        for t in self {
+            t.set_dyn(data.clone(), shape);
+        }
+    }
 }
 impl<S: MarkTensors> MarkTensors for &[S] {
     fn keep(&self) {
@@ -325,6 +342,11 @@ impl<S: MarkTensors> MarkTensors for &[S] {
             t.drop();
         }
     }
+    fn set_dyn<T: Data + Clone>(&self, data: T, shape: &[usize]) {
+        for t in *self {
+            t.set_dyn(data.clone(), shape);
+        }
+    }
 }
 
 macro_rules! tuple_impls {
@@ -341,6 +363,9 @@ macro_rules! tuple_impls {
             }
             fn drop(&self) {
                 $(self.$idx.drop();)+
+            }
+            fn set_dyn<T: Data + Clone>(&self, data: T, shape: &[usize]) {
+                $(self.$idx.set_dyn(data.clone(), shape);)+
             }
         }
     };

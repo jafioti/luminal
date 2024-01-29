@@ -117,7 +117,7 @@ mod tests {
 
         let a = cx
             .tensor::<(Dyn<'s'>, crate::shape::Const<3>)>()
-            .set_dyn(vec![-1., 2., 3., 3., 3., -1.], vec![2, 3]);
+            .set_dyn(vec![-1., 2., 3., 3., 3., -1.], &[2, 3]);
         let b = model.forward(a).retrieve();
 
         cx.execute();

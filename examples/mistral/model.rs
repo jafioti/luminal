@@ -146,11 +146,13 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             .matmul(repeated_keys.permute())
             .div((HEAD_DIM as f32).sqrt());
 
-        // We only mask on a non-kv cache pass
-        if cache.is_none() {
-            let attention_mask = self.k_proj.graph().triu::<TotSeq>(1) * f16::MIN.to_f32();
-            attention_weights += attention_mask.realize::<(CurSeq, TotSeq)>().expand();
-        }
+        let attention_mask = self.k_proj.graph().triu::<CurSeq>(1) * f16::MIN.to_f32();
+        attention_weights += attention_mask
+            .pad::<(CurSeq, TotSeq), _, _>(&[
+                (0.into(), Expression::from(0)),
+                (TotSeq::const_size() - CurSeq::const_size(), 0.into()),
+            ])
+            .expand();
 
         // Calculate final outputs
         let output = attention_weights

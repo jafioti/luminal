@@ -214,7 +214,7 @@ fn test_square() {
     let data = random_vec_rng(40960, &mut rng);
     let a = cx
         .tensor::<(Dyn<'b'>, Dyn<'s'>, crate::prelude::Const<4096>)>()
-        .set_dyn(data.clone(), vec![1, 10, 4096]);
+        .set_dyn(data.clone(), &[1, 10, 4096]);
     let mut b = a * a;
     b.retrieve();
 
@@ -261,7 +261,7 @@ fn test_mul2() {
     let mut cx = Graph::new();
     let a = cx
         .tensor::<(LConst<1>, LConst<1>, Dyn<'a'>, Dyn<'a'>)>()
-        .set_dyn(vec![82.4, 783.0, 99.6, 974.5], vec![1, 1, 2, 2]);
+        .set_dyn(vec![82.4, 783.0, 99.6, 974.5], &[1, 1, 2, 2]);
     let b = cx.tensor::<R0>().set(vec![0.57735026]);
     let mut c = (a * b.expand()).retrieve();
 
@@ -475,10 +475,10 @@ fn test_matmul() {
                     let b_data = random_vec_rng(k * n, &mut rng);
                     let a = cx
                         .tensor::<(Dyn<'M'>, Dyn<'K'>)>()
-                        .set_dyn(a_data.clone(), vec![m, k]);
+                        .set_dyn(a_data.clone(), &[m, k]);
                     let b = cx
                         .tensor::<(Dyn<'K'>, Dyn<'N'>)>()
-                        .set_dyn(b_data.clone(), vec![k, n]);
+                        .set_dyn(b_data.clone(), &[k, n]);
                     let mut c = a.matmul(b).retrieve();
 
                     cx.compile(MetalCompiler::<f16>::default(), &mut c);
@@ -544,10 +544,10 @@ fn test_batch_matmul() {
                     let b_data = random_vec_rng(k * n, &mut rng);
                     let a = cx
                         .tensor::<(Dyn<'B'>, Dyn<'M'>, Dyn<'K'>)>()
-                        .set_dyn(a_data.clone(), vec![batch, m, k]);
+                        .set_dyn(a_data.clone(), &[batch, m, k]);
                     let b = cx
                         .tensor::<(Dyn<'K'>, Dyn<'N'>)>()
-                        .set_dyn(b_data.clone(), vec![k, n]);
+                        .set_dyn(b_data.clone(), &[k, n]);
                     let mut c = a.matmul(b).retrieve();
 
                     cx.compile(MetalCompiler::<f16>::default(), &mut c);
@@ -804,7 +804,7 @@ fn test_transformer_encoder_block() {
     let a_data = random_vec(2 * 32);
     let a = cx
         .tensor::<(Dyn<'b'>, Dyn<'a'>, LConst<32>)>()
-        .set_dyn(a_data.clone(), vec![1, 2, 3])
+        .set_dyn(a_data.clone(), &[1, 2, 3])
         .keep();
     cx.keep_tensors(state_dict(&model));
     let mut b = model.forward(a).retrieve();
@@ -966,7 +966,7 @@ fn test_pad_contig() {
     let a_data = random_vec_rng(m * k, &mut rng);
     let mut a = cx
         .tensor::<(Dyn<'M'>, Dyn<'K'>)>()
-        .set_dyn(a_data, vec![m, k])
+        .set_dyn(a_data, &[m, k])
         .retrieve();
     let mut b: GraphTensor<(Dyn<'M'>, Dyn<'K'>)> = a
         .pad(&[(0, 0.into()), (0, Expression::from(16) - 'K')])

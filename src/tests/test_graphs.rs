@@ -12,7 +12,7 @@ pub fn matmul() -> (Graph, Vec<GraphTensor<()>>) {
     let mut cx = Graph::new();
     let a = cx
         .tensor::<(Dyn<'a'>, Const<3>)>()
-        .set_dyn(random_vec_rng(2 * 3, &mut rng), vec![2, 3]);
+        .set_dyn(random_vec_rng(2 * 3, &mut rng), &[2, 3]);
     let b = cx.tensor::<R2<3, 3>>().set(random_vec_rng(3 * 3, &mut rng));
     let c = a.matmul(b).retrieve();
     (cx, vec![c.no_shape()])
@@ -23,7 +23,7 @@ pub fn batch_matmul() -> (Graph, Vec<GraphTensor<()>>) {
     let mut cx = Graph::new();
     let a = cx
         .tensor::<(Dyn<'a'>, Dyn<'b'>, Const<2>)>()
-        .set_dyn(random_vec_rng(2 * 3 * 2, &mut rng), vec![2, 3, 2]);
+        .set_dyn(random_vec_rng(2 * 3 * 2, &mut rng), &[2, 3, 2]);
     let b = cx.tensor::<R2<2, 4>>().set(random_vec_rng(2 * 4, &mut rng));
     let c = a.matmul(b).retrieve();
     (cx, vec![c.no_shape()])
@@ -35,7 +35,7 @@ pub fn feedforward() -> (Graph, Vec<GraphTensor<()>>) {
     let mut cx = Graph::new();
     let batch = cx
         .tensor::<(Dyn<'a'>, Const<3>)>()
-        .set_dyn(random_vec_rng(2 * 3, &mut rng), vec![2, 3]);
+        .set_dyn(random_vec_rng(2 * 3, &mut rng), &[2, 3]);
     let model: (Linear<3, 4>, ReLU, Linear<4, 2>) = InitModule::initialize(&mut cx);
     model.0.weight.set(random_vec_rng(3 * 4, &mut rng));
     model.2.weight.set(random_vec_rng(4 * 2, &mut rng));
@@ -133,8 +133,8 @@ pub fn transformer() -> (Graph, Vec<GraphTensor<()>>) {
     let e = cx.tensor::<(Dyn<'e'>, crate::shape::Const<3>)>();
     let b = model.forward((a, e));
 
-    a.set_dyn(random_vec_rng(2 * 3, &mut rng), vec![2, 3]);
-    e.set_dyn(random_vec_rng(3 * 3, &mut rng), vec![3, 3]);
+    a.set_dyn(random_vec_rng(2 * 3, &mut rng), &[2, 3]);
+    e.set_dyn(random_vec_rng(3 * 3, &mut rng), &[3, 3]);
     b.retrieve();
 
     (cx, vec![b.no_shape()])
