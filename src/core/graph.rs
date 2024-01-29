@@ -200,7 +200,6 @@ impl Graph {
             if self.tensors.contains_key(&(*node, 0)) {
                 continue;
             }
-            // println!("Running {:?}", self.graph.node_weight(*node).unwrap());
 
             let mut srcs = Vec::new();
             get_source_tensors(

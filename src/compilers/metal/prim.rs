@@ -27,7 +27,7 @@ impl<T: MetalFloat> Operator for MetalCopyToDevice<T> {
             // Already on device
             return vec![inp.pop().unwrap().0.cloned()];
         }
-        let data = inp[0]
+        let mut data = inp[0]
             .0
             .borrowed()
             .data
@@ -38,11 +38,12 @@ impl<T: MetalFloat> Operator for MetalCopyToDevice<T> {
             .copied()
             .map(MetalFloat::from_f32)
             .collect::<Vec<T>>();
-        let data_ptr = data.as_ptr() as *mut _;
-        let data_len = data.len();
+        if data.len() == 0 {
+            data.push(T::from_f32(0.0));
+        }
         let buffer = self.0.new_buffer_with_bytes_no_copy(
-            data_ptr,
-            (data_len * std::mem::size_of::<T>()) as u64,
+            data.as_ptr() as *mut _,
+            (data.len() * std::mem::size_of::<T>()) as u64,
             MTLResourceOptions::StorageModeShared,
             None,
         );
