@@ -175,8 +175,7 @@ fn test_add() {
     let mut cx = Graph::new();
     let a = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
     let b = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
-    let mut c = a + b;
-    c.retrieve();
+    let mut c = (a + b).retrieve();
 
     cx.compile(MetalCompiler::<f16>::default(), &mut c);
     cx.execute();

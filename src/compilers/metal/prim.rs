@@ -46,6 +46,7 @@ impl<T: MetalFloat> Operator for MetalCopyToDevice<T> {
             MTLResourceOptions::StorageModeShared,
             None,
         );
+        data.leak();
         vec![Tensor {
             data: Box::new(buffer),
         }]

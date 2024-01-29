@@ -195,6 +195,39 @@ impl Compiler for StorageBufferCompiler {
                 }
             }
         }
+        // Loop through no_delete nodes and add buffers just for them
+        for node in &toposort {
+            if !graph.no_delete.contains(node) {
+                continue;
+            }
+            let Some(Ok(wrapper)) = graph
+                .graph
+                .node_weight_mut(*node)
+                .unwrap()
+                .custom("metal", Box::new(()))
+                .map(|e| e.downcast::<MetalKernelWrapper>())
+            else {
+                continue;
+            };
+            buffer_map.insert(*node, (vec![], vec![]));
+            let input_shapes = graph
+                .get_sources(*node)
+                .into_iter()
+                .map(|(_, _, i)| i)
+                .collect::<Vec<_>>();
+            // Assign output buffers
+            for required_buffer in wrapper.0.output_buffer_sizes(&input_shapes) {
+                // Allocate new buffer
+                buffer_map.get_mut(node).unwrap().0.push(buffers.len());
+                buffers.push(required_buffer);
+            }
+            // Assign intermediate buffers
+            for required_buffer in wrapper.0.intermediate_buffer_sizes(&input_shapes) {
+                // Allocate new buffer
+                buffer_map.get_mut(node).unwrap().1.push(buffers.len());
+                buffers.push(required_buffer);
+            }
+        }
 
         // We now have the buffers to allocate, and the buffers needed for each op.
         // Let's create the allocator op and wrap all the metal ops
@@ -289,11 +322,14 @@ impl Operator for AllocateMetalBuffers {
             for (size, buffer) in self.buffer_sizes.iter().zip(buffers) {
                 let size = size.exec(dyn_map).unwrap() as u64;
                 if buffer.length() < size {
+                    // TODO: For some reason this causes bad outputs. Maybe we are relying on buffer length somewhere? We shouldn't be.
+                    // Also, it seems we are getting the benifits of this without actually doing it. Maybe metal is doing it in the background?
                     // Similar allocation strategy to Rust's Vec
-                    let mut length = buffer.length();
-                    while length < size {
-                        length *= 2;
-                    }
+                    // let mut length = buffer.length();
+                    // while length < size {
+                    //     length *= 2;
+                    // }
+                    let length = size;
                     *buffer = self
                         .dev
                         .new_buffer(length, MTLResourceOptions::StorageModeShared);

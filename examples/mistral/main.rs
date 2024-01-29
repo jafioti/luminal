@@ -136,7 +136,6 @@ fn main() {
 
     // Run inference first pass
     let mut input_ids = encode(&tokenizer, &cli_args.prompt);
-
     input.set_dyn(
         input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
         vec![1, input_ids.len()],
@@ -146,10 +145,10 @@ fn main() {
     let now = Instant::now();
     cx1.execute();
     let elapsed_ms = now.elapsed().as_millis();
-    let n_prompt_tokens = input_ids.len();
-    let pp_speed = 1000.0 * (n_prompt_tokens as f64) / (elapsed_ms as f64);
-    println!("\t - {}ms ({:.2} tok/s)", elapsed_ms, pp_speed);
-
+    println!(
+        "\t - {elapsed_ms}ms ({:.2} tok/s)",
+        1000.0 * (input_ids.len() as f64) / (elapsed_ms as f64)
+    );
     let output_id = sample_index(&logits.data());
     input_ids.push(output_id);
 
