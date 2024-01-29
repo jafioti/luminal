@@ -43,21 +43,16 @@ fn main() {
     )
     .unwrap();
 
-    print!("Defining Graphs");
+    print!("Defining Graph");
     io::stdout().flush().unwrap();
     let now = Instant::now();
-    let mut cx1 = Graph::new();
-    let mut input = cx1.named_tensor::<(Const<1>, Dyn<'s'>)>("Input");
+    let mut cx = Graph::new();
+    let mut input = cx.named_tensor::<(Const<1>, Dyn<'s'>)>("Input");
     let mut cache_src: Vec<KVCache<Const<1>, Dyn<'p'>>> = (0..model::NUM_LAYERS)
-        .map(|_| {
-            (
-                cx1.named_tensor("Key Cache"),
-                cx1.named_tensor("Value Cache"),
-            )
-        })
+        .map(|_| (cx.named_tensor("Key Cache"), cx.named_tensor("Value Cache")))
         .collect();
     cache_src.set_dyn(vec![], &[1, model::N_KV_HEADS, 0, model::HEAD_DIM]);
-    let model = model::MistralLM::initialize(&mut cx1);
+    let model = model::MistralLM::initialize(&mut cx);
     let (logits, mut cache_dest) =
         model.forward((input, Some(cache_src.clone()), PhantomData::<Dyn<'t'>>));
     let mut logits = logits
@@ -71,19 +66,19 @@ fn main() {
         "./examples/mistral/setup/mistral-7b-hf/converted-model-00002-of-00003.safetensors",
         "./examples/mistral/setup/mistral-7b-hf/converted-model-00003-of-00003.safetensors",
     ])
-    .load(&model, &mut cx1);
+    .load(&model, &mut cx);
     println!("\t - {}ms", now.elapsed().as_millis());
 
-    print!("Compiling Prompt Processing Graph");
+    print!("Compiling Graph");
     io::stdout().flush().unwrap();
     let now = Instant::now();
-    cx1.compile(
+    cx.compile(
         <(GenericCompiler, DeviceCompiler)>::default(),
         (&mut input, &mut logits, &mut cache_src, &mut cache_dest),
     );
-    let model_weights = downstream(&state_set(&model), &cx1);
-    cx1.keep_tensors(&model_weights);
-    let cache_src_set = downstream(&cache_src, &cx1);
+    let model_weights = downstream(&state_set(&model), &cx);
+    cx.keep_tensors(&model_weights);
+    let cache_src_set = downstream(&cache_src, &cx);
     let cache_dest_set = cache_dest.to_ids();
     println!("\t - {}ms", now.elapsed().as_millis());
 
@@ -92,14 +87,14 @@ fn main() {
     io::stdout().flush().unwrap();
     let now = Instant::now();
     input.set_dyn(vec![0.], &[1, 1]);
-    cx1.set_dyn_dim('t', 1);
-    cx1.execute();
+    cx.set_dyn_dim('t', 1);
+    cx.execute();
     logits.drop();
     cache_dest.drop();
     println!("\t - {}ms", now.elapsed().as_millis());
 
     // Now that weights are loaded, delete the loading nodes so they don't run again
-    delete_inputs(&model_weights, &mut cx1);
+    delete_inputs(&model_weights, &mut cx);
 
     // Run inference first pass
     let mut input_ids = encode(&tokenizer, &cli_args.prompt);
@@ -107,17 +102,17 @@ fn main() {
         input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
         &[1, input_ids.len()],
     );
-    cx1.set_dyn_dim('t', input_ids.len());
+    cx.set_dyn_dim('t', input_ids.len());
     print!("Processing Prompt");
     io::stdout().flush().unwrap();
     let now = Instant::now();
-    cx1.execute();
+    cx.execute();
     let elapsed_ms = now.elapsed().as_millis();
     println!(
         "\t - {elapsed_ms}ms ({:.2} tok/s)",
         1000.0 * (input_ids.len() as f64) / (elapsed_ms as f64)
     );
-    delete_inputs(&cache_src_set, &mut cx1);
+    delete_inputs(&cache_src_set, &mut cx);
     let output_id = sample_index(&logits.data());
     logits.drop();
     input_ids.push(output_id);
@@ -131,17 +126,17 @@ fn main() {
     io::stdout().flush().unwrap();
 
     // Swap caches
-    transfer_data_same_graph(&cache_dest_set, &cache_src_set, &mut cx1);
+    transfer_data_same_graph(&cache_dest_set, &cache_src_set, &mut cx);
 
     // Decode loop
     let mut token_decode_times = vec![];
     for _ in 0..cli_args.gen_tokens {
         input.set_dyn(vec![*input_ids.last().unwrap() as f32], &[1, 1]);
-        cx1.set_dyn_dim('p', input_ids.len() - 1);
-        cx1.set_dyn_dim('t', input_ids.len());
+        cx.set_dyn_dim('p', input_ids.len() - 1);
+        cx.set_dyn_dim('t', input_ids.len());
 
         let now = Instant::now();
-        cx1.execute();
+        cx.execute();
         token_decode_times.push(now.elapsed().as_millis());
 
         // Sample tokens
@@ -152,7 +147,7 @@ fn main() {
         io::stdout().flush().unwrap();
 
         // Swap caches
-        transfer_data_same_graph(&cache_dest_set, &cache_src_set, &mut cx1);
+        transfer_data_same_graph(&cache_dest_set, &cache_src_set, &mut cx);
     }
     println!(
         "\nAverage token generated in {}ms",
