@@ -10,6 +10,16 @@ use std::marker::PhantomData;
 
 use petgraph::graph::NodeIndex;
 
+/// A tensor on the graph.
+///
+/// Graphs can be built by performing operations on these tensors.
+/// ```rust
+/// let cx = Graph::new();
+/// let a: GraphTensor<R1<3>> = cx.tensor();
+/// let b: GraphTensor<R1<3>> = cx.tensor();
+/// let c: GraphTensor<R1<3>> = a + b;
+/// // The graph `cx` now has `a` and `b` loading nodes, and an add node resulting in `c`
+/// ```
 #[derive(Clone, Copy)]
 pub struct GraphTensor<S: Shape> {
     pub id: NodeIndex,
@@ -19,7 +29,8 @@ pub struct GraphTensor<S: Shape> {
 }
 
 impl<S: Shape> GraphTensor<S> {
-    pub fn from_id(id: NodeIndex, shape: ShapeTracker, graph_ref: *mut Graph) -> Self {
+    /// Create a GraphTensor from a NodeIndex
+    pub(crate) fn from_id(id: NodeIndex, shape: ShapeTracker, graph_ref: *mut Graph) -> Self {
         Self {
             id,
             graph_ref,
@@ -46,12 +57,19 @@ impl<S: Shape> GraphTensor<S> {
         self.graph().drop_tensors(self.id);
     }
 
+    /// Get a mutable reference to the graph this tensor belongs to
     #[allow(clippy::mut_from_ref)]
     pub fn graph(&self) -> &mut Graph {
         unsafe { self.graph_ref.as_mut().unwrap() }
     }
 
     /// Set the value of the tensor, with dynamic dimensions.
+    /// ```rust
+    /// let cx = Graph::new();
+    /// let a: GraphTensor<(Const<2>, Dyn<'s'>)> = cx
+    ///     .tensor()
+    ///     .set_dyn(vec![1., 2., 3., 4.], &[2, 2]);
+    /// ```
     ///
     /// TODO: shape should be a const sized array. Blocked by https://github.com/rust-lang/rust/issues/60551
     pub fn set_dyn<T: Data + Clone>(self, data: T, shape: &[usize]) -> Self {
@@ -96,6 +114,7 @@ impl<S: Shape> GraphTensor<S> {
         node.0 = name.to_string();
     }
 
+    /// Print the value of this tensor when the graph is ran
     pub fn print(&self, message: &str) {
         let id = self
             .graph()
@@ -105,6 +124,7 @@ impl<S: Shape> GraphTensor<S> {
         self.graph().no_delete.insert(id);
     }
 
+    /// Convert tensor to a shapeless tensor
     pub fn no_shape(self) -> GraphTensor<()> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
@@ -148,8 +168,8 @@ impl<S: ConstShape> GraphTensor<S> {
         self
     }
 
-    // Implement a deferred set where the input is a closure
-    pub fn set_defer(self, load_data: &'static impl Fn() -> Result<Vec<f32>, String>) -> Self {
+    /// Set the tensor with a generating closure to be ran at runtime
+    pub fn set_deferred(self, loader: impl Fn() -> Vec<f32> + 'static) -> Self {
         let node = self
             .graph()
             .graph
@@ -160,9 +180,9 @@ impl<S: ConstShape> GraphTensor<S> {
             .unwrap();
 
         // Set the closure here
-        node.1 = Box::new(|_| {
+        node.1 = Box::new(move |_| {
             vec![Tensor {
-                data: Box::new(load_data().unwrap()),
+                data: Box::new(loader()),
             }]
         });
 
@@ -171,7 +191,7 @@ impl<S: ConstShape> GraphTensor<S> {
     }
 }
 
-pub fn pretty_print_tensor_recursive(
+fn pretty_print_tensor_recursive(
     f: &mut std::fmt::Formatter<'_>,
     data: &[f32],
     shape: &[usize],

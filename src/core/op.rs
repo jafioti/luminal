@@ -10,12 +10,16 @@ use crate::{
 use super::shape::symbolic::BigExpression;
 use rustc_hash::FxHashMap;
 
+/// Either an owned or borrowed tensor that gets consumed by ops
 pub enum InputTensor<'a> {
+    /// An owned tensor
     Owned(Tensor),
+    /// A borrowed tensor
     Borrowed(&'a Tensor),
 }
 
 impl<'a> InputTensor<'a> {
+    /// Borrow the tensor
     pub fn borrowed(&'a self) -> &'a Tensor {
         match self {
             InputTensor::Owned(t) => t,
@@ -23,6 +27,7 @@ impl<'a> InputTensor<'a> {
         }
     }
 
+    /// Unwrap or clone the tensor, depending on if it's owned or not
     pub fn cloned(self) -> Tensor {
         match self {
             InputTensor::Owned(t) => t,
@@ -32,7 +37,9 @@ impl<'a> InputTensor<'a> {
 }
 
 pub trait Operator: Debug + TraitObjEq {
+    /// Process the input tensors and produce output tensors
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor>;
+    /// Implement custom functionality
     #[allow(unused)]
     fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
         None
@@ -118,6 +125,7 @@ impl Operator for Print {
     }
 }
 
+/// A constant value placed on the graph at runtime. Can either be an expression evaluated at runtime, or a constant float
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConstantValue {
     Expression(BigExpression),
@@ -157,13 +165,7 @@ pub struct Contiguous;
 impl Operator for Contiguous {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         // Copy data over to new tensor
-        let src = inp[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Vec<f32>>()
-            .unwrap();
+        let src = get_vec_from_tensor(&inp[0].0);
         let mut res = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
         let ind = inp[0].1.index_expression();
         let val = inp[0].1.valid_expression();
@@ -178,7 +180,7 @@ impl Operator for Contiguous {
     }
 }
 
-// Below are the primitive operators currently supported
+// Below are all the primitive operators
 
 // Unary Op (A -> A)
 
@@ -186,18 +188,12 @@ impl Operator for Contiguous {
 pub struct Log2;
 impl Operator for Log2 {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut t = inp.pop().unwrap().0.cloned();
-        for a in t
-            .data
-            .as_any_mut()
-            .downcast_mut::<Vec<f32>>()
-            .unwrap()
-            .iter_mut()
-        {
+        let mut tensor = inp.pop().unwrap().0.cloned();
+        for a in get_vec_from_tensor_owned(&mut tensor).iter_mut() {
             *a = a.log2();
         }
 
-        vec![t]
+        vec![tensor]
     }
 }
 
@@ -205,18 +201,12 @@ impl Operator for Log2 {
 pub struct Exp2;
 impl Operator for Exp2 {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut t = inp.pop().unwrap().0.cloned();
-        for a in t
-            .data
-            .as_any_mut()
-            .downcast_mut::<Vec<f32>>()
-            .unwrap()
-            .iter_mut()
-        {
+        let mut tensor = inp.pop().unwrap().0.cloned();
+        for a in get_vec_from_tensor_owned(&mut tensor).iter_mut() {
             *a = a.exp2();
         }
 
-        vec![t]
+        vec![tensor]
     }
 }
 
@@ -224,17 +214,11 @@ impl Operator for Exp2 {
 pub struct Sin;
 impl Operator for Sin {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut t = inp.pop().unwrap().0.cloned();
-        for a in t
-            .data
-            .as_any_mut()
-            .downcast_mut::<Vec<f32>>()
-            .unwrap()
-            .iter_mut()
-        {
+        let mut tensor = inp.pop().unwrap().0.cloned();
+        for a in get_vec_from_tensor_owned(&mut tensor).iter_mut() {
             *a = a.sin();
         }
-        vec![t]
+        vec![tensor]
     }
 }
 
@@ -242,17 +226,11 @@ impl Operator for Sin {
 pub struct Sqrt;
 impl Operator for Sqrt {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut t = inp.pop().unwrap().0.cloned();
-        for a in t
-            .data
-            .as_any_mut()
-            .downcast_mut::<Vec<f32>>()
-            .unwrap()
-            .iter_mut()
-        {
+        let mut tensor = inp.pop().unwrap().0.cloned();
+        for a in get_vec_from_tensor_owned(&mut tensor).iter_mut() {
             *a = a.sqrt();
         }
-        vec![t]
+        vec![tensor]
     }
 }
 
@@ -260,17 +238,11 @@ impl Operator for Sqrt {
 pub struct Recip;
 impl Operator for Recip {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut t = inp.pop().unwrap().0.cloned();
-        for a in t
-            .data
-            .as_any_mut()
-            .downcast_mut::<Vec<f32>>()
-            .unwrap()
-            .iter_mut()
-        {
+        let mut tensor = inp.pop().unwrap().0.cloned();
+        for a in get_vec_from_tensor_owned(&mut tensor).iter_mut() {
             *a = a.recip();
         }
-        vec![t]
+        vec![tensor]
     }
 }
 
@@ -281,20 +253,8 @@ pub struct Add;
 impl Operator for Add {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let (a_data, b_data) = (
-            inp[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Vec<f32>>()
-                .unwrap(),
-            inp[1]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Vec<f32>>()
-                .unwrap(),
+            get_vec_from_tensor(&inp[0].0),
+            get_vec_from_tensor(&inp[1].0),
         );
         let (a_ind, a_val, b_ind, b_val) = (
             inp[0].1.index_expression(),
@@ -304,15 +264,17 @@ impl Operator for Add {
         );
         let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
         for i in 0..data.len() {
-            data[i] = if a_val.exec_single_var(i) != 0 {
+            let lhs = if a_val.exec_single_var(i) != 0 {
                 a_data[a_ind.exec_single_var(i)]
             } else {
                 0.0
-            } + if b_val.exec_single_var(i) != 0 {
+            };
+            let rhs = if b_val.exec_single_var(i) != 0 {
                 b_data[b_ind.exec_single_var(i)]
             } else {
                 0.0
             };
+            data[i] = lhs + rhs;
         }
         vec![Tensor {
             data: Box::new(data),
@@ -325,20 +287,8 @@ pub struct Mul;
 impl Operator for Mul {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let (a_data, b_data) = (
-            inp[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Vec<f32>>()
-                .unwrap(),
-            inp[1]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Vec<f32>>()
-                .unwrap(),
+            get_vec_from_tensor(&inp[0].0),
+            get_vec_from_tensor(&inp[1].0),
         );
         let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
         let (a_ind, a_val, b_ind, b_val) = (
@@ -369,20 +319,8 @@ pub struct Mod;
 impl Operator for Mod {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let (a_data, b_data) = (
-            inp[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Vec<f32>>()
-                .unwrap(),
-            inp[1]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Vec<f32>>()
-                .unwrap(),
+            get_vec_from_tensor(&inp[0].0),
+            get_vec_from_tensor(&inp[1].0),
         );
         let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
         let (a_ind, a_val, b_ind, b_val) = (
@@ -413,20 +351,8 @@ pub struct LessThan;
 impl Operator for LessThan {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let (a_data, b_data) = (
-            inp[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Vec<f32>>()
-                .unwrap(),
-            inp[1]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Vec<f32>>()
-                .unwrap(),
+            get_vec_from_tensor(&inp[0].0),
+            get_vec_from_tensor(&inp[1].0),
         );
         let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
         let (a_ind, a_val, b_ind, b_val) = (
@@ -479,13 +405,7 @@ impl Operator for SumReduce {
             None => panic!("Can't reduce over an unknown dimension"),
         };
         let mut result: Vec<f32> = vec![0.0; front_size * back_size];
-        let a_data = inp[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Vec<f32>>()
-            .unwrap();
+        let a_data = get_vec_from_tensor(&inp[0].0);
         let ind = inp[0].1.index_expression();
         let val = inp[0].1.valid_expression();
 
@@ -529,13 +449,7 @@ impl Operator for MaxReduce {
             None => panic!("Can't reduce over an unknown dimension"),
         };
         let mut result: Vec<f32> = vec![-f32::INFINITY; front_size * back_size];
-        let a_data = inp[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Vec<f32>>()
-            .unwrap();
+        let a_data = get_vec_from_tensor(&inp[0].0);
         let ind = inp[0].1.index_expression();
         let val = inp[0].1.valid_expression();
 
@@ -555,6 +469,19 @@ impl Operator for MaxReduce {
             data: Box::new(result),
         }]
     }
+}
+
+fn get_vec_from_tensor<'a>(tensor: &'a InputTensor<'a>) -> &'a Vec<f32> {
+    tensor
+        .borrowed()
+        .data
+        .as_any()
+        .downcast_ref::<Vec<f32>>()
+        .unwrap()
+}
+
+fn get_vec_from_tensor_owned<'a>(tensor: &'a mut Tensor) -> &'a mut Vec<f32> {
+    tensor.data.as_any_mut().downcast_mut::<Vec<f32>>().unwrap()
 }
 
 #[cfg(test)]

@@ -237,6 +237,17 @@ tuple_impls!(
 // Helpers
 
 impl Graph {
+    /// Add op on the graph, and get back a NewOp
+    ///
+    /// ```rust
+    /// let cx = Graph::new();
+    /// let a = cx.tensor::<R1<3>>();
+    /// let b_id = cx
+    ///     .add_op(Mul)
+    ///     .input((a.id, a.shape))
+    ///     .finish();
+    /// let b = GraphTensor::from_id(b_id, a.shape, a.graph());
+    /// ```
     pub fn add_op<O: Operator + 'static>(&mut self, op: O) -> NewOp {
         NewOp {
             new_op_id: self.graph.add_node(Box::new(op)),

@@ -2,7 +2,7 @@ use std::{any::Any, fmt::Debug};
 
 use dyn_clone::{clone_trait_object, DynClone};
 
-/// An entirely dynamic tensor with data
+/// A tensor with data. The data can be anything that implements the Data trait
 #[derive(Debug, Clone)]
 pub struct Tensor {
     pub data: Box<dyn Data>,
@@ -16,7 +16,7 @@ impl Tensor {
     }
 }
 
-/// Some sort of data, for instance a Vec<f32> on CPU or CudaSlice<f32> on GPU
+/// Some sort of data, for instance a Vec<f32> on CPU, CudaSlice<f32> on Nvidia GPUs, or metal::Buffer for Apple GPUs
 pub trait Data: Any + Debug + DynClone {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;

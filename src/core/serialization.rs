@@ -145,6 +145,7 @@ impl Loader for SafeTensorLoader {
     }
 }
 
+/// Serializer keeps track of the tensors and modules that make up a model
 #[derive(Debug, Default)]
 pub struct Serializer {
     current_path: Vec<String>,

@@ -21,33 +21,39 @@ pub use petgraph::stable_graph::NodeIndex;
 
 #[derive(Debug, Default)]
 pub struct Graph {
+    /// The store of tensors in the graph. Indexed by node index and output index.
     pub tensors: rustc_hash::FxHashMap<(NodeIndex, u8), Tensor>,
+    /// A map of dynamic dimensions to concrete dimension sizes
     pub dyn_map: rustc_hash::FxHashMap<char, usize>,
     /// Edge weights: (Input index, Output index, Input shape)
     pub graph: MainGraph,
+    /// Tensors marked in this set will not get deleted when the graph is ran
     pub no_delete: rustc_hash::FxHashSet<NodeIndex>,
-    /// Mark tensors that need to be retrieved later (mostly for optimizers to insert copy back calls, the graph itself doesn't treat these differently)
+    /// Tensors marked in this set need to be retrieved later (mostly for optimizers to insert copy back calls, the graph itself doesn't treat these differently)
     pub to_retrieve: rustc_hash::FxHashSet<NodeIndex>,
     /// A list of current node to run, source nodes, and view nodes to delete after execution.
     #[allow(clippy::type_complexity)]
     pub(crate) linearized_graph: Option<Vec<(NodeIndex, Vec<((NodeIndex, u8), ShapeTracker)>)>>,
+    /// Cached consumers (for execution only)
     consumers_map: Option<FxHashMap<(NodeIndex, u8), usize>>,
 }
 
+/// A dependency between two nodes
 #[derive(Debug, Clone, Copy)]
 #[allow(clippy::large_enum_variant)]
 pub enum Dependency {
-    /// Actual data dependency
+    /// A data dependency (transferring a tensor from one node to the next)
     Data {
         input_order: u8,
         output_order: u8,
         shape: ShapeTracker,
     },
-    /// Explicit dependency for ordering
+    /// Explicit dependency for ordering. No tensors are transferred through this dependency
     Schedule,
 }
 
 impl Dependency {
+    /// Try to extract dependency data
     pub fn as_data(self) -> Option<(u8, u8, ShapeTracker)> {
         if let Self::Data {
             input_order,
@@ -61,38 +67,43 @@ impl Dependency {
         }
     }
 
+    /// Is this a schedule dependency?
     pub fn is_schedule(&self) -> bool {
         matches!(self, Self::Schedule)
     }
 }
 
 impl Graph {
+    /// Create a new graph
     pub fn new() -> Graph {
         Graph::default()
     }
 
+    /// Try to remove the tensor data from the graph
     pub fn get_tensor(&mut self, id: NodeIndex, ind: u8) -> Option<Tensor> {
-        // Walk through remap
         self.tensors.remove(&(id, ind))
     }
 
+    /// Try to get the tensor data in the graph
     pub fn get_tensor_ref(&self, id: NodeIndex, ind: u8) -> Option<&Tensor> {
-        // Walk through remap
         self.tensors.get(&(id, ind))
     }
 
+    /// Delete the tensor data from the graph
     pub fn drop_tensors<T: ToIds>(&mut self, tensors: T) {
         for id in tensors.to_ids() {
             self.tensors.remove(&(id, 0));
         }
     }
 
+    /// Mark tensors to be kept
     pub fn keep_tensors<T: ToIds>(&mut self, tensors: T) {
         for id in tensors.to_ids() {
             self.no_delete.insert(id);
         }
     }
 
+    /// Mark tensors to be retrieved
     pub fn retrieve_tensors<T: ToIds>(&mut self, tensors: T) {
         for id in tensors.to_ids() {
             self.no_delete.insert(id);
@@ -100,18 +111,22 @@ impl Graph {
         }
     }
 
+    /// Set a tensor's data
     pub fn set_tensor(&mut self, id: NodeIndex, ind: u8, tensor: Tensor) {
         self.tensors.insert((id, ind), tensor);
     }
 
-    pub fn set_dyn_dim(&mut self, dim: char, val: usize) {
-        self.dyn_map.insert(dim, val);
+    /// Set a dynamic dimension
+    pub fn set_dyn_dim(&mut self, dimension: char, val: usize) {
+        self.dyn_map.insert(dimension, val);
     }
 
+    /// Create a new tensor with shape S
     pub fn tensor<S: Shape>(&mut self) -> GraphTensor<S> {
         self.named_tensor("Tensor")
     }
 
+    /// Create a new tensor with shape S and a name. This name will show up on the graph when displayed
     pub fn named_tensor<S: Shape>(&mut self, name: &str) -> GraphTensor<S> {
         GraphTensor {
             id: self.graph.add_node(Box::new(op::Function(
@@ -149,7 +164,7 @@ impl Graph {
                 })
                 .collect(),
         );
-        self.create_remaining_customers_map();
+        self.create_remaining_consumers_map();
     }
 
     /// Swap the tensors with these ids
@@ -165,7 +180,8 @@ impl Graph {
         }
     }
 
-    fn create_remaining_customers_map(&mut self) {
+    /// Refresh the internal remaining consumers map
+    fn create_remaining_consumers_map(&mut self) {
         self.consumers_map = Some(
             self.graph
                 .node_indices()
@@ -384,6 +400,7 @@ impl Graph {
     }
 }
 
+/// Get source tensor array for a node
 fn get_source_tensors<'a>(
     no_delete: &FxHashSet<NodeIndex>,
     tensors: *mut FxHashMap<(NodeIndex, u8), Tensor>,
