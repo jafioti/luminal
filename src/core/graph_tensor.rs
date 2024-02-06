@@ -14,7 +14,8 @@ use petgraph::graph::NodeIndex;
 ///
 /// Graphs can be built by performing operations on these tensors.
 /// ```rust
-/// let cx = Graph::new();
+/// use luminal::prelude::*;
+/// let mut cx = Graph::new();
 /// let a: GraphTensor<R1<3>> = cx.tensor();
 /// let b: GraphTensor<R1<3>> = cx.tensor();
 /// let c: GraphTensor<R1<3>> = a + b;
@@ -30,7 +31,7 @@ pub struct GraphTensor<S: Shape> {
 
 impl<S: Shape> GraphTensor<S> {
     /// Create a GraphTensor from a NodeIndex
-    pub(crate) fn from_id(id: NodeIndex, shape: ShapeTracker, graph_ref: *mut Graph) -> Self {
+    pub fn from_id(id: NodeIndex, shape: ShapeTracker, graph_ref: *mut Graph) -> Self {
         Self {
             id,
             graph_ref,
@@ -65,7 +66,8 @@ impl<S: Shape> GraphTensor<S> {
 
     /// Set the value of the tensor, with dynamic dimensions.
     /// ```rust
-    /// let cx = Graph::new();
+    /// use luminal::prelude::*;
+    /// let mut cx = Graph::new();
     /// let a: GraphTensor<(Const<2>, Dyn<'s'>)> = cx
     ///     .tensor()
     ///     .set_dyn(vec![1., 2., 3., 4.], &[2, 2]);

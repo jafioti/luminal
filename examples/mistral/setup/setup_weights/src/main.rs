@@ -21,7 +21,10 @@ fn main() {
         for (weight_name, tensor) in st.tensors() {
             let bytes = tensor.data().to_vec();
             let mut data: Vec<f16> = match tensor.dtype() {
-                Dtype::F16 => unsafe { std::mem::transmute::<_, Vec<f16>>(bytes) },
+                Dtype::F16 => bytes
+                    .chunks_exact(2)
+                    .map(|c| f16::from_ne_bytes([c[0], c[1]]))
+                    .collect(),
                 Dtype::F32 => bytes
                     .chunks_exact(4)
                     .map(|c| f16::from_f32(f32::from_ne_bytes([c[0], c[1], c[2], c[3]])))

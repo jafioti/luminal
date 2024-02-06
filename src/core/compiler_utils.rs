@@ -240,13 +240,14 @@ impl Graph {
     /// Add op on the graph, and get back a NewOp
     ///
     /// ```rust
-    /// let cx = Graph::new();
+    /// use luminal::prelude::*;
+    /// let mut cx = Graph::new();
     /// let a = cx.tensor::<R1<3>>();
     /// let b_id = cx
-    ///     .add_op(Mul)
-    ///     .input((a.id, a.shape))
+    ///     .add_op(luminal::op::Mul)
+    ///     .input(a.id, 0, a.shape)
     ///     .finish();
-    /// let b = GraphTensor::from_id(b_id, a.shape, a.graph());
+    /// let b = GraphTensor::<R1<3>>::from_id(b_id, a.shape, a.graph());
     /// ```
     pub fn add_op<O: Operator + 'static>(&mut self, op: O) -> NewOp {
         NewOp {
