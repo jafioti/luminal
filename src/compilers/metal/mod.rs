@@ -33,7 +33,6 @@ use crate::{
 pub type MetalCompiler<T> = (
     prim::PrimitiveCompiler<T>,
     SpecialOpsCompiler<T>,
-    matmul::MetalMatMulCompiler<T>,
     other::CopyCompiler<T>,
     other::ContiguousElimination<T>,
     elementwise_fusion::ElementwiseFusionCompiler<T>,
@@ -58,6 +57,7 @@ type SpecialOpsCompiler<T> = (
     unary::StdNormCompiler<T>,
     unary::SoftmaxCompiler<T>,
     unary::RotateCompiler<T>,
+    matmul::MetalMatMulCompiler<T>,
 );
 
 impl Data for Buffer {
