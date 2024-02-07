@@ -28,7 +28,7 @@ println!("Result: {:?}", c);
 ## Getting Started
 **Mistral 7B**
 ```bash
-sh examples/mistral/setup/setup.sh     # Download the model weights
+bash examples/mistral/setup/setup.sh     # Download the model weights
 cargo run --release --example mistral  # Run the model
 ```
 
