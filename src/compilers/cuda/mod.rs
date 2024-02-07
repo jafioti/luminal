@@ -7,21 +7,11 @@ pub use fp32::CudaFp32Compiler;
 use half::f16;
 use itertools::Itertools;
 
-use std::{
-    collections::{hash_map::DefaultHasher, HashSet},
-    fmt::{Debug, Write},
-    hash::{Hash, Hasher},
-    marker::PhantomData,
-    mem::size_of,
-    sync::Arc,
-};
+use std::fmt::Write;
 
-use cudarc::{
-    driver::{CudaDevice, CudaFunction, CudaSlice, DeviceRepr, LaunchAsync, LaunchConfig},
-    nvrtc::{compile_ptx_with_opts, CompileOptions},
-};
+use crate::prelude::*;
 
-use crate::{op::*, prelude::*};
+use self::symbolic::{BigExpression, Term};
 
 pub trait CudaFloat {
     fn to_f32(self) -> f32;
@@ -58,4 +48,69 @@ impl CudaFloat for f16 {
     fn type_name() -> &'static str {
         "__half"
     }
+}
+
+fn expr_to_cuda_string(expr: BigExpression) -> String {
+    let mut symbols = vec![];
+    for term in expr.terms {
+        let new_symbol = match term {
+            Term::Num(n) => n.to_string(),
+            Term::Var(c) => {
+                if c == 'z' {
+                    "(int)idx".to_string()
+                } else {
+                    c.to_string()
+                }
+            }
+            Term::Max => format!(
+                "max((int){}, (int){})",
+                symbols.pop().unwrap(),
+                symbols.pop().unwrap()
+            ),
+            Term::Min => format!(
+                "min((int){}, (int){})",
+                symbols.pop().unwrap(),
+                symbols.pop().unwrap()
+            ),
+            _ => format!(
+                "({}{term:?}{})",
+                symbols.pop().unwrap(),
+                symbols.pop().unwrap()
+            ),
+        };
+        symbols.push(new_symbol);
+    }
+    symbols.pop().unwrap()
+}
+
+fn get_idx_valid_exps(shape: ShapeTracker) -> (String, String) {
+    (
+        expr_to_cuda_string(shape.index_expression()),
+        expr_to_cuda_string(shape.valid_expression()),
+    )
+}
+
+fn render_dyn_dim_inputs(shapes: &[ShapeTracker]) -> (Vec<char>, String) {
+    let symbols: Vec<char> = shapes
+        .iter()
+        .flat_map(|st| {
+            st.shape()
+                .into_iter()
+                .chain(
+                    st.padding
+                        .into_iter()
+                        .flat_map(|i| [i.0.into(), i.1.into()]),
+                )
+                .chain(st.slices.into_iter().flat_map(|i| [i.0.into(), i.1.into()]))
+        })
+        .flat_map(|d| d.to_symbols())
+        .unique()
+        .collect();
+    (
+        symbols.clone(),
+        symbols.into_iter().fold(String::default(), |mut acc, c| {
+            write!(&mut acc, ", const int {c}").unwrap();
+            acc
+        }),
+    )
 }

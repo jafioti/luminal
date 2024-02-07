@@ -15,7 +15,7 @@ use itertools::Itertools;
 use num_traits::FromPrimitive;
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
-use crate::{op::*, prelude::*};
+use crate::{compilers::cuda::prim::*, op::*, prelude::*};
 
 // Unary Op (A -> A)
 
@@ -26,7 +26,7 @@ use crate::{op::*, prelude::*};
 pub struct CudaPrimitiveCompiler;
 
 impl Compiler for CudaPrimitiveCompiler {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         let dev = CudaDevice::new(0).unwrap();
         // Go through the graph and insert copy ops
         // Copy function output to device and input from device
@@ -44,45 +44,26 @@ impl Compiler for CudaPrimitiveCompiler {
             })
             .collect::<Vec<_>>()
         {
-            if graph
+            // Create copy node
+            let copy_node = graph
+                .add_op(CudaCopyToDevice::<f16>::new(dev.clone()))
+                .input(function_node, 0, ShapeTracker::new(&[]))
+                .finish();
+
+            // Switch outgoing edges from input to copy_node
+            for (edge_id, weight, dest) in graph
                 .graph
-                .node_weight(function_node)
-                .unwrap()
-                .as_any()
-                .downcast_ref::<Function>()
-                .unwrap()
-                .2
-                == std::any::TypeId::of::<Vec<f32>>()
+                .edges_directed(function_node, petgraph::Direction::Outgoing)
+                .map(|e| (e.id(), *e.weight(), e.target()))
+                .filter(|(_, _, trg)| *trg != copy_node)
+                .collect::<Vec<_>>()
             {
-                // Create copy node
-                let copy_node = graph
-                    .add_op(CudaCopyToDevice::<f16>::new(dev.clone()))
-                    .input(function_node, 0, ShapeTracker::new(&[]))
-                    .finish();
+                graph.graph.add_edge(copy_node, dest, weight);
+                graph.graph.remove_edge(edge_id);
+            }
 
-                // Switch outgoing edges from input to copy_node
-                for (edge_id, weight, dest) in graph
-                    .graph
-                    .edges_directed(function_node, petgraph::Direction::Outgoing)
-                    .map(|e| (e.id(), *e.weight(), e.target()))
-                    .filter(|(_, _, trg)| *trg != copy_node)
-                    .collect::<Vec<_>>()
-                {
-                    graph.graph.add_edge(copy_node, dest, weight);
-                    graph.graph.remove_edge(edge_id);
-                }
-
-                if graph.to_retrieve.contains(&function_node) {
-                    graph.to_retrieve.insert(copy_node);
-                }
-
-                move_references(
-                    &mut graph.id_remap,
-                    &mut graph.no_delete,
-                    &mut graph.to_retrieve,
-                    function_node,
-                    copy_node,
-                );
+            if graph.to_retrieve.contains(&function_node) {
+                graph.to_retrieve.insert(copy_node);
             }
 
             // Insert copy from device for function inputs
@@ -123,7 +104,7 @@ impl Compiler for CudaPrimitiveCompiler {
                         .graph
                         .edges_directed(*n, petgraph::Direction::Incoming)
                         .flat_map(|i| i.weight().as_data().map(|i| i.2))
-                        .max_by_key(|s| s.n_physical_elements())
+                        .max_by_key(|s| s.n_physical_elements().to_usize().unwrap_or_default())
                         .unwrap(),
                 )
             })
@@ -136,7 +117,7 @@ impl Compiler for CudaPrimitiveCompiler {
                 .finish();
 
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 output_node,
@@ -204,23 +185,61 @@ impl Compiler for CudaPrimitiveCompiler {
             } else if is::<Sqrt>(op) {
                 *op_ref = Box::new(CudaSqrt::<f16>::new(dev.clone()));
             } else if let Some(c) = op_ref.as_any().downcast_ref::<Constant>() {
-                *op_ref = Box::new(CudaConstant::<f16>::new(dev.clone(), f16::from_f32(c.0)));
+                *op_ref = Box::new(CudaConstant::<f16>::new(
+                    dev.clone(),
+                    c.0.clone(),
+                    &graph.dyn_map,
+                ));
             } else if is::<Recip>(op) {
                 *op_ref = Box::new(CudaRecip::<f16>::new(dev.clone()));
             } else if is::<Add>(op) {
-                *op_ref = Box::new(CudaAdd::<f16>::new(shapes[0], shapes[1], dev.clone()));
+                *op_ref = Box::new(CudaAdd::<f16>::new(
+                    shapes[0],
+                    shapes[1],
+                    dev.clone(),
+                    &graph.dyn_map,
+                ));
             } else if is::<Mul>(op) {
-                *op_ref = Box::new(CudaMul::<f16>::new(shapes[0], shapes[1], dev.clone()));
+                *op_ref = Box::new(CudaMul::<f16>::new(
+                    shapes[0],
+                    shapes[1],
+                    dev.clone(),
+                    &graph.dyn_map,
+                ));
             } else if is::<Mod>(op) {
-                *op_ref = Box::new(CudaMod::<f16>::new(shapes[0], shapes[1], dev.clone()));
+                *op_ref = Box::new(CudaMod::<f16>::new(
+                    shapes[0],
+                    shapes[1],
+                    dev.clone(),
+                    &graph.dyn_map,
+                ));
             } else if is::<LessThan>(op) {
-                *op_ref = Box::new(CudaLessThan::<f16>::new(shapes[0], shapes[1], dev.clone()));
+                *op_ref = Box::new(CudaLessThan::<f16>::new(
+                    shapes[0],
+                    shapes[1],
+                    dev.clone(),
+                    &graph.dyn_map,
+                ));
             } else if is::<Contiguous>(op) {
-                *op_ref = Box::new(CudaContiguous::<f16>::new(shapes[0], dev.clone()));
+                *op_ref = Box::new(CudaContiguous::<f16>::new(
+                    shapes[0],
+                    dev.clone(),
+                    &graph.dyn_map,
+                ));
             } else if let Some(SumReduce(dim)) = op_ref.as_any().downcast_ref() {
-                *op_ref = Box::new(CudaSumReduce::<f16>::new(*dim, shapes[0], dev.clone()));
+                *op_ref = Box::new(CudaSumReduce::<f16>::new(
+                    *dim,
+                    shapes[0],
+                    dev.clone(),
+                    &graph.dyn_map,
+                ));
             } else if let Some(MaxReduce(dim)) = op_ref.as_any().downcast_ref() {
-                *op_ref = Box::new(CudaMaxReduce::<f16>::new(*dim, shapes[0], dev.clone()));
+                *op_ref = Box::new(CudaMaxReduce::<f16>::new(
+                    *dim,
+                    shapes[0],
+                    dev.clone(),
+                    &graph.dyn_map,
+                ));
             }
         }
     }
@@ -231,12 +250,16 @@ impl Compiler for CudaPrimitiveCompiler {
 pub struct FakeReductionCompiler;
 
 impl Compiler for FakeReductionCompiler {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, _: T) {
         let mut sum_reduce = NodeIndex::default();
-        let s = SelectEdge::new(
+        let mut searcher = SelectEdge::new(
             SelectOp::new().check(|o, _| {
                 if let Some(c) = o.as_any().downcast_ref::<CudaConstant<f16>>() {
-                    c.1 == f16::ONE
+                    if let ConstantValue::Float(f) = c.0 {
+                        f == 1.0
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 }
@@ -251,9 +274,10 @@ impl Compiler for FakeReductionCompiler {
                     }
                 })
                 .ptr(&mut sum_reduce),
-        );
+        )
+        .search(graph);
 
-        for _ in s.search(graph) {
+        while searcher.next_match() {
             let op_ref = graph.graph.node_weight_mut(sum_reduce).unwrap();
             let dim = op_ref
                 .as_any()
@@ -312,7 +336,7 @@ extern \"C\" __global__ void kernel(__half *out, const __half *inp, int numel, _
 }
 
 impl Operator for FakeSumReduce {
-    fn process(&self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let dim_size = f16::from_usize(tensors[0].1.shape()[self.2].to_usize().unwrap()).unwrap();
         let inp = tensors[0]
             .0
@@ -321,7 +345,7 @@ impl Operator for FakeSumReduce {
             .as_any()
             .downcast_ref::<CudaSlice<f16>>()
             .unwrap();
-        let inp_size = tensors[0].1.n_physical_elements();
+        let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
         let mut out = self.1.alloc_zeros::<f16>(inp_size).unwrap();
         unsafe {
             self.0
@@ -344,7 +368,7 @@ impl Operator for FakeSumReduce {
 pub struct CopyCompiler;
 
 impl Compiler for CopyCompiler {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         for (first, second) in graph
             .graph
             .edge_indices()
@@ -406,7 +430,7 @@ impl Compiler for CopyCompiler {
             let source = graph.get_sources(first)[0];
             move_outgoing_edge(second, source.0, &mut graph.graph);
             move_references(
-                &mut graph.id_remap,
+                &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 second,
@@ -421,7 +445,7 @@ impl Compiler for CopyCompiler {
             {
                 move_outgoing_edge(dest, source.0, &mut graph.graph);
                 move_references(
-                    &mut graph.id_remap,
+                    &mut remap,
                     &mut graph.no_delete,
                     &mut graph.to_retrieve,
                     dest,

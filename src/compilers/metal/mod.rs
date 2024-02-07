@@ -29,20 +29,10 @@ use crate::{
     },
 };
 
+/// Compile graphs to run on Metal-supported macOS devices in supported data formats
 pub type MetalCompiler<T> = (
     prim::PrimitiveCompiler<T>,
-    (
-        unary::MetalCosCompiler<T>,
-        binary::MetalSubtractionCompiler<T>,
-        binary::MetalEqualCompiler<T>,
-        other::ARangeCompiler<T>,
-        binary::MetalGatherCompiler<T>,
-        unary::MetalExpCompiler<T>,
-        unary::MeanReduceCompiler<T>,
-        unary::StdNormCompiler<T>,
-        unary::SoftmaxCompiler<T>,
-        unary::RotateCompiler<T>,
-    ),
+    SpecialOpsCompiler<T>,
     matmul::MetalMatMulCompiler<T>,
     other::CopyCompiler<T>,
     other::ContiguousElimination<T>,
@@ -51,6 +41,20 @@ pub type MetalCompiler<T> = (
         command_buffer::CommandBufferCompiler,
         storage_buffer::StorageBufferCompiler,
     ),
+);
+
+/// Compiler to replace metal ops with specialized variants
+type SpecialOpsCompiler<T> = (
+    unary::MetalCosCompiler<T>,
+    binary::MetalSubtractionCompiler<T>,
+    binary::MetalEqualCompiler<T>,
+    other::ARangeCompiler<T>,
+    binary::MetalGatherCompiler<T>,
+    unary::MetalExpCompiler<T>,
+    unary::MeanReduceCompiler<T>,
+    unary::StdNormCompiler<T>,
+    unary::SoftmaxCompiler<T>,
+    unary::RotateCompiler<T>,
 );
 
 impl Data for Buffer {

@@ -480,7 +480,7 @@ fn get_vec_from_tensor<'a>(tensor: &'a InputTensor<'a>) -> &'a Vec<f32> {
         .unwrap()
 }
 
-fn get_vec_from_tensor_owned<'a>(tensor: &'a mut Tensor) -> &'a mut Vec<f32> {
+fn get_vec_from_tensor_owned(tensor: &mut Tensor) -> &mut Vec<f32> {
     tensor.data.as_any_mut().downcast_mut::<Vec<f32>>().unwrap()
 }
 

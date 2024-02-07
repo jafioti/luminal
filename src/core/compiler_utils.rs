@@ -274,8 +274,7 @@ impl Graph {
 
         node_weight
             .custom(key, Box::new(input))
-            .map(|o| o.downcast::<O>().ok().map(|o| *o))
-            .flatten()
+            .and_then(|o| o.downcast::<O>().ok().map(|o| *o))
     }
 
     /// Convert to debug-viewable graph
@@ -772,7 +771,7 @@ macro_rules! constant_select_op {
     ($i: expr, $t: tt) => {
         SelectOp::new().check(|o, _| {
             if let Some(c) = o.as_any().downcast_ref::<MetalConstant<$t>>() {
-                if let crate::op::ConstantValue::Float(f) = c.0 {
+                if let op::ConstantValue::Float(f) = c.0 {
                     (f - $i).abs() < 0.0001
                 } else {
                     false

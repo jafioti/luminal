@@ -446,7 +446,7 @@ impl Compiler for ArithmeticElimination {
                 for (weight, target) in graph
                     .graph
                     .edges_directed(add, petgraph::Direction::Outgoing)
-                    .map(|e| (e.weight().clone(), e.target()))
+                    .map(|e| (*e.weight(), e.target()))
                     .collect::<Vec<_>>()
                 {
                     if let Some(weight) = weight.as_data() {
@@ -539,7 +539,7 @@ impl Compiler for ArithmeticElimination {
                 for (weight, target) in graph
                     .graph
                     .edges_directed(mul, petgraph::Direction::Outgoing)
-                    .map(|e| (e.weight().clone(), e.target()))
+                    .map(|e| (*e.weight(), e.target()))
                     .collect::<Vec<_>>()
                 {
                     if let Some(weight) = weight.as_data() {

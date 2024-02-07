@@ -401,12 +401,12 @@ impl Graph {
 }
 
 /// Get source tensor array for a node
-fn get_source_tensors<'a>(
+fn get_source_tensors(
     no_delete: &FxHashSet<NodeIndex>,
     tensors: *mut FxHashMap<(NodeIndex, u8), Tensor>,
     src_ids: &[((NodeIndex, u8), ShapeTracker)],
     remaining_consumers: &FxHashMap<(NodeIndex, u8), usize>,
-    srcs: &mut Vec<(InputTensor<'a>, ShapeTracker)>,
+    srcs: &mut Vec<(InputTensor, ShapeTracker)>,
 ) {
     for (id, sh) in src_ids {
         if remaining_consumers[id] == 1 && !no_delete.contains(&id.0) {

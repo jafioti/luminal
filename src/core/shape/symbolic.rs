@@ -461,6 +461,7 @@ where
             match term {
                 Term::Num(n) => stack.push(*n),
                 Term::Var(c) => {
+                    #[allow(clippy::needless_borrow)]
                     if let Some(n) = variables.get(&c) {
                         stack.push(*n as i32)
                     } else {

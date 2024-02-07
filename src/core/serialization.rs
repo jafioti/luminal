@@ -121,7 +121,10 @@ impl Loader for SafeTensorLoader {
                             // Convert to fp32
                             let bytes = tensor_view.data().to_vec();
                             let data: Vec<f32> = match tensor_view.dtype() {
-                                Dtype::F32 => unsafe { std::mem::transmute::<_, Vec<f32>>(bytes) },
+                                Dtype::F32 => bytes
+                                    .chunks_exact(4)
+                                    .map(|c| f32::from_ne_bytes([c[0], c[1], c[2], c[3]]))
+                                    .collect(),
                                 Dtype::F16 => bytes
                                     .chunks_exact(2)
                                     .map(|c| f16::from_ne_bytes([c[0], c[1]]).to_f32())

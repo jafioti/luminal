@@ -1,13 +1,14 @@
-use std::{
-    any::{Any, TypeId},
-    fmt::Debug,
-};
+use std::any::{Any, TypeId};
 
 use cudarc::driver::CudaDevice;
 use itertools::Itertools;
 use petgraph::visit::EdgeRef;
 
-use crate::{op::*, prelude::*};
+use crate::{
+    compilers::cuda::prim::*,
+    op::{Function as LFunction, *},
+    prelude::*,
+};
 
 // Unary Op (A -> A)
 
@@ -18,7 +19,7 @@ use crate::{op::*, prelude::*};
 pub struct CudaPrimitiveCompiler;
 
 impl Compiler for CudaPrimitiveCompiler {
-    fn compile(&self, graph: &mut Graph) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         let dev = CudaDevice::new(0).unwrap();
         // Go through the graph and insert copy ops
         // Copy function output to device and input from device
@@ -58,22 +59,6 @@ impl Compiler for CudaPrimitiveCompiler {
                 graph.to_retrieve.insert(copy_node);
             }
 
-            // If there are inputs to this function remap the function to the copy node
-            if graph
-                .graph
-                .edges_directed(function_node, petgraph::Direction::Incoming)
-                .count()
-                != 0
-            {
-                move_references(
-                    &mut graph.id_remap,
-                    &mut graph.no_delete,
-                    &mut graph.to_retrieve,
-                    function_node,
-                    copy_node,
-                );
-            }
-
             // Insert copy from device for function inputs
             for (source, edge, edge_weight) in graph
                 .graph
@@ -96,14 +81,14 @@ impl Compiler for CudaPrimitiveCompiler {
         for (output_node, output_shape) in graph
             .to_retrieve
             .iter()
-            // Filter non-functions
+            // Filter to non-functions
             .filter(|n| {
                 !graph
                     .graph
                     .node_weight(**n)
                     .unwrap()
                     .as_any()
-                    .is::<Function>()
+                    .is::<LFunction>()
             })
             .map(|n| {
                 (
@@ -111,26 +96,46 @@ impl Compiler for CudaPrimitiveCompiler {
                     graph
                         .graph
                         .edges_directed(*n, petgraph::Direction::Incoming)
-                        .flat_map(|i| i.weight().as_data().map(|i| i.2))
-                        .max_by_key(|s| s.n_physical_elements())
+                        .filter_map(|e| e.weight().as_data())
+                        .map(|i| i.2)
+                        .max_by_key(|s| s.n_physical_elements().to_usize().unwrap_or_default())
                         .unwrap(),
                 )
             })
             .collect::<Vec<_>>()
         {
-            // Create copy node
-            let copy_node = graph
-                .add_op(CudaCopyFromDevice::<f32>::new(dev.clone()))
-                .input(output_node, 0, output_shape)
-                .finish();
+            if graph
+                .graph
+                .node_weight(output_node)
+                .unwrap()
+                .as_any()
+                .is::<CudaCopyToDevice<f32>>()
+            {
+                // This output is already a copy to, instead of adding a copy from, let's remap back to the source
+                let src = graph
+                    .graph
+                    .neighbors_directed(output_node, petgraph::Direction::Incoming)
+                    .next()
+                    .unwrap();
+                graph.no_delete.remove(&output_node);
+                graph.to_retrieve.remove(&output_node);
+                graph.no_delete.insert(src);
+                graph.to_retrieve.insert(src);
+            } else {
+                // Create copy node
+                let copy_node = graph
+                    .add_op(CudaCopyFromDevice::<f32>::new(dev.clone()))
+                    .input(output_node, 0, output_shape)
+                    .finish();
 
-            move_references(
-                &mut graph.id_remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                output_node,
-                copy_node,
-            );
+                move_references(
+                    &mut remap,
+                    &mut graph.no_delete,
+                    &mut graph.to_retrieve,
+                    output_node,
+                    copy_node,
+                );
+            }
         }
 
         // Copy prints from device
@@ -195,25 +200,63 @@ impl Compiler for CudaPrimitiveCompiler {
             } else if is::<Sin>(op) {
                 *op_ref = Box::new(CudaSin::<f32>::new(dev.clone()));
             } else if let Some(c) = op_ref.as_any().downcast_ref::<Constant>() {
-                *op_ref = Box::new(CudaConstant::<f32>::new(dev.clone(), c.0));
+                *op_ref = Box::new(CudaConstant::<f32>::new(
+                    dev.clone(),
+                    c.0.clone(),
+                    &graph.dyn_map,
+                ));
             } else if is::<Sqrt>(op) {
                 *op_ref = Box::new(CudaSqrt::<f32>::new(dev.clone()));
             } else if is::<Recip>(op) {
                 *op_ref = Box::new(CudaRecip::<f32>::new(dev.clone()));
             } else if is::<Add>(op) {
-                *op_ref = Box::new(CudaAdd::<f32>::new(shapes[0], shapes[1], dev.clone()));
+                *op_ref = Box::new(CudaAdd::<f32>::new(
+                    shapes[0],
+                    shapes[1],
+                    dev.clone(),
+                    &graph.dyn_map,
+                ));
             } else if is::<Mul>(op) {
-                *op_ref = Box::new(CudaMul::<f32>::new(shapes[0], shapes[1], dev.clone()));
+                *op_ref = Box::new(CudaMul::<f32>::new(
+                    shapes[0],
+                    shapes[1],
+                    dev.clone(),
+                    &graph.dyn_map,
+                ));
             } else if is::<Mod>(op) {
-                *op_ref = Box::new(CudaMod::<f32>::new(shapes[0], shapes[1], dev.clone()));
+                *op_ref = Box::new(CudaMod::<f32>::new(
+                    shapes[0],
+                    shapes[1],
+                    dev.clone(),
+                    &graph.dyn_map,
+                ));
             } else if is::<LessThan>(op) {
-                *op_ref = Box::new(CudaLessThan::<f32>::new(shapes[0], shapes[1], dev.clone()));
+                *op_ref = Box::new(CudaLessThan::<f32>::new(
+                    shapes[0],
+                    shapes[1],
+                    dev.clone(),
+                    &graph.dyn_map,
+                ));
             } else if is::<Contiguous>(op) {
-                *op_ref = Box::new(CudaContiguous::<f32>::new(shapes[0], dev.clone()));
+                *op_ref = Box::new(CudaContiguous::<f32>::new(
+                    shapes[0],
+                    dev.clone(),
+                    &graph.dyn_map,
+                ));
             } else if let Some(SumReduce(dim)) = op_ref.as_any().downcast_ref() {
-                *op_ref = Box::new(CudaSumReduce::<f32>::new(*dim, shapes[0], dev.clone()));
+                *op_ref = Box::new(CudaSumReduce::<f32>::new(
+                    *dim,
+                    shapes[0],
+                    dev.clone(),
+                    &graph.dyn_map,
+                ));
             } else if let Some(MaxReduce(dim)) = op_ref.as_any().downcast_ref() {
-                *op_ref = Box::new(CudaMaxReduce::<f32>::new(*dim, shapes[0], dev.clone()));
+                *op_ref = Box::new(CudaMaxReduce::<f32>::new(
+                    *dim,
+                    shapes[0],
+                    dev.clone(),
+                    &graph.dyn_map,
+                ));
             }
         }
     }

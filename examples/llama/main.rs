@@ -4,7 +4,6 @@ mod model;
 use std::{io::Write, marker::PhantomData, time::Instant};
 
 use colored::Colorize;
-use half::f16;
 use luminal::{prelude::*, shape::symbolic::Expression};
 use model::LlamaForCausalLM;
 use rust_tokenizers::tokenizer::{
@@ -25,7 +24,7 @@ type Model = LlamaForCausalLM<
 >;
 
 #[cfg(feature = "metal")]
-type DeviceCompiler = MetalCompiler<f16>;
+type DeviceCompiler = MetalCompiler<luminal::f16>;
 #[cfg(feature = "cuda")]
 type DeviceCompiler = CudaFp16Compiler;
 #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
@@ -81,7 +80,7 @@ fn main() {
         <(GenericCompiler, DeviceCompiler)>::default(),
         (&mut input, &mut logits, &mut kv_cache),
     );
-    let model_weights = downstream(&state_set(&model), &cx1);
+    let model_weights = downstream(state_set(&model), &cx1);
     cx1.no_delete.extend(model_weights.clone());
 
     // Compile second graph
@@ -94,7 +93,7 @@ fn main() {
             &mut cache_dest,
         ),
     );
-    let kv_model_weights = downstream(&state_set(&kv_model), &cx2);
+    let kv_model_weights = downstream(state_set(&kv_model), &cx2);
     cx2.no_delete.extend(kv_model_weights.clone());
     let cache_src_set = downstream(&cache_src, &cx2);
     let cache_dest_set = cache_dest.to_ids();
