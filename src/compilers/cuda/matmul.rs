@@ -14,7 +14,7 @@ use crate::{
 
 /// Multiplies a MxK matrix with a KxN matrix, resulting in a MxN matrix
 #[derive(LuminalPrint, LuminalEqFalse, Clone)]
-pub struct CudaMatmul2D<T>(CudaBlas, Arc<CudaDevice>, PhantomData<T>);
+pub struct CudaMatmul2D<T>(Arc<CudaBlas>, Arc<CudaDevice>, PhantomData<T>);
 
 impl<T: CudaFloat + 'static> Operator for CudaMatmul2D<T>
 where
@@ -102,7 +102,7 @@ where
 
 /// Multiplies a BxMxK matrix with a BxKxN matrix, resulting in a BxMxN matrix
 #[derive(LuminalPrint, LuminalEqFalse, Clone)]
-pub struct CudaBatchMatmul2D<T>(CudaBlas, Arc<CudaDevice>, PhantomData<T>);
+pub struct CudaBatchMatmul2D<T>(Arc<CudaBlas>, Arc<CudaDevice>, PhantomData<T>);
 
 impl<T: CudaFloat + 'static> Operator for CudaBatchMatmul2D<T>
 where
@@ -251,7 +251,7 @@ where
             srcs[1].2.permute(&[1, 0]);
             let new_op = graph
                 .add_op(CudaMatmul2D::<T>(
-                    CudaBlas::new(dev.clone()).unwrap(),
+                    Arc::new(CudaBlas::new(dev.clone()).unwrap()),
                     dev.clone(),
                     Default::default(),
                 ))
@@ -323,7 +323,7 @@ where
             srcs[1].2.permute(&[1, 0]);
             let new_op = graph
                 .add_op(CudaBatchMatmul2D::<T>(
-                    CudaBlas::new(dev.clone()).unwrap(),
+                    Arc::new(CudaBlas::new(dev.clone()).unwrap()),
                     dev.clone(),
                     Default::default(),
                 ))

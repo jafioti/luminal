@@ -183,7 +183,7 @@ extern \"C\" __global__ void kernel({} *out, const {} *inp_a, int numel{rendered
                 )
                 .unwrap(),
                 &name,
-                &[&name],
+                &[name.clone().leak()],
             )
             .unwrap();
         }
@@ -227,7 +227,7 @@ where
         unsafe {
             self.0
                 .clone()
-                .launch_async_impl(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
                 .unwrap();
         }
 
@@ -268,7 +268,7 @@ extern \"C\" __global__ void kernel({} *out, const {} *inp, int numel) {{
                 )
                 .unwrap(),
                 &name,
-                &[&name],
+                &[name.clone().leak()],
             )
             .unwrap();
         }
@@ -342,7 +342,7 @@ extern \"C\" __global__ void kernel({} *out, const {} *inp, int numel) {{
                 )
                 .unwrap(),
                 &name,
-                &[&name],
+                &[name.clone().leak()],
             )
             .unwrap();
         }
@@ -415,7 +415,7 @@ extern \"C\" __global__ void kernel({} *out, const {} *inp, int numel) {{
                 )
                 .unwrap(),
                 &name,
-                &[&name],
+                &[name.clone().leak()],
             )
             .unwrap();
         }
@@ -490,7 +490,7 @@ extern \"C\" __global__ void kernel({} *out, const {} *inp, int numel) {{
                 )
                 .unwrap(),
                 &name,
-                &[&name],
+                &[name.clone().leak()],
             )
             .unwrap();
         }
@@ -565,7 +565,7 @@ extern \"C\" __global__ void kernel({} *out, const {} *inp, int numel) {{
                 )
                 .unwrap(),
                 &name,
-                &[&name],
+                &[name.clone().leak()],
             )
             .unwrap();
         }
@@ -668,7 +668,7 @@ extern \"C\" __global__ void kernel({} *out, const {} *inp_a, const {} *inp_b, i
                 )
                 .unwrap(),
                 &name,
-                &[&name],
+                &[name.clone().leak()],
             )
             .unwrap();
         }
@@ -726,7 +726,7 @@ where
         unsafe {
             self.0
                 .clone()
-                .launch_async_impl(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
                 .unwrap();
         }
 
@@ -779,7 +779,7 @@ extern \"C\" __global__ void kernel({} *out, const {} *inp_a, const {} *inp_b, i
                 )
                 .unwrap(),
                 &name,
-                &[&name],
+                &[name.clone().leak()],
             )
             .unwrap();
         }
@@ -837,7 +837,7 @@ where
         unsafe {
             self.0
                 .clone()
-                .launch_async_impl(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
                 .unwrap();
         }
 
@@ -907,7 +907,7 @@ extern \"C\" __global__ void kernel({} *out, const {} *inp_a, const {} *inp_b, i
                 )
                 .unwrap(),
                 &name,
-                &[&name],
+                &[name.clone().leak()],
             )
             .unwrap();
         }
@@ -965,7 +965,7 @@ where
         unsafe {
             self.0
                 .clone()
-                .launch_async_impl(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
                 .unwrap();
         }
 
@@ -1033,7 +1033,7 @@ extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp_a, 
                 )
                 .unwrap(),
                 &name,
-                &[&name],
+                &[name.clone().leak()],
             )
             .unwrap();
         }
@@ -1091,7 +1091,7 @@ where
         unsafe {
             self.0
                 .clone()
-                .launch_async_impl(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
                 .unwrap();
         }
 
@@ -1153,7 +1153,7 @@ extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, co
                 )
                 .unwrap(),
                 &name,
-                &[&name],
+                &[name.clone().leak()],
             )
             .unwrap();
         }
@@ -1218,7 +1218,7 @@ where
         unsafe {
             self.0
                 .clone()
-                .launch_async_impl(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
                 .unwrap();
         }
         vec![Tensor {
@@ -1280,7 +1280,7 @@ extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, co
                 )
                 .unwrap(),
                 &name,
-                &[&name],
+                &[name.clone().leak()],
             )
             .unwrap();
         }
@@ -1349,7 +1349,7 @@ where
         unsafe {
             self.0
                 .clone()
-                .launch_async_impl(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
                 .unwrap();
         }
 
