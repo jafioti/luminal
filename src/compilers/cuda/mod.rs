@@ -1,9 +1,10 @@
-mod fp16;
-mod fp32;
+mod matmul;
 mod prim;
 
-pub use fp16::CudaFp16Compiler;
-pub use fp32::CudaFp32Compiler;
+#[cfg(test)]
+mod tests;
+
+use cudarc::driver::CudaSlice;
 use half::f16;
 use itertools::Itertools;
 
@@ -13,7 +14,19 @@ use crate::prelude::*;
 
 use self::symbolic::{BigExpression, Term};
 
-pub trait CudaFloat {
+pub type CudaCompiler<T> = (
+    prim::CudaPrimitiveCompiler<T>,
+    matmul::CudaMatMulCompiler<T>,
+    prim::CopyCompiler<T>,
+);
+
+pub trait CudaFloat:
+    std::fmt::Debug
+    + Copy
+    + cudarc::driver::DeviceRepr
+    + std::marker::Unpin
+    + cudarc::driver::ValidAsZeroBits
+{
     fn to_f32(self) -> f32;
     fn from_f32(a: f32) -> Self;
     fn is_f32() -> bool;
@@ -34,6 +47,15 @@ impl CudaFloat for f32 {
         "float"
     }
 }
+impl Data for CudaSlice<f32> {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+}
 
 impl CudaFloat for f16 {
     fn from_f32(a: f32) -> Self {
@@ -47,6 +69,15 @@ impl CudaFloat for f16 {
     }
     fn type_name() -> &'static str {
         "__half"
+    }
+}
+impl Data for CudaSlice<f16> {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }
 

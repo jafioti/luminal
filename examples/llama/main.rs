@@ -24,9 +24,9 @@ type Model = LlamaForCausalLM<
 >;
 
 #[cfg(feature = "metal")]
-type DeviceCompiler = MetalCompiler<luminal::f16>;
+type DeviceCompiler = MetalCompiler<luminal::prelude::f16>;
 #[cfg(feature = "cuda")]
-type DeviceCompiler = CudaFp16Compiler;
+type DeviceCompiler = CudaCompiler<luminal::prelude::f16>;
 #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
 type DeviceCompiler = CPUCompiler;
 
