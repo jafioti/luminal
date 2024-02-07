@@ -14,13 +14,8 @@ use crate::{
 };
 
 /// Multiplies a MxK matrix with a KxN matrix, resulting in a MxN matrix
-#[derive(Debug, Clone)]
+#[derive(LuminalPrint, LuminalEqFalse, Clone)]
 pub struct CudaMatmul2D(CudaBlas, Arc<CudaDevice>);
-impl PartialEq for CudaMatmul2D {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
 
 impl Operator for CudaMatmul2D {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -82,13 +77,8 @@ impl Operator for CudaMatmul2D {
 }
 
 /// Multiplies a BxMxK matrix with a BxKxN matrix, resulting in a BxMxN matrix
-#[derive(Debug, Clone)]
+#[derive(LuminalPrint, LuminalEqFalse, Clone)]
 pub struct CudaBatchMatmul2D(CudaBlas, Arc<CudaDevice>);
-impl PartialEq for CudaBatchMatmul2D {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
 
 impl Operator for CudaBatchMatmul2D {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {

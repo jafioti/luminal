@@ -1115,24 +1115,24 @@ impl<T: CudaFloat> CudaSumReduce<T> {
     ) -> Self {
         let (idx, valid) = get_idx_valid_exps(shape);
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape]);
+        let type_name = T::type_name();
         let mut code = format!("#include \"cuda_fp16.h\"
-extern \"C\" __global__ void kernel({} *out, const {} *inp, const int front_size, const int back_size, const int dim_size, int numel{rendered}) {{
+extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, const int front_size, const int back_size, const int dim_size, int numel{rendered}) {{
     int i_ = blockIdx.x * blockDim.x + threadIdx.x;
     
     if (i_ < numel) {{
         int a_ = i_ / back_size;
         int b_ = i_ % back_size;
-        {} reduce_value = {};
+        float reduce_value = 0.0;
         for (int c_ = 0; c_ < dim_size; c_++) {{
             int idx = a_ * dim_size * back_size + c_ * back_size + b_;
             if (({valid}) != 0) {{
-                reduce_value = reduce_value + inp[{idx}];
+                reduce_value = reduce_value + (float)inp[{idx}];
             }}
         }}
-        out[i_] = reduce_value;
+        out[i_] = ({type_name})reduce_value;
     }}
-}}", T::type_name(), T::type_name(), T::type_name(), if T::is_f32() {"0.0"} else {"__float2half(0.0)"}
-        );
+}}");
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("kernel", &name);
         if !dev.has_func(&name, &name) {
@@ -1245,25 +1245,25 @@ impl<T: CudaFloat> CudaMaxReduce<T> {
     ) -> Self {
         let (idx, valid) = get_idx_valid_exps(shape);
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape]);
+        let type_name = T::type_name();
         let mut code = format!("#include \"cuda_fp16.h\"
-extern \"C\" __global__ void kernel({} *out, const {} *inp, const int front_size, const int back_size, const int dim_size, int numel{rendered}) {{
+extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, const int front_size, const int back_size, const int dim_size, int numel{rendered}) {{
     int i_ = blockIdx.x * blockDim.x + threadIdx.x;
     
     if (i_ < numel) {{
         int a_ = i_ / back_size;
         int b_ = i_ % back_size;
-        {} reduce_value = {}(-__int_as_float(0x7f800000));
+        float reduce_value = -__int_as_float(0x7f800000);
         for (int c_ = 0; c_ < dim_size; c_++) {{
             int idx = a_ * dim_size * back_size + c_ * back_size + b_;
             if (({valid}) != 0) {{
                 int a_idx = {idx};
-                reduce_value = {}(reduce_value, inp[a_idx]);
+                reduce_value = max(reduce_value, (float)inp[a_idx]);
             }}
         }}
-        out[i_] = reduce_value;
+        out[i_] = ({type_name})reduce_value;
     }}
-}}", T::type_name(), T::type_name(), T::type_name(), if T::is_f32() {""} else {"__float2half"}, if T::is_f32() {"max"} else {"__hmax"}
-        );
+}}");
         let name = format!("kernel_{}", hash(&code));
         code = code.replace("kernel", &name);
         if !dev.has_func(&name, &name) {
