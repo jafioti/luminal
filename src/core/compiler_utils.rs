@@ -233,6 +233,46 @@ tuple_impls!(
     [M1, M2, M3, M4, M5, M6, M7, M8, M9, M10],
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 );
+tuple_impls!(
+    [M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+);
+tuple_impls!(
+    [M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+);
+tuple_impls!(
+    [M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+);
+tuple_impls!(
+    [M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+);
+tuple_impls!(
+    [M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+);
+tuple_impls!(
+    [M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+);
+tuple_impls!(
+    [M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+);
+tuple_impls!(
+    [M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+);
+tuple_impls!(
+    [M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+);
+tuple_impls!(
+    [M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+);
 
 // Helpers
 
@@ -771,7 +811,7 @@ macro_rules! constant_select_op {
     ($i: expr, $t: tt) => {
         SelectOp::new().check(|o, _| {
             if let Some(c) = o.as_any().downcast_ref::<MetalConstant<$t>>() {
-                if let op::ConstantValue::Float(f) = c.0 {
+                if let crate::op::ConstantValue::Float(f) = c.0 {
                     (f - $i).abs() < 0.0001
                 } else {
                     false
