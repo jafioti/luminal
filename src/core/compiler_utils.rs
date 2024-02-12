@@ -79,6 +79,11 @@ impl ToIds for NodeIndex {
         vec![*self]
     }
 }
+impl ToIdsMut for &mut NodeIndex {
+    fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
+        vec![self]
+    }
+}
 impl ToIdsMut for () {
     fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
         vec![]

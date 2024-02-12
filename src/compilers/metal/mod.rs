@@ -13,12 +13,14 @@ mod elementwise_fusion;
 mod matmul;
 mod other;
 mod prim;
+mod quantized;
 mod storage_buffer;
 mod unary;
 
 use half::f16;
 use itertools::Itertools;
 use metal_rs::*;
+pub use quantized::*;
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -47,7 +49,6 @@ type BufferCompilers = (
 
 /// Compiler to replace metal ops with specialized variants
 type SpecialOpsCompiler<T> = (
-    unary::MetalCosCompiler<T>,
     binary::MetalSubtractionCompiler<T>,
     binary::MetalEqualCompiler<T>,
     other::ARangeCompiler<T>,
@@ -86,6 +87,29 @@ pub trait MetalFloat: Copy + 'static {
     fn is_f32() -> bool;
     fn type_name() -> &'static str;
 }
+
+// Quantization types
+
+pub trait MetalQuantizationType {
+    type MatmulCompiler;
+}
+
+/// 8-bit quantization. Equivalent to the ggml Q8_0 datatype
+pub struct Q8_0;
+
+impl MetalQuantizationType for Q8_0 {
+    type MatmulCompiler = matmul::MetalMatMulCompiler<f16>;
+}
+
+impl MetalQuantizationType for f32 {
+    type MatmulCompiler = matmul::MetalMatMulCompiler<Self>;
+}
+
+impl MetalQuantizationType for f16 {
+    type MatmulCompiler = matmul::MetalMatMulCompiler<Self>;
+}
+
+// Main metal dtypes
 
 impl MetalFloat for f32 {
     fn from_f32(a: f32) -> Self {

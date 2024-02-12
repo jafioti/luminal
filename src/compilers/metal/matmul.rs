@@ -114,8 +114,8 @@ impl<T> MetalKernel for Matmul<T> {
                     .any(|i| !inputs[1].1.fake[*i])
             // At least one non-fake dimension before 3rd to last
             {
+                // B batch size 2
                 encoder.set_i32(8, b_shape[inputs[1].1.len() - 3] as i32);
-            // B batch size 2
             } else {
                 encoder.set_i32(8, 1 as i32); // B batch size
             }
@@ -203,7 +203,7 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
                 vec!['M'.into(), 'N'.into(), 'K'.into()],
             ])
             .fakes(vec![
-                vec![Some(false), Some(true), Some(false)],
+                vec![None, Some(true), Some(false)],
                 vec![Some(true), Some(false), Some(false)],
             ])
             .ptr(&mut mul)
