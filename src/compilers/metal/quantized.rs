@@ -37,23 +37,18 @@ typedef struct {
 } block_q8_0;
 
 kernel void mkernel(
-    device const  void * src0 [[buffer(0)]], // Quantized 2D matrix
-    device const half * src1 [[buffer(1)]], // Float src vector
-    device       half * dst [[buffer(2)]], // Float dest vector
+    device const  void* src0 [[buffer(0)]], // Quantized 2D matrix
+    device const half* src1 [[buffer(1)]], // Float src vector
+    device       half* dst [[buffer(2)]], // Float dest vector
     constant   int64_t & src_vec_size [[buffer(3)]], // Matrix n cols (src vector size) (Must be >= 32)
-    constant   int64_t & ne01 [[buffer(4)]], // Matrix n rows (dest vector size) (Must be >= 4)
-    constant   int64_t & ne02 [[buffer(5)]], // Batch of some sort
-    constant   int64_t & ne10 [[buffer(6)]], // Always equal to src_vec_size
-    constant   int64_t & ne12 [[buffer(7)]], // Batch of some other sort
-    constant   int64_t & ne0 [[buffer(8)]], // Always equal to ne01
-    constant   int64_t & ne1 [[buffer(9)]], // Always 1
-    constant   uint    & r2 [[buffer(10)]], // ne12 / ne02
-    constant   uint    & r3 [[buffer(11)]], // ne13 / ne03
+    constant   int64_t & dest_vec_size [[buffer(4)]], // Matrix n rows (dest vector size) (Must be >= 4)
+    constant   int64_t & mat_batch_stride [[buffer(5)]], // Matrix batch stride
+    constant   int64_t & vec_batch_stride [[buffer(6)]], // Vector batch stride
     uint3 threadgroup_position_in_grid [[threadgroup_position_in_grid]],
     uint  thread_index_in_simdgroup[[thread_index_in_simdgroup]],
     uint  simdgroup_index_in_threadgroup [[simdgroup_index_in_threadgroup]] // 2 simdgroups in a threadgroup
 ) {
-    const int num_rows  = 4;
+    const int num_rows = 4;
     const int num_simdgroups_per_threadgroup = 2;
     const int quant_width = 32;
 
@@ -64,7 +59,8 @@ kernel void mkernel(
 
     // Offset in number of quant blocks
     device const block_q8_0* x = ((device const block_q8_0*)src0) + (first_row * num_quants_per_row); // Add batch offset here
-    device const half* y = (device const half*) src1; // Add batch offset here
+    device const half* y = src1 + (threadgroup_position_in_grid.z * vec_batch_stride); // Add batch offset here
+    dst += (threadgroup_position_in_grid.z * dest_vec_size);
 
     // thread-local cache of vector values to work on. This thread must only work on 8 at a time
     half yl[8];
@@ -105,7 +101,7 @@ kernel void mkernel(
     #pragma unroll(4)
     for (int row = 0; row < num_rows; ++row) {
         const half tot = simd_sum(sumf[row]);
-        if (thread_index_in_simdgroup == 0 && first_row + row < ne01) {
+        if (thread_index_in_simdgroup == 0 && first_row + row < dest_vec_size) {
             dst[first_row + row] = tot;
         }
     }
@@ -324,23 +320,18 @@ impl<T> MetalKernel for QuantizedMatmul<T> {
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        if (m == 1 || k == 1) && batch_size == 1 {
+        if batch_size == 1 {
             // Matvec
             encoder.set_compute_pipeline_state(&self.matvec_pipeline);
             encoder.set_buffer(0, Some(inputs[1].0), 0); // Matrix
             encoder.set_buffer(1, Some(inputs[0].0), 0); // Vector
             encoder.set_buffer(2, Some(output_buffers[0]), 0); // Dest vector
-            encoder.set_i64(3, if m == 1 { k } else { m } as i64); // Src vec size
+            encoder.set_i64(3, k as i64); // Src vec size
             encoder.set_i64(4, n as i64); // Dest vec size
-            encoder.set_i64(5, 1); // Batch of some sort (NOT 1)
-            encoder.set_i64(6, if m == 1 { k } else { m } as i64); // Src vec size
-            encoder.set_i64(7, 1); // Batch of some other sort (NOT 1)
-            encoder.set_i64(8, n as i64); // Dest vec size
-            encoder.set_i64(9, 1); // Always 1
-            encoder.set_u32(10, 1); // This is wrong
-            encoder.set_u32(11, 1);
+            encoder.set_i64(5, 0); // Matrix batch stride
+            encoder.set_i64(6, k as i64); // Vector batch stride
             encoder.dispatch_thread_groups(
-                MTLSize::new(n.div_ceil(8) as u64, 1, 1),
+                MTLSize::new(n.div_ceil(8) as u64, 1, m as u64),
                 MTLSize::new(8, 8, 1),
             );
         } else {
@@ -523,8 +514,51 @@ mod tests {
             .tensor_from_vec(vec_data, (DConst::<32>,))
             .to_dtype::<f16>();
         let d_c = d_b.matmul(d_a.permute());
-        println!("Out: {:?}", out.data());
-        println!("Dfdx: {:?}", d_c.as_vec());
-        assert_close(&out.data(), &d_c.to_dtype::<f32>().as_vec());
+        assert_close_precision(&out.data(), &d_c.to_dtype::<f32>().as_vec(), 2);
+    }
+
+    #[test]
+    fn test_quantized_matmul() {
+        let mut rng = thread_rng();
+        let mat_data: Vec<i8> = (0..(32 * 4)).map(|_| rng.gen_range(0..5)).collect();
+        let inp_mat_data = random_vec_rng(32 * 2, &mut rng);
+        let mut cx = Graph::new();
+        let weights = cx.tensor::<R2<4, 32>>();
+        let inp_mat = cx.tensor::<R2<2, 32>>().set(inp_mat_data.clone());
+        let mut out = inp_mat.matmul(weights.permute()).retrieve();
+
+        // "Load" weights in 8bit
+        let blocks = mat_data
+            .chunks_exact(32)
+            .map(|chunk| {
+                let mut array = [0; 32];
+                for (i, n) in chunk.iter().enumerate() {
+                    array[i] = *n;
+                }
+                BlockQ8_0 {
+                    _d: f16::from_f32(1.0),
+                    _qs: array,
+                }
+            })
+            .collect::<Vec<_>>();
+        let dev = Device::system_default().unwrap();
+        cx.tensors
+            .insert((weights.id, 0), quantized_buffer(&blocks, &dev));
+
+        cx.compile(MetalCompilerQ::<f16>::new(vec![weights.id]), &mut out);
+        cx.execute();
+
+        let cpu = Cpu::default();
+        let d_a = cpu
+            .tensor_from_vec(
+                mat_data.into_iter().map(|i| i as f32).collect::<Vec<_>>(),
+                (DConst::<4>, DConst::<32>),
+            )
+            .to_dtype::<f16>();
+        let d_b = cpu
+            .tensor_from_vec(inp_mat_data, (DConst::<2>, DConst::<32>))
+            .to_dtype::<f16>();
+        let d_c = d_b.matmul(d_a.permute());
+        assert_close_precision(&out.data(), &d_c.to_dtype::<f32>().as_vec(), 2);
     }
 }
