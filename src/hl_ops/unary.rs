@@ -87,7 +87,7 @@ impl<S: Shape> GraphTensor<S> {
             .sqrt()
             .recip()
             .expand()
-            .mul(self)
+        // .mul(self)
     }
 
     /// Center so mean is 0.0

@@ -9,7 +9,7 @@ use luminal::{
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
-pub const NUM_LAYERS: usize = 1;
+pub const NUM_LAYERS: usize = 32;
 pub const N_HEADS: usize = 32;
 pub const N_KV_HEADS: usize = 8;
 pub const MLP_DIM: usize = 14336;
@@ -109,9 +109,8 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         ),
     ) -> Self::Output {
         // Apply the Projections
-        x.print("x");
         let queries = x.matmul(self.q_proj.permute());
-        queries.print("queries");
+        // queries.print("queries");
         let queries = queries
             .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
@@ -218,18 +217,21 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         ),
     ) -> Self::Output {
         // Attention
-        let (y, cache) =
-            self.attention
-                .forward((self.attention_norm.forward(x), cache, PhantomData::<TotSeq>));
+        // x.print("input");
+        let normed = self.attention_norm.forward(x);
+        // normed.print("norm");
+        let (y, cache) = self
+            .attention
+            .forward((normed, cache, PhantomData::<TotSeq>));
 
         // Residual Addition
-        // x += y;
+        x += y;
 
         // Feed Forward
-        // let y = self.feed_forward.forward(self.feed_forward_norm.forward(x));
+        let y = self.feed_forward.forward(self.feed_forward_norm.forward(x));
 
         // Residual Addition
-        (y, cache)
+        (x + y, cache)
     }
 }
 
@@ -306,6 +308,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
 
         // Run through last norm and output projection
         let output = self.norm.forward(x).matmul(self.lm_head.permute());
+        // output.print("o");
 
         // let output = self.norm.forward(x);
         // output.print("output");

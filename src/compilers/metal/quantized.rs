@@ -365,11 +365,11 @@ impl<T: MetalFloat + Default> Compiler for MetalQuantizedCompiler<T> {
                 // );
                 let op_node = graph.graph.node_weight_mut(target).unwrap();
                 if let Some(gather) = op_node.as_any().downcast_ref::<MetalGather<T>>() {
-                    // *op_node = Box::new(QuantizedGather::<T>::new(
-                    //     device.clone(),
-                    //     queue.clone(),
-                    //     gather.embed_dim,
-                    // ));
+                    *op_node = Box::new(QuantizedGather::<T>::new(
+                        device.clone(),
+                        queue.clone(),
+                        gather.embed_dim,
+                    ));
                 } else if op_node.as_any().is::<super::matmul::Matmul<T>>() {
                     *op_node = Box::new(QuantizedMatmul::<T>::new(device.clone(), queue.clone()));
                 } else {

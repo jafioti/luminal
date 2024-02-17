@@ -129,7 +129,12 @@ impl Operator for Print {
                         .map(|(a, b)| (a - b).abs())
                         .max_by(|a, b| a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal))
                         .unwrap();
-                    println!("{a} is not equal to {b}, index {i}, avg dist: {avg_dist}, max dist: {max_dist}");
+                    let sum_dist = data
+                        .iter()
+                        .zip(out.iter())
+                        .map(|(a, b)| (a - b) * (a - b))
+                        .sum::<f32>();
+                    println!("{a} is not equal to {b}, index {i}, avg dist: {avg_dist}, max dist: {max_dist} sum dist: {sum_dist}");
                     println!(
                         "A avg: {} B avg: {}",
                         data.iter().sum::<f32>() / data.len() as f32,
