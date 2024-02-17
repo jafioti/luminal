@@ -92,36 +92,58 @@ impl Operator for Print {
                 .unwrap();
             println!("{} Data: {:?}", i + 1, &d[d.len().saturating_sub(10)..]);
             println!("{} Shape: {:?}", i + 1, tracker);
-            // let mut data = vec![0.; d.len()];
-            // let (ind, val) = (tracker.index_expression(), tracker.valid_expression());
-            // #[allow(unused_mut)]
-            // for (i, mut r) in data.iter_mut().enumerate() {
-            //     if val.exec_single_var(i) != 0 {
-            //         *r = d[ind.exec_single_var(i)];
-            //     }
-            // }
+            println!("Average: {}", d.iter().sum::<f32>() / d.len() as f32);
+            let mut data = vec![0.; d.len()];
+            let (ind, val) = (tracker.index_expression(), tracker.valid_expression());
+            #[allow(unused_mut)]
+            for (i, mut r) in data.iter_mut().enumerate() {
+                if val.exec_single_var(i) != 0 {
+                    *r = d[ind.exec_single_var(i)];
+                }
+            }
             // std::fs::write(
-            //     "../../Desktop/out.bin",
+            //     format!("../../Desktop/{}.bin", self.0),
             //     data.iter()
             //         .flat_map(|i| i.to_ne_bytes())
             //         .collect::<Vec<_>>(),
             // )
             // .unwrap();
-            // let out = std::fs::read("../../Desktop/out.bin")
-            //     .unwrap()
-            //     .chunks(4)
-            //     .map(|i| f32::from_ne_bytes([i[0], i[1], i[2], i[3]]))
-            //     .collect::<Vec<_>>();
-            // assert_eq!(data.len(), out.len(), "Number of elements doesn't match");
-            // for (i, (a, b)) in data.iter().zip(out.iter()).enumerate() {
-            //     if *a != *b {
-            //         panic!("{} is not equal to {}, index {i}", *a, *b);
-            //     }
-            // }
+            let out = std::fs::read(format!("../../Desktop/{}.bin", self.0))
+                .unwrap()
+                .chunks(4)
+                .map(|i| f32::from_ne_bytes([i[0], i[1], i[2], i[3]]))
+                .collect::<Vec<_>>();
+            assert_eq!(data.len(), out.len(), "Number of elements doesn't match");
+            let mut matches = true;
+            for (i, (a, b)) in data.iter().zip(out.iter()).enumerate() {
+                if *a != *b {
+                    let avg_dist = data
+                        .iter()
+                        .zip(out.iter())
+                        .map(|(a, b)| (a - b).abs())
+                        .sum::<f32>()
+                        / data.len() as f32;
+                    let max_dist = data
+                        .iter()
+                        .zip(out.iter())
+                        .map(|(a, b)| (a - b).abs())
+                        .max_by(|a, b| a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap();
+                    println!("{a} is not equal to {b}, index {i}, avg dist: {avg_dist}, max dist: {max_dist}");
+                    println!(
+                        "A avg: {} B avg: {}",
+                        data.iter().sum::<f32>() / data.len() as f32,
+                        out.iter().sum::<f32>() / out.len() as f32
+                    );
+                    matches = false;
+                    break;
+                }
+            }
+            if matches {
+                println!("matches");
+            }
         }
-        vec![Tensor {
-            data: Box::<Vec<f32>>::default(),
-        }]
+        vec![]
     }
 }
 

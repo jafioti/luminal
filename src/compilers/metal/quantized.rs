@@ -9,7 +9,10 @@ use petgraph::visit::EdgeRef;
 
 use crate::{
     op::{InputTensor, Operator},
-    prelude::{metal::get_buffer_from_tensor, *},
+    prelude::{
+        metal::{binary::MetalGather, get_buffer_from_tensor},
+        *,
+    },
 };
 
 use super::{compile_function, SetInt};
@@ -17,29 +20,29 @@ use super::{compile_function, SetInt};
 /// Multiplies a BxMxK matrix with a KxN matrix, resulting in a BxMxN matrix. This expects the first input to be a quantized 2D matrix
 #[derive(LuminalEqFalse, LuminalPrint, Clone)]
 pub struct QuantizedMatmul<T> {
-    matmul_pipeline: ComputePipelineState,
     matvec_pipeline: ComputePipelineState,
     queue: CommandQueue,
     device: Device,
     _phantom: PhantomData<T>,
 }
 
-impl<T> QuantizedMatmul<T> {
+impl<T: MetalFloat> QuantizedMatmul<T> {
     fn new(device: Device, queue: CommandQueue) -> Self {
+        let type_name = T::type_name();
         Self {
-            matvec_pipeline: compile_function("mkernel", "
+            matvec_pipeline: compile_function("mkernel", &format!("
 using namespace metal;
 #define QK8_0 32
 #define NB_Q8_0 8
-typedef struct {
+typedef struct {{
     half    d;         // delta
     int8_t  qs[QK8_0]; // quants
-} block_q8_0;
+}} block_q8_0;
 
 kernel void mkernel(
     device block_q8_0* x [[buffer(0)]], // Quantized 2D matrix
-    device half* y [[buffer(1)]], // Float src vector
-    device half* dst [[buffer(2)]], // Float dest vector
+    device {type_name}* y [[buffer(1)]], // Float src vector
+    device {type_name}* dst [[buffer(2)]], // Float dest vector
     constant int64_t & src_vec_size [[buffer(3)]], // Matrix n cols (src vector size) (Must be >= 32)
     constant int64_t & dest_vec_size [[buffer(4)]], // Matrix n rows (dest vector size) (Must be >= 4)
     constant int64_t & mat_batch_stride [[buffer(5)]], // Matrix batch stride
@@ -47,7 +50,7 @@ kernel void mkernel(
     uint3 threadgroup_position_in_grid [[threadgroup_position_in_grid]],
     uint  thread_index_in_simdgroup[[thread_index_in_simdgroup]],
     uint  simdgroup_index_in_threadgroup [[simdgroup_index_in_threadgroup]] // 2 simdgroups in a threadgroup
-) {
+) {{
     const int num_rows = 4;
     const int num_simdgroups_per_threadgroup = 2;
     const int quant_width = 32;
@@ -63,9 +66,9 @@ kernel void mkernel(
     dst += (threadgroup_position_in_grid.z * dest_vec_size);
 
     // thread-local cache of vector values to work on. This thread must only work on 8 at a time
-    half yl[8];
+    {type_name} yl[8];
     // thread-local cache of 4 row sums
-    half sumf[num_rows] = {0.h};
+    float sumf[num_rows] = {{0.f}};
 
     const int ix = thread_index_in_simdgroup / 4;
     const int il = thread_index_in_simdgroup % 4;
@@ -74,199 +77,35 @@ kernel void mkernel(
 
     // each thread in a SIMD group deals with 8 quants at a time
     // we start at 0-7 (ix) depending on the simdgroup index, and jump 8 indexes each time
-    for (int ib = ix; ib < num_quants_per_row; ib += 8) { // ib: current column position
+    for (int ib = ix; ib < num_quants_per_row; ib += 8) {{ // ib: current column position
         // Load vector values into the cache
-        #pragma unroll(8)
-        for (int i = 0; i < 8; ++i) {
+        for (int i = 0; i < 8; ++i) {{
             yl[i] = y[i];
-        }
+        }}
 
         // Loop through 4 matrix rows
-        #pragma unroll(4)
-        for (int row = 0; row < 4; ++row) {
+        for (int row = 0; row < 4; ++row) {{
             // Get pointer to matrix data
             device const int8_t* qs = x[ib + row * num_quants_per_row].qs + il * 8;
-            half sumq = 0.h; // Partial sum
+            float sumq = 0.f; // Partial sum
             // Loop through 8 columns
-            #pragma unroll(8)
-            for (int iq = 0; iq < 8; ++iq) {
-                sumq += (half)qs[iq] * yl[iq]; // Multiply int with vector value (auto converts to float?)
-            }
+            for (int iq = 0; iq < 8; ++iq) {{
+                sumq += qs[iq] * yl[iq]; // Multiply int with vector value (auto converts to float?)
+            }}
             sumf[row] += sumq * x[ib + row * num_quants_per_row].d; // multiply by delta (scaling factor)
-        }
+        }}
         y += 256; // Jump by 256
-    }
+    }}
 
     // each simdgroup is responsible for saving 4 final vector values (n rows)
-    #pragma unroll(4)
-    for (int row = 0; row < num_rows; ++row) {
-        const half tot = simd_sum(sumf[row]);
-        if (thread_index_in_simdgroup == 0 && first_row + row < dest_vec_size) {
-            dst[first_row + row] = tot;
-        }
-    }
-}
-", &device),
-            matmul_pipeline: compile_function("mkernel", "
-kernel void mkernel() {}", &device),
-//             matmul_pipeline: compile_function("mkernel", "
-// using namespace metal;
-
-// #define QK8_0 32
-// typedef struct {
-//     half    d;         // delta
-//     int8_t  qs[QK8_0]; // quants
-// } block_q8_0;
-
-// #define BLOCK_SIZE_M 64 // 8 simdgroup matrices from matrix A
-// #define BLOCK_SIZE_N 32 // 4 simdgroup matrices from matrix B
-// #define BLOCK_SIZE_K 32
-// #define THREAD_MAT_M 4 // each thread take 4 simdgroup matrices from matrix A
-// #define THREAD_MAT_N 2 // each thread take 2 simdgroup matrices from matrix B
-// #define THREAD_PER_BLOCK 128
-// #define THREAD_PER_ROW 2 // 2 thread for each row in matrix A to load numbers
-// #define THREAD_PER_COL 4 // 4 thread for each row in matrix B to load numbers
-// #define SG_MAT_SIZE 64 // simdgroup matrix is of shape 8x8
-// #define SG_MAT_ROW 8
-
-// void dequantize_q8_0(device const block_q8_0 *xb, short il, thread half4x4 & reg) {
-//     device const int8_t * qs = ((device const int8_t *)xb->qs);
-//     const half d = xb->d;
-
-//     for (int i = 0; i < 16; i++) {
-//         reg[i/4][i%4] = (qs[i + 16*il] * d);
-//     }
-// }
-
-// // each block_q contains 16*nl weights
-// kernel void mkernel(
-//     device const  uchar * src0 [[buffer(0)]], // Q8_0 matrix
-//     device const  uchar * src1 [[buffer(1)]], // Float matrix
-//     device        float * dst [[buffer(2)]],
-//     constant   int64_t & ne00 [[buffer(3)]], // Matrix n cols (src vector size)
-//     constant   int64_t & ne01 [[buffer(4)]], // Matrix n rows (dest vector size)
-//     constant   int64_t & ne02 [[buffer(5)]], // Batch of some sort
-//     constant   int64_t & ne10 [[buffer(6)]], // Always equal to ne00
-//     constant   int64_t & ne12 [[buffer(7)]], // Batch of some other sort
-//     constant   int64_t & ne0 [[buffer(8)]], // Always equal to ne01
-//     constant   int64_t & ne1 [[buffer(9)]], // Always 1
-//     constant   uint    & r2 [[buffer(10)]], // ne12 / ne02
-//     constant   uint    & r3 [[buffer(11)]], // ne13 / ne03
-//     threadgroup   uchar * shared_memory [[threadgroup(0)]],
-//     uint3                 tgpig[[threadgroup_position_in_grid]],
-//     uint                  tiitg[[thread_index_in_threadgroup]],
-//     uint                  sgitg[[simdgroup_index_in_threadgroup]]
-// ) {
-//     threadgroup half  * sa = (threadgroup half  *)(shared_memory);
-//     threadgroup float * sb = (threadgroup float *)(shared_memory + 4096);
-
-//     const uint r0 = tgpig.y;
-//     const uint r1 = tgpig.x;
-//     const uint im = tgpig.z;
-
-//     // if this block is of 64x32 shape or smaller
-//     short n_rows = (ne0 - r0 * BLOCK_SIZE_M < BLOCK_SIZE_M) ? (ne0 - r0 * BLOCK_SIZE_M) : BLOCK_SIZE_M;
-//     short n_cols = (ne1 - r1 * BLOCK_SIZE_N < BLOCK_SIZE_N) ? (ne1 - r1 * BLOCK_SIZE_N) : BLOCK_SIZE_N;
-
-//     // a thread shouldn't load data outside of the matrix
-//     short thread_row = ((short)tiitg/THREAD_PER_ROW) < n_rows ? ((short)tiitg/THREAD_PER_ROW) : n_rows - 1;
-//     short thread_col = ((short)tiitg/THREAD_PER_COL) < n_cols ? ((short)tiitg/THREAD_PER_COL) : n_cols - 1;
-
-//     simdgroup_half8x8  ma[4];
-//     simdgroup_float8x8 mb[2];
-//     simdgroup_float8x8 c_res[8];
-//     for (int i = 0; i < 8; i++){
-//         c_res[i] = make_filled_simdgroup_matrix<float, 8>(0.f);
-//     }
-
-//     short il = (tiitg % THREAD_PER_ROW);
-
-//     const uint i12 = im%ne12;
-//     const uint i13 = im/ne12;
-
-//     uint   offset0 = (i12/r2)*nb02 + (i13/r3)*(nb02*ne02);
-//     ushort offset1 = il/2;
-
-//     device const block_q8_0 * x = (device const block_q8_0 *)(src0 + (r0 * BLOCK_SIZE_M + thread_row) * nb01 + offset0) + offset1;
-//     device const float   * y = (device const float   *)(src1
-//         + nb12 * im
-//         + nb11 * (r1 * BLOCK_SIZE_N + thread_col)
-//         + nb10 * (BLOCK_SIZE_K / THREAD_PER_COL * (tiitg % THREAD_PER_COL)));
-
-//     for (int loop_k = 0; loop_k < ne00; loop_k += BLOCK_SIZE_K) {
-//         // load data and store to threadgroup memory
-//         half4x4 temp_a;
-//         dequantize_q8_0(x, il, temp_a);
-//         threadgroup_barrier(mem_flags::mem_threadgroup);
-
-//         #pragma unroll(16)
-//         for (int i = 0; i < 16; i++) {
-//             *(sa + SG_MAT_SIZE * ((tiitg / THREAD_PER_ROW / 8) \
-//             +                     (tiitg % THREAD_PER_ROW) * 16 + (i / 8) * 8) \
-//             +                     (tiitg / THREAD_PER_ROW) % 8  + (i & 7) * 8) = temp_a[i/4][i%4];
-//         }
-
-//         *(threadgroup float2x4 *)(sb + (tiitg % THREAD_PER_COL) * 8 * 32 + 8 * (tiitg / THREAD_PER_COL)) = *((device float2x4 *)y);
-
-//         il = (il + 2 < 2) ? il + 2 : il % 2;
-//         x  = (il < 2) ? x + (2+2-1)/2 : x;
-//         y += BLOCK_SIZE_K;
-
-//         threadgroup_barrier(mem_flags::mem_threadgroup);
-
-//         // load matrices from threadgroup memory and conduct outer products
-//         threadgroup half  * lsma = (sa + THREAD_MAT_M * SG_MAT_SIZE * (sgitg % 2));
-//         threadgroup float * lsmb = (sb + THREAD_MAT_N * SG_MAT_SIZE * (sgitg / 2));
-
-//         #pragma unroll(4)
-//         for (int ik = 0; ik < BLOCK_SIZE_K / 8; ik++) {
-//             #pragma unroll(4)
-//             for (int i = 0; i < 4; i++) {
-//                 simdgroup_load(ma[i],lsma + SG_MAT_SIZE * i);
-//             }
-//             simdgroup_barrier(mem_flags::mem_none);
-//             #pragma unroll(2)
-//             for (int i = 0; i < 2; i++) {
-//                 simdgroup_load(mb[i],lsmb + SG_MAT_SIZE * i);
-//             }
-
-//             lsma += BLOCK_SIZE_M / SG_MAT_ROW * SG_MAT_SIZE;
-//             lsmb += BLOCK_SIZE_N / SG_MAT_ROW * SG_MAT_SIZE;
-
-//             #pragma unroll(8)
-//             for (int i = 0; i < 8; i++){
-//                 simdgroup_multiply_accumulate(c_res[i], mb[i/4], ma[i%4], c_res[i]);
-//             }
-//         }
-//     }
-
-//     if ((r0 + 1) * BLOCK_SIZE_M <= ne0 && (r1 + 1) * BLOCK_SIZE_N <= ne1) {
-//         device float * C = dst + (BLOCK_SIZE_M * r0 + 32 * (sgitg &  1)) \
-//                                 + (BLOCK_SIZE_N * r1 + 16 * (sgitg >> 1)) * ne0 + im*ne1*ne0;
-//         for (int i = 0; i < 8; i++) {
-//             simdgroup_store(c_res[i], C + 8 * (i%4) + 8 * ne0 * (i/4), ne0);
-//         }
-//     } else {
-//         // block is smaller than 64x32, we should avoid writing data outside of the matrix
-//         threadgroup_barrier(mem_flags::mem_threadgroup);
-//         threadgroup float * temp_str = ((threadgroup float *)shared_memory) \
-//                                         + 32 * (sgitg&1) + (16 * (sgitg>>1)) * BLOCK_SIZE_M;
-//         for (int i = 0; i < 8; i++) {
-//             simdgroup_store(c_res[i], temp_str + 8 * (i%4) + 8 * BLOCK_SIZE_M * (i/4), BLOCK_SIZE_M);
-//         }
-
-//         threadgroup_barrier(mem_flags::mem_threadgroup);
-
-//         device float * C = dst + (BLOCK_SIZE_M * r0) + (BLOCK_SIZE_N * r1) * ne0 + im*ne1*ne0;
-//         if (sgitg == 0) {
-//             for (int i = 0; i < n_rows; i++) {
-//                 for (int j = tiitg; j < n_cols; j += BLOCK_SIZE_N) {
-//                     *(C + i + j * ne0) = *(temp_str + i + j * BLOCK_SIZE_M);
-//                 }
-//             }
-//         }
-//     }
-// }", &device),
+    for (int row = 0; row < num_rows; ++row) {{
+        const float tot = simd_sum(sumf[row]);
+        if (thread_index_in_simdgroup == 0 && first_row + row < dest_vec_size) {{
+            dst[first_row + row] = ({type_name})tot;
+        }}
+    }}
+}}
+"), &device),
             queue,
             device,
             _phantom: Default::default(),
@@ -390,15 +229,106 @@ impl<T: 'static + Clone> Operator for QuantizedMatmul<T> {
     }
 }
 
-pub struct MetalCompilerQ<T>(Vec<NodeIndex>, PhantomData<T>);
+#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+pub struct QuantizedGather<T> {
+    pipeline: ComputePipelineState,
+    device: Device,
+    queue: CommandQueue,
+    embed_dim: usize,
+    _phantom: PhantomData<T>,
+}
 
-impl<T> MetalCompilerQ<T> {
-    pub fn new(weights: Vec<NodeIndex>) -> Self {
-        Self(weights, Default::default())
+impl<T: MetalFloat> QuantizedGather<T> {
+    fn new(device: Device, queue: CommandQueue, embed_dim: usize) -> Self {
+        let type_name = T::type_name();
+        Self {pipeline: compile_function("metal_gather", &format!(
+            "
+#include <metal_stdlib>
+using namespace metal;
+#define QK8_0 32
+typedef struct {{
+    half    d;         // delta
+    int8_t  qs[QK8_0]; // quants
+}} block_q8_0;
+
+kernel void metal_gather(device float *inp [[buffer(0)]], device block_q8_0 *weights [[buffer(1)]], device {type_name} *out [[buffer(2)]], device int& n_embeddings [[buffer(3)]], device int& embedding_dim [[buffer(4)]], uint2 idx [[thread_position_in_grid]]) {{
+    if (idx.x < n_embeddings && idx.y < embedding_dim) {{
+        int block_idx = ((int)inp[idx.x] * embedding_dim + idx.y) / QK8_0;
+        out[idx.x * embedding_dim + idx.y] = weights[block_idx].qs[idx.y % QK8_0] * weights[block_idx].d;
+    }}
+}}"), &device), device, embed_dim, queue, _phantom: Default::default()}
     }
 }
 
-impl<T: MetalFloat + Default> Compiler for MetalCompilerQ<T> {
+impl<T: MetalFloat> Operator for QuantizedGather<T> {
+    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        autoreleasepool(|| {
+            // Setup buffers
+            let indexes = tensors[0]
+                .0
+                .borrowed()
+                .data
+                .as_any()
+                .downcast_ref::<Vec<f32>>()
+                .unwrap();
+            let index_buffer = self.device.new_buffer_with_data(
+                unsafe { std::mem::transmute(indexes.as_ptr()) },
+                (indexes.len() * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
+
+            // Setup command queue / command buffer / encoder
+            let command_buffer = self.queue.new_command_buffer();
+
+            let out = self.device.new_buffer(
+                (indexes.len() * self.embed_dim * std::mem::size_of::<T>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
+
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            encoder.set_compute_pipeline_state(&self.pipeline);
+
+            // Set inputs
+            encoder.set_buffer(0, Some(&index_buffer), 0);
+            encoder.set_buffer(1, Some(get_buffer_from_tensor(&tensors[1].0)), 0);
+            encoder.set_buffer(2, Some(&out), 0);
+            encoder.set_u32(3, indexes.len() as u32);
+            encoder.set_u32(4, self.embed_dim as u32);
+
+            // Execute
+            encoder.dispatch_threads(
+                MTLSize {
+                    width: indexes.len() as u64,
+                    height: self.embed_dim as u64,
+                    depth: 1,
+                },
+                MTLSize {
+                    width: 16,
+                    height: 16,
+                    depth: 1,
+                },
+            );
+            encoder.end_encoding();
+
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
+
+            vec![Tensor::new(out)]
+        })
+    }
+}
+
+#[derive(Default)]
+pub struct MetalQuantizedCompiler<T>(Vec<NodeIndex>, PhantomData<T>);
+
+impl<T> MetalQuantizedCompiler<T> {
+    pub fn new<To: ToIds>(weights: To) -> Self {
+        Self(weights.to_ids(), Default::default())
+    }
+}
+
+impl<T: MetalFloat + Default> Compiler for MetalQuantizedCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
         let device = Device::system_default().unwrap();
         let queue = device.new_command_queue();
@@ -418,28 +348,32 @@ impl<T: MetalFloat + Default> Compiler for MetalCompilerQ<T> {
             )>::default(),
             &mut local_remap,
         );
-        // Modify matmul dequantize functions
-        // Find matmuls directly downstream of weights
+        // Modify ops directly downstream of weights
         for weight in downstream(&weight_ids, graph) {
-            for (target, (input_ind, _, _)) in graph
+            for (target, (inp_ind, _, _)) in graph
                 .graph
                 .edges_directed(weight, petgraph::Direction::Outgoing)
                 .filter_map(|e| e.weight().as_data().map(|i| (e.target(), i)))
-                .filter(|(e, (i, _, _))| {
-                    *i == 1
-                        && graph
-                            .graph
-                            .node_weight(*e)
-                            .unwrap()
-                            .as_any()
-                            .is::<super::matmul::Matmul<T>>()
-                })
                 .collect::<Vec<_>>()
             {
-                if let Some(matmul_node) = graph.graph.node_weight_mut(target) {
-                    // Input ind is a quantized tensor
-                    *matmul_node =
-                        Box::new(QuantizedMatmul::<T>::new(device.clone(), queue.clone()))
+                if inp_ind != 1 {
+                    continue;
+                }
+                // assert_eq!(
+                //     inp_ind, 1,
+                //     "Quantized weight {target:?} is the wrong input!",
+                // );
+                let op_node = graph.graph.node_weight_mut(target).unwrap();
+                if let Some(gather) = op_node.as_any().downcast_ref::<MetalGather<T>>() {
+                    // *op_node = Box::new(QuantizedGather::<T>::new(
+                    //     device.clone(),
+                    //     queue.clone(),
+                    //     gather.embed_dim,
+                    // ));
+                } else if op_node.as_any().is::<super::matmul::Matmul<T>>() {
+                    *op_node = Box::new(QuantizedMatmul::<T>::new(device.clone(), queue.clone()));
+                } else {
+                    panic!("Quantized weight {target:?} is an input to a node that isn't a matmul or gather!");
                 }
             }
         }
@@ -453,7 +387,7 @@ mod tests {
     use metal_rs::{Device, MTLResourceOptions};
     use rand::{thread_rng, Rng};
 
-    #[repr(packed)]
+    #[repr(C, packed)]
     struct BlockQ8_0 {
         _d: f16,
         _qs: [i8; 32],
@@ -475,11 +409,11 @@ mod tests {
     #[test]
     fn test_quantized_matvec() {
         let mut rng = thread_rng();
-        let mat_data: Vec<i8> = (0..(32 * 4)).map(|_| rng.gen_range(0..5)).collect();
-        let vec_data = random_vec_rng(32, &mut rng);
+        let mat_data: Vec<i8> = (0..(1024 * 512)).map(|_| rng.gen_range(0..5)).collect();
+        let vec_data = random_vec_rng(1024, &mut rng);
         let mut cx = Graph::new();
-        let weights = cx.tensor::<R2<4, 32>>();
-        let vec = cx.tensor::<R1<32>>().set(vec_data.clone());
+        let weights = cx.tensor::<R2<512, 1024>>();
+        let vec = cx.tensor::<R1<1024>>().set(vec_data.clone());
         let mut out = vec.matmul(weights.permute()).retrieve();
 
         // "Load" weights in 8bit
@@ -500,31 +434,31 @@ mod tests {
         cx.tensors
             .insert((weights.id, 0), quantized_buffer(&blocks, &dev));
 
-        cx.compile(MetalCompilerQ::<f16>::new(vec![weights.id]), &mut out);
+        cx.compile(
+            MetalQuantizedCompiler::<f32>::new(vec![weights.id]),
+            &mut out,
+        );
         cx.execute();
 
-        let cpu = Cpu::default();
-        let d_a = cpu
-            .tensor_from_vec(
-                mat_data.into_iter().map(|i| i as f32).collect::<Vec<_>>(),
-                (DConst::<4>, DConst::<32>),
-            )
-            .to_dtype::<f16>();
-        let d_b = cpu
-            .tensor_from_vec(vec_data, (DConst::<32>,))
-            .to_dtype::<f16>();
-        let d_c = d_b.matmul(d_a.permute());
-        assert_close_precision(&out.data(), &d_c.to_dtype::<f32>().as_vec(), 2);
+        let mut cx1 = Graph::new();
+        let weights = cx1
+            .tensor::<R2<512, 1024>>()
+            .set(mat_data.into_iter().map(|i| i as f32).collect::<Vec<_>>());
+        let vec = cx1.tensor::<R1<1024>>().set(vec_data);
+        let out_32 = vec.matmul(weights.permute()).retrieve();
+        cx1.execute();
+
+        assert_close(&out.data(), &out_32.data());
     }
 
     #[test]
     fn test_quantized_matmul() {
         let mut rng = thread_rng();
-        let mat_data: Vec<i8> = (0..(32 * 4)).map(|_| rng.gen_range(0..5)).collect();
-        let inp_mat_data = random_vec_rng(32 * 2, &mut rng);
+        let mat_data: Vec<i8> = (0..(1024 * 512)).map(|_| rng.gen_range(0..5)).collect();
+        let inp_mat_data = random_vec_rng(1024 * 16, &mut rng);
         let mut cx = Graph::new();
-        let weights = cx.tensor::<R2<4, 32>>();
-        let inp_mat = cx.tensor::<R2<2, 32>>().set(inp_mat_data.clone());
+        let weights = cx.tensor::<R2<512, 1024>>();
+        let inp_mat = cx.tensor::<R2<16, 1024>>().set(inp_mat_data.clone());
         let mut out = inp_mat.matmul(weights.permute()).retrieve();
 
         // "Load" weights in 8bit
@@ -545,20 +479,19 @@ mod tests {
         cx.tensors
             .insert((weights.id, 0), quantized_buffer(&blocks, &dev));
 
-        cx.compile(MetalCompilerQ::<f16>::new(vec![weights.id]), &mut out);
+        cx.compile(
+            MetalQuantizedCompiler::<f32>::new(vec![weights.id]),
+            &mut out,
+        );
         cx.execute();
 
         let cpu = Cpu::default();
-        let d_a = cpu
-            .tensor_from_vec(
-                mat_data.into_iter().map(|i| i as f32).collect::<Vec<_>>(),
-                (DConst::<4>, DConst::<32>),
-            )
-            .to_dtype::<f16>();
-        let d_b = cpu
-            .tensor_from_vec(inp_mat_data, (DConst::<2>, DConst::<32>))
-            .to_dtype::<f16>();
+        let d_a = cpu.tensor_from_vec(
+            mat_data.into_iter().map(|i| i as f32).collect::<Vec<_>>(),
+            (DConst::<512>, DConst::<1024>),
+        );
+        let d_b = cpu.tensor_from_vec(inp_mat_data, (DConst::<16>, DConst::<1024>));
         let d_c = d_b.matmul(d_a.permute());
-        assert_close_precision(&out.data(), &d_c.to_dtype::<f32>().as_vec(), 2);
+        assert_close(&out.data(), &d_c.as_vec());
     }
 }

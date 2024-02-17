@@ -459,7 +459,7 @@ pub struct MetalGather<T> {
     pipeline: ComputePipelineState,
     device: Device,
     queue: CommandQueue,
-    embed_dim: usize,
+    pub embed_dim: usize,
     _phantom: PhantomData<T>,
 }
 
@@ -506,7 +506,7 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
             let command_buffer = self.queue.new_command_buffer();
 
             let out = self.device.new_buffer(
-                (indexes.len() * self.embed_dim * std::mem::size_of::<f16>()) as u64,
+                (indexes.len() * self.embed_dim * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
 
@@ -611,8 +611,6 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
 
 #[cfg(test)]
 mod tests {
-    use half::f16;
-
     crate::test_imports!();
     #[test]
     fn test_subtraction() {

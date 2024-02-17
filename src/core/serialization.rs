@@ -18,7 +18,8 @@ pub trait SerializeModule {
 
 /// Something that can load the state of a module into the graph
 pub trait Loader {
-    fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph);
+    type Output;
+    fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Output;
 }
 
 /// Something that can save the state of a module from the graph
@@ -78,7 +79,8 @@ impl StateDictLoader {
 }
 
 impl Loader for StateDictLoader {
-    fn load<M: SerializeModule>(mut self, model: &M, graph: &mut Graph) {
+    type Output = ();
+    fn load<M: SerializeModule>(mut self, model: &M, graph: &mut Graph) -> () {
         for (s, n) in state_dict(model) {
             let t = self.state_dict.remove(&s).unwrap();
             graph.no_delete.insert(n);
@@ -102,7 +104,8 @@ impl SafeTensorLoader {
 }
 
 impl Loader for SafeTensorLoader {
-    fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) {
+    type Output = ();
+    fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> () {
         for (weight_name, node_index) in state_dict(model) {
             if let Some(loading_node) = graph
                 .graph
@@ -157,20 +160,28 @@ pub struct Serializer {
 
 impl Serializer {
     pub fn tensor<S: Shape>(&mut self, name: &str, tensor: GraphTensor<S>) {
-        // Add new path component
-        self.current_path.push(name.to_string());
+        if !name.is_empty() {
+            // Add new path component
+            self.current_path.push(name.to_string());
+        }
         // Insert tensor id
         self.state.insert(self.current_path.join("/"), tensor.id);
-        // Remove new path component
-        self.current_path.pop();
+        if !name.is_empty() {
+            // Remove new path component
+            self.current_path.pop();
+        }
     }
     pub fn module<T: SerializeModule>(&mut self, name: &str, module: &T) {
-        // Add new path component
-        self.current_path.push(name.to_string());
+        if !name.is_empty() {
+            // Add new path component
+            self.current_path.push(name.to_string());
+        }
         // Serialize
         module.serialize(self);
-        // Remove new path component
-        self.current_path.pop();
+        if !name.is_empty() {
+            // Remove new path component
+            self.current_path.pop();
+        }
     }
 }
 

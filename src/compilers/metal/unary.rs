@@ -321,10 +321,10 @@ kernel void kernel_std_norm(
         all_sum = simd_sum(all_sum);
     }}
 
-    const float mean  = all_sum/row_size;
-    const float scale = 1.0f/sqrt(mean + eps);
+    const float mean  = all_sum / row_size;
+    const float scale = 1.0f / sqrt(mean + eps);
 
-    device half4 * y = (device half4 *) (dst + threadgroup_position_in_grid * row_size);
+    device {type_name}4 * y = (device {type_name}4 *) (dst + threadgroup_position_in_grid * row_size);
     for (int i = thread_position_in_threadgroup; i < row_size/4; i += threads_per_threadgroup) {{
         y[i] = ({type_name}4)(x[i] * scale);
     }}
@@ -455,7 +455,8 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
                     .check(|op, _| {
                         if let Some(c) = op.as_any().downcast_ref::<MetalConstant<T>>() {
                             if let ConstantValue::Float(v) = c.0 {
-                                v <= 1e-3 && v > 0.0
+                                true
+                                // v <= 1e-3 && v > 0.0
                             } else {
                                 false
                             }

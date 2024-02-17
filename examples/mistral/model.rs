@@ -9,7 +9,7 @@ use luminal::{
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
-pub const NUM_LAYERS: usize = 32;
+pub const NUM_LAYERS: usize = 1;
 pub const N_HEADS: usize = 32;
 pub const N_KV_HEADS: usize = 8;
 pub const MLP_DIM: usize = 14336;
@@ -56,9 +56,9 @@ impl<const I: usize, const H: usize> InitModule for Mlp<I, H> {
 
 impl<const I: usize, const H: usize> SerializeModule for Mlp<I, H> {
     fn serialize(&self, s: &mut Serializer) {
-        s.tensor("gate_proj/weight", self.gate_proj);
-        s.tensor("up_proj/weight", self.up_proj);
-        s.tensor("down_proj/weight", self.down_proj);
+        s.tensor("ffn_gate/weight", self.gate_proj);
+        s.tensor("ffn_up/weight", self.up_proj);
+        s.tensor("ffn_down/weight", self.down_proj);
     }
 }
 
@@ -109,8 +109,10 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         ),
     ) -> Self::Output {
         // Apply the Projections
-        let queries = x
-            .matmul(self.q_proj.permute())
+        x.print("x");
+        let queries = x.matmul(self.q_proj.permute());
+        queries.print("queries");
+        let queries = queries
             .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let keys = x
@@ -182,10 +184,10 @@ impl InitModule for SelfAttention {
 
 impl SerializeModule for SelfAttention {
     fn serialize(&self, s: &mut Serializer) {
-        s.tensor("q_proj/weight", self.q_proj);
-        s.tensor("v_proj/weight", self.v_proj);
-        s.tensor("k_proj/weight", self.k_proj);
-        s.tensor("o_proj/weight", self.o_proj);
+        s.tensor("attn_q/weight", self.q_proj);
+        s.tensor("attn_v/weight", self.v_proj);
+        s.tensor("attn_k/weight", self.k_proj);
+        s.tensor("attn_output/weight", self.o_proj);
     }
 }
 
@@ -221,13 +223,13 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
                 .forward((self.attention_norm.forward(x), cache, PhantomData::<TotSeq>));
 
         // Residual Addition
-        x += y;
+        // x += y;
 
         // Feed Forward
-        let y = self.feed_forward.forward(self.feed_forward_norm.forward(x));
+        // let y = self.feed_forward.forward(self.feed_forward_norm.forward(x));
 
         // Residual Addition
-        (x + y, cache)
+        (y, cache)
     }
 }
 
@@ -252,10 +254,10 @@ impl InitModule for TransformerBlock {
 
 impl SerializeModule for TransformerBlock {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("self_attn", &self.attention);
-        s.module("input_layernorm", &self.attention_norm);
-        s.module("post_attention_layernorm", &self.feed_forward_norm);
-        s.module("mlp", &self.feed_forward);
+        s.module("", &self.attention);
+        s.module("attn_norm", &self.attention_norm);
+        s.module("ffn_norm", &self.feed_forward_norm);
+        s.module("", &self.feed_forward);
     }
 }
 
@@ -300,10 +302,13 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
                 layer.forward((x, cache.as_ref().map(|c| c[i]), PhantomData::<TotSeq>));
             new_caches.push(new_cache);
         }
+        // x.print("after");
 
         // Run through last norm and output projection
         let output = self.norm.forward(x).matmul(self.lm_head.permute());
 
+        // let output = self.norm.forward(x);
+        // output.print("output");
         (output, new_caches)
     }
 }
@@ -312,7 +317,11 @@ impl InitModule for MistralLM {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             embedding: InitModule::initialize(cx),
-            norm: InitModule::initialize(cx),
+            norm: {
+                let mut norm = RMSNorm::initialize(cx);
+                norm.epsilon = 1.0;
+                norm
+            },
             lm_head: cx.named_tensor("LM Head"),
             layers: (0..NUM_LAYERS)
                 .map(|_| InitModule::initialize(cx))
@@ -323,11 +332,11 @@ impl InitModule for MistralLM {
 
 impl SerializeModule for MistralLM {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("model/embed_tokens", &self.embedding);
-        s.module("model/norm", &self.norm);
-        s.tensor("lm_head/weight", self.lm_head);
+        s.module("token_embd", &self.embedding);
+        s.module("output_norm", &self.norm);
+        s.tensor("output/weight", self.lm_head);
         for (i, layer) in self.layers.iter().enumerate() {
-            s.module(&format!("model/layers/{i}"), layer);
+            s.module(&format!("blk/{i}"), layer);
         }
     }
 }
