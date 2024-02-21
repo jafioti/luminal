@@ -1741,12 +1741,15 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
             }
         }
 
-        // Copy prints from device
+        // Copy prints and diffs from device
         for (output_node, edge) in graph
             .graph
             .node_indices()
             // Filter non-functions
-            .filter(|n| graph.graph.node_weight(*n).unwrap().as_any().is::<Print>())
+            .filter(|n| {
+                graph.graph.node_weight(*n).unwrap().as_any().is::<Print>()
+                    || graph.graph.node_weight(*n).unwrap().as_any().is::<Diff>()
+            })
             .map(|n| {
                 (
                     n,

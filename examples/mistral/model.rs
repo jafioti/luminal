@@ -9,7 +9,7 @@ use luminal::{
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
-pub const NUM_LAYERS: usize = 32;
+pub const NUM_LAYERS: usize = 1;
 pub const N_HEADS: usize = 32;
 pub const N_KV_HEADS: usize = 8;
 pub const MLP_DIM: usize = 14336;
@@ -94,6 +94,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
         Option<KVCache<Batch, PrevSeq>>,
         PhantomData<TotSeq>,
+        usize,
     )> for SelfAttention
 {
     type Output = (
@@ -102,30 +103,42 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     );
     fn forward(
         &self,
-        (x, cache, _): (
+        (x, cache, _, index): (
             GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
             Option<KVCache<Batch, PrevSeq>>,
             PhantomData<TotSeq>,
+            usize,
         ),
     ) -> Self::Output {
         // Apply the Projections
         let queries = x.matmul(self.q_proj.permute());
-        // queries.print("queries");
+        queries.diff(format!("/Users/jafioti/Desktop/saves/query{index}.bin"), 0.);
         let queries = queries
             .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
-        let keys = x
-            .matmul(self.k_proj.permute())
+        let keys = x.matmul(self.k_proj.permute());
+        keys.diff(format!("/Users/jafioti/Desktop/saves/key{index}.bin"), 0.);
+        let keys = keys
             .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
-        let values = x
-            .matmul(self.v_proj.permute())
+        let values = x.matmul(self.v_proj.permute());
+        values.diff(format!("/Users/jafioti/Desktop/saves/value{index}.bin"), 0.);
+        let values = values
             .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         // Rotary embed queries and keys
         let queries = apply_rotary_embeddings(queries, PrevSeq::const_size().into());
         let keys = apply_rotary_embeddings(keys, PrevSeq::const_size().into());
+
+        keys.diff(
+            format!("/Users/jafioti/Desktop/saves/rope_key{index}.bin"),
+            0.,
+        );
+        queries.diff(
+            format!("/Users/jafioti/Desktop/saves/rope_query{index}.bin"),
+            0.,
+        );
 
         // Add KV cache
         let (keys, values) = if let Some((k_cache, v_cache)) = cache {
@@ -162,9 +175,15 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             .matmul(repeated_values)
             // Merge heads
             .permute::<_, Axes5<0, 3, 1, 2, 4>>()
-            .reshape::<(Batch, CurSeq, Const<HIDDEN_DIM>)>()
+            .reshape::<(Batch, CurSeq, Const<HIDDEN_DIM>)>();
+        output.diff("/Users/jafioti/Desktop/saves/attn_out.bin", 0.0);
+        let output = output
             // Apply output projection
             .matmul(self.o_proj.permute());
+        // output.diff(
+        //     format!("/Users/jafioti/Desktop/saves/attn_out{index}.bin"),
+        //     0.,
+        // );
 
         (output, (keys.contiguous(), values.contiguous())) // Cache needs to be contiguous for transferring to another graph
     }
@@ -202,6 +221,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
         Option<KVCache<Batch, PrevSeq>>,
         PhantomData<TotSeq>,
+        usize,
     )> for TransformerBlock
 {
     type Output = (
@@ -210,19 +230,22 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     );
     fn forward(
         &self,
-        (mut x, cache, _): (
+        (mut x, cache, _, index): (
             GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
             Option<KVCache<Batch, PrevSeq>>,
             PhantomData<TotSeq>,
+            usize,
         ),
     ) -> Self::Output {
         // Attention
-        // x.print("input");
         let normed = self.attention_norm.forward(x);
-        // normed.print("norm");
+        normed.diff(
+            format!("/Users/jafioti/Desktop/saves/attn_norm{index}.bin"),
+            0.,
+        );
         let (y, cache) = self
             .attention
-            .forward((normed, cache, PhantomData::<TotSeq>));
+            .forward((normed, cache, PhantomData::<TotSeq>, index));
 
         // Residual Addition
         x += y;
@@ -296,23 +319,20 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         // Embed tokens
         let mut x = self.embedding.forward(input);
 
+        x.diff("/Users/jafioti/Desktop/saves/embedded.bin", 0.);
+
         // Run through layers and collect new caches
         let mut new_caches = vec![];
         let mut new_cache;
         for (i, layer) in self.layers.iter().enumerate() {
             (x, new_cache) =
-                layer.forward((x, cache.as_ref().map(|c| c[i]), PhantomData::<TotSeq>));
+                layer.forward((x, cache.as_ref().map(|c| c[i]), PhantomData::<TotSeq>, i));
             new_caches.push(new_cache);
         }
-        // x.print("after");
-
         // Run through last norm and output projection
         let output = self.norm.forward(x).matmul(self.lm_head.permute());
-        // output.print("o");
 
-        // let output = self.norm.forward(x);
-        // output.print("output");
-        (output, new_caches)
+        (output.realize(), new_caches)
     }
 }
 

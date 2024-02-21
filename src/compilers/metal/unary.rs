@@ -322,7 +322,7 @@ kernel void kernel_std_norm(
     }}
 
     const float mean  = all_sum / row_size;
-    const float scale = 1.0f / sqrt(mean + eps);
+    const float scale = rsqrt(mean + eps);
 
     device {type_name}4 * y = (device {type_name}4 *) (dst + threadgroup_position_in_grid * row_size);
     for (int i = thread_position_in_threadgroup; i < row_size/4; i += threads_per_threadgroup) {{

@@ -1,6 +1,6 @@
 #![allow(clippy::needless_range_loop)]
 
-use std::{any::Any, fmt::Debug};
+use std::{any::Any, fmt::Debug, path::PathBuf};
 
 use crate::{
     prelude::{tracker::ShapeTracker, TraitObjEq},
@@ -8,6 +8,8 @@ use crate::{
 };
 
 use super::shape::symbolic::BigExpression;
+use colored::Colorize;
+use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 /// Either an owned or borrowed tensor that gets consumed by ops
@@ -71,6 +73,7 @@ impl Debug for Function {
     }
 }
 
+/// An op to print the value of a tensor
 #[derive(Clone, Default, PartialEq)]
 pub struct Print(pub String);
 
@@ -90,63 +93,168 @@ impl Operator for Print {
                 .as_any()
                 .downcast_ref::<Vec<f32>>()
                 .unwrap();
-            println!("{} Data: {:?}", i + 1, &d[d.len().saturating_sub(10)..]);
+            println!("{} Data: {:?}", i + 1, &d[d.len().saturating_sub(50)..]);
             println!("{} Shape: {:?}", i + 1, tracker);
-            println!("Average: {}", d.iter().sum::<f32>() / d.len() as f32);
-            let mut data = vec![0.; d.len()];
-            let (ind, val) = (tracker.index_expression(), tracker.valid_expression());
-            #[allow(unused_mut)]
-            for (i, mut r) in data.iter_mut().enumerate() {
-                if val.exec_single_var(i) != 0 {
-                    *r = d[ind.exec_single_var(i)];
+        }
+        vec![]
+    }
+}
+
+/// An op to diff a tensor with a binary file
+#[derive(Clone, Default, PartialEq)]
+pub struct Diff(pub PathBuf, pub f32);
+
+impl Debug for Diff {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Diff-{}", self.0.as_os_str().to_str().unwrap())
+    }
+}
+
+impl Operator for Diff {
+    fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        // Get tensor data and file data
+        let (tensor, shape) = inp.pop().unwrap();
+        let d = tensor
+            .borrowed()
+            .data
+            .as_any()
+            .downcast_ref::<Vec<f32>>()
+            .unwrap();
+        let mut data = vec![0.; d.len()];
+        let (ind, val) = (shape.index_expression(), shape.valid_expression());
+        #[allow(unused_mut)]
+        for (i, mut r) in data.iter_mut().enumerate() {
+            if val.exec_single_var(i) != 0 {
+                *r = d[ind.exec_single_var(i)];
+            }
+        }
+        let bin_data = std::fs::read(&self.0)
+            .unwrap()
+            .chunks(4)
+            .map(|i| f32::from_ne_bytes([i[0], i[1], i[2], i[3]]))
+            .collect::<Vec<_>>();
+        if data.len() != bin_data.len() {
+            println!(
+                "{}",
+                format!(
+                    "{} | Length mismatch! Data: {}, File: {}",
+                    self.0.as_os_str().to_str().unwrap(),
+                    data.len(),
+                    bin_data.len()
+                )
+                .bold()
+                .red()
+            );
+            println!("Shape: {shape:?}");
+            return vec![];
+        }
+        let data_nan = data.iter().any(|i| i.is_nan());
+        let file_nan = bin_data.iter().any(|i| i.is_nan());
+        if data_nan {
+            println!(
+                "{}",
+                format!("{} | Data contains nan!", self.0.to_str().unwrap())
+                    .bold()
+                    .red()
+            );
+        }
+        if file_nan {
+            println!(
+                "{}",
+                format!("{} | File contains nan!", self.0.to_str().unwrap())
+                    .bold()
+                    .red()
+            );
+        }
+        if data_nan || file_nan {
+            return vec![];
+        }
+        let mut matched = true;
+        for (i, (a, b)) in data.iter().zip(bin_data.iter()).enumerate() {
+            if (a - b).abs() > self.1 {
+                println!(
+                    "{}",
+                    format!("{} | Mismatch!", self.0.to_str().unwrap())
+                        .bold()
+                        .red()
+                );
+                if let Some((i, _)) = data.iter().enumerate().find(|(_, i)| i.is_nan()) {
+                    println!("Index {} is nan!", i.to_string().bold());
                 }
-            }
-            // std::fs::write(
-            //     format!("../../Desktop/{}.bin", self.0),
-            //     data.iter()
-            //         .flat_map(|i| i.to_ne_bytes())
-            //         .collect::<Vec<_>>(),
-            // )
-            // .unwrap();
-            let out = std::fs::read(format!("../../Desktop/{}.bin", self.0))
-                .unwrap()
-                .chunks(4)
-                .map(|i| f32::from_ne_bytes([i[0], i[1], i[2], i[3]]))
-                .collect::<Vec<_>>();
-            assert_eq!(data.len(), out.len(), "Number of elements doesn't match");
-            let mut matches = true;
-            for (i, (a, b)) in data.iter().zip(out.iter()).enumerate() {
-                if *a != *b {
-                    let avg_dist = data
+                println!("{a} is not equal to {b}, index {i}");
+                let avg_dist = data
+                    .iter()
+                    .zip(bin_data.iter())
+                    .map(|(a, b)| (a - b).abs())
+                    .sum::<f32>()
+                    / data.len() as f32;
+                let max_dist = data
+                    .iter()
+                    .zip(bin_data.iter())
+                    .map(|(a, b)| (a - b).abs())
+                    .max_by(|a, b| a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal))
+                    .unwrap();
+                let sum_dist = data
+                    .iter()
+                    .zip(bin_data.iter())
+                    .map(|(a, b)| (a - b) * (a - b))
+                    .sum::<f32>();
+                println!(
+                    "Avg dist: {}, Max dist: {} Sum dist: {}",
+                    avg_dist.to_string().bold().red(),
+                    max_dist.to_string().bold().red(),
+                    sum_dist.to_string().bold().red(),
+                );
+                println!("{}: {:?}", "This".bold(), &data[..10]);
+                println!("{}: {:?}", "File".bold(), &bin_data[..10]);
+                println!(
+                    "Largest Mismatches: {:?}",
+                    data.iter()
+                        .zip(bin_data.iter())
+                        .filter(|(a, b)| (**a - **b).abs() > 0.01)
+                        .sorted_by(|(a, b), (c, d)| (**c - **d)
+                            .abs()
+                            .partial_cmp(&(**a - **b).abs())
+                            .unwrap_or(std::cmp::Ordering::Equal))
+                        .take(10)
+                        .collect::<Vec<_>>()
+                );
+                println!(
+                    "A avg: {} B avg: {}",
+                    data.iter().sum::<f32>() / data.len() as f32,
+                    bin_data.iter().sum::<f32>() / bin_data.len() as f32
+                );
+                println!(
+                    "A max: {} B max: {}",
+                    data.iter()
+                        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap(),
+                    bin_data
                         .iter()
-                        .zip(out.iter())
-                        .map(|(a, b)| (a - b).abs())
-                        .sum::<f32>()
-                        / data.len() as f32;
-                    let max_dist = data
+                        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap()
+                );
+                println!(
+                    "A min: {} B min: {}",
+                    data.iter()
+                        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap(),
+                    bin_data
                         .iter()
-                        .zip(out.iter())
-                        .map(|(a, b)| (a - b).abs())
-                        .max_by(|a, b| a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal))
-                        .unwrap();
-                    let sum_dist = data
-                        .iter()
-                        .zip(out.iter())
-                        .map(|(a, b)| (a - b) * (a - b))
-                        .sum::<f32>();
-                    println!("{a} is not equal to {b}, index {i}, avg dist: {avg_dist}, max dist: {max_dist} sum dist: {sum_dist}");
-                    println!(
-                        "A avg: {} B avg: {}",
-                        data.iter().sum::<f32>() / data.len() as f32,
-                        out.iter().sum::<f32>() / out.len() as f32
-                    );
-                    matches = false;
-                    break;
-                }
+                        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap()
+                );
+                matched = false;
+                break;
             }
-            if matches {
-                println!("matches");
-            }
+        }
+        if matched {
+            println!(
+                "{}",
+                format!("{} matched", self.0.to_str().unwrap())
+                    .bold()
+                    .bright_green()
+            );
         }
         vec![]
     }

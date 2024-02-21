@@ -51,8 +51,7 @@ impl<const DIM: usize> Module<GraphTensor<R1<DIM>>> for RMSNorm<DIM> {
     type Output = GraphTensor<R1<DIM>>;
 
     fn forward(&self, input: GraphTensor<R1<DIM>>) -> Self::Output {
-        input.std_norm::<0>(self.epsilon)
-        //.mul(self.weight)
+        input.std_norm::<0>(self.epsilon).mul(self.weight)
     }
 }
 
@@ -60,8 +59,7 @@ impl<S: Dimension, const DIM: usize> Module<GraphTensor<(S, Const<DIM>)>> for RM
     type Output = GraphTensor<(S, Const<DIM>)>;
 
     fn forward(&self, input: GraphTensor<(S, Const<DIM>)>) -> Self::Output {
-        input.std_norm::<1>(self.epsilon)
-        //.mul(self.weight.expand())
+        input.std_norm::<1>(self.epsilon).mul(self.weight.expand())
     }
 }
 
@@ -71,7 +69,6 @@ impl<B: Dimension, S: Dimension, const DIM: usize> Module<GraphTensor<(B, S, Con
     type Output = GraphTensor<(B, S, Const<DIM>)>;
 
     fn forward(&self, input: GraphTensor<(B, S, Const<DIM>)>) -> Self::Output {
-        input.std_norm::<2>(self.epsilon)
-        //.mul(self.weight.expand())
+        input.std_norm::<2>(self.epsilon).mul(self.weight.expand())
     }
 }
