@@ -164,11 +164,11 @@ impl<
         ),
     ) -> Self::Output {
         let y = self.self_attention.forward(x);
-        let x = (y + x).layer_norm::<2>(1e-5);
+        let x = (y + x).layer_norm::<2, _>(1e-5);
         let y = self.cross_attention.forward((from_enc, x, from_enc));
-        let x = (y + x).layer_norm::<2>(1e-5);
+        let x = (y + x).layer_norm::<2, _>(1e-5);
         let y = self.ff.forward(x);
-        (y + x).layer_norm::<2>(1e-5)
+        (y + x).layer_norm::<2, _>(1e-5)
     }
 }
 

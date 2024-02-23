@@ -93,7 +93,7 @@ impl Operator for Print {
                 .as_any()
                 .downcast_ref::<Vec<f32>>()
                 .unwrap();
-            println!("{} Data: {:?}", i + 1, &d[d.len().saturating_sub(50)..]);
+            println!("{} Data: {:?}", i + 1, &d[..d.len().min(10)]);
             println!("{} Shape: {:?}", i + 1, tracker);
         }
         vec![]
@@ -145,7 +145,7 @@ impl Operator for Diff {
                 .bold()
                 .red()
             );
-            println!("Shape: {shape:?}");
+            println!("Data Shape: {shape:?}");
             return vec![];
         }
         let data_nan = data.iter().any(|i| i.is_nan());
@@ -205,6 +205,7 @@ impl Operator for Diff {
                     max_dist.to_string().bold().red(),
                     sum_dist.to_string().bold().red(),
                 );
+                println!("Data Shape: {shape:?}");
                 println!("{}: {:?}", "This".bold(), &data[..10]);
                 println!("{}: {:?}", "File".bold(), &bin_data[..10]);
                 println!(

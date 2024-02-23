@@ -9,7 +9,7 @@ use luminal::{
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
 pub const HIDDEN_DIM: usize = 4096;
-pub const NUM_LAYERS: usize = 1;
+pub const NUM_LAYERS: usize = 32;
 pub const N_HEADS: usize = 32;
 pub const N_KV_HEADS: usize = 8;
 pub const MLP_DIM: usize = 14336;
@@ -82,6 +82,36 @@ fn apply_rotary_embeddings<const N_HEADS: usize, Batch: Dimension, Seq: Dimensio
     rotated_input * emb.sin().expand() + input * emb.cos().expand()
 }
 
+fn apply_rotary_embeddings_ggml<const N_HEADS: usize, Batch: Dimension, Seq: Dimension>(
+    input: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)>,
+    prev_seq: BigExpression,
+) -> GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)> {
+    // Get embedding
+    let freqs = (input.graph().arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
+    let freqs = freqs.inv_pow(1000000.0).recip();
+    let t = input.graph().arange::<Seq>() + input.graph().constant_expr(prev_seq).expand();
+    let emb = t.expand::<(_, Const<1>), _>().matmul(freqs.expand());
+
+    // Rotate input
+    let split = input.reshape::<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<2>)>();
+    let x0: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<1>)> = split
+        .slice((.., .., .., .., ..Expression::from(1)))
+        .contiguous()
+        .realize();
+    let x1: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<1>)> = split
+        .slice((.., .., .., .., Expression::from(1)..))
+        .contiguous()
+        .realize();
+    let x0_out = x0 * emb.cos().expand() - x1 * emb.sin().expand();
+    let x1_out = x0 * emb.sin().expand() + x1 * emb.cos().expand();
+
+    x0_out
+        .concat_along::<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<2>), Axis<4>, _>(
+            x1_out,
+        )
+        .reshape()
+}
+
 pub struct SelfAttention {
     pub q_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
     pub k_proj: GraphTensor<R2<ATTN_PROJ_DIM, HIDDEN_DIM>>,
@@ -112,33 +142,39 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     ) -> Self::Output {
         // Apply the Projections
         let queries = x.matmul(self.q_proj.permute());
-        queries.diff(format!("/Users/jafioti/Desktop/saves/query{index}.bin"), 0.);
+        // queries.diff(
+        //     format!("/Users/jafioti/Desktop/saves/query{index}.bin"),
+        //     0.01,
+        // );
         let queries = queries
             .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let keys = x.matmul(self.k_proj.permute());
-        keys.diff(format!("/Users/jafioti/Desktop/saves/key{index}.bin"), 0.);
+        // keys.diff(format!("/Users/jafioti/Desktop/saves/key{index}.bin"), 0.01);
         let keys = keys
             .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let values = x.matmul(self.v_proj.permute());
-        values.diff(format!("/Users/jafioti/Desktop/saves/value{index}.bin"), 0.);
+        // values.diff(
+        //     format!("/Users/jafioti/Desktop/saves/value{index}.bin"),
+        //     0.01,
+        // );
         let values = values
             .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         // Rotary embed queries and keys
-        let queries = apply_rotary_embeddings(queries, PrevSeq::const_size().into());
-        let keys = apply_rotary_embeddings(keys, PrevSeq::const_size().into());
+        let queries = apply_rotary_embeddings_ggml(queries, PrevSeq::const_size().into());
+        let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::const_size().into());
 
-        keys.diff(
-            format!("/Users/jafioti/Desktop/saves/rope_key{index}.bin"),
-            0.,
-        );
-        queries.diff(
-            format!("/Users/jafioti/Desktop/saves/rope_query{index}.bin"),
-            0.,
-        );
+        // keys.permute::<_, Axes4<0, 2, 1, 3>>().diff(
+        //     format!("/Users/jafioti/Desktop/saves/key_rope{index}.bin"),
+        //     0.01,
+        // );
+        // queries.permute::<_, Axes4<0, 2, 1, 3>>().diff(
+        //     format!("/Users/jafioti/Desktop/saves/query_rope{index}.bin"),
+        //     0.01,
+        // );
 
         // Add KV cache
         let (keys, values) = if let Some((k_cache, v_cache)) = cache {
@@ -176,15 +212,10 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             // Merge heads
             .permute::<_, Axes5<0, 3, 1, 2, 4>>()
             .reshape::<(Batch, CurSeq, Const<HIDDEN_DIM>)>();
-        output.diff("/Users/jafioti/Desktop/saves/attn_out.bin", 0.0);
         let output = output
             // Apply output projection
             .matmul(self.o_proj.permute());
-        // output.diff(
-        //     format!("/Users/jafioti/Desktop/saves/attn_out{index}.bin"),
-        //     0.,
-        // );
-
+        // output.diff(format!("/Users/jafioti/Desktop/saves/attn_out.bin"), 0.01);
         (output, (keys.contiguous(), values.contiguous())) // Cache needs to be contiguous for transferring to another graph
     }
 }
@@ -230,7 +261,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     );
     fn forward(
         &self,
-        (mut x, cache, _, index): (
+        (mut x, cache, _, i): (
             GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
             Option<KVCache<Batch, PrevSeq>>,
             PhantomData<TotSeq>,
@@ -239,13 +270,10 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     ) -> Self::Output {
         // Attention
         let normed = self.attention_norm.forward(x);
-        normed.diff(
-            format!("/Users/jafioti/Desktop/saves/attn_norm{index}.bin"),
-            0.,
-        );
+        // normed.diff(format!("/Users/jafioti/Desktop/saves/normed{i}.bin"), 0.01);
         let (y, cache) = self
             .attention
-            .forward((normed, cache, PhantomData::<TotSeq>, index));
+            .forward((normed, cache, PhantomData::<TotSeq>, i));
 
         // Residual Addition
         x += y;
@@ -319,7 +347,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         // Embed tokens
         let mut x = self.embedding.forward(input);
 
-        x.diff("/Users/jafioti/Desktop/saves/embedded.bin", 0.);
+        // x.diff("/Users/jafioti/Desktop/saves/embedded.bin", 0.);
 
         // Run through layers and collect new caches
         let mut new_caches = vec![];
@@ -330,9 +358,13 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             new_caches.push(new_cache);
         }
         // Run through last norm and output projection
-        let output = self.norm.forward(x).matmul(self.lm_head.permute());
+        // x.diff("/Users/jafioti/Desktop/saves/output_prenorm.bin", 0.01);
+        let output = self.norm.forward(x);
+        // output.diff("/Users/jafioti/Desktop/saves/output_normed.bin", 0.01);
+        let output = output.matmul(self.lm_head.permute());
 
-        (output.realize(), new_caches)
+        // output.diff("/Users/jafioti/Desktop/saves/logits.bin", 0.01);
+        (output, new_caches)
     }
 }
 
@@ -342,7 +374,7 @@ impl InitModule for MistralLM {
             embedding: InitModule::initialize(cx),
             norm: {
                 let mut norm = RMSNorm::initialize(cx);
-                norm.epsilon = 1.0;
+                norm.epsilon = 1e-5;
                 norm
             },
             lm_head: cx.named_tensor("LM Head"),
