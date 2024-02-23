@@ -455,8 +455,7 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
                     .check(|op, _| {
                         if let Some(c) = op.as_any().downcast_ref::<MetalConstant<T>>() {
                             if let ConstantValue::Float(v) = c.0 {
-                                true
-                                // v <= 1e-3 && v > 0.0
+                                v <= 1e-3 && v > 0.0
                             } else {
                                 false
                             }
