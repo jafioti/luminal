@@ -31,12 +31,12 @@ pub struct CLIArgs {
 fn main() {
     let cli_args = CLIArgs::parse();
     let tokenizer = SentencePieceBpeTokenizer::from_file(
-        "./examples/mistral/setup/mistral-7b-hf/tokenizer.model",
+        "./examples/mistral/setup/mistral_tokenizer.model",
         false,
     )
     .unwrap();
 
-    print!("Defining Graph");
+    print!("Defining graph");
     io::stdout().flush().unwrap();
     let now = Instant::now();
 
@@ -58,13 +58,13 @@ fn main() {
     // Set up model loading
     #[cfg(feature = "metal")]
     let quantized_weight_nodes =
-        loader::MetalQ8Loader::new("/Users/jafioti/Downloads/mistral-7b-instruct-v0.2.Q8_0.gguf")
+        loader::MetalQ8Loader::new("./examples/mistral/setup/mistral-7b-instruct-v0.2.Q8_0.gguf")
             .load(&model, &mut cx);
     #[cfg(not(feature = "metal"))]
     todo!("Implement a gguf loader for non-metal devices");
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
-    print!("Compiling Graph");
+    print!("Compiling graph");
     io::stdout().flush().unwrap();
     let now = Instant::now();
     cx.compile(
