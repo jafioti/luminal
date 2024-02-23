@@ -1066,7 +1066,7 @@ impl<T: MetalFloat> Compiler for SoftmaxCompiler<T> {
 
 /// Special kernel for rotating. Probably shouldn't exist, seeing as it's only for rotary embeddings
 #[derive(LuminalPrint, LuminalEqTrue, Clone)]
-pub struct MetalRotate<T> {
+pub struct MetalRope<T> {
     pipeline: ComputePipelineState,
     axis_size: usize,
     queue: CommandQueue,
@@ -1076,7 +1076,7 @@ pub struct MetalRotate<T> {
     _phantom: PhantomData<T>,
 }
 
-impl<T: MetalFloat> MetalRotate<T> {
+impl<T: MetalFloat> MetalRope<T> {
     fn new(
         axis_size: usize,
         shape: ShapeTracker,
@@ -1116,7 +1116,7 @@ kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *o
     }
 }
 
-impl<T> MetalKernel for MetalRotate<T> {
+impl<T> MetalKernel for MetalRope<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![input_shapes[0].n_physical_elements() * size_of::<T>()]
     }
@@ -1145,7 +1145,7 @@ impl<T> MetalKernel for MetalRotate<T> {
     }
 }
 
-impl<T: MetalFloat> Operator for MetalRotate<T> {
+impl<T: MetalFloat> Operator for MetalRope<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup buffers
@@ -1199,9 +1199,9 @@ impl<T: MetalFloat> Operator for MetalRotate<T> {
 
 /// Replace the rotate pattern with a special kernel.
 #[derive(Default, Debug)]
-pub struct RotateCompiler<T>(PhantomData<T>);
+pub struct RopeCompiler<T>(PhantomData<T>);
 
-impl<T: MetalFloat> Compiler for RotateCompiler<T> {
+impl<T: MetalFloat> Compiler for RopeCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
@@ -1305,7 +1305,7 @@ impl<T: MetalFloat> Compiler for RotateCompiler<T> {
             }
             // Insert op
             let rotate = graph
-                .add_op(MetalRotate::<T>::new(
+                .add_op(MetalRope::<T>::new(
                     axis_size,
                     a.1 .2,
                     dev.clone(),

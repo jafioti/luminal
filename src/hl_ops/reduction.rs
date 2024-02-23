@@ -59,7 +59,7 @@ impl<S: Shape> GraphTensor<S> {
                 .finish();
 
             // Divide by size of dimension
-            let div_tensor = self.graph().constant_expr(shape.remove_dim(dim).into()).id;
+            let div_tensor = self.graph().constant_expr(shape.remove_dim(dim)).id;
             let mul_tensor = self
                 .graph()
                 .add_op(op::Recip)

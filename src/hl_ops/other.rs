@@ -45,10 +45,10 @@ impl Graph {
     }
 
     /// A scalar constant evaluated from an expression at runtime
-    pub fn constant_expr(&mut self, expr: BigExpression) -> GraphTensor<R0> {
+    pub fn constant_expr<E: Into<BigExpression>>(&mut self, expr: E) -> GraphTensor<R0> {
         GraphTensor::from_id(
             self.add_op(Constant(
-                ConstantValue::Expression(expr.minimize()),
+                ConstantValue::Expression(expr.into().minimize()),
                 &self.dyn_map,
             ))
             .finish(),

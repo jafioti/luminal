@@ -66,11 +66,11 @@ fn apply_rotary_embeddings_ggml<const N_HEADS: usize, Batch: Dimension, Seq: Dim
     input: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)>,
     prev_seq: BigExpression,
 ) -> GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)> {
-    // Get embedding
+    // Get freqs
     let freqs = (input.graph().arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
     let freqs = freqs.inv_pow(1000000.0).recip();
-    let t = input.graph().arange::<Seq>() + input.graph().constant_expr(prev_seq).expand();
-    let emb = t.expand::<(_, Const<1>), _>().matmul(freqs.expand());
+    let pos = input.graph().arange::<Seq>() + prev_seq;
+    let emb = pos.expand::<(_, Const<1>), _>().matmul(freqs.expand());
 
     // Split input into evens and odds
     let split = input.reshape::<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<2>)>();
