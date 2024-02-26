@@ -700,10 +700,7 @@ fn backtrack_match_new(
     let mut mapping = FxHashMap::default();
     mapping.insert(pattern_root, main_root);
     let main_parents = get_parents(main_graph, main_root, |e| !e.weight().is_schedule());
-    'pattern_loop: for (index, pattern_parent) in get_parents(pattern_graph, pattern_root, |_| true)
-        .into_iter()
-        .enumerate()
-    {
+    'pattern_loop: for pattern_parent in get_parents(pattern_graph, pattern_root, |_| true) {
         for parent in main_parents.iter() {
             if mapping.values().any(|&v| v == *parent) {
                 // This main node was used already, skip it
@@ -719,52 +716,6 @@ fn backtrack_match_new(
         return None;
     }
     Some(mapping)
-}
-
-/// TODO: This should return **all** possible matches stemming from these roots, not just the first
-fn backtrack_match(
-    pattern_root: NodeIndex,
-    pattern_graph: &SelectionGraph,
-    main_root: NodeIndex,
-    main_graph: &mut MainGraph,
-) -> Option<FxHashMap<NodeIndex, NodeIndex>> {
-    let mut matches = FxHashMap::default();
-    let mut stack = Vec::new();
-    matches.insert(pattern_root, main_root);
-    stack.push((pattern_root, main_root));
-
-    // Loop through joint dfs
-    while let Some((pattern_node, main_node)) = stack.pop() {
-        let pattern_parents =
-            pattern_graph.neighbors_directed(pattern_node, petgraph::Direction::Incoming);
-        let main_parents = main_graph
-            .edges_directed(main_node, petgraph::Direction::Incoming)
-            .filter(|e| !e.weight().is_schedule())
-            .map(|e| e.source())
-            .collect_vec();
-
-        'pattern_loop: for pattern_parent in pattern_parents {
-            for main_parent in &main_parents {
-                if matches.values().any(|&v| v == *main_parent) {
-                    // This main node was used already, skip it
-                    continue;
-                }
-                if test_node(
-                    pattern_graph.node_weight(pattern_parent).unwrap(),
-                    main_graph,
-                    *main_parent,
-                ) {
-                    matches.insert(pattern_parent, *main_parent);
-                    stack.push((pattern_parent, *main_parent));
-                    continue 'pattern_loop;
-                }
-            }
-            // If we reach here, no match was found for this pattern parent
-            return None;
-        }
-    }
-
-    Some(matches)
 }
 
 fn test_node(

@@ -1236,7 +1236,7 @@ impl<T: MetalFloat> Operator for MetalRope<T> {
 pub struct RopeCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for RopeCompiler<T> {
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let mut head_dim_arange = NodeIndex::default();
@@ -1359,6 +1359,8 @@ impl<T: MetalFloat> Compiler for RopeCompiler<T> {
                 continue;
             }
 
+            // TODO: Actually do remapping and contig shape checking
+
             let shape = graph
                 .graph
                 .edges_connecting(input, split_contig1)
@@ -1419,6 +1421,5 @@ impl<T: MetalFloat> Compiler for RopeCompiler<T> {
             graph.safe_remove_node(inv_head_dim, 0);
             graph.safe_remove_node(theta, 0);
         }
-        // graph.display();
     }
 }
