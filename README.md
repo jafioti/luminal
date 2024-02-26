@@ -28,7 +28,7 @@ println!("Result: {:?}", c);
 ## Getting Started
 **Mistral 7B**
 ```bash
-bash examples/mistral/setup/setup.sh     # Download the model weights
+bash examples/mistral/setup/setup.sh   # Download the model weights
 cargo run --release --example mistral  # Run the model
 ```
 
@@ -53,11 +53,10 @@ Now we can do:
 - Networks can be written in generic code, but compiled and ran fast on hyper-specific architectures (try writing a PyTorch network that works with both TF32 dtypes and TPUs; get ready for if statement hell...)
 
 ## RISC-style architecture
-Luminal can be ran on new accelerators by implementing the following 11 primitive ops:
+Luminal can be ran on new accelerators by implementing the following 10 primitive ops:
 - Log2
 - Exp2
 - Sin
-- Sqrt
 - Recip
 - Add
 - Mul

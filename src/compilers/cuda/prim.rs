@@ -459,81 +459,6 @@ where
 }
 
 #[derive(LuminalEqFalse, LuminalPrint, Clone)]
-pub struct CudaSqrt<T>(CudaFunction, Arc<CudaDevice>, PhantomData<T>);
-
-impl<T: CudaFloat> CudaSqrt<T> {
-    pub fn new(dev: Arc<CudaDevice>) -> Self {
-        let mut code = format!(
-            "
-#include \"cuda_fp16.h\"
-extern \"C\" __global__ void kernel({} *out, const {} *inp, int numel) {{
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < numel) {{
-        out[i] = {}(inp[i]);
-    }}
-}}",
-            T::type_name(),
-            T::type_name(),
-            if T::is_f32() { "sqrt" } else { "hsqrt" }
-        );
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("kernel", &name);
-        if !dev.has_func(&name, &name) {
-            dev.load_ptx(
-                compile_ptx_with_opts(
-                    code,
-                    CompileOptions {
-                        arch: Some("sm_75"),
-                        include_paths: vec!["/usr/local/cuda/include".to_string()],
-                        ..Default::default()
-                    },
-                )
-                .unwrap(),
-                &name,
-                &[name.clone().leak()],
-            )
-            .unwrap();
-        }
-        Self(dev.get_func(&name, &name).unwrap(), dev, Default::default())
-    }
-}
-
-impl<T> Operator for CudaSqrt<T>
-where
-    T: Debug
-        + Copy
-        + cudarc::driver::DeviceRepr
-        + std::marker::Unpin
-        + cudarc::driver::ValidAsZeroBits,
-    CudaSlice<T>: Data,
-{
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<CudaSlice<T>>()
-            .unwrap();
-        let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
-        let mut out = self.1.alloc_zeros::<T>(inp_size).unwrap();
-        unsafe {
-            self.0
-                .clone()
-                .launch(
-                    LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
-                )
-                .unwrap();
-        }
-
-        vec![Tensor {
-            data: Box::new(out),
-        }]
-    }
-}
-
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
 pub struct CudaRecip<T>(CudaFunction, Arc<CudaDevice>, PhantomData<T>);
 
 impl<T: CudaFloat> CudaRecip<T> {
@@ -1559,8 +1484,6 @@ where
                     c.0.clone(),
                     &graph.dyn_map,
                 ));
-            } else if is::<Sqrt>(op) {
-                *op_ref = Box::new(CudaSqrt::<T>::new(dev.clone()));
             } else if is::<Recip>(op) {
                 *op_ref = Box::new(CudaRecip::<T>::new(dev.clone()));
             } else if is::<Add>(op) {

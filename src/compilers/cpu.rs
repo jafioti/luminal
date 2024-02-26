@@ -4,7 +4,7 @@ use itertools::Itertools;
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
 use crate::{
-    op::{Exp2, InputTensor, Log2, Mul, Operator, Recip, Sin, Sqrt, SumReduce},
+    op::{Exp2, InputTensor, Log2, Mul, Operator, Recip, Sin, SumReduce},
     prelude::*,
 };
 
@@ -258,8 +258,6 @@ impl Compiler for UnaryFusionCompiler {
                 Some(|i| i.log2())
             } else if op.is::<Recip>() {
                 Some(|i| i.recip())
-            } else if op.is::<Sqrt>() {
-                Some(|i| i.sqrt())
             } else if op.is::<Sin>() {
                 Some(|i| i.sin())
             } else {
