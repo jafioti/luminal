@@ -76,9 +76,11 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Scale so std is 1.0
-    pub fn std_norm<const DIM: usize>(self, epsilon: f32) -> GraphTensor<S>
+    pub fn std_norm<const DIM: usize, T>(self, epsilon: T) -> GraphTensor<S>
     where
         <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
+        GraphTensor<<S as ReduceShape<Axis<DIM>>>::Reduced>:
+            Add<T, Output = GraphTensor<<S as ReduceShape<Axis<DIM>>>::Reduced>>,
         S: ReduceShape<Axis<DIM>>,
     {
         (self * self)
@@ -102,9 +104,11 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Applies a layer norm along an axis
-    pub fn layer_norm<const DIM: usize>(self, epsilon: f32) -> GraphTensor<S>
+    pub fn layer_norm<const DIM: usize, T>(self, epsilon: T) -> GraphTensor<S>
     where
         <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
+        GraphTensor<<S as ReduceShape<Axis<DIM>>>::Reduced>:
+            Add<T, Output = GraphTensor<<S as ReduceShape<Axis<DIM>>>::Reduced>>,
         S: ReduceShape<Axis<DIM>>,
     {
         self.mean_norm().std_norm(epsilon)
@@ -145,7 +149,10 @@ impl<S: Shape> GraphTensor<S> {
 
     /// Raise the tensor to a power
     /// Approximate, see full impl here: https://github.com/tinygrad/tinygrad/blob/a32c67760140dd26b60d7932268f2e62e96a66e0/tinygrad/tensor.py#L568
-    pub fn pow(self, e: f32) -> GraphTensor<S> {
+    pub fn pow<T>(self, e: T) -> GraphTensor<S>
+    where
+        Self: Mul<T, Output = Self>,
+    {
         self.abs().ln().mul(e).exp()
     }
 
@@ -206,8 +213,8 @@ mod tests {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
         let a = cx.tensor::<R2<2, 3>>().set(a_data.clone());
-        let b = a.layer_norm::<0>(1e-5).retrieve();
-        let c = a.layer_norm::<1>(1e-5).retrieve();
+        let b = a.layer_norm::<0, _>(1e-5).retrieve();
+        let c = a.layer_norm::<1, _>(1e-5).retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();

@@ -18,7 +18,7 @@ pub type BigExpression = GenericExpression<Vec<Term>>;
 
 /// Trait implemented on the 2 main symbolic expression storage types, Vec<Term> and ArrayVec<Term>
 #[allow(clippy::len_without_is_empty)]
-trait ExpressionStorage:
+pub(crate) trait ExpressionStorage:
     Clone
     + IndexMut<usize, Output = Term>
     + std::iter::Extend<Term>
@@ -460,7 +460,8 @@ where
         for term in &self.terms {
             match term {
                 Term::Num(n) => stack.push(*n),
-                Term::Var(c) => {
+                Term::Var(c) =>
+                {
                     #[allow(clippy::needless_borrow)]
                     if let Some(n) = variables.get(&c) {
                         stack.push(*n as i32)

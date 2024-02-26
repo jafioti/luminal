@@ -25,10 +25,7 @@ impl Compiler for MatMul2DCompiler {
         // Actually starts at [A,B] | [B, C]
         let s = SelectOp::new()
             .ty::<Mul>()
-            .shapes(vec![
-                vec!['A'.into(), 'C'.into(), 'B'.into()],
-                vec!['A'.into(), 'C'.into(), 'B'.into()],
-            ])
+            .shapes(vec![vec!['A', 'C', 'B'], vec!['A', 'C', 'B']])
             .fakes(vec![
                 vec![Some(false), Some(true), Some(false)],
                 vec![Some(true), Some(false), Some(false)],
@@ -139,7 +136,7 @@ impl Compiler for BatchMatMul2DCompiler {
         let s = SelectOp::new()
             .ty::<Mul>()
             .shapes(vec![
-                vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
+                vec!['D', 'A', 'C', 'B'],
                 vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
             ])
             .fakes(vec![

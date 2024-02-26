@@ -76,7 +76,7 @@ fn test_rotate() {
 #[test]
 fn test_constant() {
     let mut cx = Graph::new();
-    let a = cx.constant_expr('a'.into());
+    let a = cx.constant_expr('a');
     let mut a = (a * a).retrieve();
     cx.compile(MetalCompiler::<f16>::default(), &mut a);
 
@@ -766,8 +766,8 @@ fn test_layer_norm() {
     let mut cx = Graph::new();
     let a_data = random_vec(15 * 16 * 32);
     let a = cx.tensor::<R3<15, 16, 32>>().set(a_data.clone());
-    let mut b = a.layer_norm::<0>(1e-5).retrieve();
-    let mut c = a.layer_norm::<2>(1e-5).retrieve();
+    let mut b = a.layer_norm::<0, _>(1e-5).retrieve();
+    let mut c = a.layer_norm::<2, _>(1e-5).retrieve();
     cx.compile(
         <(GenericCompiler, MetalCompiler<f16>)>::default(),
         (&mut b, &mut c),

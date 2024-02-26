@@ -26,8 +26,13 @@ rand = "0.8.5"
 urlencoding = "2.1.2"
 webbrowser = "0.8.10"
 dyn-clone = "1.0.12"
-cudarc = { git="https://github.com/jafioti/cudarc", features = ["cublas", "f16"], optional = true }
-metal-rs = { version = "0.27.0", package = "metal", features = ["mps"], optional = true }
+cudarc = { git = "https://github.com/jafioti/cudarc", features = [
+    "cublas",
+    "f16",
+], optional = true }
+metal-rs = { version = "0.27.0", package = "metal", features = [
+    "mps",
+], optional = true }
 safetensors = "0.3.1"
 memmap2 = { version = "0.7.1", features = ["stable_deref_trait"] }
 half = { version = "2.3.1", features = ["num-traits", "rand_distr"] }
@@ -41,3 +46,4 @@ rustc-hash = "1.1.0"
 dfdx = { version = "0.13", features = ["f16"] }
 rust_tokenizers = "8.1.0"
 clap = { version = "4.4.18", features = ["derive"] }
+byteorder = "1.5.0"

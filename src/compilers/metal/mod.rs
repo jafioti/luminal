@@ -54,10 +54,11 @@ type SpecialOpsCompiler<T> = (
     other::ARangeCompiler<T>,
     binary::MetalGatherCompiler<T>,
     unary::MetalExpCompiler<T>,
+    unary::MetalCosCompiler<T>,
     unary::MeanReduceCompiler<T>,
     unary::StdNormCompiler<T>,
     unary::SoftmaxCompiler<T>,
-    unary::RotateCompiler<T>,
+    unary::RopeCompiler<T>,
     matmul::MetalMatMulCompiler<T>,
 );
 

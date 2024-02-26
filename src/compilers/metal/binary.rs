@@ -6,9 +6,9 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     compilers::metal::{prim::*, *},
-    constant_select_op,
     op::Operator,
     prelude::*,
+    select_const,
 };
 
 use super::other::MetalARange;
@@ -159,7 +159,7 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
             NodeIndex::default(),
             NodeIndex::default(),
         );
-        let mut searcher = constant_select_op!(-1.0, T)
+        let mut searcher = select_const!(-1.0, T)
             .ptr(&mut neg_one)
             .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul))
             .edge(SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add))
@@ -367,7 +367,7 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
             NodeIndex::default(),
             NodeIndex::default(),
         );
-        let s = constant_select_op!(1.0, T).ptr(&mut one).edge(
+        let s = select_const!(1.0, T).ptr(&mut one).edge(
             SelectOp::new()
                 .ty::<MetalLessThan<T>>()
                 .ptr(&mut less_than1)
@@ -459,7 +459,7 @@ pub struct MetalGather<T> {
     pipeline: ComputePipelineState,
     device: Device,
     queue: CommandQueue,
-    embed_dim: usize,
+    pub embed_dim: usize,
     _phantom: PhantomData<T>,
 }
 
@@ -506,7 +506,7 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
             let command_buffer = self.queue.new_command_buffer();
 
             let out = self.device.new_buffer(
-                (indexes.len() * self.embed_dim * std::mem::size_of::<f16>()) as u64,
+                (indexes.len() * self.embed_dim * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
 
@@ -611,8 +611,6 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
 
 #[cfg(test)]
 mod tests {
-    use half::f16;
-
     crate::test_imports!();
     #[test]
     fn test_subtraction() {

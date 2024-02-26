@@ -56,30 +56,43 @@ impl<const I: usize, const H: usize> InitModule for Mlp<I, H> {
 
 impl<const I: usize, const H: usize> SerializeModule for Mlp<I, H> {
     fn serialize(&self, s: &mut Serializer) {
-        s.tensor("gate_proj/weight", self.gate_proj);
-        s.tensor("up_proj/weight", self.up_proj);
-        s.tensor("down_proj/weight", self.down_proj);
+        s.tensor("ffn_gate/weight", self.gate_proj);
+        s.tensor("ffn_up/weight", self.up_proj);
+        s.tensor("ffn_down/weight", self.down_proj);
     }
 }
 
-fn apply_rotary_embeddings<const N_HEADS: usize, Batch: Dimension, Seq: Dimension>(
+fn apply_rotary_embeddings_ggml<const N_HEADS: usize, Batch: Dimension, Seq: Dimension>(
     input: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)>,
     prev_seq: BigExpression,
 ) -> GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)> {
-    // Get embedding
+    // Get freqs
     let freqs = (input.graph().arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
     let freqs = freqs.inv_pow(1000000.0).recip();
-    let t = input.graph().arange::<Seq>() + input.graph().constant_expr(prev_seq).expand();
-    let freqs = t.expand::<(_, Const<1>), _>().matmul(freqs.expand());
-    let emb = freqs.concat_along::<(Seq, Const<HEAD_DIM>), Axis<1>, _>(freqs);
+    let pos = input.graph().arange::<Seq>() + prev_seq;
+    let emb = pos.expand::<(_, Const<1>), _>().matmul(freqs.expand());
 
-    // Rotate input
-    let x1 = input.slice((.., .., .., ..Expression::from(HEAD_DIM_OVER_2)));
-    let x2 = input.slice((.., .., .., Expression::from(HEAD_DIM_OVER_2)..));
-    let rotated_input = (-x2).concat_along::<(_, _, _, Const<HEAD_DIM>), Axis<3>, _>(x1);
+    // Split input into evens and odds
+    let split = input.reshape::<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<2>)>();
+    let x0: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<1>)> = split
+        .slice((.., .., .., .., ..Expression::from(1)))
+        .contiguous()
+        .realize();
+    let x1: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<1>)> = split
+        .slice((.., .., .., .., Expression::from(1)..))
+        .contiguous()
+        .realize();
 
-    // Final calculation
-    rotated_input * emb.sin().expand() + input * emb.cos().expand()
+    // Apply sin and cos embeddings
+    let x0_out = x0 * emb.cos().expand() - x1 * emb.sin().expand();
+    let x1_out = x0 * emb.sin().expand() + x1 * emb.cos().expand();
+
+    // Combine back into output
+    x0_out
+        .concat_along::<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<2>), Axis<4>, _>(
+            x1_out,
+        )
+        .reshape()
 }
 
 pub struct SelfAttention {
@@ -123,8 +136,8 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         // Rotary embed queries and keys
-        let queries = apply_rotary_embeddings(queries, PrevSeq::const_size().into());
-        let keys = apply_rotary_embeddings(keys, PrevSeq::const_size().into());
+        let queries = apply_rotary_embeddings_ggml(queries, PrevSeq::const_size().into());
+        let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::const_size().into());
 
         // Add KV cache
         let (keys, values) = if let Some((k_cache, v_cache)) = cache {
@@ -161,10 +174,10 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             .matmul(repeated_values)
             // Merge heads
             .permute::<_, Axes5<0, 3, 1, 2, 4>>()
-            .reshape::<(Batch, CurSeq, Const<HIDDEN_DIM>)>()
+            .reshape::<(Batch, CurSeq, Const<HIDDEN_DIM>)>();
+        let output = output
             // Apply output projection
             .matmul(self.o_proj.permute());
-
         (output, (keys.contiguous(), values.contiguous())) // Cache needs to be contiguous for transferring to another graph
     }
 }
@@ -182,10 +195,10 @@ impl InitModule for SelfAttention {
 
 impl SerializeModule for SelfAttention {
     fn serialize(&self, s: &mut Serializer) {
-        s.tensor("q_proj/weight", self.q_proj);
-        s.tensor("v_proj/weight", self.v_proj);
-        s.tensor("k_proj/weight", self.k_proj);
-        s.tensor("o_proj/weight", self.o_proj);
+        s.tensor("attn_q/weight", self.q_proj);
+        s.tensor("attn_v/weight", self.v_proj);
+        s.tensor("attn_k/weight", self.k_proj);
+        s.tensor("attn_output/weight", self.o_proj);
     }
 }
 
@@ -216,9 +229,10 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         ),
     ) -> Self::Output {
         // Attention
-        let (y, cache) =
-            self.attention
-                .forward((self.attention_norm.forward(x), cache, PhantomData::<TotSeq>));
+        let normed = self.attention_norm.forward(x);
+        let (y, cache) = self
+            .attention
+            .forward((normed, cache, PhantomData::<TotSeq>));
 
         // Residual Addition
         x += y;
@@ -252,10 +266,10 @@ impl InitModule for TransformerBlock {
 
 impl SerializeModule for TransformerBlock {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("self_attn", &self.attention);
-        s.module("input_layernorm", &self.attention_norm);
-        s.module("post_attention_layernorm", &self.feed_forward_norm);
-        s.module("mlp", &self.feed_forward);
+        s.module("", &self.attention);
+        s.module("attn_norm", &self.attention_norm);
+        s.module("ffn_norm", &self.feed_forward_norm);
+        s.module("", &self.feed_forward);
     }
 }
 
@@ -292,6 +306,8 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         // Embed tokens
         let mut x = self.embedding.forward(input);
 
+        // x.diff("/Users/jafioti/Desktop/saves/embedded.bin", 0.);
+
         // Run through layers and collect new caches
         let mut new_caches = vec![];
         let mut new_cache;
@@ -300,10 +316,13 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
                 layer.forward((x, cache.as_ref().map(|c| c[i]), PhantomData::<TotSeq>));
             new_caches.push(new_cache);
         }
-
         // Run through last norm and output projection
-        let output = self.norm.forward(x).matmul(self.lm_head.permute());
+        // x.diff("/Users/jafioti/Desktop/saves/output_prenorm.bin", 0.01);
+        let output = self.norm.forward(x);
+        // output.diff("/Users/jafioti/Desktop/saves/output_normed.bin", 0.01);
+        let output = output.matmul(self.lm_head.permute());
 
+        // output.diff("/Users/jafioti/Desktop/saves/logits.bin", 0.01);
         (output, new_caches)
     }
 }
@@ -312,7 +331,11 @@ impl InitModule for MistralLM {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             embedding: InitModule::initialize(cx),
-            norm: InitModule::initialize(cx),
+            norm: {
+                let mut norm = RMSNorm::initialize(cx);
+                norm.epsilon = 1e-5;
+                norm
+            },
             lm_head: cx.named_tensor("LM Head"),
             layers: (0..NUM_LAYERS)
                 .map(|_| InitModule::initialize(cx))
@@ -323,11 +346,11 @@ impl InitModule for MistralLM {
 
 impl SerializeModule for MistralLM {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("model/embed_tokens", &self.embedding);
-        s.module("model/norm", &self.norm);
-        s.tensor("lm_head/weight", self.lm_head);
+        s.module("token_embd", &self.embedding);
+        s.module("output_norm", &self.norm);
+        s.tensor("output/weight", self.lm_head);
         for (i, layer) in self.layers.iter().enumerate() {
-            s.module(&format!("model/layers/{i}"), layer);
+            s.module(&format!("blk/{i}"), layer);
         }
     }
 }

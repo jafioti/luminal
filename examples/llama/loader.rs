@@ -16,7 +16,8 @@ impl DfdxDeferredLoader {
 }
 
 impl Loader for DfdxDeferredLoader {
-    fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) {
+    type Output = ();
+    fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> () {
         for (s, n) in state_dict(model) {
             let Some(n_elements) = graph
                 .graph

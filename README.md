@@ -53,9 +53,23 @@ Now we can do:
 - Networks can be written in generic code, but compiled and ran fast on hyper-specific architectures (try writing a PyTorch network that works with both TF32 dtypes and TPUs; get ready for if statement hell...)
 
 ## RISC-style architecture
-Luminal can be ran on new accelerators by implementing 12 primitive ops. Take a look at `src/compilers/metal/prim.rs` to see 1-to-1 Metal translations of the primops.
+Luminal can be ran on new accelerators by implementing the following 11 primitive ops:
+- Log2
+- Exp2
+- Sin
+- Sqrt
+- Recip
+- Add
+- Mul
+- Mod
+- LessThan
+- SumReduce
+- MaxReduce
+- Contiguous
 
-Accelerators are free to implement their own custom ops and their own compilers.
+Take a look at `src/compilers/metal/prim.rs` to see 1-to-1 Metal translations of the primops.
+
+Accelerators are free to implement their own custom ops and compilers.
 
 ## Compile-time Shape Checks
 All operations are shape checked at compile time, so no more shape mismatches! Credit for this goes to [dfdx](https://github.com/coreylowman/dfdx).

@@ -5,8 +5,8 @@ use crate::{
     shape::*,
     tensor::Tensor,
 };
-use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::{fmt::Debug, path::Path};
 
 use petgraph::graph::NodeIndex;
 
@@ -117,10 +117,20 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Print the value of this tensor when the graph is ran
-    pub fn print(&self, message: &str) {
+    pub fn print<T: ToString>(&self, message: T) {
         let id = self
             .graph()
             .add_op(op::Print(message.to_string()))
+            .input(self.id, 0, self.shape)
+            .finish();
+        self.graph().no_delete.insert(id);
+    }
+
+    /// Check the tensor value against a binary file
+    pub fn diff<T: AsRef<Path>>(&self, file: T, threshold: f32) {
+        let id = self
+            .graph()
+            .add_op(op::Diff(file.as_ref().into(), threshold))
             .input(self.id, 0, self.shape)
             .finish();
         self.graph().no_delete.insert(id);

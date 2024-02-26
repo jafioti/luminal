@@ -1,57 +1,66 @@
 use std::fs::File;
 
 use luminal::{op::Function, prelude::*};
-use memmap2::MmapOptions;
+use memmap2::Mmap;
 use metal_rs::{Device, MTLResourceOptions};
-use safetensors::SafeTensors;
 
-/// Load the model in the same way dfdx-llama does
-pub struct MetalFp16SafetensorsLoader {
-    paths: Vec<String>,
-}
-
-impl MetalFp16SafetensorsLoader {
-    pub fn new<S: ToString>(paths: &[S]) -> Self {
-        Self {
-            paths: paths.iter().map(|s| s.to_string()).collect(),
-        }
+use crate::gguf::*;
+pub struct MetalQ8Loader(String);
+impl MetalQ8Loader {
+    pub fn new<S: Into<String>>(path: S) -> Self {
+        Self(path.into())
     }
 }
 
-impl Loader for MetalFp16SafetensorsLoader {
-    fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) {
+impl Loader for MetalQ8Loader {
+    type Output = Vec<NodeIndex>;
+    fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Output {
+        // Read metadata from file
+        let mut reader = File::open(&self.0).unwrap();
+        let Content {
+            mut tensor_infos,
+            tensor_data_offset,
+            ..
+        } = Content::read(&mut reader).unwrap();
+
+        // Create weight loading closures
+        let mut q8_weights = vec![];
         for (weight_name, node_index) in state_dict(model) {
             if let Some(loading_node) = graph
                 .graph
                 .node_weight_mut(node_index)
                 .and_then(|op| op.as_any_mut().downcast_mut::<Function>())
             {
-                let file_paths = self.paths.clone();
-                loading_node.1 = Box::new(move |_| {
-                    for file_path in file_paths.iter() {
-                        let file = File::open(file_path).unwrap();
-                        let buffer = unsafe { MmapOptions::new().map(&file).unwrap() };
-                        let safetensors = SafeTensors::deserialize(&buffer).unwrap();
-
-                        if let Ok(tensor_view) = safetensors.tensor(&weight_name.replace('/', "."))
-                        {
-                            let buffer = Device::system_default()
-                                .unwrap()
-                                .new_buffer_with_bytes_no_copy(
-                                    tensor_view.data().as_ptr() as *const _,
-                                    tensor_view.data().len() as u64,
-                                    MTLResourceOptions::StorageModeShared,
-                                    None,
-                                );
-                            return vec![Tensor {
-                                data: Box::new(buffer),
-                            }];
-                        }
+                let file_path = self.0.clone();
+                let (n_elements, buffer_offset, data_type) =
+                    tensor_infos.remove(&weight_name.replace('/', ".")).unwrap();
+                let n_bytes = match data_type {
+                    GgmlDType::F32 => n_elements * 4,
+                    GgmlDType::Q8_0 => {
+                        q8_weights.push(node_index);
+                        n_elements + (n_elements / 16)
                     }
-
-                    panic!("Tensor \"{weight_name}\" not found in files");
+                    _ => panic!("Unsupported dtype: {data_type:?}"),
+                };
+                loading_node.1 = Box::new(move |_| {
+                    let mmap_buffer =
+                        unsafe { Mmap::map(&File::open(&file_path).unwrap()).unwrap() };
+                    let buffer = Device::system_default().unwrap().new_buffer_with_data(
+                        unsafe {
+                            mmap_buffer
+                                .as_ptr()
+                                .add(buffer_offset + tensor_data_offset as usize)
+                                as *const _
+                        },
+                        n_bytes as u64,
+                        MTLResourceOptions::StorageModeShared,
+                    );
+                    vec![Tensor {
+                        data: Box::new(buffer),
+                    }]
                 });
             }
         }
+        q8_weights
     }
 }
