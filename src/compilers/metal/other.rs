@@ -5,9 +5,9 @@ use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
 
 use crate::{
     compilers::metal::{prim::*, *},
-    constant_select_op,
     op::Operator,
     prelude::*,
+    select_const,
 };
 
 use super::binary::MetalSub;
@@ -79,50 +79,50 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
 
 /// Special kernel for producing aranges
 #[derive(Clone, LuminalEqFalse)]
-pub struct MetalARange<T: MetalFloat>(
-    ComputePipelineState,
-    CommandQueue,
-    Device,
-    BigExpression,
-    *const FxHashMap<char, usize>,
-    PhantomData<T>,
-);
+pub struct MetalARange<T: MetalFloat> {
+    pipeline: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    pub size: BigExpression,
+    dyn_map: *const FxHashMap<char, usize>,
+    _phantom: PhantomData<T>,
+}
 
 impl<T: MetalFloat> Debug for MetalARange<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MetalARange({:?})", self.3)
+        write!(f, "MetalARange({:?})", self.size)
     }
 }
 
 impl<T: MetalFloat> MetalARange<T> {
     fn new(
-        dev: Device,
+        device: Device,
         queue: CommandQueue,
-        dim: BigExpression,
+        size: BigExpression,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let type_name = T::type_name();
-        Self(
-            compile_function("metal_arange", &format!("
+        Self {
+            pipeline: compile_function("metal_arange", &format!("
 #include <metal_stdlib>
 using namespace metal;
 kernel void metal_arange(device {type_name} *out [[buffer(0)]], device int& n_elements [[buffer(1)]], uint idx [[thread_position_in_grid]]) {{
     if (idx < n_elements) {{
         out[idx] = ({type_name})idx;
     }}
-}}"), &dev),
+}}"), &device),
             queue,
-            dev,
-            dim,
+            device,
+            size,
             dyn_map,
-            Default::default(),
-        )
+            _phantom: Default::default(),
+        }
     }
 }
 
 impl<T: MetalFloat> MetalKernel for MetalARange<T> {
     fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<BigExpression> {
-        vec![self.3.clone() * std::mem::size_of::<f16>()]
+        vec![self.size.clone() * std::mem::size_of::<f16>()]
     }
     fn metal_forward(
         &self,
@@ -132,11 +132,14 @@ impl<T: MetalFloat> MetalKernel for MetalARange<T> {
         output_buffers: &[&Buffer],
     ) {
         // Calculate size
-        let size = self.3.exec(unsafe { self.4.as_ref().unwrap() }).unwrap();
+        let size = self
+            .size
+            .exec(unsafe { self.dyn_map.as_ref().unwrap() })
+            .unwrap();
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.0);
+        encoder.set_compute_pipeline_state(&self.pipeline);
 
         // Set inputs
         encoder.set_buffer(0, Some(output_buffers[0]), 0);
@@ -152,9 +155,12 @@ impl<T: MetalFloat> Operator for MetalARange<T> {
     fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Set up command buffer and output buffer
-            let command_buffer = self.1.new_command_buffer();
-            let size = self.3.exec(unsafe { self.4.as_ref().unwrap() }).unwrap();
-            let out = self.2.new_buffer(
+            let command_buffer = self.queue.new_command_buffer();
+            let size = self
+                .size
+                .exec(unsafe { self.dyn_map.as_ref().unwrap() })
+                .unwrap();
+            let out = self.device.new_buffer(
                 (size * std::mem::size_of::<f16>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -209,7 +215,7 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
 
         // TODO: Make sure this actually checks the shape transformations to ensure pooling happens
         let contig = SelectOp::new().ty::<MetalContiguous<T>>();
-        let pre_sub_pattern = constant_select_op!(1.0, T)
+        let pre_sub_pattern = select_const!(1.0, T)
             .ptr(&mut one_const)
             .edge(contig.clone().ptr(&mut contig1))
             .edge(contig.clone().ptr(&mut contig2))
@@ -223,14 +229,14 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
         let mut s1 = pre_sub_pattern
             .clone()
             .edge(
-                constant_select_op!(1.0, T)
+                select_const!(1.0, T)
                     .ptr(&mut subtraction_constant)
                     .edge(SelectOp::new().ty::<MetalSub<T>>().ptr(&mut subtraction)),
             )
             .search(graph);
         let mut s2 = pre_sub_pattern
             .edge(
-                constant_select_op!(-1.0, T)
+                select_const!(-1.0, T)
                     .ptr(&mut subtraction_constant)
                     .edge(SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut subtraction)),
             )

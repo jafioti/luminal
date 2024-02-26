@@ -6,9 +6,9 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     compilers::metal::{prim::*, *},
-    constant_select_op,
     op::Operator,
     prelude::*,
+    select_const,
 };
 
 use super::other::MetalARange;
@@ -159,7 +159,7 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
             NodeIndex::default(),
             NodeIndex::default(),
         );
-        let mut searcher = constant_select_op!(-1.0, T)
+        let mut searcher = select_const!(-1.0, T)
             .ptr(&mut neg_one)
             .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul))
             .edge(SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add))
@@ -367,7 +367,7 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
             NodeIndex::default(),
             NodeIndex::default(),
         );
-        let s = constant_select_op!(1.0, T).ptr(&mut one).edge(
+        let s = select_const!(1.0, T).ptr(&mut one).edge(
             SelectOp::new()
                 .ty::<MetalLessThan<T>>()
                 .ptr(&mut less_than1)

@@ -198,13 +198,10 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
         // Actually starts at [A,B] | [B, C]
         let mut searcher_2d = SelectOp::new()
             .ty::<MetalMul<T>>()
-            .shapes(vec![
-                vec!['M'.into(), 'N'.into(), 'K'.into()],
-                vec!['M'.into(), 'N'.into(), 'K'.into()],
-            ])
-            .fakes(vec![
-                vec![None, Some(true), Some(false)],
-                vec![Some(true), Some(false), Some(false)],
+            .shapes([['M', 'N', 'K'], ['M', 'N', 'K']])
+            .fakes([
+                [None, Some(true), Some(false)],
+                [Some(true), Some(false), Some(false)],
             ])
             .ptr(&mut mul)
             .edge(
@@ -221,13 +218,10 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
             .search(graph);
         let mut searcher_3d = SelectOp::new()
             .ty::<MetalMul<T>>()
-            .shapes(vec![
-                vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
-                vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
-            ])
-            .fakes(vec![
-                vec![Some(false), Some(false), Some(true), Some(false)],
-                vec![None, Some(true), Some(false), Some(false)],
+            .shapes([['D', 'A', 'C', 'B'], ['D', 'A', 'C', 'B']])
+            .fakes([
+                [Some(false), Some(false), Some(true), Some(false)],
+                [None, Some(true), Some(false), Some(false)],
             ])
             .ptr(&mut mul)
             .edge(
@@ -245,19 +239,16 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
             .search(graph);
         let mut searcher_4d = SelectOp::new()
             .ty::<MetalMul<T>>()
-            .shapes(vec![
-                vec!['E'.into(), 'D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
-                vec!['E'.into(), 'D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
-            ])
-            .fakes(vec![
-                vec![
+            .shapes([['E', 'D', 'A', 'C', 'B'], ['E', 'D', 'A', 'C', 'B']])
+            .fakes([
+                [
                     Some(false),
                     Some(false),
                     Some(false),
                     Some(true),
                     Some(false),
                 ],
-                vec![None, None, Some(true), Some(false), Some(false)],
+                [None, None, Some(true), Some(false), Some(false)],
             ])
             .ptr(&mut mul)
             .edge(
@@ -275,26 +266,12 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
             .search(graph);
         let mut searcher_5d = SelectOp::new()
             .ty::<MetalMul<T>>()
-            .shapes(vec![
-                vec![
-                    'F'.into(),
-                    'E'.into(),
-                    'D'.into(),
-                    'A'.into(),
-                    'C'.into(),
-                    'B'.into(),
-                ],
-                vec![
-                    'F'.into(),
-                    'E'.into(),
-                    'D'.into(),
-                    'A'.into(),
-                    'C'.into(),
-                    'B'.into(),
-                ],
+            .shapes([
+                ['F', 'E', 'D', 'A', 'C', 'B'],
+                ['F', 'E', 'D', 'A', 'C', 'B'],
             ])
-            .fakes(vec![
-                vec![
+            .fakes([
+                [
                     Some(false),
                     Some(false),
                     Some(false),
@@ -302,7 +279,7 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
                     Some(true),
                     Some(false),
                 ],
-                vec![None, None, None, Some(true), Some(false), Some(false)],
+                [None, None, None, Some(true), Some(false), Some(false)],
             ])
             .ptr(&mut mul)
             .edge(

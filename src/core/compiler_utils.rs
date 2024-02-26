@@ -2,7 +2,7 @@
 
 use std::{
     any::{Any, TypeId},
-    collections::{HashSet, VecDeque},
+    collections::HashSet,
     fmt::Debug,
 };
 
@@ -10,7 +10,7 @@ use colored::Colorize;
 use itertools::Itertools;
 use petgraph::{
     algo::toposort,
-    stable_graph::{EdgeIndex, NodeIndex, StableGraph},
+    stable_graph::{EdgeIndex, EdgeReference, NodeIndex, StableGraph},
     visit::EdgeRef,
     Direction,
 };
@@ -611,7 +611,7 @@ impl<S: 'static + PartialEq> TraitObjEq for S {
     }
 }
 
-type SelectionGraph = petgraph::Graph<SelectOp, Option<u8>>;
+type SelectionGraph = StableGraph<SelectOp, Option<u8>>;
 
 pub struct GraphSearch {
     selector: SelectionGraph,
@@ -635,7 +635,7 @@ impl GraphSearch {
                 {
                     // Backtrack to check if this is a match
                     if let Some(mapping) =
-                        backtrack_match(self.anchor, &self.selector, node, &mut graph.graph)
+                        backtrack_match_new(self.anchor, &self.selector, node, &mut graph.graph)
                     {
                         self.to_return.push(mapping);
                     }
@@ -671,6 +671,56 @@ impl GraphSearch {
     }
 }
 
+fn backtrack_match_new(
+    pattern_root: NodeIndex,
+    pattern_graph: &SelectionGraph,
+    main_root: NodeIndex,
+    main_graph: &mut MainGraph,
+) -> Option<FxHashMap<NodeIndex, NodeIndex>> {
+    fn get_parents<N, E>(
+        graph: &petgraph::stable_graph::StableGraph<N, E>,
+        node_index: NodeIndex,
+        edge_filter: fn(&EdgeReference<'_, E>) -> bool,
+    ) -> Vec<NodeIndex> {
+        graph
+            .edges_directed(node_index, Direction::Incoming)
+            .filter(edge_filter)
+            .map(|e| e.source())
+            .collect()
+    }
+
+    if !test_node(
+        pattern_graph.node_weight(pattern_root).unwrap(),
+        main_graph,
+        main_root,
+    ) {
+        return None;
+    }
+
+    let mut mapping = FxHashMap::default();
+    mapping.insert(pattern_root, main_root);
+    let main_parents = get_parents(main_graph, main_root, |e| !e.weight().is_schedule());
+    'pattern_loop: for (index, pattern_parent) in get_parents(pattern_graph, pattern_root, |_| true)
+        .into_iter()
+        .enumerate()
+    {
+        for parent in main_parents.iter() {
+            if mapping.values().any(|&v| v == *parent) {
+                // This main node was used already, skip it
+                continue;
+            }
+            if let Some(new_mapping) =
+                backtrack_match_new(pattern_parent, pattern_graph, *parent, main_graph)
+            {
+                mapping.extend(new_mapping.into_iter());
+                continue 'pattern_loop;
+            }
+        }
+        return None;
+    }
+    Some(mapping)
+}
+
 /// TODO: This should return **all** possible matches stemming from these roots, not just the first
 fn backtrack_match(
     pattern_root: NodeIndex,
@@ -679,11 +729,12 @@ fn backtrack_match(
     main_graph: &mut MainGraph,
 ) -> Option<FxHashMap<NodeIndex, NodeIndex>> {
     let mut matches = FxHashMap::default();
-    let mut stack = VecDeque::new();
+    let mut stack = Vec::new();
     matches.insert(pattern_root, main_root);
-    stack.push_back((pattern_root, main_root));
+    stack.push((pattern_root, main_root));
 
-    while let Some((pattern_node, main_node)) = stack.pop_back() {
+    // Loop through joint dfs
+    while let Some((pattern_node, main_node)) = stack.pop() {
         let pattern_parents =
             pattern_graph.neighbors_directed(pattern_node, petgraph::Direction::Incoming);
         let main_parents = main_graph
@@ -695,6 +746,7 @@ fn backtrack_match(
         'pattern_loop: for pattern_parent in pattern_parents {
             for main_parent in &main_parents {
                 if matches.values().any(|&v| v == *main_parent) {
+                    // This main node was used already, skip it
                     continue;
                 }
                 if test_node(
@@ -703,7 +755,7 @@ fn backtrack_match(
                     *main_parent,
                 ) {
                     matches.insert(pattern_parent, *main_parent);
-                    stack.push_back((pattern_parent, *main_parent));
+                    stack.push((pattern_parent, *main_parent));
                     continue 'pattern_loop;
                 }
             }
@@ -812,7 +864,7 @@ pub struct SelectOp {
 }
 
 #[macro_export]
-macro_rules! constant_select_op {
+macro_rules! select_const {
     ($i: expr, $t: tt) => {
         SelectOp::new().check(|o, _| {
             if let Some(c) = o.as_any().downcast_ref::<MetalConstant<$t>>() {
@@ -825,6 +877,13 @@ macro_rules! constant_select_op {
                 false
             }
         })
+    };
+}
+
+#[macro_export]
+macro_rules! select_ty {
+    ($t: ty) => {
+        SelectOp::new().ty::<$t>()
     };
 }
 
@@ -849,13 +908,22 @@ impl SelectOp {
         self
     }
     /// Constrain the op to input shapes
-    pub fn shapes<S: Into<Vec<Vec<Expression>>>>(mut self, shapes: S) -> Self {
-        self.shape = Some(shapes.into());
+    pub fn shapes<E: Into<Expression>, V: Into<Vec<E>>, S: Into<Vec<V>>>(
+        mut self,
+        shapes: S,
+    ) -> Self {
+        self.shape = Some(
+            shapes
+                .into()
+                .into_iter()
+                .map(|i| i.into().into_iter().map(|i| i.into()).collect())
+                .collect(),
+        );
         self
     }
     /// Constrain the op to input shape fakes
-    pub fn fakes<S: Into<Vec<Vec<Option<bool>>>>>(mut self, fakes: S) -> Self {
-        self.fake = Some(fakes.into());
+    pub fn fakes<V: Into<Vec<Option<bool>>>, S: Into<Vec<V>>>(mut self, fakes: S) -> Self {
+        self.fake = Some(fakes.into().into_iter().map(|i| i.into()).collect());
         self
     }
     /// Register a pointer to set if the op is matched

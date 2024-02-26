@@ -1,14 +1,13 @@
 use num_traits::FloatConst;
 use std::{marker::PhantomData, mem::size_of, sync::Arc};
 
-use half::f16;
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
 use crate::{
     compilers::metal::{prim::*, *},
-    constant_select_op,
     op::{ConstantValue, InputTensor, Operator},
     prelude::*,
+    select_const, select_ty,
 };
 
 use metal_rs::{objc::rc::autoreleasepool, *};
@@ -135,7 +134,7 @@ impl<T: MetalFloat> Operator for MetalMeanReduce<T> {
             sh.remove_dim(self.3);
             let inp_size = sh.n_elements().to_usize().unwrap();
             let out = self.2.new_buffer(
-                (inp_size * std::mem::size_of::<f16>()) as u64,
+                (inp_size * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
 
@@ -679,10 +678,10 @@ impl<T: MetalFloat> Compiler for MetalExpCompiler<T> {
             NodeIndex::default(),
         );
 
-        let s = constant_select_op!(1.0 / f32::ln(2.), T)
+        let s = select_const!(1.0 / f32::ln(2.), T)
             .ptr(&mut constant)
-            .edge(SelectOp::new().ty::<MetalMul<f16>>().ptr(&mut mul))
-            .edge(SelectOp::new().ty::<MetalExp2<f16>>().ptr(&mut exp2));
+            .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul))
+            .edge(SelectOp::new().ty::<MetalExp2<T>>().ptr(&mut exp2));
 
         let mut searcher = s.search(graph);
         while searcher.next_match() {
@@ -840,9 +839,9 @@ impl<T: MetalFloat> Compiler for MetalCosCompiler<T> {
         let s = SelectOp::new()
             .ptr(&mut x)
             .edge(
-                constant_select_op!(f32::PI() / 2., T)
+                select_const!(f32::PI() / 2., T)
                     .ptr(&mut const_pi)
-                    .edge(SelectOp::new().ty::<MetalSub<T>>().ptr(&mut sub)),
+                    .edge(select_ty!(MetalSub<T>).ptr(&mut sub)),
             )
             .edge(SelectOp::new().ty::<MetalSin<T>>().ptr(&mut sin));
 
@@ -880,9 +879,9 @@ impl<T: MetalFloat> Compiler for MetalCosCompiler<T> {
             );
 
             // Remove the old ops
-            graph.graph.remove_node(sub);
-            graph.graph.remove_node(const_pi);
             graph.graph.remove_node(sin);
+            graph.safe_remove_node(sub, 0);
+            graph.safe_remove_node(const_pi, 0);
         }
     }
 }
@@ -1069,6 +1068,7 @@ impl<T: MetalFloat> Compiler for SoftmaxCompiler<T> {
 pub struct MetalRope<T> {
     pipeline: ComputePipelineState,
     axis_size: usize,
+    seq_offset: BigExpression,
     queue: CommandQueue,
     device: Device,
     dyn_symbols: Vec<char>,
@@ -1079,46 +1079,67 @@ pub struct MetalRope<T> {
 impl<T: MetalFloat> MetalRope<T> {
     fn new(
         axis_size: usize,
+        seq_offset: BigExpression,
         shape: ShapeTracker,
         device: Device,
         queue: CommandQueue,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
-        let half_size = axis_size / 2;
         let type_name = T::type_name();
         let (index, valid) = get_idx_valid_exps(shape);
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape], 3);
         Self {
-            pipeline: compile_function("mkernel", &format!("
+            pipeline: compile_function(
+                "mkernel",
+                &format!(
+                    "
 #include <metal_stdlib>
 using namespace metal;
-kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *out [[buffer(1)]], device uint& n_elements [[buffer(2)]], uint idx [[thread_position_in_grid]]{rendered}) {{
-    if (idx < n_elements) {{
-        uint orig_idx = idx;
-        idx = {index};
-        if ((idx % {axis_size}) < {half_size}) {{
-            idx += {half_size};
-            out[orig_idx] = ({valid} != 0) ? -inp[idx] : 0.0;
-        }} else {{
-            idx -= {half_size};
-            out[orig_idx] = ({valid} != 0) ? inp[idx]: 0.0;
-        }}
-    }}
-}}
-"), &device),
+kernel void mkernel(
+    device {type_name} *inp [[buffer(0)]],
+    device {type_name} *out [[buffer(1)]],
+    device uint& seq_offset [[buffer(2)]],
+    uint thread_index_in_threadgroup [[thread_index_in_threadgroup]],
+    uint3 threads_per_threadgroup [[threads_per_threadgroup]],
+    uint3 threadgroups_per_grid [[threadgroups_per_grid]],
+    uint3 threadgroup_position_in_grid [[threadgroup_position_in_grid]]
+    {rendered}
+) {{
+    const uint seq_len = threadgroups_per_grid.y;
+    const uint size = threads_per_threadgroup.x * 2;
+    const uint local_seq_pos = threadgroup_position_in_grid.y;
+    const uint head_pos = threadgroup_position_in_grid.x;
+    const uint heads = threadgroups_per_grid.x;
+    const uint global_seq_pos = local_seq_pos + seq_offset;
+    const uint vec_pos = thread_index_in_threadgroup * 2;
+    const float theta = (float)global_seq_pos * pow(1000000.0, -(float)vec_pos / (float)size);
+    const float sin_theta = sin(theta);
+    const float cos_theta = cos(theta);
+
+    uint idx = threadgroup_position_in_grid.z * heads * seq_len * size + head_pos * seq_len * size + local_seq_pos * size + vec_pos;
+    float x0 = ({valid} == 0 ? 0.0 : (float)inp[{index}]);
+    idx += 1;
+    float x1 = ({valid} == 0 ? 0.0 : (float)inp[{index}]);
+    out[idx - 1] = ({type_name})(x0 * cos_theta - x1 * sin_theta);
+    out[idx] = ({type_name})(x0 * sin_theta + x1 * cos_theta);
+}}"
+                ),
+                &device,
+            ),
             device,
             queue,
             dyn_symbols,
             axis_size,
+            seq_offset,
             dyn_map,
-            _phantom: Default::default()
+            _phantom: Default::default(),
         }
     }
 }
 
 impl<T> MetalKernel for MetalRope<T> {
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
-        vec![input_shapes[0].n_physical_elements() * size_of::<T>()]
+        vec![input_shapes[0].n_elements() * size_of::<T>()]
     }
     fn metal_forward(
         &self,
@@ -1127,12 +1148,16 @@ impl<T> MetalKernel for MetalRope<T> {
         _: &[&Buffer],
         output_buffers: &[&Buffer],
     ) {
-        let n_elements = inputs[0].1.n_physical_elements().to_usize().unwrap();
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
         encoder.set_buffer(0, Some(inputs[0].0), 0);
         encoder.set_buffer(1, Some(output_buffers[0]), 0);
-        encoder.set_u32(2, n_elements as u32);
+        encoder.set_u32(
+            2,
+            self.seq_offset
+                .exec(unsafe { self.dyn_map.as_ref().unwrap() })
+                .unwrap() as u32,
+        );
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
@@ -1140,7 +1165,15 @@ impl<T> MetalKernel for MetalRope<T> {
             3,
         );
         encoder.set_compute_pipeline_state(&self.pipeline);
-        encoder.dispatch_1d(n_elements);
+        let sh = inputs[0].1.shape();
+        encoder.dispatch_thread_groups(
+            MTLSize {
+                width: sh[1].to_usize().unwrap() as u64,
+                height: sh[2].to_usize().unwrap() as u64,
+                depth: sh[0].to_usize().unwrap() as u64,
+            },
+            MTLSize::new((sh[3].to_usize().unwrap() / 2) as u64, 1, 1),
+        );
         encoder.end_encoding();
     }
 }
@@ -1186,6 +1219,7 @@ impl<T: MetalFloat> Operator for MetalRope<T> {
             if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
                 *self = Self::new(
                     self.axis_size,
+                    self.seq_offset.clone(),
                     input_shapes[0],
                     self.device.clone(),
                     self.queue.clone(),
@@ -1205,131 +1239,186 @@ impl<T: MetalFloat> Compiler for RopeCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
-        let (mut neg_one, mut add, mut mul, mut contig) = (
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-        );
+        let mut head_dim_arange = NodeIndex::default();
+        let mut two = NodeIndex::default();
+        let mut mul_2 = NodeIndex::default();
+        let mut inv_head_dim = NodeIndex::default();
+        let mut head_dim_mul = NodeIndex::default();
+        let mut theta = NodeIndex::default();
+        let mut theta_mul = NodeIndex::default();
+        let mut exp = NodeIndex::default();
+        let mut recip = NodeIndex::default();
+        let mut seq_arange = NodeIndex::default();
+        let mut seq_expr = NodeIndex::default();
+        let mut seq_add = NodeIndex::default();
+        let mut freq_seq_mul = NodeIndex::default();
+        let mut input = NodeIndex::default();
+        let mut split_contig1 = NodeIndex::default();
+        let mut split_contig2 = NodeIndex::default();
+        let mut split_contig3 = NodeIndex::default();
+        let mut sin1 = NodeIndex::default();
+        let mut sin2 = NodeIndex::default();
+        let mut cos1 = NodeIndex::default();
+        let mut cos2 = NodeIndex::default();
+        let mut out_add = NodeIndex::default();
+        let mut out_sub = NodeIndex::default();
+        let mut final_add = NodeIndex::default();
+        let mut out_mul1 = NodeIndex::default();
+        let mut out_mul2 = NodeIndex::default();
+        let mut out_mul3 = NodeIndex::default();
+        let mut out_mul4 = NodeIndex::default();
 
-        let mut searcher = constant_select_op!(-1.0, T)
-            .ptr(&mut neg_one)
-            .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul))
+        let freqs = select_const!(1000000.0_f32.ln(), T)
+            .ptr(&mut theta)
             .edge(
-                SelectOp::new()
-                    .ty::<MetalContiguous<T>>()
-                    .ptr(&mut contig)
-                    .edge(SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add)),
+                select_ty!(MetalConstant<T>)
+                    .ptr(&mut inv_head_dim)
+                    .edge(
+                        select_ty!(MetalConstant<T>)
+                            .ptr(&mut two)
+                            .edge(
+                                select_ty!(crate::compilers::metal::other::MetalARange<T>)
+                                    .ptr(&mut head_dim_arange)
+                                    .edge(select_ty!(MetalMul<T>).ptr(&mut mul_2)),
+                            )
+                            .edge(select_ty!(MetalMul<T>).ptr(&mut head_dim_mul)),
+                    )
+                    .edge(select_ty!(MetalMul<T>).ptr(&mut theta_mul)),
             )
+            .edge(select_ty!(MetalExp<T>).ptr(&mut exp))
+            .edge(select_ty!(MetalRecip<T>).ptr(&mut recip));
+        let seq = select_ty!(MetalConstant<T>).ptr(&mut seq_expr).edge(
+            select_ty!(crate::compilers::metal::other::MetalARange<T>)
+                .ptr(&mut seq_arange)
+                .edge(select_ty!(MetalAdd<T>).ptr(&mut seq_add)),
+        );
+        let emb = freqs.edge(seq.edge(select_ty!(MetalMul<T>).ptr(&mut freq_seq_mul)));
+        let split = SelectOp::new()
+            .ptr(&mut input)
+            .edge(select_ty!(MetalContiguous<T>).ptr(&mut split_contig1));
+        let x0 = split
+            .clone()
+            .edge(select_ty!(MetalContiguous<T>).ptr(&mut split_contig2));
+        let x1 = split.edge(select_ty!(MetalContiguous<T>).ptr(&mut split_contig3));
+        let x0_sin = emb
+            .clone()
+            .edge(select_ty!(MetalSin<T>).ptr(&mut sin1))
+            .edge(x0.clone().edge(select_ty!(MetalMul<T>).ptr(&mut out_mul1)));
+        let x0_cos = emb
+            .clone()
+            .edge(select_ty!(MetalCos<T>).ptr(&mut cos1))
+            .edge(x0.edge(select_ty!(MetalMul<T>).ptr(&mut out_mul2)));
+        let x1_sin = emb
+            .clone()
+            .edge(select_ty!(MetalSin<T>).ptr(&mut sin2))
+            .edge(x1.clone().edge(select_ty!(MetalMul<T>).ptr(&mut out_mul3)));
+        let x1_cos = emb
+            .clone()
+            .edge(select_ty!(MetalCos<T>).ptr(&mut cos2))
+            .edge(x1.edge(select_ty!(MetalMul<T>).ptr(&mut out_mul4)));
+        let x0_out = x1_sin.edge(x0_cos.edge(select_ty!(MetalSub<T>).ptr(&mut out_sub)));
+        let x1_out = x0_sin.edge(x1_cos.edge(select_ty!(MetalAdd<T>).ptr(&mut out_add)));
+        let mut searcher = x1_out
+            .edge(x0_out.edge(select_ty!(MetalAdd<T>).ptr(&mut final_add)))
             .search(graph);
+
         while searcher.next_match() {
-            if check_no_delete(graph, &[mul]) {
-                // An intermediate node can't be deleted
+            if check_no_delete(
+                graph,
+                &[
+                    head_dim_arange,
+                    two,
+                    mul_2,
+                    inv_head_dim,
+                    head_dim_mul,
+                    theta,
+                    theta_mul,
+                    exp,
+                    recip,
+                    seq_arange,
+                    seq_expr,
+                    seq_add,
+                    freq_seq_mul,
+                    input,
+                    split_contig1,
+                    split_contig2,
+                    split_contig3,
+                    sin1,
+                    sin2,
+                    cos1,
+                    cos2,
+                    out_add,
+                    out_sub,
+                    final_add,
+                    out_mul1,
+                    out_mul2,
+                    out_mul3,
+                    out_mul4,
+                ],
+            ) {
                 continue;
             }
-            // Check shapes
-            let a_shape_first = graph
+
+            let shape = graph
                 .graph
-                .edges_directed(mul, petgraph::Direction::Incoming)
-                .find(|e| e.source() != neg_one)
+                .edges_connecting(input, split_contig1)
+                .next()
                 .unwrap()
                 .weight()
                 .as_data()
                 .unwrap()
                 .2;
-            let Some(axis_size) = a_shape_first.dims[a_shape_first.indexes[3]].to_usize() else {
+            let Some(MetalConstant(ConstantValue::Expression(e), ..)) = graph
+                .graph
+                .node_weight(seq_expr)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<MetalConstant<T>>()
+            else {
                 continue;
             };
-            let b_shape_first = graph
-                .graph
-                .edges_directed(contig, petgraph::Direction::Incoming)
-                .next()
-                .unwrap()
-                .weight()
-                .as_data()
-                .unwrap()
-                .2;
-            let a_shape_last = graph
-                .graph
-                .edges_connecting(mul, add)
-                .next()
-                .unwrap()
-                .weight()
-                .as_data()
-                .unwrap()
-                .2;
-            let b_shape_last = graph
-                .graph
-                .edges_connecting(contig, add)
-                .next()
-                .unwrap()
-                .weight()
-                .as_data()
-                .unwrap()
-                .2;
-            if a_shape_first.len() != 4
-                || a_shape_first.slices[a_shape_first.indexes[3]]
-                    .0
-                    .to_usize()
-                    .map(|i| i != axis_size / 2)
-                    .unwrap_or(true)
-                || b_shape_first.slices[b_shape_first.indexes[3]]
-                    .1
-                    .to_usize()
-                    .map(|i| i != axis_size / 2)
-                    .unwrap_or(true)
-                || a_shape_last.padding[a_shape_last.indexes[3]]
-                    .1
-                    .to_usize()
-                    .map(|i| i != axis_size / 2)
-                    .unwrap_or(true)
-                || b_shape_last.padding[b_shape_last.indexes[3]]
-                    .0
-                    .to_usize()
-                    .map(|i| i != axis_size / 2)
-                    .unwrap_or(true)
-            {
-                continue;
-            }
-            let mut a = graph
-                .graph
-                .edges_directed(mul, petgraph::Direction::Incoming)
-                .find(|e| e.source() != neg_one)
-                .map(|e| (e.source(), e.weight().as_data().unwrap()))
-                .unwrap();
-            for i in 0..a.1 .2.len() {
-                a.1 .2.padding[i].0 = 0.into();
-                a.1 .2.padding[i].1 = 0.into();
-                a.1 .2.slices[i].0 = 0.into();
-                a.1 .2.slices[i].1 = i32::MAX.into();
-            }
-            // Insert op
-            let rotate = graph
+            let rope_op = graph
                 .add_op(MetalRope::<T>::new(
-                    axis_size,
-                    a.1 .2,
+                    shape.shape()[3].to_usize().unwrap(),
+                    e.clone(),
+                    shape,
                     dev.clone(),
                     queue.clone(),
                     &graph.dyn_map,
                 ))
-                .input(a.0, 0, a.1 .2)
+                .input(input, 0, shape)
                 .finish();
+            move_outgoing_edge(final_add, rope_op, &mut graph.graph);
 
-            // Create edges to dests
-            move_outgoing_edge(add, rotate, &mut graph.graph);
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                add,
-                rotate,
-            );
-
-            // Remove the old ops
-            graph.graph.remove_node(add);
-            graph.safe_remove_node(mul, 0);
-            graph.safe_remove_node(neg_one, 0);
-            graph.safe_remove_node(contig, 0);
+            // Delete old ops
+            graph.graph.remove_node(final_add);
+            graph.safe_remove_node(out_add, 0);
+            graph.safe_remove_node(out_sub, 0);
+            graph.safe_remove_node(out_mul1, 0);
+            graph.safe_remove_node(out_mul2, 0);
+            graph.safe_remove_node(out_mul3, 0);
+            graph.safe_remove_node(out_mul4, 0);
+            graph.safe_remove_node(sin1, 0);
+            graph.safe_remove_node(sin2, 0);
+            graph.safe_remove_node(cos1, 0);
+            graph.safe_remove_node(cos2, 0);
+            graph.safe_remove_node(split_contig3, 0);
+            graph.safe_remove_node(split_contig2, 0);
+            graph.safe_remove_node(split_contig1, 0);
+            graph.safe_remove_node(freq_seq_mul, 0);
+            graph.safe_remove_node(seq_add, 0);
+            graph.safe_remove_node(seq_arange, 0);
+            graph.safe_remove_node(seq_expr, 0);
+            graph.safe_remove_node(recip, 0);
+            graph.safe_remove_node(exp, 0);
+            graph.safe_remove_node(theta_mul, 0);
+            graph.safe_remove_node(head_dim_mul, 0);
+            graph.safe_remove_node(mul_2, 0);
+            graph.safe_remove_node(head_dim_arange, 0);
+            graph.safe_remove_node(two, 0);
+            graph.safe_remove_node(inv_head_dim, 0);
+            graph.safe_remove_node(theta, 0);
         }
+        // graph.display();
     }
 }

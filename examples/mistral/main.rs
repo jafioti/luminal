@@ -140,7 +140,7 @@ fn main() {
 
         let now = Instant::now();
         cx.execute();
-        token_decode_times.push(now.elapsed().as_millis());
+        token_decode_times.push(now.elapsed().as_micros());
 
         // Sample tokens
         let output_id = sample_index(&logits.data());
@@ -152,9 +152,13 @@ fn main() {
         // Swap caches
         transfer_data_same_graph(&cache_dest_set, &cache_src_set, &mut cx);
     }
-    let avg_token_time = token_decode_times.iter().sum::<u128>() / token_decode_times.len() as u128;
+    let avg_token_time = token_decode_times
+        .iter()
+        .map(|t| *t as f32 / 1000.)
+        .sum::<f32>()
+        / token_decode_times.len() as f32;
     println!(
-        "\nAverage token generated in {}ms\t - ({:.2} tok/s)",
+        "\nAverage token generated in {:.2}ms\t - ({:.2} tok/s)",
         avg_token_time,
         1000.0 / avg_token_time as f32
     );

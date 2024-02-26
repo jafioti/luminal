@@ -94,9 +94,9 @@ impl<T: MetalFloat> Operator for MetalCopyFromDevice<T> {
 #[derive(Clone)]
 pub struct MetalConstant<T>(
     pub ConstantValue,
-    Device,
-    *const FxHashMap<char, usize>,
-    PhantomData<T>,
+    pub Device,
+    pub *const FxHashMap<char, usize>,
+    pub PhantomData<T>,
 );
 
 impl<T> PartialEq for MetalConstant<T> {
