@@ -135,10 +135,7 @@ impl Compiler for BatchMatMul2DCompiler {
         // Actually starts at [A,B] | [B, C]
         let s = SelectOp::new()
             .ty::<Mul>()
-            .shapes(vec![
-                vec!['D', 'A', 'C', 'B'],
-                vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
-            ])
+            .shapes(vec![vec!['D', 'A', 'C', 'B'], vec!['D', 'A', 'C', 'B']])
             .fakes(vec![
                 vec![Some(false), Some(false), Some(true), Some(false)],
                 vec![Some(true), Some(true), Some(false), Some(false)],

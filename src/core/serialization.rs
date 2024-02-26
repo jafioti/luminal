@@ -80,7 +80,7 @@ impl StateDictLoader {
 
 impl Loader for StateDictLoader {
     type Output = ();
-    fn load<M: SerializeModule>(mut self, model: &M, graph: &mut Graph) -> () {
+    fn load<M: SerializeModule>(mut self, model: &M, graph: &mut Graph) {
         for (s, n) in state_dict(model) {
             let t = self.state_dict.remove(&s).unwrap();
             graph.no_delete.insert(n);
@@ -105,7 +105,7 @@ impl SafeTensorLoader {
 
 impl Loader for SafeTensorLoader {
     type Output = ();
-    fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> () {
+    fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) {
         for (weight_name, node_index) in state_dict(model) {
             if let Some(loading_node) = graph
                 .graph

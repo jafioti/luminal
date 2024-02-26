@@ -217,13 +217,10 @@ where
         let s = SelectEdge::new(
             SelectOp::new()
                 .ty::<CudaMul<T>>()
-                .shapes(vec![
-                    vec!['A'.into(), 'C'.into(), 'B'.into()],
-                    vec!['A'.into(), 'C'.into(), 'B'.into()],
-                ])
-                .fakes(vec![
-                    vec![Some(false), Some(true), Some(false)],
-                    vec![Some(true), Some(false), Some(false)],
+                .shapes([['A', 'C', 'B'], ['A', 'C', 'B']])
+                .fakes([
+                    [Some(false), Some(true), Some(false)],
+                    [Some(true), Some(false), Some(false)],
                 ])
                 .ptr(&mut mul),
             SelectOp::new()
@@ -288,13 +285,10 @@ where
         let mut searcher = SelectEdge::new(
             SelectOp::new()
                 .ty::<CudaMul<T>>()
-                .shapes(vec![
-                    vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
-                    vec!['D'.into(), 'A'.into(), 'C'.into(), 'B'.into()],
-                ])
-                .fakes(vec![
-                    vec![Some(false), Some(false), Some(true), Some(false)],
-                    vec![Some(true), Some(true), Some(false), Some(false)],
+                .shapes([['D', 'A', 'C', 'B'], ['D', 'A', 'C', 'B']])
+                .fakes([
+                    [Some(false), Some(false), Some(true), Some(false)],
+                    [Some(true), Some(true), Some(false), Some(false)],
                 ])
                 .ptr(&mut mul),
             SelectOp::new()

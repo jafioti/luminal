@@ -192,7 +192,7 @@ impl Operator for Diff {
                     .iter()
                     .zip(bin_data.iter())
                     .map(|(a, b)| (a - b).abs())
-                    .max_by(|a, b| a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal))
+                    .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                     .unwrap();
                 let sum_dist = data
                     .iter()
