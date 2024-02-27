@@ -26,7 +26,7 @@ rand = "0.8.5"
 urlencoding = "2.1.2"
 webbrowser = "0.8.10"
 dyn-clone = "1.0.12"
-cudarc = { git = "https://github.com/jafioti/cudarc", features = [
+cudarc = { git = "https://github.com/coreylowman/cudarc", rev = "ed3bb3e5bb186fb70ebfffc497bcd206f126ccce", features = [
     "cublas",
     "f16",
 ], optional = true }
