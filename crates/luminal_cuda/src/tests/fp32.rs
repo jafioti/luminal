@@ -2,12 +2,28 @@ use dfdx::prelude::{Module as DfdxModule, *};
 use itertools::Itertools;
 use rand::{rngs::StdRng, SeedableRng};
 
-use crate::{
+use luminal::{
     nn::{activation::ReLU, linear::Linear, norm::RMSNorm},
     prelude::{symbolic::Expression, Module, *},
 };
 
-crate::test_imports!();
+#[allow(unused_imports)]
+use dfdx::prelude::{
+    Axes as DAxes, Axes2 as DAxes2, Axes3 as DAxes3, Axes4 as DAxes4, Axes5 as DAxes5,
+    Axis as DAxis, Const as DConst, *,
+};
+#[allow(unused_imports)]
+use luminal::{
+    prelude::{
+        Axes as LAxes, Axes2 as LAxes2, Axes3 as LAxes3, Axes4 as LAxes4, Axes5 as LAxes5,
+        Axis as LAxis, Const as LConst, *,
+    },
+    tests::{
+        assert_close, assert_close_precision, assert_exact, random_vec, random_vec_rng, test_graphs,
+    },
+};
+
+use crate::CudaCompiler;
 
 #[test]
 fn test_contiguous() {
@@ -204,7 +220,7 @@ fn test_square() {
     let mut rng = rand::thread_rng();
     let data = random_vec_rng(40960, &mut rng);
     let a = cx
-        .tensor::<(Dyn<'b'>, Dyn<'s'>, crate::prelude::Const<4096>)>()
+        .tensor::<(Dyn<'b'>, Dyn<'s'>, luminal::prelude::Const<4096>)>()
         .set_dyn(data.clone(), &[1, 10, 4096]);
     let mut b = a * a;
     b.retrieve();
@@ -739,7 +755,7 @@ fn test_layer_norm() {
 #[test]
 fn test_transformer_encoder_block() {
     let mut cx = Graph::new();
-    let model: crate::nn::transformer::encoder::TransformerEncoderBlock<32, 64, 1> =
+    let model: luminal::nn::transformer::encoder::TransformerEncoderBlock<32, 64, 1> =
         InitModule::initialize(&mut cx);
     let w_k_weight = random_vec(32 * 32);
     model.attention.w_k.weight.set(w_k_weight.clone());
@@ -837,7 +853,7 @@ fn test_embedding() {
         .set(vec![1.0, 0.0, 1.0])
         .keep();
 
-    let model: crate::nn::embedding::Embedding<3, 4> = InitModule::initialize(&mut cx);
+    let model: luminal::nn::embedding::Embedding<3, 4> = InitModule::initialize(&mut cx);
     model
         .weight
         .set(vec![1.1, 2., 3., 1., 2., 3., 14., 2., 33., 1., 2., 3.]);

@@ -4,13 +4,12 @@ mod prim;
 #[cfg(test)]
 mod tests;
 
-use cudarc::driver::CudaSlice;
-use half::f16;
+use cudarc::driver::{CudaSlice, DeviceRepr};
 use itertools::Itertools;
 
 use std::fmt::Write;
 
-use crate::prelude::*;
+use luminal::prelude::*;
 
 use self::symbolic::{BigExpression, Term};
 
@@ -47,7 +46,16 @@ impl CudaFloat for f32 {
         "float"
     }
 }
-impl Data for CudaSlice<f32> {
+#[derive(Debug)]
+pub struct CudaData<T>(CudaSlice<T>);
+
+impl<T: DeviceRepr> Clone for CudaData<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.try_clone().unwrap())
+    }
+}
+
+impl Data for CudaData<f32> {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -71,7 +79,7 @@ impl CudaFloat for f16 {
         "__half"
     }
 }
-impl Data for CudaSlice<f16> {
+impl Data for CudaData<f16> {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

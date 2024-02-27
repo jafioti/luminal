@@ -9,10 +9,10 @@ pub struct MultiHeadSelfAttention<
     const V_DIM: usize,
     const HEADS: usize,
 > {
-    pub(crate) w_q: Linear<DIM, K_DIM>,
-    pub(crate) w_k: Linear<DIM, K_DIM>,
-    pub(crate) w_v: Linear<DIM, V_DIM>,
-    pub(crate) w_o: Linear<V_DIM, DIM>,
+    pub w_q: Linear<DIM, K_DIM>,
+    pub w_k: Linear<DIM, K_DIM>,
+    pub w_v: Linear<DIM, V_DIM>,
+    pub w_o: Linear<V_DIM, DIM>,
 }
 
 impl<const DIM: usize, const K_DIM: usize, const V_DIM: usize, const HEADS: usize> InitModule

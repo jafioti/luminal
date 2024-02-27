@@ -8,8 +8,3 @@ pub use cpu::*;
 mod cuda;
 #[cfg(feature = "cuda")]
 pub use cuda::*;
-
-#[cfg(feature = "metal")]
-pub mod metal;
-#[cfg(feature = "metal")]
-pub use metal::*;

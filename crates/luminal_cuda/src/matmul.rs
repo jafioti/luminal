@@ -2,12 +2,15 @@ use std::{marker::PhantomData, sync::Arc};
 
 use cudarc::{
     cublas::{sys::cublasOperation_t::*, CudaBlas},
-    driver::{CudaDevice, CudaSlice, DevicePtr, DevicePtrMut},
+    driver::{CudaDevice, DevicePtr, DevicePtrMut},
 };
-use petgraph::stable_graph::NodeIndex;
 
 use crate::{
-    compilers::cuda::prim::{CudaMul, CudaSumReduce},
+    prim::{CudaMul, CudaSumReduce},
+    CudaData, CudaFloat,
+};
+use luminal::{
+    graph::NodeIndex,
     op::{InputTensor, Operator},
     prelude::*,
 };
@@ -18,7 +21,7 @@ pub struct CudaMatmul2D<T>(Arc<CudaBlas>, Arc<CudaDevice>, PhantomData<T>);
 
 impl<T: CudaFloat + 'static> Operator for CudaMatmul2D<T>
 where
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
@@ -32,14 +35,14 @@ where
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let b = inp[1]
             .0
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let mut out = self.1.alloc_zeros::<T>((m * n) as usize).unwrap();
         let (a_row_major, b_row_major) = (
@@ -62,9 +65,9 @@ where
                     m,
                     k,
                     &1.0_f32 as *const f32,
-                    *b.device_ptr() as *const f32,
+                    *b.0.device_ptr() as *const f32,
                     if b_row_major { n } else { k },
-                    *a.device_ptr() as *const f32,
+                    *a.0.device_ptr() as *const f32,
                     if a_row_major { k } else { m },
                     &0.0_f32 as *const f32,
                     *out.device_ptr_mut() as *mut f32,
@@ -82,9 +85,9 @@ where
                     m,
                     k,
                     &f16::from_f32(1.0) as *const f16,
-                    *b.device_ptr() as *const f16,
+                    *b.0.device_ptr() as *const f16,
                     if b_row_major { n } else { k },
-                    *a.device_ptr() as *const f16,
+                    *a.0.device_ptr() as *const f16,
                     if a_row_major { k } else { m },
                     &f16::from_f32(0.0) as *const f16,
                     *out.device_ptr_mut() as *mut f16,
@@ -95,7 +98,7 @@ where
         }
 
         vec![Tensor {
-            data: Box::new(out),
+            data: Box::new(CudaData(out)),
         }]
     }
 }
@@ -106,7 +109,7 @@ pub struct CudaBatchMatmul2D<T>(Arc<CudaBlas>, Arc<CudaDevice>, PhantomData<T>);
 
 impl<T: CudaFloat + 'static> Operator for CudaBatchMatmul2D<T>
 where
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
@@ -122,14 +125,14 @@ where
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let b = inp[1]
             .0
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let mut out = self
             .1
@@ -155,10 +158,10 @@ where
                     m,
                     k,
                     &1.0_f32 as *const f32,
-                    *b.device_ptr() as *const f32,
+                    *b.0.device_ptr() as *const f32,
                     if b_row_major { n } else { k },
                     0,
-                    *a.device_ptr() as *const f32,
+                    *a.0.device_ptr() as *const f32,
                     if a_row_major { k } else { m },
                     a_strides[0].to_usize().unwrap() as i64,
                     &0.0_f32 as *const f32,
@@ -179,10 +182,10 @@ where
                     m,
                     k,
                     &f16::from_f32(1.0) as *const f16,
-                    *b.device_ptr() as *const f16,
+                    *b.0.device_ptr() as *const f16,
                     if b_row_major { n } else { k },
                     0,
-                    *a.device_ptr() as *const f16,
+                    *a.0.device_ptr() as *const f16,
                     if a_row_major { k } else { m },
                     a_strides[0].to_usize().unwrap() as i64,
                     &f16::from_f32(0.0) as *const f16,
@@ -196,7 +199,7 @@ where
         }
 
         vec![Tensor {
-            data: Box::new(out),
+            data: Box::new(CudaData(out)),
         }]
     }
 }
@@ -206,7 +209,7 @@ pub struct CudaMatMulCompiler<T>(PhantomData<T>);
 
 impl<T: CudaFloat + 'static> Compiler for CudaMatMulCompiler<T>
 where
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
         let dev = CudaDevice::new(0).unwrap();

@@ -5,8 +5,7 @@ pub mod nn;
 
 mod hl_ops;
 
-#[cfg(test)]
-mod tests;
+pub mod tests;
 
 pub mod prelude {
     pub use crate::compiler_utils::*;
@@ -20,4 +19,5 @@ pub mod prelude {
     pub use crate::tensor::*;
     pub use half::{bf16, f16};
     pub use luminal_macro::*;
+    pub use petgraph;
 }

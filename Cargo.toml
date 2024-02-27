@@ -7,9 +7,8 @@ license = "MIT OR Apache-2.0"
 
 [features]
 #default = ["cuda"]
-default = ["metal"]
-cuda = ["dep:cudarc"]
-metal = ["dep:metal-rs"]
+#default = ["metal"]
+cuda = []
 
 [[example]]
 name = "mistral"
@@ -26,13 +25,7 @@ rand = "0.8.5"
 urlencoding = "2.1.2"
 webbrowser = "0.8.10"
 dyn-clone = "1.0.12"
-cudarc = { git = "https://github.com/coreylowman/cudarc", rev = "ed3bb3e5bb186fb70ebfffc497bcd206f126ccce", features = [
-    "cublas",
-    "f16",
-], optional = true }
-metal-rs = { version = "0.27.0", package = "metal", features = [
-    "mps",
-], optional = true }
+
 safetensors = "0.3.1"
 memmap2 = { version = "0.7.1", features = ["stable_deref_trait"] }
 half = { version = "2.3.1", features = ["num-traits", "rand_distr"] }

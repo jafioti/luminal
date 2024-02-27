@@ -1,6 +1,8 @@
 #![allow(unused)]
 
+#[cfg(test)]
 mod dynamic;
+#[cfg(test)]
 pub mod harness;
 pub mod test_graphs;
 

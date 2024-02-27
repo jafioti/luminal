@@ -1,0 +1,18 @@
+[package]
+name = "luminal_cuda"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+luminal = {path="../.."}
+cudarc = { git = "https://github.com/coreylowman/cudarc", rev = "ed3bb3e5bb186fb70ebfffc497bcd206f126ccce", features = [
+    "cublas",
+    "f16",
+]}
+itertools = "0.12.1"
+rustc-hash = "1.1.0"
+dfdx = { version = "0.13", features = ["f16"] }
+rand = "0.8.5"
+num-traits = "0.2.18"

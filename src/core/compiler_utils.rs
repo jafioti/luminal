@@ -819,7 +819,7 @@ macro_rules! select_const {
     ($i: expr, $t: tt) => {
         SelectOp::new().check(|o, _| {
             if let Some(c) = o.as_any().downcast_ref::<MetalConstant<$t>>() {
-                if let crate::op::ConstantValue::Float(f) = c.0 {
+                if let $crate::op::ConstantValue::Float(f) = c.0 {
                     (f - $i).abs() < 0.0001
                 } else {
                     false

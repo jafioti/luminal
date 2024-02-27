@@ -1,6 +1,7 @@
+use crate::{CudaData, CudaFloat};
+
 use super::{get_idx_valid_exps, render_dyn_dim_inputs};
 use itertools::Itertools;
-use petgraph::visit::EdgeRef;
 use rustc_hash::FxHashMap;
 
 use std::{
@@ -14,13 +15,13 @@ use std::{
 };
 
 use cudarc::{
-    driver::{CudaDevice, CudaFunction, CudaSlice, DeviceRepr, LaunchAsync, LaunchConfig},
+    driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig},
     nvrtc::{compile_ptx_with_opts, CompileOptions},
 };
 
-use crate::{
+use luminal::{
     op::{Function as LFunction, *},
-    prelude::*,
+    prelude::{petgraph::visit::EdgeRef, *},
 };
 
 /// Copy a tensor to the GPU
@@ -35,11 +36,11 @@ impl<T> CudaCopyToDevice<T> {
 
 impl<T> Operator for CudaCopyToDevice<T>
 where
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
     T: CudaFloat + cudarc::driver::DeviceRepr + std::marker::Unpin,
 {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        if inp[0].0.borrowed().data.as_any().is::<CudaSlice<T>>() {
+        if inp[0].0.borrowed().data.as_any().is::<CudaData<T>>() {
             // Already on device
             return vec![inp.pop().unwrap().0.cloned()];
         }
@@ -57,7 +58,9 @@ where
             .collect::<Vec<_>>();
         let mut a = unsafe { self.0.alloc::<T>(vec.len()).unwrap() };
         self.0.htod_copy_into(vec, &mut a).unwrap();
-        vec![Tensor { data: Box::new(a) }]
+        vec![Tensor {
+            data: Box::new(CudaData(a)),
+        }]
     }
 }
 
@@ -73,7 +76,7 @@ impl<T> CudaCopyFromDevice<T> {
 
 impl<T> Operator for CudaCopyFromDevice<T>
 where
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
     T: CudaFloat + cudarc::driver::DeviceRepr + std::marker::Unpin,
 {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -86,12 +89,12 @@ where
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         vec![Tensor {
             data: Box::new(
                 self.0
-                    .dtoh_sync_copy(cuda_data)
+                    .dtoh_sync_copy(&cuda_data.0)
                     .unwrap()
                     .into_iter()
                     .map(CudaFloat::to_f32)
@@ -123,7 +126,7 @@ impl<T> CudaConstant<T> {
 impl<T> Operator for CudaConstant<T>
 where
     T: Debug + Copy + cudarc::driver::DeviceRepr + std::marker::Unpin + CudaFloat,
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let mut a = unsafe { self.1.alloc::<T>(1).unwrap() };
@@ -134,7 +137,9 @@ where
             ConstantValue::Float(f) => T::from_f32(*f),
         };
         self.1.htod_copy_into(vec![value], &mut a).unwrap();
-        vec![Tensor { data: Box::new(a) }]
+        vec![Tensor {
+            data: Box::new(CudaData(a)),
+        }]
     }
 }
 
@@ -200,7 +205,7 @@ extern \"C\" __global__ void kernel({} *out, const {} *inp_a, int numel{rendered
 impl<T> Operator for CudaContiguous<T>
 where
     T: Debug + 'static + cudarc::driver::DeviceRepr + cudarc::driver::ValidAsZeroBits,
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let res_shape = tensors[0].1.contiguous();
@@ -210,12 +215,12 @@ where
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let out = self.1.alloc_zeros::<T>(inp_size).unwrap();
         let mut params = vec![
             (&out).as_kernel_param(),
-            a.as_kernel_param(),
+            (&a.0).as_kernel_param(),
             inp_size.as_kernel_param(),
         ];
         let mut dims = [0; 10];
@@ -232,7 +237,7 @@ where
         }
 
         vec![Tensor {
-            data: Box::new(out),
+            data: Box::new(CudaData(out)),
         }]
     }
 }
@@ -283,7 +288,7 @@ where
         + cudarc::driver::DeviceRepr
         + std::marker::Unpin
         + cudarc::driver::ValidAsZeroBits,
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let inp = tensors[0]
@@ -291,7 +296,7 @@ where
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
         let mut out = self.1.alloc_zeros::<T>(inp_size).unwrap();
@@ -300,13 +305,13 @@ where
                 .clone()
                 .launch(
                     LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
+                    (&mut out, &(inp.0), inp_size),
                 )
                 .unwrap();
         }
 
         vec![Tensor {
-            data: Box::new(out),
+            data: Box::new(CudaData(out)),
         }]
     }
 }
@@ -357,7 +362,7 @@ where
         + cudarc::driver::DeviceRepr
         + std::marker::Unpin
         + cudarc::driver::ValidAsZeroBits,
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let inp = tensors[0]
@@ -365,7 +370,7 @@ where
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
         let mut out = self.1.alloc_zeros::<T>(inp_size).unwrap();
@@ -374,13 +379,13 @@ where
                 .clone()
                 .launch(
                     LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
+                    (&mut out, &(inp.0), inp_size),
                 )
                 .unwrap();
         }
 
         vec![Tensor {
-            data: Box::new(out),
+            data: Box::new(CudaData(out)),
         }]
     }
 }
@@ -432,7 +437,7 @@ where
         + cudarc::driver::DeviceRepr
         + std::marker::Unpin
         + cudarc::driver::ValidAsZeroBits,
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let inp = tensors[0]
@@ -440,7 +445,7 @@ where
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
         let mut out = self.1.alloc_zeros::<T>(inp_size).unwrap();
@@ -449,13 +454,13 @@ where
                 .clone()
                 .launch(
                     LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
+                    (&mut out, &(inp.0), inp_size),
                 )
                 .unwrap();
         }
 
         vec![Tensor {
-            data: Box::new(out),
+            data: Box::new(CudaData(out)),
         }]
     }
 }
@@ -505,7 +510,7 @@ where
         + cudarc::driver::DeviceRepr
         + std::marker::Unpin
         + cudarc::driver::ValidAsZeroBits,
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let inp = tensors[0]
@@ -513,7 +518,7 @@ where
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
         let mut out = self.1.alloc_zeros::<T>(inp_size).unwrap();
@@ -522,13 +527,13 @@ where
                 .clone()
                 .launch(
                     LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
+                    (&mut out, &(inp.0), inp_size),
                 )
                 .unwrap();
         }
 
         vec![Tensor {
-            data: Box::new(out),
+            data: Box::new(CudaData(out)),
         }]
     }
 }
@@ -580,7 +585,7 @@ where
         + cudarc::driver::DeviceRepr
         + std::marker::Unpin
         + cudarc::driver::ValidAsZeroBits,
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let inp = tensors[0]
@@ -588,7 +593,7 @@ where
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
         let mut out = self.1.alloc_zeros::<T>(inp_size).unwrap();
@@ -597,13 +602,13 @@ where
                 .clone()
                 .launch(
                     LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
+                    (&mut out, &(inp.0), inp_size),
                 )
                 .unwrap();
         }
 
         vec![Tensor {
-            data: Box::new(out),
+            data: Box::new(CudaData(out)),
         }]
     }
 }
@@ -691,7 +696,7 @@ where
         + cudarc::driver::DeviceRepr
         + std::marker::Unpin
         + cudarc::driver::ValidAsZeroBits,
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let a = tensors[0]
@@ -699,22 +704,22 @@ where
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let b = tensors[1]
             .0
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
 
         let out = self.1.alloc_zeros::<T>(inp_size).unwrap();
         let mut params = vec![
             (&out).as_kernel_param(),
-            a.as_kernel_param(),
-            b.as_kernel_param(),
+            (&a.0).as_kernel_param(),
+            (&b.0).as_kernel_param(),
             inp_size.as_kernel_param(),
         ];
         let mut dims = [0; 10];
@@ -731,7 +736,7 @@ where
         }
 
         vec![Tensor {
-            data: Box::new(out),
+            data: Box::new(CudaData(out)),
         }]
     }
 }
@@ -802,7 +807,7 @@ where
         + cudarc::driver::DeviceRepr
         + std::marker::Unpin
         + cudarc::driver::ValidAsZeroBits,
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let a = tensors[0]
@@ -810,22 +815,22 @@ where
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let b = tensors[1]
             .0
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
 
         let out = unsafe { self.1.alloc::<T>(inp_size).unwrap() };
         let mut params = vec![
             (&out).as_kernel_param(),
-            a.as_kernel_param(),
-            b.as_kernel_param(),
+            (&a.0).as_kernel_param(),
+            (&b.0).as_kernel_param(),
             inp_size.as_kernel_param(),
         ];
         let mut dims = [0; 10];
@@ -842,7 +847,7 @@ where
         }
 
         vec![Tensor {
-            data: Box::new(out),
+            data: Box::new(CudaData(out)),
         }]
     }
 }
@@ -930,7 +935,7 @@ where
         + cudarc::driver::DeviceRepr
         + std::marker::Unpin
         + cudarc::driver::ValidAsZeroBits,
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let a = tensors[0]
@@ -938,22 +943,22 @@ where
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let b = tensors[1]
             .0
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let inp_size: usize = tensors[0].1.n_elements().to_usize().unwrap();
 
         let out = self.1.alloc_zeros::<T>(inp_size).unwrap();
         let mut params = vec![
             (&out).as_kernel_param(),
-            a.as_kernel_param(),
-            b.as_kernel_param(),
+            (&a.0).as_kernel_param(),
+            (&b.0).as_kernel_param(),
             inp_size.as_kernel_param(),
         ];
         let mut dims = [0; 10];
@@ -970,7 +975,7 @@ where
         }
 
         vec![Tensor {
-            data: Box::new(out),
+            data: Box::new(CudaData(out)),
         }]
     }
 }
@@ -1056,7 +1061,7 @@ where
         + cudarc::driver::DeviceRepr
         + std::marker::Unpin
         + cudarc::driver::ValidAsZeroBits,
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let a = tensors[0]
@@ -1064,22 +1069,22 @@ where
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let b = tensors[1]
             .0
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
 
         let out = self.1.alloc_zeros::<T>(inp_size).unwrap();
         let mut params = vec![
             (&out).as_kernel_param(),
-            a.as_kernel_param(),
-            b.as_kernel_param(),
+            (&a.0).as_kernel_param(),
+            (&b.0).as_kernel_param(),
             inp_size.as_kernel_param(),
         ];
         let mut dims = [0; 10];
@@ -1096,7 +1101,7 @@ where
         }
 
         vec![Tensor {
-            data: Box::new(out),
+            data: Box::new(CudaData(out)),
         }]
     }
 }
@@ -1171,7 +1176,7 @@ extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, co
 impl<T> Operator for CudaSumReduce<T>
 where
     T: CudaFloat,
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let mut shape = tensors[0].1;
@@ -1182,7 +1187,7 @@ where
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let front_size: usize = tensors[0]
             .1
@@ -1203,7 +1208,7 @@ where
         let out = self.1.alloc_zeros::<T>(inp_size).unwrap();
         let mut params = vec![
             (&out).as_kernel_param(),
-            inp.as_kernel_param(),
+            (&inp.0).as_kernel_param(),
             front_size.as_kernel_param(),
             back_size.as_kernel_param(),
             dim_size.as_kernel_param(),
@@ -1222,7 +1227,7 @@ where
                 .unwrap();
         }
         vec![Tensor {
-            data: Box::new(out),
+            data: Box::new(CudaData(out)),
         }]
     }
 }
@@ -1302,7 +1307,7 @@ where
         + cudarc::driver::DeviceRepr
         + std::marker::Unpin
         + cudarc::driver::ValidAsZeroBits,
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let mut shape = tensors[0].1;
@@ -1313,7 +1318,7 @@ where
             .borrowed()
             .data
             .as_any()
-            .downcast_ref::<CudaSlice<T>>()
+            .downcast_ref::<CudaData<T>>()
             .unwrap();
         let front_size: usize = tensors[0]
             .1
@@ -1334,7 +1339,7 @@ where
         let out = self.1.alloc_zeros::<T>(inp_size).unwrap();
         let mut params = vec![
             (&out).as_kernel_param(),
-            inp.as_kernel_param(),
+            (&inp.0).as_kernel_param(),
             front_size.as_kernel_param(),
             back_size.as_kernel_param(),
             dim_size.as_kernel_param(),
@@ -1354,7 +1359,7 @@ where
         }
 
         vec![Tensor {
-            data: Box::new(out),
+            data: Box::new(CudaData(out)),
         }]
     }
 }
@@ -1371,7 +1376,7 @@ pub struct CudaPrimitiveCompiler<T>(PhantomData<T>);
 
 impl<T: CudaFloat + 'static> Compiler for CudaPrimitiveCompiler<T>
 where
-    CudaSlice<T>: Data,
+    CudaData<T>: Data,
 {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
         let dev = CudaDevice::new(0).unwrap();
