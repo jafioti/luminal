@@ -10,11 +10,6 @@ license = "MIT OR Apache-2.0"
 #default = ["metal"]
 cuda = []
 
-[[example]]
-name = "mistral"
-path = "examples/mistral/main.rs"
-required-features = ["metal"]
-
 [dependencies]
 luminal_macro = { path = "./resources/luminal_macro" }
 itertools = "0.11.0"

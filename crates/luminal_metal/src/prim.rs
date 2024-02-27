@@ -23,7 +23,7 @@ impl<T> MetalCopyToDevice<T> {
 
 impl<T: MetalFloat> Operator for MetalCopyToDevice<T> {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        if inp[0].0.borrowed().data.as_any().is::<Buffer>() {
+        if inp[0].0.borrowed().data.as_any().is::<MetalBuffer>() {
             // Already on device
             return vec![inp.pop().unwrap().0.cloned()];
         }

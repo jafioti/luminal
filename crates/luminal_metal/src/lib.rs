@@ -63,7 +63,7 @@ type SpecialOpsCompiler<T> = (
 );
 
 #[derive(Debug, Clone)]
-pub struct MetalBuffer(Buffer);
+pub struct MetalBuffer(pub Buffer);
 
 impl Deref for MetalBuffer {
     type Target = Buffer;

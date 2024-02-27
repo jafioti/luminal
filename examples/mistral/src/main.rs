@@ -6,6 +6,7 @@ use std::{
 
 use clap::Parser;
 use colored::Colorize;
+use luminal_metal::MetalQuantizedCompiler;
 use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
 
 mod gguf;
@@ -24,17 +25,14 @@ pub struct CLIArgs {
     gen_tokens: i32,
 
     /// Prompt for the model
-    #[clap(short = 'p', long = "prompt", default_value = include_str!("prompts/merge_sort.txt"))]
+    #[clap(short = 'p', long = "prompt", default_value = include_str!("../prompts/merge_sort.txt"))]
     prompt: String,
 }
 
 fn main() {
     let cli_args = CLIArgs::parse();
-    let tokenizer = SentencePieceBpeTokenizer::from_file(
-        "./examples/mistral/setup/mistral_tokenizer.model",
-        false,
-    )
-    .unwrap();
+    let tokenizer =
+        SentencePieceBpeTokenizer::from_file("setup/mistral_tokenizer.model", false).unwrap();
 
     print!("Defining graph");
     io::stdout().flush().unwrap();
@@ -56,12 +54,9 @@ fn main() {
     cache_dest.keep();
 
     // Set up model loading
-    #[cfg(feature = "metal")]
     let quantized_weight_nodes =
-        loader::MetalQ8Loader::new("./examples/mistral/setup/mistral-7b-instruct-v0.2.Q8_0.gguf")
+        loader::MetalQ8Loader::new("setup/mistral-7b-instruct-v0.2.Q8_0.gguf")
             .load(&model, &mut cx);
-    #[cfg(not(feature = "metal"))]
-    todo!("Implement a gguf loader for non-metal devices");
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
     print!("Compiling graph");
@@ -70,17 +65,12 @@ fn main() {
     cx.compile(
         (
             GenericCompiler::default(),
-            #[cfg(feature = "metal")]
             MetalQuantizedCompiler::<f32>::new(quantized_weight_nodes),
-            #[cfg(feature = "cuda")]
-            CudaFp16Compiler::default(),
-            #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
-            CPUCompiler::default(),
         ),
         (&mut input, &mut logits, &mut cache_src, &mut cache_dest),
     );
     // Keep model weights
-    let model_weights = downstream(&state_set(&model), &cx);
+    let model_weights = downstream(state_set(&model), &cx);
     cx.keep_tensors(&model_weights);
     let cache_src_set = downstream(&cache_src, &cx);
     let cache_dest_set = cache_dest.to_ids();
@@ -160,7 +150,7 @@ fn main() {
     println!(
         "\nAverage token generated in {:.2}ms\t - ({:.2} tok/s)",
         avg_token_time,
-        1000.0 / avg_token_time as f32
+        1000.0 / avg_token_time
     );
 }
 

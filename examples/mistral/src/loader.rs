@@ -1,6 +1,7 @@
 use std::fs::File;
 
 use luminal::{op::Function, prelude::*};
+use luminal_metal::MetalBuffer;
 use memmap2::Mmap;
 use metal_rs::{Device, MTLResourceOptions};
 
@@ -56,7 +57,7 @@ impl Loader for MetalQ8Loader {
                         MTLResourceOptions::StorageModeShared,
                     );
                     vec![Tensor {
-                        data: Box::new(buffer),
+                        data: Box::new(MetalBuffer(buffer)),
                     }]
                 });
             }

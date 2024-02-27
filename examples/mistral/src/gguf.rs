@@ -281,7 +281,7 @@ pub enum GgmlDType {
 
 impl GgmlDType {
     fn from_u32(u: u32) -> Self {
-        let dtype = match u {
+        match u {
             0 => Self::F32,
             1 => Self::F16,
             2 => Self::Q4_0,
@@ -297,7 +297,6 @@ impl GgmlDType {
             14 => Self::Q6K,
             15 => Self::Q8K,
             _ => panic!("unknown dtype for tensor {u}"),
-        };
-        dtype
+        }
     }
 }
