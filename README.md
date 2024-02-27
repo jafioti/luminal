@@ -41,18 +41,9 @@ The core of luminal is and always will be minimal. It should be possible to unde
 
 #### RISC-style architecture
 Luminal can be ran on new accelerators by implementing the following 11 primitive ops:
-- Log2
-- Exp2
-- Sin
-- Sqrt
-- Recip
-- Add
-- Mul
-- Mod
-- LessThan
-- SumReduce
-- MaxReduce
-- Contiguous
+- Unary - `Log2, Exp2, Sin, Sqrt, Recip`
+- Binary - `Add, Mul, Mod, LessThan`
+- Other - `SumReduce, MaxReduce, Contiguous`
 
 #### Native
 The current ML ecosystem is too fragmented, and the solution isn't another layer of abstraction. Luminal is written in rust, and interacts directly with the CUDA / Metal APIs. No indirections or abstractions, docker containers, or virtual environments. Just a statically-linked rust crate.
