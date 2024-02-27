@@ -79,18 +79,18 @@ impl Loader for MetalQ8Loader {
     }
 }
 
-#[cfg(feature = "cuda")]
-pub struct CudaQ8Loader(String);
+#[cfg(not(feature = "metal"))]
+pub struct Q8Loader(String);
 
-#[cfg(feature = "cuda")]
-impl CudaQ8Loader {
+#[cfg(not(feature = "metal"))]
+impl Q8Loader {
     pub fn new<S: Into<String>>(path: S) -> Self {
         Self(path.into())
     }
 }
 
-#[cfg(feature = "cuda")]
-impl Loader for CudaQ8Loader {
+#[cfg(not(feature = "metal"))]
+impl Loader for Q8Loader {
     type Output = Vec<NodeIndex>;
     fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Output {
         #[repr(C, packed)]

@@ -57,8 +57,8 @@ fn main() {
     let quantized_weight_nodes =
         loader::MetalQ8Loader::new("setup/mistral-7b-instruct-v0.2.Q8_0.gguf")
             .load(&model, &mut cx);
-    #[cfg(feature = "cuda")]
-    loader::CudaQ8Loader::new("setup/mistral-7b-instruct-v0.2.Q8_0.gguf").load(&model, &mut cx);
+    #[cfg(not(feature = "metal"))]
+    loader::Q8Loader::new("setup/mistral-7b-instruct-v0.2.Q8_0.gguf").load(&model, &mut cx);
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
     print!("Compiling graph");
@@ -71,6 +71,8 @@ fn main() {
             luminal_metal::MetalQuantizedCompiler::<f32>::new(quantized_weight_nodes),
             #[cfg(feature = "cuda")]
             luminal_cuda::CudaCompiler::<f32>::default(),
+            #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
+            luminal::compilers::CPUCompiler::default(),
         ),
         (&mut input, &mut logits, &mut cache_src, &mut cache_dest),
     );
