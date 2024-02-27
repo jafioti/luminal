@@ -24,9 +24,9 @@ type Model = LlamaForCausalLM<
 >;
 
 #[cfg(feature = "metal")]
-type DeviceCompiler = MetalCompiler<luminal::prelude::f16>;
+type DeviceCompiler = luminal_metal::MetalCompiler<luminal::prelude::f16>;
 #[cfg(feature = "cuda")]
-type DeviceCompiler = CudaCompiler<luminal::prelude::f16>;
+type DeviceCompiler = luminal_cuda::CudaCompiler<luminal::prelude::f16>;
 #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
 type DeviceCompiler = CPUCompiler;
 
@@ -35,11 +35,8 @@ fn main() {
     let tokens_to_generate = 300;
 
     println!("Creating graph...");
-    let tokenizer = SentencePieceBpeTokenizer::from_file(
-        "./examples/llama/setup/llama-7b-hf/tokenizer.model",
-        false,
-    )
-    .unwrap();
+    let tokenizer =
+        SentencePieceBpeTokenizer::from_file("setup/llama-7b-hf/tokenizer.model", false).unwrap();
 
     let mut cx1 = Graph::new(); // Prompt processing graph
     let model = Model::initialize(&mut cx1);
@@ -53,7 +50,7 @@ fn main() {
         .slice((.., (Expression::from('s') - 1).., ..))
         .retrieve();
     kv_cache.keep();
-    loader::DfdxDeferredLoader::new("./examples/llama/setup/llama-7b-hf").load(&model, &mut cx1);
+    loader::DfdxDeferredLoader::new("setup/llama-7b-hf").load(&model, &mut cx1);
 
     let mut cx2 = Graph::new(); // Token generation graph
     let kv_model = Model::initialize(&mut cx2);

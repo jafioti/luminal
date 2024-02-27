@@ -94,7 +94,7 @@ impl<T> MetalKernel for MetalSub<T> {
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
-            &encoder,
+            encoder,
             4,
         );
 
@@ -300,7 +300,7 @@ impl<T> MetalKernel for MetalEqual<T> {
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
-            &encoder,
+            encoder,
             4,
         );
 
@@ -511,7 +511,7 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
                 .borrowed()
                 .data
                 .as_any()
-                .downcast_ref::<Buffer>()
+                .downcast_ref::<MetalBuffer>()
                 .unwrap();
 
             // Setup command queue / command buffer / encoder

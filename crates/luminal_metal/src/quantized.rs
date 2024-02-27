@@ -405,7 +405,7 @@ mod tests {
     fn quantized_buffer(weights: &[BlockQ8_0], dev: &Device) -> Tensor {
         let buffer = dev.new_buffer_with_bytes_no_copy(
             weights.as_ptr() as *mut _,
-            (weights.len() * std::mem::size_of::<BlockQ8_0>()) as u64,
+            std::mem::size_of_val(weights) as u64,
             MTLResourceOptions::StorageModeShared,
             None,
         );

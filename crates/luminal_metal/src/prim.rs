@@ -38,7 +38,7 @@ impl<T: MetalFloat> Operator for MetalCopyToDevice<T> {
             .copied()
             .map(MetalFloat::from_f32)
             .collect::<Vec<T>>();
-        if data.len() == 0 {
+        if data.is_empty() {
             data.push(T::from_f32(0.0));
         }
         let buffer = self.0.new_buffer_with_bytes_no_copy(
@@ -807,7 +807,7 @@ impl<T> MetalKernel for MetalAdd<T> {
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
-            &encoder,
+            encoder,
             4,
         );
         // Execute
@@ -939,7 +939,7 @@ impl<T> MetalKernel for MetalMul<T> {
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
-            &encoder,
+            encoder,
             4,
         );
 
@@ -1084,7 +1084,7 @@ impl<T> MetalKernel for MetalLessThan<T> {
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
-            &encoder,
+            encoder,
             4,
         );
 
@@ -1216,7 +1216,7 @@ impl<T> MetalKernel for MetalMod<T> {
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
-            &encoder,
+            encoder,
             4,
         );
         // Execute
@@ -1384,7 +1384,7 @@ impl<T> MetalKernel for MetalSumReduce<T> {
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
-            &encoder,
+            encoder,
             6,
         );
 
@@ -1551,7 +1551,7 @@ impl<T> MetalKernel for MetalMaxReduce<T> {
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
-            &encoder,
+            encoder,
             6,
         );
 

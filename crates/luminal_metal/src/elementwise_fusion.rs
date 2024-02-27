@@ -119,12 +119,11 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 .collect_vec()
             {
                 // Find edge or add it
-                if graph
+                if !graph
                     .graph
                     .edges_directed(b, Direction::Incoming)
                     .filter_map(|e| e.weight().as_data().map(|(a, b, c)| (e.source(), a, b, c)))
-                    .find(|(src, _, out_ind, _)| *src == input_edge.0 && *out_ind == input_edge.2)
-                    .is_none()
+                    .any(|(src, _, out_ind, _)| src == input_edge.0 && out_ind == input_edge.2)
                 {
                     // Move all edges >= curr_input up by one
                     for edge in graph
@@ -378,7 +377,7 @@ impl<T> MetalKernel for FusedElementwiseOp<T> {
         input_dyn_dims(
             &self.dyn_chars,
             unsafe { self.dyn_map.as_ref().unwrap() },
-            &encoder,
+            encoder,
             inputs.len() + 2,
         );
 

@@ -80,8 +80,8 @@ impl<T> MetalKernel for Matmul<T> {
             encoder.set_buffer(2, Some(output_buffers[0]), 0);
             encoder.set_i32(3, if m == 1 { k } else { m } as i32);
             encoder.set_i32(4, n as i32);
-            encoder.set_i32(5, 0 as i32);
-            encoder.set_i32(6, 0 as i32);
+            encoder.set_i32(5, 0);
+            encoder.set_i32(6, 0);
             encoder.set_threadgroup_memory_length(
                 0,
                 if inputs[1].1.is_contiguous() {
@@ -121,7 +121,7 @@ impl<T> MetalKernel for Matmul<T> {
                 // B batch size 2
                 encoder.set_i32(8, b_shape[inputs[1].1.len() - 3] as i32);
             } else {
-                encoder.set_i32(8, 1 as i32); // B batch size
+                encoder.set_i32(8, 1); // B batch size
             }
             encoder.set_i32(9, (m * n) as i32); // C batch stride
 

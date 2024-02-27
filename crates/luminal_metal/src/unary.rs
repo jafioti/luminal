@@ -337,7 +337,7 @@ kernel void kernel_std_norm(
 }}");
 
         Self {
-            pipeline: compile_function(&"kernel_std_norm", &kernel_code, &device),
+            pipeline: compile_function("kernel_std_norm", &kernel_code, &device),
             device,
             queue,
             epsilon,
@@ -1168,7 +1168,7 @@ impl<T> MetalKernel for MetalRope<T> {
         input_dyn_dims(
             &self.dyn_symbols,
             unsafe { self.dyn_map.as_ref().unwrap() },
-            &encoder,
+            encoder,
             3,
         );
         encoder.set_compute_pipeline_state(&self.pipeline);
