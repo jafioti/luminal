@@ -1,4 +1,4 @@
-use crate::{CudaData, CudaFloat};
+use crate::{hash, CudaData, CudaFloat};
 
 use super::{get_idx_valid_exps, render_dyn_dim_inputs};
 use itertools::Itertools;
@@ -6,9 +6,7 @@ use rustc_hash::FxHashMap;
 
 use std::{
     any::{Any, TypeId},
-    collections::hash_map::DefaultHasher,
     fmt::Debug,
-    hash::{Hash, Hasher},
     marker::PhantomData,
     mem::size_of,
     sync::Arc,
@@ -105,13 +103,18 @@ where
 }
 
 /// Constant value on device
-#[derive(LuminalPrint, Clone, LuminalEqFalse)]
+#[derive(Clone, LuminalEqFalse)]
 pub struct CudaConstant<T>(
     pub ConstantValue,
     Arc<CudaDevice>,
     *const FxHashMap<char, usize>,
     PhantomData<T>,
 );
+impl<T> Debug for CudaConstant<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "CudaConstant({:?})", self.0)
+    }
+}
 
 impl<T> CudaConstant<T> {
     pub fn new(
@@ -1362,12 +1365,6 @@ where
             data: Box::new(CudaData(out)),
         }]
     }
-}
-
-fn hash<T: Hash>(obj: T) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    obj.hash(&mut hasher);
-    hasher.finish()
 }
 
 /// Convert all primitive ops to cuda primitive ops, and insert copy to and from device ops

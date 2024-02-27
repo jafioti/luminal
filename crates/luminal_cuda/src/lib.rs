@@ -1,4 +1,6 @@
+mod binary;
 mod matmul;
+mod other;
 mod prim;
 
 #[cfg(test)]
@@ -7,7 +9,7 @@ mod tests;
 use cudarc::driver::{CudaSlice, DeviceRepr};
 use itertools::Itertools;
 
-use std::fmt::Write;
+use std::{collections::hash_map::DefaultHasher, fmt::Write, hash::Hasher};
 
 use luminal::prelude::*;
 
@@ -15,6 +17,10 @@ use self::symbolic::{BigExpression, Term};
 
 pub type CudaCompiler<T> = (
     prim::CudaPrimitiveCompiler<T>,
+    binary::CudaSubtractionCompiler<T>,
+    binary::CudaEqualCompiler<T>,
+    other::ARangeCompiler<T>,
+    binary::MetalGatherCompiler<T>,
     matmul::CudaMatMulCompiler<T>,
     prim::CopyCompiler<T>,
 );
@@ -152,4 +158,27 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker]) -> (Vec<char>, String) {
             acc
         }),
     )
+}
+
+#[macro_export]
+macro_rules! select_const {
+    ($i: expr, $t: tt) => {
+        luminal::compiler_utils::SelectOp::new().check(|o, _| {
+            if let Some(c) = o.as_any().downcast_ref::<$crate::prim::CudaConstant<$t>>() {
+                if let luminal::op::ConstantValue::Float(f) = c.0 {
+                    (f - $i).abs() < 0.0001
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        })
+    };
+}
+
+fn hash<T: std::hash::Hash>(obj: T) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    obj.hash(&mut hasher);
+    hasher.finish()
 }

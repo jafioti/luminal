@@ -6,7 +6,6 @@ use std::{
 
 use clap::Parser;
 use colored::Colorize;
-use luminal_metal::MetalQuantizedCompiler;
 use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
 
 mod gguf;
@@ -54,9 +53,12 @@ fn main() {
     cache_dest.keep();
 
     // Set up model loading
+    #[cfg(feature = "metal")]
     let quantized_weight_nodes =
         loader::MetalQ8Loader::new("setup/mistral-7b-instruct-v0.2.Q8_0.gguf")
             .load(&model, &mut cx);
+    #[cfg(feature = "cuda")]
+    loader::CudaQ8Loader::new("setup/mistral-7b-instruct-v0.2.Q8_0.gguf").load(&model, &mut cx);
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
     print!("Compiling graph");
@@ -65,7 +67,10 @@ fn main() {
     cx.compile(
         (
             GenericCompiler::default(),
-            MetalQuantizedCompiler::<f32>::new(quantized_weight_nodes),
+            #[cfg(feature = "metal")]
+            luminal_metal::MetalQuantizedCompiler::<f32>::new(quantized_weight_nodes),
+            #[cfg(feature = "cuda")]
+            luminal_cuda::CudaCompiler::<f32>::default(),
         ),
         (&mut input, &mut logits, &mut cache_src, &mut cache_dest),
     );

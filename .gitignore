@@ -2,7 +2,7 @@
 /crates/**/target
 
 .DS_Store
-.vscode
+*.vscode
 Cargo.lock
 *.st
 *.npx
