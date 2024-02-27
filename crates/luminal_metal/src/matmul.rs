@@ -1,14 +1,18 @@
-use std::{marker::PhantomData, mem::size_of, sync::Arc};
+use std::{any::Any, marker::PhantomData, mem::size_of, sync::Arc};
 
-use petgraph::stable_graph::NodeIndex;
-
-use crate::{
-    compilers::metal::{prim::*, *},
+use luminal::{
     op::{InputTensor, Operator},
     prelude::*,
+    shape::symbolic::BigExpression,
 };
 
 use metal_rs::{objc::rc::autoreleasepool, *};
+
+use crate::{
+    compile_lib, get_buffer_from_tensor,
+    prim::{MetalContiguous, MetalMul, MetalSumReduce},
+    select_function_from_lib, MetalBuffer, MetalFloat, MetalKernel, MetalKernelWrapper, SetInt,
+};
 
 /// Multiplies a BxMxK matrix with a KxN matrix, resulting in a BxMxN matrix
 #[derive(LuminalEqFalse, LuminalPrint, Clone)]
@@ -170,7 +174,7 @@ impl<T: 'static + Clone> Operator for Matmul<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -313,7 +317,7 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
             // Undo expansions and permute
             src1_shape.remove_dim(src1_shape.len() - 2);
             src2_shape.remove_dim(src2_shape.len() - 3);
-            let mut dims = (0..src2_shape.len()).collect_vec();
+            let mut dims = (0..src2_shape.len()).collect::<Vec<_>>();
             dims.swap(src2_shape.len() - 2, src2_shape.len() - 1);
             src2_shape.permute(&dims);
             // If src1 is padded or sliced, or batch dim isn't first, we need to make it contiguous
@@ -402,9 +406,16 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
 
 #[cfg(test)]
 mod tests {
-    use half::f16;
+    use dfdx::{
+        tensor::TensorFromVec,
+        tensor_ops::{PermuteTo, TryMatMul},
+    };
+    use luminal::{
+        prelude::*,
+        tests::{assert_close_precision, random_vec},
+    };
 
-    crate::test_imports!();
+    use crate::MetalCompiler;
     #[test]
     fn test_matrix_vector() {
         const M: usize = 53;
@@ -421,9 +432,10 @@ mod tests {
         );
         cx.execute();
 
-        let d_dev = Cpu::default();
-        let d_a = d_dev.tensor_from_vec(a_vec, (DConst::<M>,));
-        let d_b = d_dev.tensor_from_vec(b_vec, (DConst::<N>, DConst::<M>));
+        let d_dev = dfdx::tensor::Cpu::default();
+        let d_a = d_dev.tensor_from_vec(a_vec, (dfdx::shapes::Const::<M>,));
+        let d_b =
+            d_dev.tensor_from_vec(b_vec, (dfdx::shapes::Const::<N>, dfdx::shapes::Const::<M>));
         let d_c = d_a.matmul(d_b.permute());
 
         assert_close_precision(&c.data(), &d_c.as_vec(), 2);
@@ -445,9 +457,10 @@ mod tests {
         );
         cx.execute();
 
-        let d_dev = Cpu::default();
-        let d_a = d_dev.tensor_from_vec(a_vec, (DConst::<M>,));
-        let d_b = d_dev.tensor_from_vec(b_vec, (DConst::<M>, DConst::<N>));
+        let d_dev = dfdx::tensor::Cpu::default();
+        let d_a = d_dev.tensor_from_vec(a_vec, (dfdx::shapes::Const::<M>,));
+        let d_b =
+            d_dev.tensor_from_vec(b_vec, (dfdx::shapes::Const::<M>, dfdx::shapes::Const::<N>));
         let d_c = d_a.matmul(d_b);
 
         assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 2);

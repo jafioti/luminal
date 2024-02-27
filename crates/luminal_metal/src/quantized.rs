@@ -1,18 +1,20 @@
 use std::{any::Any, marker::PhantomData, mem::size_of, sync::Arc};
 
-use metal::symbolic::BigExpression;
 use metal_rs::{
     objc::rc::autoreleasepool, Buffer, CommandBufferRef, CommandQueue, ComputePassDescriptor,
     ComputePipelineState, Device, MTLResourceOptions, MTLSize,
 };
 use petgraph::visit::EdgeRef;
 
-use crate::{
+use luminal::{
     op::{InputTensor, Operator},
-    prelude::{
-        metal::{binary::MetalGather, get_buffer_from_tensor},
-        *,
-    },
+    prelude::*,
+    shape::symbolic::BigExpression,
+};
+
+use crate::{
+    binary::MetalGather, get_buffer_from_tensor, MetalBuffer, MetalFloat, MetalKernel,
+    MetalKernelWrapper,
 };
 
 use super::{compile_function, SetInt};
@@ -215,7 +217,7 @@ impl<T: 'static + Clone> Operator for QuantizedMatmul<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -314,7 +316,7 @@ impl<T: MetalFloat> Operator for QuantizedGather<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 }
@@ -381,8 +383,18 @@ impl<T: MetalFloat + Default> Compiler for MetalQuantizedCompiler<T> {
 
 #[cfg(test)]
 mod tests {
+    use dfdx::{
+        tensor::TensorFromVec,
+        tensor_ops::{PermuteTo, TryMatMul},
+    };
+    use luminal::{
+        prelude::*,
+        tests::{assert_close, random_vec_rng},
+    };
     use metal_rs::{Device, MTLResourceOptions};
     use rand::{thread_rng, Rng};
+
+    use crate::{MetalBuffer, MetalQuantizedCompiler};
 
     #[repr(C, packed)]
     struct BlockQ8_0 {
@@ -390,19 +402,18 @@ mod tests {
         _qs: [i8; 32],
     }
 
-    fn quantized_buffer(weights: &[BlockQ8_0], dev: &Device) -> crate::prelude::Tensor {
+    fn quantized_buffer(weights: &[BlockQ8_0], dev: &Device) -> Tensor {
         let buffer = dev.new_buffer_with_bytes_no_copy(
             weights.as_ptr() as *mut _,
             (weights.len() * std::mem::size_of::<BlockQ8_0>()) as u64,
             MTLResourceOptions::StorageModeShared,
             None,
         );
-        crate::prelude::Tensor {
-            data: Box::new(buffer),
+        Tensor {
+            data: Box::new(MetalBuffer(buffer)),
         }
     }
 
-    crate::test_imports!();
     #[test]
     fn test_quantized_matvec() {
         let mut rng = thread_rng();
@@ -482,12 +493,15 @@ mod tests {
         );
         cx.execute();
 
-        let cpu = Cpu::default();
+        let cpu = dfdx::tensor::Cpu::default();
         let d_a = cpu.tensor_from_vec(
             mat_data.into_iter().map(|i| i as f32).collect::<Vec<_>>(),
-            (DConst::<512>, DConst::<1024>),
+            (dfdx::shapes::Const::<512>, dfdx::shapes::Const::<1024>),
         );
-        let d_b = cpu.tensor_from_vec(inp_mat_data, (DConst::<16>, DConst::<1024>));
+        let d_b = cpu.tensor_from_vec(
+            inp_mat_data,
+            (dfdx::shapes::Const::<16>, dfdx::shapes::Const::<1024>),
+        );
         let d_c = d_b.matmul(d_a.permute());
         assert_close(&out.data(), &d_c.as_vec());
     }

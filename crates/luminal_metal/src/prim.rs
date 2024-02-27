@@ -6,7 +6,7 @@ use objc::rc::autoreleasepool;
 use petgraph::visit::EdgeRef;
 use rustc_hash::FxHashMap;
 
-use crate::{
+use luminal::{
     op::{Function as LFunction, *},
     prelude::*,
 };
@@ -48,9 +48,7 @@ impl<T: MetalFloat> Operator for MetalCopyToDevice<T> {
             None,
         );
         data.leak();
-        vec![Tensor {
-            data: Box::new(buffer),
-        }]
+        vec![Tensor::new(MetalBuffer(buffer))]
     }
 }
 
@@ -120,11 +118,11 @@ impl<T: MetalFloat> Operator for MetalConstant<T> {
             ConstantValue::Float(f) => *f,
         });
         vec![Tensor {
-            data: Box::new(self.1.new_buffer_with_data(
+            data: Box::new(MetalBuffer(self.1.new_buffer_with_data(
                 &val as *const T as *const _,
                 std::mem::size_of::<T>() as u64,
                 MTLResourceOptions::StorageModeShared,
-            )),
+            ))),
         }]
     }
 
@@ -234,7 +232,7 @@ impl<T: MetalFloat> Operator for MetalContiguous<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -340,7 +338,7 @@ impl<T: MetalFloat> Operator for MetalLog2<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -435,7 +433,7 @@ impl<T: MetalFloat> Operator for MetalExp2<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -530,7 +528,7 @@ impl<T: MetalFloat> Operator for MetalSin<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -625,7 +623,7 @@ impl<T: MetalFloat> Operator for MetalSqrt<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -720,7 +718,7 @@ impl<T: MetalFloat> Operator for MetalRecip<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -841,7 +839,7 @@ impl<T: MetalFloat> Operator for MetalAdd<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -974,7 +972,7 @@ impl<T: MetalFloat> Operator for MetalMul<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -1119,7 +1117,7 @@ impl<T: MetalFloat> Operator for MetalLessThan<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -1250,7 +1248,7 @@ impl<T: MetalFloat> Operator for MetalMod<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -1419,7 +1417,7 @@ impl<T: MetalFloat> Operator for MetalSumReduce<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -1589,7 +1587,7 @@ impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 

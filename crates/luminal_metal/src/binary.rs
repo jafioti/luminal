@@ -1,14 +1,26 @@
-use std::{marker::PhantomData, mem::size_of};
+use std::{any::Any, marker::PhantomData, mem::size_of, sync::Arc};
 
-use objc::rc::autoreleasepool;
-use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
+use itertools::Itertools;
+use metal_rs::{
+    objc::rc::autoreleasepool, Buffer, CommandBufferRef, CommandQueue, ComputePassDescriptor,
+    ComputePipelineState, Device, MTLResourceOptions, MTLSize,
+};
 use rustc_hash::FxHashMap;
 
 use crate::{
-    compilers::metal::{prim::*, *},
-    op::Operator,
-    prelude::*,
-    select_const,
+    compile_function, get_buffer_from_tensor, get_idx_valid_exps, input_dyn_dims,
+    render_dyn_dim_inputs, select_const, DispatchNElements, MetalBuffer, MetalFloat, MetalKernel,
+    MetalKernelWrapper, SetInt,
+};
+
+use super::prim::*;
+use luminal::{
+    op::{InputTensor, Operator},
+    prelude::{
+        petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction},
+        *,
+    },
+    shape::symbolic::BigExpression,
 };
 
 use super::other::MetalARange;
@@ -115,7 +127,7 @@ impl<T: MetalFloat> Operator for MetalSub<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -321,7 +333,7 @@ impl<T: MetalFloat> Operator for MetalEqual<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -539,7 +551,7 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 }
@@ -611,7 +623,9 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
 
 #[cfg(test)]
 mod tests {
-    crate::test_imports!();
+    use luminal::{prelude::*, tests::assert_close};
+
+    use crate::MetalCompiler;
     #[test]
     fn test_subtraction() {
         let mut cx = Graph::new();

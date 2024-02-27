@@ -1,4 +1,4 @@
-use std::{any::Any, cell::UnsafeCell, sync::Arc};
+use std::{any::Any, cell::UnsafeCell, ops::Deref, sync::Arc};
 
 use itertools::Itertools;
 use metal_rs::{Buffer, CommandBuffer, CommandQueue, Device};
@@ -9,10 +9,12 @@ use petgraph::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{
+use luminal::{
     op::{InputTensor, Operator},
     prelude::*,
 };
+
+use crate::{MetalBuffer, MetalKernel, MetalKernelWrapper};
 
 use super::get_buffer_from_tensor;
 
@@ -271,13 +273,13 @@ impl Operator for CommandBufferWrapper {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         self.without_storage_buffers(
             &inp.iter()
-                .map(|(t, sh)| (get_buffer_from_tensor(t), *sh))
+                .map(|(t, sh)| (get_buffer_from_tensor(t).deref(), *sh))
                 .collect::<Vec<_>>(),
             unsafe { &*self.buffer.get() },
             unsafe { self.dyn_map.as_ref().unwrap() },
         )
         .into_iter()
-        .map(|b| Tensor::new(b))
+        .map(|b| Tensor::new(MetalBuffer(b)))
         .collect()
     }
 
@@ -295,9 +297,12 @@ impl Operator for CommandBufferWrapper {
 #[cfg(test)]
 #[test]
 fn test_common_buffer() {
-    use half::f16;
+    use luminal::{
+        prelude::*,
+        tests::{assert_close, random_vec},
+    };
 
-    crate::test_imports!();
+    use crate::MetalCompiler;
     let mut cx = Graph::new();
     let a = cx.tensor::<R1<5>>().set(random_vec(5)).keep();
     let b = cx.tensor::<R1<5>>().set(random_vec(5)).keep();

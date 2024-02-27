@@ -1,23 +1,24 @@
 use std::{
     cell::UnsafeCell,
     collections::{BTreeMap, BTreeSet},
+    ops::Deref,
     sync::Arc,
 };
 
 use itertools::Itertools;
 use metal_rs::{Buffer, Device, MTLResourceOptions};
-use petgraph::{
-    algo::toposort,
-    stable_graph::NodeIndex,
-    visit::EdgeRef,
-    Direction::{self},
-};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{
+use luminal::{
     op::{InputTensor, Operator},
-    prelude::{symbolic::BigExpression, *},
+    prelude::{
+        petgraph::{algo::toposort, stable_graph::NodeIndex, visit::EdgeRef, Direction},
+        symbolic::BigExpression,
+        *,
+    },
 };
+
+use crate::{MetalBuffer, MetalKernelWrapper};
 
 use super::get_buffer_from_tensor;
 
@@ -369,23 +370,22 @@ impl Operator for StorageBufferWrapper {
             .collect::<Vec<_>>();
         self.wrapper.0.without_command_buffer(
             &inp.iter()
-                .map(|(t, sh)| (get_buffer_from_tensor(t), *sh))
+                .map(|(t, sh)| (get_buffer_from_tensor(t).deref(), *sh))
                 .collect::<Vec<_>>(),
             &intermediate_buffers,
             &output_buffers,
         );
         output_buffers
             .iter()
-            .map(|buf| Tensor {
-                data: Box::new((*buf).clone()),
-            })
+            .map(|buf| Tensor::new(MetalBuffer((*buf).clone())))
             .collect()
     }
 }
 
 #[test]
 fn test_shared_buffers() {
-    crate::test_imports!();
+    use luminal::prelude::*;
+    use luminal::tests::{assert_close_precision, random_vec};
     let mut cx = Graph::new();
     let a = cx.tensor::<R1<5>>().set(random_vec(5)).keep();
     let b = a.exp2();
@@ -397,7 +397,7 @@ fn test_shared_buffers() {
     let e_unopt = e.data();
     e.drop();
 
-    cx.compile(MetalCompiler::<f16>::default(), &mut e);
+    cx.compile(crate::MetalCompiler::<f16>::default(), &mut e);
     cx.execute();
 
     assert_close_precision(&e.data(), &e_unopt, 2);

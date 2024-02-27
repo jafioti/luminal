@@ -1,13 +1,24 @@
-use std::marker::PhantomData;
+use std::{any::Any, marker::PhantomData, sync::Arc};
 
-use objc::rc::autoreleasepool;
-use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
+use luminal::{
+    op::{InputTensor, Operator},
+    prelude::{
+        petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction},
+        *,
+    },
+    shape::symbolic::BigExpression,
+};
+use metal_rs::{
+    objc::rc::autoreleasepool, Buffer, CommandBufferRef, CommandQueue, ComputePassDescriptor,
+    ComputePipelineState, Device, MTLResourceOptions,
+};
+use rustc_hash::FxHashMap;
 
 use crate::{
-    compilers::metal::{prim::*, *},
-    op::Operator,
-    prelude::*,
-    select_const,
+    compile_function,
+    prim::{MetalAdd, MetalContiguous, MetalCopyFromDevice, MetalCopyToDevice, MetalSumReduce},
+    select_const, DispatchNElements, MetalBuffer, MetalFloat, MetalKernel, MetalKernelWrapper,
+    SetInt,
 };
 
 use super::binary::MetalSub;
@@ -88,7 +99,7 @@ pub struct MetalARange<T: MetalFloat> {
     _phantom: PhantomData<T>,
 }
 
-impl<T: MetalFloat> Debug for MetalARange<T> {
+impl<T: MetalFloat> std::fmt::Debug for MetalARange<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "MetalARange({:?})", self.size)
     }
@@ -170,7 +181,7 @@ impl<T: MetalFloat> Operator for MetalARange<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 

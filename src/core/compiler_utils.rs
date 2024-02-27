@@ -815,23 +815,6 @@ pub struct SelectOp {
 }
 
 #[macro_export]
-macro_rules! select_const {
-    ($i: expr, $t: tt) => {
-        SelectOp::new().check(|o, _| {
-            if let Some(c) = o.as_any().downcast_ref::<MetalConstant<$t>>() {
-                if let $crate::op::ConstantValue::Float(f) = c.0 {
-                    (f - $i).abs() < 0.0001
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        })
-    };
-}
-
-#[macro_export]
 macro_rules! select_ty {
     ($t: ty) => {
         SelectOp::new().ty::<$t>()

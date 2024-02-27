@@ -13,6 +13,8 @@ cudarc = { git = "https://github.com/coreylowman/cudarc", rev = "ed3bb3e5bb186fb
 ]}
 itertools = "0.12.1"
 rustc-hash = "1.1.0"
+num-traits = "0.2.18"
+
+[dev-dependencies]
 dfdx = { version = "0.13", features = ["f16"] }
 rand = "0.8.5"
-num-traits = "0.2.18"

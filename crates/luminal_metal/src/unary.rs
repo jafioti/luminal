@@ -1,16 +1,23 @@
 use num_traits::FloatConst;
-use std::{marker::PhantomData, mem::size_of, sync::Arc};
+use rustc_hash::FxHashMap;
+use std::{any::Any, marker::PhantomData, mem::size_of, sync::Arc};
 
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
 
-use crate::{
-    compilers::metal::{prim::*, *},
+use luminal::{
     op::{ConstantValue, InputTensor, Operator},
     prelude::*,
-    select_const, select_ty,
+    select_ty,
+    shape::symbolic::BigExpression,
 };
 
 use metal_rs::{objc::rc::autoreleasepool, *};
+
+use crate::{
+    compile_function, compile_lib, get_buffer_from_tensor, get_idx_valid_exps, input_dyn_dims,
+    prim::*, render_dyn_dim_inputs, select_const, select_function_from_lib, DispatchNElements,
+    MetalBuffer, MetalFloat, MetalKernel, MetalKernelWrapper, SetInt,
+};
 
 use super::binary::MetalSub;
 
@@ -151,7 +158,7 @@ impl<T: MetalFloat> Operator for MetalMeanReduce<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -410,7 +417,7 @@ impl<T: 'static + Clone> Operator for MetalStdNorm<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -642,7 +649,7 @@ impl<T: MetalFloat> Operator for MetalExp<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -799,7 +806,7 @@ impl<T: MetalFloat> Operator for MetalCos<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -966,7 +973,7 @@ impl<T: MetalFloat> Operator for MetalSoftmax<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -1200,7 +1207,7 @@ impl<T: MetalFloat> Operator for MetalRope<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -1277,7 +1284,7 @@ impl<T: MetalFloat> Compiler for RopeCompiler<T> {
                         select_ty!(MetalConstant<T>)
                             .ptr(&mut two)
                             .edge(
-                                select_ty!(crate::compilers::metal::other::MetalARange<T>)
+                                select_ty!(crate::other::MetalARange<T>)
                                     .ptr(&mut head_dim_arange)
                                     .edge(select_ty!(MetalMul<T>).ptr(&mut mul_2)),
                             )
@@ -1288,7 +1295,7 @@ impl<T: MetalFloat> Compiler for RopeCompiler<T> {
             .edge(select_ty!(MetalExp<T>).ptr(&mut exp))
             .edge(select_ty!(MetalRecip<T>).ptr(&mut recip));
         let seq = select_ty!(MetalConstant<T>).ptr(&mut seq_expr).edge(
-            select_ty!(crate::compilers::metal::other::MetalARange<T>)
+            select_ty!(crate::other::MetalARange<T>)
                 .ptr(&mut seq_arange)
                 .edge(select_ty!(MetalAdd<T>).ptr(&mut seq_add)),
         );

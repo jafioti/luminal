@@ -1,6 +1,7 @@
 use std::{
     any::{Any, TypeId},
     fmt::{Debug, Write},
+    ops::Deref,
     sync::Arc,
 };
 
@@ -17,13 +18,12 @@ mod quantized;
 mod storage_buffer;
 mod unary;
 
-use half::f16;
 use itertools::Itertools;
 use metal_rs::*;
 pub use quantized::*;
 use rustc_hash::FxHashMap;
 
-use crate::{
+use luminal::{
     op::InputTensor,
     prelude::{
         symbolic::{BigExpression, Term},
@@ -62,17 +62,17 @@ type SpecialOpsCompiler<T> = (
     matmul::MetalMatMulCompiler<T>,
 );
 
-impl Data for Buffer {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
+#[derive(Debug, Clone)]
+pub struct MetalBuffer(Buffer);
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
+impl Deref for MetalBuffer {
+    type Target = Buffer;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
-impl Data for Arc<Box<Buffer>> {
+impl Data for MetalBuffer {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -246,7 +246,7 @@ fn compile_lib(device: &Device, source: &str) -> Library {
         .new_library_with_source(
             &source.replace(
                 "KERNEL_PATH",
-                &format!("{}/src/compilers/metal/kernels", env!("CARGO_MANIFEST_DIR")),
+                &format!("{}/src/kernels", env!("CARGO_MANIFEST_DIR")),
             ),
             &options,
         )
@@ -431,11 +431,28 @@ fn get_idx_valid_exps(shape: ShapeTracker) -> (String, String) {
     )
 }
 
-fn get_buffer_from_tensor<'a>(tensor: &'a InputTensor) -> &'a Buffer {
+fn get_buffer_from_tensor<'a>(tensor: &'a InputTensor) -> &'a MetalBuffer {
     tensor
         .borrowed()
         .data
         .as_any()
-        .downcast_ref::<Buffer>()
+        .downcast_ref::<MetalBuffer>()
         .expect("Tensor does not contain a metal buffer")
+}
+
+#[macro_export]
+macro_rules! select_const {
+    ($i: expr, $t: tt) => {
+        luminal::compiler_utils::SelectOp::new().check(|o, _| {
+            if let Some(c) = o.as_any().downcast_ref::<$crate::prim::MetalConstant<$t>>() {
+                if let luminal::op::ConstantValue::Float(f) = c.0 {
+                    (f - $i).abs() < 0.0001
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        })
+    };
 }

@@ -1,17 +1,21 @@
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::{any::Any, marker::PhantomData, sync::Arc};
+use std::{any::Any, marker::PhantomData, ops::Deref, sync::Arc};
 
 use itertools::Itertools;
 use metal_rs::{
     objc::rc::autoreleasepool, Buffer, CommandBufferRef, CommandQueue, ComputePassDescriptor,
     ComputePipelineState, Device, MTLResourceOptions,
 };
-use petgraph::{visit::EdgeRef, Direction};
 
-use crate::{
+use luminal::{
     op::{InputTensor, Operator},
-    prelude::{metal::get_buffer_from_tensor, *},
+    prelude::{
+        petgraph::{visit::EdgeRef, Direction},
+        *,
+    },
 };
+
+use crate::{get_buffer_from_tensor, MetalBuffer, MetalFloat, MetalKernel, MetalKernelWrapper};
 
 use self::symbolic::BigExpression;
 
@@ -260,12 +264,9 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 );
                 for (inp_ind, _, sh) in &edges {
                     let (ind, val) = get_idx_valid_exps(*sh);
-                    if sh.is_contiguous() && !sh.is_sliced() && !sh.is_padded() {
-                        op.equation = op.equation.replace(
-                            &format!("input{inp_ind}"),
-                            &format!("(float)input{inp_ind}[{ind}]"),
-                        );
-                    } else if !sh.is_sliced() && !sh.is_padded() {
+                    if (sh.is_contiguous() && !sh.is_sliced() && !sh.is_padded())
+                        || (!sh.is_sliced() && !sh.is_padded())
+                    {
                         op.equation = op.equation.replace(
                             &format!("input{inp_ind}"),
                             &format!("(float)input{inp_ind}[{ind}]"),
@@ -401,7 +402,7 @@ impl<T: MetalFloat> Operator for FusedElementwiseOp<T> {
             self.metal_forward(
                 &tensors
                     .iter()
-                    .map(|(t, s)| (get_buffer_from_tensor(t), *s))
+                    .map(|(t, s)| (get_buffer_from_tensor(t).deref(), *s))
                     .collect_vec(),
                 command_buffer,
                 &[],
@@ -411,7 +412,7 @@ impl<T: MetalFloat> Operator for FusedElementwiseOp<T> {
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            vec![Tensor::new(out)]
+            vec![Tensor::new(MetalBuffer(out))]
         })
     }
 
@@ -434,9 +435,12 @@ impl<T: MetalFloat> Operator for FusedElementwiseOp<T> {
 
 #[cfg(test)]
 mod tests {
-    use half::f16;
+    use luminal::{
+        prelude::*,
+        tests::{assert_close, random_vec},
+    };
 
-    crate::test_imports!();
+    use crate::MetalCompiler;
     #[test]
     fn test_fusion() {
         let mut cx = Graph::new();
