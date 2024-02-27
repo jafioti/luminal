@@ -370,6 +370,18 @@ impl Operator for Recip {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Sqrt;
+impl Operator for Sqrt {
+    fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let mut tensor = inp.pop().unwrap().0.cloned();
+        for a in get_vec_from_tensor_owned(&mut tensor).iter_mut() {
+            *a = a.sqrt();
+        }
+        vec![tensor]
+    }
+}
+
 // Binary Ops (A x A -> A)
 
 #[derive(Debug, Clone, Default, PartialEq)]

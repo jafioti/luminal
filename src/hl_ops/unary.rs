@@ -67,7 +67,12 @@ impl<S: Shape> GraphTensor<S> {
 
     /// The square root function
     pub fn sqrt(self) -> GraphTensor<S> {
-        self.pow(0.5)
+        let new_id = self
+            .graph()
+            .add_op(op::Sqrt)
+            .input(self.id, 0, self.shape)
+            .finish();
+        GraphTensor::from_id(new_id, self.shape, self.graph_ref)
     }
 
     /// Scale so std is 1.0

@@ -386,6 +386,81 @@ where
 }
 
 #[derive(LuminalEqFalse, LuminalPrint, Clone)]
+pub struct CudaSqrt<T>(CudaFunction, Arc<CudaDevice>, PhantomData<T>);
+
+impl<T: CudaFloat> CudaSqrt<T> {
+    pub fn new(dev: Arc<CudaDevice>) -> Self {
+        let mut code = format!(
+            "
+#include \"cuda_fp16.h\"
+extern \"C\" __global__ void kernel({} *out, const {} *inp, int numel) {{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < numel) {{
+        out[i] = {}(inp[i]);
+    }}
+}}",
+            T::type_name(),
+            T::type_name(),
+            if T::is_f32() { "sqrt" } else { "hsqrt" }
+        );
+        let name = format!("kernel_{}", hash(&code));
+        code = code.replace("kernel", &name);
+        if !dev.has_func(&name, &name) {
+            dev.load_ptx(
+                compile_ptx_with_opts(
+                    code,
+                    CompileOptions {
+                        arch: Some("sm_75"),
+                        include_paths: vec!["/usr/local/cuda/include".to_string()],
+                        ..Default::default()
+                    },
+                )
+                .unwrap(),
+                &name,
+                &[name.clone().leak()],
+            )
+            .unwrap();
+        }
+        Self(dev.get_func(&name, &name).unwrap(), dev, Default::default())
+    }
+}
+
+impl<T> Operator for CudaSqrt<T>
+where
+    T: Debug
+        + Copy
+        + cudarc::driver::DeviceRepr
+        + std::marker::Unpin
+        + cudarc::driver::ValidAsZeroBits,
+    CudaSlice<T>: Data,
+{
+    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let inp = tensors[0]
+            .0
+            .borrowed()
+            .data
+            .as_any()
+            .downcast_ref::<CudaSlice<T>>()
+            .unwrap();
+        let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
+        let mut out = self.1.alloc_zeros::<T>(inp_size).unwrap();
+        unsafe {
+            self.0
+                .clone()
+                .launch(
+                    LaunchConfig::for_num_elems(inp_size as u32),
+                    (&mut out, inp, inp_size),
+                )
+                .unwrap();
+        }
+
+        vec![Tensor {
+            data: Box::new(out),
+        }]
+    }
+}
+
+#[derive(LuminalEqFalse, LuminalPrint, Clone)]
 pub struct CudaSin<T>(CudaFunction, Arc<CudaDevice>, PhantomData<T>);
 
 impl<T: CudaFloat> CudaSin<T> {
@@ -560,8 +635,8 @@ impl<T: CudaFloat> CudaAdd<T> {
 extern \"C\" __global__ void kernel({} *out, const {} *inp_a, const {} *inp_b, int numel{rendered}) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < numel) {{
-        out[idx] = 
-            (({a_valid}) == 0 ? {} : inp_a[{a_idx}]) 
+        out[idx] =
+            (({a_valid}) == 0 ? {} : inp_a[{a_idx}])
             + (({b_valid}) == 0 ? {} : inp_b[{b_idx}]);
     }}
 }}",
@@ -799,7 +874,7 @@ extern \"C\" __global__ void kernel({} *out, const {} *inp_a, const {} *inp_b, i
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < numel) {{
         out[idx] = fmod(
-            ({a_valid}) == 0 ? {} : inp_a[{a_idx}], 
+            ({a_valid}) == 0 ? {} : inp_a[{a_idx}],
             ({b_valid}) == 0 ? {} : inp_b[{b_idx}]
         );
     }}
@@ -1050,7 +1125,7 @@ impl<T: CudaFloat> CudaSumReduce<T> {
         let mut code = format!("#include \"cuda_fp16.h\"
 extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, const int front_size, const int back_size, const int dim_size, int numel{rendered}) {{
     int i_ = blockIdx.x * blockDim.x + threadIdx.x;
-    
+
     if (i_ < numel) {{
         int a_ = i_ / back_size;
         int b_ = i_ % back_size;
@@ -1176,7 +1251,7 @@ impl<T: CudaFloat> CudaMaxReduce<T> {
         let mut code = format!("#include \"cuda_fp16.h\"
 extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, const int front_size, const int back_size, const int dim_size, int numel{rendered}) {{
     int i_ = blockIdx.x * blockDim.x + threadIdx.x;
-    
+
     if (i_ < numel) {{
         int a_ = i_ / back_size;
         int b_ = i_ % back_size;
@@ -1486,6 +1561,8 @@ where
                 ));
             } else if is::<Recip>(op) {
                 *op_ref = Box::new(CudaRecip::<T>::new(dev.clone()));
+            } else if is::<Sqrt>(op) {
+                *op_ref = Box::new(CudaSqrt::<T>::new(dev.clone()));
             } else if is::<Add>(op) {
                 *op_ref = Box::new(CudaAdd::<T>::new(
                     shapes[0],
