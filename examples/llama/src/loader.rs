@@ -1,4 +1,3 @@
-use half::f16;
 use luminal::{op::Function, prelude::*};
 
 /// Load the model in the same way dfdx-llama does

@@ -10,7 +10,6 @@ pub const INTERMEDIATE: usize = 11008;
 pub const HEADS: usize = 32;
 pub const LAYERS: usize = 32;
 
-use half::f16;
 use luminal::{
     nn::{embedding::Embedding, norm::RMSNorm},
     prelude::*,
