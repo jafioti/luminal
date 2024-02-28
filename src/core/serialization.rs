@@ -225,18 +225,16 @@ mod tests {
 
     #[test]
     fn test_serialization() {
-        let mut cx = Graph::new();
-        let model: Transformer<32, 5, 4, 4, 3, 2> = InitModule::initialize(&mut cx);
-        let enc = cx.tensor::<R2<24, 32>>();
-        let trg = cx.tensor::<R2<20, 32>>();
-        let out1 = model.forward((trg, enc));
-
         let mut rng = thread_rng();
         let enc_data = (0..(24 * 32)).map(|_| rng.gen()).collect::<Vec<f32>>();
         let trg_data = (0..(20 * 32)).map(|_| rng.gen()).collect::<Vec<f32>>();
-        enc.set(enc_data.clone());
-        trg.set(trg_data.clone());
-        out1.retrieve();
+
+        let mut cx = Graph::new();
+        let model: Transformer<32, 5, 4, 4, 3, 2> = InitModule::initialize(&mut cx);
+        let enc = cx.tensor::<R2<24, 32>>().set(enc_data.clone()).keep();
+        let trg = cx.tensor::<R2<20, 32>>().set(trg_data.clone()).keep();
+        let mut out1 = model.forward((trg, enc)).retrieve();
+        cx.compile(CPUCompiler::default(), &mut out1);
 
         cx.execute_no_delete();
 
@@ -246,13 +244,9 @@ mod tests {
         let mut cx = Graph::new();
         let model: Transformer<32, 5, 4, 4, 3, 2> = InitModule::initialize(&mut cx);
         StateDictLoader::new(state_dict).load(&model, &mut cx);
-        let enc = cx.tensor::<R2<24, 32>>();
-        let trg = cx.tensor::<R2<20, 32>>();
-        let mut out2 = model.forward((trg, enc));
-
-        enc.set(enc_data);
-        trg.set(trg_data);
-        out2.retrieve();
+        let enc = cx.tensor::<R2<24, 32>>().set(enc_data);
+        let trg = cx.tensor::<R2<20, 32>>().set(trg_data);
+        let mut out2 = model.forward((trg, enc)).retrieve();
 
         cx.compile(CPUCompiler::default(), &mut out2);
         cx.execute();
