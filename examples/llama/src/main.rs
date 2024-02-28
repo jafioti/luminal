@@ -5,7 +5,7 @@ use std::{io::Write, marker::PhantomData, time::Instant};
 
 use colored::Colorize;
 use luminal::{prelude::*, shape::symbolic::Expression};
-use model::LlamaForCausalLM;
+use model::Llama;
 use rust_tokenizers::tokenizer::{
     SentencePieceBpeTokenizer, Tokenizer,
     TruncationStrategy::{self},
@@ -28,11 +28,11 @@ fn main() {
         SentencePieceBpeTokenizer::from_file("setup/llama-7b-hf/tokenizer.model", false).unwrap();
 
     let mut cx1 = Graph::new(); // Prompt processing graph
-    let model = LlamaForCausalLM::initialize(&mut cx1);
+    let model = Llama::initialize(&mut cx1);
     let mut input = cx1.named_tensor::<(Const<1>, Dyn<'s'>)>("Input");
     let (logits, mut kv_cache) = model.forward((
         input,
-        Option::<Vec<KVCache<Const<1>, Const<0>, { model::HEADS }, { model::HEAD_DIM }>>>::None,
+        Option::<Vec<KVCache<Const<1>, Const<0>>>>::None,
         PhantomData::<Dyn<'s'>>,
     ));
     let mut logits = logits
@@ -42,10 +42,9 @@ fn main() {
     loader::DfdxDeferredLoader::new("setup/llama-7b-hf").load(&model, &mut cx1);
 
     let mut cx2 = Graph::new(); // Token generation graph
-    let kv_model = LlamaForCausalLM::initialize(&mut cx2);
+    let kv_model = Llama::initialize(&mut cx2);
     let mut single_input = cx2.named_tensor::<R2<1, 1>>("Input");
-    let mut cache_src: Vec<KVCache<Const<1>, Dyn<'p'>, { model::HEADS }, { model::HEAD_DIM }>> = (0
-        ..model::LAYERS)
+    let mut cache_src: Vec<KVCache<Const<1>, Dyn<'p'>>> = (0..model::LAYERS)
         .map(|_| {
             (
                 cx2.named_tensor("Key Cache"),

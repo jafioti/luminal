@@ -18,9 +18,9 @@ use luminal::{
 
 // Full LLaMa model implementation, heavily based off of https://github.com/coreylowman/llama-dfdx/blob/main/src/modeling.rs
 
-pub type KVCache<Batch, Seq, const NUM_HEADS: usize, const HEAD_DIM: usize> = (
-    GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
-    GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
+pub type KVCache<Batch, Seq> = (
+    GraphTensor<(Batch, Const<HEADS>, Seq, Const<HEAD_DIM>)>,
+    GraphTensor<(Batch, Const<HEADS>, Seq, Const<HEAD_DIM>)>,
 );
 
 pub struct Mlp<const I: usize, const H: usize> {
@@ -65,28 +65,28 @@ pub struct RotaryEmbedding {
     pub inv_freq: GraphTensor<R1<HEAD_DIM_OVER_2>>,
 }
 
-impl<Batch: Dimension, const NUM_HEADS: usize, Seq: Dimension>
+impl<Batch: Dimension, Seq: Dimension>
     Module<(
-        GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
+        GraphTensor<(Batch, Const<HEADS>, Seq, Const<HEAD_DIM>)>,
         BigExpression,
     )> for RotaryEmbedding
 {
-    type Output = GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>;
+    type Output = GraphTensor<(Batch, Const<HEADS>, Seq, Const<HEAD_DIM>)>;
 
     fn forward(
         &self,
         (inp, prev_seq): (
-            GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
+            GraphTensor<(Batch, Const<HEADS>, Seq, Const<HEAD_DIM>)>,
             BigExpression,
         ),
     ) -> Self::Output {
-        let (sin, cos) = self.get_sincos::<NUM_HEADS, Seq>(prev_seq);
+        let (sin, cos) = self.get_sincos::<Seq>(prev_seq);
         (Self::rotate_half(inp) * sin.expand()) + (inp * cos.expand())
     }
 }
 
 impl RotaryEmbedding {
-    fn get_sincos<const NUM_HEADS: usize, Seq: Dimension>(
+    fn get_sincos<Seq: Dimension>(
         &self,
         prev_seq: BigExpression,
     ) -> (
@@ -102,16 +102,16 @@ impl RotaryEmbedding {
         (emb.sin().reshape(), emb.cos().reshape())
     }
 
-    fn rotate_half<Batch: Dimension, NumHeads: Dimension, Seq: Dimension>(
-        x: GraphTensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>)>,
-    ) -> GraphTensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>)> {
+    fn rotate_half<Batch: Dimension, Seq: Dimension>(
+        x: GraphTensor<(Batch, Const<HEADS>, Seq, Const<HEAD_DIM>)>,
+    ) -> GraphTensor<(Batch, Const<HEADS>, Seq, Const<HEAD_DIM>)> {
         let x1 = x
             .slice((.., .., .., ..Expression::from(HEAD_DIM_OVER_2)))
             .contiguous();
         let x2 = x
             .slice((.., .., .., Expression::from(HEAD_DIM_OVER_2)..))
             .contiguous();
-        (-x2).concat_along::<(Batch, NumHeads, Seq, Const<HEAD_DIM>), Axis<3>, _>(x1)
+        (-x2).concat_along::<(Batch, Const<HEADS>, Seq, Const<HEAD_DIM>), Axis<3>, _>(x1)
     }
 }
 
@@ -140,68 +140,69 @@ pub struct Attention {
 impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     Module<(
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        Option<KVCache<Batch, PrevSeq, HEADS, HEAD_DIM>>,
+        Option<KVCache<Batch, PrevSeq>>,
         PhantomData<TotSeq>,
     )> for Attention
 {
     type Output = (
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        KVCache<Batch, TotSeq, HEADS, HEAD_DIM>,
+        KVCache<Batch, TotSeq>,
     );
 
     fn forward(
         &self,
         (x, cache, _): (
             GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-            Option<KVCache<Batch, PrevSeq, HEADS, HEAD_DIM>>,
+            Option<KVCache<Batch, PrevSeq>>,
             PhantomData<TotSeq>,
         ),
     ) -> Self::Output {
-        let q = x
+        let queries = x
             .matmul(self.q_proj.permute())
             .reshape::<(Batch, CurSeq, Const<HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
-        let k = x
+        let keys = x
             .matmul(self.k_proj.permute())
             .reshape::<(Batch, CurSeq, Const<HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
-        let v = x
+        let values = x
             .matmul(self.v_proj.permute())
             .reshape::<(Batch, CurSeq, Const<HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
-        let q = self
+        let queries = self
             .rotary_embed
-            .forward((q.permute(), PrevSeq::const_size().into()));
-        let k = self.rotary_embed.forward((k, PrevSeq::const_size().into()));
+            .forward((queries.permute(), PrevSeq::const_size().into()));
+        let keys = self
+            .rotary_embed
+            .forward((keys, PrevSeq::const_size().into()));
 
-        let (k, v) = if let Some(cache) = cache {
-            // Add KV cache
-            let k = cache
-                .0
-                .concat_along::<(Batch, Const<HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(k);
-            let v = cache
-                .1
-                .concat_along::<(Batch, Const<HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(v);
-            (k, v)
+        let (keys, values) = if let Some((k_cache, v_cache)) = cache {
+            (
+                k_cache.concat_along::<_, Axis<2>, _>(keys),
+                v_cache.concat_along::<_, Axis<2>, _>(values),
+            )
         } else {
-            (k.realize(), v.realize())
+            (keys.realize(), values.contiguous().realize())
         };
 
-        let mut w = q
-            .matmul(k.permute())
+        let mut weights = queries
+            .matmul(keys.permute())
             .mul((HEAD_DIM as f64).sqrt().recip() as f32);
         // We only mask on a non-kv cache pass
         if cache.is_none() {
             let attention_mask = self.k_proj.graph().triu::<CurSeq>(1) * f16::MIN.to_f32();
-            w += attention_mask.realize::<(CurSeq, TotSeq)>().expand(); // CurSeq and TotSeq are guarenteed to be the same size here
+            weights += attention_mask.realize::<(CurSeq, TotSeq)>().expand(); // CurSeq and TotSeq are guarenteed to be the same size here
         }
-        w = w.softmax::<3>();
 
-        let o = w
-            .matmul(v)
+        let outputs = weights
+            .softmax::<3>()
+            .matmul(values)
             .permute::<_, Axes4<0, 2, 1, 3>>()
             .reshape::<(Batch, CurSeq, Const<HIDDEN>)>();
-        (o.matmul(self.o_proj.permute()), (k, v))
+        (
+            outputs.matmul(self.o_proj.permute()),
+            (keys.contiguous(), values.contiguous()),
+        )
     }
 }
 
@@ -227,7 +228,7 @@ impl SerializeModule for Attention {
     }
 }
 
-pub struct DecoderLayer {
+pub struct TransformerBlock {
     pub self_attn: Attention,
     pub mlp: Mlp<INTERMEDIATE, HIDDEN>,
     pub input_layer_norm: RMSNorm<HIDDEN>,
@@ -237,33 +238,40 @@ pub struct DecoderLayer {
 impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     Module<(
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        Option<KVCache<Batch, PrevSeq, HEADS, HEAD_DIM>>,
+        Option<KVCache<Batch, PrevSeq>>,
         PhantomData<TotSeq>,
-    )> for DecoderLayer
+    )> for TransformerBlock
 {
     type Output = (
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        KVCache<Batch, TotSeq, HEADS, HEAD_DIM>,
+        KVCache<Batch, TotSeq>,
     );
     fn forward(
         &self,
-        (x, cache, _): (
+        (mut x, cache, _): (
             GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-            Option<KVCache<Batch, PrevSeq, HEADS, HEAD_DIM>>,
+            Option<KVCache<Batch, PrevSeq>>,
             PhantomData<TotSeq>,
         ),
     ) -> Self::Output {
+        // Attention
         let normed = self.input_layer_norm.forward(x);
         let (y, cache) = self
             .self_attn
             .forward((normed, cache, PhantomData::<TotSeq>));
-        let x = x + y;
+
+        // Residual Addition
+        x += y;
+
+        // Feed Forward
         let y = self.mlp.forward(self.post_attention_layer_norm.forward(x));
+
+        // Residual Addition
         (x + y, cache)
     }
 }
 
-impl InitModule for DecoderLayer {
+impl InitModule for TransformerBlock {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             self_attn: InitModule::initialize(cx),
@@ -274,7 +282,7 @@ impl InitModule for DecoderLayer {
     }
 }
 
-impl SerializeModule for DecoderLayer {
+impl SerializeModule for TransformerBlock {
     fn serialize(&self, s: &mut Serializer) {
         s.module("self_attn", &self.self_attn);
         s.module("mlp", &self.mlp);
@@ -283,63 +291,70 @@ impl SerializeModule for DecoderLayer {
     }
 }
 
-pub struct LlamaForCausalLM {
-    pub embed_tokens: Embedding<VOCAB, HIDDEN>,
-    pub layers: Vec<DecoderLayer>,
+pub struct Llama {
+    // Token embeddings
+    pub embedding: Embedding<VOCAB, HIDDEN>,
+    // Transformer layers
+    pub layers: Vec<TransformerBlock>,
+    // Final Norm layer
     pub norm: RMSNorm<HIDDEN>,
-    pub lm_head: GraphTensor<(Const<VOCAB>, Const<HIDDEN>)>,
+    // LM Head Layer
+    pub lm_head: GraphTensor<R2<VOCAB, HIDDEN>>,
 }
 
 impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     Module<(
         GraphTensor<(Batch, CurSeq)>,
-        Option<Vec<KVCache<Batch, PrevSeq, HEADS, HEAD_DIM>>>,
+        Option<Vec<KVCache<Batch, PrevSeq>>>,
         PhantomData<TotSeq>,
-    )> for LlamaForCausalLM
+    )> for Llama
 {
     type Output = (
         GraphTensor<(Batch, CurSeq, Const<VOCAB>)>,
-        Vec<KVCache<Batch, TotSeq, HEADS, HEAD_DIM>>,
+        Vec<KVCache<Batch, TotSeq>>,
     );
     fn forward(
         &self,
-        (input, caches, _): (
+        (input, cache, _): (
             GraphTensor<(Batch, CurSeq)>,
-            Option<Vec<KVCache<Batch, PrevSeq, HEADS, HEAD_DIM>>>,
+            Option<Vec<KVCache<Batch, PrevSeq>>>,
             PhantomData<TotSeq>,
         ),
     ) -> Self::Output {
-        let mut hidden_states = self.embed_tokens.forward(input);
-        let mut new_caches = Vec::with_capacity(LAYERS);
-        for (i, layer_i) in self.layers.iter().enumerate() {
-            let (new_hidden_states, (k_cache, v_cache)) = layer_i.forward((
-                hidden_states,
-                caches.as_ref().map(|v| v[i]),
-                PhantomData::<TotSeq>,
-            ));
-            hidden_states = new_hidden_states;
-            new_caches.push((k_cache.contiguous(), v_cache.contiguous()));
+        // Embed tokens
+        let mut x = self.embedding.forward(input);
+
+        // Run through layers and collect new caches
+        let mut new_caches = vec![];
+        let mut new_cache;
+        for (i, layer) in self.layers.iter().enumerate() {
+            (x, new_cache) =
+                layer.forward((x, cache.as_ref().map(|c| c[i]), PhantomData::<TotSeq>));
+            new_caches.push(new_cache);
         }
-        hidden_states = self.norm.forward(hidden_states);
-        (hidden_states.matmul(self.lm_head.permute()), new_caches)
+        // Run through last norm and output projection
+        let output = self.norm.forward(x);
+        let output = output.matmul(self.lm_head.permute());
+
+        (output, new_caches)
     }
 }
 
-impl InitModule for LlamaForCausalLM {
+impl InitModule for Llama {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             norm: InitModule::initialize(cx),
-            embed_tokens: InitModule::initialize(cx),
+            embedding: InitModule::initialize(cx),
             layers: (0..LAYERS).map(|_| InitModule::initialize(cx)).collect(),
             lm_head: cx.named_tensor("LM Head"),
         }
     }
 }
 
-impl SerializeModule for LlamaForCausalLM {
+impl SerializeModule for Llama {
     fn serialize(&self, s: &mut Serializer) {
         s.module("model/norm", &self.norm);
-        s.module("model/embed_tokens", &self.embed_tokens);
+        s.module("model/embed_tokens", &self.embedding);
         for (i, l) in self.layers.iter().enumerate() {
             s.module(&format!("model/layers/{i}"), l);
         }
