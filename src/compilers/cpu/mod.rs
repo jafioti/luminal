@@ -35,10 +35,10 @@ impl Compiler for MatMul2DCompiler {
         // Actually starts at [A,B] | [B, C]
         let s = SelectOp::new()
             .ty::<Mul>()
-            .shapes(vec![vec!['A', 'C', 'B'], vec!['A', 'C', 'B']])
-            .fakes(vec![
-                vec![Some(false), Some(true), Some(false)],
-                vec![Some(true), Some(false), Some(false)],
+            .shapes([['A', 'C', 'B'], ['A', 'C', 'B']])
+            .fakes([
+                [Some(false), Some(true), Some(false)],
+                [Some(true), Some(false), Some(false)],
             ])
             .ptr(&mut mul)
             .edge(
@@ -145,10 +145,10 @@ impl Compiler for BatchMatMul2DCompiler {
         // Actually starts at [A,B] | [B, C]
         let s = SelectOp::new()
             .ty::<Mul>()
-            .shapes(vec![vec!['D', 'A', 'C', 'B'], vec!['D', 'A', 'C', 'B']])
-            .fakes(vec![
-                vec![Some(false), Some(false), Some(true), Some(false)],
-                vec![Some(true), Some(true), Some(false), Some(false)],
+            .shapes([['D', 'A', 'C', 'B'], ['D', 'A', 'C', 'B']])
+            .fakes([
+                [Some(false), Some(false), Some(true), Some(false)],
+                [Some(true), Some(true), Some(false), Some(false)],
             ])
             .ptr(&mut mul)
             .edge(

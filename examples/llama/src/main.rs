@@ -12,17 +12,6 @@ use rust_tokenizers::tokenizer::{
 };
 
 use crate::model::KVCache;
-
-type Model = LlamaForCausalLM<
-    { model::VOCAB },
-    { model::HEADS },
-    { model::HIDDEN },
-    { model::INTERMEDIATE },
-    { model::HEAD_DIM },
-    { model::HEAD_DIM_OVER_2 },
-    { model::LAYERS },
->;
-
 #[cfg(feature = "metal")]
 type DeviceCompiler = luminal_metal::MetalCompiler<luminal::prelude::f16>;
 #[cfg(feature = "cuda")]
@@ -39,7 +28,7 @@ fn main() {
         SentencePieceBpeTokenizer::from_file("setup/llama-7b-hf/tokenizer.model", false).unwrap();
 
     let mut cx1 = Graph::new(); // Prompt processing graph
-    let model = Model::initialize(&mut cx1);
+    let model = LlamaForCausalLM::initialize(&mut cx1);
     let mut input = cx1.named_tensor::<(Const<1>, Dyn<'s'>)>("Input");
     let (logits, mut kv_cache) = model.forward((
         input,
@@ -53,7 +42,7 @@ fn main() {
     loader::DfdxDeferredLoader::new("setup/llama-7b-hf").load(&model, &mut cx1);
 
     let mut cx2 = Graph::new(); // Token generation graph
-    let kv_model = Model::initialize(&mut cx2);
+    let kv_model = LlamaForCausalLM::initialize(&mut cx2);
     let mut single_input = cx2.named_tensor::<R2<1, 1>>("Input");
     let mut cache_src: Vec<KVCache<Const<1>, Dyn<'p'>, { model::HEADS }, { model::HEAD_DIM }>> = (0
         ..model::LAYERS)

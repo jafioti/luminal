@@ -61,21 +61,15 @@ impl<const I: usize, const H: usize> SerializeModule for Mlp<I, H> {
     }
 }
 
-pub struct RotaryEmbedding<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> {
+pub struct RotaryEmbedding {
     pub inv_freq: GraphTensor<R1<HEAD_DIM_OVER_2>>,
 }
 
-impl<
-        Batch: Dimension,
-        const NUM_HEADS: usize,
-        Seq: Dimension,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-    >
+impl<Batch: Dimension, const NUM_HEADS: usize, Seq: Dimension>
     Module<(
         GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>,
         BigExpression,
-    )> for RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
+    )> for RotaryEmbedding
 {
     type Output = GraphTensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>)>;
 
@@ -91,9 +85,7 @@ impl<
     }
 }
 
-impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
-    RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
-{
+impl RotaryEmbedding {
     fn get_sincos<const NUM_HEADS: usize, Seq: Dimension>(
         &self,
         prev_seq: BigExpression,
@@ -101,8 +93,7 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
         GraphTensor<(Seq, Const<HEAD_DIM>)>,
         GraphTensor<(Seq, Const<HEAD_DIM>)>,
     ) {
-        let t = self.inv_freq.graph().arange::<Seq>()
-            + self.inv_freq.graph().constant_expr(prev_seq).expand();
+        let t = self.inv_freq.graph().arange::<Seq>() + prev_seq;
         let freqs = t.expand::<(Seq, Const<1>), _>().matmul(
             self.inv_freq
                 .expand::<(Const<1>, Const<HEAD_DIM_OVER_2>), _>(),
@@ -124,9 +115,7 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize>
     }
 }
 
-impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> InitModule
-    for RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
-{
+impl InitModule for RotaryEmbedding {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             inv_freq: cx.named_tensor("Inv Freq"),
@@ -134,67 +123,51 @@ impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> InitModule
     }
 }
 
-impl<const HEAD_DIM: usize, const HEAD_DIM_OVER_2: usize> SerializeModule
-    for RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>
-{
+impl SerializeModule for RotaryEmbedding {
     fn serialize(&self, s: &mut Serializer) {
         s.tensor("inv_freq", self.inv_freq);
     }
 }
 
-pub struct Attention<
-    const NUM_HEADS: usize,
-    const HIDDEN: usize,
-    const HEAD_DIM: usize,
-    const HEAD_DIM_OVER_2: usize,
-> {
+pub struct Attention {
     pub q_proj: GraphTensor<(Const<HIDDEN>, Const<HIDDEN>)>,
     pub k_proj: GraphTensor<(Const<HIDDEN>, Const<HIDDEN>)>,
     pub v_proj: GraphTensor<(Const<HIDDEN>, Const<HIDDEN>)>,
     pub o_proj: GraphTensor<(Const<HIDDEN>, Const<HIDDEN>)>,
-    pub rotary_embed: RotaryEmbedding<HEAD_DIM, HEAD_DIM_OVER_2>,
+    pub rotary_embed: RotaryEmbedding,
 }
 
-impl<
-        const NUM_HEADS: usize,
-        const HIDDEN: usize,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-        Batch: Dimension,
-        CurSeq: Dimension,
-        PrevSeq: Dimension,
-        TotSeq: Dimension,
-    >
+impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     Module<(
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        Option<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
+        Option<KVCache<Batch, PrevSeq, HEADS, HEAD_DIM>>,
         PhantomData<TotSeq>,
-    )> for Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
+    )> for Attention
 {
     type Output = (
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>,
+        KVCache<Batch, TotSeq, HEADS, HEAD_DIM>,
     );
 
     fn forward(
         &self,
         (x, cache, _): (
             GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-            Option<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
+            Option<KVCache<Batch, PrevSeq, HEADS, HEAD_DIM>>,
             PhantomData<TotSeq>,
         ),
     ) -> Self::Output {
         let q = x
             .matmul(self.q_proj.permute())
-            .reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>()
+            .reshape::<(Batch, CurSeq, Const<HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let k = x
             .matmul(self.k_proj.permute())
-            .reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>()
+            .reshape::<(Batch, CurSeq, Const<HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let v = x
             .matmul(self.v_proj.permute())
-            .reshape::<(Batch, CurSeq, Const<NUM_HEADS>, Const<HEAD_DIM>)>()
+            .reshape::<(Batch, CurSeq, Const<HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let q = self
             .rotary_embed
@@ -205,10 +178,10 @@ impl<
             // Add KV cache
             let k = cache
                 .0
-                .concat_along::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(k);
+                .concat_along::<(Batch, Const<HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(k);
             let v = cache
                 .1
-                .concat_along::<(Batch, Const<NUM_HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(v);
+                .concat_along::<(Batch, Const<HEADS>, TotSeq, Const<HEAD_DIM>), Axis<2>, _>(v);
             (k, v)
         } else {
             (k.realize(), v.realize())
@@ -232,13 +205,7 @@ impl<
     }
 }
 
-impl<
-        const NUM_HEADS: usize,
-        const HIDDEN: usize,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-    > InitModule for Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
-{
+impl InitModule for Attention {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             q_proj: cx.named_tensor("Query Weight"),
@@ -250,13 +217,7 @@ impl<
     }
 }
 
-impl<
-        const NUM_HEADS: usize,
-        const HIDDEN: usize,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-    > SerializeModule for Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>
-{
+impl SerializeModule for Attention {
     fn serialize(&self, s: &mut Serializer) {
         s.tensor("q_proj/weight", self.q_proj);
         s.tensor("k_proj/weight", self.k_proj);
@@ -266,45 +227,29 @@ impl<
     }
 }
 
-pub struct DecoderLayer<
-    const NUM_HEADS: usize,
-    const HIDDEN: usize,
-    const INTERMEDIATE: usize,
-    const HEAD_DIM: usize,
-    const HEAD_DIM_OVER_2: usize,
-> {
-    pub self_attn: Attention<NUM_HEADS, HIDDEN, HEAD_DIM, HEAD_DIM_OVER_2>,
+pub struct DecoderLayer {
+    pub self_attn: Attention,
     pub mlp: Mlp<INTERMEDIATE, HIDDEN>,
     pub input_layer_norm: RMSNorm<HIDDEN>,
     pub post_attention_layer_norm: RMSNorm<HIDDEN>,
 }
 
-impl<
-        const NUM_HEADS: usize,
-        const HIDDEN: usize,
-        const INTERMEDIATE: usize,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-        Batch: Dimension,
-        CurSeq: Dimension,
-        PrevSeq: Dimension,
-        TotSeq: Dimension,
-    >
+impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     Module<(
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        Option<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
+        Option<KVCache<Batch, PrevSeq, HEADS, HEAD_DIM>>,
         PhantomData<TotSeq>,
-    )> for DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>
+    )> for DecoderLayer
 {
     type Output = (
         GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-        KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>,
+        KVCache<Batch, TotSeq, HEADS, HEAD_DIM>,
     );
     fn forward(
         &self,
         (x, cache, _): (
             GraphTensor<(Batch, CurSeq, Const<HIDDEN>)>,
-            Option<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>,
+            Option<KVCache<Batch, PrevSeq, HEADS, HEAD_DIM>>,
             PhantomData<TotSeq>,
         ),
     ) -> Self::Output {
@@ -318,14 +263,7 @@ impl<
     }
 }
 
-impl<
-        const NUM_HEADS: usize,
-        const HIDDEN: usize,
-        const INTERMEDIATE: usize,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-    > InitModule for DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>
-{
+impl InitModule for DecoderLayer {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             self_attn: InitModule::initialize(cx),
@@ -336,14 +274,7 @@ impl<
     }
 }
 
-impl<
-        const NUM_HEADS: usize,
-        const HIDDEN: usize,
-        const INTERMEDIATE: usize,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-    > SerializeModule for DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>
-{
+impl SerializeModule for DecoderLayer {
     fn serialize(&self, s: &mut Serializer) {
         s.module("self_attn", &self.self_attn);
         s.module("mlp", &self.mlp);
@@ -352,50 +283,29 @@ impl<
     }
 }
 
-pub struct LlamaForCausalLM<
-    const VOCAB: usize,
-    const NUM_HEADS: usize,
-    const HIDDEN: usize,
-    const INTERMEDIATE: usize,
-    const HEAD_DIM: usize,
-    const HEAD_DIM_OVER_2: usize,
-    const LAYERS: usize,
-> {
+pub struct LlamaForCausalLM {
     pub embed_tokens: Embedding<VOCAB, HIDDEN>,
-    pub layers: Vec<DecoderLayer<NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2>>,
+    pub layers: Vec<DecoderLayer>,
     pub norm: RMSNorm<HIDDEN>,
     pub lm_head: GraphTensor<(Const<VOCAB>, Const<HIDDEN>)>,
 }
 
-impl<
-        const VOCAB: usize,
-        const NUM_HEADS: usize,
-        const HIDDEN: usize,
-        const INTERMEDIATE: usize,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-        const LAYERS: usize,
-        Batch: Dimension,
-        CurSeq: Dimension,
-        PrevSeq: Dimension,
-        TotSeq: Dimension,
-    >
+impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     Module<(
         GraphTensor<(Batch, CurSeq)>,
-        Option<Vec<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>>,
+        Option<Vec<KVCache<Batch, PrevSeq, HEADS, HEAD_DIM>>>,
         PhantomData<TotSeq>,
-    )>
-    for LlamaForCausalLM<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
+    )> for LlamaForCausalLM
 {
     type Output = (
         GraphTensor<(Batch, CurSeq, Const<VOCAB>)>,
-        Vec<KVCache<Batch, TotSeq, NUM_HEADS, HEAD_DIM>>,
+        Vec<KVCache<Batch, TotSeq, HEADS, HEAD_DIM>>,
     );
     fn forward(
         &self,
         (input, caches, _): (
             GraphTensor<(Batch, CurSeq)>,
-            Option<Vec<KVCache<Batch, PrevSeq, NUM_HEADS, HEAD_DIM>>>,
+            Option<Vec<KVCache<Batch, PrevSeq, HEADS, HEAD_DIM>>>,
             PhantomData<TotSeq>,
         ),
     ) -> Self::Output {
@@ -415,17 +325,7 @@ impl<
     }
 }
 
-impl<
-        const VOCAB: usize,
-        const NUM_HEADS: usize,
-        const HIDDEN: usize,
-        const INTERMEDIATE: usize,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-        const LAYERS: usize,
-    > InitModule
-    for LlamaForCausalLM<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
-{
+impl InitModule for LlamaForCausalLM {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             norm: InitModule::initialize(cx),
@@ -436,17 +336,7 @@ impl<
     }
 }
 
-impl<
-        const VOCAB: usize,
-        const NUM_HEADS: usize,
-        const HIDDEN: usize,
-        const INTERMEDIATE: usize,
-        const HEAD_DIM: usize,
-        const HEAD_DIM_OVER_2: usize,
-        const LAYERS: usize,
-    > SerializeModule
-    for LlamaForCausalLM<VOCAB, NUM_HEADS, HIDDEN, INTERMEDIATE, HEAD_DIM, HEAD_DIM_OVER_2, LAYERS>
-{
+impl SerializeModule for LlamaForCausalLM {
     fn serialize(&self, s: &mut Serializer) {
         s.module("model/norm", &self.norm);
         s.module("model/embed_tokens", &self.embed_tokens);
