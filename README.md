@@ -28,8 +28,13 @@ println!("Result: {:?}", c);
 ## Getting Started
 **Mistral 7B**
 ```bash
-bash examples/mistral/setup/setup.sh   # Download the model weights
-cargo run --release --example mistral  # Run the model
+cd ./examples/mistral
+# Download the model
+bash ./setup/setup.sh
+# Run the model
+cargo run --release --features metal    # MacOS (Recommended)
+cargo run --release --features cuda     # Nvidia
+cargo run --release                     # CPU
 ```
 
 ## Features
