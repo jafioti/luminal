@@ -18,7 +18,7 @@ let b = cx.tensor::<R2<1, 4>>()
 let mut c = a.matmul(b).retrieve();
 
 // Compile and run graph
-cx.compile(GenericCompiler::default(), &mut c);
+cx.compile(<(GenericCompiler, CPUCompiler)>::default(), &mut c);
 cx.execute();
 
 // Get result
