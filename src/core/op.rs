@@ -607,7 +607,7 @@ impl Operator for MaxReduce {
     }
 }
 
-fn get_vec_from_tensor<'a>(tensor: &'a InputTensor<'a>) -> &'a Vec<f32> {
+pub fn get_vec_from_tensor<'a>(tensor: &'a InputTensor<'a>) -> &'a Vec<f32> {
     tensor
         .borrowed()
         .data
@@ -616,7 +616,7 @@ fn get_vec_from_tensor<'a>(tensor: &'a InputTensor<'a>) -> &'a Vec<f32> {
         .unwrap()
 }
 
-fn get_vec_from_tensor_owned(tensor: &mut Tensor) -> &mut Vec<f32> {
+pub fn get_vec_from_tensor_owned(tensor: &mut Tensor) -> &mut Vec<f32> {
     tensor.data.as_any_mut().downcast_mut::<Vec<f32>>().unwrap()
 }
 

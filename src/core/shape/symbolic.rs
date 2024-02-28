@@ -199,6 +199,17 @@ fn reduce_triples<S: ExpressionStorage>(mut expr: GenericExpression<S>) -> Gener
             terms.remove(*ind);
         }
     }
+
+    #[macro_export]
+    macro_rules! unwrap_cont {
+        ($i: expr) => {
+            if let Some(s) = $i {
+                s
+            } else {
+                continue;
+            }
+        };
+    }
     let mut changed = true;
     while changed {
         changed = false;
@@ -211,112 +222,112 @@ fn reduce_triples<S: ExpressionStorage>(mut expr: GenericExpression<S>) -> Gener
                 b_ind.map(|b| expr.terms[b]),
             ) {
                 (Some(Term::Num(a)), term, Some(Term::Num(b))) if term.as_op().is_some() => {
-                    expr.terms[a_ind.unwrap()] = Term::Num(term.as_op().unwrap()(a, b));
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    expr.terms[unwrap_cont!(a_ind)] = Term::Num(term.as_op().unwrap()(a, b));
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 // Remove min(i, inf) and min(inf, i)
                 (Some(Term::Num(a)), Term::Min, _) if a == i32::MAX => {
-                    remove_terms(&mut expr.terms, &[op_ind, a_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
                 }
                 (_, Term::Min, Some(Term::Num(b))) if b == i32::MAX => {
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 // Remove min(i, 0) and min(0, i)
                 (Some(Term::Num(0)), Term::Min, Some(Term::Var(_))) => {
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 (Some(Term::Var(_)), Term::Min, Some(Term::Num(0))) => {
-                    remove_terms(&mut expr.terms, &[op_ind, a_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
                 }
                 // Remove max(i, 0) and max(0, i)
                 (Some(Term::Var(_)), Term::Max, Some(Term::Num(0))) => {
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 (Some(Term::Num(0)), Term::Max, Some(Term::Var(_))) => {
-                    remove_terms(&mut expr.terms, &[op_ind, a_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
                 }
                 // Remove max(i, inf) and max(inf, i)
                 (_, Term::Max, Some(Term::Num(i))) if i == i32::MAX => {
-                    remove_terms(&mut expr.terms, &[op_ind, a_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
                 }
                 (Some(Term::Num(i)), Term::Max, _) if i == i32::MAX => {
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 // Remove i + 0, i - 0 and 0 + i
                 (Some(Term::Num(0)), Term::Add, _) => {
-                    remove_terms(&mut expr.terms, &[op_ind, a_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
                 }
                 (_, Term::Add | Term::Sub, Some(Term::Num(0))) => {
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()])
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)])
                 }
                 // Simplify i * 0, 0 * i to 0
                 (_, Term::Mul, Some(Term::Num(0))) => {
-                    remove_terms(&mut expr.terms, &[op_ind, a_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
                 }
                 (Some(Term::Num(0)), Term::Mul, _) => {
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 // Simplify 0 / i to 0
                 (Some(Term::Num(0)), Term::Div, _) => {
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 // Remove i / 1
                 (_, Term::Div, Some(Term::Num(1))) => {
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 // Remove i * 1 and 1 * i
                 (_, Term::Mul, Some(Term::Num(1))) => {
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 (Some(Term::Num(1)), Term::Mul, _) => {
-                    remove_terms(&mut expr.terms, &[op_ind, a_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
                 }
                 // Simplify i - i to 0
                 (Some(a), Term::Sub, Some(b)) if a == b => {
-                    expr.terms[a_ind.unwrap()] = Term::Num(0);
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    expr.terms[unwrap_cont!(a_ind)] = Term::Num(0);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 // Simplify true && i and i && true to i
                 (_, Term::And, Some(Term::Num(1))) => {
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 (Some(Term::Num(1)), Term::And, _) => {
-                    remove_terms(&mut expr.terms, &[op_ind, a_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
                 }
                 // Simplify false && i and i && false to false
                 (_, Term::And, Some(Term::Num(0))) => {
-                    remove_terms(&mut expr.terms, &[op_ind, a_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
                 }
                 (Some(Term::Num(0)), Term::And, _) => {
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 // Simplify false || i and i || false to i
                 (_, Term::Or, Some(Term::Num(0))) => {
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 (Some(Term::Num(0)), Term::Or, _) => {
-                    remove_terms(&mut expr.terms, &[op_ind, a_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
                 }
                 // Simplify true || i and i || true to true
                 (_, Term::Or, Some(Term::Num(1))) => {
-                    remove_terms(&mut expr.terms, &[op_ind, a_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
                 }
                 (Some(Term::Num(1)), Term::Or, _) => {
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 // Simplify i >= i to true (1)
                 (Some(a), Term::Gte, Some(b)) if a == b => {
-                    expr.terms[a_ind.unwrap()] = Term::Num(1);
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    expr.terms[unwrap_cont!(a_ind)] = Term::Num(1);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 // Simplify i < i to false (0)
                 (Some(a), Term::Lt, Some(b)) if a == b => {
-                    expr.terms[a_ind.unwrap()] = Term::Num(0);
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    expr.terms[unwrap_cont!(a_ind)] = Term::Num(0);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 // Simplify min(i, i) and max(i, i) to i
                 (Some(a), Term::Min | Term::Max, Some(b)) if a == b => {
-                    remove_terms(&mut expr.terms, &[op_ind, b_ind.unwrap()]);
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                 }
                 _ => {
                     inner_changed = false;

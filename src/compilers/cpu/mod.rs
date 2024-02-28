@@ -1,3 +1,6 @@
+mod binary;
+mod other;
+
 use std::any::Any;
 
 use itertools::Itertools;
@@ -10,7 +13,14 @@ use crate::{
 
 // Ops and compilers specific to CPU execution
 
-pub type CPUCompiler = (MatMulCompiler, UnaryFusionCompiler);
+pub type CPUCompiler = (
+    MatMulCompiler,
+    binary::SubtractionCompiler,
+    binary::EqualCompiler,
+    other::ARangeCompiler,
+    binary::GatherCompiler,
+    UnaryFusionCompiler,
+);
 
 pub type MatMulCompiler = (MatMul2DCompiler, BatchMatMul2DCompiler);
 
