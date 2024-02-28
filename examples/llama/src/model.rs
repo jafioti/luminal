@@ -188,11 +188,13 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         let mut weights = queries
             .matmul(keys.permute())
             .mul((HEAD_DIM as f64).sqrt().recip() as f32);
-        // We only mask on a non-kv cache pass
-        if cache.is_none() {
-            let attention_mask = self.k_proj.graph().triu::<CurSeq>(1) * f16::MIN.to_f32();
-            weights += attention_mask.realize::<(CurSeq, TotSeq)>().expand(); // CurSeq and TotSeq are guarenteed to be the same size here
-        }
+        let attention_mask = self.k_proj.graph().triu::<CurSeq>(1) * f16::MIN.to_f32();
+        weights += attention_mask
+            .pad::<(CurSeq, TotSeq), _, _>(&[
+                (0.into(), Expression::from(0)),
+                (TotSeq::const_size() - CurSeq::const_size(), 0.into()),
+            ])
+            .expand();
 
         let outputs = weights
             .softmax::<3>()
