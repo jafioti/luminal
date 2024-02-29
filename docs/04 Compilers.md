@@ -1,0 +1,27 @@
+# Compilers
+
+So now we have our graph all set up. We did our forward passes through the model, so now what? Do we run it?
+
+We could! But it wouldn't be very fast. Right now your graph is full of **primops**, which are the simplest set of primitive operations in luminal. One of the key tenants of luminal is a small primop set, which makes it easy to add new backends and write compilers for. But another consequence of a small primset is that even simple operations usually end up creating quite a few operations, and even small neural networks can end up with hundreds or thousands of primops, which are slow to run directly. So it's time to compile the graph!
+
+Compilers are structs that implement the `Compiler` trait, which simply specifies a single function:
+```rust
+pub trait Compiler {
+    /// Run a compilation pass
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, remap: T);
+}
+```
+So all a compiler does is take a mutable reference to the graph, something called remap (beyond the scope of this introduction), and does something to the graph. That something is compilation, usually in the form of finding patterns of nodes and replacing them with other nodes. For instance, there's no Subtract operation in the primops, so subtractions are implemented as `add(a, mul(b, -1))`. We can have a compiler that looks for that pattern of nodes and directly replaces it with a `Subtract` operation. We'll look at how to do this in the [Writing Compilers](https://github.com/jafioti/luminal/blob/main/docs/06%20Writing%20Compilers.md) section.
+
+All you need to know for now is that we can use this compiler on the graph by doing:
+```rust
+cx.compile(SubtractionCompiler::default());
+```
+Now the graph will have the old mul + add pattern removed and Subtract ops placed in. There are plenty of different compilers for different purposes. Some of the popular ones:
+- GenericCompiler - A handful of hardware-agnostic optimizations like [CSE](https://en.wikipedia.org/wiki/Common_subexpression_elimination) to be ran before any hardware-specific compilers.
+- CudaCompiler<T> - The full stack of cuda compilers to convert a graph to a cuda-specialized graph with T as the datatype (either f32 or f16). Imported from luminal_cuda
+- MetalCompiler<T> - Same as CudaCompiler. Imported from luminal_metal
+
+Compilers are entirely seperate from luminal, so they can be fully implemented by third party crates. For instance, everything specific to Cuda is contained in luminal_cuda.
+
+[Now let's look into how to load weights from a file.](https://github.com/jafioti/luminal/blob/main/docs/05%20Serialization.md)

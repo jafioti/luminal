@@ -1,4 +1,4 @@
-## Luminal Introduction
+# Luminal Introduction
 
 Let's get up to speed with how to use luminal, and how it works internally.
 
@@ -20,7 +20,7 @@ let c = (a + b).retrieve();
 cx.execute();
 
 // Get result (4)
-println!("Result: {:?}", c.data());
+println!("Result: {:?}", c);
 // Prints out [2.0, 4.0, 6.0]
 ```
 Wow! A lot is going on here just to add two tensors together. That's because luminal isn't really designed for such simple computation, and there's little benifit to using it here. But we'll see it pay off when we start doing more complex operations.
@@ -35,32 +35,4 @@ Then we set the data for these tensors. But if `GraphTensor` doesn't hold data, 
 
 Alright, that was a lot but now we've touched on all the main aspects of running a model in luminal.
 
-## NN Modules
-Like any good DL library, we organize our networks into `Module`s. Here is the module trait:
-```rust
-/// A module with a forward pass
-pub trait Module<I> {
-    type Output;
-    fn forward(&self, input: I) -> Self::Output;
-}
-```
-Super simple, we just define a forward function that takes an input and returns an output. A consequence of this is it allows us to define seperate forward passes for single and batched inputs!
-
-Now let's take a look at how `Linear` is defined:
-```rust
-/// A simple linear layer
-pub struct Linear<const A: usize, const B: usize> {
-    pub(crate) weight: GraphTensor<R2<A, B>>,
-}
-
-impl<const A: usize, const B: usize> Module<GraphTensor<R1<A>>> for Linear<A, B> {
-    type Output = GraphTensor<R1<B>>;
-
-    fn forward(&self, input: GraphTensor<R1<A>>) -> Self::Output {
-        input.matmul(self.weight)
-    }
-}
-```
-Here we see a single weight matrix as the internal state, of size AxB. We've written a single forward function for single input vectors of shape (A,) and matmul it by our weight matrix to get an output of shape (B,).
-
-Again, notice we're only dealing with `GraphTensor`s here, so when this code actually gets ran, **no computation happens, ops just get recorded to the graph.**
+[Let's take a look at each piece in more depth.](https://github.com/jafioti/luminal/blob/main/docs/02%20GraphTensor%20API.md)
