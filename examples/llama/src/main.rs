@@ -9,7 +9,6 @@ use std::{
 
 use colored::Colorize;
 use luminal::{prelude::*, shape::symbolic::Expression};
-use model::Llama;
 use rust_tokenizers::tokenizer::{
     SentencePieceBpeTokenizer, Tokenizer,
     TruncationStrategy::{self},
