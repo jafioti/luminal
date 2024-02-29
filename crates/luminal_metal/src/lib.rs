@@ -38,7 +38,7 @@ pub type MetalCompiler<T> = (
     other::CopyCompiler<T>,
     other::ContiguousElimination<T>,
     elementwise_fusion::ElementwiseFusionCompiler<T>,
-    BufferCompilers,
+    // BufferCompilers,
 );
 
 /// Compilers to share command and storage buffers

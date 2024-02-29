@@ -62,29 +62,35 @@ impl<T> MetalKernel for Matmul<T> {
         let a_dims = a_shape.len();
         let m = a_shape[a_dims - 2];
         let batch_size = a_shape.iter().take(a_dims - 2).product::<usize>().max(1);
-        // if m == 1 && a_shape.len() > 2 {
-        //     m *= a_shape[a_shape.len() - 3];
-        //     batch_size /= m;
-        // }
+        let b_batch_size = b_shape
+            .iter()
+            .enumerate()
+            .take(b_shape.len() - 2)
+            .filter(|(i, _)| !inputs[1].1.fake[inputs[1].1.indexes[*i]])
+            .map(|(_, i)| *i)
+            .product::<usize>()
+            .max(1);
         let b_dims = b_shape.len();
         let k = b_shape[b_dims - 2];
         let n = b_shape[b_dims - 1];
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        if (m == 1 || k == 1) && batch_size == 1 {
+        if m == 1 && batch_size == 1 {
             // Matvec
             encoder.set_compute_pipeline_state(&self.matvec_pipeline);
             encoder.set_buffer(0, Some(inputs[1].0), 0);
             encoder.set_buffer(1, Some(inputs[0].0), 0);
             encoder.set_buffer(2, Some(output_buffers[0]), 0);
             encoder.set_i32(3, if m == 1 { k } else { m } as i32);
-            encoder.set_i32(4, n as i32);
+            encoder.set_i32(4, if m == 1 { n } else { m } as i32);
             encoder.set_i32(5, 0);
             encoder.set_i32(6, 0);
             encoder.set_threadgroup_memory_length(
                 0,
-                if inputs[1].1.is_contiguous() {
+                if inputs[1].1.indexes[inputs[1].1.len() - 1]
+                    > inputs[1].1.indexes[inputs[1].1.len() - 2]
+                {
                     BN * BM * 4
                 } else {
                     BN * 8
@@ -107,7 +113,6 @@ impl<T> MetalKernel for Matmul<T> {
             encoder.set_i32(4, n as i32);
             encoder.set_i32(5, k as i32);
             encoder.set_i32(6, (m * k) as i32); // A batch stride
-            encoder.set_i32(7, (k * n) as i32); // B batch stride
             if inputs[1].1.len() > 2 // 3D or larger
                 && inputs[1].1.fake[inputs[1].1.indexes[inputs[1].1.len() - 3]] // 3rd to last dimension is fake
                 && inputs[1]
@@ -118,9 +123,11 @@ impl<T> MetalKernel for Matmul<T> {
                     .any(|i| !inputs[1].1.fake[*i])
             // At least one non-fake dimension before 3rd to last
             {
-                // B batch size 2
+                encoder.set_i32(7, (k * n) as i32); // B batch stride
+                                                    // B batch size 2
                 encoder.set_i32(8, b_shape[inputs[1].1.len() - 3] as i32);
             } else {
+                encoder.set_i32(7, if b_batch_size == 1 { 0 } else { n * k } as i32); // B batch stride
                 encoder.set_i32(8, 1); // B batch size
             }
             encoder.set_i32(9, (m * n) as i32); // C batch stride
@@ -128,8 +135,8 @@ impl<T> MetalKernel for Matmul<T> {
             // Execute
             encoder.dispatch_thread_groups(
                 MTLSize::new(
-                    (n + 32 - 1).div_ceil(32) as u64,
-                    (m + 32 - 1).div_ceil(32) as u64,
+                    (n + 31).div_ceil(32) as u64,
+                    (m + 31).div_ceil(32) as u64,
                     batch_size as u64,
                 ),
                 MTLSize::new(32, 2, 2),
@@ -146,15 +153,13 @@ impl<T: 'static + Clone> Operator for Matmul<T> {
             let command_buffer = self.queue.new_command_buffer();
 
             let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
-            let n = b_shape[1].to_usize().unwrap();
-            let (batch_size, m) = if a_shape.len() == 3 {
-                (
-                    a_shape[0].to_usize().unwrap(),
-                    a_shape[1].to_usize().unwrap(),
-                )
-            } else {
-                (0, a_shape[0].to_usize().unwrap())
-            };
+            let n = b_shape.last().unwrap().to_usize().unwrap();
+            let batch_size = a_shape
+                .iter()
+                .map(|i| i.to_usize().unwrap())
+                .take(a_shape.len() - 2)
+                .product::<usize>();
+            let m = a_shape[a_shape.len() - 2].to_usize().unwrap();
 
             let out = self.device.new_buffer(
                 (batch_size * m * n * std::mem::size_of::<T>()) as u64,

@@ -1569,7 +1569,7 @@ impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
                 .borrowed()
                 .data
                 .as_any()
-                .downcast_ref::<Buffer>()
+                .downcast_ref::<MetalBuffer>()
                 .unwrap();
 
             // Setup command queue / command buffer / encoder

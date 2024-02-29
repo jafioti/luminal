@@ -405,7 +405,7 @@ impl<T: 'static + Clone> Operator for MetalStdNorm<T> {
                 .borrowed()
                 .data
                 .as_any()
-                .downcast_ref::<Buffer>()
+                .downcast_ref::<MetalBuffer>()
                 .unwrap();
             let out = self.device.new_buffer(
                 (tensors[0].1.n_elements().to_usize().unwrap() * size_of::<T>()) as u64,
@@ -633,7 +633,7 @@ impl<T: MetalFloat> Operator for MetalExp<T> {
                 .borrowed()
                 .data
                 .as_any()
-                .downcast_ref::<Buffer>()
+                .downcast_ref::<MetalBuffer>()
                 .unwrap();
             let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
             let out = self.device.new_buffer(
@@ -791,7 +791,7 @@ impl<T: MetalFloat> Operator for MetalCos<T> {
                 .borrowed()
                 .data
                 .as_any()
-                .downcast_ref::<Buffer>()
+                .downcast_ref::<MetalBuffer>()
                 .unwrap();
             let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
             let out = self.device.new_buffer(
@@ -955,7 +955,7 @@ impl<T: MetalFloat> Operator for MetalSoftmax<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup buffers
-            let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
+            let inp_size = tensors[0].1.n_elements().to_usize().unwrap() * size_of::<T>();
             let out = self
                 .device
                 .new_buffer(inp_size as u64, MTLResourceOptions::StorageModeShared);
