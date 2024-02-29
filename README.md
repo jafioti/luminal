@@ -50,6 +50,8 @@ Luminal can be ran on new accelerators by implementing the following 11 primitiv
 - Binary - `Add, Mul, Mod, LessThan`
 - Other - `SumReduce, MaxReduce, Contiguous`
 
+These ops are enough to support transformers, convnets, etc.
+
 ### Native
 The current ML ecosystem is too fragmented, and the solution isn't another layer of abstraction. Luminal is written in rust, and interacts directly with the CUDA / Metal APIs. No indirections or abstractions, docker containers, or virtual environments. Just a statically-linked rust crate.
 
