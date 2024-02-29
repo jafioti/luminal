@@ -375,7 +375,7 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
                         &matvec_library,
                         &format!(
                             "gemv_{}{type_name}_bm{BM}_bn{BN}_tm4_tn4",
-                            if src2_shape.is_contiguous() { "t_" } else { "" }
+                            if src2_shape.indexes[src2_shape.len() - 1] > src2_shape.indexes[src2_shape.len() - 2] { "t_" } else { "" }
                         ),
                         &dev
                     ),
@@ -421,9 +421,9 @@ mod tests {
         const M: usize = 53;
         const N: usize = 256;
         let mut cx = Graph::new();
-        let (a_vec, b_vec) = (random_vec(M), random_vec(M * N));
+        let (a_vec, b_mat) = (random_vec(M), random_vec(M * N));
         let mut a = cx.named_tensor::<R2<1, M>>("Vec").set(a_vec.clone());
-        let mut b = cx.named_tensor::<R2<N, M>>("Mat").set(b_vec.clone());
+        let mut b = cx.named_tensor::<R2<N, M>>("Mat").set(b_mat.clone());
         let mut c = a.matmul(b.permute()).retrieve();
 
         cx.compile(
@@ -435,7 +435,7 @@ mod tests {
         let d_dev = dfdx::tensor::Cpu::default();
         let d_a = d_dev.tensor_from_vec(a_vec, (dfdx::shapes::Const::<M>,));
         let d_b =
-            d_dev.tensor_from_vec(b_vec, (dfdx::shapes::Const::<N>, dfdx::shapes::Const::<M>));
+            d_dev.tensor_from_vec(b_mat, (dfdx::shapes::Const::<N>, dfdx::shapes::Const::<M>));
         let d_c = d_a.matmul(d_b.permute());
 
         assert_close_precision(&c.data(), &d_c.as_vec(), 2);
@@ -446,9 +446,9 @@ mod tests {
         const M: usize = 256;
         const N: usize = 256;
         let mut cx = Graph::new();
-        let (a_vec, b_vec) = (random_vec(M), random_vec(M * N));
+        let (a_vec, b_mat) = (random_vec(M), random_vec(M * N));
         let mut a = cx.named_tensor::<R3<1, 1, M>>("Vec").set(a_vec.clone());
-        let mut b = cx.named_tensor::<R2<M, N>>("Mat").set(b_vec.clone());
+        let mut b = cx.named_tensor::<R2<M, N>>("Mat").set(b_mat.clone());
         let mut c = a.matmul(b).retrieve();
 
         cx.compile(
@@ -458,9 +458,16 @@ mod tests {
         cx.execute();
 
         let d_dev = dfdx::tensor::Cpu::default();
-        let d_a = d_dev.tensor_from_vec(a_vec, (dfdx::shapes::Const::<M>,));
+        let d_a = d_dev.tensor_from_vec(
+            a_vec,
+            (
+                dfdx::shapes::Const::<1>,
+                dfdx::shapes::Const::<1>,
+                dfdx::shapes::Const::<M>,
+            ),
+        );
         let d_b =
-            d_dev.tensor_from_vec(b_vec, (dfdx::shapes::Const::<M>, dfdx::shapes::Const::<N>));
+            d_dev.tensor_from_vec(b_mat, (dfdx::shapes::Const::<M>, dfdx::shapes::Const::<N>));
         let d_c = d_a.matmul(d_b);
 
         assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 2);
