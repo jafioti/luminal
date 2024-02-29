@@ -634,10 +634,8 @@ mod tests {
     #[test]
     fn test_reshape() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R2<2, 3>>();
-        a.set(vec![1., 2., 3., 1., 2., 3.]);
-        let b = a.reshape::<R1<6>>();
-        b.retrieve();
+        let a = cx.tensor::<R2<2, 3>>().set([[1., 2., 3.], [1., 2., 3.]]);
+        let b = a.reshape::<R1<6>>().retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -650,10 +648,8 @@ mod tests {
     #[test]
     fn test_permute() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R2<2, 3>>();
-        a.set(vec![1., 2., 3., 1., 2., 3.]);
-        let b: GraphTensor<R2<3, 2>> = a.permute();
-        b.retrieve();
+        let a = cx.tensor::<R2<2, 3>>().set([[1., 2., 3.], [1., 2., 3.]]);
+        let b: GraphTensor<R2<3, 2>> = a.permute().retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -666,10 +662,8 @@ mod tests {
     #[test]
     fn test_expand() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R1<3>>();
-        a.set(vec![1., 2., 3.]);
-        let b: GraphTensor<R2<3, 2>> = a.expand();
-        b.retrieve();
+        let a = cx.tensor::<R1<3>>().set([1., 2., 3.]);
+        let b: GraphTensor<R2<3, 2>> = a.expand().retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -682,10 +676,8 @@ mod tests {
     #[test]
     fn test_slice() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R2<2, 3>>();
-        a.set(vec![1., 2., 3., 1., 2., 3.]);
-        let b = a.slice((Expression::from(1).., ..));
-        b.retrieve();
+        let a = cx.tensor::<R2<2, 3>>().set([[1., 2., 3.], [1., 2., 3.]]);
+        let b = a.slice((Expression::from(1).., ..)).retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -701,10 +693,8 @@ mod tests {
     fn test_log2() {
         // We can't use dfdx because it doesn't implement this op
         let mut cx = Graph::new();
-        let a = cx.tensor::<R1<3>>();
-        a.set(vec![1., 2., 3.]);
-        let b = a.log2();
-        b.retrieve();
+        let a = cx.tensor::<R1<3>>().set([1., 2., 3.]);
+        let b = a.log2().retrieve();
         cx.execute();
 
         assert_close(
@@ -720,10 +710,8 @@ mod tests {
     fn test_exp2() {
         // We can't use dfdx because it doesn't implement this op
         let mut cx = Graph::new();
-        let a = cx.tensor::<R1<3>>();
-        a.set(vec![1., 2., 3.]);
-        let b = a.exp2();
-        b.retrieve();
+        let a = cx.tensor::<R1<3>>().set([1., 2., 3.]);
+        let b = a.exp2().retrieve();
         cx.execute();
 
         assert_close(
@@ -738,10 +726,8 @@ mod tests {
     #[test]
     fn test_recip() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R1<3>>();
-        a.set(vec![1., 2., 3.]);
-        let b = a.recip();
-        b.retrieve();
+        let a = cx.tensor::<R1<3>>().set([1., 2., 3.]);
+        let b = a.recip().retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -754,10 +740,8 @@ mod tests {
     #[test]
     fn test_sin() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R1<3>>();
-        a.set(vec![1., 2., 3.]);
-        let b = a.sin();
-        b.retrieve();
+        let a = cx.tensor::<R1<3>>().set([1., 2., 3.]);
+        let b = a.sin().retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -770,10 +754,8 @@ mod tests {
     #[test]
     fn test_sqrt() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R1<3>>();
-        a.set(vec![1., 2., 3.]);
-        let b = a.sqrt();
-        b.retrieve();
+        let a = cx.tensor::<R1<3>>().set([1., 2., 3.]);
+        let b = a.sqrt().retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -788,12 +770,9 @@ mod tests {
     #[test]
     fn test_add() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R1<3>>();
-        a.set(vec![1., 2., 3.]);
-        let b = cx.tensor::<R1<3>>();
-        b.set(vec![1., 2., 3.]);
-        let c = a + b;
-        c.retrieve();
+        let a = cx.tensor::<R1<3>>().set([1., 2., 3.]);
+        let b = cx.tensor::<R1<3>>().set([1., 2., 3.]);
+        let c = (a + b).retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -807,12 +786,9 @@ mod tests {
     #[test]
     fn test_sub() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R1<3>>();
-        a.set(vec![1., 2., 3.]);
-        let b = cx.tensor::<R1<3>>();
-        b.set(vec![1., 2., 3.]);
-        let c = a - b;
-        c.retrieve();
+        let a = cx.tensor::<R1<3>>().set([1., 2., 3.]);
+        let b = cx.tensor::<R1<3>>().set([1., 2., 3.]);
+        let c = (a - b).retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -826,12 +802,9 @@ mod tests {
     #[test]
     fn test_mul() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R1<3>>();
-        a.set(vec![1., 2., 3.]);
-        let b = cx.tensor::<R1<3>>();
-        b.set(vec![1., 2., 3.]);
-        let c = a * b;
-        c.retrieve();
+        let a = cx.tensor::<R1<3>>().set([1., 2., 3.]);
+        let b = cx.tensor::<R1<3>>().set([1., 2., 3.]);
+        let c = (a * b).retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -845,10 +818,8 @@ mod tests {
     #[test]
     fn test_permute_mul() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R2<3, 2>>();
-        a.set(vec![1., 2., 3., 2., 3., 1.]);
-        let b = cx.tensor::<R2<3, 2>>();
-        b.set(vec![1., 2., 3., -1., 3., 0.]);
+        let a = cx.tensor::<R2<3, 2>>().set([[1., 2.], [3., 2.], [3., 1.]]);
+        let b = cx.tensor::<R2<3, 2>>().set([[1., 2.], [3., -1.], [3., 0.]]);
         let c = a.expand::<R3<3, 2, 3>, crate::prelude::Axis<2>>()
             * b.expand::<R3<3, 2, 3>, crate::prelude::Axis<2>>();
         c.retrieve();
@@ -866,12 +837,9 @@ mod tests {
     #[test]
     fn test_div() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R1<3>>();
-        a.set(vec![1., 2., 3.]);
-        let b = cx.tensor::<R1<3>>();
-        b.set(vec![1., 2., 3.]);
-        let c = a / b;
-        c.retrieve();
+        let a = cx.tensor::<R1<3>>().set([1., 2., 3.]);
+        let b = cx.tensor::<R1<3>>().set([1., 2., 3.]);
+        let c = (a / b).retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -885,13 +853,9 @@ mod tests {
     #[test]
     fn test_max() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R1<3>>();
-        a.set(vec![1., 0., 3.]);
-        let b = cx.tensor::<R1<3>>();
-        b.set(vec![1., 2., -2.]);
-        let c = a.max(b);
-        c.retrieve();
-
+        let a = cx.tensor::<R1<3>>().set([1., 0., 3.]);
+        let b = cx.tensor::<R1<3>>().set([1., 2., -2.]);
+        let c = a.max(b).retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -905,12 +869,9 @@ mod tests {
     #[test]
     fn test_mod() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R1<3>>();
-        a.set(vec![1., 2., 3.]);
-        let b = cx.tensor::<R1<3>>();
-        b.set(vec![1., 2., 3.]);
-        let c = a % b;
-        c.retrieve();
+        let a = cx.tensor::<R1<3>>().set([1., 2., 3.]);
+        let b = cx.tensor::<R1<3>>().set([1., 2., 3.]);
+        let c = (a % b).retrieve();
         cx.execute();
 
         // No dfdx equivalent
@@ -930,14 +891,12 @@ mod tests {
     #[test]
     fn test_sum_reduce() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R3<2, 2, 3>>();
-        a.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
-        let b = a.sum_reduce::<_, crate::prelude::Axis<1>>();
-        let c = a.sum_reduce::<_, crate::prelude::Axis<0>>();
-        let d = a.sum_reduce::<_, crate::prelude::Axis<2>>();
-        b.retrieve();
-        c.retrieve();
-        d.retrieve();
+        let a = cx
+            .tensor::<R3<2, 2, 3>>()
+            .set([[[1., 2., 3.], [1., 2., 3.]], [[1., 2., 3.], [1., 2., 3.]]]);
+        let b = a.sum_reduce::<_, crate::prelude::Axis<1>>().retrieve();
+        let c = a.sum_reduce::<_, crate::prelude::Axis<0>>().retrieve();
+        let d = a.sum_reduce::<_, crate::prelude::Axis<2>>().retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -954,26 +913,18 @@ mod tests {
     #[test]
     fn test_sum_reduce2() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R4<1, 2, 2, 3>>();
-        a.set(vec![
-            34.4, -96.0, 144.0, 43.0, 560.0, 180.0, 39.6, -120.0, 180.0, 49.5, 700.0, 225.0,
-        ]);
-        let b = a.sum_reduce::<_, crate::prelude::Axis<3>>();
-        b.retrieve();
+        let a = cx.tensor::<R4<1, 2, 2, 3>>().set([[
+            [[34.4, -96.0, 144.0], [43.0, 560.0, 180.0]],
+            [[39.6, -120.0, 180.0], [49.5, 700.0, 225.0]],
+        ]]);
+        let b = a.sum_reduce::<_, crate::prelude::Axis<3>>().retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
-        let d_a = d_dev.tensor_from_vec(
-            vec![
-                34.4, -96.0, 144.0, 43.0, 560.0, 180.0, 39.6, -120.0, 180.0, 49.5, 700.0, 225.0,
-            ],
-            (
-                dfdx::shapes::Const::<1>,
-                dfdx::shapes::Const::<2>,
-                dfdx::shapes::Const::<2>,
-                dfdx::shapes::Const::<3>,
-            ),
-        );
+        let d_a = d_dev.tensor([[
+            [[34.4, -96.0, 144.0], [43.0, 560.0, 180.0]],
+            [[39.6, -120.0, 180.0], [49.5, 700.0, 225.0]],
+        ]]);
         let d_b = d_a.sum::<_, dfdx::shapes::Axis<3>>();
 
         assert_close(&b.data(), &d_b.as_vec());
@@ -982,15 +933,12 @@ mod tests {
     #[test]
     fn test_max_reduce() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R3<2, 2, 3>>();
-        a.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
-        let b = a.max_reduce::<_, crate::prelude::Axis<1>>();
-        let c = a.max_reduce::<_, crate::prelude::Axis<0>>();
-        let d = a.max_reduce::<_, crate::prelude::Axis<2>>();
-        b.retrieve();
-        c.retrieve();
-        d.retrieve();
-
+        let a = cx
+            .tensor::<R3<2, 2, 3>>()
+            .set([[[1., 2., 3.], [1., 2., 3.]], [[1., 2., 3.], [1., 2., 3.]]]);
+        let b = a.max_reduce::<_, crate::prelude::Axis<1>>().retrieve();
+        let c = a.max_reduce::<_, crate::prelude::Axis<0>>().retrieve();
+        let d = a.max_reduce::<_, crate::prelude::Axis<2>>().retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();

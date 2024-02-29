@@ -162,7 +162,7 @@ impl<S: Shape> GraphTensor<S> {
 
 impl<S: ConstShape> GraphTensor<S> {
     /// Set the value of the tensor matching the constant shape
-    pub fn set<T: Data + Clone>(self, data: T) -> Self {
+    pub fn set<T: Data + Clone, D: ToData<S, T>>(self, data: D) -> Self {
         let node = self
             .graph()
             .graph
@@ -171,12 +171,9 @@ impl<S: ConstShape> GraphTensor<S> {
             .as_any_mut()
             .downcast_mut::<Function>()
             .unwrap();
+        let data = data.to_data_vec();
         // We shouldn't do cloning here!
-        node.1 = Box::new(move |_| {
-            vec![Tensor {
-                data: Box::new(data.clone()),
-            }]
-        });
+        node.1 = Box::new(move |_| vec![Tensor::new(data.clone())]);
         self
     }
 
@@ -419,3 +416,58 @@ tuple_impls!(
     [M1, M2, M3, M4, M5, M6, M7, M8, M9, M10],
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 );
+
+pub trait ToData<S: Shape, T> {
+    fn to_data_vec(self) -> T;
+}
+
+impl<S: Shape> ToData<S, Vec<f32>> for Vec<f32> {
+    fn to_data_vec(self) -> Vec<f32> {
+        self
+    }
+}
+impl<const A: usize> ToData<(Const<A>,), Vec<f32>> for [f32; A] {
+    fn to_data_vec(self) -> Vec<f32> {
+        self.to_vec()
+    }
+}
+impl<const A: usize, const B: usize> ToData<(Const<A>, Const<B>), Vec<f32>> for [[f32; B]; A] {
+    fn to_data_vec(self) -> Vec<f32> {
+        self.into_iter().flat_map(|i| i.to_vec()).collect()
+    }
+}
+impl<const A: usize, const B: usize, const C: usize>
+    ToData<(Const<A>, Const<B>, Const<C>), Vec<f32>> for [[[f32; C]; B]; A]
+{
+    fn to_data_vec(self) -> Vec<f32> {
+        self.into_iter()
+            .flat_map(|i| i.into_iter().flat_map(|i| i.to_vec()))
+            .collect()
+    }
+}
+impl<const A: usize, const B: usize, const C: usize, const D: usize>
+    ToData<(Const<A>, Const<B>, Const<C>, Const<D>), Vec<f32>> for [[[[f32; D]; C]; B]; A]
+{
+    fn to_data_vec(self) -> Vec<f32> {
+        self.into_iter()
+            .flat_map(|i| {
+                i.into_iter()
+                    .flat_map(|i| i.into_iter().flat_map(|i| i.to_vec()))
+            })
+            .collect()
+    }
+}
+impl<const A: usize, const B: usize, const C: usize, const D: usize, const E: usize>
+    ToData<(Const<A>, Const<B>, Const<C>, Const<D>), Vec<f32>> for [[[[[f32; E]; D]; C]; B]; A]
+{
+    fn to_data_vec(self) -> Vec<f32> {
+        self.into_iter()
+            .flat_map(|i| {
+                i.into_iter().flat_map(|i| {
+                    i.into_iter()
+                        .flat_map(|i| i.into_iter().flat_map(|i| i.to_vec()))
+                })
+            })
+            .collect()
+    }
+}
