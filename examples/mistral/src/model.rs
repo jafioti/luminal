@@ -306,8 +306,6 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         // Embed tokens
         let mut x = self.embedding.forward(input);
 
-        // x.diff("/Users/jafioti/Desktop/saves/embedded.bin", 0.);
-
         // Run through layers and collect new caches
         let mut new_caches = vec![];
         let mut new_cache;
@@ -317,12 +315,8 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             new_caches.push(new_cache);
         }
         // Run through last norm and output projection
-        // x.diff("/Users/jafioti/Desktop/saves/output_prenorm.bin", 0.01);
-        let output = self.norm.forward(x);
-        // output.diff("/Users/jafioti/Desktop/saves/output_normed.bin", 0.01);
-        let output = output.matmul(self.lm_head.permute());
+        let output = self.norm.forward(x).matmul(self.lm_head.permute());
 
-        // output.diff("/Users/jafioti/Desktop/saves/logits.bin", 0.01);
         (output, new_caches)
     }
 }
