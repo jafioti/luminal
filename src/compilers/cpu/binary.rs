@@ -31,7 +31,7 @@ impl Operator for Sub {
             } else {
                 0.0
             };
-            data[i] = lhs + rhs;
+            data[i] = lhs - rhs;
         }
         vec![Tensor {
             data: Box::new(data),

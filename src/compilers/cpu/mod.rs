@@ -363,40 +363,42 @@ impl Operator for FusedUnary {
 
 #[cfg(test)]
 mod tests {
+    use rand::{rngs::StdRng, SeedableRng};
+
     use crate::prelude::*;
     crate::test_imports!();
 
-    // #[test]
-    // fn matmul() {
-    //     test_compilers_close(
-    //         &[test_graphs::matmul],
-    //         &[Box::<(CPUCompiler, PostGenericCompiler)>::default()],
-    //     );
-    // }
+    #[test]
+    fn test_matmul() {
+        let mut cx = Graph::new();
+        let a = cx.tensor::<(Dyn<'M'>, Dyn<'K'>)>();
+        let b = cx.tensor::<(Dyn<'K'>, Dyn<'N'>)>();
+        let mut c = a.matmul(b).retrieve();
 
-    // #[test]
-    // fn batch_matmul() {
-    //     test_compilers_close(
-    //         &[test_graphs::batch_matmul],
-    //         &[Box::<(CPUCompiler, PostGenericCompiler)>::default()],
-    //     );
-    // }
+        cx.compile(CPUCompiler::default(), &mut c);
 
-    // #[test]
-    // fn feedforward() {
-    //     test_compilers_close(
-    //         &[test_graphs::feedforward],
-    //         &[Box::<(CPUCompiler, PostGenericCompiler)>::default()],
-    //     );
-    // }
+        let d_dev = Cpu::default();
+        for m in (1..23).step_by(4) {
+            for k in (1..35).step_by(3) {
+                for n in (1..70).step_by(7) {
+                    let mut rng = StdRng::seed_from_u64(0);
+                    let a_data = random_vec_rng(m * k, &mut rng);
+                    let b_data = random_vec_rng(k * n, &mut rng);
+                    a.set_dyn(a_data.clone(), &[m, k]);
+                    b.set_dyn(b_data.clone(), &[k, n]);
 
-    // #[test]
-    // fn transformer() {
-    //     test_compilers_close(
-    //         &[test_graphs::transformer],
-    //         &[Box::<(CPUCompiler, PostGenericCompiler)>::default()],
-    //     );
-    // }
+                    cx.execute();
+
+                    let d_a = d_dev.tensor_from_vec(a_data, (m, k));
+                    let d_b = d_dev.tensor_from_vec(b_data, (k, n));
+                    let d_c = d_a.matmul(d_b);
+
+                    assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 2);
+                    c.drop();
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_cpu_matmul_2d_2() {
