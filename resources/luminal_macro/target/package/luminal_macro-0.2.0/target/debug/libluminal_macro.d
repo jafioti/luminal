@@ -1,0 +1,1 @@
+/Users/jafioti/Documents/luminal/resources/luminal_macro/target/package/luminal_macro-0.2.0/target/debug/libluminal_macro.dylib: /Users/jafioti/Documents/luminal/resources/luminal_macro/target/package/luminal_macro-0.2.0/src/lib.rs
