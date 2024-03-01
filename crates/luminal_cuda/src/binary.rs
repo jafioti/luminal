@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use cudarc::{
+use luminal_cudarc::{
     driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig},
     nvrtc::{compile_ptx_with_opts, CompileOptions},
 };
@@ -93,9 +93,9 @@ impl<T> Operator for CudaSub<T>
 where
     T: std::fmt::Debug
         + Copy
-        + cudarc::driver::DeviceRepr
+        + luminal_cudarc::driver::DeviceRepr
         + std::marker::Unpin
-        + cudarc::driver::ValidAsZeroBits,
+        + luminal_cudarc::driver::ValidAsZeroBits,
     CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -291,9 +291,9 @@ impl<T> Operator for CudaEqual<T>
 where
     T: std::fmt::Debug
         + Copy
-        + cudarc::driver::DeviceRepr
+        + luminal_cudarc::driver::DeviceRepr
         + std::marker::Unpin
-        + cudarc::driver::ValidAsZeroBits,
+        + luminal_cudarc::driver::ValidAsZeroBits,
     CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -490,7 +490,7 @@ extern \"C\" __global__ void gather({type_name} *out, const {type_name} *weights
 
 impl<T> Operator for CudaGather<T>
 where
-    T: std::fmt::Debug + Copy + cudarc::driver::DeviceRepr + std::marker::Unpin + CudaFloat,
+    T: std::fmt::Debug + Copy + luminal_cudarc::driver::DeviceRepr + std::marker::Unpin + CudaFloat,
     CudaData<T>: Data,
 {
     fn process(&mut self, inputs: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {

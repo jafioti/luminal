@@ -1,13 +1,15 @@
 [package]
 name = "luminal_cuda"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+description = "Cuda compiler for luminal"
+license = "MIT OR Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-luminal = {path="../.."}
-cudarc = { git = "https://github.com/coreylowman/cudarc", rev = "ed3bb3e5bb186fb70ebfffc497bcd206f126ccce", features = [
+luminal = { path = "../.." }
+luminal_cudarc = { version="0.10.0", features = [
     "cublas",
     "f16",
 ]}

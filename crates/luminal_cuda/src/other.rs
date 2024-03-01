@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use cudarc::{
+use luminal_cudarc::{
     driver::{CudaDevice, CudaFunction, LaunchAsync, LaunchConfig},
     nvrtc::{compile_ptx_with_opts, CompileOptions},
 };
@@ -70,7 +70,7 @@ extern \"C\" __global__ void arange({type_name} *out, int n_elements) {{
 
 impl<T> Operator for CudaARange<T>
 where
-    T: std::fmt::Debug + Copy + cudarc::driver::DeviceRepr + std::marker::Unpin + CudaFloat,
+    T: std::fmt::Debug + Copy + luminal_cudarc::driver::DeviceRepr + std::marker::Unpin + CudaFloat,
     CudaData<T>: Data,
 {
     fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {

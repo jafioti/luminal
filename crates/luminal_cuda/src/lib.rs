@@ -6,8 +6,8 @@ mod prim;
 #[cfg(test)]
 mod tests;
 
-use cudarc::driver::{CudaSlice, DeviceRepr};
 use itertools::Itertools;
+use luminal_cudarc::driver::{CudaSlice, DeviceRepr};
 
 use std::{collections::hash_map::DefaultHasher, fmt::Write, hash::Hasher};
 
@@ -28,9 +28,9 @@ pub type CudaCompiler<T> = (
 pub trait CudaFloat:
     std::fmt::Debug
     + Copy
-    + cudarc::driver::DeviceRepr
+    + luminal_cudarc::driver::DeviceRepr
     + std::marker::Unpin
-    + cudarc::driver::ValidAsZeroBits
+    + luminal_cudarc::driver::ValidAsZeroBits
 {
     fn to_f32(self) -> f32;
     fn from_f32(a: f32) -> Self;
