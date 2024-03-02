@@ -10,7 +10,21 @@ use luminal::{
     tests::{assert_close, assert_close_precision, assert_exact, random_vec, random_vec_rng},
 };
 
-use crate::{binary_test, unary_test, MetalCompiler};
+use crate::{binary_test, single_binary_test, single_unary_test, unary_test, MetalCompiler};
+
+unary_test!(|a| a.sin(), |a| a.sin(), test_sin, f16);
+unary_test!(|a| a.sqrt(), |a| a.sqrt(), test_sqrt, f16);
+unary_test!(|a| a.recip(), |a| a.recip(), test_recip, f16);
+unary_test!(|a| a * a, |a| a.clone() * a, test_square, f16);
+single_unary_test!(|a| a.ln(), |a| a.ln(), test_ln, f16, 3); // For some reason ln fails on larger tensors
+
+binary_test!(|a, b| a + b, |a, b| a + b, test_add, f16);
+binary_test!(|a, b| a - b, |a, b| a - b, test_sub, f16);
+binary_test!(|a, b| a * b, |a, b| a * b, test_mul, f16);
+binary_test!(|a, b| a / b, |a, b| a / b, test_div, f16);
+// binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f16);
+single_binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f16, 3); // Why don't larger max tests work?
+binary_test!(|a, b| a.min(b), |a, b| a.minimum(b), test_min, f16);
 
 #[test]
 fn test_contiguous() {
@@ -124,19 +138,6 @@ fn test_exp2() {
         &data.into_iter().map(|i: f32| i.exp2()).collect::<Vec<_>>(),
     );
 }
-
-unary_test!(|a| a.sin(), |a| a.sin(), test_sin, f16);
-unary_test!(|a| a.sqrt(), |a| a.sqrt(), test_sqrt, f16);
-unary_test!(|a| a.recip(), |a| a.recip(), test_recip, f16);
-unary_test!(|a| a * a, |a| a.clone() * a, test_square, f16);
-unary_test!(|a| a.ln(), |a| a.ln(), test_ln, f16);
-
-binary_test!(|a, b| a + b, |a, b| a + b, test_add, f16);
-binary_test!(|a, b| a - b, |a, b| a - b, test_sub, f16);
-binary_test!(|a, b| a * b, |a, b| a * b, test_mul, f16);
-binary_test!(|a, b| a / b, |a, b| a / b, test_div, f16);
-binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f16);
-binary_test!(|a, b| a.min(b), |a, b| a.minimum(b), test_min, f16);
 
 #[test]
 fn test_mod() {

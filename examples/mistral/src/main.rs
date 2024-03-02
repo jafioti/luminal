@@ -24,7 +24,7 @@ pub struct CLIArgs {
     gen_tokens: i32,
 
     /// Prompt for the model
-    #[clap(short = 'p', long = "prompt", default_value = include_str!("../prompts/merge_sort.txt"))]
+    #[clap(short = 'p', long = "prompt", default_value = include_str!("../prompts/asimov.txt"))]
     prompt: String,
 }
 

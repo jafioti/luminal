@@ -1,13 +1,14 @@
-use std::{
-    fs::File,
-    io::{Read, Seek},
-};
+use std::fs::File;
 
-use itertools::Itertools;
 use luminal::{op::Function, prelude::*};
 
 use crate::gguf::*;
 
+#[cfg(not(feature = "metal"))]
+use {
+    itertools::Itertools,
+    std::io::{Read, Seek},
+};
 #[cfg(feature = "metal")]
 use {
     luminal_metal::MetalBuffer,
