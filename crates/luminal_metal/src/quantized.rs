@@ -22,6 +22,7 @@ use super::{compile_function, SetInt};
 /// Multiplies a BxMxK matrix with a KxN matrix, resulting in a BxMxN matrix. This expects the first input to be a quantized 2D matrix
 #[derive(LuminalEqFalse, LuminalPrint, Clone)]
 pub struct QuantizedMatmul<T> {
+    matmul_pipeline: ComputePipelineState,
     matvec_pipeline: ComputePipelineState,
     queue: CommandQueue,
     device: Device,
@@ -32,7 +33,7 @@ impl<T: MetalFloat> QuantizedMatmul<T> {
     fn new(device: Device, queue: CommandQueue) -> Self {
         let type_name = T::type_name();
         Self {
-            matvec_pipeline: compile_function("mkernel", &format!("
+            matmul_pipeline: compile_function("matmul", &format!("
 using namespace metal;
 #define QK8_0 32
 #define NB_Q8_0 8
@@ -41,14 +42,41 @@ typedef struct {{
     int8_t  qs[QK8_0]; // quants
 }} block_q8_0;
 
-kernel void mkernel(
+kernel void matmul(
+    device block_q8_0* x [[buffer(0)]], // Quantized 2D matrix (KxN)
+    device {type_name}* y [[buffer(1)]], // Float src matrix (MxK)
+    device {type_name}* dst [[buffer(2)]], // Float dest matrix (MxN)
+    constant uint& M [[buffer(3)]],
+    constant uint& K [[buffer(4)]], // Must be >= 32
+    constant uint& N [[buffer(5)]], // Must be >= 4
+    constant uint& mat_batch_stride [[buffer(6)]], // x batch stride
+    constant uint& vec_batch_stride [[buffer(7)]], // y batch stride
+    uint3 threadgroup_position_in_grid [[threadgroup_position_in_grid]],
+    uint  thread_index_in_simdgroup[[thread_index_in_simdgroup]],
+    uint  simdgroup_index_in_threadgroup [[simdgroup_index_in_threadgroup]], // 2 simdgroups in a threadgroup
+    threadgroup uchar* shared_memory [[threadgroup(0)]]
+) {{
+    threadgroup half  * sa = (threadgroup half  *)(shared_memory);
+    threadgroup float * sb = (threadgroup float *)(shared_memory + 4096);
+}}
+"), &device),
+            matvec_pipeline: compile_function("matvec", &format!("
+using namespace metal;
+#define QK8_0 32
+#define NB_Q8_0 8
+typedef struct {{
+    half    d;         // delta
+    int8_t  qs[QK8_0]; // quants
+}} block_q8_0;
+
+kernel void matvec(
     device block_q8_0* x [[buffer(0)]], // Quantized 2D matrix
     device {type_name}* y [[buffer(1)]], // Float src vector
     device {type_name}* dst [[buffer(2)]], // Float dest vector
-    constant int64_t & src_vec_size [[buffer(3)]], // Matrix n cols (src vector size) (Must be >= 32)
-    constant int64_t & dest_vec_size [[buffer(4)]], // Matrix n rows (dest vector size) (Must be >= 4)
-    constant int64_t & mat_batch_stride [[buffer(5)]], // Matrix batch stride
-    constant int64_t & vec_batch_stride [[buffer(6)]], // Vector batch stride
+    constant uint & src_vec_size [[buffer(3)]], // Matrix n cols (src vector size) (Must be >= 32)
+    constant uint & dest_vec_size [[buffer(4)]], // Matrix n rows (dest vector size) (Must be >= 4)
+    constant uint & mat_batch_stride [[buffer(5)]], // Matrix batch stride
+    constant uint & vec_batch_stride [[buffer(6)]], // Vector batch stride
     uint3 threadgroup_position_in_grid [[threadgroup_position_in_grid]],
     uint  thread_index_in_simdgroup[[thread_index_in_simdgroup]],
     uint  simdgroup_index_in_threadgroup [[simdgroup_index_in_threadgroup]] // 2 simdgroups in a threadgroup
@@ -153,9 +181,9 @@ impl<T> MetalKernel for QuantizedMatmul<T> {
                 .collect::<Vec<_>>(),
         );
         let a_dims = a_shape.len();
-        let m = a_shape[a_dims - 2];
-        let batch_size = a_shape.iter().take(a_dims - 2).product::<usize>().max(1);
         let b_dims = b_shape.len();
+        let batch_size = a_shape.iter().take(a_dims - 2).product::<usize>().max(1);
+        let m = a_shape[a_dims - 2];
         let k = b_shape[b_dims - 2];
         let n = b_shape[b_dims - 1];
 
@@ -167,10 +195,10 @@ impl<T> MetalKernel for QuantizedMatmul<T> {
             encoder.set_buffer(0, Some(inputs[1].0), 0); // Matrix
             encoder.set_buffer(1, Some(inputs[0].0), 0); // Vector
             encoder.set_buffer(2, Some(output_buffers[0]), 0); // Dest vector
-            encoder.set_i64(3, k as i64); // Src vec size
-            encoder.set_i64(4, n as i64); // Dest vec size
-            encoder.set_i64(5, 0); // Matrix batch stride
-            encoder.set_i64(6, k as i64); // Vector batch stride
+            encoder.set_u32(3, k as u32); // Src vec size
+            encoder.set_u32(4, n as u32); // Dest vec size
+            encoder.set_u32(5, 0); // Matrix batch stride
+            encoder.set_u32(6, k as u32); // Vector batch stride
             encoder.dispatch_thread_groups(
                 MTLSize::new(n.div_ceil(8) as u64, 1, m as u64),
                 MTLSize::new(8, 8, 1),
