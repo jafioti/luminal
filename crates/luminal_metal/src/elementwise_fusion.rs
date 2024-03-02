@@ -297,7 +297,6 @@ kernel void mkernel({} device {type_name} *out [[buffer({})]], device uint& n_el
                     edges.len() + 1,
                     op.equation
                 );
-                println!("Kernel: {:?}", kernel);
                 op.kernel = Some(compile_function("mkernel", &kernel, &device));
                 op.dyn_chars = dyn_chars;
             }
