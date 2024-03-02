@@ -1143,7 +1143,7 @@ impl<T: MetalFloat> Operator for MetalLessThan<T> {
             }
         }
         if key == "elementwise" {
-            return Some(Box::new("(float)(input0 < input1)".to_string()));
+            return Some(Box::new("(float)(input0 < input1 ? 1.0 : 0.0)".to_string()));
         }
         None
     }
