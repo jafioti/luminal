@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use cudarc::{
+use luminal_cudarc::{
     cublas::{sys::cublasOperation_t::*, CudaBlas},
     driver::{CudaDevice, DevicePtr, DevicePtrMut},
 };
@@ -57,7 +57,7 @@ where
         };
         if T::is_f32() {
             unsafe {
-                cudarc::cublas::result::sgemm(
+                luminal_cudarc::cublas::result::sgemm(
                     *self.0.handle(),
                     transa,
                     transb,
@@ -77,7 +77,7 @@ where
             }
         } else {
             unsafe {
-                cudarc::cublas::result::hgemm(
+                luminal_cudarc::cublas::result::hgemm(
                     *self.0.handle(),
                     transa,
                     transb,
@@ -150,7 +150,7 @@ where
         };
         if T::is_f32() {
             unsafe {
-                cudarc::cublas::result::sgemm_strided_batched(
+                luminal_cudarc::cublas::result::sgemm_strided_batched(
                     *self.0.handle(),
                     transa,
                     transb,
@@ -174,7 +174,7 @@ where
             }
         } else {
             unsafe {
-                cudarc::cublas::result::hgemm_strided_batched(
+                luminal_cudarc::cublas::result::hgemm_strided_batched(
                     *self.0.handle(),
                     transa,
                     transb,

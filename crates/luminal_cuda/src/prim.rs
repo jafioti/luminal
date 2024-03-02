@@ -12,7 +12,7 @@ use std::{
     sync::Arc,
 };
 
-use cudarc::{
+use luminal_cudarc::{
     driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig},
     nvrtc::{compile_ptx_with_opts, CompileOptions},
 };
@@ -35,7 +35,7 @@ impl<T> CudaCopyToDevice<T> {
 impl<T> Operator for CudaCopyToDevice<T>
 where
     CudaData<T>: Data,
-    T: CudaFloat + cudarc::driver::DeviceRepr + std::marker::Unpin,
+    T: CudaFloat + luminal_cudarc::driver::DeviceRepr + std::marker::Unpin,
 {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         if inp[0].0.borrowed().data.as_any().is::<CudaData<T>>() {
@@ -75,7 +75,7 @@ impl<T> CudaCopyFromDevice<T> {
 impl<T> Operator for CudaCopyFromDevice<T>
 where
     CudaData<T>: Data,
-    T: CudaFloat + cudarc::driver::DeviceRepr + std::marker::Unpin,
+    T: CudaFloat + luminal_cudarc::driver::DeviceRepr + std::marker::Unpin,
 {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         if inp[0].0.borrowed().data.as_any().is::<Vec<f32>>() {
@@ -128,7 +128,7 @@ impl<T> CudaConstant<T> {
 
 impl<T> Operator for CudaConstant<T>
 where
-    T: Debug + Copy + cudarc::driver::DeviceRepr + std::marker::Unpin + CudaFloat,
+    T: Debug + Copy + luminal_cudarc::driver::DeviceRepr + std::marker::Unpin + CudaFloat,
     CudaData<T>: Data,
 {
     fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -207,7 +207,10 @@ extern \"C\" __global__ void kernel({} *out, const {} *inp_a, int numel{rendered
 }
 impl<T> Operator for CudaContiguous<T>
 where
-    T: Debug + 'static + cudarc::driver::DeviceRepr + cudarc::driver::ValidAsZeroBits,
+    T: Debug
+        + 'static
+        + luminal_cudarc::driver::DeviceRepr
+        + luminal_cudarc::driver::ValidAsZeroBits,
     CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -288,9 +291,9 @@ impl<T> Operator for CudaLog2<T>
 where
     T: Debug
         + Copy
-        + cudarc::driver::DeviceRepr
+        + luminal_cudarc::driver::DeviceRepr
         + std::marker::Unpin
-        + cudarc::driver::ValidAsZeroBits,
+        + luminal_cudarc::driver::ValidAsZeroBits,
     CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -362,9 +365,9 @@ impl<T> Operator for CudaExp2<T>
 where
     T: Debug
         + Copy
-        + cudarc::driver::DeviceRepr
+        + luminal_cudarc::driver::DeviceRepr
         + std::marker::Unpin
-        + cudarc::driver::ValidAsZeroBits,
+        + luminal_cudarc::driver::ValidAsZeroBits,
     CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -437,9 +440,9 @@ impl<T> Operator for CudaSqrt<T>
 where
     T: Debug
         + Copy
-        + cudarc::driver::DeviceRepr
+        + luminal_cudarc::driver::DeviceRepr
         + std::marker::Unpin
-        + cudarc::driver::ValidAsZeroBits,
+        + luminal_cudarc::driver::ValidAsZeroBits,
     CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -510,9 +513,9 @@ impl<T> Operator for CudaSin<T>
 where
     T: Debug
         + Copy
-        + cudarc::driver::DeviceRepr
+        + luminal_cudarc::driver::DeviceRepr
         + std::marker::Unpin
-        + cudarc::driver::ValidAsZeroBits,
+        + luminal_cudarc::driver::ValidAsZeroBits,
     CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -585,9 +588,9 @@ impl<T> Operator for CudaRecip<T>
 where
     T: Debug
         + Copy
-        + cudarc::driver::DeviceRepr
+        + luminal_cudarc::driver::DeviceRepr
         + std::marker::Unpin
-        + cudarc::driver::ValidAsZeroBits,
+        + luminal_cudarc::driver::ValidAsZeroBits,
     CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -696,9 +699,9 @@ impl<T> Operator for CudaAdd<T>
 where
     T: Debug
         + Copy
-        + cudarc::driver::DeviceRepr
+        + luminal_cudarc::driver::DeviceRepr
         + std::marker::Unpin
-        + cudarc::driver::ValidAsZeroBits,
+        + luminal_cudarc::driver::ValidAsZeroBits,
     CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -807,9 +810,9 @@ impl<T> Operator for CudaMul<T>
 where
     T: Debug
         + Copy
-        + cudarc::driver::DeviceRepr
+        + luminal_cudarc::driver::DeviceRepr
         + std::marker::Unpin
-        + cudarc::driver::ValidAsZeroBits,
+        + luminal_cudarc::driver::ValidAsZeroBits,
     CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -935,9 +938,9 @@ impl<T> Operator for CudaMod<T>
 where
     T: Debug
         + Copy
-        + cudarc::driver::DeviceRepr
+        + luminal_cudarc::driver::DeviceRepr
         + std::marker::Unpin
-        + cudarc::driver::ValidAsZeroBits,
+        + luminal_cudarc::driver::ValidAsZeroBits,
     CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -1061,9 +1064,9 @@ impl<T> Operator for CudaLessThan<T>
 where
     T: Debug
         + Copy
-        + cudarc::driver::DeviceRepr
+        + luminal_cudarc::driver::DeviceRepr
         + std::marker::Unpin
-        + cudarc::driver::ValidAsZeroBits,
+        + luminal_cudarc::driver::ValidAsZeroBits,
     CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -1307,9 +1310,9 @@ impl<T> Operator for CudaMaxReduce<T>
 where
     T: Debug
         + Copy
-        + cudarc::driver::DeviceRepr
+        + luminal_cudarc::driver::DeviceRepr
         + std::marker::Unpin
-        + cudarc::driver::ValidAsZeroBits,
+        + luminal_cudarc::driver::ValidAsZeroBits,
     CudaData<T>: Data,
 {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {

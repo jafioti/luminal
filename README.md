@@ -1,5 +1,9 @@
 # luminal
 ![image](https://raw.githubusercontent.com/jafioti/luminal/main/resources/dag.jpeg)
+[![CI Status](https://img.shields.io/github/actions/workflow/status/jafioti/luminal/test.yml?style=for-the-badge&logo=github-actions&logoColor=white&branch=main)](https://github.com/Sidekick-AI/dataflow/actions)
+[![Current Crates.io Version](https://img.shields.io/crates/v/luminal.svg?style=for-the-badge&logo=rust)](https://crates.io/crates/luminal)
+[![](https://dcbadge.vercel.app/api/server/VQf3j8WWNd)](https://discord.gg/VQf3j8WWNd)
+
 **Deep learning at the speed of light.**
 
 Luminal is a deep learning library that uses **composable compilers** to achieve high performance.
