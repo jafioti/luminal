@@ -382,7 +382,6 @@ impl<T> MetalKernel for FusedElementwiseOp<T> {
         );
 
         // Execute
-        println!("Out: {:?}", out_size);
         encoder.dispatch_1d(out_size);
         encoder.end_encoding();
     }
