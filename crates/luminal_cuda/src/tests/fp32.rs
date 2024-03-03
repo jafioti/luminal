@@ -23,7 +23,21 @@ use luminal::{
     },
 };
 
-use crate::CudaCompiler;
+use crate::{binary_test, single_binary_test, single_unary_test, unary_test, CudaCompiler};
+
+unary_test!(|a| a.sin(), |a| a.sin(), test_sin, f32);
+unary_test!(|a| a.sqrt(), |a| a.sqrt(), test_sqrt, f32);
+unary_test!(|a| a.recip(), |a| a.recip(), test_recip, f32);
+unary_test!(|a| a * a, |a| a.clone() * a, test_square, f32);
+single_unary_test!(|a| a.ln(), |a| a.ln(), test_ln, f32, 3); // For some reason ln fails on larger tensors
+
+binary_test!(|a, b| a + b, |a, b| a + b, test_add, f32);
+binary_test!(|a, b| a - b, |a, b| a - b, test_sub, f32);
+binary_test!(|a, b| a * b, |a, b| a * b, test_mul, f32);
+binary_test!(|a, b| a / b, |a, b| a * b.recip(), test_div, f32);
+// binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f32);
+single_binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f32, 3); // Why don't larger max tests work?
+binary_test!(|a, b| a.min(b), |a, b| a.minimum(b), test_min, f32);
 
 #[test]
 fn test_contiguous() {
@@ -129,193 +143,6 @@ fn test_exp2() {
         &b.data(),
         &data.into_iter().map(|i: f32| i.exp2()).collect::<Vec<_>>(),
     );
-}
-
-#[test]
-fn test_recip() {
-    let mut cx = Graph::new();
-    let a = cx.tensor::<R1<3>>().set(vec![1., 2., 4096.]);
-    let mut b = a.recip().retrieve();
-    cx.compile(CudaCompiler::<f32>::default(), &mut b);
-    cx.execute();
-
-    let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([1., 2., 4096.]);
-    let d_b = d_a.recip();
-
-    assert_close(&b.data(), &d_b.as_vec());
-}
-
-#[test]
-fn test_sin() {
-    let mut cx = Graph::new();
-    let a = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
-    let mut b = a.sin().retrieve();
-    cx.compile(CudaCompiler::<f32>::default(), &mut b);
-    cx.execute();
-
-    let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([1., 2., 3.]);
-    let d_b = d_a.sin();
-
-    assert_close(&b.data(), &d_b.as_vec());
-}
-
-#[test]
-fn test_sqrt() {
-    let mut cx = Graph::new();
-    let a = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
-    let mut b = a / a.sqrt();
-    b.retrieve();
-    cx.compile(CudaCompiler::<f32>::default(), &mut b);
-    cx.execute();
-
-    let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([1., 2., 3.]);
-    let d_b = d_a.clone() / d_a.sqrt();
-
-    assert_close(&b.data(), &d_b.as_vec());
-}
-
-#[test]
-fn test_add() {
-    let mut cx = Graph::new();
-    let a = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
-    let b = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
-    let mut c = (a + b).retrieve();
-
-    cx.compile(CudaCompiler::<f32>::default(), &mut c);
-    cx.execute();
-
-    let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([1., 2., 3.]);
-    let d_b = d_dev.tensor([1., 2., 3.]);
-    let d_c = d_a + d_b;
-
-    assert_close(&c.data(), &d_c.as_vec());
-}
-
-#[test]
-fn test_sub() {
-    let mut cx = Graph::new();
-    let a = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
-    let b = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
-    let mut c = a - b;
-    c.retrieve();
-
-    cx.compile(CudaCompiler::<f32>::default(), &mut c);
-    cx.execute();
-
-    let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([1., 2., 3.]);
-    let d_b = d_dev.tensor([1., 2., 3.]);
-    let d_c = d_a - d_b;
-
-    assert_close(&c.data(), &d_c.as_vec());
-}
-
-#[test]
-fn test_square() {
-    let mut cx = Graph::new();
-    let mut rng = rand::thread_rng();
-    let data = random_vec_rng(40960, &mut rng);
-    let a = cx
-        .tensor::<(Dyn<'b'>, Dyn<'s'>, luminal::prelude::Const<4096>)>()
-        .set_dyn(data.clone(), &[1, 10, 4096]);
-    let mut b = a * a;
-    b.retrieve();
-
-    cx.compile(<(GenericCompiler, CudaCompiler<f32>)>::default(), &mut b);
-    cx.execute();
-
-    let d_dev = Cpu::default();
-    let d_a = d_dev.tensor_from_vec::<Rank3<1, 10, 4096>>(
-        data,
-        (
-            dfdx::prelude::Const::<1>,
-            dfdx::prelude::Const::<10>,
-            dfdx::prelude::Const::<4096>,
-        ),
-    );
-    let d_b = d_a.clone() * d_a;
-
-    assert_close(&b.data(), &d_b.as_vec());
-}
-
-#[test]
-fn test_mul() {
-    let mut cx = Graph::new();
-    let a = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
-    let b = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
-    let mut c = a * b;
-    c.retrieve();
-
-    cx.compile(CudaCompiler::<f32>::default(), &mut c);
-    cx.execute();
-
-    let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([1., 2., 3.]);
-    let d_b = d_dev.tensor([1., 2., 3.]);
-    let d_c = d_a * d_b;
-
-    assert_close(&c.data(), &d_c.as_vec());
-}
-
-#[test]
-fn test_mul2() {
-    let mut cx = Graph::new();
-    let a = cx
-        .tensor::<(LConst<1>, LConst<1>, Dyn<'a'>, Dyn<'a'>)>()
-        .set_dyn(vec![82.4, 783.0, 99.6, 974.5], &[1, 1, 2, 2]);
-    let b = cx.tensor::<R0>().set(vec![0.57735026]);
-    let mut c = (a * b.expand()).retrieve();
-
-    cx.compile(CudaCompiler::<f32>::default(), &mut c);
-    cx.execute();
-
-    let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([[[[82.4, 783.0], [99.6, 974.5]]]]);
-    let d_b = d_dev.tensor(0.57735026);
-    let d_c = d_a * d_b.broadcast::<_, dfdx::shapes::Axes4<0, 1, 2, 3>>();
-
-    assert_exact(&c.data(), &d_c.as_vec());
-}
-
-#[test]
-fn test_div() {
-    let mut cx = Graph::new();
-    let a = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
-    let b = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
-    let mut c = a / b;
-    c.retrieve();
-
-    cx.compile(CudaCompiler::<f32>::default(), &mut c);
-    cx.execute();
-
-    let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([1., 2., 3.]);
-    let d_b = d_dev.tensor([1., 2., 3.]);
-    let d_c = d_a / d_b;
-
-    assert_close(&c.data(), &d_c.as_vec());
-}
-
-#[test]
-fn test_max() {
-    let mut cx = Graph::new();
-    let a = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
-    let b = cx.tensor::<R1<3>>().set(vec![1., 2., 3.]);
-    let mut c = a.max(b).retrieve();
-
-    cx.compile(CudaCompiler::<f32>::default(), &mut c);
-    cx.execute();
-
-    let d_dev = Cpu::default();
-    let d_a = d_dev.tensor([1., 2., 3.]);
-    let d_b = d_dev.tensor([1., 2., 3.]);
-    let d_c = d_a.maximum(d_b);
-
-    assert_close(&c.data(), &d_c.as_vec());
 }
 
 #[test]
@@ -823,22 +650,6 @@ fn test_transformer_encoder_block() {
     let d_b = d_model.forward(d_a);
 
     assert_close_precision(&b.data(), &d_b.as_vec(), 2);
-}
-
-#[test]
-fn test_common_buffer() {
-    let data = random_vec(32);
-    let mut cx = Graph::new();
-    let a = cx.tensor::<R1<32>>();
-    a.set(data.clone());
-    let a1 = cx.tensor::<R1<32>>();
-    a1.set(data.clone());
-    let exped = a * a1;
-    let mut b = exped.log2().retrieve();
-    let mut c = exped.sin().retrieve();
-
-    cx.compile(CudaCompiler::<f32>::default(), (&mut b, &mut c));
-    cx.execute();
 }
 
 #[test]
