@@ -93,7 +93,7 @@ Once you've written all your computation code, run `cx.display()` to see the ent
 - Mistral 7B and Llama 7B are implemented in `examples/`. See instructions above for running.
 - We have a small library of NN modules in `nn`, including transformers.
 - A signifigant amount of high-level ops are implemented in `hl_ops`. We are aiming to match the most used ~80% of the pytorch api.
-- The aim for 0.3 is to achieve SOTA performance on an M1 pro (50 tok/s), and near SOTA on single nvidia gpus (>100 tok/s), as well as support many mainstream models (Whisper, Stable Diffusion, Yolo v9, etc.)
+- The aim for 0.3 is to achieve SOTA performance on an M1 pro (50 tok/s), and near SOTA on single nvidia gpus (>100 tok/s), as well as support many mainstream models (Whisper, Stable Diffusion, Yolo v9, etc.) See the tracking issue [here](https://github.com/jafioti/luminal/issues/29)
 
 Some things on the roadmap:
 - Optimize cuda and metal matmul kernels
