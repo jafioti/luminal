@@ -507,35 +507,43 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
-        let arange = op::<MetalARange<T>>();
-        let eq = unary::<MetalEqual<T>>(arange);
-        let inp = node();
-        let mul = binary::<MetalMul<T>>(eq.clone(), inp.clone());
+        let indexes = node();
+        let ind_copy = unary::<MetalCopyToDevice<T>>(indexes.clone());
+        let equal = binary::<MetalEqual<T>>(op::<MetalARange<T>>(), ind_copy.clone());
+        let embeddings = node();
+        let mul = binary::<MetalMul<T>>(embeddings.clone(), equal.clone());
         let sum_reduce = unary::<MetalSumReduce<T>>(mul.clone());
         let mut s = sum_reduce.clone().search(graph);
         while s.next_match() {
-            if s.check_no_delete(&[sum_reduce.id]) {
+            if s.check_no_delete(&[sum_reduce.id, embeddings.id]) {
                 continue;
             }
-            let embed_dim = graph
+            let emb_shape = graph
                 .graph
-                .edges_connecting(s.get(&inp), s.get(&mul))
+                .edges_connecting(s.get(&embeddings), s.get(&mul))
                 .next()
                 .unwrap()
                 .weight()
                 .as_data()
                 .unwrap()
-                .2
-                .shape()[2]
-                .to_usize()
-                .unwrap();
+                .2;
+            let embed_dim = emb_shape.shape()[2].to_usize().unwrap();
+            let index_shape = graph
+                .graph
+                .edges_connecting(s.get(&indexes), s.get(&ind_copy))
+                .next()
+                .unwrap()
+                .weight()
+                .as_data()
+                .unwrap()
+                .2;
             let gather = graph
                 .add_op(MetalGather::<T>::new(dev.clone(), queue.clone(), embed_dim))
+                .input(s.get(&indexes), 0, index_shape)
+                .input(s.get(&embeddings), 0, emb_shape)
                 .finish();
-            move_incoming_edge(s.get(&eq), gather, &mut graph.graph);
-            graph.safe_remove_node(s.get(&eq), 1);
-            move_incoming_edge(s.get(&mul), gather, &mut graph.graph);
             move_outgoing_edge(s.get(&sum_reduce), gather, &mut graph.graph);
+            graph.graph.remove_node(s.get(&sum_reduce));
             s.try_delete();
         }
     }

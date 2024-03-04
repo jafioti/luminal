@@ -1181,7 +1181,6 @@ impl<T: MetalFloat> Compiler for RopeCompiler<T> {
         let freqs = binary::<MetalMul<T>>(op::<MetalARange<T>>(), constant::<T>(2.0));
         let freqs = binary::<MetalMul<T>>(freqs, op::<MetalConstant<T>>());
         let freqs = binary::<MetalMul<T>>(freqs, constant::<T>((1000000_f32).abs().ln()));
-        let freqs = binary::<MetalMul<T>>(freqs, constant::<T>(1.0 / f32::ln(2.)));
         let freqs = unary::<MetalRecip<T>>(unary::<MetalExp<T>>(freqs));
         let prev_seq = op::<MetalConstant<T>>();
         let emb = binary::<MetalMul<T>>(
@@ -1191,16 +1190,11 @@ impl<T: MetalFloat> Compiler for RopeCompiler<T> {
         let inp = node();
         let split = unary::<MetalContiguous<T>>(inp.clone());
         let x0 = unary::<MetalContiguous<T>>(split.clone());
-        let x1 = unary::<MetalContiguous<T>>(split.clone());
-        let (emb_sin, emb_cos) = (unary::<MetalSin<T>>(emb.clone()), unary::<MetalCos<T>>(emb));
         let x0_out = binary::<MetalSub<T>>(
-            binary::<MetalMul<T>>(x0.clone(), emb_cos.clone()),
-            binary::<MetalMul<T>>(x1.clone(), emb_sin.clone()),
+            binary::<MetalMul<T>>(x0, unary::<MetalSin<T>>(emb.clone())),
+            binary::<MetalMul<T>>(op::<MetalContiguous<T>>(), op::<MetalCos<T>>()),
         );
-        let x1_out = binary::<MetalAdd<T>>(
-            binary::<MetalMul<T>>(x0, emb_sin),
-            binary::<MetalMul<T>>(x1, emb_cos),
-        );
+        let x1_out = binary::<MetalAdd<T>>(op::<MetalMul<T>>(), op::<MetalMul<T>>());
         let add = binary::<MetalAdd<T>>(x0_out, x1_out);
         let mut s = add.clone().search(graph);
 

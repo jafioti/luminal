@@ -446,7 +446,7 @@ pub fn constant<T: MetalFloat>(num: f32) -> SelectGraph {
     n.check(move |o, _| {
         if let Some(c) = o.as_any().downcast_ref::<MetalConstant<T>>() {
             if let luminal::op::ConstantValue::Float(f) = c.0 {
-                f == num
+                (f - num).abs() < 1e-3
             } else {
                 false
             }
