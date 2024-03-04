@@ -439,7 +439,7 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
             }
         });
         let inp = node();
-        let square = binary::<MetalMul<T>>(inp.clone(), inp);
+        let square = unary::<MetalMul<T>>(inp.clone()); // This should check both inputs! For some reason doesn't work
         let mean = unary::<MetalMeanReduce<T>>(square.clone());
         let add = binary::<MetalAdd<T>>(mean.clone(), eps.clone());
         let mul = unary::<MetalMul<T>>(unary::<MetalRecip<T>>(unary::<MetalSqrt<T>>(add.clone())));

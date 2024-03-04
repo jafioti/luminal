@@ -16,7 +16,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     compile_function, constant,
-    prim::{MetalContiguous, MetalCopyFromDevice, MetalCopyToDevice, MetalSumReduce},
+    prim::{MetalAdd, MetalContiguous, MetalCopyFromDevice, MetalCopyToDevice, MetalSumReduce},
     DispatchNElements, MetalBuffer, MetalFloat, MetalKernel, MetalKernelWrapper, SetInt,
 };
 
@@ -205,22 +205,21 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
             unary::<MetalSumReduce<T>>(unary::<MetalContiguous<T>>(unary::<MetalContiguous<T>>(
                 unary::<MetalContiguous<T>>(contig1.clone()),
             )));
-        let sub = binary::<MetalSub<T>>(sum_reduce, one.clone());
-        let mut s = sub.clone().search(graph);
+        let sub = binary::<MetalSub<T>>(sum_reduce.clone(), one.clone());
+        let mut s1 = sub.clone().search(graph);
+        let neg_one = constant::<T>(-1.);
+        let add = binary::<MetalAdd<T>>(sum_reduce, neg_one.clone());
+        let mut s2 = add.clone().search(graph);
 
-        while s.next_match() {
+        while s1.next_match() || s2.next_match() {
+            let s = if s1.matched { &s1 } else { &s2 };
             let arange_amount = {
                 let sh = graph
                     .graph
-                    .edge_weight(
-                        graph
-                            .graph
-                            .edges_connecting(s.get(&one), s.get(&contig1))
-                            .next()
-                            .unwrap()
-                            .id(),
-                    )
+                    .edges_connecting(s.get(&one), s.get(&contig1))
+                    .next()
                     .unwrap()
+                    .weight()
                     .as_data()
                     .unwrap()
                     .2;
@@ -234,8 +233,13 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
                     &graph.dyn_map,
                 ))
                 .finish();
-            move_outgoing_edge(s.get(&sub), arange_op, &mut graph.graph);
-            graph.graph.remove_node(s.get(&sub));
+            let fin = if s1.matched {
+                s1.get(&sub)
+            } else {
+                s2.get(&add)
+            };
+            move_outgoing_edge(fin, arange_op, &mut graph.graph);
+            graph.graph.remove_node(fin);
             s.try_delete();
         }
     }

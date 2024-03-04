@@ -228,7 +228,7 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
         let mut sr3d = op::<MetalSumReduce<T>>();
         sr3d.check(|o, _| {
             if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<T>>() {
-                o.dim == 2
+                o.dim == 3
             } else {
                 false
             }
@@ -249,7 +249,7 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
         let mut sr4d = op::<MetalSumReduce<T>>();
         sr4d.check(|o, _| {
             if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<T>>() {
-                o.dim == 2
+                o.dim == 4
             } else {
                 false
             }
@@ -274,7 +274,7 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
         let mut sr5d = op::<MetalSumReduce<T>>();
         sr5d.check(|o, _| {
             if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<T>>() {
-                o.dim == 2
+                o.dim == 5
             } else {
                 false
             }
