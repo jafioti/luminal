@@ -60,7 +60,7 @@ impl Loader for MetalQ8Loader {
                 loading_node.1 = Box::new(move |_| {
                     let mmap_buffer =
                         unsafe { Mmap::map(&File::open(&file_path).unwrap()).unwrap() };
-                    let buffer = Device::system_default().unwrap().new_buffer_with_data(
+                    let buffer = Device::system_default().unwrap().new_buffer_with_bytes_no_copy(
                         unsafe {
                             mmap_buffer
                                 .as_ptr()
@@ -69,7 +69,8 @@ impl Loader for MetalQ8Loader {
                         },
                         n_bytes as u64,
                         MTLResourceOptions::StorageModeShared,
-                    );
+                        None,
+                    );                    
                     vec![Tensor {
                         data: Box::new(MetalBuffer(buffer)),
                     }]
