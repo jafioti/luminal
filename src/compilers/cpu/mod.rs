@@ -23,7 +23,7 @@ pub type CPUCompiler = (
     UnaryFusionCompiler,
 );
 
-pub fn constant(num: f32) -> SelectGraph {
+pub(crate) fn constant(num: f32) -> SelectGraph {
     let mut n = op::<Constant>();
     n.check(move |o, _| {
         if let Some(c) = o.as_any().downcast_ref::<Constant>() {

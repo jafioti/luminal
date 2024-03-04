@@ -864,7 +864,7 @@ impl SelectGraph {
             Some(fakes.into().into_iter().map(|i| i.into()).collect());
     }
 
-    fn connect(mut self, b: Self) -> Self {
+    pub fn connect(mut self, b: Self) -> Self {
         // Add b graph to a graph
         let mut node_map = FxHashMap::default();
         let mut a_nodes = FxHashMap::default();

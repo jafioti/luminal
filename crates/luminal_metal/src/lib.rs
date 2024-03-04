@@ -20,6 +20,7 @@ mod unary;
 
 use itertools::Itertools;
 use metal_rs::*;
+use prim::MetalConstant;
 pub use quantized::*;
 use rustc_hash::FxHashMap;
 
@@ -440,19 +441,18 @@ fn get_buffer_from_tensor<'a>(tensor: &'a InputTensor) -> &'a MetalBuffer {
         .expect("Tensor does not contain a metal buffer")
 }
 
-#[macro_export]
-macro_rules! select_const {
-    ($i: expr, $t: tt) => {
-        luminal::compiler_utils::SelectOp::new().check(|o, _| {
-            if let Some(c) = o.as_any().downcast_ref::<$crate::prim::MetalConstant<$t>>() {
-                if let luminal::op::ConstantValue::Float(f) = c.0 {
-                    (f - $i).abs() < 0.0001
-                } else {
-                    false
-                }
+pub fn constant<T: MetalFloat>(num: f32) -> SelectGraph {
+    let mut n = op::<MetalConstant<T>>();
+    n.check(move |o, _| {
+        if let Some(c) = o.as_any().downcast_ref::<MetalConstant<T>>() {
+            if let luminal::op::ConstantValue::Float(f) = c.0 {
+                f == num
             } else {
                 false
             }
-        })
-    };
+        } else {
+            false
+        }
+    });
+    n
 }

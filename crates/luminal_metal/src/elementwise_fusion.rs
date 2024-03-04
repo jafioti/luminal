@@ -32,19 +32,15 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
         let device = Device::system_default().unwrap();
         let queue = device.new_command_queue();
         // Find two elementwise ops that have a contiguous edge
-        let (mut a, mut b) = (NodeIndex::default(), NodeIndex::default());
-        let mut selector = SelectOp::new()
-            .check(|o, _| o.custom("elementwise", Box::<()>::default()).is_some())
-            .ptr(&mut a)
-            .edge(
-                SelectOp::new()
-                    .check(|o, _| o.custom("elementwise", Box::<()>::default()).is_some())
-                    .ptr(&mut b),
-            )
-            .search(graph);
+        let mut a = node();
+        a.check(|o, _| o.custom("elementwise", Box::<()>::default()).is_some());
+        let mut b = node();
+        b.check(|o, _| o.custom("elementwise", Box::<()>::default()).is_some());
+        let mut s = a.clone().connect(b.clone()).search(graph);
         let mut fused_ops = FxHashSet::default();
 
-        while selector.next_match() {
+        while s.next_match() {
+            let (a, b) = (s.get(&a), s.get(&b));
             // More than one connecting edge
             if graph.no_delete.contains(&a)
                 || (graph
@@ -240,7 +236,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
             }
             fused_ops.remove(&a);
             fused_ops.insert(new_op);
-            selector.reset();
+            s.reset();
         }
         // Compile all the kernels we placed
         let type_name = T::type_name();

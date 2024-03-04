@@ -105,7 +105,7 @@ where
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = CudaDevice::new(0).unwrap();
         // TODO: Make sure this actually checks the shape transformations to ensure pooling happens
-        let one = constant(1.);
+        let one = constant::<T>(1.);
         let contig1 = unary::<CudaContiguous<T>>(one.clone());
         let sum_reduce =
             unary::<CudaSumReduce<T>>(unary::<CudaContiguous<T>>(unary::<CudaContiguous<T>>(

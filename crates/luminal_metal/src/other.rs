@@ -3,7 +3,7 @@ use std::{any::Any, marker::PhantomData, sync::Arc};
 use luminal::{
     op::{InputTensor, Operator},
     prelude::{
-        petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction},
+        petgraph::{visit::EdgeRef, Direction},
         *,
     },
     shape::symbolic::BigExpression,
@@ -15,10 +15,9 @@ use metal_rs::{
 use rustc_hash::FxHashMap;
 
 use crate::{
-    compile_function,
-    prim::{MetalAdd, MetalContiguous, MetalCopyFromDevice, MetalCopyToDevice, MetalSumReduce},
-    select_const, DispatchNElements, MetalBuffer, MetalFloat, MetalKernel, MetalKernelWrapper,
-    SetInt,
+    compile_function, constant,
+    prim::{MetalContiguous, MetalCopyFromDevice, MetalCopyToDevice, MetalSumReduce},
+    DispatchNElements, MetalBuffer, MetalFloat, MetalKernel, MetalKernelWrapper, SetInt,
 };
 
 use super::binary::MetalSub;
@@ -29,17 +28,11 @@ pub struct CopyCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for CopyCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
-        let (mut first, mut second) = (NodeIndex::default(), NodeIndex::default());
-        let mut selector = SelectOp::new()
-            .ty::<MetalCopyToDevice<T>>()
-            .ptr(&mut first)
-            .edge(
-                SelectOp::new()
-                    .ty::<MetalCopyToDevice<T>>()
-                    .ptr(&mut second),
-            )
-            .search(graph);
-        while selector.next_match() {
+        let first = op::<MetalCopyToDevice<T>>();
+        let second = op::<MetalCopyFromDevice<T>>();
+        let mut s = first.clone().connect(second.clone()).search(graph);
+        while s.next_match() {
+            let (first, second) = (s.get(&first), s.get(&second));
             // Ensure there are no dests from first that are not copies
             if graph
                 .graph
@@ -83,7 +76,7 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
                 graph.graph.remove_node(dest);
             }
             graph.graph.remove_node(first);
-            selector.clear_cached_results();
+            s.clear_cached_results();
         }
     }
 }
@@ -204,63 +197,25 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
-        let (
-            mut one_const,
-            mut contig1,
-            mut contig2,
-            mut contig3,
-            mut contig4,
-            mut sum_reduce,
-            mut subtraction_constant,
-            mut subtraction,
-        ) = (
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-        );
 
         // TODO: Make sure this actually checks the shape transformations to ensure pooling happens
-        let contig = SelectOp::new().ty::<MetalContiguous<T>>();
-        let pre_sub_pattern = select_const!(1.0, T)
-            .ptr(&mut one_const)
-            .edge(contig.clone().ptr(&mut contig1))
-            .edge(contig.clone().ptr(&mut contig2))
-            .edge(contig.clone().ptr(&mut contig3))
-            .edge(contig.clone().ptr(&mut contig4))
-            .edge(
-                SelectOp::new()
-                    .ty::<MetalSumReduce<T>>()
-                    .ptr(&mut sum_reduce),
-            );
-        let mut s1 = pre_sub_pattern
-            .clone()
-            .edge(
-                select_const!(1.0, T)
-                    .ptr(&mut subtraction_constant)
-                    .edge(SelectOp::new().ty::<MetalSub<T>>().ptr(&mut subtraction)),
-            )
-            .search(graph);
-        let mut s2 = pre_sub_pattern
-            .edge(
-                select_const!(-1.0, T)
-                    .ptr(&mut subtraction_constant)
-                    .edge(SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut subtraction)),
-            )
-            .search(graph);
+        let one = constant::<T>(1.);
+        let contig1 = unary::<MetalContiguous<T>>(one.clone());
+        let sum_reduce =
+            unary::<MetalSumReduce<T>>(unary::<MetalContiguous<T>>(unary::<MetalContiguous<T>>(
+                unary::<MetalContiguous<T>>(contig1.clone()),
+            )));
+        let sub = binary::<MetalSub<T>>(sum_reduce, one.clone());
+        let mut s = sub.clone().search(graph);
 
-        while s1.next_match() || s2.next_match() {
+        while s.next_match() {
             let arange_amount = {
                 let sh = graph
                     .graph
                     .edge_weight(
                         graph
                             .graph
-                            .edges_connecting(one_const, contig1)
+                            .edges_connecting(s.get(&one), s.get(&contig1))
                             .next()
                             .unwrap()
                             .id(),
@@ -279,18 +234,9 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
                     &graph.dyn_map,
                 ))
                 .finish();
-            move_outgoing_edge(subtraction, arange_op, &mut graph.graph);
-
-            graph.graph.remove_node(subtraction);
-            graph.safe_remove_node(subtraction_constant, 0);
-            graph.safe_remove_node(sum_reduce, 0);
-            graph.safe_remove_node(contig4, 0);
-            graph.safe_remove_node(contig3, 0);
-            graph.safe_remove_node(contig2, 0);
-            graph.safe_remove_node(contig1, 0);
-            graph.safe_remove_node(one_const, 0);
-            s1.clear_cached_results();
-            s2.clear_cached_results();
+            move_outgoing_edge(s.get(&sub), arange_op, &mut graph.graph);
+            graph.graph.remove_node(s.get(&sub));
+            s.try_delete();
         }
     }
 }
@@ -301,17 +247,12 @@ pub struct ContiguousElimination<T>(PhantomData<T>);
 impl<T: MetalFloat> Compiler for ContiguousElimination<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
         // Look for contiguous calls going to ops that can accept non-contiguous inputs (marked non_contiguous)
-        let (mut contig, mut op) = (NodeIndex::default(), NodeIndex::default());
-        let pattern = SelectOp::new()
-            .ty::<MetalContiguous<T>>()
-            .ptr(&mut contig)
-            .edge(
-                SelectOp::new()
-                    .check(|op, _| op.custom("non_contiguous", Box::new(())).is_some())
-                    .ptr(&mut op),
-            );
-        let mut selector = pattern.search(graph);
-        while selector.next_match() {
+        let contig = op::<MetalContiguous<T>>();
+        let mut op = node();
+        op.check(|op, _| op.custom("non_contiguous", Box::new(())).is_some());
+        let mut s = contig.clone().connect(op.clone()).search(graph);
+        while s.next_match() {
+            let (contig, op) = (s.get(&contig), s.get(&op));
             if graph.no_delete.contains(&contig)
                 || graph
                     .graph
@@ -363,7 +304,7 @@ impl<T: MetalFloat> Compiler for ContiguousElimination<T> {
                     .node_weight_mut(op)
                     .unwrap()
                     .custom("recompile_shapes", Box::new(new_shapes));
-                selector.clear_cached_results();
+                s.clear_cached_results();
             }
         }
     }

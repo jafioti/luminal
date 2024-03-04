@@ -1,22 +1,21 @@
-use num_traits::FloatConst;
+use num_traits::float::FloatConst;
 use rustc_hash::FxHashMap;
 use std::{any::Any, marker::PhantomData, mem::size_of, sync::Arc};
 
-use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
+use petgraph::visit::EdgeRef;
 
 use luminal::{
     op::{ConstantValue, InputTensor, Operator},
     prelude::*,
-    select_ty,
     shape::symbolic::BigExpression,
 };
 
 use metal_rs::{objc::rc::autoreleasepool, *};
 
 use crate::{
-    compile_function, compile_lib, get_buffer_from_tensor, get_idx_valid_exps, input_dyn_dims,
-    prim::*, render_dyn_dim_inputs, select_const, select_function_from_lib, DispatchNElements,
-    MetalBuffer, MetalFloat, MetalKernel, MetalKernelWrapper, SetInt,
+    compile_function, compile_lib, constant, get_buffer_from_tensor, get_idx_valid_exps,
+    input_dyn_dims, other::MetalARange, prim::*, render_dyn_dim_inputs, select_function_from_lib,
+    DispatchNElements, MetalBuffer, MetalFloat, MetalKernel, MetalKernelWrapper, SetInt,
 };
 
 use super::binary::MetalSub;
@@ -198,33 +197,19 @@ impl<T: MetalFloat> Compiler for MeanReduceCompiler<T> {
         let queue = dev.new_command_queue();
         // Look for the mean-reduce pattern
         // mul(recip(fake_sum_reduce(const_ones)), sum_reduce(x))
-        let (mut fake_sum_reduce, mut recip, mut mul, mut sum_reduce) = (
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
+        let fake_sum_reduce = op::<MetalConstant<T>>();
+        let sum_reduce = op::<MetalSumReduce<T>>();
+        let mul = binary::<MetalMul<T>>(
+            sum_reduce.clone(),
+            unary::<MetalRecip<T>>(fake_sum_reduce.clone()),
         );
-
-        let s = SelectOp::new()
-            .ty::<MetalSumReduce<T>>()
-            .ptr(&mut sum_reduce)
-            .edge(
-                SelectOp::new()
-                    .ty::<MetalConstant<T>>()
-                    .ptr(&mut fake_sum_reduce)
-                    .edge(SelectOp::new().ty::<MetalRecip<T>>().ptr(&mut recip))
-                    .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul)),
-            );
-
-        let mut searcher = s.search(graph);
-        while searcher.next_match() {
-            if graph.no_delete.contains(&sum_reduce)
-                || graph.no_delete.contains(&fake_sum_reduce)
-                || graph.no_delete.contains(&recip)
-            {
+        let mut s = mul.clone().search(graph);
+        while s.next_match() {
+            if s.check_no_delete(&[mul.id]) {
                 // An intermediate node can't be deleted
                 continue;
             }
+            let (sum_reduce, mul) = (s.get(&sum_reduce), s.get(&mul));
             let dim = graph
                 .graph
                 .node_weight(sum_reduce)
@@ -258,9 +243,7 @@ impl<T: MetalFloat> Compiler for MeanReduceCompiler<T> {
 
             // Remove the old ops
             graph.graph.remove_node(mul);
-            graph.safe_remove_node(recip, 0);
-            graph.safe_remove_node(fake_sum_reduce, 0);
-            graph.safe_remove_node(sum_reduce, 0);
+            s.try_delete();
         }
     }
 }
@@ -442,49 +425,34 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
         let queue = dev.new_command_queue();
         // Look for the RMSNorm pattern
         // mul(recip(sqrt(add(mean_reduce(mul(x, x)), 1e-6))), x)
-        let (mut square, mut mean, mut add, mut sqrt, mut recip, mut mul, mut epsilon) = (
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-        );
 
-        let s = SelectOp::new()
-            .ty::<MetalMul<T>>()
-            .ptr(&mut square)
-            .edge(SelectOp::new().ty::<MetalMeanReduce<T>>().ptr(&mut mean))
-            .edge(
-                SelectOp::new()
-                    .check(|op, _| {
-                        if let Some(c) = op.as_any().downcast_ref::<MetalConstant<T>>() {
-                            if let ConstantValue::Float(v) = c.0 {
-                                v <= 1e-3 && v > 0.0
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    })
-                    .ptr(&mut epsilon)
-                    .edge(SelectOp::new().ty::<MetalAdd<T>>().ptr(&mut add)),
-            )
-            .edge(SelectOp::new().ty::<MetalSqrt<T>>().ptr(&mut sqrt))
-            .edge(SelectOp::new().ty::<MetalRecip<T>>().ptr(&mut recip))
-            .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul));
+        let mut eps = op::<MetalConstant<T>>();
+        eps.check(|op, _| {
+            if let Some(c) = op.as_any().downcast_ref::<MetalConstant<T>>() {
+                if let ConstantValue::Float(v) = c.0 {
+                    v <= 1e-3 && v > 0.0
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        });
+        let inp = node();
+        let square = binary::<MetalMul<T>>(inp.clone(), inp);
+        let mean = unary::<MetalMeanReduce<T>>(square.clone());
+        let add = binary::<MetalAdd<T>>(mean.clone(), eps.clone());
+        let mul = unary::<MetalMul<T>>(unary::<MetalRecip<T>>(unary::<MetalSqrt<T>>(add.clone())));
 
-        let mut searcher = s.search(graph);
-        while searcher.next_match() {
-            if check_no_delete(graph, &[add, sqrt, recip, mul, epsilon, square, mean]) {
+        let mut s = mul.clone().search(graph);
+        while s.next_match() {
+            if s.check_no_delete(&[mul.id]) {
                 // An intermediate node can't be deleted
                 continue;
             }
             let ConstantValue::Float(epsilon_num) = graph
                 .graph
-                .node_weight(epsilon)
+                .node_weight(s.get(&eps))
                 .unwrap()
                 .as_any()
                 .downcast_ref::<MetalConstant<T>>()
@@ -493,10 +461,10 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
             else {
                 continue;
             };
-            let (mut x, _, mut sh) = graph.get_sources(square)[0];
+            let (mut x, _, mut sh) = graph.get_sources(s.get(&square))[0];
             if let Some(mean_reduce) = graph
                 .graph
-                .node_weight(mean)
+                .node_weight(s.get(&mean))
                 .unwrap()
                 .as_any()
                 .downcast_ref::<MetalMeanReduce<T>>()
@@ -515,10 +483,11 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
             {
                 continue;
             }
-            if !graph.get_sources(square).iter().all(|(i, _, _)| *i == x) {
-                continue;
-            }
-            if !graph.get_sources(mul).iter().any(|(i, _, _)| *i == x) {
+            if !graph
+                .get_sources(s.get(&mul))
+                .iter()
+                .any(|(i, _, _)| *i == x)
+            {
                 continue;
             }
 
@@ -547,6 +516,7 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
                 .finish();
 
             // Create edges to dests
+            let mul = s.get(&mul);
             move_outgoing_edge(mul, rms_norm, &mut graph.graph);
             move_references(
                 &mut remap,
@@ -558,12 +528,7 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
 
             // Remove the old ops
             graph.graph.remove_node(mul);
-            graph.safe_remove_node(recip, 0);
-            graph.safe_remove_node(sqrt, 0);
-            graph.safe_remove_node(add, 0);
-            graph.safe_remove_node(epsilon, 0);
-            graph.safe_remove_node(mean, 0);
-            graph.safe_remove_node(square, 0);
+            s.try_delete();
         }
     }
 }
@@ -679,39 +644,33 @@ impl<T: MetalFloat> Compiler for MetalExpCompiler<T> {
         let queue = dev.new_command_queue();
         // Look for the exp pattern
         // exp2(mul(x, const))
-        let (mut constant, mut mul, mut exp2) = (
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-        );
 
-        let s = select_const!(1.0 / f32::ln(2.), T)
-            .ptr(&mut constant)
-            .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul))
-            .edge(SelectOp::new().ty::<MetalExp2<T>>().ptr(&mut exp2));
-
-        let mut searcher = s.search(graph);
-        while searcher.next_match() {
-            if graph.no_delete.contains(&constant)
-                || graph.no_delete.contains(&mul)
-                || graph.no_delete.contains(&exp2)
-            {
+        let inp = node();
+        let mul = binary::<MetalMul<T>>(inp.clone(), constant::<T>(1.0 / f32::ln(2.)));
+        let exp2 = unary::<MetalExp2<T>>(mul.clone());
+        let mut s = exp2.clone().search(graph);
+        while s.next_match() {
+            if s.check_no_delete(&[exp2.id]) {
                 // An intermediate node can't be deleted
                 continue;
             }
 
             // Insert exp op
-            let src = graph
-                .get_sources(mul)
-                .into_iter()
-                .find(|(i, _, _)| *i != constant)
+            let (_, _, src_shape) = graph
+                .graph
+                .edges_connecting(s.get(&inp), s.get(&mul))
+                .next()
+                .unwrap()
+                .weight()
+                .as_data()
                 .unwrap();
             let exp = graph
                 .add_op(MetalExp::<T>::new(dev.clone(), queue.clone()))
-                .input(src.0, 0, src.2)
+                .input(s.get(&inp), 0, src_shape)
                 .finish();
 
             // Create edges to dests
+            let exp2 = s.get(&exp2);
             move_outgoing_edge(exp2, exp, &mut graph.graph);
             move_references(
                 &mut remap,
@@ -723,8 +682,7 @@ impl<T: MetalFloat> Compiler for MetalExpCompiler<T> {
 
             // Remove the old ops
             graph.graph.remove_node(exp2);
-            graph.safe_remove_node(mul, 0);
-            graph.safe_remove_node(constant, 0);
+            s.try_delete();
         }
     }
 }
@@ -836,25 +794,14 @@ impl<T: MetalFloat> Compiler for MetalCosCompiler<T> {
         let queue = dev.new_command_queue();
         // Look for the cos pattern
         // sin(add(mul(const_neg_one, x), const_pi_over_2))
-        let (mut const_pi, mut sub, mut sin, mut x) = (
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-        );
 
-        let s = SelectOp::new()
-            .ptr(&mut x)
-            .edge(
-                select_const!(f32::PI() / 2., T)
-                    .ptr(&mut const_pi)
-                    .edge(select_ty!(MetalSub<T>).ptr(&mut sub)),
-            )
-            .edge(SelectOp::new().ty::<MetalSin<T>>().ptr(&mut sin));
-
-        let mut searcher = s.search(graph);
-        while searcher.next_match() {
-            if check_no_delete(graph, &[const_pi, sub]) {
+        let const_pi = constant::<T>(f32::PI() / 2.);
+        let inp = node();
+        let sub = binary::<MetalSub<T>>(inp.clone(), const_pi.clone());
+        let sin = unary::<MetalSin<T>>(sub.clone());
+        let mut s = sin.clone().search(graph);
+        while s.next_match() {
+            if s.check_no_delete(&[sin.id]) {
                 // An intermediate node can't be deleted
                 continue;
             }
@@ -862,9 +809,9 @@ impl<T: MetalFloat> Compiler for MetalCosCompiler<T> {
             // Insert cos op
             let shape = graph
                 .graph
-                .edges_directed(sub, petgraph::Direction::Incoming)
+                .edges_directed(s.get(&sub), petgraph::Direction::Incoming)
                 .filter(|e| !e.weight().is_schedule())
-                .find(|e| e.source() != const_pi)
+                .find(|e| e.source() != s.get(&const_pi))
                 .unwrap()
                 .weight()
                 .as_data()
@@ -872,10 +819,11 @@ impl<T: MetalFloat> Compiler for MetalCosCompiler<T> {
                 .2;
             let cos = graph
                 .add_op(MetalCos::<T>::new(dev.clone(), queue.clone()))
-                .input(x, 0, shape)
+                .input(s.get(&inp), 0, shape)
                 .finish();
 
             // Create edges to dests
+            let sin = s.get(&sin);
             move_outgoing_edge(sin, cos, &mut graph.graph);
             move_references(
                 &mut remap,
@@ -887,8 +835,7 @@ impl<T: MetalFloat> Compiler for MetalCosCompiler<T> {
 
             // Remove the old ops
             graph.graph.remove_node(sin);
-            graph.safe_remove_node(sub, 0);
-            graph.safe_remove_node(const_pi, 0);
+            s.try_delete();
         }
     }
 }
@@ -998,38 +945,25 @@ impl<T: MetalFloat> Compiler for SoftmaxCompiler<T> {
         let queue = dev.new_command_queue();
         // Look for the mean-reduce pattern
         // mul(recip(fake_sum_reduce(const_ones)), sum_reduce(x))
-        let (mut max_reduce, mut sub, mut exp, mut sum_reduce, mut recip, mut mul) = (
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-        );
 
-        let s = SelectOp::new()
-            .ty::<MetalMaxReduce<T>>()
-            .ptr(&mut max_reduce)
-            .edge(SelectOp::new().ty::<MetalSub<T>>().ptr(&mut sub))
-            .edge(SelectOp::new().ty::<MetalExp<T>>().ptr(&mut exp))
-            .edge(
-                SelectOp::new()
-                    .ty::<MetalSumReduce<T>>()
-                    .ptr(&mut sum_reduce),
-            )
-            .edge(SelectOp::new().ty::<MetalRecip<T>>().ptr(&mut recip))
-            .edge(SelectOp::new().ty::<MetalMul<T>>().ptr(&mut mul));
+        let max_reduce = op::<MetalMaxReduce<T>>();
+        let mul =
+            unary::<MetalMul<T>>(unary::<MetalRecip<T>>(unary::<MetalSumReduce<T>>(unary::<
+                MetalExp<T>,
+            >(
+                unary::<MetalSub<T>>(max_reduce.clone()),
+            ))));
 
         let lib = compile_lib(&dev, include_str!("kernels/softmax.metal"));
         let type_name = if T::is_f32() { "float32" } else { "float16" };
-        let mut searcher = s.search(graph);
-        while searcher.next_match() {
-            if check_no_delete(graph, &[max_reduce, sub, exp, sum_reduce, recip]) {
+        let mut s = mul.clone().search(graph);
+        while s.next_match() {
+            if s.check_no_delete(&[mul.id]) {
                 // An intermediate node can't be deleted
                 continue;
             }
             // Insert Softmax op
-            let src = graph.get_sources(max_reduce)[0];
+            let src = graph.get_sources(s.get(&max_reduce))[0];
             let mean_reduce = graph
                 .add_op(MetalSoftmax::<T> {
                     device: dev.clone(),
@@ -1050,6 +984,7 @@ impl<T: MetalFloat> Compiler for SoftmaxCompiler<T> {
                 .finish();
 
             // Create edges to dests
+            let mul = s.get(&mul);
             move_outgoing_edge(mul, mean_reduce, &mut graph.graph);
             move_references(
                 &mut remap,
@@ -1061,11 +996,7 @@ impl<T: MetalFloat> Compiler for SoftmaxCompiler<T> {
 
             // Remove the old ops
             graph.graph.remove_node(mul);
-            graph.safe_remove_node(recip, 0);
-            graph.safe_remove_node(sum_reduce, 0);
-            graph.safe_remove_node(exp, 0);
-            graph.safe_remove_node(sub, 0);
-            graph.safe_remove_node(max_reduce, 0);
+            s.try_delete();
         }
     }
 }
@@ -1246,131 +1177,44 @@ impl<T: MetalFloat> Compiler for RopeCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
-        let mut head_dim_arange = NodeIndex::default();
-        let mut two = NodeIndex::default();
-        let mut mul_2 = NodeIndex::default();
-        let mut inv_head_dim = NodeIndex::default();
-        let mut head_dim_mul = NodeIndex::default();
-        let mut theta = NodeIndex::default();
-        let mut theta_mul = NodeIndex::default();
-        let mut exp = NodeIndex::default();
-        let mut recip = NodeIndex::default();
-        let mut seq_arange = NodeIndex::default();
-        let mut seq_expr = NodeIndex::default();
-        let mut seq_add = NodeIndex::default();
-        let mut freq_seq_mul = NodeIndex::default();
-        let mut input = NodeIndex::default();
-        let mut split_contig1 = NodeIndex::default();
-        let mut split_contig2 = NodeIndex::default();
-        let mut split_contig3 = NodeIndex::default();
-        let mut sin1 = NodeIndex::default();
-        let mut sin2 = NodeIndex::default();
-        let mut cos1 = NodeIndex::default();
-        let mut cos2 = NodeIndex::default();
-        let mut out_add = NodeIndex::default();
-        let mut out_sub = NodeIndex::default();
-        let mut final_add = NodeIndex::default();
-        let mut out_mul1 = NodeIndex::default();
-        let mut out_mul2 = NodeIndex::default();
-        let mut out_mul3 = NodeIndex::default();
-        let mut out_mul4 = NodeIndex::default();
 
-        let freqs = select_const!(1000000.0_f32.ln(), T)
-            .ptr(&mut theta)
-            .edge(
-                select_ty!(MetalConstant<T>)
-                    .ptr(&mut inv_head_dim)
-                    .edge(
-                        select_ty!(MetalConstant<T>)
-                            .ptr(&mut two)
-                            .edge(
-                                select_ty!(crate::other::MetalARange<T>)
-                                    .ptr(&mut head_dim_arange)
-                                    .edge(select_ty!(MetalMul<T>).ptr(&mut mul_2)),
-                            )
-                            .edge(select_ty!(MetalMul<T>).ptr(&mut head_dim_mul)),
-                    )
-                    .edge(select_ty!(MetalMul<T>).ptr(&mut theta_mul)),
-            )
-            .edge(select_ty!(MetalExp<T>).ptr(&mut exp))
-            .edge(select_ty!(MetalRecip<T>).ptr(&mut recip));
-        let seq = select_ty!(MetalConstant<T>).ptr(&mut seq_expr).edge(
-            select_ty!(crate::other::MetalARange<T>)
-                .ptr(&mut seq_arange)
-                .edge(select_ty!(MetalAdd<T>).ptr(&mut seq_add)),
+        let freqs = binary::<MetalMul<T>>(op::<MetalARange<T>>(), constant::<T>(2.0));
+        let freqs = binary::<MetalMul<T>>(freqs, op::<MetalConstant<T>>());
+        let freqs = binary::<MetalMul<T>>(freqs, constant::<T>((1000000_f32).abs().ln()));
+        let freqs = binary::<MetalMul<T>>(freqs, constant::<T>(1.0 / f32::ln(2.)));
+        let freqs = unary::<MetalRecip<T>>(unary::<MetalExp<T>>(freqs));
+        let prev_seq = op::<MetalConstant<T>>();
+        let emb = binary::<MetalMul<T>>(
+            binary::<MetalAdd<T>>(op::<MetalARange<T>>(), prev_seq.clone()),
+            freqs,
         );
-        let emb = freqs.edge(seq.edge(select_ty!(MetalMul<T>).ptr(&mut freq_seq_mul)));
-        let split = SelectOp::new()
-            .ptr(&mut input)
-            .edge(select_ty!(MetalContiguous<T>).ptr(&mut split_contig1));
-        let x0 = split
-            .clone()
-            .edge(select_ty!(MetalContiguous<T>).ptr(&mut split_contig2));
-        let x1 = split.edge(select_ty!(MetalContiguous<T>).ptr(&mut split_contig3));
-        let x0_sin = emb
-            .clone()
-            .edge(select_ty!(MetalSin<T>).ptr(&mut sin1))
-            .edge(x0.clone().edge(select_ty!(MetalMul<T>).ptr(&mut out_mul1)));
-        let x0_cos = emb
-            .clone()
-            .edge(select_ty!(MetalCos<T>).ptr(&mut cos1))
-            .edge(x0.edge(select_ty!(MetalMul<T>).ptr(&mut out_mul2)));
-        let x1_sin = emb
-            .clone()
-            .edge(select_ty!(MetalSin<T>).ptr(&mut sin2))
-            .edge(x1.clone().edge(select_ty!(MetalMul<T>).ptr(&mut out_mul3)));
-        let x1_cos = emb
-            .clone()
-            .edge(select_ty!(MetalCos<T>).ptr(&mut cos2))
-            .edge(x1.edge(select_ty!(MetalMul<T>).ptr(&mut out_mul4)));
-        let x0_out = x1_sin.edge(x0_cos.edge(select_ty!(MetalSub<T>).ptr(&mut out_sub)));
-        let x1_out = x0_sin.edge(x1_cos.edge(select_ty!(MetalAdd<T>).ptr(&mut out_add)));
-        let mut searcher = x1_out
-            .edge(x0_out.edge(select_ty!(MetalAdd<T>).ptr(&mut final_add)))
-            .search(graph);
+        let inp = node();
+        let split = unary::<MetalContiguous<T>>(inp.clone());
+        let x0 = unary::<MetalContiguous<T>>(split.clone());
+        let x1 = unary::<MetalContiguous<T>>(split.clone());
+        let (emb_sin, emb_cos) = (unary::<MetalSin<T>>(emb.clone()), unary::<MetalCos<T>>(emb));
+        let x0_out = binary::<MetalSub<T>>(
+            binary::<MetalMul<T>>(x0.clone(), emb_cos.clone()),
+            binary::<MetalMul<T>>(x1.clone(), emb_sin.clone()),
+        );
+        let x1_out = binary::<MetalAdd<T>>(
+            binary::<MetalMul<T>>(x0, emb_sin),
+            binary::<MetalMul<T>>(x1, emb_cos),
+        );
+        let add = binary::<MetalAdd<T>>(x0_out, x1_out);
+        let mut s = add.clone().search(graph);
 
-        while searcher.next_match() {
-            if check_no_delete(
-                graph,
-                &[
-                    head_dim_arange,
-                    two,
-                    mul_2,
-                    inv_head_dim,
-                    head_dim_mul,
-                    theta,
-                    theta_mul,
-                    exp,
-                    recip,
-                    seq_arange,
-                    seq_expr,
-                    seq_add,
-                    freq_seq_mul,
-                    input,
-                    split_contig1,
-                    split_contig2,
-                    split_contig3,
-                    sin1,
-                    sin2,
-                    cos1,
-                    cos2,
-                    out_add,
-                    out_sub,
-                    final_add,
-                    out_mul1,
-                    out_mul2,
-                    out_mul3,
-                    out_mul4,
-                ],
-            ) {
+        while s.next_match() {
+            if s.check_no_delete(&[add.id]) {
                 continue;
             }
 
             // TODO: Actually do remapping and contig shape checking
 
+            let inp = s.get(&inp);
             let shape = graph
                 .graph
-                .edges_connecting(input, split_contig1)
+                .edges_connecting(inp, s.get(&split))
                 .next()
                 .unwrap()
                 .weight()
@@ -1379,7 +1223,7 @@ impl<T: MetalFloat> Compiler for RopeCompiler<T> {
                 .2;
             let Some(MetalConstant(ConstantValue::Expression(e), ..)) = graph
                 .graph
-                .node_weight(seq_expr)
+                .node_weight(s.get(&prev_seq))
                 .unwrap()
                 .as_any()
                 .downcast_ref::<MetalConstant<T>>()
@@ -1395,38 +1239,14 @@ impl<T: MetalFloat> Compiler for RopeCompiler<T> {
                     queue.clone(),
                     &graph.dyn_map,
                 ))
-                .input(input, 0, shape)
+                .input(inp, 0, shape)
                 .finish();
-            move_outgoing_edge(final_add, rope_op, &mut graph.graph);
+            let add = s.get(&add);
+            move_outgoing_edge(add, rope_op, &mut graph.graph);
 
             // Delete old ops
-            graph.graph.remove_node(final_add);
-            graph.safe_remove_node(out_add, 0);
-            graph.safe_remove_node(out_sub, 0);
-            graph.safe_remove_node(out_mul1, 0);
-            graph.safe_remove_node(out_mul2, 0);
-            graph.safe_remove_node(out_mul3, 0);
-            graph.safe_remove_node(out_mul4, 0);
-            graph.safe_remove_node(sin1, 0);
-            graph.safe_remove_node(sin2, 0);
-            graph.safe_remove_node(cos1, 0);
-            graph.safe_remove_node(cos2, 0);
-            graph.safe_remove_node(split_contig3, 0);
-            graph.safe_remove_node(split_contig2, 0);
-            graph.safe_remove_node(split_contig1, 0);
-            graph.safe_remove_node(freq_seq_mul, 0);
-            graph.safe_remove_node(seq_add, 0);
-            graph.safe_remove_node(seq_arange, 0);
-            graph.safe_remove_node(seq_expr, 0);
-            graph.safe_remove_node(recip, 0);
-            graph.safe_remove_node(exp, 0);
-            graph.safe_remove_node(theta_mul, 0);
-            graph.safe_remove_node(head_dim_mul, 0);
-            graph.safe_remove_node(mul_2, 0);
-            graph.safe_remove_node(head_dim_arange, 0);
-            graph.safe_remove_node(two, 0);
-            graph.safe_remove_node(inv_head_dim, 0);
-            graph.safe_remove_node(theta, 0);
+            graph.graph.remove_node(add);
+            s.try_delete();
         }
     }
 }

@@ -200,117 +200,98 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
-        let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
 
         // Look for the matmul pattern
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        let mut searcher_2d = SelectOp::new()
-            .ty::<MetalMul<T>>()
-            .shapes([['M', 'N', 'K'], ['M', 'N', 'K']])
-            .fakes([
-                [None, Some(true), Some(false)],
-                [Some(true), Some(false), Some(false)],
-            ])
-            .ptr(&mut mul)
-            .edge(
-                SelectOp::new()
-                    .check(|o, _| {
-                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<T>>() {
-                            o.dim == 2
-                        } else {
-                            false
-                        }
-                    })
-                    .ptr(&mut sum_reduce),
-            )
-            .search(graph);
-        let mut searcher_3d = SelectOp::new()
-            .ty::<MetalMul<T>>()
-            .shapes([['D', 'A', 'C', 'B'], ['D', 'A', 'C', 'B']])
-            .fakes([
-                [Some(false), Some(false), Some(true), Some(false)],
-                [None, Some(true), Some(false), Some(false)],
-            ])
-            .ptr(&mut mul)
-            .edge(
-                SelectOp::new()
-                    .ty::<MetalSumReduce<T>>()
-                    .check(|o, _| {
-                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<T>>() {
-                            o.dim == 3
-                        } else {
-                            false
-                        }
-                    })
-                    .ptr(&mut sum_reduce),
-            )
-            .search(graph);
-        let mut searcher_4d = SelectOp::new()
-            .ty::<MetalMul<T>>()
-            .shapes([['E', 'D', 'A', 'C', 'B'], ['E', 'D', 'A', 'C', 'B']])
-            .fakes([
-                [
-                    Some(false),
-                    Some(false),
-                    Some(false),
-                    Some(true),
-                    Some(false),
-                ],
-                [None, None, Some(true), Some(false), Some(false)],
-            ])
-            .ptr(&mut mul)
-            .edge(
-                SelectOp::new()
-                    .ty::<MetalSumReduce<T>>()
-                    .check(|o, _| {
-                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<T>>() {
-                            o.dim == 4
-                        } else {
-                            false
-                        }
-                    })
-                    .ptr(&mut sum_reduce),
-            )
-            .search(graph);
-        let mut searcher_5d = SelectOp::new()
-            .ty::<MetalMul<T>>()
-            .shapes([
-                ['F', 'E', 'D', 'A', 'C', 'B'],
-                ['F', 'E', 'D', 'A', 'C', 'B'],
-            ])
-            .fakes([
-                [
-                    Some(false),
-                    Some(false),
-                    Some(false),
-                    Some(false),
-                    Some(true),
-                    Some(false),
-                ],
-                [None, None, None, Some(true), Some(false), Some(false)],
-            ])
-            .ptr(&mut mul)
-            .edge(
-                SelectOp::new()
-                    .ty::<MetalSumReduce<T>>()
-                    .check(|o, _| {
-                        if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<T>>() {
-                            o.dim == 5
-                        } else {
-                            false
-                        }
-                    })
-                    .ptr(&mut sum_reduce),
-            )
-            .search(graph);
+        let mut mul2d = op::<MetalMul<T>>();
+        mul2d.shapes([['M', 'N', 'K'], ['M', 'N', 'K']]);
+        mul2d.fakes([
+            [None, Some(true), Some(false)],
+            [Some(true), Some(false), Some(false)],
+        ]);
+        let mut sr2d = op::<MetalSumReduce<T>>();
+        sr2d.check(|o, _| {
+            if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<T>>() {
+                o.dim == 2
+            } else {
+                false
+            }
+        });
+        let mut s2d = mul2d.clone().connect(sr2d.clone()).search(graph);
+        let mut mul3d = op::<MetalMul<T>>();
+        mul3d.shapes([['D', 'A', 'C', 'B'], ['D', 'A', 'C', 'B']]);
+        mul3d.fakes([
+            [Some(false), Some(false), Some(true), Some(false)],
+            [None, Some(true), Some(false), Some(false)],
+        ]);
+        let mut sr3d = op::<MetalSumReduce<T>>();
+        sr3d.check(|o, _| {
+            if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<T>>() {
+                o.dim == 2
+            } else {
+                false
+            }
+        });
+        let mut s3d = mul3d.clone().connect(sr3d.clone()).search(graph);
+        let mut mul4d = op::<MetalMul<T>>();
+        mul4d.shapes([['E', 'D', 'A', 'C', 'B'], ['E', 'D', 'A', 'C', 'B']]);
+        mul4d.fakes([
+            [
+                Some(false),
+                Some(false),
+                Some(false),
+                Some(true),
+                Some(false),
+            ],
+            [None, None, Some(true), Some(false), Some(false)],
+        ]);
+        let mut sr4d = op::<MetalSumReduce<T>>();
+        sr4d.check(|o, _| {
+            if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<T>>() {
+                o.dim == 2
+            } else {
+                false
+            }
+        });
+        let mut s4d = mul4d.clone().connect(sr4d.clone()).search(graph);
+        let mut mul5d = op::<MetalMul<T>>();
+        mul5d.shapes([
+            ['F', 'E', 'D', 'A', 'C', 'B'],
+            ['F', 'E', 'D', 'A', 'C', 'B'],
+        ]);
+        mul5d.fakes([
+            [
+                Some(false),
+                Some(false),
+                Some(false),
+                Some(false),
+                Some(true),
+                Some(false),
+            ],
+            [None, None, None, Some(true), Some(false), Some(false)],
+        ]);
+        let mut sr5d = op::<MetalSumReduce<T>>();
+        sr5d.check(|o, _| {
+            if let Some(o) = o.as_any().downcast_ref::<MetalSumReduce<T>>() {
+                o.dim == 2
+            } else {
+                false
+            }
+        });
+        let mut s5d = mul5d.clone().connect(sr5d.clone()).search(graph);
         let matmul_library = compile_lib(&dev, include_str!("kernels/gemm.metal"));
         let matvec_library = compile_lib(&dev, include_str!("kernels/gemv.metal"));
-        while searcher_2d.next_match()
-            || searcher_3d.next_match()
-            || searcher_4d.next_match()
-            || searcher_5d.next_match()
-        {
+        while s2d.next_match() || s3d.next_match() || s4d.next_match() || s5d.next_match() {
+            let (mul, sum_reduce) = if s2d.matched {
+                (s2d.get(&mul2d), s2d.get(&sr2d))
+            } else if s3d.matched {
+                (s3d.get(&mul3d), s3d.get(&sr3d))
+            } else if s4d.matched {
+                (s4d.get(&mul4d), s4d.get(&sr4d))
+            } else {
+                (s5d.get(&mul5d), s5d.get(&sr5d))
+            };
             if graph.no_delete.contains(&mul) {
                 // The intermediate mul can't be deleted
                 continue;

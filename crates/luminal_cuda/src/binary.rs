@@ -157,10 +157,8 @@ where
         let mul = binary::<CudaMul<T>>(rhs.clone(), constant::<T>(-1.));
         let add = binary::<CudaAdd<T>>(lhs.clone(), mul.clone());
         let mut s = add.clone().search(graph);
-
         while s.next_match() {
             if s.check_no_delete(&[add.id]) {
-                s.clear_cached_results();
                 continue;
             }
             let add = s.get(&add);
@@ -205,7 +203,6 @@ where
 
             graph.graph.remove_node(add);
             s.try_delete();
-            s.clear_cached_results();
         }
     }
 }
@@ -345,7 +342,7 @@ where
 {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = CudaDevice::new(0).unwrap();
-        let one = constant(1.);
+        let one = constant::<T>(1.);
         let (lhs, rhs) = (node(), node());
         let lt1 = binary::<CudaLessThan<T>>(lhs.clone(), rhs.clone());
         let ne = binary::<CudaAdd<T>>(
@@ -510,8 +507,8 @@ where
         let arange = op::<CudaARange<T>>();
         let eq = unary::<CudaEqual<T>>(arange);
         let inp = node();
-        let mul = binary::<Mul>(eq.clone(), inp.clone());
-        let sum_reduce = unary::<SumReduce>(mul.clone());
+        let mul = binary::<CudaMul<T>>(eq.clone(), inp.clone());
+        let sum_reduce = unary::<CudaSumReduce<T>>(mul.clone());
         let mut s = sum_reduce.clone().search(graph);
         while s.next_match() {
             if s.check_no_delete(&[sum_reduce.id]) {
