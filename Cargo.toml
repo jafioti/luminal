@@ -24,6 +24,7 @@ term_size = "0.3.2"
 colored = "2.0.4"
 regex = "1.9.5"
 rustc-hash = "1.1.0"
+uuid = { version = "1.7.0", features = ["v4"] }
 
 [dev-dependencies]
 dfdx = { version = "0.13", features = ["f16"] }

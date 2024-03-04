@@ -577,9 +577,10 @@ fn test_relu_and_linear() {
 
 #[test]
 fn test_rms_norm() {
+    let mut rng = StdRng::seed_from_u64(0);
     // Test single and batch, unoptimized and optimized
-    let inp_data = random_vec(15 * 32);
-    let weight_data = random_vec(32);
+    let inp_data = random_vec_rng(15 * 32, &mut rng);
+    let weight_data = random_vec_rng(32, &mut rng);
     let mut cx = Graph::new();
     let a = cx.tensor::<R2<15, 32>>().set(inp_data.clone());
 

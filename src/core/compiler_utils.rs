@@ -4,6 +4,7 @@ use std::{
     any::{Any, TypeId},
     collections::HashSet,
     fmt::Debug,
+    sync::Arc,
 };
 
 use colored::Colorize;
@@ -16,6 +17,7 @@ use petgraph::{
 };
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
+use uuid::Uuid;
 
 use crate::{
     graph::Graph,
@@ -398,9 +400,13 @@ impl Graph {
         display_graph(&g, &e, &[]);
     }
 
-    pub fn display_set(&self, set: &[NodeIndex]) {
+    pub fn display_set<T: ToIds>(&self, set: T) {
         let (g, e, id_map) = self.debug_graph(false);
-        display_graph(&g, &e, &set.iter().map(|i| id_map[i]).collect::<Vec<_>>());
+        display_graph(
+            &g,
+            &e,
+            &set.to_ids().iter().map(|i| id_map[i]).collect::<Vec<_>>(),
+        );
     }
 
     /// Remove node if it only has n dests
@@ -470,38 +476,6 @@ pub fn display_graph(
     );
     if let Err(e) = webbrowser::open(&url) {
         panic!("Error displaying graph: {:?}", e);
-    }
-}
-
-pub trait JoinGraph {
-    fn join(
-        self,
-        rhs: &petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32>,
-    ) -> Self;
-}
-
-impl JoinGraph for petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32> {
-    /// Join two debug graphs together
-    fn join(
-        mut self,
-        rhs: &petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32>,
-    ) -> Self {
-        let mut id_map = FxHashMap::default(); // We track the node id remapping here so they don't overlap
-        for (index, node) in rhs.node_indices().zip(rhs.node_weights()) {
-            id_map.insert(index, self.add_node(node.clone()));
-        }
-
-        for node in rhs.node_indices() {
-            for edge in rhs.edges_directed(node, petgraph::Direction::Outgoing) {
-                self.add_edge(
-                    id_map[&edge.source()],
-                    id_map[&edge.target()],
-                    *edge.weight(),
-                );
-            }
-        }
-
-        self
     }
 }
 
@@ -611,14 +585,16 @@ impl<S: 'static + PartialEq> TraitObjEq for S {
     }
 }
 
-type SelectionGraph = StableGraph<SelectOp, Option<u8>>;
+// type SelectionGraph = StableGraph<SelectOp, Option<u8>>;
 
 pub struct GraphSearch {
-    selector: SelectionGraph,
+    current: FxHashMap<Uuid, NodeIndex>,
+    selector: StableGraph<(Uuid, SelectOp), Option<u8>>,
     graph: *mut Graph,
     to_return: Vec<FxHashMap<NodeIndex, NodeIndex>>,
     returned_anchors: HashSet<NodeIndex>,
     anchor: NodeIndex,
+    pub matched: bool,
 }
 
 impl GraphSearch {
@@ -628,7 +604,7 @@ impl GraphSearch {
 
         if self.to_return.is_empty() {
             // Replenish to_return
-            let select_op = self.selector.node_weight(self.anchor).unwrap();
+            let (_, select_op) = self.selector.node_weight(self.anchor).unwrap();
             for node in graph.graph.node_indices().collect::<Vec<_>>() {
                 if !self.returned_anchors.contains(&node)
                     && test_node(select_op, &mut graph.graph, node)
@@ -643,22 +619,15 @@ impl GraphSearch {
             }
         }
         if let Some(mapping) = self.to_return.pop() {
-            // Apply pattern to ptrs
-            for (selector_node, ptr) in self.selector.node_indices().flat_map(|n| {
-                self.selector
-                    .node_weight(n)
-                    .unwrap()
-                    .pointers
-                    .iter()
-                    .map(move |i| (n, *i))
-            }) {
-                unsafe {
-                    *ptr = mapping[&selector_node];
-                }
-            }
             self.returned_anchors.insert(mapping[&self.anchor]);
+            self.current = mapping
+                .into_iter()
+                .map(|(k, v)| (self.selector.node_weight(k).unwrap().0, v))
+                .collect();
+            self.matched = true;
             return true;
         }
+        self.matched = false;
         false
     }
 
@@ -669,11 +638,29 @@ impl GraphSearch {
         self.clear_cached_results();
         self.returned_anchors.clear();
     }
+    pub fn check_no_delete(&self, exclude: &[Uuid]) -> bool {
+        let graph = unsafe { self.graph.as_ref().unwrap() };
+        self.current
+            .iter()
+            .filter(|(k, _)| !exclude.contains(k))
+            .any(|(_, v)| graph.no_delete.contains(v))
+    }
+    pub fn get(&self, node: &SelectGraph) -> NodeIndex {
+        *self.current.get(&node.id).unwrap()
+    }
+    pub fn try_delete(&self) {
+        let graph = unsafe { self.graph.as_mut().unwrap() };
+        for node in toposort(&self.selector, None).unwrap().into_iter().rev() {
+            let id = self.selector.node_weight(node).unwrap().0;
+            let node = self.current[&id];
+            graph.safe_remove_node(node, 0);
+        }
+    }
 }
 
 fn backtrack_match_new(
     pattern_root: NodeIndex,
-    pattern_graph: &SelectionGraph,
+    pattern_graph: &StableGraph<(Uuid, SelectOp), Option<u8>>,
     main_root: NodeIndex,
     main_graph: &mut MainGraph,
 ) -> Option<FxHashMap<NodeIndex, NodeIndex>> {
@@ -690,7 +677,7 @@ fn backtrack_match_new(
     }
 
     if !test_node(
-        pattern_graph.node_weight(pattern_root).unwrap(),
+        &pattern_graph.node_weight(pattern_root).unwrap().1,
         main_graph,
         main_root,
     ) {
@@ -724,7 +711,6 @@ fn test_node(
         check,
         shape,
         fake,
-        pointers: _,
     }: &SelectOp,
     graph: &mut MainGraph,
     graph_node: NodeIndex,
@@ -802,16 +788,14 @@ fn test_node(
 #[derive(Default, Clone)]
 pub struct SelectOp {
     /// Type constraint
-    type_id: Option<TypeId>,
+    pub type_id: Option<TypeId>,
     /// Check constraint
     #[allow(clippy::type_complexity)]
-    check: Option<fn(&mut dyn Operator, &[ShapeTracker]) -> bool>,
+    pub check: Option<Arc<Box<dyn Fn(&mut dyn Operator, &[ShapeTracker]) -> bool>>>,
     /// Shape constraint
-    shape: Option<Vec<Vec<Expression>>>,
+    pub shape: Option<Vec<Vec<Expression>>>,
     /// Fake constraint
-    fake: Option<Vec<Vec<Option<bool>>>>,
-    /// Pointers
-    pointers: Vec<*mut NodeIndex>,
+    pub fake: Option<Vec<Vec<Option<bool>>>>,
 }
 
 #[macro_export]
@@ -825,149 +809,119 @@ impl SelectOp {
     pub fn new() -> Self {
         Self::default()
     }
-
-    /// Constrain the op to a type
-    pub fn ty<O: Operator + 'static>(mut self) -> Self {
-        self.type_id = Some(TypeId::of::<O>());
-        self
-    }
-    /// Constrain the op to a type
-    pub fn type_id(mut self, type_id: TypeId) -> Self {
-        self.type_id = Some(type_id);
-        self
-    }
-    /// Constrain the op to a checking function
-    pub fn check(mut self, check: fn(&mut dyn Operator, &[ShapeTracker]) -> bool) -> Self {
-        self.check = Some(check);
-        self
-    }
-    /// Constrain the op to input shapes
-    pub fn shapes<E: Into<Expression>, V: Into<Vec<E>>, S: Into<Vec<V>>>(
-        mut self,
-        shapes: S,
-    ) -> Self {
-        self.shape = Some(
-            shapes
-                .into()
-                .into_iter()
-                .map(|i| i.into().into_iter().map(|i| i.into()).collect())
-                .collect(),
-        );
-        self
-    }
-    /// Constrain the op to input shape fakes
-    pub fn fakes<V: Into<Vec<Option<bool>>>, S: Into<Vec<V>>>(mut self, fakes: S) -> Self {
-        self.fake = Some(fakes.into().into_iter().map(|i| i.into()).collect());
-        self
-    }
-    /// Register a pointer to set if the op is matched
-    pub fn ptr(mut self, ptr: *mut NodeIndex) -> Self {
-        self.pointers.push(ptr);
-        self
-    }
-
-    /// Connect this op with another op
-    pub fn edge<T: Into<SelectEdge>>(self, node: T) -> SelectEdge {
-        SelectEdge::new(self, node)
-    }
-}
-
-#[derive(Clone)]
-pub struct SelectEdge {
-    main_node: NodeIndex,
-    graph: SelectionGraph,
-}
-
-impl From<SelectOp> for SelectEdge {
-    fn from(value: SelectOp) -> Self {
-        let mut graph = SelectionGraph::default();
-        let main_node = graph.add_node(value);
-        Self { main_node, graph }
-    }
-}
-
-impl SelectEdge {
-    fn internal_new<A: Into<SelectEdge>, B: Into<SelectEdge>>(a: A, out: Option<u8>, b: B) -> Self {
-        let mut a = a.into();
-        let b = b.into();
-        // Add b graph to a graph
-        let mut node_map = FxHashMap::default();
-        for node in b.graph.node_indices() {
-            let new_node = a.graph.add_node(b.graph.node_weight(node).unwrap().clone());
-            node_map.insert(node, new_node);
-        }
-        for edge in b.graph.edge_indices() {
-            let (src, trg) = b.graph.edge_endpoints(edge).unwrap();
-            a.graph.add_edge(
-                node_map[&src],
-                node_map[&trg],
-                *b.graph.edge_weight(edge).unwrap(),
-            );
-        }
-        a.graph.add_edge(a.main_node, node_map[&b.main_node], out);
-        a.main_node = node_map[&b.main_node];
-        a
-    }
-
-    pub fn new<A: Into<SelectEdge>, B: Into<SelectEdge>>(a: A, b: B) -> Self {
-        Self::internal_new(a, None, b)
-    }
-
-    pub fn new_with_output<A: Into<SelectEdge>, B: Into<SelectEdge>>(a: A, out: u8, b: B) -> Self {
-        Self::internal_new(a, Some(out), b)
-    }
-
-    pub fn search(self, graph: &mut Graph) -> GraphSearch {
-        let anchor = *toposort(&self.graph, None).unwrap().last().unwrap();
-        GraphSearch {
-            to_return: vec![],
-            selector: self.graph,
-            graph,
-            returned_anchors: HashSet::new(),
-            anchor,
-        }
-    }
-
-    /// Connect this op with another op
-    pub fn edge<T: Into<SelectEdge>>(self, node: T) -> Self {
-        Self::new(self, node)
-    }
 }
 
 pub fn check_no_delete(graph: &Graph, nodes: &[NodeIndex]) -> bool {
     nodes.iter().any(|n| graph.no_delete.contains(n))
 }
 
-#[cfg(test)]
-mod tests {
-    use petgraph::adj::NodeIndex;
+#[derive(Clone)]
+pub struct SelectGraph {
+    /// The full selection graph
+    graph: StableGraph<(Uuid, SelectOp), Option<u8>>,
+    /// The current id for the current node in the graph
+    pub id: Uuid,
+    /// The index of the current node in the graph
+    node: NodeIndex,
+}
 
-    use crate::{
-        op::{Exp2, Log2, Mul, SumReduce},
-        prelude::Graph,
-    };
-
-    use super::*;
-
-    #[test]
-    fn test_graph_selector() {
-        let mut cx = Graph::default();
-        // Exp -> Log or Log -> Exp
-        let (mut exp, mut log) = (NodeIndex::default(), NodeIndex::default());
-        let (exp_select, log_select) = (
-            SelectOp::new().ty::<Exp2>().ptr(&mut exp),
-            SelectOp::new().ty::<Log2>().ptr(&mut log),
-        );
-        let selector1 = log_select.clone().edge(exp_select.clone());
-        let selector2 = exp_select.edge(log_select);
-
-        assert!(!selector1.search(&mut cx).next_match() && !selector2.search(&mut cx).next_match());
-
-        // Matmul
-        let s = SelectOp::new()
-            .ty::<Mul>()
-            .edge(SelectOp::new().ty::<SumReduce>());
-
-        assert!(!s.search(&mut cx).next_match());
+impl SelectGraph {
+    fn new(restrictions: SelectOp) -> Self {
+        let mut graph = StableGraph::new();
+        let id = Uuid::new_v4();
+        Self {
+            node: graph.add_node((id, restrictions)),
+            graph,
+            id,
+        }
     }
+
+    /// Constrain the op to a type
+    pub fn ty<O: Operator + 'static>(&mut self) {
+        self.graph.node_weight_mut(self.node).unwrap().1.type_id = Some(TypeId::of::<O>());
+    }
+    /// Constrain the op to a type
+    pub fn type_id(&mut self, type_id: TypeId) {
+        self.graph.node_weight_mut(self.node).unwrap().1.type_id = Some(type_id);
+    }
+    /// Constrain the op to a checking function
+    pub fn check<F: Fn(&mut dyn Operator, &[ShapeTracker]) -> bool + 'static>(&mut self, check: F) {
+        self.graph.node_weight_mut(self.node).unwrap().1.check = Some(Arc::new(Box::new(check)));
+    }
+    /// Constrain the op to input shapes
+    pub fn shapes<E: Into<Expression>, V: Into<Vec<E>>, S: Into<Vec<V>>>(&mut self, shapes: S) {
+        self.graph.node_weight_mut(self.node).unwrap().1.shape = Some(
+            shapes
+                .into()
+                .into_iter()
+                .map(|i| i.into().into_iter().map(|i| i.into()).collect())
+                .collect(),
+        );
+    }
+    /// Constrain the op to input shape fakes
+    pub fn fakes<V: Into<Vec<Option<bool>>>, S: Into<Vec<V>>>(&mut self, fakes: S) {
+        self.graph.node_weight_mut(self.node).unwrap().1.fake =
+            Some(fakes.into().into_iter().map(|i| i.into()).collect());
+    }
+
+    fn connect(mut self, b: Self) -> Self {
+        // Add b graph to a graph
+        let mut node_map = FxHashMap::default();
+        let mut a_nodes = FxHashMap::default();
+        for node in self.graph.node_indices() {
+            let id = self.graph.node_weight(node).unwrap().0;
+            a_nodes.insert(id, node);
+        }
+        for node in b.graph.node_indices() {
+            let id = b.graph.node_weight(node).unwrap().0;
+            let new_node = a_nodes.get(&id).copied().unwrap_or_else(|| {
+                self.graph
+                    .add_node(b.graph.node_weight(node).unwrap().clone())
+            });
+            node_map.insert(node, new_node);
+        }
+        for edge in b.graph.edge_indices() {
+            let (src, trg) = b.graph.edge_endpoints(edge).unwrap();
+            self.graph.add_edge(
+                node_map[&src],
+                node_map[&trg],
+                *b.graph.edge_weight(edge).unwrap(),
+            );
+        }
+        self.graph.add_edge(self.node, node_map[&b.node], None);
+        self.node = node_map[&b.node];
+        self.id = b.id;
+        self
+    }
+
+    pub fn search(self, graph: &mut Graph) -> GraphSearch {
+        let anchor = *toposort(&self.graph, None).unwrap().last().unwrap();
+        GraphSearch {
+            current: FxHashMap::default(),
+            to_return: vec![],
+            selector: self.graph,
+            graph,
+            returned_anchors: HashSet::new(),
+            anchor,
+            matched: false,
+        }
+    }
+}
+
+pub fn op<T: Operator + 'static>() -> SelectGraph {
+    let mut s = SelectOp::new();
+    s.type_id = Some(TypeId::of::<T>());
+    SelectGraph::new(s)
+}
+
+pub fn node() -> SelectGraph {
+    SelectGraph::new(SelectOp::new())
+}
+
+pub fn unary<T: Operator + 'static>(node: SelectGraph) -> SelectGraph {
+    node.connect(op::<T>())
+}
+
+pub fn binary<T: Operator + 'static>(a: SelectGraph, b: SelectGraph) -> SelectGraph {
+    b.connect(a.connect(op::<T>()))
 }

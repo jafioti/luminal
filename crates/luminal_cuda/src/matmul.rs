@@ -10,7 +10,6 @@ use crate::{
     CudaData, CudaFloat,
 };
 use luminal::{
-    graph::NodeIndex,
     op::{InputTensor, Operator},
     prelude::*,
 };
@@ -214,35 +213,29 @@ where
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
         let dev = CudaDevice::new(0).unwrap();
         // Look for the matmul pattern
-        let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        let s = SelectEdge::new(
-            SelectOp::new()
-                .ty::<CudaMul<T>>()
-                .shapes([['A', 'C', 'B'], ['A', 'C', 'B']])
-                .fakes([
-                    [Some(false), Some(true), Some(false)],
-                    [Some(true), Some(false), Some(false)],
-                ])
-                .ptr(&mut mul),
-            SelectOp::new()
-                .ty::<CudaSumReduce<T>>()
-                .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<CudaSumReduce<T>>() {
-                        o.2 == 2
-                    } else {
-                        false
-                    }
-                })
-                .ptr(&mut sum_reduce),
-        );
-        let mut searcher = s.search(graph);
-        while searcher.next_match() {
-            if graph.no_delete.contains(&mul) {
+        let mut mul = op::<CudaMul<T>>();
+        mul.shapes([['A', 'C', 'B'], ['A', 'C', 'B']]);
+        mul.fakes([
+            [Some(false), Some(true), Some(false)],
+            [Some(true), Some(false), Some(false)],
+        ]);
+        let mut sum_reduce = unary::<CudaSumReduce<T>>(mul.clone());
+        sum_reduce.check(|o, _| {
+            if let Some(c) = o.as_any().downcast_ref::<CudaSumReduce<T>>() {
+                c.2 == 0
+            } else {
+                false
+            }
+        });
+        let mut s = sum_reduce.clone().search(graph);
+        while s.next_match() {
+            if s.check_no_delete(&[sum_reduce.id]) {
                 // The intermediate mul can't be deleted
                 continue;
             }
+            let (mul, sum_reduce) = (s.get(&mul), s.get(&sum_reduce));
             // Insert MatMul2D op
             let mut srcs = graph.get_sources(mul);
             // Undo expansions and permute
@@ -282,35 +275,29 @@ where
         }
 
         // Look for the batch matmul pattern
-        let (mut sum_reduce, mut mul) = (NodeIndex::default(), NodeIndex::default());
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
-        let mut searcher = SelectEdge::new(
-            SelectOp::new()
-                .ty::<CudaMul<T>>()
-                .shapes([['D', 'A', 'C', 'B'], ['D', 'A', 'C', 'B']])
-                .fakes([
-                    [Some(false), Some(false), Some(true), Some(false)],
-                    [Some(true), Some(true), Some(false), Some(false)],
-                ])
-                .ptr(&mut mul),
-            SelectOp::new()
-                .ty::<CudaSumReduce<T>>()
-                .check(|o, _| {
-                    if let Some(o) = o.as_any().downcast_ref::<CudaSumReduce<T>>() {
-                        o.2 == 3
-                    } else {
-                        false
-                    }
-                })
-                .ptr(&mut sum_reduce),
-        )
-        .search(graph);
-        while searcher.next_match() {
-            if graph.no_delete.contains(&mul) {
+        let mut mul = op::<CudaMul<T>>();
+        mul.shapes([['D', 'A', 'C', 'B'], ['D', 'A', 'C', 'B']]);
+        mul.fakes([
+            [Some(false), Some(false), Some(true), Some(false)],
+            [Some(true), Some(true), Some(false), Some(false)],
+        ]);
+        let mut sum_reduce = unary::<CudaSumReduce<T>>(mul.clone());
+        sum_reduce.check(|o, _| {
+            if let Some(c) = o.as_any().downcast_ref::<CudaSumReduce<T>>() {
+                c.2 == 3
+            } else {
+                false
+            }
+        });
+        let mut s = sum_reduce.clone().search(graph);
+        while s.next_match() {
+            if s.check_no_delete(&[sum_reduce.id]) {
                 // The intermediate mul can't be deleted
                 continue;
             }
+            let (mul, sum_reduce) = (s.get(&mul), s.get(&sum_reduce));
             // Insert BatchMatMul2D op
             let mut srcs = graph.get_sources(mul);
             // Undo expansions and permute

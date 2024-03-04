@@ -8,6 +8,7 @@ mod tests;
 
 use itertools::Itertools;
 use luminal_cudarc::driver::{CudaSlice, DeviceRepr};
+use prim::CudaConstant;
 
 use std::{collections::hash_map::DefaultHasher, fmt::Write, hash::Hasher};
 
@@ -160,21 +161,23 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker]) -> (Vec<char>, String) {
     )
 }
 
-#[macro_export]
-macro_rules! select_const {
-    ($i: expr, $t: tt) => {
-        luminal::compiler_utils::SelectOp::new().check(|o, _| {
-            if let Some(c) = o.as_any().downcast_ref::<$crate::prim::CudaConstant<$t>>() {
-                if let luminal::op::ConstantValue::Float(f) = c.0 {
-                    (f - $i).abs() < 0.0001
-                } else {
-                    false
-                }
+pub fn constant<T: CudaFloat>(num: f32) -> SelectGraph
+where
+    CudaData<T>: Data,
+{
+    let mut n = op::<CudaConstant<T>>();
+    n.check(move |o, _| {
+        if let Some(c) = o.as_any().downcast_ref::<CudaConstant<T>>() {
+            if let luminal::op::ConstantValue::Float(f) = c.0 {
+                f == num
             } else {
                 false
             }
-        })
-    };
+        } else {
+            false
+        }
+    });
+    n
 }
 
 fn hash<T: std::hash::Hash>(obj: T) -> u64 {

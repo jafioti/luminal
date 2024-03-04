@@ -2,7 +2,8 @@ use crate::{
     op::*,
     prelude::{petgraph::visit::EdgeRef, *},
 };
-use itertools::Itertools;
+
+use super::other::ARange;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Sub;
@@ -44,46 +45,32 @@ pub struct SubtractionCompiler;
 
 impl Compiler for SubtractionCompiler {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
-        let (mut neg_one, mut mul, mut add) = (
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-        );
-        let mut searcher = SelectOp::new()
-            .check(|o, _| {
-                if let Some(c) = o.as_any().downcast_ref::<Constant>() {
-                    match c.0 {
-                        ConstantValue::Float(f) => f == -1.0,
-                        _ => false,
-                    }
-                } else {
-                    false
-                }
-            })
-            .ptr(&mut neg_one)
-            .edge(SelectOp::new().ty::<Mul>().ptr(&mut mul))
-            .edge(SelectOp::new().ty::<Add>().ptr(&mut add))
-            .search(graph);
+        let (lhs, rhs) = (node(), node());
+        let mul = binary::<Mul>(rhs.clone(), constant(-1.));
+        let add = binary::<Add>(lhs.clone(), mul.clone());
+        let mut s = add.clone().search(graph);
 
-        while searcher.next_match() {
-            if check_no_delete(graph, &[neg_one, mul, add]) {
+        while s.next_match() {
+            if s.check_no_delete(&[add.id]) {
+                s.clear_cached_results();
                 continue;
             }
+            let add = s.get(&add);
             let (a, a_edge) = graph
                 .graph
-                .edges_directed(add, petgraph::Direction::Incoming)
-                .find(|e| e.source() != mul)
+                .edges_connecting(s.get(&lhs), add)
+                .next()
                 .map(|e| (e.source(), e.weight().as_data().unwrap()))
                 .unwrap();
             let (b, b_edge) = graph
                 .graph
-                .edges_directed(mul, petgraph::Direction::Incoming)
-                .find(|e| e.source() != neg_one)
+                .edges_connecting(s.get(&rhs), s.get(&mul))
+                .next()
                 .map(|e| (e.source(), e.weight().as_data().unwrap()))
                 .unwrap();
             let b_final_shape = graph
                 .graph
-                .edges_connecting(mul, add)
+                .edges_connecting(s.get(&mul), add)
                 .next()
                 .unwrap()
                 .weight()
@@ -94,6 +81,7 @@ impl Compiler for SubtractionCompiler {
                 || b_final_shape.is_sliced()
                 || b_final_shape.is_padded()
             {
+                s.clear_cached_results();
                 continue;
             }
             let sub = graph
@@ -103,11 +91,9 @@ impl Compiler for SubtractionCompiler {
                 .finish();
             move_outgoing_edge(add, sub, &mut graph.graph);
 
-            if graph.get_dests(neg_one).len() == 1 {
-                graph.graph.remove_node(neg_one);
-            }
-            graph.graph.remove_node(mul);
             graph.graph.remove_node(add);
+            s.try_delete();
+            s.clear_cached_results();
         }
     }
 }
@@ -152,102 +138,44 @@ pub struct EqualCompiler;
 
 impl Compiler for EqualCompiler {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
-        let (mut less_than1, mut less_than2, mut add, mut one, mut sub) = (
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-        );
-        let s = SelectOp::new()
-            .check(|o, _| {
-                if let Some(c) = o.as_any().downcast_ref::<Constant>() {
-                    match c.0 {
-                        ConstantValue::Float(f) => f == 1.0,
-                        _ => false,
-                    }
-                } else {
-                    false
-                }
-            })
-            .ptr(&mut one)
-            .edge(
-                SelectOp::new()
-                    .ty::<LessThan>()
-                    .ptr(&mut less_than1)
-                    .edge(
-                        SelectOp::new()
-                            .ty::<LessThan>()
-                            .ptr(&mut less_than2)
-                            .edge(SelectOp::new().ty::<Add>().ptr(&mut add)),
-                    )
-                    .edge(SelectOp::new().ty::<Sub>().ptr(&mut sub)),
-            );
+        let one = constant(1.);
+        let (lhs, rhs) = (node(), node());
+        let lt1 = binary::<LessThan>(lhs.clone(), rhs.clone());
+        let ne = binary::<Add>(lt1.clone(), binary::<LessThan>(rhs.clone(), lhs.clone()));
+        let eq = binary::<Sub>(one, ne);
 
-        let mut searcher = s.search(graph);
-        while searcher.next_match() {
-            let lt1_inputs = graph
-                .graph
-                .neighbors_directed(less_than1, petgraph::Direction::Incoming)
-                .sorted()
-                .collect::<Vec<_>>();
-            let lt2_inputs = graph
-                .graph
-                .neighbors_directed(less_than2, petgraph::Direction::Incoming)
-                .sorted()
-                .collect::<Vec<_>>();
-            if lt1_inputs != lt2_inputs {
+        let mut s = eq.clone().search(graph);
+        while s.next_match() {
+            if s.check_no_delete(&[eq.id]) {
                 continue;
             }
-            let inputs = graph
-                .graph
-                .edges_directed(less_than1, petgraph::Direction::Incoming)
-                .sorted_by_key(|e| e.weight().as_data().unwrap().0)
-                .map(|e| e.source())
-                .collect::<Vec<_>>();
-            let (a, b) = (inputs[0], inputs[1]);
-            if check_no_delete(graph, &[less_than1, less_than2, add, one, sub]) {
-                continue;
-            }
+            let (lhs, rhs) = (s.get(&lhs), s.get(&rhs));
+            let eq = s.get(&eq);
             let a_edge = graph
                 .graph
-                .edge_weight(
-                    graph
-                        .graph
-                        .edges_connecting(a, less_than1)
-                        .next()
-                        .unwrap()
-                        .id(),
-                )
+                .edges_connecting(lhs, s.get(&lt1))
+                .next()
                 .unwrap()
+                .weight()
                 .as_data()
                 .unwrap();
             let b_edge = graph
                 .graph
-                .edge_weight(
-                    graph
-                        .graph
-                        .edges_connecting(b, less_than1)
-                        .next()
-                        .unwrap()
-                        .id(),
-                )
+                .edges_connecting(rhs, s.get(&lt1))
+                .next()
                 .unwrap()
+                .weight()
                 .as_data()
                 .unwrap();
             let equals = graph
                 .add_op(Equal)
-                .input(a, a_edge.1, a_edge.2)
-                .input(b, b_edge.1, b_edge.2)
+                .input(lhs, a_edge.1, a_edge.2)
+                .input(rhs, b_edge.1, b_edge.2)
                 .finish();
-            move_outgoing_edge(sub, equals, &mut graph.graph);
+            move_outgoing_edge(eq, equals, &mut graph.graph);
 
-            graph.graph.remove_node(sub);
-            graph.safe_remove_node(add, 0);
-            graph.safe_remove_node(one, 0);
-            graph.safe_remove_node(less_than2, 0);
-            graph.safe_remove_node(less_than1, 0);
-            searcher.clear_cached_results();
+            graph.graph.remove_node(eq);
+            s.try_delete();
         }
     }
 }
@@ -294,27 +222,20 @@ pub struct GatherCompiler;
 
 impl Compiler for GatherCompiler {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
-        let (mut arange, mut equal, mut mul, mut sum_reduce) = (
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-        );
-        let s = SelectOp::new()
-            .ty::<super::other::ARange>()
-            .ptr(&mut arange)
-            .edge(SelectOp::new().ty::<Equal>().ptr(&mut equal))
-            .edge(SelectOp::new().ty::<Mul>().ptr(&mut mul))
-            .edge(SelectOp::new().ty::<SumReduce>().ptr(&mut sum_reduce));
-        let mut searcher = s.search(graph);
-        while searcher.next_match() {
-            if check_no_delete(graph, &[arange, equal, mul, sum_reduce]) {
+        let arange = op::<ARange>();
+        let eq = unary::<Equal>(arange);
+        let inp = node();
+        let mul = binary::<Mul>(eq.clone(), inp.clone());
+        let sum_reduce = unary::<SumReduce>(mul.clone());
+        let mut s = sum_reduce.clone().search(graph);
+        while s.next_match() {
+            if s.check_no_delete(&[sum_reduce.id]) {
                 continue;
             }
             let embed_dim = graph
                 .graph
-                .edges_directed(mul, petgraph::Direction::Incoming)
-                .find(|e| e.source() != equal && !e.weight().is_schedule())
+                .edges_connecting(s.get(&inp), s.get(&mul))
+                .next()
                 .unwrap()
                 .weight()
                 .as_data()
@@ -324,13 +245,11 @@ impl Compiler for GatherCompiler {
                 .to_usize()
                 .unwrap();
             let gather = graph.add_op(Gather { embed_dim }).finish();
-            move_incoming_edge(equal, gather, &mut graph.graph);
-            graph.safe_remove_node(equal, 1);
-            move_incoming_edge(mul, gather, &mut graph.graph);
-            move_outgoing_edge(sum_reduce, gather, &mut graph.graph);
-            graph.graph.remove_node(sum_reduce);
-            graph.safe_remove_node(mul, 0);
-            graph.safe_remove_node(arange, 0);
+            move_incoming_edge(s.get(&eq), gather, &mut graph.graph);
+            graph.safe_remove_node(s.get(&eq), 1);
+            move_incoming_edge(s.get(&mul), gather, &mut graph.graph);
+            move_outgoing_edge(s.get(&sum_reduce), gather, &mut graph.graph);
+            s.try_delete();
         }
     }
 }

@@ -5,6 +5,8 @@ use crate::{
 };
 use rustc_hash::FxHashMap;
 
+use super::binary::Sub;
+
 #[derive(LuminalPrint, Clone, LuminalEqFalse)]
 pub struct ARange {
     pub size: BigExpression,
@@ -28,93 +30,24 @@ pub struct ARangeCompiler;
 
 impl Compiler for ARangeCompiler {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
-        let (
-            mut one_const,
-            mut contig1,
-            mut contig2,
-            mut contig3,
-            mut contig4,
-            mut sum_reduce,
-            mut subtraction_constant,
-            mut subtraction,
-        ) = (
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-        );
-
         // TODO: Make sure this actually checks the shape transformations to ensure pooling happens
-        let contig = SelectOp::new().ty::<Contiguous>();
-        let pre_sub_pattern = SelectOp::new()
-            .check(|o, _| {
-                if let Some(c) = o.as_any().downcast_ref::<Constant>() {
-                    match c.0 {
-                        ConstantValue::Float(f) => f == 1.0,
-                        _ => false,
-                    }
-                } else {
-                    false
-                }
-            })
-            .ptr(&mut one_const)
-            .edge(contig.clone().ptr(&mut contig1))
-            .edge(contig.clone().ptr(&mut contig2))
-            .edge(contig.clone().ptr(&mut contig3))
-            .edge(contig.clone().ptr(&mut contig4))
-            .edge(SelectOp::new().ty::<SumReduce>().ptr(&mut sum_reduce));
-        let mut s1 = pre_sub_pattern
-            .clone()
-            .edge(
-                SelectOp::new()
-                    .check(|o, _| {
-                        if let Some(c) = o.as_any().downcast_ref::<Constant>() {
-                            match c.0 {
-                                ConstantValue::Float(f) => f == 1.0,
-                                _ => false,
-                            }
-                        } else {
-                            false
-                        }
-                    })
-                    .ptr(&mut subtraction_constant)
-                    .edge(
-                        SelectOp::new()
-                            .ty::<super::binary::Sub>()
-                            .ptr(&mut subtraction),
-                    ),
-            )
-            .search(graph);
-        let mut s2 = pre_sub_pattern
-            .edge(
-                SelectOp::new()
-                    .check(|o, _| {
-                        if let Some(c) = o.as_any().downcast_ref::<Constant>() {
-                            match c.0 {
-                                ConstantValue::Float(f) => f == -1.0,
-                                _ => false,
-                            }
-                        } else {
-                            false
-                        }
-                    })
-                    .ptr(&mut subtraction_constant)
-                    .edge(SelectOp::new().ty::<Add>().ptr(&mut subtraction)),
-            )
-            .search(graph);
+        let one = constant(1.);
+        let contig1 = unary::<Contiguous>(one.clone());
+        let sum_reduce =
+            unary::<SumReduce>(unary::<Contiguous>(unary::<Contiguous>(
+                unary::<Contiguous>(contig1.clone()),
+            )));
+        let sub = binary::<Sub>(sum_reduce, one.clone());
+        let mut s = sub.clone().search(graph);
 
-        while s1.next_match() || s2.next_match() {
+        while s.next_match() {
             let arange_amount = {
                 let sh = graph
                     .graph
                     .edge_weight(
                         graph
                             .graph
-                            .edges_connecting(one_const, contig1)
+                            .edges_connecting(s.get(&one), s.get(&contig1))
                             .next()
                             .unwrap()
                             .id(),
@@ -131,18 +64,9 @@ impl Compiler for ARangeCompiler {
                     dyn_map: &graph.dyn_map,
                 })
                 .finish();
-            move_outgoing_edge(subtraction, arange_op, &mut graph.graph);
-
-            graph.graph.remove_node(subtraction);
-            graph.safe_remove_node(subtraction_constant, 0);
-            graph.safe_remove_node(sum_reduce, 0);
-            graph.safe_remove_node(contig4, 0);
-            graph.safe_remove_node(contig3, 0);
-            graph.safe_remove_node(contig2, 0);
-            graph.safe_remove_node(contig1, 0);
-            graph.safe_remove_node(one_const, 0);
-            s1.clear_cached_results();
-            s2.clear_cached_results();
+            move_outgoing_edge(s.get(&sub), arange_op, &mut graph.graph);
+            graph.graph.remove_node(s.get(&sub));
+            s.try_delete();
         }
     }
 }

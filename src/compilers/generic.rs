@@ -1,7 +1,4 @@
-use std::{
-    any::TypeId,
-    collections::{HashMap, HashSet},
-};
+use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use petgraph::{
@@ -11,79 +8,12 @@ use petgraph::{
 };
 
 use crate::{
-    op::{
-        Add, Constant, ConstantValue, Exp2, Function, Log2, MaxReduce, Mul, Operator, Recip,
-        SumReduce,
-    },
+    op::{Add, Function, MaxReduce, Mul, Operator, SumReduce},
     prelude::*,
 };
 
 /// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
-pub type GenericCompiler = (
-    RemoveSingleReductions,
-    ArithmeticElimination,
-    UnarySequentialElimination,
-    CSE,
-);
-
-/// Eliminate complementary unary sequential operations like `x.log().exp()`
-#[derive(Debug, Default)]
-pub struct UnarySequentialElimination;
-
-impl Compiler for UnarySequentialElimination {
-    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
-        // Here are all the complementary ops that should be removed
-        let sequences = [
-            (TypeId::of::<Log2>(), TypeId::of::<Exp2>()),
-            (TypeId::of::<Recip>(), TypeId::of::<Recip>()),
-        ];
-        let (mut first, mut last) = (NodeIndex::default(), NodeIndex::default());
-        for selector_graph in sequences
-            .into_iter()
-            .flat_map(|(f, l)| {
-                // Construct two searches: in order and reversed
-                let (f_sel, l_sel) = (
-                    SelectOp::new().type_id(f).ptr(&mut first),
-                    SelectOp::new().type_id(l).ptr(&mut last),
-                );
-                [f_sel.clone().edge(l_sel.clone()), l_sel.edge(f_sel)]
-            })
-            .collect::<Vec<_>>()
-        {
-            let mut searcher = selector_graph.search(graph);
-            while searcher.next_match() {
-                if graph.no_delete.contains(&first)
-                    || graph
-                        .graph
-                        .edges_directed(first, Direction::Outgoing)
-                        .count()
-                        != 1
-                {
-                    // Either first is marked as no_delete or there are other nodes depending on first
-                    continue;
-                }
-                // Remove current node and next node
-                let pre_node = graph
-                    .graph
-                    .edges_directed(first, petgraph::Direction::Incoming)
-                    .next()
-                    .unwrap()
-                    .source();
-
-                move_outgoing_edge(last, pre_node, &mut graph.graph);
-                move_references(
-                    &mut remap,
-                    &mut graph.no_delete,
-                    &mut graph.to_retrieve,
-                    last,
-                    pre_node,
-                );
-                graph.graph.remove_node(first);
-                graph.graph.remove_node(last);
-            }
-        }
-    }
-}
+pub type GenericCompiler = (RemoveSingleReductions, ArithmeticElimination, CSE);
 
 /// [Common subexpression elimination](https://en.wikipedia.org/wiki/Common_subexpression_elimination)
 #[derive(Default)]
@@ -365,20 +295,6 @@ fn is_from_set(node: NodeIndex, graph: &Graph, set: &HashSet<NodeIndex>) -> bool
     true
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::prelude::*;
-    #[test]
-    fn test_log_exp() {
-        let mut cx = Graph::new();
-        let a = cx.tensor::<R0>();
-        let _ = a.log2().exp2().retrieve();
-
-        cx.compile(GenericCompiler::default(), ());
-        assert_eq!(cx.graph.node_count(), 1);
-    }
-}
-
 /// **Reduces arithmetic expressions**
 ///
 /// - Current: x + 0 => x, x * 1 => x
@@ -389,47 +305,25 @@ pub struct ArithmeticElimination;
 impl Compiler for ArithmeticElimination {
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         // x + 0, 0 + x
-        let (mut x, mut add, mut zero) = (
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-        );
-        let zero_pat = SelectOp::new()
-            .check(|o, _| {
-                if let Some(o) = o.as_any().downcast_ref::<Constant>() {
-                    if let ConstantValue::Float(c) = o.0 {
-                        c == 0.0
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            })
-            .ptr(&mut zero);
-        let mut selector1 = SelectOp::new()
-            .ptr(&mut x)
-            .edge(
-                zero_pat
-                    .clone()
-                    .edge(SelectOp::new().ty::<Add>().ptr(&mut add)),
-            )
-            .search(graph);
-        let mut selector2 = zero_pat
-            .edge(
-                SelectOp::new()
-                    .ptr(&mut x)
-                    .edge(SelectOp::new().ty::<Add>().ptr(&mut add)),
-            )
-            .search(graph);
-        while selector1.next_match() || selector2.next_match() {
+        let zero = constant(0.);
+        let inp = node();
+        let add1 = binary::<Add>(zero.clone(), inp.clone());
+        let add2 = binary::<Add>(inp.clone(), zero.clone());
+        let mut s1 = add1.clone().search(graph);
+        let mut s2 = add2.clone().search(graph);
+        while s1.next_match() || s2.next_match() {
+            let (inp, zero, add) = if s1.matched {
+                (s1.get(&inp), s1.get(&zero), s1.get(&add1))
+            } else {
+                (s2.get(&inp), s2.get(&zero), s2.get(&add2))
+            };
             if graph.no_delete.contains(&zero) {
                 continue;
             }
             // Carry over outgoing edges
             let input_shape = graph
                 .graph
-                .edges_connecting(x, add)
+                .edges_connecting(inp, add)
                 .find_map(|e| e.weight().as_data())
                 .unwrap()
                 .2;
@@ -451,7 +345,7 @@ impl Compiler for ArithmeticElimination {
                 {
                     if let Some(weight) = weight.as_data() {
                         graph.graph.add_edge(
-                            x,
+                            inp,
                             target,
                             Dependency::Data {
                                 input_order: weight.0,
@@ -462,14 +356,14 @@ impl Compiler for ArithmeticElimination {
                     }
                 }
             } else {
-                move_outgoing_edge(add, x, &mut graph.graph);
+                move_outgoing_edge(add, inp, &mut graph.graph);
             }
             move_references(
                 &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 add,
-                x,
+                inp,
             );
             if graph
                 .graph
@@ -482,47 +376,25 @@ impl Compiler for ArithmeticElimination {
             graph.graph.remove_node(add);
         }
         // x * 1, 1 * x
-        let (mut a, mut mul, mut one) = (
-            NodeIndex::default(),
-            NodeIndex::default(),
-            NodeIndex::default(),
-        );
-        let one_pat = SelectOp::new()
-            .check(|o, _| {
-                if let Some(o) = o.as_any().downcast_ref::<Constant>() {
-                    if let ConstantValue::Float(c) = o.0 {
-                        c == 1.0
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            })
-            .ptr(&mut one);
-        let mut selector1 = SelectOp::new()
-            .ptr(&mut a)
-            .edge(
-                one_pat
-                    .clone()
-                    .edge(SelectOp::new().ty::<Mul>().ptr(&mut mul)),
-            )
-            .search(graph);
-        let mut selector2 = one_pat
-            .edge(
-                SelectOp::new()
-                    .ptr(&mut a)
-                    .edge(SelectOp::new().ty::<Mul>().ptr(&mut mul)),
-            )
-            .search(graph);
-        while selector1.next_match() || selector2.next_match() {
+        let one = constant(1.);
+        let inp = node();
+        let mul1 = binary::<Mul>(one.clone(), inp.clone());
+        let mul2 = binary::<Mul>(inp.clone(), one.clone());
+        let mut s1 = mul1.clone().search(graph);
+        let mut s2 = mul2.clone().search(graph);
+        while s1.next_match() || s2.next_match() {
+            let (inp, one, mul) = if s1.matched {
+                (s1.get(&inp), s1.get(&one), s1.get(&mul1))
+            } else {
+                (s2.get(&inp), s2.get(&one), s2.get(&mul2))
+            };
             if graph.no_delete.contains(&one) {
                 continue;
             }
             // Carry over outgoing edges
             let input_shape = graph
                 .graph
-                .edges_connecting(a, mul)
+                .edges_connecting(inp, mul)
                 .find_map(|e| e.weight().as_data())
                 .unwrap()
                 .2;
@@ -544,7 +416,7 @@ impl Compiler for ArithmeticElimination {
                 {
                     if let Some(weight) = weight.as_data() {
                         graph.graph.add_edge(
-                            a,
+                            inp,
                             target,
                             Dependency::Data {
                                 input_order: weight.0,
@@ -555,14 +427,14 @@ impl Compiler for ArithmeticElimination {
                     }
                 }
             } else {
-                move_outgoing_edge(mul, a, &mut graph.graph);
+                move_outgoing_edge(mul, inp, &mut graph.graph);
             }
             move_references(
                 &mut remap,
                 &mut graph.no_delete,
                 &mut graph.to_retrieve,
                 mul,
-                a,
+                inp,
             );
             if graph.graph.edges_directed(one, Direction::Outgoing).count() == 1 {
                 graph.graph.remove_node(one);
