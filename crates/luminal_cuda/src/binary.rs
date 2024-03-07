@@ -14,7 +14,7 @@ use rustc_hash::FxHashMap;
 use crate::{
     constant, get_idx_valid_exps, hash,
     other::CudaARange,
-    prim::{CudaAdd, CudaLessThan, CudaMul},
+    prim::{CudaAdd, CudaLessThan, CudaMul, CudaSumReduce},
     render_dyn_dim_inputs, CudaData, CudaFloat,
 };
 

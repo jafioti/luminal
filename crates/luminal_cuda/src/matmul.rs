@@ -224,7 +224,7 @@ where
         let mut sum_reduce = unary::<CudaSumReduce<T>>(mul.clone());
         sum_reduce.check(|o, _| {
             if let Some(c) = o.as_any().downcast_ref::<CudaSumReduce<T>>() {
-                c.2 == 0
+                c.dim == 0
             } else {
                 false
             }
@@ -286,7 +286,7 @@ where
         let mut sum_reduce = unary::<CudaSumReduce<T>>(mul.clone());
         sum_reduce.check(|o, _| {
             if let Some(c) = o.as_any().downcast_ref::<CudaSumReduce<T>>() {
-                c.2 == 3
+                c.dim == 3
             } else {
                 false
             }

@@ -14,6 +14,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     binary::CudaSub,
+    constant,
     prim::{CudaContiguous, CudaSumReduce},
     CudaData, CudaFloat,
 };
