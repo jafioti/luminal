@@ -52,9 +52,7 @@ where
             .collect::<Vec<_>>();
         let mut a = unsafe { self.0.alloc::<T>(vec.len()).unwrap() };
         self.0.htod_copy_into(vec, &mut a).unwrap();
-        vec![Tensor {
-            data: Box::new(CudaData(a)),
-        }]
+        vec![Tensor::new(CudaData(a))]
     }
 }
 
@@ -78,16 +76,14 @@ where
             // Already off device
             return vec![inp.pop().unwrap().0.cloned()];
         }
-        vec![Tensor {
-            data: Box::new(
-                self.0
-                    .dtoh_sync_copy(get_buffer_from_tensor::<T>(&inp[0].0))
-                    .unwrap()
-                    .into_iter()
-                    .map(CudaFloat::to_f32)
-                    .collect::<Vec<_>>(),
-            ),
-        }]
+        vec![Tensor::new(
+            self.0
+                .dtoh_sync_copy(get_buffer_from_tensor::<T>(&inp[0].0))
+                .unwrap()
+                .into_iter()
+                .map(CudaFloat::to_f32)
+                .collect::<Vec<_>>(),
+        )]
     }
 }
 
@@ -134,9 +130,7 @@ where
             ConstantValue::Float(f) => T::from_f32(*f),
         };
         self.device.htod_copy_into(vec![value], &mut a).unwrap();
-        vec![Tensor {
-            data: Box::new(CudaData(a)),
-        }]
+        vec![Tensor::new(CudaData(a))]
     }
 }
 
@@ -176,14 +170,7 @@ extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp_a, 
         }
     }
 }
-impl<T> Operator for CudaContiguous<T>
-where
-    T: Debug
-        + 'static
-        + luminal_cudarc::driver::DeviceRepr
-        + luminal_cudarc::driver::ValidAsZeroBits,
-    CudaData<T>: Data,
-{
+impl<T: CudaFloat> Operator for CudaContiguous<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let res_shape = tensors[0].1.contiguous();
         let inp_size = res_shape.n_elements().to_usize().unwrap();
@@ -202,9 +189,7 @@ where
                 .unwrap();
         }
 
-        vec![Tensor {
-            data: Box::new(CudaData(out)),
-        }]
+        vec![Tensor::new(CudaData(out))]
     }
 }
 
@@ -251,9 +236,7 @@ impl<T: CudaFloat> Operator for CudaLog2<T> {
                 .unwrap();
         }
 
-        vec![Tensor {
-            data: Box::new(CudaData(out)),
-        }]
+        vec![Tensor::new(CudaData(out))]
     }
 }
 
@@ -299,9 +282,7 @@ impl<T: CudaFloat> Operator for CudaExp2<T> {
                 .unwrap();
         }
 
-        vec![Tensor {
-            data: Box::new(CudaData(out)),
-        }]
+        vec![Tensor::new(CudaData(out))]
     }
 }
 
@@ -348,9 +329,7 @@ impl<T: CudaFloat> Operator for CudaSqrt<T> {
                 .unwrap();
         }
 
-        vec![Tensor {
-            data: Box::new(CudaData(out)),
-        }]
+        vec![Tensor::new(CudaData(out))]
     }
 }
 
@@ -397,9 +376,7 @@ impl<T: CudaFloat> Operator for CudaSin<T> {
                 .unwrap();
         }
 
-        vec![Tensor {
-            data: Box::new(CudaData(out)),
-        }]
+        vec![Tensor::new(CudaData(out))]
     }
 }
 
@@ -447,9 +424,7 @@ impl<T: CudaFloat> Operator for CudaRecip<T> {
                 .unwrap();
         }
 
-        vec![Tensor {
-            data: Box::new(CudaData(out)),
-        }]
+        vec![Tensor::new(CudaData(out))]
     }
 }
 
@@ -523,9 +498,7 @@ where
                 .unwrap();
         }
 
-        vec![Tensor {
-            data: Box::new(CudaData(out)),
-        }]
+        vec![Tensor::new(CudaData(out))]
     }
 }
 
@@ -588,9 +561,7 @@ impl<T: CudaFloat> Operator for CudaMul<T> {
                 .unwrap();
         }
 
-        vec![Tensor {
-            data: Box::new(CudaData(out)),
-        }]
+        vec![Tensor::new(CudaData(out))]
     }
 }
 
@@ -653,9 +624,7 @@ impl<T: CudaFloat> Operator for CudaMod<T> {
                 .unwrap();
         }
 
-        vec![Tensor {
-            data: Box::new(CudaData(out)),
-        }]
+        vec![Tensor::new(CudaData(out))]
     }
 }
 
@@ -724,9 +693,7 @@ impl<T: CudaFloat> Operator for CudaLessThan<T> {
                 .unwrap();
         }
 
-        vec![Tensor {
-            data: Box::new(CudaData(out)),
-        }]
+        vec![Tensor::new(CudaData(out))]
     }
 }
 
@@ -819,9 +786,7 @@ where
                 .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
                 .unwrap();
         }
-        vec![Tensor {
-            data: Box::new(CudaData(out)),
-        }]
+        vec![Tensor::new(CudaData(out))]
     }
 }
 
@@ -910,9 +875,7 @@ impl<T: CudaFloat> Operator for CudaMaxReduce<T> {
                 .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
                 .unwrap();
         }
-        vec![Tensor {
-            data: Box::new(CudaData(out)),
-        }]
+        vec![Tensor::new(CudaData(out))]
     }
 }
 
