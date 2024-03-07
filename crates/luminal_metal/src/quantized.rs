@@ -540,7 +540,6 @@ impl<T: MetalFloat + Default> Compiler for MetalQuantizedCompiler<T> {
         // Modify ops directly downstream of weights
         for weight in downstream(&weight_ids, graph) {
             for (target, (inp_ind, _, _)) in graph
-                .graph
                 .edges_directed(weight, petgraph::Direction::Outgoing)
                 .filter_map(|e| e.weight().as_data().map(|i| (e.target(), i)))
                 .collect::<Vec<_>>()
@@ -549,7 +548,7 @@ impl<T: MetalFloat + Default> Compiler for MetalQuantizedCompiler<T> {
                     inp_ind, 1,
                     "Quantized weight {target:?} is the wrong input!",
                 );
-                let op_node = graph.graph.node_weight_mut(target).unwrap();
+                let op_node = graph.node_weight_mut(target).unwrap();
                 if let Some(gather) = op_node.as_any().downcast_ref::<MetalGather<T>>() {
                     *op_node = Box::new(QuantizedGather::<T>::new(
                         device.clone(),

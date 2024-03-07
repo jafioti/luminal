@@ -76,6 +76,8 @@ fn main() {
         ),
         (&mut input, &mut logits, &mut cache_src, &mut cache_dest),
     );
+    // cx.display();
+    println!("Nodes: {:?}", cx.node_count());
     // Keep model weights
     let model_weights = downstream(state_set(&model), &cx);
     cx.keep_tensors(&model_weights);

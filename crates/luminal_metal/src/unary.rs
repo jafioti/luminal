@@ -211,7 +211,6 @@ impl<T: MetalFloat> Compiler for MeanReduceCompiler<T> {
             }
             let (sum_reduce, mul) = (s.get(&sum_reduce), s.get(&mul));
             let dim = graph
-                .graph
                 .node_weight(sum_reduce)
                 .unwrap()
                 .as_any()
@@ -232,7 +231,7 @@ impl<T: MetalFloat> Compiler for MeanReduceCompiler<T> {
                 .finish();
 
             // Create edges to dests
-            move_outgoing_edge(mul, mean_reduce, &mut graph.graph);
+            move_outgoing_edge(mul, mean_reduce, graph);
             move_references(
                 &mut remap,
                 &mut graph.no_delete,
@@ -242,7 +241,7 @@ impl<T: MetalFloat> Compiler for MeanReduceCompiler<T> {
             );
 
             // Remove the old ops
-            graph.graph.remove_node(mul);
+            graph.remove_node(mul);
             s.try_delete();
         }
     }
@@ -451,7 +450,6 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
                 continue;
             }
             let ConstantValue::Float(epsilon_num) = graph
-                .graph
                 .node_weight(s.get(&eps))
                 .unwrap()
                 .as_any()
@@ -463,7 +461,6 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
             };
             let (mut x, _, mut sh) = graph.get_sources(s.get(&square))[0];
             if let Some(mean_reduce) = graph
-                .graph
                 .node_weight(s.get(&mean))
                 .unwrap()
                 .as_any()
@@ -517,7 +514,7 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
 
             // Create edges to dests
             let mul = s.get(&mul);
-            move_outgoing_edge(mul, rms_norm, &mut graph.graph);
+            move_outgoing_edge(mul, rms_norm, graph);
             move_references(
                 &mut remap,
                 &mut graph.no_delete,
@@ -527,7 +524,7 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
             );
 
             // Remove the old ops
-            graph.graph.remove_node(mul);
+            graph.remove_node(mul);
             s.try_delete();
         }
     }
@@ -657,7 +654,6 @@ impl<T: MetalFloat> Compiler for MetalExpCompiler<T> {
 
             // Insert exp op
             let (_, _, src_shape) = graph
-                .graph
                 .edges_connecting(s.get(&inp), s.get(&mul))
                 .next()
                 .unwrap()
@@ -671,7 +667,7 @@ impl<T: MetalFloat> Compiler for MetalExpCompiler<T> {
 
             // Create edges to dests
             let exp2 = s.get(&exp2);
-            move_outgoing_edge(exp2, exp, &mut graph.graph);
+            move_outgoing_edge(exp2, exp, graph);
             move_references(
                 &mut remap,
                 &mut graph.no_delete,
@@ -681,7 +677,7 @@ impl<T: MetalFloat> Compiler for MetalExpCompiler<T> {
             );
 
             // Remove the old ops
-            graph.graph.remove_node(exp2);
+            graph.remove_node(exp2);
             s.try_delete();
         }
     }
@@ -808,7 +804,6 @@ impl<T: MetalFloat> Compiler for MetalCosCompiler<T> {
 
             // Insert cos op
             let shape = graph
-                .graph
                 .edges_directed(s.get(&sub), petgraph::Direction::Incoming)
                 .filter(|e| !e.weight().is_schedule())
                 .find(|e| e.source() != s.get(&const_pi))
@@ -824,7 +819,7 @@ impl<T: MetalFloat> Compiler for MetalCosCompiler<T> {
 
             // Create edges to dests
             let sin = s.get(&sin);
-            move_outgoing_edge(sin, cos, &mut graph.graph);
+            move_outgoing_edge(sin, cos, graph);
             move_references(
                 &mut remap,
                 &mut graph.no_delete,
@@ -834,7 +829,7 @@ impl<T: MetalFloat> Compiler for MetalCosCompiler<T> {
             );
 
             // Remove the old ops
-            graph.graph.remove_node(sin);
+            graph.remove_node(sin);
             s.try_delete();
         }
     }
@@ -985,7 +980,7 @@ impl<T: MetalFloat> Compiler for SoftmaxCompiler<T> {
 
             // Create edges to dests
             let mul = s.get(&mul);
-            move_outgoing_edge(mul, mean_reduce, &mut graph.graph);
+            move_outgoing_edge(mul, mean_reduce, graph);
             move_references(
                 &mut remap,
                 &mut graph.no_delete,
@@ -995,7 +990,7 @@ impl<T: MetalFloat> Compiler for SoftmaxCompiler<T> {
             );
 
             // Remove the old ops
-            graph.graph.remove_node(mul);
+            graph.remove_node(mul);
             s.try_delete();
         }
     }
@@ -1207,7 +1202,6 @@ impl<T: MetalFloat> Compiler for RopeCompiler<T> {
 
             let inp = s.get(&inp);
             let shape = graph
-                .graph
                 .edges_connecting(inp, s.get(&split))
                 .next()
                 .unwrap()
@@ -1216,7 +1210,6 @@ impl<T: MetalFloat> Compiler for RopeCompiler<T> {
                 .unwrap()
                 .2;
             let Some(MetalConstant(ConstantValue::Expression(e), ..)) = graph
-                .graph
                 .node_weight(s.get(&prev_seq))
                 .unwrap()
                 .as_any()
@@ -1236,10 +1229,10 @@ impl<T: MetalFloat> Compiler for RopeCompiler<T> {
                 .input(inp, 0, shape)
                 .finish();
             let add = s.get(&add);
-            move_outgoing_edge(add, rope_op, &mut graph.graph);
+            move_outgoing_edge(add, rope_op, graph);
 
             // Delete old ops
-            graph.graph.remove_node(add);
+            graph.remove_node(add);
             s.try_delete();
         }
     }

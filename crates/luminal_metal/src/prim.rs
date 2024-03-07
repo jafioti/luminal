@@ -1039,14 +1039,10 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
         if (({b_valid_exp}) != 0) {{
             b_t = inp_b[{b_idx_exp}];
         }}
-        if (a_t < b_t) {{
-            out[idx] = {};
-        }} else {{
-            out[idx] = {};
-        }}
+        out[idx] = ({type_name})(a_t < b_t);
     }}
 }}
-", if T::is_f32() {"1.0"} else {"1.0h"},if T::is_f32() {"0.0"} else {"0.0h"},
+"
         );
         Self {
             pipeline: compile_function("mkernel", &code, &device),
@@ -1143,7 +1139,7 @@ impl<T: MetalFloat> Operator for MetalLessThan<T> {
             }
         }
         if key == "elementwise" {
-            return Some(Box::new("(float)(input0 < input1 ? 1.0 : 0.0)".to_string()));
+            return Some(Box::new("(float)((input0) < (input1))".to_string()));
         }
         None
     }
@@ -1626,16 +1622,8 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
         // Go through the graph and insert copy ops
         // Copy function output to device and input from device
         for function_node in graph
-            .graph
             .node_indices()
-            .filter(|n| {
-                graph
-                    .graph
-                    .node_weight(*n)
-                    .unwrap()
-                    .as_any()
-                    .is::<LFunction>()
-            })
+            .filter(|n| graph.node_weight(*n).unwrap().as_any().is::<LFunction>())
             .collect::<Vec<_>>()
         {
             // Create copy node
@@ -1646,14 +1634,13 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
 
             // Switch outgoing edges from input to copy_node
             for (edge_id, weight, dest) in graph
-                .graph
                 .edges_directed(function_node, petgraph::Direction::Outgoing)
                 .map(|e| (e.id(), *e.weight(), e.target()))
                 .filter(|(_, _, trg)| *trg != copy_node)
                 .collect::<Vec<_>>()
             {
-                graph.graph.add_edge(copy_node, dest, weight);
-                graph.graph.remove_edge(edge_id);
+                graph.add_edge(copy_node, dest, weight);
+                graph.remove_edge(edge_id);
             }
 
             if graph.to_retrieve.contains(&function_node) {
@@ -1662,7 +1649,6 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
 
             // Insert copy from device for function inputs
             for (source, edge, edge_weight) in graph
-                .graph
                 .edges_directed(function_node, petgraph::Direction::Incoming)
                 .map(|e| (e.source(), e.id(), *e.weight()))
                 .collect::<Vec<_>>()
@@ -1671,10 +1657,8 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                     .add_op(MetalCopyFromDevice::<T>::new(dev.clone()))
                     .input(source, 0, ShapeTracker::new(&[]))
                     .finish();
-                graph
-                    .graph
-                    .add_edge(copy_from_node, function_node, edge_weight);
-                graph.graph.remove_edge(edge);
+                graph.add_edge(copy_from_node, function_node, edge_weight);
+                graph.remove_edge(edge);
             }
         }
 
@@ -1683,19 +1667,11 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
             .to_retrieve
             .iter()
             // Filter to non-functions
-            .filter(|n| {
-                !graph
-                    .graph
-                    .node_weight(**n)
-                    .unwrap()
-                    .as_any()
-                    .is::<LFunction>()
-            })
+            .filter(|n| !graph.node_weight(**n).unwrap().as_any().is::<LFunction>())
             .map(|n| {
                 (
                     *n,
                     graph
-                        .graph
                         .edges_directed(*n, petgraph::Direction::Incoming)
                         .filter_map(|e| e.weight().as_data())
                         .map(|i| i.2)
@@ -1706,7 +1682,6 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
             .collect::<Vec<_>>()
         {
             if graph
-                .graph
                 .node_weight(output_node)
                 .unwrap()
                 .as_any()
@@ -1714,7 +1689,6 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
             {
                 // This output is already a copy to, instead of adding a copy from, let's remap back to the source
                 let src = graph
-                    .graph
                     .neighbors_directed(output_node, petgraph::Direction::Incoming)
                     .next()
                     .unwrap();
@@ -1741,18 +1715,16 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
 
         // Copy prints and diffs from device
         for (output_node, edge) in graph
-            .graph
             .node_indices()
             // Filter non-functions
             .filter(|n| {
-                graph.graph.node_weight(*n).unwrap().as_any().is::<Print>()
-                    || graph.graph.node_weight(*n).unwrap().as_any().is::<Diff>()
+                graph.node_weight(*n).unwrap().as_any().is::<Print>()
+                    || graph.node_weight(*n).unwrap().as_any().is::<Diff>()
             })
             .map(|n| {
                 (
                     n,
                     graph
-                        .graph
                         .edges_directed(n, petgraph::Direction::Incoming)
                         .find(|e| !e.weight().is_schedule())
                         .unwrap()
@@ -1763,14 +1735,14 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
         {
             // Create copy node
             let (source, shape) = (
-                graph.graph.edge_endpoints(edge).unwrap().0,
-                graph.graph.edge_weight(edge).unwrap().as_data().unwrap().2,
+                graph.edge_endpoints(edge).unwrap().0,
+                graph.edge_weight(edge).unwrap().as_data().unwrap().2,
             );
             let copy_node = graph
                 .add_op(MetalCopyFromDevice::<T>::new(dev.clone()))
                 .input(source, 0, shape)
                 .finish();
-            graph.graph.add_edge(
+            graph.add_edge(
                 copy_node,
                 output_node,
                 Dependency::Data {
@@ -1779,13 +1751,12 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                     shape,
                 },
             );
-            graph.graph.remove_edge(edge);
+            graph.remove_edge(edge);
         }
 
         // Swap primitive ops
-        for id in graph.graph.node_indices().collect::<Vec<_>>() {
+        for id in graph.node_indices().collect::<Vec<_>>() {
             let src_shapes = graph
-                .graph
                 .edges_directed(id, petgraph::Direction::Incoming)
                 .filter_map(|e| e.weight().as_data())
                 .sorted_by_key(|e| e.0)

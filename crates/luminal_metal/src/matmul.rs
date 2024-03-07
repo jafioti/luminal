@@ -374,7 +374,7 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
                 .finish();
 
             // Create edges to dests
-            move_outgoing_edge(sum_reduce, matmul_op, &mut graph.graph);
+            move_outgoing_edge(sum_reduce, matmul_op, graph);
             move_references(
                 &mut remap,
                 &mut graph.no_delete,
@@ -384,8 +384,8 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
             );
 
             // Remove the old ops
-            graph.graph.remove_node(mul);
-            graph.graph.remove_node(sum_reduce);
+            graph.remove_node(mul);
+            graph.remove_node(sum_reduce);
         }
     }
 }

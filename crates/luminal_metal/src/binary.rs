@@ -172,19 +172,16 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
             }
             let add = s.get(&add);
             let (a, a_edge) = graph
-                .graph
                 .edges_connecting(s.get(&lhs), add)
                 .next()
                 .map(|e| (e.source(), e.weight().as_data().unwrap()))
                 .unwrap();
             let (b, b_edge) = graph
-                .graph
                 .edges_connecting(s.get(&rhs), s.get(&mul))
                 .next()
                 .map(|e| (e.source(), e.weight().as_data().unwrap()))
                 .unwrap();
             let b_final_shape = graph
-                .graph
                 .edges_connecting(s.get(&mul), add)
                 .next()
                 .unwrap()
@@ -209,9 +206,9 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
                 .input(a, a_edge.1, a_edge.2)
                 .input(b, b_edge.1, b_edge.2)
                 .finish();
-            move_outgoing_edge(add, sub, &mut graph.graph);
+            move_outgoing_edge(add, sub, graph);
 
-            graph.graph.remove_node(add);
+            graph.remove_node(add);
             s.try_delete();
         }
     }
@@ -376,7 +373,6 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
             let (lhs, rhs) = (s.get(&lhs), s.get(&rhs));
             let eq = s.get(&eq);
             let a_edge = graph
-                .graph
                 .edges_connecting(lhs, s.get(&lt1))
                 .next()
                 .unwrap()
@@ -384,7 +380,6 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
                 .as_data()
                 .unwrap();
             let b_edge = graph
-                .graph
                 .edges_connecting(rhs, s.get(&lt1))
                 .next()
                 .unwrap()
@@ -402,9 +397,9 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
                 .input(lhs, a_edge.1, a_edge.2)
                 .input(rhs, b_edge.1, b_edge.2)
                 .finish();
-            move_outgoing_edge(eq, equals, &mut graph.graph);
+            move_outgoing_edge(eq, equals, graph);
 
-            graph.graph.remove_node(eq);
+            graph.remove_node(eq);
             s.try_delete();
         }
     }
@@ -519,7 +514,6 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
                 continue;
             }
             let emb_shape = graph
-                .graph
                 .edges_connecting(s.get(&embeddings), s.get(&mul))
                 .next()
                 .unwrap()
@@ -529,7 +523,6 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
                 .2;
             let embed_dim = emb_shape.shape()[2].to_usize().unwrap();
             let index_shape = graph
-                .graph
                 .edges_connecting(s.get(&indexes), s.get(&ind_copy))
                 .next()
                 .unwrap()
@@ -542,8 +535,8 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
                 .input(s.get(&indexes), 0, index_shape)
                 .input(s.get(&embeddings), 0, emb_shape)
                 .finish();
-            move_outgoing_edge(s.get(&sum_reduce), gather, &mut graph.graph);
-            graph.graph.remove_node(s.get(&sum_reduce));
+            move_outgoing_edge(s.get(&sum_reduce), gather, graph);
+            graph.remove_node(s.get(&sum_reduce));
             s.try_delete();
         }
     }

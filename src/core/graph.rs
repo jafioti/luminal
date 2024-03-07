@@ -7,7 +7,10 @@ use crate::{
     shape::*,
     tensor::Tensor,
 };
-use std::io::Write;
+use std::{
+    io::Write,
+    ops::{Deref, DerefMut},
+};
 
 use colored::Colorize;
 use itertools::Itertools;
@@ -397,6 +400,19 @@ impl Graph {
             .bold()
         );
         self.reset();
+    }
+}
+
+impl Deref for Graph {
+    type Target = MainGraph;
+    fn deref(&self) -> &Self::Target {
+        &self.graph
+    }
+}
+
+impl DerefMut for Graph {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.graph
     }
 }
 

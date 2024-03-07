@@ -117,6 +117,7 @@ impl<S: ExpressionStorage + Clone> Debug for GenericExpression<S> {
 }
 
 impl<S: ExpressionStorage> GenericExpression<S> {
+    /// Reduce the expression to its minimal terms
     pub fn minimize(mut self) -> Self {
         self = reduce_triples(self);
         // If we only have adds and subtractions, we can minimize it down
@@ -133,6 +134,7 @@ impl<S: ExpressionStorage> GenericExpression<S> {
         reduce_triples(self)
     }
 
+    /// Minimum
     pub fn min<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
@@ -140,6 +142,7 @@ impl<S: ExpressionStorage> GenericExpression<S> {
         rhs.minimize()
     }
 
+    /// Maximum
     pub fn max<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
@@ -147,6 +150,7 @@ impl<S: ExpressionStorage> GenericExpression<S> {
         rhs.minimize()
     }
 
+    /// Greater than or equals
     pub fn gte<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
@@ -154,11 +158,30 @@ impl<S: ExpressionStorage> GenericExpression<S> {
         rhs.minimize()
     }
 
+    /// Less than
     pub fn lt<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Lt);
         rhs.minimize()
+    }
+
+    /// Substitute an expression for a variable
+    pub fn substitute<N: ExpressionStorage>(self, var: char, expr: GenericExpression<N>) -> Self {
+        let mut new_terms = S::default();
+        for term in self.terms.clone().into_iter() {
+            match term {
+                Term::Var(c) if c == var => {
+                    for t in expr.terms.clone().into_iter() {
+                        new_terms.push(t);
+                    }
+                }
+                _ => {
+                    new_terms.push(term);
+                }
+            }
+        }
+        Self { terms: new_terms }
     }
 }
 
@@ -751,5 +774,13 @@ mod tests {
 
         let reduced_expr = expr.minimize();
         assert_eq!(reduced_expr, 'a'.into());
+    }
+
+    #[test]
+    fn test_substitution() {
+        let main = Expression::from('x') - 255;
+        let sub = Expression::from('x') / 2;
+        let new = main.substitute('x', sub);
+        assert_eq!(new, (Expression::from('x') / 2) - 255);
     }
 }

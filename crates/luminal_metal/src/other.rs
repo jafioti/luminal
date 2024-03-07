@@ -35,10 +35,9 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
             let (first, second) = (s.get(&first), s.get(&second));
             // Ensure there are no dests from first that are not copies
             if graph
-                .graph
                 .edges_directed(first, petgraph::Direction::Outgoing)
                 .filter(|e| {
-                    let target = graph.graph.node_weight(e.target()).unwrap().as_any();
+                    let target = graph.node_weight(e.target()).unwrap().as_any();
                     !target.is::<MetalCopyFromDevice<T>>() && !target.is::<MetalCopyToDevice<T>>()
                 })
                 .count()
@@ -50,7 +49,7 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
             let Some((source, _, _)) = graph.get_sources(first).pop() else {
                 continue;
             };
-            move_outgoing_edge(second, source, &mut graph.graph);
+            move_outgoing_edge(second, source, graph);
             move_references(
                 &mut remap,
                 &mut graph.no_delete,
@@ -58,14 +57,14 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
                 second,
                 source,
             );
-            graph.graph.remove_node(second);
+            graph.remove_node(second);
             for dest in graph
                 .get_dests(first)
                 .iter()
                 .map(|(i, _)| *i)
                 .collect::<Vec<_>>()
             {
-                move_outgoing_edge(dest, source, &mut graph.graph);
+                move_outgoing_edge(dest, source, graph);
                 move_references(
                     &mut remap,
                     &mut graph.no_delete,
@@ -73,9 +72,9 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
                     dest,
                     source,
                 );
-                graph.graph.remove_node(dest);
+                graph.remove_node(dest);
             }
-            graph.graph.remove_node(first);
+            graph.remove_node(first);
             s.clear_cached_results();
         }
     }
@@ -215,7 +214,6 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
             let s = if s1.matched { &s1 } else { &s2 };
             let arange_amount = {
                 let sh = graph
-                    .graph
                     .edges_connecting(s.get(&one), s.get(&contig1))
                     .next()
                     .unwrap()
@@ -238,8 +236,8 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
             } else {
                 s2.get(&add)
             };
-            move_outgoing_edge(fin, arange_op, &mut graph.graph);
-            graph.graph.remove_node(fin);
+            move_outgoing_edge(fin, arange_op, graph);
+            graph.remove_node(fin);
             s.try_delete();
         }
     }
@@ -258,23 +256,18 @@ impl<T: MetalFloat> Compiler for ContiguousElimination<T> {
         while s.next_match() {
             let (contig, op) = (s.get(&contig), s.get(&op));
             if graph.no_delete.contains(&contig)
-                || graph
-                    .graph
-                    .edges_directed(contig, Direction::Outgoing)
-                    .count()
-                    > 1
+                || graph.edges_directed(contig, Direction::Outgoing).count() > 1
             {
                 continue;
             }
             // Shape going from contig to op
             // let first_shape = graph
-            //     .graph
+            //
             //     .edges_directed(contig, Direction::Incoming)
             //     .find_map(|e| e.weight().as_data())
             //     .unwrap()
             //     .2;
             let second_shape = graph
-                .graph
                 .edges_connecting(contig, op)
                 .find_map(|e| e.weight().as_data())
                 .unwrap()
@@ -285,11 +278,10 @@ impl<T: MetalFloat> Compiler for ContiguousElimination<T> {
                 && !second_shape.is_padded()
             {
                 let source = graph
-                    .graph
                     .neighbors_directed(contig, petgraph::Direction::Incoming)
                     .next()
                     .unwrap();
-                move_incoming_edge(contig, op, &mut graph.graph);
+                move_incoming_edge(contig, op, graph);
                 move_references(
                     &mut remap,
                     &mut graph.no_delete,
@@ -297,14 +289,13 @@ impl<T: MetalFloat> Compiler for ContiguousElimination<T> {
                     contig,
                     source,
                 );
-                graph.graph.remove_node(contig);
+                graph.remove_node(contig);
                 let new_shapes = graph
                     .get_sources(op)
                     .into_iter()
                     .map(|(_, _, s)| s)
                     .collect::<Vec<_>>();
                 graph
-                    .graph
                     .node_weight_mut(op)
                     .unwrap()
                     .custom("recompile_shapes", Box::new(new_shapes));
