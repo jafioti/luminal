@@ -20,7 +20,7 @@ impl Compiler for MatMul2DCompiler {
             [Some(true), Some(false), Some(false)],
         ]);
         let mut sum_reduce = unary::<SumReduce>(mul.clone());
-        sum_reduce.check(|o, _| o.is_equal(&SumReduce(0)));
+        sum_reduce.check(|o, _| o.is_equal(&SumReduce(2)));
         let mut s = sum_reduce.clone().search(graph);
         while s.next_match() {
             if s.check_no_delete(&[sum_reduce.id]) {
