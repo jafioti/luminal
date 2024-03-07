@@ -28,11 +28,7 @@ impl<T> CudaCopyToDevice<T> {
     }
 }
 
-impl<T> Operator for CudaCopyToDevice<T>
-where
-    CudaData<T>: Data,
-    T: CudaFloat + luminal_cudarc::driver::DeviceRepr + std::marker::Unpin,
-{
+impl<T: CudaFloat> Operator for CudaCopyToDevice<T> {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         if inp[0].0.borrowed().data.as_any().is::<CudaData<T>>() {
             // Already on device
@@ -66,11 +62,7 @@ impl<T> CudaCopyFromDevice<T> {
     }
 }
 
-impl<T> Operator for CudaCopyFromDevice<T>
-where
-    CudaData<T>: Data,
-    T: CudaFloat + luminal_cudarc::driver::DeviceRepr + std::marker::Unpin,
-{
+impl<T: CudaFloat> Operator for CudaCopyFromDevice<T> {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         if inp[0].0.borrowed().data.as_any().is::<Vec<f32>>() {
             // Already off device
@@ -116,11 +108,7 @@ impl<T> CudaConstant<T> {
     }
 }
 
-impl<T> Operator for CudaConstant<T>
-where
-    T: Debug + Copy + luminal_cudarc::driver::DeviceRepr + std::marker::Unpin + CudaFloat,
-    CudaData<T>: Data,
-{
+impl<T: CudaFloat> Operator for CudaConstant<T> {
     fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let mut a = unsafe { self.device.alloc::<T>(1).unwrap() };
         let value = match &self.value {
@@ -469,15 +457,7 @@ extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp_a, 
     }
 }
 
-impl<T> Operator for CudaAdd<T>
-where
-    T: Debug
-        + Copy
-        + luminal_cudarc::driver::DeviceRepr
-        + std::marker::Unpin
-        + luminal_cudarc::driver::ValidAsZeroBits,
-    CudaData<T>: Data,
-{
+impl<T: CudaFloat> Operator for CudaAdd<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let a = get_buffer_from_tensor::<T>(&tensors[0].0);
         let b = get_buffer_from_tensor::<T>(&tensors[1].0);
@@ -1108,7 +1088,7 @@ impl<T: CudaFloat> Compiler for CudaPrimitiveCompiler<T> {
 #[derive(Debug, Default)]
 pub struct CopyCompiler<T>(PhantomData<T>);
 
-impl<T: 'static> Compiler for CopyCompiler<T> {
+impl<T: CudaFloat> Compiler for CopyCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
         for (first, second) in graph
             .edge_indices()

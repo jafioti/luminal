@@ -1,9 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use luminal_cudarc::{
-    driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig},
-    nvrtc::{compile_ptx_with_opts, CompileOptions},
-};
+use luminal_cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
 
 use luminal::{
     op::*,
@@ -12,7 +9,7 @@ use luminal::{
 use rustc_hash::FxHashMap;
 
 use crate::{
-    constant, get_idx_valid_exps, hash,
+    compile_and_load_kernel, constant, get_buffer_from_tensor, get_idx_valid_exps, input_dyn_dims,
     other::CudaARange,
     prim::{CudaAdd, CudaLessThan, CudaMul, CudaSumReduce},
     render_dyn_dim_inputs, CudaData, CudaFloat,
@@ -31,56 +28,27 @@ impl<T: CudaFloat> CudaSub<T> {
     pub fn new(
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
-        dev: Arc<CudaDevice>,
+        device: Arc<CudaDevice>,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (a_idx, a_valid) = get_idx_valid_exps(a_shape);
         let (b_idx, b_valid) = get_idx_valid_exps(b_shape);
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape]);
         let type_name = T::type_name();
-        let mut code = format!(
+        let code = format!(
             "
 #include \"cuda_fp16.h\"
 extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp_a, const {type_name} *inp_b, int numel{rendered}) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < numel) {{
         out[idx] =
-            (({a_valid}) == 0 ? {} : inp_a[{a_idx}])
-            - (({b_valid}) == 0 ? {} : inp_b[{b_idx}]);
+            (({a_valid}) == 0 ? ({type_name})0.0 : inp_a[{a_idx}])
+            - (({b_valid}) == 0 ? ({type_name})0.0 : inp_b[{b_idx}]);
     }}
-}}",
-            if T::is_f32() {
-                "0.0"
-            } else {
-                "__float2half(0.0)"
-            },
-            if T::is_f32() {
-                "0.0"
-            } else {
-                "__float2half(0.0)"
-            },
-        );
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("kernel", &name);
-        if !dev.has_func(&name, &name) {
-            dev.load_ptx(
-                compile_ptx_with_opts(
-                    code,
-                    CompileOptions {
-                        arch: Some("sm_75"),
-                        include_paths: vec!["/usr/local/cuda/include".to_string()],
-                        ..Default::default()
-                    },
-                )
-                .unwrap(),
-                &name,
-                &[name.clone().leak()],
-            )
-            .unwrap();
-        }
+}}");
         Self {
-            function: dev.get_func(&name, &name).unwrap(),
-            device: dev,
+            function: compile_and_load_kernel(code, &device),
+            device,
             _phantom: Default::default(),
             dyn_symbols,
             dyn_map,
@@ -88,49 +56,20 @@ extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp_a, 
     }
 }
 
-impl<T> Operator for CudaSub<T>
-where
-    T: std::fmt::Debug
-        + Copy
-        + luminal_cudarc::driver::DeviceRepr
-        + std::marker::Unpin
-        + luminal_cudarc::driver::ValidAsZeroBits,
-    CudaData<T>: Data,
-{
+impl<T: CudaFloat> Operator for CudaSub<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let a = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<CudaData<T>>()
-            .unwrap();
-        let b = tensors[1]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<CudaData<T>>()
-            .unwrap();
+        let a = get_buffer_from_tensor::<T>(&tensors[0].0);
+        let b = get_buffer_from_tensor::<T>(&tensors[1].0);
         let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
 
         let out = self.device.alloc_zeros::<T>(inp_size).unwrap();
         let mut params = vec![
             (&out).as_kernel_param(),
-            (&a.0).as_kernel_param(),
-            (&b.0).as_kernel_param(),
+            a.as_kernel_param(),
+            b.as_kernel_param(),
             inp_size.as_kernel_param(),
         ];
-        let mut dims = [0; 10];
-        let dyn_map = unsafe { self.dyn_map.as_ref().unwrap() };
-        for (i, d) in self.dyn_symbols.iter().enumerate() {
-            dims[i] = dyn_map[d] as i32;
-            params.push(unsafe {
-                dims[0]
-                    .as_kernel_param()
-                    .add(i * std::mem::size_of::<i32>())
-            });
-        }
+        input_dyn_dims(&mut params, &self.dyn_symbols, self.dyn_map);
         unsafe {
             self.function
                 .clone()
@@ -138,19 +77,14 @@ where
                 .unwrap();
         }
 
-        vec![Tensor {
-            data: Box::new(CudaData(out)),
-        }]
+        vec![Tensor::new(CudaData(out))]
     }
 }
 
 #[derive(LuminalPrint, Default)]
 pub struct CudaSubtractionCompiler<T: CudaFloat>(PhantomData<T>);
 
-impl<T: CudaFloat> Compiler for CudaSubtractionCompiler<T>
-where
-    CudaData<T>: luminal::prelude::Data,
-{
+impl<T: CudaFloat> Compiler for CudaSubtractionCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = CudaDevice::new(0).unwrap();
         let (lhs, rhs) = (node(), node());
@@ -220,56 +154,27 @@ impl<T: CudaFloat> CudaEqual<T> {
     pub fn new(
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
-        dev: Arc<CudaDevice>,
+        device: Arc<CudaDevice>,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (a_idx, a_valid) = get_idx_valid_exps(a_shape);
         let (b_idx, b_valid) = get_idx_valid_exps(b_shape);
         let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape]);
         let type_name = T::type_name();
-        let mut code = format!(
+        let code = format!(
             "
 #include \"cuda_fp16.h\"
 extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp_a, const {type_name} *inp_b, int numel{rendered}) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < numel) {{
-        {type_name} a_val = ({a_valid}) == 0 ? {} : inp_a[{a_idx}];
-        {type_name} b_val = ({b_valid}) == 0 ? {} : inp_b[{b_idx}];
+        {type_name} a_val = ({a_valid}) == 0 ? ({type_name})0.0 : inp_a[{a_idx}];
+        {type_name} b_val = ({b_valid}) == 0 ? ({type_name})0.0 : inp_b[{b_idx}];
         out[idx] = ({type_name})(a_val == b_val);
     }}
-}}",
-            if T::is_f32() {
-                "0.0"
-            } else {
-                "__float2half(0.0)"
-            },
-            if T::is_f32() {
-                "0.0"
-            } else {
-                "__float2half(0.0)"
-            },
-        );
-        let name = format!("kernel_{}", hash(&code));
-        code = code.replace("kernel", &name);
-        if !dev.has_func(&name, &name) {
-            dev.load_ptx(
-                compile_ptx_with_opts(
-                    code,
-                    CompileOptions {
-                        arch: Some("sm_75"),
-                        include_paths: vec!["/usr/local/cuda/include".to_string()],
-                        ..Default::default()
-                    },
-                )
-                .unwrap(),
-                &name,
-                &[name.clone().leak()],
-            )
-            .unwrap();
-        }
+}}");
         Self {
-            function: dev.get_func(&name, &name).unwrap(),
-            device: dev,
+            function: compile_and_load_kernel(code, &device),
+            device,
             _phantom: Default::default(),
             dyn_symbols,
             dyn_map,
@@ -277,49 +182,20 @@ extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp_a, 
     }
 }
 
-impl<T> Operator for CudaEqual<T>
-where
-    T: std::fmt::Debug
-        + Copy
-        + luminal_cudarc::driver::DeviceRepr
-        + std::marker::Unpin
-        + luminal_cudarc::driver::ValidAsZeroBits,
-    CudaData<T>: Data,
-{
+impl<T: CudaFloat> Operator for CudaEqual<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let a = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<CudaData<T>>()
-            .unwrap();
-        let b = tensors[1]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<CudaData<T>>()
-            .unwrap();
+        let a = get_buffer_from_tensor::<T>(&tensors[0].0);
+        let b = get_buffer_from_tensor::<T>(&tensors[1].0);
         let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
 
         let out = self.device.alloc_zeros::<T>(inp_size).unwrap();
         let mut params = vec![
             (&out).as_kernel_param(),
-            (&a.0).as_kernel_param(),
-            (&b.0).as_kernel_param(),
+            a.as_kernel_param(),
+            b.as_kernel_param(),
             inp_size.as_kernel_param(),
         ];
-        let mut dims = [0; 10];
-        let dyn_map = unsafe { self.dyn_map.as_ref().unwrap() };
-        for (i, d) in self.dyn_symbols.iter().enumerate() {
-            dims[i] = dyn_map[d] as i32;
-            params.push(unsafe {
-                dims[0]
-                    .as_kernel_param()
-                    .add(i * std::mem::size_of::<i32>())
-            });
-        }
+        input_dyn_dims(&mut params, &self.dyn_symbols, self.dyn_map);
         unsafe {
             self.function
                 .clone()
@@ -327,19 +203,14 @@ where
                 .unwrap();
         }
 
-        vec![Tensor {
-            data: Box::new(CudaData(out)),
-        }]
+        vec![Tensor::new(CudaData(out))]
     }
 }
 
 #[derive(LuminalPrint, Default)]
 pub struct CudaEqualCompiler<T: CudaFloat>(PhantomData<T>);
 
-impl<T: CudaFloat> Compiler for CudaEqualCompiler<T>
-where
-    CudaData<T>: luminal::prelude::Data,
-{
+impl<T: CudaFloat> Compiler for CudaEqualCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = CudaDevice::new(0).unwrap();
         let one = constant::<T>(1.);
@@ -401,45 +272,27 @@ pub struct CudaGather<T> {
 }
 
 impl<T: CudaFloat> CudaGather<T> {
-    pub fn new(dev: Arc<CudaDevice>, embed_dim: usize) -> Self {
+    pub fn new(device: Arc<CudaDevice>, embed_dim: usize) -> Self {
         let type_name = T::type_name();
         let code = format!("
 #include \"cuda_fp16.h\"
-extern \"C\" __global__ void gather({type_name} *out, const {type_name} *weights, const float *inp, int n_embeddings, int embedding_dim) {{
+extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *weights, const float *inp, int n_embeddings, int embedding_dim) {{
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x < n_embeddings && y < embedding_dim) {{
         out[x * embedding_dim + y] = weights[(int)inp[x] * embedding_dim + y];
     }}
 }}");
-        dev.load_ptx(
-            compile_ptx_with_opts(
-                code,
-                CompileOptions {
-                    arch: Some("sm_75"),
-                    include_paths: vec!["/usr/local/cuda/include".to_string()],
-                    ..Default::default()
-                },
-            )
-            .unwrap(),
-            "gather",
-            &["gather"],
-        )
-        .unwrap();
         Self {
-            function: dev.get_func("gather", "gather").unwrap(),
-            device: dev,
+            function: compile_and_load_kernel(code, &device),
+            device,
             embed_dim,
             _phantom: Default::default(),
         }
     }
 }
 
-impl<T> Operator for CudaGather<T>
-where
-    T: std::fmt::Debug + Copy + luminal_cudarc::driver::DeviceRepr + std::marker::Unpin + CudaFloat,
-    CudaData<T>: Data,
-{
+impl<T: CudaFloat> Operator for CudaGather<T> {
     fn process(&mut self, inputs: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         // Inp 1 should be Vec<f32> and inp 2 should be a CudaSlice<T>
         let indexes = inputs[0]
@@ -449,13 +302,7 @@ where
             .as_any()
             .downcast_ref::<Vec<f32>>()
             .unwrap();
-        let weights = inputs[1]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<CudaData<T>>()
-            .unwrap();
+        let weights = get_buffer_from_tensor::<T>(&inputs[1].0);
 
         let mut indexes_buffer = unsafe { self.device.alloc::<f32>(indexes.len()).unwrap() };
         self.device
@@ -480,7 +327,7 @@ where
                     },
                     (
                         &mut out,
-                        &weights.0,
+                        weights,
                         &indexes_buffer,
                         indexes.len(),
                         self.embed_dim,
@@ -498,10 +345,7 @@ where
 #[derive(LuminalPrint, Default)]
 pub struct MetalGatherCompiler<T: CudaFloat>(PhantomData<T>);
 
-impl<T: CudaFloat> Compiler for MetalGatherCompiler<T>
-where
-    CudaData<T>: luminal::prelude::Data,
-{
+impl<T: CudaFloat> Compiler for MetalGatherCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = CudaDevice::new(0).unwrap();
         let arange = op::<CudaARange<T>>();

@@ -1,9 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use luminal_cudarc::{
-    driver::{CudaDevice, CudaFunction, LaunchAsync, LaunchConfig},
-    nvrtc::{compile_ptx_with_opts, CompileOptions},
-};
+use luminal_cudarc::driver::{CudaDevice, CudaFunction, LaunchAsync, LaunchConfig};
 
 use luminal::{
     op::*,
@@ -14,7 +11,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     binary::CudaSub,
-    constant,
+    compile_and_load_kernel, constant,
     prim::{CudaContiguous, CudaSumReduce},
     CudaData, CudaFloat,
 };
@@ -30,7 +27,7 @@ pub struct CudaARange<T> {
 
 impl<T: CudaFloat> CudaARange<T> {
     pub fn new(
-        dev: Arc<CudaDevice>,
+        device: Arc<CudaDevice>,
         size: BigExpression,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
@@ -38,30 +35,16 @@ impl<T: CudaFloat> CudaARange<T> {
         let code = format!(
             "
 #include \"cuda_fp16.h\"
-extern \"C\" __global__ void arange({type_name} *out, int n_elements) {{
+extern \"C\" __global__ void kernel({type_name} *out, int n_elements) {{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n_elements) {{
         out[idx] = ({type_name})idx;
     }}
 }}"
         );
-        dev.load_ptx(
-            compile_ptx_with_opts(
-                code,
-                CompileOptions {
-                    arch: Some("sm_75"),
-                    include_paths: vec!["/usr/local/cuda/include".to_string()],
-                    ..Default::default()
-                },
-            )
-            .unwrap(),
-            "arange",
-            &["arange"],
-        )
-        .unwrap();
         Self {
-            function: dev.get_func("arange", "arange").unwrap(),
-            device: dev,
+            function: compile_and_load_kernel(code, &device),
+            device,
             size,
             _phantom: Default::default(),
             dyn_map,
@@ -69,11 +52,7 @@ extern \"C\" __global__ void arange({type_name} *out, int n_elements) {{
     }
 }
 
-impl<T> Operator for CudaARange<T>
-where
-    T: std::fmt::Debug + Copy + luminal_cudarc::driver::DeviceRepr + std::marker::Unpin + CudaFloat,
-    CudaData<T>: Data,
-{
+impl<T: CudaFloat> Operator for CudaARange<T> {
     fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let n_elements = self
             .size
@@ -99,10 +78,7 @@ where
 #[derive(LuminalPrint, Default)]
 pub struct ARangeCompiler<T: CudaFloat>(PhantomData<T>);
 
-impl<T: CudaFloat> Compiler for ARangeCompiler<T>
-where
-    CudaData<T>: Data,
-{
+impl<T: CudaFloat> Compiler for ARangeCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = CudaDevice::new(0).unwrap();
         // TODO: Make sure this actually checks the shape transformations to ensure pooling happens
@@ -134,7 +110,7 @@ where
                 sh.dims[sh.indexes[sh.len() - 1]]
             };
             let arange_op = graph
-                .add_op(CudaARange::new(
+                .add_op(CudaARange::<T>::new(
                     dev.clone(),
                     arange_amount.into(),
                     &graph.dyn_map,
