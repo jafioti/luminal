@@ -20,29 +20,20 @@ use crate::{get_buffer_from_tensor, MetalBuffer, MetalFloat, MetalKernel, MetalK
 use self::symbolic::BigExpression;
 
 use super::{
-    compile_function, get_idx_valid_exps, input_dyn_dims, prim::MetalConstant,
-    render_dyn_dim_inputs, DispatchNElements, SetInt,
+    compile_function, get_idx_valid_exps, input_dyn_dims, render_dyn_dim_inputs, DispatchNElements,
+    SetInt,
 };
 
 #[derive(Default, Debug)]
 pub struct ElementwiseFusionCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
+        graph.display();
         let device = Device::system_default().unwrap();
         let queue = device.new_command_queue();
-        let mut elementwise = graph
-            .node_indices()
-            .collect::<Vec<_>>()
-            .into_iter()
-            .filter(|n| {
-                graph
-                    .node_custom::<String, _>(*n, "elementwise", Box::<()>::default())
-                    .is_some()
-            })
-            .collect::<FxHashSet<_>>();
-        // Find two elementwise ops that have a contiguous edge
-        let mut fused_ops = FxHashSet::default();
+        // Track fused ops to compile later
+        let mut fused_ops = FxHashMap::default();
 
         let mut matched = true;
         while matched {
@@ -51,232 +42,160 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 let Some((a, b)) = graph.edge_endpoints(edge) else {
                     continue;
                 };
-                let Some(mut a_equation) = graph.node_custom::<String, _>(a, "elementwise", ())
-                else {
+                if graph.edges_directed(a, Direction::Outgoing).count() > 1 {
+                    continue; // More than one connecting edge. We'll handle this later
+                }
+                if graph.no_delete.contains(&a) {
+                    continue;
+                }
+                let (Some(expression_a), Some(expression_b)) = (
+                    graph.node_custom::<String, _>(a, "elementwise", Box::<()>::default()),
+                    graph.node_custom::<String, _>(b, "elementwise", Box::<()>::default()),
+                ) else {
                     continue;
                 };
-                if graph
-                    .node_custom::<String, _>(b, "elementwise", ())
-                    .is_none()
-                {
-                    continue;
-                }
-                let constant = graph
-                    .node_weight(a)
-                    .unwrap()
-                    .as_any()
-                    .is::<MetalConstant<T>>();
-                if graph.no_delete.contains(&a)
-                    || (graph
-                        .edges_directed(a, Direction::Outgoing)
-                        .filter(|e| !e.weight().is_schedule())
-                        .count()
-                        > 1
-                        && !constant)
-                {
-                    continue;
-                }
-                let (edge_id, (to_input, _, connecting_shape)) = graph
-                    .edges_connecting(a, b)
-                    .find_map(|e| e.weight().as_data().map(|i| (e.id(), i)))
-                    .unwrap();
-                // Connecting shape isn't contiguous
-                if !constant
-                    && (!connecting_shape.is_contiguous()
-                        || connecting_shape.is_sliced()
-                        || connecting_shape.is_padded())
-                {
-                    continue;
-                }
+                // a and b are elementwise ops
                 matched = true;
-
-                // Fuse into a FusedElementwiseOp
+                // get views for each input in a and b
+                #[allow(clippy::type_complexity)]
+                let mut b_inputs: Vec<(
+                    Vec<ShapeTracker>,
+                    (NodeIndex, (u8, u8, ShapeTracker)),
+                )> = graph
+                    .try_get_op::<FusedElementwiseOp<T>>(b)
+                    .map(|n| n.input_views.clone())
+                    .unwrap_or_else(|| {
+                        vec![vec![]; graph.edges_directed(b, Direction::Incoming).count()]
+                    })
+                    .into_iter()
+                    .zip(
+                        graph
+                            .edges_directed(b, Direction::Incoming)
+                            .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i))),
+                    )
+                    .collect::<Vec<_>>();
+                let a_to_b_index = graph
+                    .edges_directed(b, Direction::Incoming)
+                    .position(|e| e.source() == a)
+                    .unwrap();
+                let (connect_inp, (_, (_, _, sh))) = b_inputs.remove(a_to_b_index);
+                let reshaped = !sh.is_contiguous() || sh.is_sliced() || sh.is_padded();
+                let b_replacements = b_inputs
+                    .iter()
+                    .enumerate()
+                    .skip(a_to_b_index + 1)
+                    .map(|(i, _)| (i, i - 1))
+                    .collect::<Vec<_>>();
+                let mut a_replacements = vec![];
+                for mut a_inp in graph
+                    .try_get_op::<FusedElementwiseOp<T>>(a)
+                    .map(|n| n.input_views.clone())
+                    .unwrap_or_else(|| {
+                        vec![vec![]; graph.edges_directed(a, Direction::Incoming).count()]
+                    })
+                    .into_iter()
+                    .zip(
+                        graph
+                            .edges_directed(a, Direction::Incoming)
+                            .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i))),
+                    )
+                {
+                    if !reshaped {
+                        if let Some(pos) = b_inputs.iter().position(|(v, (n, w))| {
+                            *v == a_inp.0
+                                && *n == a_inp.1 .0
+                                && w.1 == a_inp.1 .1 .1
+                                && w.2 == a_inp.1 .1 .2
+                        }) {
+                            a_replacements.push((a_inp.1 .1 .0 as usize, pos));
+                            continue;
+                        }
+                    }
+                    a_inp.0.extend(connect_inp.iter().copied());
+                    a_inp.1 .1 .0 = b_inputs.len() as u8;
+                    b_inputs.push(a_inp);
+                }
+                // Combine the views into a final view array
+                let new_views = b_inputs.iter().map(|(v, _)| v.clone()).collect::<Vec<_>>();
+                // Get new input array
+                let new_inputs = b_inputs
+                    .into_iter()
+                    .map(|(_, (n, (_, o, sh)))| (n, o, sh))
+                    .collect::<Vec<_>>();
+                // Combine expressions together to get final expression
+                let a_replacements = a_replacements
+                    .into_iter()
+                    .map(|(from, to)| (format!("input{from}"), format!("input{to}")))
+                    .collect::<Vec<_>>();
+                println!("Exp A: {}", expression_a);
+                let expression_a = multi_replace(&expression_a, &a_replacements);
+                let mut b_replacements = b_replacements
+                    .into_iter()
+                    .map(|(from, to)| (format!("input{from}"), format!("input{to}")))
+                    .collect::<Vec<_>>();
+                b_replacements.push((format!("input{a_to_b_index}"), expression_a));
+                println!("Exp B: {}", expression_b);
+                let equation = multi_replace(&expression_b, &b_replacements);
+                // Delete old ops
+                let b_outgoing = graph
+                    .edges_directed(b, Direction::Outgoing)
+                    .map(|e| (e.target(), *e.weight()))
+                    .collect::<Vec<_>>();
+                let a_prev_ops = fused_ops.remove(&a).unwrap_or_else(|| {
+                    vec![format!(
+                        "{:?}({})",
+                        graph.node_weight(a).unwrap(),
+                        a.index()
+                    )]
+                });
+                let b_prev_ops = fused_ops.remove(&b).unwrap_or_else(|| {
+                    vec![format!(
+                        "{:?}({})",
+                        graph.node_weight(b).unwrap(),
+                        b.index()
+                    )]
+                });
+                graph.remove_node(a);
+                graph.remove_node(b);
                 println!(
-                    "Fusing {:?}({}) into {:?}({}) | {}",
-                    graph.node_weight(a).unwrap(),
-                    a.index(),
-                    graph.node_weight(b).unwrap(),
-                    b.index(),
-                    graph
-                        .edges_directed(a, Direction::Outgoing)
-                        .filter(|e| !e.weight().is_schedule())
-                        .count()
+                    "Fused {:?}",
+                    [a_prev_ops.clone(), b_prev_ops.clone()].concat()
                 );
-                let new_op;
-                let mut curr_input = to_input;
-                // Keep track of original edges to a and b
-                let a_orig_edges = graph
-                    .edges_directed(a, Direction::Incoming)
-                    .filter_map(|e| {
-                        e.weight()
-                            .as_data()
-                            .map(|(i, ind, sh)| (e.source(), i, ind, sh))
+                println!("Into {:?}", equation);
+                // Create new fused op
+                let new_op = graph
+                    .add_op(FusedElementwiseOp::<T> {
+                        kernel: None,
+                        dyn_map: &graph.dyn_map,
+                        dyn_chars: vec![],
+                        equation,
+                        queue: queue.clone(),
+                        device: device.clone(),
+                        input_views: new_views,
+                        _phantom: Default::default(),
                     })
-                    .sorted_by_key(|i| i.1)
-                    .collect::<Vec<_>>();
-                let b_orig_edges = graph
-                    .edges_directed(b, Direction::Incoming)
-                    .filter_map(|e| {
-                        e.weight()
-                            .as_data()
-                            .map(|(i, ind, sh)| (e.source(), i, ind, sh))
-                    })
-                    .sorted_by_key(|i| i.1)
-                    .collect::<Vec<_>>();
-                // Remove edge a -> b, and decrement indexes of all edges higher than it
-                graph.remove_edge(edge_id);
-                for edge in graph
-                    .edges_directed(b, Direction::Incoming)
-                    .map(|e| e.id())
-                    .collect_vec()
-                {
-                    if let Some(Dependency::Data { input_order, .. }) = graph.edge_weight_mut(edge)
-                    {
-                        if *input_order > curr_input {
-                            *input_order -= 1;
-                        }
-                    }
-                }
-                // Add edges if they don't exist
-                for input_edge in graph
-                    .edges_directed(a, Direction::Incoming)
-                    .filter_map(|e| e.weight().as_data().map(|(a, b, c)| (e.source(), a, b, c)))
-                    .sorted_by_key(|i| i.1)
-                    .collect_vec()
-                {
-                    // Find edge or add it
-                    if !graph
-                        .edges_directed(b, Direction::Incoming)
-                        .filter_map(|e| e.weight().as_data().map(|(a, b, c)| (e.source(), a, b, c)))
-                        .any(|(src, _, out_ind, sh)| {
-                            src == input_edge.0 && out_ind == input_edge.2 && sh == input_edge.3
-                        })
-                    {
-                        // Move all edges >= curr_input up by one
-                        for edge in graph
-                            .edges_directed(b, Direction::Incoming)
-                            .map(|e| e.id())
-                            .collect_vec()
-                        {
-                            if let Some(Dependency::Data { input_order, .. }) =
-                                graph.edge_weight_mut(edge)
-                            {
-                                if *input_order >= curr_input {
-                                    *input_order += 1;
-                                }
-                            }
-                        }
-                        // Add edge
-                        graph.add_edge(
-                            input_edge.0,
-                            b,
-                            Dependency::Data {
-                                input_order: curr_input,
-                                output_order: input_edge.2,
-                                shape: input_edge.3,
-                            },
-                        );
-                        curr_input += 1;
-                    }
-                }
-                // Alter a_equation to reflect the correct input indexes
-                let mut replacements = vec![];
-                for (src, inp_ind, out_ind, sh) in a_orig_edges {
-                    let n = graph
-                        .edges_directed(b, Direction::Incoming)
-                        .filter_map(|e| e.weight().as_data().map(|(a, b, c)| (e.source(), a, b, c)))
-                        .find(|(c_src, _, c_out_ind, c_sh)| {
-                            *c_src == src && *c_out_ind == out_ind && *c_sh == sh
-                        })
-                        .unwrap();
-                    replacements.push((format!("input{inp_ind}"), format!("input{}", n.1)));
-                }
-                a_equation = multi_replace(&a_equation, &replacements);
-                // Alter b_equation to reflect the correct input indexes
-                replacements.clear();
-                for (src, inp_ind, out_ind, sh) in b_orig_edges {
-                    if inp_ind > to_input {
-                        let n = graph
-                            .edges_directed(b, Direction::Incoming)
-                            .filter_map(|e| {
-                                e.weight().as_data().map(|(a, b, c)| (e.source(), a, b, c))
-                            })
-                            .find(|(c_src, _, c_out_ind, c_sh)| {
-                                *c_src == src && *c_out_ind == out_ind && *c_sh == sh
-                            })
-                            .unwrap();
-                        replacements.push((format!("input{inp_ind}"), format!("input{}", n.1)));
-                    }
-                }
-
-                if let Some(fused_op) = graph
-                    .node_weight_mut(b)
-                    .unwrap()
-                    .as_any_mut()
-                    .downcast_mut::<FusedElementwiseOp<T>>()
-                {
-                    // B is already fused, just combine with b
-                    new_op = b;
-                    // Render a into b as input to_input
-                    fused_op.equation = multi_replace(&fused_op.equation, &replacements)
-                        .replace(&format!("input{to_input}"), &format!("({a_equation})"));
-                } else {
-                    let mut b_equation = graph
-                        .node_custom::<String, _>(b, "elementwise", ())
-                        .unwrap();
-                    b_equation = multi_replace(&b_equation, &replacements)
-                        .replace(&format!("input{to_input}"), &format!("({a_equation})"));
-                    // B is not a fused op, let's create a new one
-                    new_op = graph
-                        .add_op(FusedElementwiseOp::<T> {
-                            kernel: None,
-                            dyn_map: &graph.dyn_map,
-                            dyn_chars: vec![],
-                            equation: b_equation,
-                            queue: queue.clone(),
-                            device: device.clone(),
-                            _phantom: Default::default(),
-                        })
-                        .finish();
-                    move_incoming_edge(b, new_op, graph);
-                    move_outgoing_edge(b, new_op, graph);
-                    move_references(
-                        &mut remap,
-                        &mut graph.no_delete,
-                        &mut graph.to_retrieve,
-                        b,
+                    .finish();
+                for (i, (node, output, shape)) in new_inputs.into_iter().enumerate() {
+                    graph.add_edge(
+                        node,
                         new_op,
+                        Dependency::Data {
+                            input_order: i as u8,
+                            output_order: output,
+                            shape,
+                        },
                     );
-                    elementwise.remove(&b);
-                    graph.remove_node(b);
-                    fused_ops.remove(&b);
                 }
-                // Remove a
-                move_references(
-                    &mut remap,
-                    &mut graph.no_delete,
-                    &mut graph.to_retrieve,
-                    a,
-                    new_op,
-                );
-                if graph
-                    .edges_directed(a, Direction::Outgoing)
-                    .filter(|e| !e.weight().is_schedule())
-                    .count()
-                    == 0
-                {
-                    graph.remove_node(a);
-                    elementwise.remove(&a);
+                for (node, weight) in b_outgoing {
+                    graph.add_edge(new_op, node, weight);
                 }
-                fused_ops.remove(&a);
-                fused_ops.insert(new_op);
-                elementwise.insert(new_op);
-                println!("Created {}", new_op.index());
+                // Keep track of the fused op so we can compile it later
+                fused_ops.insert(new_op, [a_prev_ops, b_prev_ops].concat());
             }
         }
         // Compile all the kernels we placed
         let type_name = T::type_name();
-        for fused_op in fused_ops {
+        for (fused_op, prev_ops) in fused_ops {
             let edges = graph
                 .edges_directed(fused_op, Direction::Incoming)
                 .filter_map(|e| e.weight().as_data())
@@ -307,6 +226,8 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                         );
                     }
                 }
+                println!("Fused {:?}", prev_ops);
+                println!("Into {:?}", op.equation);
                 let kernel = format!(
                     "
 #include <metal_stdlib>
@@ -327,11 +248,11 @@ kernel void mkernel({} device {type_name} *out [[buffer({})]], device uint& n_el
                     edges.len() + 1,
                     op.equation
                 );
-                println!("{:?}", kernel);
                 op.kernel = Some(compile_function("mkernel", &kernel, &device));
                 op.dyn_chars = dyn_chars;
             }
         }
+        graph.display();
     }
 }
 
@@ -371,6 +292,7 @@ pub struct FusedElementwiseOp<T> {
     equation: String,
     queue: CommandQueue,
     device: Device,
+    input_views: Vec<Vec<ShapeTracker>>,
     _phantom: PhantomData<T>,
 }
 impl<T> MetalKernel for FusedElementwiseOp<T> {
@@ -487,7 +409,6 @@ mod tests {
         out.drop();
 
         cx.compile(<(GenericCompiler, MetalCompiler<f16>)>::default(), &mut out);
-        cx.display();
         cx.execute();
 
         assert_close(&out.data(), &unopt_out);
