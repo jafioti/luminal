@@ -66,7 +66,7 @@ where
 }
 
 /// A symbolic expression
-#[derive(Clone)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct GenericExpression<S: ExpressionStorage> {
     pub terms: S,
 }
@@ -76,14 +76,6 @@ impl<S: ExpressionStorage> Default for GenericExpression<S> {
         let mut s = S::default();
         s.push(Term::Num(0));
         Self { terms: s }
-    }
-}
-
-impl<S: Copy + ExpressionStorage> Copy for GenericExpression<S> {}
-
-impl<S: PartialEq + ExpressionStorage> PartialEq for GenericExpression<S> {
-    fn eq(&self, other: &Self) -> bool {
-        self.terms == other.terms
     }
 }
 

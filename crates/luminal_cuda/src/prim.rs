@@ -226,6 +226,14 @@ impl<T: CudaFloat> Operator for CudaLog2<T> {
 
         vec![Tensor::new(CudaData(out))]
     }
+
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        if key == "elementwise" {
+            return Some(Box::new("log2(input0)".to_string()));
+        }
+
+        None
+    }
 }
 
 #[derive(LuminalEqFalse, LuminalPrint, Clone)]
@@ -271,6 +279,14 @@ impl<T: CudaFloat> Operator for CudaExp2<T> {
         }
 
         vec![Tensor::new(CudaData(out))]
+    }
+
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        if key == "elementwise" {
+            return Some(Box::new("exp2(input0)".to_string()));
+        }
+
+        None
     }
 }
 
@@ -319,6 +335,17 @@ impl<T: CudaFloat> Operator for CudaSqrt<T> {
 
         vec![Tensor::new(CudaData(out))]
     }
+
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        if key == "elementwise" {
+            return Some(Box::new(format!(
+                "{}(input0)",
+                if T::is_f32() { "sqrt" } else { "hsqrt" }
+            )));
+        }
+
+        None
+    }
 }
 
 #[derive(LuminalEqFalse, LuminalPrint, Clone)]
@@ -365,6 +392,14 @@ impl<T: CudaFloat> Operator for CudaSin<T> {
         }
 
         vec![Tensor::new(CudaData(out))]
+    }
+
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        if key == "elementwise" {
+            return Some(Box::new("sin(input0)".to_string()));
+        }
+
+        None
     }
 }
 
@@ -413,6 +448,17 @@ impl<T: CudaFloat> Operator for CudaRecip<T> {
         }
 
         vec![Tensor::new(CudaData(out))]
+    }
+
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        if key == "elementwise" {
+            return Some(Box::new(format!(
+                "{}(input0)",
+                if T::is_f32() { "__frcp_rn" } else { "hrcp" }
+            )));
+        }
+
+        None
     }
 }
 
@@ -480,6 +526,13 @@ impl<T: CudaFloat> Operator for CudaAdd<T> {
 
         vec![Tensor::new(CudaData(out))]
     }
+
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        if key == "elementwise" {
+            return Some(Box::new("input0 + input1".to_string()));
+        }
+        None
+    }
 }
 
 #[derive(LuminalEqFalse, LuminalPrint, Clone)]
@@ -543,6 +596,13 @@ impl<T: CudaFloat> Operator for CudaMul<T> {
 
         vec![Tensor::new(CudaData(out))]
     }
+
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        if key == "elementwise" {
+            return Some(Box::new("input0 * input1".to_string()));
+        }
+        None
+    }
 }
 
 #[derive(LuminalEqFalse, LuminalPrint, Clone)]
@@ -605,6 +665,13 @@ impl<T: CudaFloat> Operator for CudaMod<T> {
         }
 
         vec![Tensor::new(CudaData(out))]
+    }
+
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        if key == "elementwise" {
+            return Some(Box::new("fmod(input0, input1)".to_string()));
+        }
+        None
     }
 }
 
@@ -674,6 +741,13 @@ impl<T: CudaFloat> Operator for CudaLessThan<T> {
         }
 
         vec![Tensor::new(CudaData(out))]
+    }
+
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        if key == "elementwise" {
+            return Some(Box::new("(float)(input0 < input1 ? 1.0 : 0.0)".to_string()));
+        }
+        None
     }
 }
 

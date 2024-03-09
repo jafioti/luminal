@@ -443,6 +443,22 @@ impl Graph {
             .map(|(a, _)| (a, self.graph.node_weight(a).unwrap()))
             .collect()
     }
+
+    pub fn try_get_op<T: Operator + 'static>(&self, node: NodeIndex) -> Option<&T> {
+        self.node_weight(node).unwrap().as_any().downcast_ref::<T>()
+    }
+    pub fn get_op<T: Operator + 'static>(&self, node: NodeIndex) -> &T {
+        self.try_get_op(node).unwrap()
+    }
+    pub fn try_get_op_mut<T: Operator + 'static>(&mut self, node: NodeIndex) -> Option<&mut T> {
+        self.node_weight_mut(node)
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<T>()
+    }
+    pub fn get_op_mut<T: Operator + 'static>(&mut self, node: NodeIndex) -> &mut T {
+        self.try_get_op_mut(node).unwrap()
+    }
 }
 
 /// View a debug graph in the browser

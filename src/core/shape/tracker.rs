@@ -3,7 +3,7 @@ use tinyvec::ArrayVec;
 
 use super::symbolic::{BigExpression, Expression};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ShapeTracker {
     pub dims: ArrayVec<[Expression; 6]>,
     pub indexes: ArrayVec<[usize; 6]>,
