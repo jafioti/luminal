@@ -16,7 +16,7 @@ use petgraph::{
     Direction,
 };
 use regex::Regex;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use uuid::Uuid;
 
 use crate::{
@@ -147,7 +147,7 @@ tuple_impls!(
 
 pub trait Compiler {
     /// Run a compilation pass
-    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, remap: T);
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, ids: T);
 }
 
 impl Compiler for () {
@@ -390,6 +390,13 @@ impl Graph {
         (new_graph, schedule_edges, id_map)
     }
 
+    pub fn check_node_type<T: Operator + 'static>(&self, node: NodeIndex) -> bool {
+        self.node_weight(node)
+            .expect("Node not found in graph!")
+            .as_any()
+            .is::<T>()
+    }
+
     pub fn display(&self) {
         let (g, e, _) = self.debug_graph(false);
         display_graph(&g, &e, &[]);
@@ -522,25 +529,19 @@ impl<'a> NewOp<'a> {
 }
 
 /// Transfer all external references from one node to another (this may happen because one node is about to be removed / merged into another)
-pub fn move_references<T: ToIdsMut>(
-    mut ids: T,
-    no_delete: &mut FxHashSet<NodeIndex<u32>>,
-    to_retrieve: &mut FxHashSet<NodeIndex<u32>>,
-    src: NodeIndex,
-    trg: NodeIndex,
-) {
+pub fn remap<T: ToIdsMut>(from: NodeIndex, to: NodeIndex, mut ids: T, graph: &mut Graph) {
     for id in ids.to_ids_mut() {
-        if *id == src {
-            *id = trg;
+        if *id == from {
+            *id = to;
         }
     }
     // Transfer no_delete
-    if no_delete.remove(&src) {
-        no_delete.insert(trg);
+    if graph.no_delete.remove(&from) {
+        graph.no_delete.insert(to);
     }
     // Transfer to_retrieve
-    if to_retrieve.remove(&src) {
-        to_retrieve.insert(trg);
+    if let Some(w) = graph.to_retrieve.remove(&from) {
+        graph.to_retrieve.insert(to, w);
     }
 }
 

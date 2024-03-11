@@ -197,7 +197,7 @@ impl<T: 'static + Clone> Operator for Matmul<T> {
 pub struct MetalMatMulCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
 
@@ -375,13 +375,7 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
 
             // Create edges to dests
             move_outgoing_edge(sum_reduce, matmul_op, graph);
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                sum_reduce,
-                matmul_op,
-            );
+            remap(sum_reduce, matmul_op, &mut ids, graph);
 
             // Remove the old ops
             graph.remove_node(mul);

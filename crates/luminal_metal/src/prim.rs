@@ -79,14 +79,6 @@ impl<T: MetalFloat> Operator for MetalCopyFromDevice<T> {
             data: Box::new(data),
         }]
     }
-
-    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
-        None
-    }
 }
 
 #[derive(Clone)]
@@ -129,7 +121,7 @@ impl<T: MetalFloat> Operator for MetalConstant<T> {
     fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "elementwise" {
             if let ConstantValue::Float(f) = self.0 {
-                return Some(Box::new(f.to_string()));
+                return Some(Box::new(format!("{f:?}")));
             }
         }
         None
@@ -236,25 +228,11 @@ impl<T: MetalFloat> Operator for MetalContiguous<T> {
         })
     }
 
-    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
-        }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
-        if key == "recompile_shapes" {
-            if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
-                *self = Self::new(
-                    input_shapes[0],
-                    self.device.clone(),
-                    self.queue.clone(),
-                    self.dyn_map,
-                )
-            }
         }
         if key == "elementwise" {
             return Some(Box::new("input0".to_string()));
@@ -351,10 +329,6 @@ impl<T: MetalFloat> Operator for MetalLog2<T> {
         if key == "elementwise" {
             return Some(Box::new("log2(input0)".to_string()));
         }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
         None
     }
 }
@@ -445,10 +419,6 @@ impl<T: MetalFloat> Operator for MetalExp2<T> {
         }
         if key == "elementwise" {
             return Some(Box::new("exp2(input0)".to_string()));
-        }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
         }
         None
     }
@@ -541,10 +511,6 @@ impl<T: MetalFloat> Operator for MetalSin<T> {
         if key == "elementwise" {
             return Some(Box::new("sin(input0)".to_string()));
         }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
         None
     }
 }
@@ -636,10 +602,6 @@ impl<T: MetalFloat> Operator for MetalSqrt<T> {
         if key == "elementwise" {
             return Some(Box::new("sqrt(input0)".to_string()));
         }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
         None
     }
 }
@@ -730,10 +692,6 @@ impl<T: MetalFloat> Operator for MetalRecip<T> {
         }
         if key == "elementwise" {
             return Some(Box::new("1.0 / input0".to_string()));
-        }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
         }
         None
     }
@@ -843,26 +801,11 @@ impl<T: MetalFloat> Operator for MetalAdd<T> {
         })
     }
 
-    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
-        }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
-        if key == "recompile_shapes" {
-            if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
-                *self = Self::new(
-                    input_shapes[0],
-                    input_shapes[1],
-                    self.device.clone(),
-                    self.queue.clone(),
-                    self.dyn_map,
-                )
-            }
         }
         if key == "elementwise" {
             return Some(Box::new("input0 + input1".to_string()));
@@ -976,26 +919,11 @@ impl<T: MetalFloat> Operator for MetalMul<T> {
         })
     }
 
-    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
-        }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
-        if key == "recompile_shapes" {
-            if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
-                *self = Self::new(
-                    input_shapes[0],
-                    input_shapes[1],
-                    self.device.clone(),
-                    self.queue.clone(),
-                    self.dyn_map,
-                )
-            }
         }
         if key == "elementwise" {
             return Some(Box::new("input0 * input1".to_string()));
@@ -1117,26 +1045,11 @@ impl<T: MetalFloat> Operator for MetalLessThan<T> {
         })
     }
 
-    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
-        }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
-        if key == "recompile_shapes" {
-            if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
-                *self = Self::new(
-                    input_shapes[0],
-                    input_shapes[1],
-                    self.device.clone(),
-                    self.queue.clone(),
-                    self.dyn_map,
-                )
-            }
         }
         if key == "elementwise" {
             return Some(Box::new("(float)((input0) < (input1))".to_string()));
@@ -1248,26 +1161,11 @@ impl<T: MetalFloat> Operator for MetalMod<T> {
         })
     }
 
-    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
-        }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
-        if key == "recompile_shapes" {
-            if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
-                *self = Self::new(
-                    input_shapes[0],
-                    input_shapes[1],
-                    self.device.clone(),
-                    self.queue.clone(),
-                    self.dyn_map,
-                )
-            }
         }
         if key == "elementwise" {
             return Some(Box::new("fmod(input0, input1)".to_string()));
@@ -1417,26 +1315,11 @@ impl<T: MetalFloat> Operator for MetalSumReduce<T> {
         })
     }
 
-    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
-        }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
-        if key == "recompile_shapes" {
-            if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
-                *self = Self::new(
-                    input_shapes[0],
-                    self.dim,
-                    self.device.clone(),
-                    self.queue.clone(),
-                    self.dyn_map,
-                )
-            }
         }
         None
     }
@@ -1585,26 +1468,11 @@ impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
         })
     }
 
-    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
-        }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
-        if key == "recompile_shapes" {
-            if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
-                *self = Self::new(
-                    input_shapes[0],
-                    self.dim,
-                    self.device.clone(),
-                    self.queue.clone(),
-                    self.dyn_map,
-                )
-            }
         }
         None
     }
@@ -1614,7 +1482,7 @@ impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
 pub struct PrimitiveCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         // Go through the graph and insert copy ops
@@ -1641,42 +1509,42 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                 graph.remove_edge(edge_id);
             }
 
-            if graph.to_retrieve.contains(&function_node) {
-                graph.to_retrieve.insert(copy_node);
+            if let Some(w) = graph.to_retrieve.get(&function_node) {
+                graph.to_retrieve.insert(copy_node, *w);
             }
 
             // Insert copy from device for function inputs
             for (source, edge, edge_weight) in graph
                 .edges_directed(function_node, petgraph::Direction::Incoming)
+                .filter(|e| !e.weight().is_schedule())
                 .map(|e| (e.source(), e.id(), *e.weight()))
                 .collect::<Vec<_>>()
             {
+                let (input_order, output_order, shape) = edge_weight.as_data().unwrap();
                 let copy_from_node = graph
                     .add_op(MetalCopyFromDevice::<T>::new(dev.clone()))
-                    .input(source, 0, ShapeTracker::new(&[]))
+                    .input(source, output_order, shape)
                     .finish();
-                graph.add_edge(copy_from_node, function_node, edge_weight);
+                graph.add_edge(
+                    copy_from_node,
+                    function_node,
+                    Dependency::Data {
+                        input_order,
+                        output_order: 0,
+                        shape,
+                    },
+                );
                 graph.remove_edge(edge);
             }
         }
 
         // Copy to_retrieve from device
-        for (output_node, output_shape) in graph
+        for (output_node, (_, output_shape)) in graph
             .to_retrieve
             .iter()
+            .map(|(a, b)| (*a, *b))
             // Filter to non-functions
-            .filter(|n| !graph.node_weight(**n).unwrap().as_any().is::<LFunction>())
-            .map(|n| {
-                (
-                    *n,
-                    graph
-                        .edges_directed(*n, petgraph::Direction::Incoming)
-                        .filter_map(|e| e.weight().as_data())
-                        .map(|i| i.2)
-                        .max_by_key(|s| s.n_physical_elements().to_usize().unwrap_or_default())
-                        .unwrap(),
-                )
-            })
+            .filter(|(n, _)| !graph.node_weight(*n).unwrap().as_any().is::<LFunction>())
             .collect::<Vec<_>>()
         {
             if graph
@@ -1691,9 +1559,9 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                     .next()
                     .unwrap();
                 graph.no_delete.remove(&output_node);
-                graph.to_retrieve.remove(&output_node);
                 graph.no_delete.insert(src);
-                graph.to_retrieve.insert(src);
+                let w = graph.to_retrieve.remove(&output_node).unwrap();
+                graph.to_retrieve.insert(src, w);
             } else {
                 // Create copy node
                 let copy_node = graph
@@ -1701,13 +1569,7 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                     .input(output_node, 0, output_shape)
                     .finish();
 
-                move_references(
-                    &mut remap,
-                    &mut graph.no_delete,
-                    &mut graph.to_retrieve,
-                    output_node,
-                    copy_node,
-                );
+                remap(output_node, copy_node, &mut ids, graph);
             }
         }
 

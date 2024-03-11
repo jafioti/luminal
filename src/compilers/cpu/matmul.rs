@@ -9,7 +9,7 @@ pub type MatMulCompiler = (MatMul2DCompiler, BatchMatMul2DCompiler);
 pub struct MatMul2DCompiler;
 
 impl Compiler for MatMul2DCompiler {
-    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut ids: T) {
         // Look for the matmul pattern
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
@@ -41,21 +41,9 @@ impl Compiler for MatMul2DCompiler {
                 .finish();
 
             // Create edges to dests
-            move_outgoing_edge(sum_reduce, new_op, &mut graph.graph);
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                sum_reduce,
-                new_op,
-            );
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                mul,
-                new_op,
-            );
+            move_outgoing_edge(sum_reduce, new_op, graph);
+            remap(sum_reduce, new_op, &mut ids, graph);
+            remap(mul, new_op, &mut ids, graph);
 
             // Remove the old ops
             graph.graph.remove_node(sum_reduce);
@@ -113,7 +101,7 @@ impl Operator for MatMul2D {
 pub struct BatchMatMul2DCompiler;
 
 impl Compiler for BatchMatMul2DCompiler {
-    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut ids: T) {
         // Look for the matmul pattern
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
@@ -146,21 +134,9 @@ impl Compiler for BatchMatMul2DCompiler {
                 .finish();
 
             // Create edges to dests
-            move_outgoing_edge(sum_reduce, new_op, &mut graph.graph);
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                sum_reduce,
-                new_op,
-            );
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                mul,
-                new_op,
-            );
+            move_outgoing_edge(sum_reduce, new_op, graph);
+            remap(sum_reduce, new_op, &mut ids, graph);
+            remap(mul, new_op, &mut ids, graph);
 
             // Remove the old ops
             graph.graph.remove_node(mul);

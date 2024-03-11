@@ -532,7 +532,6 @@ impl<T: MetalFloat + Default> Compiler for MetalQuantizedCompiler<T> {
                 super::prim::PrimitiveCompiler<T>,
                 super::SpecialOpsCompiler<T>,
                 super::other::CopyCompiler<T>,
-                super::other::ContiguousElimination<T>,
                 super::elementwise_fusion::ElementwiseFusionCompiler<T>,
             )>::default(),
             &mut local_remap,
@@ -589,11 +588,10 @@ mod tests {
     }
 
     fn quantized_buffer(weights: &[BlockQ8_0], dev: &Device) -> Tensor {
-        let buffer = dev.new_buffer_with_bytes_no_copy(
+        let buffer = dev.new_buffer_with_data(
             weights.as_ptr() as *mut _,
             std::mem::size_of_val(weights) as u64,
             MTLResourceOptions::StorageModeShared,
-            None,
         );
         Tensor {
             data: Box::new(MetalBuffer(buffer)),
@@ -606,7 +604,7 @@ mod tests {
         let mat_data: Vec<i8> = (0..(1024 * 512)).map(|_| rng.gen_range(0..5)).collect();
         let vec_data = random_vec_rng(1024, &mut rng);
         let mut cx = Graph::new();
-        let weights = cx.tensor::<R2<512, 1024>>();
+        let weights = cx.tensor::<R2<512, 1024>>().keep();
         let vec = cx.tensor::<R1<1024>>().set(vec_data.clone());
         let mut out = vec.matmul(weights.permute()).retrieve();
 
@@ -637,7 +635,8 @@ mod tests {
         let mut cx1 = Graph::new();
         let weights = cx1
             .tensor::<R2<512, 1024>>()
-            .set(mat_data.into_iter().map(|i| i as f32).collect::<Vec<_>>());
+            .set(mat_data.into_iter().map(|i| i as f32).collect::<Vec<_>>())
+            .keep();
         let vec = cx1.tensor::<R1<1024>>().set(vec_data);
         let out_32 = vec.matmul(weights.permute()).retrieve();
         cx1.execute();
@@ -651,7 +650,7 @@ mod tests {
         let mat_data: Vec<i8> = (0..(1024 * 512)).map(|_| rng.gen_range(0..5)).collect();
         let inp_mat_data = random_vec_rng(1024 * 16, &mut rng);
         let mut cx = Graph::new();
-        let weights = cx.tensor::<R2<512, 1024>>();
+        let weights = cx.tensor::<R2<512, 1024>>().keep();
         let inp_mat = cx.tensor::<R2<16, 1024>>().set(inp_mat_data.clone());
         let mut out = inp_mat.matmul(weights.permute()).retrieve();
 
@@ -698,7 +697,7 @@ mod tests {
         let mat_data: Vec<i8> = (0..(1024 * 512)).map(|_| rng.gen_range(0..5)).collect();
         let inp_mat_data = random_vec_rng(1024 * 16, &mut rng);
         let mut cx = Graph::new();
-        let weights = cx.tensor::<R2<512, 1024>>();
+        let weights = cx.tensor::<R2<512, 1024>>().keep();
         let inp_mat = cx.tensor::<R2<16, 1024>>().set(inp_mat_data.clone());
         let mut out = inp_mat.matmul(weights.permute()).retrieve();
 

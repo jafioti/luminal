@@ -37,7 +37,6 @@ pub type MetalCompiler<T> = (
     prim::PrimitiveCompiler<T>,
     SpecialOpsCompiler<T>,
     other::CopyCompiler<T>,
-    other::ContiguousElimination<T>,
     elementwise_fusion::ElementwiseFusionCompiler<T>,
     BufferCompilers,
 );
@@ -411,6 +410,16 @@ fn expr_to_metal_string(expr: BigExpression) -> String {
             ),
             Term::Min => format!(
                 "min((int){}, (int){})",
+                symbols.pop().unwrap(),
+                symbols.pop().unwrap()
+            ),
+            Term::Lt => format!(
+                "(int)({} < {})",
+                symbols.pop().unwrap(),
+                symbols.pop().unwrap()
+            ),
+            Term::Gte => format!(
+                "(int)({} >= {})",
                 symbols.pop().unwrap(),
                 symbols.pop().unwrap()
             ),

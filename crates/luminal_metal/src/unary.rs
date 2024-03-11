@@ -161,27 +161,12 @@ impl<T: MetalFloat> Operator for MetalMeanReduce<T> {
         })
     }
 
-    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             #[allow(clippy::arc_with_non_send_sync)]
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
-        }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
-        if key == "recompile_shapes" {
-            if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
-                *self = MetalMeanReduce::<T>::new(
-                    self.2.clone(),
-                    self.1.clone(),
-                    self.3,
-                    input_shapes[0],
-                    self.5,
-                );
-            }
         }
         None
     }
@@ -192,7 +177,7 @@ impl<T: MetalFloat> Operator for MetalMeanReduce<T> {
 pub struct MeanReduceCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MeanReduceCompiler<T> {
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         // Look for the mean-reduce pattern
@@ -232,13 +217,7 @@ impl<T: MetalFloat> Compiler for MeanReduceCompiler<T> {
 
             // Create edges to dests
             move_outgoing_edge(mul, mean_reduce, graph);
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                mul,
-                mean_reduce,
-            );
+            remap(mul, mean_reduce, &mut ids, graph);
 
             // Remove the old ops
             graph.remove_node(mul);
@@ -419,7 +398,7 @@ impl<T: 'static + Clone> Operator for MetalStdNorm<T> {
 pub struct StdNormCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         // Look for the RMSNorm pattern
@@ -515,13 +494,7 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
             // Create edges to dests
             let mul = s.get(&mul);
             move_outgoing_edge(mul, rms_norm, graph);
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                mul,
-                rms_norm,
-            );
+            remap(mul, rms_norm, &mut ids, graph);
 
             // Remove the old ops
             graph.remove_node(mul);
@@ -624,10 +597,6 @@ impl<T: MetalFloat> Operator for MetalExp<T> {
         if key == "elementwise" {
             return Some(Box::new("exp(input0)".to_string()));
         }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
         None
     }
 }
@@ -636,7 +605,7 @@ impl<T: MetalFloat> Operator for MetalExp<T> {
 pub struct MetalExpCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalExpCompiler<T> {
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         // Look for the exp pattern
@@ -668,13 +637,7 @@ impl<T: MetalFloat> Compiler for MetalExpCompiler<T> {
             // Create edges to dests
             let exp2 = s.get(&exp2);
             move_outgoing_edge(exp2, exp, graph);
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                exp2,
-                exp,
-            );
+            remap(exp2, exp, &mut ids, graph);
 
             // Remove the old ops
             graph.remove_node(exp2);
@@ -773,10 +736,6 @@ impl<T: MetalFloat> Operator for MetalCos<T> {
         if key == "elementwise" {
             return Some(Box::new("cos(input0)".to_string()));
         }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
         None
     }
 }
@@ -785,7 +744,7 @@ impl<T: MetalFloat> Operator for MetalCos<T> {
 pub struct MetalCosCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalCosCompiler<T> {
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         // Look for the cos pattern
@@ -820,13 +779,7 @@ impl<T: MetalFloat> Compiler for MetalCosCompiler<T> {
             // Create edges to dests
             let sin = s.get(&sin);
             move_outgoing_edge(sin, cos, graph);
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                sin,
-                cos,
-            );
+            remap(sin, cos, &mut ids, graph);
 
             // Remove the old ops
             graph.remove_node(sin);
@@ -935,7 +888,7 @@ impl<T: MetalFloat> Operator for MetalSoftmax<T> {
 pub struct SoftmaxCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for SoftmaxCompiler<T> {
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         // Look for the mean-reduce pattern
@@ -981,13 +934,7 @@ impl<T: MetalFloat> Compiler for SoftmaxCompiler<T> {
             // Create edges to dests
             let mul = s.get(&mul);
             move_outgoing_edge(mul, mean_reduce, graph);
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                mul,
-                mean_reduce,
-            );
+            remap(mul, mean_reduce, &mut ids, graph);
 
             // Remove the old ops
             graph.remove_node(mul);
@@ -1000,7 +947,6 @@ impl<T: MetalFloat> Compiler for SoftmaxCompiler<T> {
 #[derive(LuminalPrint, LuminalEqTrue, Clone)]
 pub struct MetalRope<T> {
     pipeline: ComputePipelineState,
-    axis_size: usize,
     seq_offset: BigExpression,
     queue: CommandQueue,
     device: Device,
@@ -1011,7 +957,6 @@ pub struct MetalRope<T> {
 
 impl<T: MetalFloat> MetalRope<T> {
     fn new(
-        axis_size: usize,
         seq_offset: BigExpression,
         shape: ShapeTracker,
         device: Device,
@@ -1062,7 +1007,6 @@ kernel void mkernel(
             device,
             queue,
             dyn_symbols,
-            axis_size,
             seq_offset,
             dyn_map,
             _phantom: Default::default(),
@@ -1137,28 +1081,12 @@ impl<T: MetalFloat> Operator for MetalRope<T> {
         })
     }
 
-    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             #[allow(clippy::arc_with_non_send_sync)]
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
-        }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
-        if key == "recompile_shapes" {
-            if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
-                *self = Self::new(
-                    self.axis_size,
-                    self.seq_offset.clone(),
-                    input_shapes[0],
-                    self.device.clone(),
-                    self.queue.clone(),
-                    self.dyn_map,
-                );
-            }
         }
         None
     }
@@ -1219,7 +1147,6 @@ impl<T: MetalFloat> Compiler for RopeCompiler<T> {
             };
             let rope_op = graph
                 .add_op(MetalRope::<T>::new(
-                    shape.shape()[3].to_usize().unwrap(),
                     e.clone(),
                     shape,
                     dev.clone(),

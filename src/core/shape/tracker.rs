@@ -155,22 +155,23 @@ impl ShapeTracker {
         let mut ret = BigExpression::from(1);
         let mut acc = BigExpression::from(1);
         let logical = BigExpression::from('z');
-        for (sh, padding, slice, fake) in self
+        for (sh, (bottom_padding, top_padding), (bottom_slice, top_slice), fake) in self
             .indexes
             .into_iter()
             .rev()
             .map(|i| (self.dims[i], self.padding[i], self.slices[i], self.fake[i]))
         {
-            let logical_sh =
-                (BigExpression::from(sh) + padding.0 + padding.1).min(slice.1) - slice.0;
+            let logical_sh = (BigExpression::from(sh) + bottom_padding + top_padding)
+                .min(top_slice)
+                - bottom_slice;
             if !fake {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
-                ret = ret
-                    & dim_ind.clone().gte(
-                        BigExpression::from(padding.0)
-                            - BigExpression::from(slice.0).min(padding.0),
-                    );
-                ret = ret & dim_ind.lt((BigExpression::from(sh) + padding.0).min(slice.1));
+                let greater_than = BigExpression::from(bottom_padding)
+                    - BigExpression::from(bottom_slice).min(bottom_padding);
+                if greater_than != BigExpression::from(0) {
+                    ret = ret & dim_ind.clone().gte(greater_than);
+                }
+                ret = ret & dim_ind.lt((BigExpression::from(sh) + bottom_padding).min(top_slice));
             }
             acc = acc * logical_sh;
         }

@@ -42,11 +42,13 @@ impl Compiler for StorageBufferCompiler {
             // Run through parents to build new tenative set and clear set
             let (mut tenative_sets, mut clear_set) = (BTreeMap::default(), BTreeSet::default());
             for parent in graph
+                .graph
                 .edges_directed(*node, Direction::Incoming)
                 .filter(|e| !e.weight().is_schedule())
                 .map(|e| e.source())
             {
                 let parent_children = graph
+                    .graph
                     .edges_directed(parent, Direction::Outgoing)
                     .filter(|e| !e.weight().is_schedule())
                     .map(|e| e.target())
@@ -82,12 +84,14 @@ impl Compiler for StorageBufferCompiler {
 
         // Second pass - assign buffers
         let available_buffers = graph
+            .graph
             .node_indices()
             .filter(|n| !graph.no_delete.contains(n))
             .collect::<Vec<_>>()
             .into_iter()
             .filter_map(|n| {
                 if let Some(Ok(wrapper)) = graph
+                    .graph
                     .node_weight_mut(n)
                     .unwrap()
                     .custom("metal", Box::new(()))
@@ -120,6 +124,7 @@ impl Compiler for StorageBufferCompiler {
                 continue;
             }
             let Some(Ok(wrapper)) = graph
+                .graph
                 .node_weight_mut(*node)
                 .unwrap()
                 .custom("metal", Box::new(()))
@@ -197,6 +202,7 @@ impl Compiler for StorageBufferCompiler {
                 continue;
             }
             let Some(Ok(wrapper)) = graph
+                .graph
                 .node_weight_mut(*node)
                 .unwrap()
                 .custom("metal", Box::new(()))
@@ -237,10 +243,12 @@ impl Compiler for StorageBufferCompiler {
             .finish();
         // Ensure allocator is ran before any nodes that use the buffers
         for node in graph
+            .graph
             .node_indices()
             // Starting node must have no incoming edges
             .filter(|e| {
                 graph
+                    .graph
                     .edges_directed(*e, Direction::Incoming)
                     .filter(|e| !e.weight().is_schedule())
                     .count()
@@ -249,6 +257,7 @@ impl Compiler for StorageBufferCompiler {
             // Starting node must have at least one outgoing edge
             .filter(|e| {
                 graph
+                    .graph
                     .edges_directed(*e, Direction::Outgoing)
                     .filter(|e| !e.weight().is_schedule())
                     .count()
@@ -264,13 +273,14 @@ impl Compiler for StorageBufferCompiler {
             .filter(|(_, b)| !b.0.is_empty() || !b.1.is_empty())
         {
             let wrapper = graph
+                .graph
                 .node_weight_mut(node)
                 .unwrap()
                 .custom("metal", Box::new(()))
                 .unwrap()
                 .downcast::<MetalKernelWrapper>()
                 .unwrap();
-            *graph.node_weight_mut(node).unwrap() = Box::new(StorageBufferWrapper {
+            *graph.graph.node_weight_mut(node).unwrap() = Box::new(StorageBufferWrapper {
                 wrapper,
                 buffers: shared_buffers.clone(),
                 output_buffers,

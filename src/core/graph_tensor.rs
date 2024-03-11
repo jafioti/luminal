@@ -49,7 +49,7 @@ impl<S: Shape> GraphTensor<S> {
     /// Mark this tensor to be retrieved later
     pub fn retrieve(self) -> Self {
         self.keep();
-        self.graph().retrieve_tensors(self.id);
+        self.graph().to_retrieve.insert(self.id, (0, self.shape));
         self
     }
 

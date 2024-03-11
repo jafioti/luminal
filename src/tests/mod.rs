@@ -59,12 +59,10 @@ fn test_matmul() {
 fn test_shapes() {
     let mut cx = Graph::new();
     let a = cx.tensor::<R1<4>>().set(vec![1., 2., 3., 4.]);
-
     let b: GraphTensor<R2<2, 2>> = a
         .reshape::<R2<2, 2>>()
         .permute::<_, Axes2<1, 0>>()
         .retrieve();
-
     cx.execute();
 
     assert_exact(&b.data(), &[1., 3., 2., 4.]);

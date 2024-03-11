@@ -2,10 +2,7 @@ use std::{any::Any, marker::PhantomData, sync::Arc};
 
 use luminal::{
     op::{InputTensor, Operator},
-    prelude::{
-        petgraph::{visit::EdgeRef, Direction},
-        *,
-    },
+    prelude::{petgraph::visit::EdgeRef, *},
     shape::symbolic::BigExpression,
 };
 use metal_rs::{
@@ -27,7 +24,7 @@ use super::binary::MetalSub;
 pub struct CopyCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for CopyCompiler<T> {
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let first = op::<MetalCopyToDevice<T>>();
         let second = op::<MetalCopyFromDevice<T>>();
         let mut s = first.clone().connect(second.clone()).search(graph);
@@ -50,13 +47,7 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
                 continue;
             };
             move_outgoing_edge(second, source, graph);
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                second,
-                source,
-            );
+            remap(second, source, &mut ids, graph);
             graph.remove_node(second);
             for dest in graph
                 .get_dests(first)
@@ -65,13 +56,7 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
                 .collect::<Vec<_>>()
             {
                 move_outgoing_edge(dest, source, graph);
-                move_references(
-                    &mut remap,
-                    &mut graph.no_delete,
-                    &mut graph.to_retrieve,
-                    dest,
-                    source,
-                );
+                remap(dest, source, &mut ids, graph);
                 graph.remove_node(dest);
             }
             graph.remove_node(first);
@@ -198,13 +183,13 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
         let queue = dev.new_command_queue();
 
         // TODO: Make sure this actually checks the shape transformations to ensure pooling happens
-        let one = constant::<T>(1.);
-        let contig1 = unary::<MetalContiguous<T>>(one.clone());
+        let contig_one = constant::<T>(1.);
+        let contig1 = unary::<MetalContiguous<T>>(contig_one.clone());
         let sum_reduce =
             unary::<MetalSumReduce<T>>(unary::<MetalContiguous<T>>(unary::<MetalContiguous<T>>(
                 unary::<MetalContiguous<T>>(contig1.clone()),
             )));
-        let sub = binary::<MetalSub<T>>(sum_reduce.clone(), one.clone());
+        let sub = binary::<MetalSub<T>>(sum_reduce.clone(), constant::<T>(1.));
         let mut s1 = sub.clone().search(graph);
         let neg_one = constant::<T>(-1.);
         let add = binary::<MetalAdd<T>>(sum_reduce, neg_one.clone());
@@ -214,7 +199,7 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
             let s = if s1.matched { &s1 } else { &s2 };
             let arange_amount = {
                 let sh = graph
-                    .edges_connecting(s.get(&one), s.get(&contig1))
+                    .edges_connecting(s.get(&contig_one), s.get(&contig1))
                     .next()
                     .unwrap()
                     .weight()
@@ -239,68 +224,6 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
             move_outgoing_edge(fin, arange_op, graph);
             graph.remove_node(fin);
             s.try_delete();
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct ContiguousElimination<T>(PhantomData<T>);
-
-impl<T: MetalFloat> Compiler for ContiguousElimination<T> {
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
-        // Look for contiguous calls going to ops that can accept non-contiguous inputs (marked non_contiguous)
-        let contig = op::<MetalContiguous<T>>();
-        let mut op = node();
-        op.check(|op, _| op.custom("non_contiguous", Box::new(())).is_some());
-        let mut s = contig.clone().connect(op.clone()).search(graph);
-        while s.next_match() {
-            let (contig, op) = (s.get(&contig), s.get(&op));
-            if graph.no_delete.contains(&contig)
-                || graph.edges_directed(contig, Direction::Outgoing).count() > 1
-            {
-                continue;
-            }
-            // Shape going from contig to op
-            // let first_shape = graph
-            //
-            //     .edges_directed(contig, Direction::Incoming)
-            //     .find_map(|e| e.weight().as_data())
-            //     .unwrap()
-            //     .2;
-            let second_shape = graph
-                .edges_connecting(contig, op)
-                .find_map(|e| e.weight().as_data())
-                .unwrap()
-                .2;
-            // Here we should check if second shape and first shape are mergeable instead of just checking if second_shape is contiguous
-            if second_shape.is_contiguous()
-                && !second_shape.is_sliced()
-                && !second_shape.is_padded()
-            {
-                let source = graph
-                    .neighbors_directed(contig, petgraph::Direction::Incoming)
-                    .next()
-                    .unwrap();
-                move_incoming_edge(contig, op, graph);
-                move_references(
-                    &mut remap,
-                    &mut graph.no_delete,
-                    &mut graph.to_retrieve,
-                    contig,
-                    source,
-                );
-                graph.remove_node(contig);
-                let new_shapes = graph
-                    .get_sources(op)
-                    .into_iter()
-                    .map(|(_, _, s)| s)
-                    .collect::<Vec<_>>();
-                graph
-                    .node_weight_mut(op)
-                    .unwrap()
-                    .custom("recompile_shapes", Box::new(new_shapes));
-                s.clear_cached_results();
-            }
         }
     }
 }

@@ -21,34 +21,7 @@ binary_test!(|a, b| a - b, |a, b| a - b, test_sub, f32);
 binary_test!(|a, b| a * b, |a, b| a * b, test_mul, f32);
 binary_test!(|a, b| a / b, |a, b| a / b, test_div, f32);
 binary_test!(|a, b| a.min(b), |a, b| a.minimum(b), test_min, f32);
-binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f32); // Broken because elementwise fusion is broken I think
-
-// Broken because elementwise fusion is broken I think
-#[test]
-fn test_max() {
-    let mut rng = StdRng::seed_from_u64(2);
-    let a_data = random_vec_rng(4, &mut rng);
-    let b_data = random_vec_rng(4, &mut rng);
-    let mut cx = Graph::new();
-    let a = cx.tensor::<R1<4>>().set(a_data.clone());
-    let b = cx.tensor::<R1<4>>().set(b_data.clone());
-    let mut c = a.max(b).retrieve();
-    cx.compile(MetalCompiler::<f32>::default(), &mut c);
-    cx.execute();
-
-    let d_dev = Cpu::default();
-    let d_a = d_dev
-        .tensor_from_vec(a_data, (dfdx::prelude::Const::<4>,))
-        .to_dtype::<f32>();
-    let d_b = d_dev
-        .tensor_from_vec(b_data, (dfdx::prelude::Const::<4>,))
-        .to_dtype::<f32>();
-    let d_c = d_a.maximum(d_b);
-
-    println!("C: {:?},", c.data());
-    println!("D: {:?}", d_c.clone().to_dtype::<f32>().as_vec());
-    assert_close(&c.data(), &d_c.to_dtype::<f32>().as_vec());
-}
+binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f32);
 
 #[test]
 fn test_contiguous() {

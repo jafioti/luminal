@@ -43,7 +43,7 @@ pub(crate) fn constant(num: f32) -> SelectGraph {
 pub struct UnaryFusionCompiler;
 
 impl Compiler for UnaryFusionCompiler {
-    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut ids: T) {
         fn is_unary(op: &dyn Any) -> Option<fn(f32) -> f32> {
             if op.is::<Exp2>() {
                 Some(|i| i.exp2())
@@ -106,14 +106,8 @@ impl Compiler for UnaryFusionCompiler {
                 }
                 if replaced {
                     // Remove other node
-                    move_outgoing_edge(outgoing_target, id, &mut graph.graph);
-                    move_references(
-                        &mut remap,
-                        &mut graph.no_delete,
-                        &mut graph.to_retrieve,
-                        outgoing_target,
-                        id,
-                    );
+                    move_outgoing_edge(outgoing_target, id, graph);
+                    remap(outgoing_target, id, &mut ids, graph);
                     graph.graph.remove_node(outgoing_target);
                 }
             }

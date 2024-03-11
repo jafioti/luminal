@@ -20,7 +20,7 @@ pub type GenericCompiler = (RemoveSingleReductions, ArithmeticElimination, CSE);
 pub struct CSE;
 
 impl Compiler for CSE {
-    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut ids: T) {
         // Look for nodes that have the exact same srcs
         // Loop cause I'm lazy
         let mut eliminated = true;
@@ -71,13 +71,7 @@ impl Compiler for CSE {
                         // Carry over outgoing edges from node to other_node
                         move_outgoing_edge(node, *other_node, &mut graph.graph);
                         // Transfer all references to node over to other node
-                        move_references(
-                            &mut remap,
-                            &mut graph.no_delete,
-                            &mut graph.to_retrieve,
-                            node,
-                            *other_node,
-                        );
+                        remap(node, *other_node, &mut ids, graph);
                         // Remove node
                         graph.graph.remove_node(node);
                         eliminated = true;
@@ -103,7 +97,7 @@ impl Compiler for CSE {
 pub struct RemoveSingleReductions;
 
 impl Compiler for RemoveSingleReductions {
-    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut ids: T) {
         for node in graph.graph.node_indices().collect::<Vec<_>>() {
             let dim = if let Some(red) = graph
                 .graph
@@ -145,13 +139,7 @@ impl Compiler for RemoveSingleReductions {
                         .neighbors_directed(node, Direction::Incoming)
                         .next()
                         .unwrap();
-                    move_references(
-                        &mut remap,
-                        &mut graph.no_delete,
-                        &mut graph.to_retrieve,
-                        node,
-                        upstream,
-                    );
+                    remap(node, upstream, &mut ids, graph);
                     move_outgoing_edge(node, upstream, &mut graph.graph);
                     graph.graph.remove_node(node);
                 }
@@ -303,7 +291,7 @@ fn is_from_set(node: NodeIndex, graph: &Graph, set: &HashSet<NodeIndex>) -> bool
 pub struct ArithmeticElimination;
 
 impl Compiler for ArithmeticElimination {
-    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut ids: T) {
         // x + 0, 0 + x
         let zero = constant(0.);
         let inp = node();
@@ -358,13 +346,7 @@ impl Compiler for ArithmeticElimination {
             } else {
                 move_outgoing_edge(add, inp, &mut graph.graph);
             }
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                add,
-                inp,
-            );
+            remap(add, inp, &mut ids, graph);
             if graph
                 .graph
                 .edges_directed(zero, Direction::Outgoing)
@@ -429,13 +411,7 @@ impl Compiler for ArithmeticElimination {
             } else {
                 move_outgoing_edge(mul, inp, &mut graph.graph);
             }
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                mul,
-                inp,
-            );
+            remap(mul, inp, &mut ids, graph);
             if graph.graph.edges_directed(one, Direction::Outgoing).count() == 1 {
                 graph.graph.remove_node(one);
             }

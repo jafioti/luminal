@@ -33,7 +33,7 @@ pub struct Graph {
     /// Tensors marked in this set will not get deleted when the graph is ran
     pub no_delete: rustc_hash::FxHashSet<NodeIndex>,
     /// Tensors marked in this set need to be retrieved later (mostly for optimizers to insert copy back calls, the graph itself doesn't treat these differently)
-    pub to_retrieve: rustc_hash::FxHashSet<NodeIndex>,
+    pub to_retrieve: rustc_hash::FxHashMap<NodeIndex, (u8, ShapeTracker)>,
     /// A list of current node to run, source nodes, and view nodes to delete after execution.
     #[allow(clippy::type_complexity)]
     pub(crate) linearized_graph: Option<Vec<(NodeIndex, Vec<((NodeIndex, u8), ShapeTracker)>)>>,
@@ -106,14 +106,6 @@ impl Graph {
         }
     }
 
-    /// Mark tensors to be retrieved
-    pub fn retrieve_tensors<T: ToIds>(&mut self, tensors: T) {
-        for id in tensors.to_ids() {
-            self.no_delete.insert(id);
-            self.to_retrieve.insert(id);
-        }
-    }
-
     /// Set a tensor's data
     pub fn set_tensor(&mut self, id: NodeIndex, ind: u8, tensor: Tensor) {
         self.tensors.insert((id, ind), tensor);
@@ -146,6 +138,7 @@ impl Graph {
     pub fn compile<T: ToIdsMut, C: Compiler>(&mut self, compiler: C, remap: T) {
         compiler.compile(self, remap);
         self.toposort();
+        self.reset();
     }
 
     /// Refresh the internally sorted graph

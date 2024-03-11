@@ -127,29 +127,14 @@ impl<T: MetalFloat> Operator for MetalSub<T> {
         })
     }
 
-    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
         }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
         if key == "elementwise" {
             return Some(Box::new("input0 - input1".to_string()));
-        }
-        if key == "recompile_shapes" {
-            if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
-                *self = Self::new(
-                    input_shapes[0],
-                    input_shapes[1],
-                    self.device.clone(),
-                    self.queue.clone(),
-                    self.dyn_map,
-                )
-            }
         }
         None
     }
@@ -321,29 +306,14 @@ impl<T: MetalFloat> Operator for MetalEqual<T> {
         })
     }
 
-    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
         if key == "metal" {
             return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
                 self.clone(),
             )))));
         }
-        // This op can accept non contiguous inputs
-        if key == "non_contiguous" {
-            return Some(Box::new(()));
-        }
         if key == "elementwise" {
             return Some(Box::new("input0 == input1 ? 1.0 : 0.0".to_string()));
-        }
-        if key == "recompile_shapes" {
-            if let Some(input_shapes) = input.downcast_ref::<Vec<ShapeTracker>>() {
-                *self = Self::new(
-                    input_shapes[0],
-                    input_shapes[1],
-                    self.device.clone(),
-                    self.queue.clone(),
-                    self.dyn_map,
-                )
-            }
         }
         None
     }
@@ -510,7 +480,7 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
         let sum_reduce = unary::<MetalSumReduce<T>>(mul.clone());
         let mut s = sum_reduce.clone().search(graph);
         while s.next_match() {
-            if s.check_no_delete(&[sum_reduce.id, embeddings.id]) {
+            if s.check_no_delete(&[sum_reduce.id, embeddings.id, indexes.id]) {
                 continue;
             }
             let emb_shape = graph
