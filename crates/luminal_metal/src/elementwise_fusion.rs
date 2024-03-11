@@ -41,13 +41,13 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 let Some((a, b)) = graph.edge_endpoints(edge) else {
                     continue;
                 };
+                if graph.no_delete.contains(&a) {
+                    continue;
+                }
                 if graph.edges_directed(a, Direction::Outgoing).count() > 1
                     && !graph.check_node_type::<MetalConstant<T>>(a)
                 {
                     continue; // More than one connecting edge. We'll handle this later
-                }
-                if graph.no_delete.contains(&a) {
-                    continue;
                 }
                 let (Some(expression_a), Some(expression_b)) = (
                     graph.node_custom::<String, _>(a, "elementwise", Box::<()>::default()),
@@ -56,26 +56,17 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     continue;
                 };
                 let a_to_b_index = graph
-                    .edges_directed(b, Direction::Incoming)
-                    .filter(|e| !e.weight().is_schedule())
-                    .sorted_by_key(|e| e.weight().as_data().unwrap().0)
-                    .position(|e| e.source() == a)
-                    .unwrap();
-                if expression_b
-                    .matches(&format!("input{a_to_b_index}"))
-                    .count()
-                    > 1
-                {
-                    continue;
-                }
+                    .edges_connecting(a, b)
+                    .next()
+                    .unwrap()
+                    .weight()
+                    .as_data()
+                    .unwrap()
+                    .0 as usize;
                 // a and b are elementwise ops
                 matched = true;
                 // get views for each input in a and b
-                #[allow(clippy::type_complexity)]
-                let mut b_inputs: Vec<(
-                    Vec<ShapeTracker>,
-                    (NodeIndex, (u8, u8, ShapeTracker)),
-                )> = graph
+                let mut b_inputs: Vec<(Vec<ShapeTracker>, NodeIndex, u8, u8, ShapeTracker)> = graph
                     .try_get_op::<FusedElementwiseOp<T>>(b)
                     .map(|n| n.input_views.clone())
                     .unwrap_or_else(|| {
@@ -88,15 +79,14 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                             .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i)))
                             .sorted_by_key(|(_, i)| i.0),
                     )
+                    .map(|(a, (b, (c, d, e)))| (a, b, c, d, e))
                     .collect::<Vec<_>>();
-                let (connect_inp, (_, (_, _, sh))) = b_inputs.remove(a_to_b_index);
+                let (connect_inp, _, _, _, sh) = b_inputs.remove(a_to_b_index);
                 let reshaped = !sh.is_contiguous() || sh.is_sliced() || sh.is_padded();
                 let mut add_index = a_to_b_index;
-                let mut added_inputs = 0;
                 let mut a_replacements = vec![];
-
                 let orig_b_inputs = b_inputs.clone();
-                for (a_inp_index, mut a_inp) in graph
+                for (mut views, src, inp, out, shape) in graph
                     .try_get_op::<FusedElementwiseOp<T>>(a)
                     .map(|n| n.input_views.clone())
                     .unwrap_or_else(|| {
@@ -109,18 +99,17 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                             .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i)))
                             .sorted_by_key(|(_, i)| i.0),
                     )
-                    .enumerate()
+                    .map(|(a, (b, (c, d, e)))| (a, b, c, d, e))
                 {
                     if reshaped {
-                        a_inp.0.push(sh);
+                        views.push(sh);
                     }
-                    a_inp.0.extend(connect_inp.iter().copied());
-                    a_replacements.push((a_inp_index, add_index));
-                    a_inp.1 .1 .0 = add_index as u8;
-                    b_inputs.insert(add_index, a_inp);
+                    views.extend(connect_inp.iter().copied());
+                    a_replacements.push((inp, add_index));
+                    b_inputs.insert(add_index, (views, src, add_index as u8, out, shape));
                     add_index += 1;
-                    added_inputs += 1;
                 }
+                let added_inputs = graph.edges_directed(a, Direction::Incoming).count();
                 let b_replacements = orig_b_inputs
                     .iter()
                     .enumerate()
@@ -128,11 +117,14 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     .map(|(i, _)| (i + 1, i + added_inputs))
                     .collect::<Vec<_>>();
                 // Combine the views into a final view array
-                let new_views = b_inputs.iter().map(|(v, _)| v.clone()).collect::<Vec<_>>();
+                let new_views = b_inputs
+                    .iter()
+                    .map(|(v, _, _, _, _)| v.clone())
+                    .collect::<Vec<_>>();
                 // Get new input array
                 let new_inputs = b_inputs
                     .into_iter()
-                    .map(|(_, (n, (_, o, sh)))| (n, o, sh))
+                    .map(|(_, n, _, o, sh)| (n, o, sh))
                     .collect::<Vec<_>>();
                 // Combine expressions together to get final expression
                 let a_replacements = a_replacements
@@ -192,7 +184,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 }
                 // Keep track of the fused op so we can compile it later
                 fused_ops.insert(new_op);
-                if graph.contains_node(a) {
+                if !graph.contains_node(a) {
                     remap(a, new_op, &mut ids, graph);
                 }
                 remap(b, new_op, &mut ids, graph);
@@ -201,34 +193,24 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
         // Compile all the kernels we placed
         let type_name = T::type_name();
         for fused_op in fused_ops {
-            let edges = graph
-                .edges_directed(fused_op, Direction::Incoming)
-                .filter_map(|e| e.weight().as_data())
-                .sorted_by_key(|e| e.0)
-                .collect_vec();
-            let inp_vec = graph
-                .edges_directed(fused_op, Direction::Incoming)
-                .sorted_by_key(|e| e.weight().as_data().unwrap().0)
-                .map(|e| e.source())
-                .collect::<Vec<_>>();
-            let op = graph
-                .node_weight_mut(fused_op)
-                .unwrap()
-                .as_any_mut()
-                .downcast_mut::<FusedElementwiseOp<T>>()
-                .unwrap();
-            let (dyn_chars, rendered) =
-                render_dyn_dim_inputs(&edges.iter().map(|i| i.2).collect_vec(), edges.len() + 2);
-            for ((inp_ind, _, sh), input_views) in edges.iter().zip(op.input_views.iter()) {
+            let (inp_vec, edges): (Vec<NodeIndex>, Vec<ShapeTracker>) = graph
+                .get_sources(fused_op)
+                .into_iter()
+                .map(|(n, _, sh)| (n, sh))
+                .unzip();
+            let op = graph.get_op_mut::<FusedElementwiseOp<T>>(fused_op);
+            for (inp_ind, (sh, input_views)) in edges.iter().zip(&op.input_views).enumerate() {
+                // Stack views in reverse order
                 let mut val_exp = BigExpression::from(true);
                 let mut ind_exp = BigExpression::from('z');
                 for v in input_views.iter().rev() {
                     val_exp = val_exp & v.valid_expression().substitute('z', ind_exp.clone());
                     ind_exp = v.index_expression().substitute('z', ind_exp);
                 }
+                // Stack the final view on
                 val_exp = val_exp & sh.valid_expression().substitute('z', ind_exp.clone());
                 ind_exp = sh.index_expression().substitute('z', ind_exp);
-                if !sh.is_sliced() && !sh.is_padded() {
+                if val_exp == true.into() {
                     op.equation = op.equation.replace(
                         &format!("input{inp_ind}"),
                         &format!("(float)input{inp_ind}[{}]", expr_to_metal_string(ind_exp)),
@@ -244,6 +226,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     );
                 }
             }
+            let (dyn_chars, rendered) = render_dyn_dim_inputs(&edges, edges.len() + 2);
             let kernel = format!(
                     "
 #include <metal_stdlib>
@@ -253,12 +236,11 @@ kernel void mkernel({} device {type_name} *out [[buffer({})]], device uint& n_el
         out[idx] = ({type_name})({});
     }}
 }}",
-                    edges
-                        .iter()
-                        .map(|(inp_ind, _, _)| format!(
+                    (0..edges.len())
+                        .map(|inp_ind| format!(
                             "device {type_name}* input{inp_ind} [[buffer({inp_ind})]],"
                         ))
-                        .collect_vec()
+                        .collect::<Vec<_>>()
                         .join(" "),
                     edges.len(),
                     edges.len() + 1,
