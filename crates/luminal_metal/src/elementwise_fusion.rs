@@ -218,7 +218,6 @@ kernel void mkernel({} device {type_name} *out [[buffer({})]], device uint& n_el
                     edges.len() + 1,
                     op.equation
                 );
-            println!("Kernel: {:?}", kernel);
             op.kernel = Some(compile_function("mkernel", &kernel, &device));
             op.dyn_chars = dyn_chars;
         }
@@ -346,7 +345,7 @@ impl<T: MetalFloat> Operator for FusedElementwiseOp<T> {
 mod tests {
     use luminal::{
         prelude::*,
-        shape::symbolic::Expression,
+        shape::symbolic::{BigExpression, Expression},
         tests::{assert_close, random_vec, random_vec_rng},
     };
     use rand::{rngs::StdRng, SeedableRng};
@@ -408,6 +407,53 @@ mod tests {
             .keep();
         let sqrt = a.sqrt();
         let mut out = (sqrt.exp() + sqrt.sin()).retrieve();
+        cx.execute();
+        let unopt_out = out.data();
+        out.drop();
+
+        cx.compile(<(GenericCompiler, MetalCompiler<f16>)>::default(), &mut out);
+        cx.execute();
+
+        assert_close(&out.data(), &unopt_out);
+    }
+
+    #[test]
+    fn test_fusion_rope() {
+        let mut cx = Graph::new();
+        let mut rng = StdRng::seed_from_u64(0);
+        const BATCH: usize = 1;
+        const N_HEADS: usize = 8;
+        const SEQ: usize = 2;
+        const HEAD_DIM: usize = 4;
+        const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
+        let a = cx
+            .named_tensor::<R4<BATCH, N_HEADS, SEQ, HEAD_DIM>>("a")
+            .set(random_vec_rng(BATCH * N_HEADS * SEQ * HEAD_DIM, &mut rng))
+            .keep();
+        let freqs = (cx.arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
+        let freqs = freqs.inv_pow(1000000.0).recip();
+        let pos = cx.arange::<Const<SEQ>>() + BigExpression::from(0);
+        let emb = pos.expand::<(_, Const<1>), _>().matmul(freqs.expand());
+        // Split input into evens and odds
+        let split = a.reshape::<R5<BATCH, N_HEADS, SEQ, HEAD_DIM_OVER_2, 2>>();
+        let x0: GraphTensor<R5<BATCH, N_HEADS, SEQ, HEAD_DIM_OVER_2, 1>> = split
+            .slice((.., .., .., .., ..Expression::from(1)))
+            .contiguous()
+            .realize();
+        let x1: GraphTensor<R5<BATCH, N_HEADS, SEQ, HEAD_DIM_OVER_2, 1>> = split
+            .slice((.., .., .., .., Expression::from(1)..))
+            .contiguous()
+            .realize();
+
+        // Apply sin and cos embeddings
+        let x0_out = x0 * emb.cos().expand() - x1 * emb.sin().expand();
+        let x1_out = x0 * emb.sin().expand() + x1 * emb.cos().expand();
+
+        // Combine back into output
+        let mut out: GraphTensor<R4<BATCH, N_HEADS, SEQ, HEAD_DIM>> = x0_out
+            .concat_along::<R5<BATCH, N_HEADS, SEQ, HEAD_DIM_OVER_2, 2>, Axis<4>, _>(x1_out)
+            .reshape()
+            .retrieve();
         cx.execute();
         let unopt_out = out.data();
         out.drop();

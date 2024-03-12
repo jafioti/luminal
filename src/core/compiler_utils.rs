@@ -430,7 +430,6 @@ impl Graph {
     }
 
     /// Get the sources of a node given it's id
-    #[allow(clippy::type_complexity, clippy::borrowed_box)]
     pub fn get_sources(&self, node_id: NodeIndex) -> Vec<(NodeIndex, u8, ShapeTracker)> {
         self.graph
             .edges_directed(node_id, Direction::Incoming)
@@ -441,7 +440,7 @@ impl Graph {
     }
 
     /// Get the dests of a node given it's id
-    #[allow(clippy::type_complexity, clippy::borrowed_box)]
+    #[allow(clippy::borrowed_box)]
     pub fn get_dests(&self, node_id: NodeIndex) -> Vec<(NodeIndex, &Box<dyn Operator>)> {
         self.graph
             .edges_directed(node_id, Direction::Outgoing)

@@ -58,7 +58,6 @@ type SpecialOpsCompiler<T> = (
     unary::MeanReduceCompiler<T>,
     unary::StdNormCompiler<T>,
     unary::SoftmaxCompiler<T>,
-    unary::RopeCompiler<T>,
     matmul::MetalMatMulCompiler<T>,
 );
 
