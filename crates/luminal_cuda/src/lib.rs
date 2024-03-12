@@ -1,5 +1,4 @@
 mod binary;
-mod elementwise_fusion;
 mod matmul;
 mod other;
 mod prim;
