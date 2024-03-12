@@ -938,7 +938,7 @@ impl<T: CudaFloat> Operator for CudaMaxReduce<T> {
 pub struct CudaPrimitiveCompiler<T>(PhantomData<T>);
 
 impl<T: CudaFloat> Compiler for CudaPrimitiveCompiler<T> {
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = CudaDevice::new(0).unwrap();
         // Go through the graph and insert copy ops
         // Copy function output to device and input from device
@@ -967,8 +967,8 @@ impl<T: CudaFloat> Compiler for CudaPrimitiveCompiler<T> {
                 graph.remove_edge(edge_id);
             }
 
-            if graph.to_retrieve.contains(&function_node) {
-                graph.to_retrieve.insert(copy_node);
+            if let Some(v) = graph.to_retrieve.get(&function_node) {
+                graph.to_retrieve.insert(copy_node, *v);
             }
 
             // Insert copy from device for function inputs
@@ -987,22 +987,12 @@ impl<T: CudaFloat> Compiler for CudaPrimitiveCompiler<T> {
         }
 
         // Copy to_retrieve from device
-        for (output_node, output_shape) in graph
+        for (output_node, (_, output_shape)) in graph
             .to_retrieve
             .iter()
+            .map(|(a, b)| (*a, *b))
             // Filter to non-functions
-            .filter(|n| !graph.node_weight(**n).unwrap().as_any().is::<LFunction>())
-            .map(|n| {
-                (
-                    *n,
-                    graph
-                        .edges_directed(*n, petgraph::Direction::Incoming)
-                        .filter_map(|e| e.weight().as_data())
-                        .map(|i| i.2)
-                        .max_by_key(|s| s.n_physical_elements().to_usize().unwrap_or_default())
-                        .unwrap(),
-                )
-            })
+            .filter(|(n, _)| !graph.node_weight(*n).unwrap().as_any().is::<LFunction>())
             .collect::<Vec<_>>()
         {
             if graph
@@ -1017,9 +1007,9 @@ impl<T: CudaFloat> Compiler for CudaPrimitiveCompiler<T> {
                     .next()
                     .unwrap();
                 graph.no_delete.remove(&output_node);
-                graph.to_retrieve.remove(&output_node);
                 graph.no_delete.insert(src);
-                graph.to_retrieve.insert(src);
+                let w = graph.to_retrieve.remove(&output_node).unwrap();
+                graph.to_retrieve.insert(src, w);
             } else {
                 // Create copy node
                 let copy_node = graph
@@ -1027,13 +1017,7 @@ impl<T: CudaFloat> Compiler for CudaPrimitiveCompiler<T> {
                     .input(output_node, 0, output_shape)
                     .finish();
 
-                move_references(
-                    &mut remap,
-                    &mut graph.no_delete,
-                    &mut graph.to_retrieve,
-                    output_node,
-                    copy_node,
-                );
+                remap(output_node, copy_node, &mut ids, graph);
             }
         }
 
@@ -1163,7 +1147,7 @@ impl<T: CudaFloat> Compiler for CudaPrimitiveCompiler<T> {
 pub struct CopyCompiler<T>(PhantomData<T>);
 
 impl<T: CudaFloat> Compiler for CopyCompiler<T> {
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         for (first, second) in graph
             .edge_indices()
             .filter_map(|e| graph.edge_endpoints(e))
@@ -1216,13 +1200,7 @@ impl<T: CudaFloat> Compiler for CopyCompiler<T> {
             }
             let source = graph.get_sources(first)[0];
             move_outgoing_edge(second, source.0, graph);
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                second,
-                source.0,
-            );
+            remap(second, source.0, &mut ids, graph);
             graph.remove_node(second);
             for dest in graph
                 .get_dests(first)
@@ -1231,13 +1209,7 @@ impl<T: CudaFloat> Compiler for CopyCompiler<T> {
                 .collect::<Vec<_>>()
             {
                 move_outgoing_edge(dest, source.0, graph);
-                move_references(
-                    &mut remap,
-                    &mut graph.no_delete,
-                    &mut graph.to_retrieve,
-                    dest,
-                    source.0,
-                );
+                remap(dest, source.0, &mut ids, graph);
                 graph.remove_node(dest);
             }
             graph.remove_node(first);

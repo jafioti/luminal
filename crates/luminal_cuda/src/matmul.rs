@@ -210,7 +210,7 @@ impl<T: CudaFloat + 'static> Compiler for CudaMatMulCompiler<T>
 where
     CudaData<T>: Data,
 {
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = CudaDevice::new(0).unwrap();
         // Look for the matmul pattern
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
@@ -254,20 +254,8 @@ where
 
             // Create edges to dests
             move_outgoing_edge(sum_reduce, new_op, &mut graph.graph);
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                sum_reduce,
-                new_op,
-            );
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                mul,
-                new_op,
-            );
+            remap(sum_reduce, new_op, &mut ids, graph);
+            remap(mul, new_op, &mut ids, graph);
 
             // Remove the old ops
             graph.graph.remove_node(mul);
@@ -317,20 +305,8 @@ where
 
             // Create edges to dests
             move_outgoing_edge(sum_reduce, new_op, &mut graph.graph);
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                sum_reduce,
-                new_op,
-            );
-            move_references(
-                &mut remap,
-                &mut graph.no_delete,
-                &mut graph.to_retrieve,
-                mul,
-                new_op,
-            );
+            remap(sum_reduce, new_op, &mut ids, graph);
+            remap(mul, new_op, &mut ids, graph);
 
             // Remove the old ops
             graph.graph.remove_node(mul);
