@@ -60,11 +60,9 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 let Some((a, b)) = graph.edge_endpoints(edge) else {
                     continue;
                 };
-                if graph.no_delete.contains(&a) {
-                    continue;
-                }
-                if !graph.check_node_type::<MetalConstant<T>>(a)
-                    && graph.edges_directed(a, Direction::Outgoing).count() > 1
+                if graph.no_delete.contains(&a)
+                    || (!graph.check_node_type::<MetalConstant<T>>(a)
+                        && graph.edges_directed(a, Direction::Outgoing).count() > 1)
                 {
                     continue; // A is not a constant and is feeding into some other node
                 }
@@ -81,7 +79,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     .next()
                     .map(|e| e.weight().as_data().unwrap().0 as usize)
                     .unwrap();
-                // get views for each input in a and b
+                // Combine inputs for a and b
                 let a_inputs = get_inputs::<T>(a, graph);
                 let mut b_inputs = get_inputs::<T>(b, graph);
                 let (connect_inp, _, _, _, sh) = b_inputs.remove(a_to_b_index);
@@ -98,22 +96,23 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     b_inputs.insert(add_index, (views, src, add_index as u8, out, shape));
                     add_index += 1;
                 }
-                let added_inputs = graph.edges_directed(a, Direction::Incoming).count();
-                let b_replacements = orig_b_inputs
-                    .iter()
-                    .enumerate()
-                    .skip(a_to_b_index)
-                    .map(|(i, _)| (i + 1, i + added_inputs))
-                    .collect::<Vec<_>>();
                 // Combine expressions together to get final expression
                 let a_replacements = a_replacements
                     .into_iter()
                     .map(|(from, to)| (format!("input{from}"), format!("input{to}")))
                     .collect::<Vec<_>>();
                 let expression_a = multi_replace(&expression_a, &a_replacements);
-                let mut b_replacements = b_replacements
-                    .into_iter()
-                    .map(|(from, to)| (format!("input{from}"), format!("input{to}")))
+                let added_inputs = graph.edges_directed(a, Direction::Incoming).count();
+                let mut b_replacements = orig_b_inputs
+                    .iter()
+                    .enumerate()
+                    .skip(a_to_b_index)
+                    .map(|(i, _)| {
+                        (
+                            format!("input{}", i + 1),
+                            format!("input{}", i + added_inputs),
+                        )
+                    })
                     .collect::<Vec<_>>();
                 b_replacements.push((format!("input{a_to_b_index}"), format!("({expression_a})")));
                 let equation = multi_replace(&expression_b, &b_replacements);
@@ -137,11 +136,8 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                         _phantom: Default::default(),
                     })
                     .finish();
+                // Add edges to new op
                 move_outgoing_edge(b, new_op, graph);
-                fused_ops.remove(&a);
-                fused_ops.remove(&b);
-                graph.remove_node(b);
-                graph.safe_remove_node(a, 0);
                 for (i, (_, node, _, output, shape)) in b_inputs.into_iter().enumerate() {
                     graph.add_edge(
                         node,
@@ -153,7 +149,11 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                         },
                     );
                 }
+                graph.remove_node(b);
+                graph.safe_remove_node(a, 0);
                 // Keep track of the fused op so we can compile it later
+                fused_ops.remove(&a);
+                fused_ops.remove(&b);
                 fused_ops.insert(new_op);
                 if !graph.contains_node(a) {
                     remap(a, new_op, &mut ids, graph);
