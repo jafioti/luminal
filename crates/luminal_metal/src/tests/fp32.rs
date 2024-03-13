@@ -4,10 +4,10 @@ use rand::{rngs::StdRng, SeedableRng};
 use luminal::{
     nn::{activation::ReLU, linear::Linear},
     prelude::{Module, *},
-    tests::{assert_close, assert_close_precision, random_vec, random_vec_rng},
 };
 
 use crate::{binary_test, unary_test, MetalCompiler};
+luminal::test_imports!();
 
 unary_test!(|a| a.sin(), |a| a.sin(), test_sin, f32);
 unary_test!(|a| a.sqrt(), |a| a.sqrt(), test_sqrt, f32);
@@ -16,6 +16,18 @@ unary_test!(|a| a * a, |a| a.clone() * a, test_square, f32);
 unary_test!(|a| a.ln(), |a| a.ln(), test_ln, f32);
 unary_test!(|a| a.log2(), |a| a.ln() / 2_f32.ln(), test_log2, f32);
 unary_test!(|a| a.exp2(), |a| (a * 2_f32.ln()).exp(), test_exp2, f32);
+unary_test!(
+    |a| a.softmax::<0>(),
+    |a| a.softmax::<DAxis<0>>(),
+    test_softmax,
+    f32
+);
+unary_test!(
+    |a| a.mean_norm::<0>().std_norm::<0, _>(1e-5),
+    |a| a.normalize::<DAxis<0>>(1e-5),
+    test_norm,
+    f32
+);
 
 binary_test!(|a, b| a + b, |a, b| a + b, test_add, f32);
 binary_test!(|a, b| a - b, |a, b| a - b, test_sub, f32);
@@ -40,7 +52,7 @@ fn test_contiguous() {
     cx.execute();
 
     let d_dev = Cpu::default();
-    let d_a = d_dev.tensor_from_vec(data, (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<4>));
+    let d_a = d_dev.tensor_from_vec(data, (DConst::<3>, DConst::<4>));
     let d_b = d_a.permute::<Rank2<4, 3>, _>().reshape::<Rank2<12, 1>>();
 
     assert_close(&b.data(), &d_b.as_vec());
@@ -51,28 +63,21 @@ fn test_contiguous() {
 #[test]
 fn test_sum_reduce() {
     let mut cx = Graph::new();
-    let data = random_vec(4096);
-    let a = cx.tensor::<R3<1, 1, 4096>>();
+    let data = random_vec(4 * 4096);
+    let a = cx.tensor::<R3<1, 4, 4096>>();
     a.set(data.clone());
-    let mut b = a.sum_reduce::<_, luminal::prelude::Axis<1>>().retrieve();
-    let mut c = a.sum_reduce::<_, luminal::prelude::Axis<0>>().retrieve();
-    let mut d = a.sum_reduce::<_, luminal::prelude::Axis<2>>().retrieve();
+    let mut b = a.sum_reduce::<_, LAxis<1>>().retrieve();
+    let mut c = a.sum_reduce::<_, LAxis<0>>().retrieve();
+    let mut d = a.sum_reduce::<_, LAxis<2>>().retrieve();
 
     cx.compile(MetalCompiler::<f32>::default(), (&mut b, &mut c, &mut d));
     cx.execute();
 
     let d_dev = Cpu::default();
-    let d_a = d_dev.tensor_from_vec(
-        data,
-        (
-            dfdx::shapes::Const::<1>,
-            dfdx::shapes::Const::<1>,
-            dfdx::shapes::Const::<4096>,
-        ),
-    );
-    let d_b = d_a.clone().sum::<_, dfdx::shapes::Axis<1>>();
-    let d_c = d_a.clone().sum::<_, dfdx::shapes::Axis<0>>();
-    let d_d = d_a.sum::<_, dfdx::shapes::Axis<2>>();
+    let d_a = d_dev.tensor_from_vec(data, (DConst::<1>, DConst::<4>, DConst::<4096>));
+    let d_b = d_a.clone().sum::<_, DAxis<1>>();
+    let d_c = d_a.clone().sum::<_, DAxis<0>>();
+    let d_d = d_a.sum::<_, DAxis<2>>();
 
     assert_close(&b.data(), &d_b.as_vec());
     assert_close(&c.data(), &d_c.as_vec());
@@ -85,25 +90,18 @@ fn test_max_reduce() {
     let data = random_vec(12);
     let a = cx.tensor::<R3<2, 2, 3>>();
     a.set(data.clone());
-    let mut b = a.max_reduce::<_, luminal::prelude::Axis<1>>().retrieve();
-    let mut c = a.max_reduce::<_, luminal::prelude::Axis<0>>().retrieve();
-    let mut d = a.max_reduce::<_, luminal::prelude::Axis<2>>().retrieve();
+    let mut b = a.max_reduce::<_, LAxis<1>>().retrieve();
+    let mut c = a.max_reduce::<_, LAxis<0>>().retrieve();
+    let mut d = a.max_reduce::<_, LAxis<2>>().retrieve();
 
     cx.compile(MetalCompiler::<f32>::default(), (&mut b, &mut c, &mut d));
     cx.execute();
 
     let d_dev = Cpu::default();
-    let d_a = d_dev.tensor_from_vec(
-        data,
-        (
-            dfdx::shapes::Const::<2>,
-            dfdx::shapes::Const::<2>,
-            dfdx::shapes::Const::<3>,
-        ),
-    );
-    let d_b = d_a.clone().max::<_, dfdx::shapes::Axis<1>>();
-    let d_c = d_a.clone().max::<_, dfdx::shapes::Axis<0>>();
-    let d_d = d_a.max::<_, dfdx::shapes::Axis<2>>();
+    let d_a = d_dev.tensor_from_vec(data, (DConst::<2>, DConst::<2>, DConst::<3>));
+    let d_b = d_a.clone().max::<_, DAxis<1>>();
+    let d_c = d_a.clone().max::<_, DAxis<0>>();
+    let d_d = d_a.max::<_, DAxis<2>>();
 
     assert_close(&b.data(), &d_b.as_vec());
     assert_close(&c.data(), &d_c.as_vec());
@@ -115,21 +113,14 @@ fn test_mean_reduce() {
     let data = random_vec(40960);
     let mut cx = Graph::new();
     let a = cx.tensor::<R3<1, 10, 4096>>().set(data.clone());
-    let mut b = a.mean_reduce::<_, luminal::prelude::Axis<2>>().retrieve();
+    let mut b = a.mean_reduce::<_, LAxis<2>>().retrieve();
 
     cx.compile(MetalCompiler::<f32>::default(), &mut b);
     cx.execute();
 
     let d_dev = Cpu::default();
-    let d_a = d_dev.tensor_from_vec(
-        data,
-        (
-            dfdx::shapes::Const::<1>,
-            dfdx::shapes::Const::<10>,
-            dfdx::shapes::Const::<4096>,
-        ),
-    );
-    let d_b = d_a.mean::<_, dfdx::shapes::Axis<2>>();
+    let d_a = d_dev.tensor_from_vec(data, (DConst::<1>, DConst::<10>, DConst::<4096>));
+    let d_b = d_a.mean::<_, DAxis<2>>();
     assert_close(&b.data(), &d_b.as_vec());
 }
 
@@ -146,14 +137,8 @@ fn test_matmul_simple() {
     cx.execute();
 
     let d_dev = Cpu::default();
-    let d_a = d_dev.tensor_from_vec(
-        a_data,
-        (dfdx::shapes::Const::<256>, dfdx::shapes::Const::<256>),
-    );
-    let d_b = d_dev.tensor_from_vec(
-        b_data,
-        (dfdx::shapes::Const::<256>, dfdx::shapes::Const::<256>),
-    );
+    let d_a = d_dev.tensor_from_vec(a_data, (DConst::<256>, DConst::<256>));
+    let d_b = d_dev.tensor_from_vec(b_data, (DConst::<256>, DConst::<256>));
     let d_c = d_a.matmul(d_b);
 
     assert_close(&c.data(), &d_c.as_vec());
@@ -172,14 +157,8 @@ fn test_matmul() {
     cx.execute();
 
     let d_dev = Cpu::default();
-    let d_a = d_dev.tensor_from_vec(
-        a_data,
-        (dfdx::shapes::Const::<512>, dfdx::shapes::Const::<512>),
-    );
-    let d_b = d_dev.tensor_from_vec(
-        b_data,
-        (dfdx::shapes::Const::<512>, dfdx::shapes::Const::<512>),
-    );
+    let d_a = d_dev.tensor_from_vec(a_data, (DConst::<512>, DConst::<512>));
+    let d_b = d_dev.tensor_from_vec(b_data, (DConst::<512>, DConst::<512>));
     let d_c = d_a.matmul(d_b);
 
     assert_close(&c.data(), &d_c.as_vec());
@@ -242,16 +221,10 @@ fn test_matmul_transpose() {
     cx.execute();
 
     let d_dev = Cpu::default();
-    let d_a = d_dev.tensor_from_vec(a_data, (dfdx::shapes::Const::<M>, dfdx::shapes::Const::<K>));
-    let d_b = d_dev.tensor_from_vec(b_data, (dfdx::shapes::Const::<N>, dfdx::shapes::Const::<K>));
-    let d_a_t = d_dev.tensor_from_vec(
-        a_t_data,
-        (dfdx::shapes::Const::<K>, dfdx::shapes::Const::<M>),
-    );
-    let d_b_t = d_dev.tensor_from_vec(
-        b_t_data,
-        (dfdx::shapes::Const::<K>, dfdx::shapes::Const::<N>),
-    );
+    let d_a = d_dev.tensor_from_vec(a_data, (DConst::<M>, DConst::<K>));
+    let d_b = d_dev.tensor_from_vec(b_data, (DConst::<N>, DConst::<K>));
+    let d_a_t = d_dev.tensor_from_vec(a_t_data, (DConst::<K>, DConst::<M>));
+    let d_b_t = d_dev.tensor_from_vec(b_t_data, (DConst::<K>, DConst::<N>));
     let d_a_b = d_a.clone().matmul(d_b.clone().permute());
     let d_a_b_t = d_a.matmul(d_b_t.clone());
     let d_a_t_b = d_a_t
@@ -309,12 +282,12 @@ fn test_relu_and_linear() {
     )>::build_on_device(&dev);
     // Set weights
     model.0.weight = dev
-        .tensor_from_vec(w1, (dfdx::shapes::Const::<32>, dfdx::shapes::Const::<64>))
+        .tensor_from_vec(w1, (DConst::<32>, DConst::<64>))
         .permute();
     model.2.weight = dev
-        .tensor_from_vec(w2, (dfdx::shapes::Const::<64>, dfdx::shapes::Const::<32>))
+        .tensor_from_vec(w2, (DConst::<64>, DConst::<32>))
         .permute();
-    let a = dev.tensor_from_vec(input_data, (dfdx::shapes::Const::<32>,));
+    let a = dev.tensor_from_vec(input_data, (DConst::<32>,));
     let out = model.forward(a);
 
     assert_close_precision(&unoptimized_b, &out.as_vec(), 2);
@@ -374,51 +347,48 @@ fn test_transformer_encoder_block() {
     d_model.self_attn.w_o.weight = d_dev
         .tensor_from_vec(
             vec![1., 22., 3., 1., 2., 3., 1., 2., 3.],
-            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<3>),
+            (DConst::<3>, DConst::<3>),
         )
         .permute();
     d_model.self_attn.w_k.weight = d_dev
         .tensor_from_vec(
             vec![1., 22., 3., 1., 2., 3., 1., 2., 3.],
-            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<3>),
+            (DConst::<3>, DConst::<3>),
         )
         .permute();
     d_model.self_attn.w_q.weight = d_dev
         .tensor_from_vec(
             vec![3., 2., 3., 1.3, 2., 3., 3., 2., 3.],
-            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<3>),
+            (DConst::<3>, DConst::<3>),
         )
         .permute();
     d_model.self_attn.w_v.weight = d_dev
         .tensor_from_vec(
             vec![-1., 12., 3., -1., 2., -3., 11., 2., 3.],
-            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<3>),
+            (DConst::<3>, DConst::<3>),
         )
         .permute();
     d_model.ff.0 .0.weight = d_dev
         .tensor_from_vec(
             vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 11., 2., 3.],
-            (dfdx::shapes::Const::<3>, dfdx::shapes::Const::<4>),
+            (DConst::<3>, DConst::<4>),
         )
         .permute();
-    d_model.ff.0 .0.bias = d_dev.tensor_from_vec(vec![0., 0., 0., 0.], (dfdx::shapes::Const::<4>,));
+    d_model.ff.0 .0.bias = d_dev.tensor_from_vec(vec![0., 0., 0., 0.], (DConst::<4>,));
     d_model.ff.0 .2.weight = d_dev
         .tensor_from_vec(
             vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.],
-            (dfdx::shapes::Const::<4>, dfdx::shapes::Const::<3>),
+            (DConst::<4>, DConst::<3>),
         )
         .permute();
-    d_model.ff.0 .2.bias = d_dev.tensor_from_vec(vec![0., 0., 0.], (dfdx::shapes::Const::<3>,));
-    d_model.norm1.gamma = d_dev.tensor_from_vec(vec![1., 1., 1.], (dfdx::shapes::Const::<3>,));
-    d_model.norm2.gamma = d_dev.tensor_from_vec(vec![1., 1., 1.], (dfdx::shapes::Const::<3>,));
+    d_model.ff.0 .2.bias = d_dev.tensor_from_vec(vec![0., 0., 0.], (DConst::<3>,));
+    d_model.norm1.gamma = d_dev.tensor_from_vec(vec![1., 1., 1.], (DConst::<3>,));
+    d_model.norm2.gamma = d_dev.tensor_from_vec(vec![1., 1., 1.], (DConst::<3>,));
     d_model.norm1.epsilon = 1e-5;
-    d_model.norm2.beta = d_dev.tensor_from_vec(vec![0., 0., 0.], (dfdx::shapes::Const::<3>,));
-    d_model.norm1.beta = d_dev.tensor_from_vec(vec![0., 0., 0.], (dfdx::shapes::Const::<3>,));
+    d_model.norm2.beta = d_dev.tensor_from_vec(vec![0., 0., 0.], (DConst::<3>,));
+    d_model.norm1.beta = d_dev.tensor_from_vec(vec![0., 0., 0.], (DConst::<3>,));
     d_model.norm2.epsilon = 1e-5;
-    let d_a = d_dev.tensor_from_vec(
-        vec![-1., 2., 3., 3., 3., -1.],
-        (dfdx::shapes::Const::<2>, dfdx::shapes::Const::<3>),
-    );
+    let d_a = d_dev.tensor_from_vec(vec![-1., 2., 3., 3., 3., -1.], (DConst::<2>, DConst::<3>));
     let d_b = d_model.forward(d_a);
 
     assert_close(&b.data(), &d_b.as_vec());
