@@ -1,5 +1,4 @@
 use dfdx::prelude::{Module as DfdxModule, *};
-use itertools::Itertools;
 use rand::{rngs::StdRng, SeedableRng};
 
 use luminal::{
@@ -15,11 +14,19 @@ unary_test!(|a| a.sqrt(), |a| a.sqrt(), test_sqrt, f32);
 unary_test!(|a| a.recip(), |a| a.recip(), test_recip, f32);
 unary_test!(|a| a * a, |a| a.clone() * a, test_square, f32);
 unary_test!(|a| a.ln(), |a| a.ln(), test_ln, f32);
+unary_test!(|a| a.log2(), |a| a.ln() / 2_f32.ln(), test_log2, f32);
+unary_test!(|a| a.exp2(), |a| (a * 2_f32.ln()).exp(), test_exp2, f32);
 
 binary_test!(|a, b| a + b, |a, b| a + b, test_add, f32);
 binary_test!(|a, b| a - b, |a, b| a - b, test_sub, f32);
 binary_test!(|a, b| a * b, |a, b| a * b, test_mul, f32);
 binary_test!(|a, b| a / b, |a, b| a / b, test_div, f32);
+binary_test!(
+    |a, b| a % b,
+    |a, b| a.clone() - ((a / b.clone()).to_dtype::<i32>().to_dtype::<f32>() * b),
+    test_mod,
+    f32
+);
 binary_test!(|a, b| a.min(b), |a, b| a.minimum(b), test_min, f32);
 binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f32);
 
@@ -37,63 +44,6 @@ fn test_contiguous() {
     let d_b = d_a.permute::<Rank2<4, 3>, _>().reshape::<Rank2<12, 1>>();
 
     assert_close(&b.data(), &d_b.as_vec());
-}
-
-#[test]
-fn test_log2() {
-    let mut cx = Graph::new();
-    let data = random_vec(3);
-    let a = cx.tensor::<R1<3>>().set(data.clone());
-    let mut b = a.log2().retrieve();
-
-    cx.compile(MetalCompiler::<f32>::default(), &mut b);
-    cx.execute();
-
-    assert_close(
-        &b.data(),
-        &data.into_iter().map(|i: f32| i.log2()).collect::<Vec<_>>(),
-    );
-}
-
-#[test]
-fn test_exp2() {
-    let mut cx = Graph::new();
-    let data = random_vec(3);
-    let a = cx.tensor::<R1<3>>().set(data.clone());
-    let mut b = a.exp2().retrieve();
-
-    cx.compile(MetalCompiler::<f32>::default(), &mut b);
-    cx.execute();
-
-    assert_close(
-        &b.data(),
-        &data.into_iter().map(|i: f32| i.exp2()).collect::<Vec<_>>(),
-    );
-}
-
-#[test]
-fn test_mod() {
-    let mut cx = Graph::new();
-    let a_data = random_vec(3);
-    let b_data = random_vec(3);
-    let a = cx.tensor::<R1<3>>().set(a_data.clone());
-    let b = cx.tensor::<R1<3>>().set(b_data.clone());
-    let mut c = a % b;
-    c.retrieve();
-
-    cx.compile(MetalCompiler::<f32>::default(), &mut c);
-    cx.execute();
-
-    // No dfdx equivalent
-
-    assert_close(
-        &c.data(),
-        &a_data
-            .into_iter()
-            .zip(b_data)
-            .map(|(a, b)| a % b)
-            .collect_vec(),
-    );
 }
 
 // Reduction op tests

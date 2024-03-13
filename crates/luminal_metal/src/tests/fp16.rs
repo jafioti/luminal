@@ -1,7 +1,5 @@
 use dfdx::prelude::{Module as DfdxModule, *};
-use itertools::Itertools;
 use metal_rs::objc::rc::autoreleasepool;
-use num_traits::Float;
 use rand::{rngs::StdRng, SeedableRng};
 
 use luminal::{
@@ -10,44 +8,38 @@ use luminal::{
     tests::{assert_close, assert_close_precision, assert_exact, random_vec, random_vec_rng},
 };
 
-use crate::{binary_test, single_binary_test, unary_test, MetalCompiler};
+use crate::{binary_test, unary_test, MetalCompiler};
 
 unary_test!(|a| a.sin(), |a| a.sin(), test_sin, f16);
 unary_test!(|a| a.sqrt(), |a| a.sqrt(), test_sqrt, f16);
 unary_test!(|a| a.recip(), |a| a.recip(), test_recip, f16);
 unary_test!(|a| a * a, |a| a.clone() * a, test_square, f16);
 unary_test!(|a| a.ln(), |a| a.ln(), test_ln, f16);
+unary_test!(
+    |a| a.log2(),
+    |a| (a.to_dtype::<f32>().ln() / 2_f32.ln()).to_dtype::<f16>(),
+    test_log2,
+    f16
+);
+unary_test!(|a| a.exp2(), |a| (a * 2_f32.ln()).exp(), test_exp2, f16);
 
 binary_test!(|a, b| a + b, |a, b| a + b, test_add, f16);
 binary_test!(|a, b| a - b, |a, b| a - b, test_sub, f16);
 binary_test!(|a, b| a * b, |a, b| a * b, test_mul, f16);
 binary_test!(|a, b| a / b, |a, b| a / b, test_div, f16);
-// binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f16);
-single_binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f16, 3); // Why don't larger max tests work?
+binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f16);
 binary_test!(|a, b| a.min(b), |a, b| a.minimum(b), test_min, f16);
-
-#[test]
-fn test_minimum() {
-    let mut cx = Graph::new();
-    let a_data = random_vec(12);
-    let b_data = random_vec(12);
-    let a = cx.named_tensor::<R1<12>>("A").set(a_data.clone());
-    let b = cx.named_tensor::<R1<12>>("B").set(b_data.clone());
-    let mut c = a.min(b).retrieve();
-    cx.compile(MetalCompiler::<f16>::default(), &mut c);
-    cx.execute();
-
-    let d_dev = Cpu::default();
-    let d_a = d_dev
-        .tensor_from_vec(a_data, (dfdx::shapes::Const::<12>,))
-        .to_dtype::<f16>();
-    let d_b = d_dev
-        .tensor_from_vec(b_data, (dfdx::shapes::Const::<12>,))
-        .to_dtype::<f16>();
-    let d_c = d_a.minimum(d_b);
-
-    assert_close(&c.data(), &d_c.to_dtype::<f32>().as_vec());
-}
+binary_test!(
+    |a, b| a % b,
+    |a, b| (a.clone().to_dtype::<f32>()
+        - ((a.to_dtype::<f32>() / b.clone().to_dtype::<f32>())
+            .to_dtype::<i32>()
+            .to_dtype::<f32>()
+            * b.to_dtype::<f32>()))
+    .to_dtype::<f16>(),
+    test_mod,
+    f16
+);
 
 #[test]
 fn test_contiguous() {
@@ -124,66 +116,6 @@ fn test_constant() {
     cx.set_dyn_dim('a', 25);
     cx.execute();
     assert_exact(&a.data(), &[625.0]);
-}
-
-#[test]
-fn test_log2() {
-    let mut cx = Graph::new();
-    let data = random_vec(3);
-    let a = cx.tensor::<R1<3>>().set(data.clone());
-    let mut b = a.log2().retrieve();
-
-    cx.compile(MetalCompiler::<f16>::default(), &mut b);
-    cx.execute();
-
-    assert_close(
-        &b.data(),
-        &data
-            .into_iter()
-            .map(|i| f16::from_f32(i).log2().to_f32())
-            .collect::<Vec<_>>(),
-    );
-}
-
-#[test]
-fn test_exp2() {
-    let mut cx = Graph::new();
-    let data = random_vec(3);
-    let a = cx.tensor::<R1<3>>().set(data.clone());
-    let mut b = a.exp2().retrieve();
-
-    cx.compile(MetalCompiler::<f16>::default(), &mut b);
-    cx.execute();
-
-    assert_close(
-        &b.data(),
-        &data.into_iter().map(|i: f32| i.exp2()).collect::<Vec<_>>(),
-    );
-}
-
-#[test]
-fn test_mod() {
-    let mut cx = Graph::new();
-    let a_data = random_vec(3);
-    let b_data = random_vec(3);
-    let a = cx.tensor::<R1<3>>().set(a_data.clone());
-    let b = cx.tensor::<R1<3>>().set(b_data.clone());
-    let mut c = a % b;
-    c.retrieve();
-
-    cx.compile(MetalCompiler::<f16>::default(), &mut c);
-    cx.execute();
-
-    // No dfdx equivalent
-
-    assert_close(
-        &c.data(),
-        &a_data
-            .into_iter()
-            .zip(b_data)
-            .map(|(a, b)| a % b)
-            .collect_vec(),
-    );
 }
 
 // Reduction op tests
@@ -309,31 +241,31 @@ fn test_mean_reduce() {
     assert_close(&d.data(), &d_d.to_dtype::<f32>().as_vec());
 }
 
-// #[test]
-// fn test_matmul_simple() {
-//     let mut cx = Graph::new();
-//     let a_data = random_vec(256 * 256);
-//     let b_data = random_vec(256 * 256);
-//     let a = cx.tensor::<R2<256, 256>>().set(a_data.clone());
-//     let b = cx.tensor::<R2<256, 256>>().set(b_data.clone());
-//     let mut c = a.matmul(b).retrieve();
+#[test]
+fn test_matmul_simple() {
+    let mut cx = Graph::new();
+    let a_data = random_vec(256 * 256);
+    let b_data = random_vec(256 * 256);
+    let a = cx.tensor::<R2<256, 256>>().set(a_data.clone());
+    let b = cx.tensor::<R2<256, 256>>().set(b_data.clone());
+    let mut c = a.matmul(b).retrieve();
 
-//     cx.compile(MetalCompiler::<f16>::default(), &mut c);
-//     cx.execute();
+    cx.compile(MetalCompiler::<f16>::default(), &mut c);
+    cx.execute();
 
-//     let d_dev = Cpu::default();
-//     let d_a = d_dev.tensor_from_vec(
-//         a_data,
-//         (dfdx::shapes::Const::<256>, dfdx::shapes::Const::<256>),
-//     );
-//     let d_b = d_dev.tensor_from_vec(
-//         b_data,
-//         (dfdx::shapes::Const::<256>, dfdx::shapes::Const::<256>),
-//     );
-//     let d_c = d_a.to_dtype::<f16>().matmul(d_b.to_dtype::<f16>());
+    let d_dev = Cpu::default();
+    let d_a = d_dev.tensor_from_vec(
+        a_data,
+        (dfdx::shapes::Const::<256>, dfdx::shapes::Const::<256>),
+    );
+    let d_b = d_dev.tensor_from_vec(
+        b_data,
+        (dfdx::shapes::Const::<256>, dfdx::shapes::Const::<256>),
+    );
+    let d_c = d_a.to_dtype::<f16>().matmul(d_b.to_dtype::<f16>());
 
-//     assert_close(&c.data(), &d_c.to_dtype::<f32>().as_vec());
-// }
+    assert_close(&c.data(), &d_c.to_dtype::<f32>().as_vec());
+}
 
 #[test]
 fn test_matmul() {
