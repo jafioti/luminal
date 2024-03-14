@@ -107,8 +107,9 @@ fn main() {
     cx.execute();
     let elapsed_ms = now.elapsed().as_millis();
     println!(
-        "\t - {elapsed_ms}ms ({:.2} tok/s)",
-        1000.0 * (input_ids.len() as f64) / (elapsed_ms as f64)
+        "\t - {elapsed_ms}ms ({:.2} tok/s, {} prompt tokens)",
+        1000.0 * (input_ids.len() as f64) / (elapsed_ms as f64),
+        input_ids.len()
     );
     delete_inputs(&cache_src_set, &mut cx);
     let output_id = sample_index(&logits.data());
@@ -170,7 +171,7 @@ fn main() {
 }
 
 fn encode(tokenizer: &Tokenizer, text: &str) -> Vec<u32> {
-    let vector = tokenizer.encode(text, true).unwrap();
+    let vector = tokenizer.encode(text, false).unwrap();
     vector.get_ids().to_owned()
 }
 
