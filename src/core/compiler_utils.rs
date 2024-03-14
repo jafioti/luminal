@@ -627,7 +627,7 @@ impl GraphSearch {
                 {
                     // Backtrack to check if this is a match
                     if let Some(mapping) =
-                        backtrack_match_new(self.anchor, &self.selector, node, &mut graph.graph)
+                        backtrack_match(self.anchor, &self.selector, node, &mut graph.graph)
                     {
                         self.to_return.push(mapping);
                     }
@@ -674,7 +674,7 @@ impl GraphSearch {
     }
 }
 
-fn backtrack_match_new(
+fn backtrack_match(
     pattern_root: NodeIndex,
     pattern_graph: &StableGraph<(Uuid, SelectOp), Option<u8>>,
     main_root: NodeIndex,
@@ -710,7 +710,7 @@ fn backtrack_match_new(
                 continue;
             }
             if let Some(new_mapping) =
-                backtrack_match_new(pattern_parent, pattern_graph, *parent, main_graph)
+                backtrack_match(pattern_parent, pattern_graph, *parent, main_graph)
             {
                 mapping.extend(new_mapping.into_iter());
                 continue 'pattern_loop;
