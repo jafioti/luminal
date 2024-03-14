@@ -127,7 +127,7 @@ fn main() {
 
     // Decode loop
     let mut token_decode_times = vec![];
-    let mut prev_output = String::new();
+    let mut prev_output_len = 0;
     for _ in 0..cli_args.gen_tokens {
         input.set_dyn(vec![*input_ids.last().unwrap() as f32], &[1, 1]);
         cx.set_dyn_dim('p', input_ids.len() - 1);
@@ -146,12 +146,12 @@ fn main() {
         let current_output = decode(&tokenizer, &output_ids);
 
         // Print the new substring added to the decoded output
-        let new_substring = &current_output[prev_output.len()..];
+        let new_substring = &current_output[prev_output_len..];
         print!("{}", new_substring.bright_green());
         io::stdout().flush().unwrap();
 
         // Update the previous output
-        prev_output = current_output;
+        prev_output_len = current_output.len();
 
         // Swap caches
         transfer_data_same_graph(&cache_dest_set, &cache_src_set, &mut cx);
