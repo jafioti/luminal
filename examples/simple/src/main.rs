@@ -8,8 +8,10 @@ fn main() {
     // Make an input tensor
     let a = cx.tensor::<R1<4>>().set(vec![1., 2., 3., 4.]);
     // Feed tensor through model
-    let b = model.forward(a).retrieve();
+    let mut b = model.forward(a).retrieve();
+
     // Execute the graph
+    cx.display();
     cx.execute_debug();
     // Print the results
     println!("B: {:?}", b.data());
