@@ -11,7 +11,7 @@ use rustc_hash::FxHashMap;
 use crate::{
     compile_and_load_kernel, constant, get_buffer_from_tensor, get_idx_valid_exps, input_dyn_dims,
     other::CudaARange,
-    prim::{CudaAdd, CudaLessThan, CudaMul, CudaSumReduce},
+    prim::{CudaAdd, CudaCopyToDevice, CudaLessThan, CudaMul, CudaSumReduce},
     render_dyn_dim_inputs, CudaData, CudaFloat,
 };
 
@@ -82,9 +82,9 @@ impl<T: CudaFloat> Operator for CudaSub<T> {
 }
 
 #[derive(LuminalPrint, Default)]
-pub struct CudaSubtractionCompiler<T: CudaFloat>(PhantomData<T>);
+pub struct SubtractionCompiler<T: CudaFloat>(PhantomData<T>);
 
-impl<T: CudaFloat> Compiler for CudaSubtractionCompiler<T> {
+impl<T: CudaFloat> Compiler for SubtractionCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = CudaDevice::new(0).unwrap();
         let (lhs, rhs) = (node(), node());
@@ -208,9 +208,9 @@ impl<T: CudaFloat> Operator for CudaEqual<T> {
 }
 
 #[derive(LuminalPrint, Default)]
-pub struct CudaEqualCompiler<T: CudaFloat>(PhantomData<T>);
+pub struct EqualCompiler<T: CudaFloat>(PhantomData<T>);
 
-impl<T: CudaFloat> Compiler for CudaEqualCompiler<T> {
+impl<T: CudaFloat> Compiler for EqualCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = CudaDevice::new(0).unwrap();
         let one = constant::<T>(1.);
@@ -343,40 +343,46 @@ impl<T: CudaFloat> Operator for CudaGather<T> {
 }
 
 #[derive(LuminalPrint, Default)]
-pub struct MetalGatherCompiler<T: CudaFloat>(PhantomData<T>);
+pub struct GatherCompiler<T: CudaFloat>(PhantomData<T>);
 
-impl<T: CudaFloat> Compiler for MetalGatherCompiler<T> {
+impl<T: CudaFloat> Compiler for GatherCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = CudaDevice::new(0).unwrap();
-        let arange = op::<CudaARange<T>>();
-        let eq = unary::<CudaEqual<T>>(arange);
-        let inp = node();
-        let mul = binary::<CudaMul<T>>(eq.clone(), inp.clone());
+        let indexes = node();
+        let ind_copy = unary::<CudaCopyToDevice<T>>(indexes.clone());
+        let equal = binary::<CudaEqual<T>>(op::<CudaARange<T>>(), ind_copy.clone());
+        let embeddings = node();
+        let mul = binary::<CudaMul<T>>(embeddings.clone(), equal.clone());
         let sum_reduce = unary::<CudaSumReduce<T>>(mul.clone());
         let mut s = sum_reduce.clone().search(graph);
         while s.next_match() {
-            if s.check_no_delete(&[sum_reduce.id]) {
+            if s.check_no_delete(&[sum_reduce.id, embeddings.id, indexes.id]) {
                 continue;
             }
-            let embed_dim = graph
-                .graph
-                .edges_connecting(s.get(&inp), s.get(&mul))
+            let emb_shape = graph
+                .edges_connecting(s.get(&embeddings), s.get(&mul))
                 .next()
                 .unwrap()
                 .weight()
                 .as_data()
                 .unwrap()
-                .2
-                .shape()[2]
-                .to_usize()
-                .unwrap();
+                .2;
+            let embed_dim = emb_shape.shape()[2].to_usize().unwrap();
+            let index_shape = graph
+                .edges_connecting(s.get(&indexes), s.get(&ind_copy))
+                .next()
+                .unwrap()
+                .weight()
+                .as_data()
+                .unwrap()
+                .2;
             let gather = graph
                 .add_op(CudaGather::<T>::new(dev.clone(), embed_dim))
+                .input(s.get(&indexes), 0, index_shape)
+                .input(s.get(&embeddings), 0, emb_shape)
                 .finish();
-            move_incoming_edge(s.get(&eq), gather, &mut graph.graph);
-            graph.safe_remove_node(s.get(&eq), 1);
-            move_incoming_edge(s.get(&mul), gather, &mut graph.graph);
-            move_outgoing_edge(s.get(&sum_reduce), gather, &mut graph.graph);
+            move_outgoing_edge(s.get(&sum_reduce), gather, graph);
+            graph.remove_node(s.get(&sum_reduce));
             s.try_delete();
         }
     }

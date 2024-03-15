@@ -30,7 +30,9 @@ impl<T> CudaCopyToDevice<T> {
 
 impl<T: CudaFloat> Operator for CudaCopyToDevice<T> {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        if inp[0].0.borrowed().data.as_any().is::<CudaData<T>>() {
+        if inp[0].0.borrowed().data.as_any().is::<CudaData<T>>()
+            || inp[0].0.borrowed().data.as_any().is::<CudaData<u8>>()
+        {
             // Already on device
             return vec![inp.pop().unwrap().0.cloned()];
         }
@@ -44,11 +46,9 @@ impl<T: CudaFloat> Operator for CudaCopyToDevice<T> {
         let vec = cpu_data
             .iter()
             .copied()
-            .map(CudaFloat::from_f32)
+            .map(T::from_f32)
             .collect::<Vec<_>>();
-        let mut a = unsafe { self.0.alloc::<T>(vec.len()).unwrap() };
-        self.0.htod_copy_into(vec, &mut a).unwrap();
-        vec![Tensor::new(CudaData(a))]
+        vec![Tensor::new(CudaData(self.0.htod_sync_copy(&vec).unwrap()))]
     }
 }
 
@@ -68,13 +68,12 @@ impl<T: CudaFloat> Operator for CudaCopyFromDevice<T> {
             // Already off device
             return vec![inp.pop().unwrap().0.cloned()];
         }
+        let buf = self
+            .0
+            .dtoh_sync_copy(get_buffer_from_tensor::<T>(&inp[0].0))
+            .unwrap();
         vec![Tensor::new(
-            self.0
-                .dtoh_sync_copy(get_buffer_from_tensor::<T>(&inp[0].0))
-                .unwrap()
-                .into_iter()
-                .map(CudaFloat::to_f32)
-                .collect::<Vec<_>>(),
+            buf.into_iter().map(T::to_f32).collect::<Vec<_>>(),
         )]
     }
 }
@@ -935,9 +934,9 @@ impl<T: CudaFloat> Operator for CudaMaxReduce<T> {
 
 /// Convert all primitive ops to cuda primitive ops, and insert copy to and from device ops
 #[derive(LuminalPrint, Default)]
-pub struct CudaPrimitiveCompiler<T>(PhantomData<T>);
+pub struct PrimitiveCompiler<T>(PhantomData<T>);
 
-impl<T: CudaFloat> Compiler for CudaPrimitiveCompiler<T> {
+impl<T: CudaFloat> Compiler for PrimitiveCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = CudaDevice::new(0).unwrap();
         // Go through the graph and insert copy ops

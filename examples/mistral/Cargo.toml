@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
+default = ["cuda"]
 metal = ["dep:luminal_metal", "dep:metal-rs"]
-cuda = ["dep:luminal_cuda"]
+cuda = ["dep:luminal_cuda", "dep:luminal_cudarc"]
 
 [dependencies]
 luminal = {path="../.."}
@@ -18,3 +19,7 @@ memmap2 = "0.9.4"
 metal-rs = { version = "0.27.0", package = "metal", features = ["mps"], optional=true }
 colored = "2.1.0"
 itertools = "0.12.1"
+luminal_cudarc = { version="0.10.0", features = [
+    "cublas",
+    "f16",
+], optional=true}

@@ -53,11 +53,10 @@ fn main() {
     cache_dest.keep();
 
     // Set up model loading
-    #[cfg(feature = "metal")]
+    #[cfg(any(feature = "metal", feature = "cuda"))]
     let quantized_weight_nodes =
-        loader::MetalQ8Loader::new("setup/mistral-7b-instruct-v0.2.Q8_0.gguf")
-            .load(&model, &mut cx);
-    #[cfg(not(feature = "metal"))]
+        loader::Q8Loader::new("setup/mistral-7b-instruct-v0.2.Q8_0.gguf").load(&model, &mut cx);
+    #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
     loader::Q8Loader::new("setup/mistral-7b-instruct-v0.2.Q8_0.gguf").load(&model, &mut cx);
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
@@ -70,7 +69,7 @@ fn main() {
             #[cfg(feature = "metal")]
             luminal_metal::MetalQuantizedCompiler::<f32>::new(quantized_weight_nodes),
             #[cfg(feature = "cuda")]
-            luminal_cuda::CudaCompiler::<f32>::default(),
+            luminal_cuda::CudaQuantizedCompiler::<f32>::new(quantized_weight_nodes),
             #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
             luminal::compilers::CPUCompiler::default(),
         ),
@@ -106,7 +105,7 @@ fn main() {
     print!("Processing Prompt");
     io::stdout().flush().unwrap();
     let now = Instant::now();
-    cx.execute();
+    cx.execute_debug();
     let elapsed_ms = now.elapsed().as_millis();
     println!(
         "\t - {elapsed_ms}ms ({:.2} tok/s)",

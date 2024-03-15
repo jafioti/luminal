@@ -35,11 +35,9 @@ impl<T: MetalFloat> QuantizedMatmul<T> {
         Self {
             matmul_pipeline: compile_function("matmul", &format!("
 using namespace metal;
-#define QK8_0 32
-#define NB_Q8_0 8
 typedef struct {{
     half    d;         // delta
-    int8_t  qs[QK8_0]; // quants
+    int8_t  qs[32]; // quants
 }} block_q8_0;
 
 #define BLOCK_SIZE_M 64 // 8 simdgroup matrices from matrix A
@@ -199,11 +197,9 @@ kernel void matmul(
 }}"), &device),
             matvec_pipeline: compile_function("matvec", &format!("
 using namespace metal;
-#define QK8_0 32
-#define NB_Q8_0 8
 typedef struct {{
     half    d;         // delta
-    int8_t  qs[QK8_0]; // quants
+    int8_t  qs[32]; // quants
 }} block_q8_0;
 
 kernel void matvec(

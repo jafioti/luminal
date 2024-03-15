@@ -2,6 +2,8 @@ mod binary;
 mod matmul;
 mod other;
 mod prim;
+mod quantized;
+pub use quantized::*;
 
 #[cfg(test)]
 mod tests;
@@ -21,18 +23,19 @@ use luminal::{op::InputTensor, prelude::*};
 use self::symbolic::{BigExpression, Term};
 
 pub type CudaCompiler<T> = (
-    prim::CudaPrimitiveCompiler<T>,
-    binary::CudaSubtractionCompiler<T>,
-    binary::CudaEqualCompiler<T>,
+    prim::PrimitiveCompiler<T>,
+    binary::SubtractionCompiler<T>,
+    binary::EqualCompiler<T>,
     other::ARangeCompiler<T>,
-    binary::MetalGatherCompiler<T>,
-    matmul::CudaMatMulCompiler<T>,
+    binary::GatherCompiler<T>,
+    matmul::MatMulCompiler<T>,
     prim::CopyCompiler<T>,
 );
 
 pub trait CudaFloat:
     std::fmt::Debug
     + Copy
+    + Default
     + luminal_cudarc::driver::DeviceRepr
     + std::marker::Unpin
     + luminal_cudarc::driver::ValidAsZeroBits
@@ -59,7 +62,7 @@ impl CudaFloat for f32 {
     }
 }
 #[derive(Debug)]
-pub struct CudaData<T>(CudaSlice<T>);
+pub struct CudaData<T>(pub CudaSlice<T>);
 
 impl<T: DeviceRepr> Clone for CudaData<T> {
     fn clone(&self) -> Self {
@@ -68,6 +71,16 @@ impl<T: DeviceRepr> Clone for CudaData<T> {
 }
 
 impl<T: CudaFloat> Data for CudaData<T> {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+}
+
+impl Data for CudaData<u8> {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

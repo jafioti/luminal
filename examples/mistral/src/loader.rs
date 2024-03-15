@@ -1,14 +1,17 @@
-use std::fs::File;
+use std::{
+    fs::File,
+    io::{Read, Seek},
+};
 
 use luminal::{op::Function, prelude::*};
+
+#[cfg(feature = "cuda")]
+use {luminal_cuda::CudaData, luminal_cudarc::driver::CudaDevice};
 
 use crate::gguf::*;
 
 #[cfg(not(feature = "metal"))]
-use {
-    itertools::Itertools,
-    std::io::{Read, Seek},
-};
+use itertools::Itertools;
 #[cfg(feature = "metal")]
 use {
     luminal_metal::MetalBuffer,
@@ -16,18 +19,16 @@ use {
     metal_rs::{Device, MTLResourceOptions},
 };
 
-#[cfg(feature = "metal")]
-pub struct MetalQ8Loader(String);
+pub struct Q8Loader(String);
 
-#[cfg(feature = "metal")]
-impl MetalQ8Loader {
+impl Q8Loader {
     pub fn new<S: Into<String>>(path: S) -> Self {
         Self(path.into())
     }
 }
 
 #[cfg(feature = "metal")]
-impl Loader for MetalQ8Loader {
+impl Loader for Q8Loader {
     type Output = Vec<NodeIndex>;
     fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Output {
         // Read metadata from file
@@ -60,17 +61,19 @@ impl Loader for MetalQ8Loader {
                 loading_node.1 = Box::new(move |_| {
                     let mmap_buffer =
                         unsafe { Mmap::map(&File::open(&file_path).unwrap()).unwrap() };
-                    let buffer = Device::system_default().unwrap().new_buffer_with_bytes_no_copy(
-                        unsafe {
-                            mmap_buffer
-                                .as_ptr()
-                                .add(buffer_offset + tensor_data_offset as usize)
-                                as *const _
-                        },
-                        n_bytes as u64,
-                        MTLResourceOptions::StorageModeShared,
-                        None,
-                    );                    
+                    let buffer = Device::system_default()
+                        .unwrap()
+                        .new_buffer_with_bytes_no_copy(
+                            unsafe {
+                                mmap_buffer
+                                    .as_ptr()
+                                    .add(buffer_offset + tensor_data_offset as usize)
+                                    as *const _
+                            },
+                            n_bytes as u64,
+                            MTLResourceOptions::StorageModeShared,
+                            None,
+                        );
                     vec![Tensor {
                         data: Box::new(MetalBuffer(buffer)),
                     }]
@@ -81,17 +84,73 @@ impl Loader for MetalQ8Loader {
     }
 }
 
-#[cfg(not(feature = "metal"))]
-pub struct Q8Loader(String);
+#[cfg(feature = "cuda")]
+impl Loader for Q8Loader {
+    type Output = Vec<NodeIndex>;
+    fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Output {
+        // Read metadata from file
+        let mut reader = File::open(&self.0).unwrap();
+        let Content {
+            mut tensor_infos,
+            tensor_data_offset,
+            ..
+        } = Content::read(&mut reader).unwrap();
 
-#[cfg(not(feature = "metal"))]
-impl Q8Loader {
-    pub fn new<S: Into<String>>(path: S) -> Self {
-        Self(path.into())
+        // Create weight loading closures
+        let mut q8_weights = vec![];
+        for (weight_name, node_index) in state_dict(model) {
+            if let Some(loading_node) = graph
+                .graph
+                .node_weight_mut(node_index)
+                .and_then(|op| op.as_any_mut().downcast_mut::<Function>())
+            {
+                let file_path = self.0.clone();
+                let (n_elements, buffer_offset, data_type) =
+                    tensor_infos.remove(&weight_name.replace('/', ".")).unwrap();
+                let n_bytes = match data_type {
+                    GgmlDType::F32 => n_elements * 4,
+                    GgmlDType::Q8_0 => {
+                        q8_weights.push(node_index);
+                        n_elements + (n_elements / 16)
+                    }
+                    _ => panic!("Unsupported dtype: {data_type:?}"),
+                };
+                loading_node.1 = Box::new(move |_| {
+                    // Read bytes
+                    let mut bytes = vec![0; n_bytes];
+                    let mut file = File::open(&file_path).unwrap();
+                    file.seek(std::io::SeekFrom::Start(
+                        buffer_offset as u64 + tensor_data_offset,
+                    ))
+                    .unwrap();
+                    file.read_exact(&mut bytes).unwrap();
+                    // Copy buffer over to cuda slice
+                    let device = CudaDevice::new(0).unwrap();
+                    match data_type {
+                        GgmlDType::F32 => vec![Tensor::new(
+                            bytes
+                                .into_iter()
+                                .chunks(4)
+                                .into_iter()
+                                .map(|c| {
+                                    let c = c.collect::<Vec<_>>();
+                                    f32::from_le_bytes([c[0], c[1], c[2], c[3]])
+                                })
+                                .collect::<Vec<_>>(),
+                        )],
+                        GgmlDType::Q8_0 => vec![Tensor::new(CudaData(
+                            device.htod_sync_copy::<u8>(&bytes).unwrap(),
+                        ))],
+                        _ => unimplemented!(),
+                    }
+                });
+            }
+        }
+        q8_weights
     }
 }
 
-#[cfg(not(feature = "metal"))]
+#[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
 impl Loader for Q8Loader {
     type Output = Vec<NodeIndex>;
     fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Output {

@@ -2,17 +2,13 @@ use std::{marker::PhantomData, sync::Arc};
 
 use luminal_cudarc::driver::{CudaDevice, CudaFunction, LaunchAsync, LaunchConfig};
 
-use luminal::{
-    op::*,
-    prelude::{petgraph::visit::EdgeRef, *},
-    shape::symbolic::BigExpression,
-};
+use luminal::{op::*, prelude::*, shape::symbolic::BigExpression};
 use rustc_hash::FxHashMap;
 
 use crate::{
     binary::CudaSub,
     compile_and_load_kernel, constant,
-    prim::{CudaContiguous, CudaSumReduce},
+    prim::{CudaAdd, CudaContiguous, CudaSumReduce},
     CudaData, CudaFloat,
 };
 
@@ -82,28 +78,26 @@ impl<T: CudaFloat> Compiler for ARangeCompiler<T> {
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = CudaDevice::new(0).unwrap();
         // TODO: Make sure this actually checks the shape transformations to ensure pooling happens
-        let one = constant::<T>(1.);
-        let contig1 = unary::<CudaContiguous<T>>(one.clone());
+        let contig_one = constant::<T>(1.);
+        let contig1 = unary::<CudaContiguous<T>>(contig_one.clone());
         let sum_reduce =
             unary::<CudaSumReduce<T>>(unary::<CudaContiguous<T>>(unary::<CudaContiguous<T>>(
                 unary::<CudaContiguous<T>>(contig1.clone()),
             )));
-        let sub = binary::<CudaSub<T>>(sum_reduce, one.clone());
-        let mut s = sub.clone().search(graph);
+        let sub = binary::<CudaSub<T>>(sum_reduce.clone(), constant::<T>(1.));
+        let mut s1 = sub.clone().search(graph);
+        let neg_one = constant::<T>(-1.);
+        let add = binary::<CudaAdd<T>>(sum_reduce, neg_one.clone());
+        let mut s2 = add.clone().search(graph);
 
-        while s.next_match() {
+        while s1.next_match() || s2.next_match() {
+            let s = if s1.matched { &s1 } else { &s2 };
             let arange_amount = {
                 let sh = graph
-                    .graph
-                    .edge_weight(
-                        graph
-                            .graph
-                            .edges_connecting(s.get(&one), s.get(&contig1))
-                            .next()
-                            .unwrap()
-                            .id(),
-                    )
+                    .edges_connecting(s.get(&contig_one), s.get(&contig1))
+                    .next()
                     .unwrap()
+                    .weight()
                     .as_data()
                     .unwrap()
                     .2;
@@ -116,8 +110,13 @@ impl<T: CudaFloat> Compiler for ARangeCompiler<T> {
                     &graph.dyn_map,
                 ))
                 .finish();
-            move_outgoing_edge(s.get(&sub), arange_op, &mut graph.graph);
-            graph.graph.remove_node(s.get(&sub));
+            let fin = if s1.matched {
+                s1.get(&sub)
+            } else {
+                s2.get(&add)
+            };
+            move_outgoing_edge(fin, arange_op, graph);
+            graph.remove_node(fin);
             s.try_delete();
         }
     }
