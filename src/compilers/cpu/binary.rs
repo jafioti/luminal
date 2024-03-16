@@ -44,6 +44,7 @@ impl Operator for Sub {
 pub struct SubtractionCompiler;
 
 impl Compiler for SubtractionCompiler {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let (lhs, rhs) = (node(), node());
         let mul = binary::<Mul>(rhs.clone(), constant(-1.));
@@ -77,11 +78,7 @@ impl Compiler for SubtractionCompiler {
                 .as_data()
                 .unwrap()
                 .2;
-            if !b_final_shape.is_contiguous()
-                || b_final_shape.is_sliced()
-                || b_final_shape.is_padded()
-            {
-                s.clear_cached_results();
+            if b_final_shape.is_reshaped() {
                 continue;
             }
             let sub = graph
@@ -93,7 +90,6 @@ impl Compiler for SubtractionCompiler {
 
             graph.graph.remove_node(add);
             s.try_delete();
-            s.clear_cached_results();
         }
     }
 }
@@ -137,6 +133,7 @@ impl Operator for Equal {
 pub struct EqualCompiler;
 
 impl Compiler for EqualCompiler {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let one = constant(1.);
         let (lhs, rhs) = (node(), node());
@@ -221,6 +218,7 @@ impl Operator for Gather {
 pub struct GatherCompiler;
 
 impl Compiler for GatherCompiler {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let arange = op::<ARange>();
         let eq = unary::<Equal>(arange);

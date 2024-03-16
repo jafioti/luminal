@@ -83,7 +83,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 let a_inputs = get_inputs::<T>(a, graph);
                 let mut b_inputs = get_inputs::<T>(b, graph);
                 let (connect_inp, _, _, _, sh) = b_inputs.remove(a_to_b_index);
-                let reshaped = !sh.is_contiguous() || sh.is_sliced() || sh.is_padded();
+                let reshaped = sh.is_reshaped();
                 let mut add_index = a_to_b_index;
                 let mut a_replacements = vec![];
                 let orig_b_inputs = b_inputs.clone();

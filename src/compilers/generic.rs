@@ -20,6 +20,7 @@ pub type GenericCompiler = (RemoveSingleReductions, ArithmeticElimination, CSE);
 pub struct CSE;
 
 impl Compiler for CSE {
+    type Output = ();
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut ids: T) {
         // Look for nodes that have the exact same srcs
         // Loop cause I'm lazy
@@ -97,6 +98,7 @@ impl Compiler for CSE {
 pub struct RemoveSingleReductions;
 
 impl Compiler for RemoveSingleReductions {
+    type Output = ();
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut ids: T) {
         for node in graph.graph.node_indices().collect::<Vec<_>>() {
             let dim = if let Some(red) = graph
@@ -153,6 +155,7 @@ impl Compiler for RemoveSingleReductions {
 pub struct RemoveUnusedNodes;
 
 impl Compiler for RemoveUnusedNodes {
+    type Output = ();
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, _: T) {
         // Reverse topo sort
         for node in graph.graph.node_indices().collect::<Vec<_>>() {
@@ -174,6 +177,7 @@ impl Compiler for RemoveUnusedNodes {
 pub struct DepthFirst;
 
 impl Compiler for DepthFirst {
+    type Output = ();
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, _: T) {
         fn toposort(
             id: NodeIndex,
@@ -230,6 +234,7 @@ impl Compiler for DepthFirst {
 pub struct RemapDownstream(pub Vec<NodeIndex>);
 
 impl Compiler for RemapDownstream {
+    type Output = ();
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         let set = self.0.iter().copied().collect::<HashSet<_>>();
         // Loop through state dict tensors marked as no_delete
@@ -291,6 +296,7 @@ fn is_from_set(node: NodeIndex, graph: &Graph, set: &HashSet<NodeIndex>) -> bool
 pub struct ArithmeticElimination;
 
 impl Compiler for ArithmeticElimination {
+    type Output = ();
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut ids: T) {
         // x + 0, 0 + x
         let zero = constant(0.);
@@ -315,13 +321,13 @@ impl Compiler for ArithmeticElimination {
                 .find_map(|e| e.weight().as_data())
                 .unwrap()
                 .2;
-            if !input_shape.is_contiguous() || input_shape.is_padded() || input_shape.is_sliced() {
+            if input_shape.is_reshaped() {
                 // If any output shape is non-contiguous, we need to keep the op for it's contiguous functionality TODO: replace with explicit contiguous op here
                 if graph
                     .graph
                     .edges_directed(add, Direction::Outgoing)
                     .filter_map(|e| e.weight().as_data())
-                    .any(|(_, _, sh)| !sh.is_contiguous() || sh.is_padded() || sh.is_sliced())
+                    .any(|(_, _, sh)| sh.is_reshaped())
                 {
                     continue;
                 }
@@ -380,13 +386,13 @@ impl Compiler for ArithmeticElimination {
                 .find_map(|e| e.weight().as_data())
                 .unwrap()
                 .2;
-            if !input_shape.is_contiguous() || input_shape.is_padded() || input_shape.is_sliced() {
+            if input_shape.is_reshaped() {
                 // If any output shape is non-contiguous, we need to keep the op for it's contiguous functionality TODO: replace with explicit contiguous op here
                 if graph
                     .graph
                     .edges_directed(mul, Direction::Outgoing)
                     .filter_map(|e| e.weight().as_data())
-                    .any(|(_, _, sh)| !sh.is_contiguous() || sh.is_padded() || sh.is_sliced())
+                    .any(|(_, _, sh)| sh.is_reshaped())
                 {
                     continue;
                 }

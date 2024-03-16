@@ -135,10 +135,11 @@ impl Graph {
     }
 
     /// Compile the graph using the given compiler
-    pub fn compile<T: ToIdsMut, C: Compiler>(&mut self, compiler: C, remap: T) {
-        compiler.compile(self, remap);
+    pub fn compile<T: ToIdsMut, C: Compiler>(&mut self, compiler: C, remap: T) -> C::Output {
+        let output = compiler.compile(self, remap);
         self.toposort();
         self.reset();
+        output
     }
 
     /// Refresh the internally sorted graph

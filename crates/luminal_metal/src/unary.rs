@@ -468,7 +468,7 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
             }
 
             // Input must be contiguous
-            if !sh.is_contiguous() || sh.is_sliced() || sh.is_padded() {
+            if sh.is_reshaped() {
                 x = graph
                     .add_op(MetalContiguous::<T>::new(
                         sh,

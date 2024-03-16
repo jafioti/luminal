@@ -29,6 +29,7 @@ impl Operator for ARange {
 pub struct ARangeCompiler;
 
 impl Compiler for ARangeCompiler {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         // TODO: Make sure this actually checks the shape transformations to ensure pooling happens
         let one = constant(1.);

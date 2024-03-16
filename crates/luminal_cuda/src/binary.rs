@@ -117,10 +117,7 @@ impl<T: CudaFloat> Compiler for SubtractionCompiler<T> {
                 .as_data()
                 .unwrap()
                 .2;
-            if !b_final_shape.is_contiguous()
-                || b_final_shape.is_sliced()
-                || b_final_shape.is_padded()
-            {
+            if b_final_shape.is_reshaped() {
                 continue;
             }
             let sub = graph

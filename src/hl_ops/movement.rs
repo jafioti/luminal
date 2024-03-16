@@ -31,11 +31,8 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     pub fn reshape<N: Shape>(mut self) -> GraphTensor<N> {
-        if !self.shape.is_contiguous() {
-            // Insert contiguous call
-            self = self.contiguous();
-        }
-
+        // Insert contiguous call
+        self = self.contiguous();
         GraphTensor::from_id(
             self.id,
             ShapeTracker::new(&N::realized_shape()),
@@ -63,7 +60,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     pub fn contiguous(self) -> GraphTensor<S> {
-        if self.shape.is_contiguous() && !self.shape.is_sliced() && !self.shape.is_padded() {
+        if !self.shape.is_reshaped() {
             return self;
         }
         let new_id = self

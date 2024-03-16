@@ -43,6 +43,7 @@ pub(crate) fn constant(num: f32) -> SelectGraph {
 pub struct UnaryFusionCompiler;
 
 impl Compiler for UnaryFusionCompiler {
+    type Output = ();
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut ids: T) {
         fn is_unary(op: &dyn Any) -> Option<fn(f32) -> f32> {
             if op.is::<Exp2>() {

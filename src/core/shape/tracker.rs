@@ -101,7 +101,7 @@ impl ShapeTracker {
     }
 
     pub fn index_expression(&self) -> BigExpression {
-        if self.is_contiguous() && !self.is_sliced() && !self.is_padded() {
+        if !self.is_reshaped() {
             return 'z'.into();
         }
         // Create strides in original order
@@ -149,7 +149,7 @@ impl ShapeTracker {
 
     /// If this BigExpression evaluates to 0, the logical index is invalid. Otherwise it is valid
     pub fn valid_expression(&self) -> BigExpression {
-        if self.is_contiguous() && !self.is_sliced() && !self.is_padded() {
+        if !self.is_reshaped() {
             return 1.into();
         }
         let mut ret = BigExpression::from(1);
@@ -246,6 +246,11 @@ impl ShapeTracker {
     /// Check if contiguous
     pub fn is_contiguous(&self) -> bool {
         self.indexes.iter().enumerate().all(|(a, b)| a == *b) && self.fake.iter().all(|i| !*i)
+    }
+
+    /// Check if this shape has been modified at all (permuted, sliced, or padded)
+    pub fn is_reshaped(&self) -> bool {
+        !self.is_contiguous() || self.is_sliced() || self.is_padded()
     }
 
     /// Realize the true shape

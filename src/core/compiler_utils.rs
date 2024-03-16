@@ -146,11 +146,13 @@ tuple_impls!(
 );
 
 pub trait Compiler {
+    type Output;
     /// Run a compilation pass
-    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, ids: T);
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, ids: T) -> Self::Output;
 }
 
 impl Compiler for () {
+    type Output = ();
     fn compile<T: ToIdsMut>(&self, _: &mut Graph, _: T) {}
 }
 
@@ -158,6 +160,7 @@ impl Compiler for () {
 pub struct Looped<C: Compiler + Debug>(C);
 
 impl<C: Compiler + Debug> Compiler for Looped<C> {
+    type Output = ();
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
         graph.toposort();
         let mut linearized = graph.linearized_graph.clone();
@@ -182,6 +185,7 @@ impl<C: Default + Compiler + Debug> Default for Looped<C> {
 pub struct Timed<C: Compiler + Debug>(C);
 
 impl<C: Compiler + Debug> Compiler for Timed<C> {
+    type Output = ();
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, remap: T) {
         let compiler_name = format!("{:?}", self.0).bold();
         println!("Starting {compiler_name}");
@@ -217,8 +221,9 @@ macro_rules! tuple_impls {
         $($name:
             Compiler, )+
         > Compiler for ($($name,)+) {
-            fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
-                $(self.$idx.compile(graph, &mut remap);)+
+            type Output = ( $($name::Output, )+ );
+            fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) -> Self::Output {
+                ( $(self.$idx.compile(graph, &mut remap), )+ )
             }
         }
     };

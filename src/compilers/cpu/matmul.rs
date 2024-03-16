@@ -9,6 +9,7 @@ pub type MatMulCompiler = (MatMul2DCompiler, BatchMatMul2DCompiler);
 pub struct MatMul2DCompiler;
 
 impl Compiler for MatMul2DCompiler {
+    type Output = ();
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut ids: T) {
         // Look for the matmul pattern
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
@@ -101,6 +102,7 @@ impl Operator for MatMul2D {
 pub struct BatchMatMul2DCompiler;
 
 impl Compiler for BatchMatMul2DCompiler {
+    type Output = ();
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut ids: T) {
         // Look for the matmul pattern
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
