@@ -62,7 +62,7 @@ impl<S: Shape> GraphTensor<S> {
 
     /// The cos(x) function
     pub fn cos(self) -> GraphTensor<S> {
-        (-self + (std::f32::consts::PI / 2.)).sin()
+        ((std::f32::consts::PI / 2.) - self).sin()
     }
 
     /// The square root function
@@ -169,8 +169,7 @@ impl<S: Shape> GraphTensor<S> {
     /// The sigmoid activation function
     pub fn sigmoid(self) -> GraphTensor<S> {
         // Based on https://github.com/tinygrad/tinygrad/blob/9d142430cbe61121c864c0015f1de83c94a7d2c0/tinygrad/mlops.py#L70
-        let one = self.graph().constant(1.0);
-        one.expand() / (one.expand() + (-self).exp())
+        1. / (1. + (-self).exp())
     }
 
     /// The swish activation function

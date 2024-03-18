@@ -28,6 +28,14 @@ impl<S: Shape> Add for GraphTensor<S> {
     }
 }
 
+impl<S: Shape> Add<GraphTensor<S>> for f32 {
+    type Output = GraphTensor<S>;
+
+    fn add(self, rhs: GraphTensor<S>) -> Self::Output {
+        rhs + self
+    }
+}
+
 impl<S: Shape> AddAssign for GraphTensor<S> {
     fn add_assign(&mut self, rhs: Self) {
         *self = *self + rhs;
@@ -35,6 +43,14 @@ impl<S: Shape> AddAssign for GraphTensor<S> {
 }
 
 impl<S: Shape> Sub for GraphTensor<S> {
+    type Output = GraphTensor<S>;
+
+    fn sub(self, rhs: GraphTensor<S>) -> Self::Output {
+        self + -rhs
+    }
+}
+
+impl<S: Shape> Sub<GraphTensor<S>> for f32 {
     type Output = GraphTensor<S>;
 
     fn sub(self, rhs: GraphTensor<S>) -> Self::Output {
@@ -63,6 +79,14 @@ impl<S: Shape> Mul for GraphTensor<S> {
     }
 }
 
+impl<S: Shape> Mul<GraphTensor<S>> for f32 {
+    type Output = GraphTensor<S>;
+
+    fn mul(self, rhs: GraphTensor<S>) -> Self::Output {
+        rhs * self
+    }
+}
+
 impl<S: Shape> MulAssign for GraphTensor<S> {
     fn mul_assign(&mut self, rhs: Self) {
         *self = *self * rhs;
@@ -71,6 +95,15 @@ impl<S: Shape> MulAssign for GraphTensor<S> {
 
 #[allow(clippy::suspicious_arithmetic_impl)]
 impl<S: Shape> Div<GraphTensor<S>> for GraphTensor<S> {
+    type Output = GraphTensor<S>;
+
+    fn div(self, rhs: GraphTensor<S>) -> Self::Output {
+        self * rhs.recip()
+    }
+}
+
+#[allow(clippy::suspicious_arithmetic_impl)]
+impl<S: Shape> Div<GraphTensor<S>> for f32 {
     type Output = GraphTensor<S>;
 
     fn div(self, rhs: GraphTensor<S>) -> Self::Output {
