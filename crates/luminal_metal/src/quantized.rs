@@ -514,6 +514,7 @@ impl<T> MetalQuantizedCompiler<T> {
 }
 
 impl<T: MetalFloat + Default> Compiler for MetalQuantizedCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
         let device = Device::system_default().unwrap();
         let queue = device.new_command_queue();

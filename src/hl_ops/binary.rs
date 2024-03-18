@@ -299,3 +299,13 @@ impl<S: Shape> GraphTensor<S> {
         self.min_f32(min).max_f32(max)
     }
 }
+
+pub trait F32Pow {
+    fn pow<S: Shape>(self, e: GraphTensor<S>) -> GraphTensor<S>;
+}
+
+impl F32Pow for f32 {
+    fn pow<S: Shape>(self, e: GraphTensor<S>) -> GraphTensor<S> {
+        e.mul(self.abs().ln()).exp().recip()
+    }
+}

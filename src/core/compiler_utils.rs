@@ -2,6 +2,7 @@
 
 use std::{
     any::{Any, TypeId},
+    borrow::Borrow,
     collections::HashSet,
     fmt::Debug,
     sync::Arc,
@@ -666,8 +667,8 @@ impl GraphSearch {
             .filter(|(k, _)| !exclude.contains(k))
             .any(|(_, v)| graph.no_delete.contains(v))
     }
-    pub fn get(&self, node: &SelectGraph) -> NodeIndex {
-        *self.current.get(&node.id).unwrap()
+    pub fn get<T: Borrow<SelectGraph>>(&self, node: T) -> NodeIndex {
+        *self.current.get(&node.borrow().id).unwrap()
     }
     pub fn try_delete(&self) {
         let graph = unsafe { self.graph.as_mut().unwrap() };

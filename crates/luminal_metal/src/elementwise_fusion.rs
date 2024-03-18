@@ -47,6 +47,7 @@ fn get_inputs<T: MetalFloat>(
 }
 
 impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let device = Device::system_default().unwrap();
         let queue = device.new_command_queue();
@@ -344,7 +345,7 @@ impl<T: MetalFloat> Operator for FusedElementwiseOp<T> {
 #[cfg(test)]
 mod tests {
     use luminal::{
-        prelude::*,
+        prelude::{binary::F32Pow, *},
         shape::symbolic::{BigExpression, Expression},
         tests::{assert_close, random_vec, random_vec_rng},
     };
@@ -431,7 +432,7 @@ mod tests {
             .set(random_vec_rng(BATCH * N_HEADS * SEQ * HEAD_DIM, &mut rng))
             .keep();
         let freqs = (cx.arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
-        let freqs = freqs.inv_pow(1000000.0).recip();
+        let freqs = 1000000_f32.pow(freqs);
         let pos = cx.arange::<Const<SEQ>>() + BigExpression::from(0);
         let emb = pos.expand::<(_, Const<1>), _>().matmul(freqs.expand());
         // Split input into evens and odds

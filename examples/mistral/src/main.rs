@@ -104,7 +104,7 @@ fn main() {
     print!("Processing Prompt");
     io::stdout().flush().unwrap();
     let now = Instant::now();
-    cx.execute_debug();
+    cx.execute();
     let elapsed_ms = now.elapsed().as_millis();
     println!(
         "\t - {elapsed_ms}ms ({:.2} tok/s, {} prompt tokens)",
@@ -176,7 +176,7 @@ fn encode(tokenizer: &Tokenizer, text: &str) -> Vec<u32> {
 }
 
 fn decode(tokenizer: &Tokenizer, token_ids: &[u32]) -> String {
-    tokenizer.decode(&token_ids, false).unwrap()
+    tokenizer.decode(token_ids, false).unwrap()
 }
 
 // Currently just an argmax, do actual sampling here

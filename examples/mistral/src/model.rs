@@ -2,7 +2,7 @@ use std::{marker::PhantomData, ops::Div};
 
 use luminal::{
     nn::{embedding::Embedding, norm::RMSNorm},
-    prelude::*,
+    prelude::{binary::F32Pow, *},
     shape::symbolic::{BigExpression, Expression},
 };
 
@@ -68,7 +68,7 @@ fn apply_rotary_embeddings_ggml<const N_HEADS: usize, Batch: Dimension, Seq: Dim
 ) -> GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)> {
     // Get freqs
     let freqs = (input.graph().arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
-    let freqs = freqs.inv_pow(1000000.0).recip();
+    let freqs = 1000000_f32.pow(freqs);
     let pos = input.graph().arange::<Seq>() + prev_seq;
     let emb = pos.expand::<(_, Const<1>), _>().matmul(freqs.expand());
 

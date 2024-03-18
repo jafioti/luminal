@@ -156,11 +156,6 @@ impl<S: Shape> GraphTensor<S> {
         self.abs().ln().mul(e).exp()
     }
 
-    /// 1 / (base ^ x)
-    pub fn inv_pow(self, base: f32) -> GraphTensor<S> {
-        self.mul(base.abs().ln()).exp()
-    }
-
     /// The Rectified Linear Unit activation function
     pub fn relu(self) -> GraphTensor<S> {
         self.max_f32(0.)

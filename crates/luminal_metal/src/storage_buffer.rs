@@ -26,6 +26,7 @@ use super::get_buffer_from_tensor;
 pub struct StorageBufferCompiler;
 
 impl Compiler for StorageBufferCompiler {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         // First pass - get clear sets for each node
         #[allow(clippy::type_complexity)]

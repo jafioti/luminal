@@ -144,6 +144,7 @@ impl<T: MetalFloat> Operator for MetalSub<T> {
 pub struct MetalSubtractionCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
@@ -320,6 +321,7 @@ impl<T: MetalFloat> Operator for MetalEqual<T> {
 pub struct MetalEqualCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
@@ -466,6 +468,7 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
 pub struct MetalGatherCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();

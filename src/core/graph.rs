@@ -286,7 +286,11 @@ impl Graph {
             "{:->2$} Executing {:->2$}",
             "",
             "",
-            (term_size::dimensions().unwrap().0 - " Executing ".len()) / 2
+            (term_size::dimensions()
+                .unwrap()
+                .0
+                .saturating_sub(" Executing ".len()))
+                / 2
         );
         let start = std::time::Instant::now();
         for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
@@ -342,7 +346,11 @@ impl Graph {
                     format!("{}µs", elapsed.as_micros())
                 }
                 .bold(),
-                term_size::dimensions().unwrap().0 - op_name.len() - shapes_string.len(),
+                term_size::dimensions()
+                    .unwrap()
+                    .0
+                    .saturating_sub(op_name.len())
+                    .saturating_sub(shapes_string.len()),
             );
             for (i, tensor) in tensors.into_iter().enumerate() {
                 self.tensors.insert((*node, i as u8), tensor);
@@ -365,7 +373,11 @@ impl Graph {
             "{:->2$} Total Times {:->2$}",
             "",
             "",
-            (term_size::dimensions().unwrap().0 - " Total Times ".len()) / 2
+            (term_size::dimensions()
+                .unwrap()
+                .0
+                .saturating_sub(" Total Times ".len()))
+                / 2
         );
         for (name, elapsed) in op_times.into_iter().sorted_by(|(_, a), (_, b)| b.cmp(a)) {
             print!("{}", name.bold().bright_green());
@@ -379,7 +391,10 @@ impl Graph {
                     format!("{}µs", elapsed.as_micros())
                 }
                 .bold(),
-                term_size::dimensions().unwrap().0 - name.len(),
+                term_size::dimensions()
+                    .unwrap()
+                    .0
+                    .saturating_sub(name.len()),
             );
         }
         println!(

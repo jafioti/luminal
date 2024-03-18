@@ -177,6 +177,7 @@ impl<T: MetalFloat> Operator for MetalMeanReduce<T> {
 pub struct MeanReduceCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MeanReduceCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
@@ -398,6 +399,7 @@ impl<T: 'static + Clone> Operator for MetalStdNorm<T> {
 pub struct StdNormCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
@@ -605,6 +607,7 @@ impl<T: MetalFloat> Operator for MetalExp<T> {
 pub struct MetalExpCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalExpCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
@@ -744,6 +747,7 @@ impl<T: MetalFloat> Operator for MetalCos<T> {
 pub struct MetalCosCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalCosCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
@@ -888,6 +892,7 @@ impl<T: MetalFloat> Operator for MetalSoftmax<T> {
 pub struct SoftmaxCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for SoftmaxCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();

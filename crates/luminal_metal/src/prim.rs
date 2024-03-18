@@ -1482,6 +1482,7 @@ impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
 pub struct PrimitiveCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
