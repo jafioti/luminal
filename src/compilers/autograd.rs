@@ -98,7 +98,7 @@ impl Compiler for Autograd {
             if op.is::<Function>() {
                 continue;
             }
-            if op.is::<Mod>() || op.is::<LessThan>() || op.is::<MaxReduce>() {
+            if op.is::<Mod>() || op.is::<LessThan>() {
                 if self.0.contains(&fwd_node) {
                     panic!(
                         "Node {} is marked as a weight but is undifferentiable: {:?}",
@@ -208,6 +208,21 @@ impl Compiler for Autograd {
                 // f'(x) = 1
                 if valid_set.contains(&inps[0].id) {
                     add_grad_to_map(inps[0].id, prev_grad_node, inps[0].shape);
+                }
+            } else if let Some(op) = op.downcast_ref::<MaxReduce>().cloned() {
+                // f(x) = sum_reduce(x)
+                // f'(x) = x == sum_reduce(x)
+                if valid_set.contains(&inps[0].id) {
+                    let reduced = graph
+                        .add_op(MaxReduce(op.0))
+                        .input(inps[0].id, 0, inps[0].shape)
+                        .finish();
+                    let mut shape = inps[0].shape;
+                    let size = shape.remove_dim(op.0);
+                    shape.expand(op.0, size);
+                    let reduced = GraphTensor::<()>::from_id(reduced, shape, graph_ref);
+                    let a_grad = inps[0].equals(reduced);
+                    add_grad_to_map(a_grad.id, prev_grad_node, inps[0].shape);
                 }
             } else {
                 if !valid_set.contains(&inps[0].id) {
