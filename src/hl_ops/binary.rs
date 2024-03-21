@@ -16,15 +16,13 @@ impl<S: Shape> Add for GraphTensor<S> {
 
     fn add(mut self, mut rhs: GraphTensor<S>) -> Self::Output {
         resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
-        let mut new_shape = ShapeTracker::new(&S::realized_shape());
-        resolve_local_dyn_dims(&mut new_shape, &mut rhs.shape, false);
         let new_id = self
             .graph()
             .add_op(op::Add)
             .input(self.id, 0, self.shape)
             .input(rhs.id, 0, rhs.shape)
             .finish();
-        GraphTensor::from_id(new_id, new_shape, self.graph_ref)
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 }
 
@@ -269,6 +267,15 @@ impl<S: Shape> GraphTensor<S> {
 
     pub fn equals(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
         -self.not_equals(rhs) + 1.0
+    }
+
+    /// Raise the tensor to a power
+    pub fn pow<T>(self, e: T) -> GraphTensor<S>
+    where
+        Self: Mul<T, Output = Self>,
+    {
+        // Approximate, see full impl here: https://github.com/tinygrad/tinygrad/blob/a32c67760140dd26b60d7932268f2e62e96a66e0/tinygrad/tensor.py#L568
+        self.abs().ln().mul(e).exp()
     }
 }
 

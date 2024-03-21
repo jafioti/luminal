@@ -36,6 +36,22 @@ pub trait ToIds {
     fn to_ids(&self) -> Vec<NodeIndex>;
 }
 
+pub trait ToId {
+    fn to_id(&self) -> NodeIndex;
+}
+
+impl<S: Shape> ToId for GraphTensor<S> {
+    fn to_id(&self) -> NodeIndex {
+        self.id
+    }
+}
+
+impl ToId for NodeIndex {
+    fn to_id(&self) -> NodeIndex {
+        *self
+    }
+}
+
 impl<S: Shape> ToIdsMut for GraphTensor<S> {
     fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
         vec![&mut self.id]
@@ -59,6 +75,16 @@ impl<T: ToIds> ToIds for Vec<T> {
 impl<T: ToIdsMut> ToIdsMut for &mut [T] {
     fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
         self.iter_mut().flat_map(|i| i.to_ids_mut()).collect()
+    }
+}
+impl ToIdsMut for &mut Vec<NodeIndex> {
+    fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
+        self.iter_mut().collect()
+    }
+}
+impl ToIdsMut for &mut [NodeIndex] {
+    fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
+        self.iter_mut().collect()
     }
 }
 impl<T: ToIds> ToIds for &mut [T] {

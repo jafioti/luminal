@@ -200,7 +200,7 @@ impl<S: Shape> HasShape for S {
     }
 }
 
-/// Compile time known shape with 0 dimensions
+/// Compile time known shape with 0 dimensions (scalar)
 pub type R0 = ();
 /// Compile time known shape with 1 dimensions
 pub type R1<const M: usize> = (Const<M>,);

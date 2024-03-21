@@ -147,15 +147,6 @@ impl<S: Shape> GraphTensor<S> {
         self / (self.abs() + 1e-10)
     }
 
-    /// Raise the tensor to a power
-    /// Approximate, see full impl here: https://github.com/tinygrad/tinygrad/blob/a32c67760140dd26b60d7932268f2e62e96a66e0/tinygrad/tensor.py#L568
-    pub fn pow<T>(self, e: T) -> GraphTensor<S>
-    where
-        Self: Mul<T, Output = Self>,
-    {
-        self.abs().ln().mul(e).exp()
-    }
-
     /// The Rectified Linear Unit activation function
     pub fn relu(self) -> GraphTensor<S> {
         self.max_f32(0.)

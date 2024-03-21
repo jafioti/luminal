@@ -426,6 +426,11 @@ impl<S: Shape> ToData<S, Vec<f32>> for Vec<f32> {
         self
     }
 }
+impl ToData<R0, Vec<f32>> for f32 {
+    fn to_data_vec(self) -> Vec<f32> {
+        vec![self]
+    }
+}
 impl<const A: usize> ToData<(Const<A>,), Vec<f32>> for [f32; A] {
     fn to_data_vec(self) -> Vec<f32> {
         self.to_vec()
