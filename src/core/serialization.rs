@@ -219,7 +219,7 @@ impl<'a> std::convert::From<safetensors::tensor::TensorView<'a>> for Tensor {
 mod tests {
     use rand::{thread_rng, Rng};
 
-    use crate::{nn::transformer::Transformer, prelude::*, tests::assert_close};
+    use crate::{prelude::*, tests::assert_close};
 
     use super::*;
 

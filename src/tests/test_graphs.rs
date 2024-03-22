@@ -1,9 +1,6 @@
 use rand::{rngs::StdRng, SeedableRng};
 
-use crate::{
-    nn::{activation::ReLU, linear::Linear, transformer::Transformer},
-    prelude::*,
-};
+use crate::prelude::*;
 
 use super::random_vec_rng;
 

@@ -14,6 +14,7 @@ pub mod prelude {
     pub use crate::graph_tensor::*;
     pub use crate::hl_ops::*;
     pub use crate::module::*;
+    pub use crate::nn::*;
     pub use crate::serialization::*;
     pub use crate::shape::*;
     pub use crate::tensor::*;

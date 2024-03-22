@@ -1,11 +1,17 @@
 use crate::prelude::*;
 
-pub mod activation;
-pub mod convolution;
-pub mod embedding;
-pub mod linear;
-pub mod norm;
-pub mod transformer;
+mod activation;
+pub use activation::*;
+mod convolution;
+pub use convolution::*;
+mod embedding;
+pub use embedding::*;
+mod linear;
+pub use linear::*;
+mod norm;
+pub use norm::*;
+mod transformer;
+pub use transformer::*;
 
 pub struct Repeated<T, const N: usize> {
     pub modules: Vec<T>,

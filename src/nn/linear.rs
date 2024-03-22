@@ -2,7 +2,7 @@ use rand::{thread_rng, Rng};
 
 use crate::prelude::*;
 
-/// A simple linear layer
+/// A simple unbiased linear layer
 pub struct Linear<const A: usize, const B: usize> {
     pub weight: GraphTensor<R2<A, B>>,
 }
@@ -29,45 +29,14 @@ impl<const A: usize, const B: usize> SerializeModule for Linear<A, B> {
     }
 }
 
-// Single
-impl<const A: usize, const B: usize> Module<GraphTensor<R1<A>>> for Linear<A, B> {
-    type Output = GraphTensor<R1<B>>;
-
-    fn forward(&self, input: GraphTensor<R1<A>>) -> Self::Output {
-        input.matmul(self.weight)
-    }
-}
-
-// Batched
-impl<const A: usize, const B: usize, C: Dimension> Module<GraphTensor<(C, Const<A>)>>
-    for Linear<A, B>
+impl<const A: usize, const B: usize, S: Shape> Module<GraphTensor<S>> for Linear<A, B>
+where
+    GraphTensor<S>: Matmul<R2<A, B>>,
 {
-    type Output = GraphTensor<(C, Const<B>)>;
+    type Output = <GraphTensor<S> as Matmul<R2<A, B>>>::Output;
 
-    fn forward(&self, input: GraphTensor<(C, Const<A>)>) -> Self::Output {
+    fn forward(&self, input: GraphTensor<S>) -> Self::Output {
         input.matmul(self.weight)
-    }
-}
-
-// 2x Batched
-impl<const A: usize, const B: usize, C: Dimension, D: Dimension>
-    Module<GraphTensor<(C, D, Const<A>)>> for Linear<A, B>
-{
-    type Output = GraphTensor<(C, D, Const<B>)>;
-
-    fn forward(&self, input: GraphTensor<(C, D, Const<A>)>) -> Self::Output {
-        input.matmul(self.weight)
-    }
-}
-
-// 3x Batched
-impl<const A: usize, const B: usize, C: Dimension, D: Dimension, E: Dimension>
-    Module<GraphTensor<(C, D, E, Const<A>)>> for Linear<A, B>
-{
-    type Output = GraphTensor<(C, D, E, Const<B>)>;
-
-    fn forward(&self, input: GraphTensor<(C, D, E, Const<A>)>) -> Self::Output {
-        input.matmul(self.weight.expand())
     }
 }
 

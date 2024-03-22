@@ -294,6 +294,7 @@ impl Graph {
         );
         let start = std::time::Instant::now();
         for (node, src_ids) in self.linearized_graph.as_ref().unwrap().iter() {
+            println!("Run {}", node.index());
             if self.tensors.contains_key(&(*node, 0)) {
                 continue;
             }

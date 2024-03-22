@@ -3,7 +3,6 @@ use std::collections::VecDeque;
 use itertools::Itertools;
 use petgraph::{visit::EdgeRef, Direction};
 use rustc_hash::{FxHashMap, FxHashSet};
-use tinyvec::ArrayVec;
 
 use crate::{
     op::{
@@ -12,8 +11,6 @@ use crate::{
     },
     prelude::*,
 };
-
-use self::symbolic::Expression;
 
 #[derive(Clone, Debug)]
 pub struct Autograd(FxHashSet<NodeIndex>, NodeIndex);
@@ -68,14 +65,17 @@ impl Compiler for Autograd {
         bfs_queue.push_back(self.1);
         let mut chained_grads = FxHashMap::default();
         // Add loss gradient
-        let loss_shape = graph
+        let mut grad_shape = graph
             .edges_directed(self.1, Direction::Incoming)
-            .next()
-            .unwrap()
-            .weight()
-            .as_data()
-            .unwrap()
-            .2;
+            .find_map(|e| e.weight().as_data().map(|(_, _, s)| s))
+            .unwrap();
+        // If it's a reduction, the loss output will have that dimension removed. Otherwise just use the contiguous version
+        if let Some(SumReduce(dim)) = graph.try_get_op(self.1) {
+            grad_shape.remove_dim(*dim);
+        } else if let Some(MaxReduce(dim)) = graph.try_get_op(self.1) {
+            grad_shape.remove_dim(*dim);
+        }
+        grad_shape = grad_shape.contiguous();
         chained_grads.insert(
             self.1,
             (
@@ -85,7 +85,7 @@ impl Compiler for Autograd {
                         &graph.dyn_map,
                     ))
                     .finish(),
-                loss_shape,
+                grad_shape,
             ),
         );
         while let Some(fwd_node) = bfs_queue.pop_front() {
@@ -108,63 +108,21 @@ impl Compiler for Autograd {
                 }
                 continue;
             }
-            // Determine reverse shapes
-            let reverse_shapes = graph
-                .edges_directed(fwd_node, Direction::Incoming)
-                .filter_map(|e| e.weight().as_data())
-                .sorted_by_key(|(a, _, _)| *a)
-                .map(|(_, _, mut sh)| {
-                    // Reset permutes
-                    let mut dims = vec![0; sh.len()];
-                    for i in 0..sh.len() {
-                        dims[sh.indexes[i]] = i;
-                    }
-                    for (d, i) in dims.iter().zip(sh.indexes.iter_mut()) {
-                        *i = *d;
-                    }
-                    // Reset slices
-                    let mut new_padding = ArrayVec::<[(Expression, Expression); 6]>::new();
-                    let zero = Expression::from(0);
-                    for (i, (a, b)) in sh.slices.iter().enumerate() {
-                        let l = if *a != zero { *a } else { zero };
-                        let r = if *b != Expression::from(i32::MAX) && *b != sh.dims[i] {
-                            sh.dims[i] - b
-                        } else {
-                            zero
-                        };
-                        new_padding.push((l, r));
-                    }
-                    // Reset padding
-                    let mut new_slices = ArrayVec::<[(Expression, Expression); 6]>::new();
-                    for (i, (a, b)) in sh.padding.iter().enumerate() {
-                        let l = if *a != zero { *a } else { zero };
-                        let r = if *b != zero {
-                            *b - sh.dims[i]
-                        } else {
-                            Expression::from(i32::MAX)
-                        };
-                        new_slices.push((l, r));
-                    }
-                    sh.padding = new_padding;
-                    sh.slices = new_slices;
-                    // Reset expands
-                    for i in (0..sh.len()).rev() {
-                        if sh.fake[i] {
-                            sh.remove_dim(i);
-                        }
-                    }
-                    sh
-                })
-                .collect::<Vec<_>>();
+            // Get input tensors
             let inps = graph
                 .edges_directed(fwd_node, Direction::Incoming)
                 .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i)))
                 .sorted_by_key(|(_, (a, _, _))| *a)
-                .map(|(a, _)| a)
-                .zip(reverse_shapes)
+                .map(|(a, (_, _, b))| (a, b))
                 .map(|(n, s)| GraphTensor::<()>::from_id(n, s, graph_ref))
                 .collect::<Vec<_>>();
-            let (prev_grad_node, prev_grad_shape) = chained_grads[&fwd_node];
+            let (prev_grad_node, mut prev_grad_shape) = chained_grads[&fwd_node];
+            // If op is a reduction, we must add the dimension back
+            if let Some(SumReduce(dim)) = op.downcast_ref() {
+                prev_grad_shape.expand(*dim, inps[0].shape.shape()[*dim].clone().into());
+            } else if let Some(MaxReduce(dim)) = op.downcast_ref() {
+                prev_grad_shape.expand(*dim, inps[0].shape.shape()[*dim].clone().into());
+            }
             let prev_grad = GraphTensor::<()>::from_id(prev_grad_node, prev_grad_shape, graph_ref);
             let mut add_grad_to_map = |fwd_id, grad_id, grad_shape| {
                 if let Some((existing_grad_node, existing_grad_shape)) =
@@ -207,7 +165,7 @@ impl Compiler for Autograd {
                 // f(x) = sum_reduce(x)
                 // f'(x) = 1
                 if valid_set.contains(&inps[0].id) {
-                    add_grad_to_map(inps[0].id, prev_grad_node, inps[0].shape);
+                    add_grad_to_map(inps[0].id, prev_grad_node, prev_grad_shape);
                 }
             } else if let Some(op) = op.downcast_ref::<MaxReduce>().cloned() {
                 // f(x) = sum_reduce(x)
@@ -274,29 +232,31 @@ impl Compiler for Autograd {
 
 #[cfg(test)]
 mod tests {
+    use super::Module;
+
     crate::test_imports!();
 
-    fn get_scalar_data(id: NodeIndex, cx: &mut Graph) -> f32 {
-        cx.get_tensor(id, 0)
+    fn get_vec(id: NodeIndex, cx: &mut Graph) -> &Vec<f32> {
+        cx.get_tensor_ref(id, 0)
             .unwrap()
             .data
             .as_any()
             .downcast_ref::<Vec<f32>>()
-            .unwrap()[0]
+            .unwrap()
     }
     #[test]
-    fn test_autograd() {
+    fn test_autograd_linear() {
         let mut cx = Graph::new();
-        let weight = cx.named_tensor::<R0>("Weight").set(2.);
-        let bias = cx.named_tensor::<R0>("Bias").set(-3.);
-        let input = cx.named_tensor::<R0>("Input").set(10.);
-        let output = input * weight + bias;
+        let model = crate::nn::Linear::<2, 1>::initialize(&mut cx);
+        model.weight.set([[2.], [3.]]);
+        let input = cx.named_tensor::<R1<2>>("Input").set([10., 5.]);
+        let output = model.forward(input).retrieve();
 
-        let grads = cx.compile(Autograd::new((weight, bias), output), ());
+        let grads = cx.compile(Autograd::new(state_set(&model), output), ());
         cx.keep_tensors(&grads);
         cx.execute();
 
-        assert_exact(&[get_scalar_data(grads[0], &mut cx)], &[10.0]);
-        assert_exact(&[get_scalar_data(grads[1], &mut cx)], &[1.0]);
+        assert_exact(get_vec(grads[0], &mut cx), &[10.0, 5.0]);
+        assert_exact(&output.data(), &[35.0]);
     }
 }

@@ -8,10 +8,7 @@ use dfdx::{
     tensor_ops::{PermuteTo, ReshapeTo, TryMatMul},
 };
 
-use crate::{
-    nn::{activation::ReLU, linear::Linear},
-    prelude::*,
-};
+use crate::prelude::*;
 
 use super::assert_close;
 
