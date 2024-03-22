@@ -6,21 +6,22 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     op::{
-        Add, Constant, Exp2, Function, LessThan, Log2, MaxReduce, Mod, Mul, Recip, Sin, Sqrt,
-        SumReduce,
+        Add, Constant, ConstantValue, Exp2, Function, LessThan, Log2, MaxReduce, Mod, Mul, Recip,
+        Sin, Sqrt, SumReduce,
     },
     prelude::*,
 };
 
 #[derive(Clone, Debug)]
-pub struct Autograd(FxHashSet<NodeIndex>, NodeIndex);
+pub struct Autograd(Vec<NodeIndex>, NodeIndex);
 
 impl Autograd {
     pub fn new<W: ToIds, L: ToId>(params: W, loss: L) -> Self {
-        Self(params.to_ids().into_iter().collect(), loss.to_id())
+        Self(params.to_ids(), loss.to_id())
     }
 }
 
+// Run dfs with a starting stack and record all encountered nodes in a set
 fn build_dfs_set(
     stack: &mut Vec<NodeIndex>,
     graph: &MainGraph,
@@ -47,47 +48,39 @@ fn build_dfs_set(
 impl Compiler for Autograd {
     type Output = Vec<NodeIndex>;
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, _: T) -> Vec<NodeIndex> {
+        let Autograd(params, loss) = self;
         // Build up valid set for nodes we want to pay attention to (everything outside of this set doesn't matter)
-        let forward_set = build_dfs_set(
-            &mut self.0.clone().into_iter().collect(),
-            graph,
-            Direction::Outgoing,
-        );
-        let backward_set = build_dfs_set(&mut vec![self.1], graph, Direction::Incoming);
-        let valid_set = forward_set
-            .intersection(&backward_set)
-            .copied()
-            .collect::<FxHashSet<_>>();
+        let forward_set = build_dfs_set(&mut params.clone(), graph, Direction::Outgoing);
+        let backward_set = build_dfs_set(&mut vec![*loss], graph, Direction::Incoming);
+        let valid_set: FxHashSet<_> = forward_set.intersection(&backward_set).copied().collect();
 
         // We have the last loss node, now let's backprop through everything to get the gradient graph
         // Referse bfs
         let mut bfs_queue = VecDeque::new();
-        bfs_queue.push_back(self.1);
+        bfs_queue.push_back(*loss);
         let mut chained_grads = FxHashMap::default();
         // Add loss gradient
         let mut grad_shape = graph
-            .edges_directed(self.1, Direction::Incoming)
+            .edges_directed(*loss, Direction::Incoming)
             .find_map(|e| e.weight().as_data().map(|(_, _, s)| s))
-            .unwrap();
+            .unwrap()
+            .contiguous();
         // If it's a reduction, the loss output will have that dimension removed. Otherwise just use the contiguous version
-        if let Some(SumReduce(dim)) = graph.try_get_op(self.1) {
+        if let Some(SumReduce(dim)) = graph.try_get_op(*loss) {
             grad_shape.remove_dim(*dim);
-        } else if let Some(MaxReduce(dim)) = graph.try_get_op(self.1) {
+        } else if let Some(MaxReduce(dim)) = graph.try_get_op(*loss) {
             grad_shape.remove_dim(*dim);
         }
-        grad_shape = grad_shape.contiguous();
         chained_grads.insert(
-            self.1,
+            *loss,
             (
                 graph
-                    .add_op(Constant(
-                        crate::op::ConstantValue::Float(1.0),
-                        &graph.dyn_map,
-                    ))
+                    .add_op(Constant(ConstantValue::Float(1.0), &graph.dyn_map))
                     .finish(),
                 grad_shape,
             ),
         );
+        let weight_set = params.iter().copied().collect::<FxHashSet<_>>();
         while let Some(fwd_node) = bfs_queue.pop_front() {
             if !valid_set.contains(&fwd_node) {
                 continue;
@@ -99,22 +92,21 @@ impl Compiler for Autograd {
                 continue;
             }
             if op.is::<Mod>() || op.is::<LessThan>() {
-                if self.0.contains(&fwd_node) {
-                    panic!(
-                        "Node {} is marked as a weight but is undifferentiable: {:?}",
-                        fwd_node.index(),
-                        graph.node_weight(fwd_node).unwrap()
-                    );
-                }
+                assert!(
+                    !weight_set.contains(&fwd_node),
+                    "{fwd_node:?} is marked as a weight but is undifferentiable: {:?}",
+                    graph.node_weight(fwd_node).unwrap()
+                );
                 continue;
             }
+
+            // Differentiate through fwd_node to get gradients for it's sources
             // Get input tensors
             let inps = graph
                 .edges_directed(fwd_node, Direction::Incoming)
                 .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i)))
                 .sorted_by_key(|(_, (a, _, _))| *a)
-                .map(|(a, (_, _, b))| (a, b))
-                .map(|(n, s)| GraphTensor::<()>::from_id(n, s, graph_ref))
+                .map(|(node, (_, _, sh))| GraphTensor::<()>::from_id(node, sh, graph_ref))
                 .collect::<Vec<_>>();
             let (prev_grad_node, mut prev_grad_shape) = chained_grads[&fwd_node];
             // If op is a reduction, we must add the dimension back
@@ -142,21 +134,21 @@ impl Compiler for Autograd {
             if op.is::<Add>() {
                 // f(a, b) = a + b
                 // df/da = 1
-                // df/db = 1
                 if valid_set.contains(&inps[0].id) {
                     add_grad_to_map(inps[0].id, prev_grad_node, inps[0].shape);
                 }
+                // df/db = 1
                 if valid_set.contains(&inps[1].id) {
                     add_grad_to_map(inps[1].id, prev_grad_node, inps[1].shape);
                 }
             } else if op.is::<Mul>() {
                 // f(a, b) = a * b
                 // df/da = b
-                // df/db = a
                 if valid_set.contains(&inps[0].id) {
                     let a_grad = inps[1] * prev_grad;
                     add_grad_to_map(inps[0].id, a_grad.id, inps[0].shape);
                 }
+                // df/db = a
                 if valid_set.contains(&inps[1].id) {
                     let b_grad = inps[0] * prev_grad;
                     add_grad_to_map(inps[1].id, b_grad.id, inps[1].shape);
@@ -168,19 +160,16 @@ impl Compiler for Autograd {
                     add_grad_to_map(inps[0].id, prev_grad_node, prev_grad_shape);
                 }
             } else if let Some(op) = op.downcast_ref::<MaxReduce>().cloned() {
-                // f(x) = sum_reduce(x)
-                // f'(x) = x == sum_reduce(x)
+                // f(x) = max_reduce(x)
+                // f'(x) = x == max_reduce(x)
                 if valid_set.contains(&inps[0].id) {
-                    let reduced = graph
-                        .add_op(MaxReduce(op.0))
-                        .input(inps[0].id, 0, inps[0].shape)
-                        .finish();
+                    // fwd_nod is already max_reduce(x)
                     let mut shape = inps[0].shape;
                     let size = shape.remove_dim(op.0);
                     shape.expand(op.0, size);
-                    let reduced = GraphTensor::<()>::from_id(reduced, shape, graph_ref);
-                    let a_grad = inps[0].equals(reduced);
-                    add_grad_to_map(a_grad.id, prev_grad_node, inps[0].shape);
+                    let reduced = GraphTensor::<()>::from_id(fwd_node, shape, graph_ref);
+                    let new_grad = inps[0].equals(reduced) * prev_grad;
+                    add_grad_to_map(inps[0].id, new_grad.id, new_grad.shape);
                 }
             } else {
                 if !valid_set.contains(&inps[0].id) {
