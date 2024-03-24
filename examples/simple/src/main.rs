@@ -1,4 +1,4 @@
-use luminal::{nn::linear::Linear, prelude::*};
+use luminal::prelude::*;
 
 fn main() {
     // Create a new graph

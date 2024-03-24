@@ -937,6 +937,7 @@ impl<T: CudaFloat> Operator for CudaMaxReduce<T> {
 pub struct PrimitiveCompiler<T>(PhantomData<T>);
 
 impl<T: CudaFloat> Compiler for PrimitiveCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = CudaDevice::new(0).unwrap();
         // Go through the graph and insert copy ops
@@ -1146,6 +1147,7 @@ impl<T: CudaFloat> Compiler for PrimitiveCompiler<T> {
 pub struct CopyCompiler<T>(PhantomData<T>);
 
 impl<T: CudaFloat> Compiler for CopyCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         for (first, second) in graph
             .edge_indices()

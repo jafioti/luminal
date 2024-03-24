@@ -11,7 +11,6 @@ pub const HEADS: usize = 32;
 pub const LAYERS: usize = 32;
 
 use luminal::{
-    nn::{embedding::Embedding, norm::RMSNorm},
     prelude::*,
     shape::symbolic::{BigExpression, Expression},
 };
