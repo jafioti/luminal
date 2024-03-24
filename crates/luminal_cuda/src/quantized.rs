@@ -259,6 +259,7 @@ impl<T> CudaQuantizedCompiler<T> {
 }
 
 impl<T: CudaFloat + Default> Compiler for CudaQuantizedCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
         let device = CudaDevice::new(0).unwrap();
         let mut weight_ids = self.0.clone();

@@ -85,6 +85,7 @@ impl<T: CudaFloat> Operator for CudaSub<T> {
 pub struct SubtractionCompiler<T: CudaFloat>(PhantomData<T>);
 
 impl<T: CudaFloat> Compiler for SubtractionCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = CudaDevice::new(0).unwrap();
         let (lhs, rhs) = (node(), node());
@@ -208,6 +209,7 @@ impl<T: CudaFloat> Operator for CudaEqual<T> {
 pub struct EqualCompiler<T: CudaFloat>(PhantomData<T>);
 
 impl<T: CudaFloat> Compiler for EqualCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = CudaDevice::new(0).unwrap();
         let one = constant::<T>(1.);
@@ -343,6 +345,7 @@ impl<T: CudaFloat> Operator for CudaGather<T> {
 pub struct GatherCompiler<T: CudaFloat>(PhantomData<T>);
 
 impl<T: CudaFloat> Compiler for GatherCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = CudaDevice::new(0).unwrap();
         let indexes = node();
