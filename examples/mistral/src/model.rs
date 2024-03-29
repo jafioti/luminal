@@ -1,7 +1,6 @@
 use std::{marker::PhantomData, ops::Div};
 
 use luminal::{
-    nn::{embedding::Embedding, norm::RMSNorm},
     prelude::{binary::F32Pow, *},
     shape::symbolic::{BigExpression, Expression},
 };

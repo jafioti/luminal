@@ -75,6 +75,7 @@ impl<T: CudaFloat> Operator for CudaARange<T> {
 pub struct ARangeCompiler<T: CudaFloat>(PhantomData<T>);
 
 impl<T: CudaFloat> Compiler for ARangeCompiler<T> {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let dev = CudaDevice::new(0).unwrap();
         // TODO: Make sure this actually checks the shape transformations to ensure pooling happens

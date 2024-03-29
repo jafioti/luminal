@@ -109,6 +109,7 @@ impl<T: CudaFloat + 'static> Compiler for MatMulCompiler<T>
 where
     CudaData<T>: Data,
 {
+    type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = CudaDevice::new(0).unwrap();
         // Look for the matmul pattern
