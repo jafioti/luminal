@@ -19,15 +19,15 @@ pub trait Module<I> {
 }
 
 /// Mapping from weight name to node id
-pub fn state_dict<M: SerializeModule>(model: &M) -> FxHashMap<String, NodeIndex> {
+pub fn param_dict<M: SerializeModule>(model: M) -> FxHashMap<String, NodeIndex> {
     let mut s = Serializer::default();
     model.serialize(&mut s);
     s.state
 }
 
 /// Set of weight node ids
-pub fn state_set<M: SerializeModule>(model: &M) -> Vec<NodeIndex> {
-    state_dict(model)
+pub fn params<M: SerializeModule>(model: M) -> Vec<NodeIndex> {
+    param_dict(model)
         .into_iter()
         .sorted_by_key(|(k, _)| k.clone())
         .map(|(_, v)| v)

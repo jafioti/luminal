@@ -9,11 +9,17 @@ use safetensors::{SafeTensorError, SafeTensors};
 use std::borrow::Cow;
 use std::fs::File;
 
-use super::module::state_dict;
+use super::module::param_dict;
 
 /// Tell luminal how to represent the module as a dict of (String, NodeIndex)'s
 pub trait SerializeModule {
     fn serialize(&self, s: &mut Serializer);
+}
+
+impl<T: SerializeModule> SerializeModule for &T {
+    fn serialize(&self, s: &mut Serializer) {
+        (*self).serialize(s)
+    }
 }
 
 /// Something that can load the state of a module into the graph
@@ -29,13 +35,13 @@ pub trait Saver {
 }
 
 /// Extract the state dict from a model
-pub struct StateDictSaver;
+pub struct ParamDictSaver;
 
-impl Saver for StateDictSaver {
+impl Saver for ParamDictSaver {
     type Saved = FxHashMap<String, Tensor>;
     fn save<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Saved {
         // Attempt to get all tensor data from the graph
-        state_dict(model)
+        param_dict(model)
             .into_iter()
             .map(|(k, v)| (k, graph.get_tensor(v, 0).unwrap()))
             .collect()
@@ -59,30 +65,30 @@ impl Saver for SafeTensorSaver {
     type Saved = Result<(), SafeTensorError>;
     fn save<M: SerializeModule>(self, model: &M, graph: &mut Graph) -> Self::Saved {
         // Attempt to get all tensor data from the graph
-        let state_dict: FxHashMap<_, _> = state_dict(model)
+        let param_dict: FxHashMap<_, _> = param_dict(model)
             .into_iter()
             .map(|(k, v)| (k, graph.get_tensor_ref(v, 0).unwrap()))
             .collect();
-        safetensors::serialize_to_file(state_dict, &None, self.path.as_ref())
+        safetensors::serialize_to_file(param_dict, &None, self.path.as_ref())
     }
 }
 
 /// Load the model from a state dict
-pub struct StateDictLoader {
-    state_dict: FxHashMap<String, Tensor>,
+pub struct ParamDictLoader {
+    param_dict: FxHashMap<String, Tensor>,
 }
 
-impl StateDictLoader {
-    pub fn new(state_dict: FxHashMap<String, Tensor>) -> Self {
-        Self { state_dict }
+impl ParamDictLoader {
+    pub fn new(param_dict: FxHashMap<String, Tensor>) -> Self {
+        Self { param_dict }
     }
 }
 
-impl Loader for StateDictLoader {
+impl Loader for ParamDictLoader {
     type Output = ();
     fn load<M: SerializeModule>(mut self, model: &M, graph: &mut Graph) {
-        for (s, n) in state_dict(model) {
-            let t = self.state_dict.remove(&s).unwrap();
+        for (s, n) in param_dict(model) {
+            let t = self.param_dict.remove(&s).unwrap();
             graph.no_delete.insert(n);
             graph.tensors.insert((n, 0), t);
         }
@@ -106,7 +112,7 @@ impl SafeTensorLoader {
 impl Loader for SafeTensorLoader {
     type Output = ();
     fn load<M: SerializeModule>(self, model: &M, graph: &mut Graph) {
-        for (weight_name, node_index) in state_dict(model) {
+        for (weight_name, node_index) in param_dict(model) {
             if let Some(loading_node) = graph
                 .graph
                 .node_weight_mut(node_index)
@@ -238,12 +244,12 @@ mod tests {
 
         cx.execute_no_delete();
 
-        let state_dict = StateDictSaver.save(&model, &mut cx);
+        let param_dict = ParamDictSaver.save(&model, &mut cx);
         let out1 = out1.data();
 
         let mut cx = Graph::new();
         let model: Transformer<32, 5, 4, 4, 3, 2> = InitModule::initialize(&mut cx);
-        StateDictLoader::new(state_dict).load(&model, &mut cx);
+        ParamDictLoader::new(param_dict).load(&model, &mut cx);
         let enc = cx.tensor::<R2<24, 32>>().set(enc_data);
         let trg = cx.tensor::<R2<20, 32>>().set(trg_data);
         let mut out2 = model.forward((trg, enc)).retrieve();
