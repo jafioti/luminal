@@ -3,6 +3,7 @@ use std::{any::TypeId, collections::VecDeque};
 use itertools::Itertools;
 use petgraph::{visit::EdgeRef, Direction};
 use rustc_hash::{FxHashMap, FxHashSet};
+use tinyvec::ArrayVec;
 
 use crate::{
     op::{
@@ -105,23 +106,21 @@ impl Compiler for Autograd {
                 // f(a, b) = a + b
                 // df/da = 1
                 if valid_set.contains(&inps[0].id) {
-                    add_grad(graph, prev_grad, inps[0], &mut grads);
+                    add_grad(prev_grad, inps[0], graph, &mut grads);
                 }
                 // df/db = 1
                 if valid_set.contains(&inps[1].id) {
-                    add_grad(graph, prev_grad, inps[1], &mut grads);
+                    add_grad(prev_grad, inps[1], graph, &mut grads);
                 }
             } else if op == TypeId::of::<Mul>() {
                 // f(a, b) = a * b
                 // df/da = b
                 if valid_set.contains(&inps[0].id) {
-                    let grad = inps[1] * prev_grad;
-                    add_grad(graph, grad, inps[0], &mut grads);
+                    add_grad(inps[1] * prev_grad, inps[0], graph, &mut grads);
                 }
                 // df/db = a
                 if valid_set.contains(&inps[1].id) {
-                    let b_grad = inps[0] * prev_grad;
-                    add_grad(graph, b_grad, inps[1], &mut grads);
+                    add_grad(inps[0] * prev_grad, inps[1], graph, &mut grads);
                 }
             } else if let Some(op) = unsafe { graph_ref.as_ref().unwrap() } // Needed to get around multiple borrows
                 .try_get_op::<SumReduce>(fwd_node)
@@ -133,7 +132,7 @@ impl Compiler for Autograd {
                     prev_grad
                         .shape
                         .expand(op.0, inps[0].shape.dims[inps[0].shape.indexes[op.0]]);
-                    add_grad(graph, prev_grad, inps[0], &mut grads);
+                    add_grad(prev_grad, inps[0], graph, &mut grads);
                 }
             } else if let Some(op) = unsafe { graph_ref.as_ref().unwrap() } // Needed to get around multiple borrows
                 .try_get_op::<MaxReduce>(fwd_node)
@@ -147,8 +146,8 @@ impl Compiler for Autograd {
                         .shape
                         .expand(op.0, inps[0].shape.dims[inps[0].shape.indexes[op.0]]);
                     let reduced = GraphTensor::<()>::from_id(fwd_node, prev_grad.shape, graph_ref);
-                    let new_grad = inps[0].equals(reduced) * prev_grad;
-                    add_grad(graph, new_grad, inps[0], &mut grads);
+                    let grad = inps[0].equals(reduced) * prev_grad;
+                    add_grad(grad, inps[0], graph, &mut grads);
                 }
             } else {
                 if !valid_set.contains(&inps[0].id) {
@@ -177,8 +176,7 @@ impl Compiler for Autograd {
                 } else {
                     unreachable!()
                 };
-                let new_grad = local_grad * prev_grad; // Chain rule
-                add_grad(graph, new_grad, inps[0], &mut grads);
+                add_grad(local_grad * prev_grad, inps[0], graph, &mut grads);
             }
 
             // Continue bfs
@@ -188,27 +186,31 @@ impl Compiler for Autograd {
         }
 
         // Create a gradient array to match 1-1 with the weight array passed in
-        let mut grad_array = vec![];
-        for weight in &self.0 {
-            let grad = grads[weight].0;
-            graph.no_delete.insert(grad);
-            grad_array.push(grad);
-        }
-        grad_array
+        self.0
+            .iter()
+            .map(|weight| {
+                let grad = grads[weight].0;
+                graph.no_delete.insert(grad);
+                grad
+            })
+            .collect()
     }
 }
 
 fn add_grad(
-    graph: &mut Graph,
     mut grad: GraphTensor<()>,
     fwd: GraphTensor<()>,
+    graph: &mut Graph,
     grad_map: &mut FxHashMap<NodeIndex, (NodeIndex, ShapeTracker)>,
 ) {
     // Reshape gradient to match the shape of the input source (before the input was reshaped)
     // Undo permutes
+    let mut new_indexes = ArrayVec::new();
+    new_indexes.resize(fwd.shape.len(), 0);
     for i in 0..fwd.shape.len() {
-        grad.shape.indexes[fwd.shape.indexes[i]] = i;
+        new_indexes[fwd.shape.indexes[i]] = grad.shape.indexes[i];
     }
+    grad.shape.indexes = new_indexes;
 
     // Undo expands (sum reduce)
     for i in (0..fwd.shape.len()).rev() {
@@ -219,6 +221,20 @@ fn add_grad(
                 .finish();
             grad.shape.remove_dim(fwd.shape.indexes[i]);
             grad.shape = grad.shape.contiguous();
+        }
+    }
+    // Check to see if a reshape was done here. If so, we may need to assert grad shape is contiguous or insert a contiguous call
+    if let Some((_, _, mut pre_fwd_shape)) = graph.get_sources(fwd.id).first() {
+        if let Some(SumReduce(dim)) = graph.try_get_op(fwd.id) {
+            pre_fwd_shape.remove_dim(*dim);
+        } else if let Some(MaxReduce(dim)) = graph.try_get_op(fwd.id) {
+            pre_fwd_shape.remove_dim(*dim);
+        }
+        if grad.shape.shape() != pre_fwd_shape.shape() {
+            if !grad.shape.is_contiguous() {
+                grad = grad.contiguous();
+            }
+            grad.shape = pre_fwd_shape.contiguous();
         }
     }
 

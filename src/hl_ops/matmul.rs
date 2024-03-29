@@ -28,7 +28,7 @@ impl<A: Dimension, B: Dimension> Matmul<(A, B)> for GraphTensor<(A,)> {
         let r = s.matmul(rhs);
 
         // Sum Reduce
-        r.sum_reduce()
+        r.reshape()
     }
 }
 
