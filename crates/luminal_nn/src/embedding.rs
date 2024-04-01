@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use luminal::prelude::*;
 
 pub struct Embedding<const N: usize, const DIM: usize> {
     pub weight: GraphTensor<R2<N, DIM>>,
@@ -13,7 +13,7 @@ impl<const A: usize, const B: usize> InitModule for Embedding<A, B> {
 }
 
 impl<const A: usize, const B: usize> SerializeModule for Embedding<A, B> {
-    fn serialize(&self, s: &mut crate::serialization::Serializer) {
+    fn serialize(&self, s: &mut luminal::serialization::Serializer) {
         s.tensor("weight", self.weight);
     }
 }
@@ -49,11 +49,11 @@ mod tests {
         tensor::{Cpu, TensorFromVec},
     };
 
-    use crate::prelude::Module;
+    use luminal::prelude::Module;
 
     use super::Embedding;
     use dfdx::nn::BuildOnDevice;
-    crate::test_imports!();
+    luminal::test_imports!();
 
     #[test]
     fn test_embedding() {

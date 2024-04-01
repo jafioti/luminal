@@ -75,7 +75,7 @@ fn main() {
         (&mut input, &mut logits, &mut cache_src, &mut cache_dest),
     );
     // Keep model weights
-    let model_weights = downstream(state_set(&model), &cx);
+    let model_weights = downstream(params(&model), &cx);
     cx.keep_tensors(&model_weights);
     let cache_src_set = downstream(&cache_src, &cx);
     let cache_dest_set = cache_dest.to_ids();

@@ -10,17 +10,15 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  cpu_test:
-    name: CPU Tests
+  unit_test:
+    name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
     - uses: actions/checkout@v3
-    - name: Build
-      run: cargo build --no-default-features --verbose
     - name: Run tests
-      run: cargo test --no-default-features --verbose
+      run: cargo test --workspace --verbose
 #   macos_test:
 #     name: MacOS Tests
 #     runs-on: macos-13

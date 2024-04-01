@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use luminal::prelude::*;
 use rand::{thread_rng, Rng};
 
 pub struct Conv1D<
@@ -48,7 +48,7 @@ impl<
     > SerializeModule
     for Conv1D<CHANNELS_IN, CHANNELS_OUT, KERNEL, STRIDE, DILATION, CHANNELS_IN_TIMES_KERNEL>
 {
-    fn serialize(&self, s: &mut crate::serialization::Serializer) {
+    fn serialize(&self, s: &mut luminal::serialization::Serializer) {
         s.tensor("weight", self.weight);
     }
 }
@@ -156,7 +156,7 @@ impl<
         CHANNELS_IN_TIMES_KERNELX_KERNELY,
     >
 {
-    fn serialize(&self, s: &mut crate::serialization::Serializer) {
+    fn serialize(&self, s: &mut luminal::serialization::Serializer) {
         s.tensor("weight", self.weight);
     }
 }
@@ -218,8 +218,8 @@ impl<
 
 #[cfg(test)]
 mod tests {
-    use super::Conv1D;
-    use crate::{nn::convolution::Conv2D, prelude::*, tests::assert_close};
+    use super::{Conv1D, Conv2D};
+    use luminal::{prelude::*, tests::assert_close};
 
     #[test]
     fn test_conv1d_simple() {

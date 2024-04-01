@@ -240,7 +240,7 @@ fn add_grad(
 mod tests {
     use super::*;
     use dfdx::nn::Module as DModule;
-    use luminal::{nn, prelude::Module as LModule};
+    use luminal::prelude::Module as LModule;
     luminal::test_imports!();
 
     fn get_vec(grad: (NodeIndex, ShapeTracker), cx: &mut Graph) -> Vec<f32> {
@@ -288,7 +288,11 @@ mod tests {
     #[test]
     fn test_autograd_mlp() {
         let mut cx = Graph::new();
-        let model = <(nn::Linear<2, 2>, nn::ReLU, nn::Linear<2, 1>)>::initialize(&mut cx);
+        let model = <(
+            luminal_nn::Linear<2, 2>,
+            luminal_nn::ReLU,
+            luminal_nn::Linear<2, 1>,
+        )>::initialize(&mut cx);
         model.0.weight.set([[2., 4.], [3., 1.]]);
         model.2.weight.set([[6.], [5.]]);
         let input = cx.named_tensor("Input").set([10., 5.]);
@@ -362,7 +366,7 @@ mod tests {
     #[test]
     fn test_autograd_transformer() {
         let mut cx = Graph::new();
-        let model: luminal::nn::TransformerEncoderBlock<3, 4, 1> = InitModule::initialize(&mut cx);
+        let model: luminal_nn::TransformerEncoderBlock<3, 4, 1> = InitModule::initialize(&mut cx);
         model
             .attention
             .w_k

@@ -1,7 +1,5 @@
-use crate::{
-    nn::{activation::ReLU, linear::Linear, Repeated},
-    prelude::*,
-};
+use crate::{Linear, ReLU, Repeated};
+use luminal::prelude::*;
 
 use super::attention::MultiHeadSelfAttention;
 
@@ -74,7 +72,7 @@ mod tests {
         tensor_ops::PermuteTo,
     };
 
-    use crate::{
+    use luminal::{
         prelude::{Module, *},
         tests::assert_close,
     };
@@ -116,7 +114,7 @@ mod tests {
             .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
         let a = cx
-            .tensor::<(Dyn<'s'>, crate::shape::Const<3>)>()
+            .tensor::<(Dyn<'s'>, luminal::shape::Const<3>)>()
             .set_dyn(vec![-1., 2., 3., 3., 3., -1.], &[2, 3]);
         let b = model.forward(a).retrieve();
 

@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use luminal::prelude::*;
 
 /// Rectified Linear Unit activation function
 pub struct ReLU;
@@ -87,12 +87,12 @@ impl<S: ConstShape> Module<GraphTensor<S>> for Tanh {
 #[cfg(test)]
 mod tests {
     use super::ReLU;
-    use crate::{
-        nn::linear::Linear,
+    use crate::Linear;
+    use dfdx::prelude::{Module as DfdxModule, *};
+    use luminal::{
         prelude::{Module, *},
         tests::assert_close,
     };
-    use dfdx::prelude::{Module as DfdxModule, *};
 
     #[test]
     fn test_relu_and_linear() {

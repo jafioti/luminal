@@ -1,13 +1,13 @@
 use std::{marker::PhantomData, ops::Mul};
 
-use crate::prelude::*;
+use luminal::prelude::*;
 
 /// A simple layer norm layer. Calls `tensor.layer_norm::<DIM>()`.
 #[derive(Default)]
 pub struct LayerNorm<Ax: Axes>(PhantomData<Ax>);
 
 impl<Ax: Axes> InitModule for LayerNorm<Ax> {
-    fn initialize(_: &mut crate::prelude::Graph) -> Self {
+    fn initialize(_: &mut luminal::prelude::Graph) -> Self {
         Self::default()
     }
 }

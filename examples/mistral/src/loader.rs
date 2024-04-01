@@ -171,7 +171,7 @@ impl Loader for Q8Loader {
 
         // Create weight loading closures
         let mut q8_weights = vec![];
-        for (weight_name, node_index) in state_dict(model) {
+        for (weight_name, node_index) in param_dict(model) {
             if let Some(loading_node) = graph
                 .graph
                 .node_weight_mut(node_index)

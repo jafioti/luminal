@@ -9,6 +9,7 @@ cuda = ["dep:luminal_cuda"]
 
 [dependencies]
 luminal = {path="../.."}
+luminal_nn = {path="../../crates/luminal_nn"}
 luminal_metal = {path="../../crates/luminal_metal", optional=true}
 luminal_cuda = {path="../../crates/luminal_cuda", optional=true}
 rust_tokenizers = "8.1.0"

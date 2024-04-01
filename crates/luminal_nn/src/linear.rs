@@ -1,6 +1,6 @@
 use rand::{thread_rng, Rng};
 
-use crate::prelude::*;
+use luminal::prelude::*;
 
 /// A simple unbiased linear layer
 pub struct Linear<const A: usize, const B: usize> {
@@ -24,7 +24,7 @@ impl<const A: usize, const B: usize> InitModule for Linear<A, B> {
 }
 
 impl<const A: usize, const B: usize> SerializeModule for Linear<A, B> {
-    fn serialize(&self, s: &mut crate::serialization::Serializer) {
+    fn serialize(&self, s: &mut luminal::serialization::Serializer) {
         s.tensor("weight", self.weight);
     }
 }
@@ -43,7 +43,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::Linear;
-    use crate::{prelude::*, tests::assert_close};
+    use luminal::{prelude::*, tests::assert_close};
     #[test]
     fn test_linear() {
         let mut cx = Graph::new();

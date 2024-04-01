@@ -1,4 +1,5 @@
 use luminal::prelude::*;
+use luminal_nn::Linear;
 
 fn main() {
     // Create a new graph
@@ -8,10 +9,11 @@ fn main() {
     // Make an input tensor
     let a = cx.tensor::<R1<4>>().set(vec![1., 2., 3., 4.]);
     // Feed tensor through model
-    let mut b = model.forward(a).retrieve();
+    let b = model.forward(a).retrieve();
 
-    // Execute the graph
+    // Display the graph to see the ops
     cx.display();
+    // Execute the graph
     cx.execute_debug();
     // Print the results
     println!("B: {:?}", b.data());

@@ -1,6 +1,7 @@
 use std::ops::Mul;
 
-use crate::{nn::linear::Linear, prelude::*};
+use crate::Linear;
+use luminal::prelude::*;
 
 // This is still single head attention because I need a runtime reshape, like the try_reshape in dfdx
 pub struct MultiHeadSelfAttention<
@@ -184,11 +185,11 @@ impl<
 
 #[cfg(test)]
 mod tests {
-    use crate::{
+    use dfdx::prelude::{Module as DfdxModule, *};
+    use luminal::{
         prelude::{Module, *},
         tests::assert_close,
     };
-    use dfdx::prelude::{Module as DfdxModule, *};
 
     use super::MultiHeadSelfAttention;
     #[test]
@@ -212,8 +213,8 @@ mod tests {
             .weight
             .set(vec![1., 22., 3., 1., 2., 3., 1., 2., 3.]);
 
-        let a = cx.tensor::<(Dyn<'d'>, crate::shape::Const<3>)>();
-        let e = cx.tensor::<(Dyn<'e'>, crate::shape::Const<3>)>();
+        let a = cx.tensor::<(Dyn<'d'>, luminal::shape::Const<3>)>();
+        let e = cx.tensor::<(Dyn<'e'>, luminal::shape::Const<3>)>();
         let b = model.forward((e, a, e));
 
         a.set_dyn(

@@ -1,4 +1,6 @@
-workspace = { members = ["crates/luminal_training"] }
+[workspace]
+members = [ "crates/luminal_nn","crates/luminal_training" ]
+exclude = [ "crates/luminal_metal","crates/luminal_cuda", "examples/llama", "examples/mistral", "examples/simple" ]
 
 [package]
 name = "luminal"

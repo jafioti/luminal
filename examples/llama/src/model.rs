@@ -14,6 +14,7 @@ use luminal::{
     prelude::*,
     shape::symbolic::{BigExpression, Expression},
 };
+use luminal_nn::{Embedding, RMSNorm};
 
 // Full LLaMa model implementation, heavily based off of https://github.com/coreylowman/llama-dfdx/blob/main/src/modeling.rs
 
@@ -196,7 +197,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             .expand();
 
         let outputs = weights
-            .softmax::<3>()
+            .softmax::<Axis<3>>()
             .matmul(values)
             .permute::<_, Axes4<0, 2, 1, 3>>()
             .reshape::<(Batch, CurSeq, Const<HIDDEN>)>();

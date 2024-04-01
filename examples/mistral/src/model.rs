@@ -4,6 +4,7 @@ use luminal::{
     prelude::{binary::F32Pow, *},
     shape::symbolic::{BigExpression, Expression},
 };
+use luminal_nn::{Embedding, RMSNorm};
 
 // Mistral 7B Config
 pub const VOCAB_SIZE: usize = 32000;
@@ -168,7 +169,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
 
         // Calculate final outputs
         let output = attention_weights
-            .softmax::<4>()
+            .softmax::<Axis<4>>()
             // Apply distribution to values
             .matmul(repeated_values)
             // Merge heads

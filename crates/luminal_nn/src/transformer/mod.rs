@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use luminal::prelude::*;
 
 mod attention;
 pub use attention::*;
@@ -83,10 +83,11 @@ mod tests {
         tensor_ops::PermuteTo,
     };
 
-    use crate::{
+    use luminal::{
         prelude::{Module, *},
         tests::assert_close,
     };
+    use rand::{thread_rng, Rng};
 
     use super::Transformer;
     #[test]
@@ -174,8 +175,8 @@ mod tests {
             .weight
             .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
-        let a = cx.tensor::<(Dyn<'d'>, crate::shape::Const<3>)>();
-        let e = cx.tensor::<(Dyn<'e'>, crate::shape::Const<3>)>();
+        let a = cx.tensor::<(Dyn<'d'>, luminal::shape::Const<3>)>();
+        let e = cx.tensor::<(Dyn<'e'>, luminal::shape::Const<3>)>();
         let b = model.forward((a, e));
 
         a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], &[2, 3]);
@@ -387,5 +388,36 @@ mod tests {
         let d_b = d_model.forward((d_a, d_e));
 
         assert_close(&b.data(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_serialization() {
+        let mut rng = thread_rng();
+        let enc_data = (0..(24 * 32)).map(|_| rng.gen()).collect::<Vec<f32>>();
+        let trg_data = (0..(20 * 32)).map(|_| rng.gen()).collect::<Vec<f32>>();
+
+        let mut cx = Graph::new();
+        let model: Transformer<32, 5, 4, 4, 3, 2> = InitModule::initialize(&mut cx);
+        let enc = cx.tensor::<R2<24, 32>>().set(enc_data.clone()).keep();
+        let trg = cx.tensor::<R2<20, 32>>().set(trg_data.clone()).keep();
+        let mut out1 = model.forward((trg, enc)).retrieve();
+        cx.compile(CPUCompiler::default(), &mut out1);
+
+        cx.execute_no_delete();
+
+        let param_dict = ParamDictSaver.save(&model, &mut cx);
+        let out1 = out1.data();
+
+        let mut cx = Graph::new();
+        let model: Transformer<32, 5, 4, 4, 3, 2> = InitModule::initialize(&mut cx);
+        ParamDictLoader::new(param_dict).load(&model, &mut cx);
+        let enc = cx.tensor::<R2<24, 32>>().set(enc_data);
+        let trg = cx.tensor::<R2<20, 32>>().set(trg_data);
+        let mut out2 = model.forward((trg, enc)).retrieve();
+
+        cx.compile(CPUCompiler::default(), &mut out2);
+        cx.execute();
+
+        assert_close(&out1, &out2.data());
     }
 }
