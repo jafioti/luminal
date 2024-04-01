@@ -65,6 +65,11 @@ impl<S: Shape> GraphTensor<S> {
         ((std::f32::consts::PI / 2.) - self).sin()
     }
 
+    /// Square every element in the tensor
+    pub fn square(self) -> GraphTensor<S> {
+        self * self
+    }
+
     /// The square root function
     pub fn sqrt(self) -> GraphTensor<S> {
         let new_id = self
@@ -76,15 +81,15 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Scale so std is 1.0
-    pub fn std_norm<const DIM: usize, T>(self, epsilon: T) -> GraphTensor<S>
+    pub fn std_norm<Ax: Axes, T>(self, epsilon: T) -> GraphTensor<S>
     where
-        <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
-        GraphTensor<<S as ReduceShape<Axis<DIM>>>::Reduced>:
-            Add<T, Output = GraphTensor<<S as ReduceShape<Axis<DIM>>>::Reduced>>,
-        S: ReduceShape<Axis<DIM>>,
+        <S as ReduceShape<Ax>>::Reduced: Shape,
+        GraphTensor<<S as ReduceShape<Ax>>::Reduced>:
+            Add<T, Output = GraphTensor<<S as ReduceShape<Ax>>::Reduced>>,
+        S: ReduceShape<Ax>,
     {
         (self * self)
-            .mean_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
+            .mean_reduce::<<S as ReduceShape<Ax>>::Reduced, _>()
             .add(epsilon)
             .sqrt()
             .recip()
@@ -93,40 +98,57 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Center so mean is 0.0
-    pub fn mean_norm<const DIM: usize>(self) -> GraphTensor<S>
+    pub fn mean_norm<Ax: Axes>(self) -> GraphTensor<S>
     where
-        <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
-        S: ReduceShape<Axis<DIM>>,
+        <S as ReduceShape<Ax>>::Reduced: Shape,
+        S: ReduceShape<Ax>,
     {
         self - self
-            .mean_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
+            .mean_reduce::<<S as ReduceShape<Ax>>::Reduced, _>()
             .expand_to(self.shape)
     }
 
     /// Applies a layer norm along an axis
-    pub fn layer_norm<const DIM: usize, T>(self, epsilon: T) -> GraphTensor<S>
+    pub fn layer_norm<Ax: Axes, T>(self, epsilon: T) -> GraphTensor<S>
     where
-        <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
-        GraphTensor<<S as ReduceShape<Axis<DIM>>>::Reduced>:
-            Add<T, Output = GraphTensor<<S as ReduceShape<Axis<DIM>>>::Reduced>>,
-        S: ReduceShape<Axis<DIM>>,
+        <S as ReduceShape<Ax>>::Reduced: Shape,
+        GraphTensor<<S as ReduceShape<Ax>>::Reduced>:
+            Add<T, Output = GraphTensor<<S as ReduceShape<Ax>>::Reduced>>,
+        S: ReduceShape<Ax>,
     {
-        self.mean_norm().std_norm(epsilon)
+        self.mean_norm::<Ax>().std_norm::<Ax, T>(epsilon)
     }
 
     /// Applies a softmax function along an axis
-    pub fn softmax<const DIM: usize>(self) -> GraphTensor<S>
+    pub fn softmax<Ax: Axes>(self) -> GraphTensor<S>
     where
-        <S as ReduceShape<Axis<DIM>>>::Reduced: Shape,
-        S: ReduceShape<Axis<DIM>>,
+        <S as ReduceShape<Ax>>::Reduced: Shape,
+        S: ReduceShape<Ax>,
     {
         let m = self
             - self
-                .max_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
+                .max_reduce::<<S as ReduceShape<Ax>>::Reduced, _>()
                 .expand_to(self.shape);
         let exp = m.exp();
         exp / exp
-            .sum_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
+            .sum_reduce::<<S as ReduceShape<Ax>>::Reduced, _>()
+            .expand()
+    }
+
+    /// Applies a log softmax function along an axis
+    pub fn log_softmax<Ax: Axes>(self) -> GraphTensor<S>
+    where
+        <S as ReduceShape<Ax>>::Reduced: Shape,
+        S: ReduceShape<Ax>,
+    {
+        let m = self
+            - self
+                .max_reduce::<<S as ReduceShape<Ax>>::Reduced, _>()
+                .expand_to(self.shape);
+        m - m
+            .exp()
+            .sum_reduce::<<S as ReduceShape<Ax>>::Reduced, _>()
+            .ln()
             .expand()
     }
 
@@ -204,8 +226,8 @@ mod tests {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
         let a = cx.tensor::<R2<2, 3>>().set(a_data.clone());
-        let b = a.layer_norm::<0, _>(1e-5).retrieve();
-        let c = a.layer_norm::<1, _>(1e-5).retrieve();
+        let b = a.layer_norm::<LAxis<0>, _>(1e-5).retrieve();
+        let c = a.layer_norm::<LAxis<1>, _>(1e-5).retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -222,7 +244,7 @@ mod tests {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
         let a = cx.tensor::<R2<2, 3>>().set(a_data.clone());
-        let b = a.softmax::<1>().retrieve();
+        let b = a.softmax::<LAxis<1>>().retrieve();
 
         cx.execute();
 

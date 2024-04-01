@@ -60,9 +60,9 @@ impl<const DIM: usize, const FF: usize, const HEADS: usize, S: Dimension, B: Dim
 
     fn forward(&self, x: GraphTensor<(B, S, Const<DIM>)>) -> Self::Output {
         let x = x + self.attention.forward(x);
-        let x = x.layer_norm::<2, _>(1e-5);
+        let x = x.layer_norm::<Axis<2>, _>(1e-5);
         let x = x + self.ff.forward(x);
-        x.layer_norm::<2, _>(1e-5)
+        x.layer_norm::<Axis<2>, _>(1e-5)
     }
 }
 

@@ -3,6 +3,8 @@ use crate::{
     prelude::{symbolic::BigExpression, *},
 };
 
+use self::symbolic::Expression;
+
 impl<S: Shape> GraphTensor<S> {
     /// Cumulative sum last dimension
     pub fn cumsum_last_dim(mut self) -> Self {
@@ -33,12 +35,42 @@ impl<S: Shape> GraphTensor<S> {
     }
 }
 
+impl From<f32> for ConstantValue {
+    fn from(value: f32) -> Self {
+        ConstantValue::Float(value)
+    }
+}
+impl From<f64> for ConstantValue {
+    fn from(value: f64) -> Self {
+        ConstantValue::Float(value as f32)
+    }
+}
+impl From<BigExpression> for ConstantValue {
+    fn from(value: BigExpression) -> Self {
+        ConstantValue::Expression(value)
+    }
+}
+impl From<Expression> for ConstantValue {
+    fn from(value: Expression) -> Self {
+        ConstantValue::Expression(value.into())
+    }
+}
+impl From<&BigExpression> for ConstantValue {
+    fn from(value: &BigExpression) -> Self {
+        ConstantValue::Expression(value.clone())
+    }
+}
+impl From<&Expression> for ConstantValue {
+    fn from(value: &Expression) -> Self {
+        ConstantValue::Expression((*value).into())
+    }
+}
+
 impl Graph {
     /// A scalar constant
-    pub fn constant(&mut self, i: f32) -> GraphTensor<R0> {
+    pub fn constant(&mut self, i: impl Into<ConstantValue>) -> GraphTensor<R0> {
         GraphTensor::from_id(
-            self.add_op(Constant(ConstantValue::Float(i), &self.dyn_map))
-                .finish(),
+            self.add_op(Constant(i.into(), &self.dyn_map)).finish(),
             ShapeTracker::new(&[]),
             self,
         )

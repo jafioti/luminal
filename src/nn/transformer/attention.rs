@@ -172,7 +172,7 @@ impl<
         let weights = queries
             .matmul(keys)
             .mul((1.0 / ((K_DIM / HEADS) as f64).sqrt()) as f32)
-            .softmax::<3>();
+            .softmax::<Axis<3>>();
 
         let tokens: GraphTensor<(B, S2, Const<V_DIM>)> = weights
             .matmul(values)
