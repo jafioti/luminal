@@ -310,9 +310,7 @@ impl Operator for Contiguous {
                 res[i] = src[ind.exec_single_var(i)];
             }
         }
-        vec![Tensor {
-            data: Box::new(res),
-        }]
+        vec![Tensor::new(res)]
     }
 }
 
@@ -324,12 +322,23 @@ impl Operator for Contiguous {
 pub struct Log2;
 impl Operator for Log2 {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut tensor = inp.pop().unwrap().0.cloned();
-        for a in get_vec_from_tensor_owned(&mut tensor).iter_mut() {
-            *a = a.log2();
+        if !inp[0].1.is_reshaped() {
+            let mut tensor = inp.pop().unwrap().0.cloned();
+            for a in get_vec_from_tensor_owned(&mut tensor).iter_mut() {
+                *a = a.log2();
+            }
+            vec![tensor]
+        } else {
+            let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
+            let inp_data = get_vec_from_tensor(&inp[0].0);
+            let (ind, val) = (inp[0].1.index_expression(), inp[0].1.valid_expression());
+            for i in 0..data.len() {
+                if val.exec_single_var(i) != 0 {
+                    data[i] = inp_data[ind.exec_single_var(i)].log2();
+                }
+            }
+            vec![Tensor::new(data)]
         }
-
-        vec![tensor]
     }
 }
 
@@ -337,12 +346,23 @@ impl Operator for Log2 {
 pub struct Exp2;
 impl Operator for Exp2 {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut tensor = inp.pop().unwrap().0.cloned();
-        for a in get_vec_from_tensor_owned(&mut tensor).iter_mut() {
-            *a = a.exp2();
+        if !inp[0].1.is_reshaped() {
+            let mut tensor = inp.pop().unwrap().0.cloned();
+            for a in get_vec_from_tensor_owned(&mut tensor).iter_mut() {
+                *a = a.exp2();
+            }
+            vec![tensor]
+        } else {
+            let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
+            let inp_data = get_vec_from_tensor(&inp[0].0);
+            let (ind, val) = (inp[0].1.index_expression(), inp[0].1.valid_expression());
+            for i in 0..data.len() {
+                if val.exec_single_var(i) != 0 {
+                    data[i] = inp_data[ind.exec_single_var(i)].exp2();
+                }
+            }
+            vec![Tensor::new(data)]
         }
-
-        vec![tensor]
     }
 }
 
@@ -350,11 +370,23 @@ impl Operator for Exp2 {
 pub struct Sin;
 impl Operator for Sin {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut tensor = inp.pop().unwrap().0.cloned();
-        for a in get_vec_from_tensor_owned(&mut tensor).iter_mut() {
-            *a = a.sin();
+        if !inp[0].1.is_reshaped() {
+            let mut tensor = inp.pop().unwrap().0.cloned();
+            for a in get_vec_from_tensor_owned(&mut tensor).iter_mut() {
+                *a = a.sin();
+            }
+            vec![tensor]
+        } else {
+            let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
+            let inp_data = get_vec_from_tensor(&inp[0].0);
+            let (ind, val) = (inp[0].1.index_expression(), inp[0].1.valid_expression());
+            for i in 0..data.len() {
+                if val.exec_single_var(i) != 0 {
+                    data[i] = inp_data[ind.exec_single_var(i)].sin();
+                }
+            }
+            vec![Tensor::new(data)]
         }
-        vec![tensor]
     }
 }
 
@@ -362,11 +394,23 @@ impl Operator for Sin {
 pub struct Recip;
 impl Operator for Recip {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut tensor = inp.pop().unwrap().0.cloned();
-        for a in get_vec_from_tensor_owned(&mut tensor).iter_mut() {
-            *a = a.recip();
+        if !inp[0].1.is_reshaped() {
+            let mut tensor = inp.pop().unwrap().0.cloned();
+            for a in get_vec_from_tensor_owned(&mut tensor).iter_mut() {
+                *a = a.recip();
+            }
+            vec![tensor]
+        } else {
+            let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
+            let inp_data = get_vec_from_tensor(&inp[0].0);
+            let (ind, val) = (inp[0].1.index_expression(), inp[0].1.valid_expression());
+            for i in 0..data.len() {
+                if val.exec_single_var(i) != 0 {
+                    data[i] = inp_data[ind.exec_single_var(i)].recip();
+                }
+            }
+            vec![Tensor::new(data)]
         }
-        vec![tensor]
     }
 }
 
@@ -412,9 +456,7 @@ impl Operator for Add {
             };
             data[i] = lhs + rhs;
         }
-        vec![Tensor {
-            data: Box::new(data),
-        }]
+        vec![Tensor::new(data)]
     }
 }
 
@@ -444,9 +486,7 @@ impl Operator for Mul {
                 0.0
             };
         }
-        vec![Tensor {
-            data: Box::new(data),
-        }]
+        vec![Tensor::new(data)]
     }
 }
 
@@ -476,9 +516,7 @@ impl Operator for Mod {
                 0.0
             };
         }
-        vec![Tensor {
-            data: Box::new(data),
-        }]
+        vec![Tensor::new(data)]
     }
 }
 
@@ -510,9 +548,7 @@ impl Operator for LessThan {
             };
             data[i] = if a < b { 1. } else { 0. };
         }
-        vec![Tensor {
-            data: Box::new(data),
-        }]
+        vec![Tensor::new(data)]
     }
 }
 
@@ -522,20 +558,22 @@ impl Operator for LessThan {
 pub struct SumReduce(pub usize);
 impl Operator for SumReduce {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let front_size: usize = inp[0]
+        let front_size = inp[0]
             .1
             .shape()
             .iter()
             .take(self.0)
             .filter_map(BigExpression::to_usize)
-            .product();
+            .product::<usize>()
+            .max(1);
         let back_size: usize = inp[0]
             .1
             .shape()
             .iter()
             .skip(self.0 + 1)
             .filter_map(BigExpression::to_usize)
-            .product();
+            .product::<usize>()
+            .max(1);
         let dim_size = match inp[0].1.shape()[self.0].to_usize() {
             Some(n) => n,
             None => panic!("Can't reduce over an unknown dimension"),
@@ -556,9 +594,7 @@ impl Operator for SumReduce {
                 }
             }
         }
-        vec![Tensor {
-            data: Box::new(result),
-        }]
+        vec![Tensor::new(result)]
     }
 }
 
@@ -601,9 +637,7 @@ impl Operator for MaxReduce {
                 }
             }
         }
-        vec![Tensor {
-            data: Box::new(result),
-        }]
+        vec![Tensor::new(result)]
     }
 }
 

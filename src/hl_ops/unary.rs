@@ -17,7 +17,7 @@ impl<S: Shape> GraphTensor<S> {
             .add_op(op::Log2)
             .input(self.id, 0, self.shape)
             .finish();
-        GraphTensor::from_id(new_id, self.shape, self.graph_ref)
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 
     /// Base 2 exp
@@ -27,7 +27,7 @@ impl<S: Shape> GraphTensor<S> {
             .add_op(op::Exp2)
             .input(self.id, 0, self.shape)
             .finish();
-        GraphTensor::from_id(new_id, self.shape, self.graph_ref)
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 
     /// Natural exp
@@ -47,7 +47,7 @@ impl<S: Shape> GraphTensor<S> {
             .add_op(op::Recip)
             .input(self.id, 0, self.shape)
             .finish();
-        GraphTensor::from_id(new_id, self.shape, self.graph_ref)
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 
     /// The sin(x) function
@@ -57,7 +57,7 @@ impl<S: Shape> GraphTensor<S> {
             .add_op(op::Sin)
             .input(self.id, 0, self.shape)
             .finish();
-        GraphTensor::from_id(new_id, self.shape, self.graph_ref)
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 
     /// The cos(x) function
@@ -72,7 +72,7 @@ impl<S: Shape> GraphTensor<S> {
             .add_op(op::Sqrt)
             .input(self.id, 0, self.shape)
             .finish();
-        GraphTensor::from_id(new_id, self.shape, self.graph_ref)
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 
     /// Scale so std is 1.0
@@ -88,7 +88,7 @@ impl<S: Shape> GraphTensor<S> {
             .add(epsilon)
             .sqrt()
             .recip()
-            .expand()
+            .expand_to(self.shape)
             .mul(self)
     }
 
@@ -100,7 +100,7 @@ impl<S: Shape> GraphTensor<S> {
     {
         self - self
             .mean_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
-            .expand()
+            .expand_to(self.shape)
     }
 
     /// Applies a layer norm along an axis
@@ -123,17 +123,23 @@ impl<S: Shape> GraphTensor<S> {
         let m = self
             - self
                 .max_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
-                .expand();
+                .expand_to(self.shape);
         let exp = m.exp();
-        let exp_sum = exp.sum_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>();
-        exp / exp_sum.expand()
+        exp / exp
+            .sum_reduce::<<S as ReduceShape<Axis<DIM>>>::Reduced, _>()
+            .expand()
     }
 
     /// Get the indicies of the max elements along the last axis
     pub fn argmax(self) -> GraphTensor<<S as ReduceShape<<S as Shape>::LastAxis>>::Reduced> {
-        let x_equal = self.equals(self.max_reduce::<_, S::LastAxis>().expand());
+        let x_equal = self.equals(self.max_reduce::<_, S::LastAxis>().expand_to(self.shape));
         // ARange to shape
-        let r = self.graph().constant(1.).expand().cumsum_last_dim() - 1.;
+        let r = self
+            .graph()
+            .constant(1.)
+            .expand_to(self.shape)
+            .cumsum_last_dim()
+            - 1.;
         (x_equal * r).max_reduce::<_, S::LastAxis>()
     }
 

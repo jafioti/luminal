@@ -30,6 +30,16 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
+    pub fn expand_to<Dst: Shape>(mut self, shape: ShapeTracker) -> GraphTensor<Dst> {
+        for (i, s) in shape.indexes.iter().map(|i| shape.dims[*i]).enumerate() {
+            if self.shape.len() <= i || self.shape.dims[self.shape.indexes[i]] != s {
+                self.shape.expand(i, s);
+            }
+        }
+
+        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
+    }
+
     pub fn reshape<N: Shape>(mut self) -> GraphTensor<N> {
         // Insert contiguous call
         self = self.contiguous();

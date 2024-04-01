@@ -78,7 +78,11 @@ impl Graph {
         let horizontal = self.arange::<S>().expand::<(S, S), Axis<0>>();
         let vertical = self.arange::<S>().expand::<(S, S), Axis<1>>();
 
-        (horizontal + self.constant(-(diagonal as f32 + 1.)).expand()).less_than(vertical)
+        (horizontal
+            + self
+                .constant(-(diagonal as f32 + 1.))
+                .expand_to(horizontal.shape))
+        .less_than(vertical)
     }
 
     /// Upper right-hand triangle of 1s
@@ -88,7 +92,11 @@ impl Graph {
         let horizontal = self.arange::<S>().expand::<(S, S), Axis<0>>();
         let vertical = self.arange::<S>().expand::<(S, S), Axis<1>>();
 
-        (horizontal + self.constant(-(diagonal as f32 - 1.)).expand()).greater_than(vertical)
+        (horizontal
+            + self
+                .constant(-(diagonal as f32 - 1.))
+                .expand_to(horizontal.shape))
+        .greater_than(vertical)
     }
 }
 

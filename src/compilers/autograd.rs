@@ -1,14 +1,14 @@
-use std::{any::TypeId, collections::VecDeque};
+use std::any::TypeId;
 
 use itertools::Itertools;
-use petgraph::{visit::EdgeRef, Direction};
+use petgraph::{algo::toposort, visit::EdgeRef, Direction};
 use rustc_hash::{FxHashMap, FxHashSet};
 use tinyvec::ArrayVec;
 
 use crate::{
     op::{
-        Add, Constant, ConstantValue, Exp2, Function, LessThan, Log2, MaxReduce, Mod, Mul, Recip,
-        Sin, Sqrt, SumReduce,
+        Add, Contiguous, Exp2, Function, LessThan, Log2, MaxReduce, Mod, Mul, Recip, Sin, Sqrt,
+        SumReduce,
     },
     prelude::*,
 };
@@ -19,6 +19,18 @@ pub struct Autograd(Vec<NodeIndex>, NodeIndex);
 impl Autograd {
     pub fn new<W: ToIds>(params: W, loss: GraphTensor<()>) -> Self {
         Self(params.to_ids(), loss.id)
+    }
+}
+
+impl ToIds for (NodeIndex, ShapeTracker) {
+    fn to_ids(&self) -> Vec<NodeIndex> {
+        vec![self.0]
+    }
+}
+
+impl ToIdsMut for (NodeIndex, ShapeTracker) {
+    fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
+        vec![&mut self.0]
     }
 }
 
@@ -47,8 +59,8 @@ fn build_dfs_set(
 }
 
 impl Compiler for Autograd {
-    type Output = Vec<NodeIndex>;
-    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, _: T) -> Vec<NodeIndex> {
+    type Output = Vec<(NodeIndex, ShapeTracker)>;
+    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, _: T) -> Vec<(NodeIndex, ShapeTracker)> {
         let Autograd(params, loss) = self;
         // Build up valid set for nodes we want to pay attention to (everything outside of this set doesn't matter)
         let forward_set = build_dfs_set(&mut params.clone(), graph, Direction::Outgoing);
@@ -56,22 +68,17 @@ impl Compiler for Autograd {
         let valid_set: FxHashSet<_> = forward_set.intersection(&backward_set).copied().collect();
 
         // We have the last loss node, now let's backprop through everything to get the gradient graph
-        // Referse bfs
-        let mut bfs_queue = VecDeque::new();
-        bfs_queue.push_back(*loss);
         let mut grads = FxHashMap::default();
         // Add loss gradient
         grads.insert(
             *loss,
             (
-                graph
-                    .add_op(Constant(ConstantValue::Float(1.0), &graph.dyn_map))
-                    .finish(),
+                graph.constant(1.0).id,
                 ShapeTracker::new(&[]), // Assume scalar loss for now
             ),
         );
         let weight_set = params.iter().copied().collect::<FxHashSet<_>>();
-        while let Some(fwd_node) = bfs_queue.pop_front() {
+        for fwd_node in toposort(&graph.graph, None).unwrap().into_iter().rev() {
             if !valid_set.contains(&fwd_node) {
                 continue;
             }
@@ -149,6 +156,10 @@ impl Compiler for Autograd {
                     let grad = inps[0].equals(reduced) * prev_grad;
                     add_grad(grad, inps[0], graph, &mut grads);
                 }
+            } else if op == TypeId::of::<Contiguous>() {
+                if valid_set.contains(&inps[0].id) {
+                    add_grad(prev_grad, inps[0], graph, &mut grads);
+                }
             } else {
                 if !valid_set.contains(&inps[0].id) {
                     continue;
@@ -160,7 +171,7 @@ impl Compiler for Autograd {
                 } else if op == TypeId::of::<Exp2>() {
                     // f(x) = exp2(x)
                     // f'(x) = exp2(x) * ln(2)
-                    inps[0] * 2_f32.ln()
+                    inps[0].exp2() * 2_f32.ln()
                 } else if op == TypeId::of::<Sin>() {
                     // f(x) = sin(x)
                     // f'(x) = cos(x)
@@ -172,28 +183,16 @@ impl Compiler for Autograd {
                 } else if op == TypeId::of::<Recip>() {
                     // f(x) = 1 / x
                     // f'(x) = -1 / x**2
-                    -1.0 / inps[0].pow(2.0)
+                    -1.0 / (inps[0] * inps[0])
                 } else {
                     unreachable!()
                 };
                 add_grad(local_grad * prev_grad, inps[0], graph, &mut grads);
             }
-
-            // Continue bfs
-            for node in inps {
-                bfs_queue.push_back(node.id);
-            }
         }
 
         // Create a gradient array to match 1-1 with the weight array passed in
-        self.0
-            .iter()
-            .map(|weight| {
-                let grad = grads[weight].0;
-                graph.no_delete.insert(grad);
-                grad
-            })
-            .collect()
+        self.0.iter().map(|weight| grads[weight]).collect()
     }
 }
 
@@ -213,16 +212,17 @@ fn add_grad(
     grad.shape.indexes = new_indexes;
 
     // Undo expands (sum reduce)
-    for i in (0..fwd.shape.len()).rev() {
-        if fwd.shape.fake[fwd.shape.indexes[i]] {
+    for i in fwd.shape.indexes.into_iter().rev() {
+        if fwd.shape.fake[i] {
             grad.id = graph
-                .add_op(SumReduce(fwd.shape.indexes[i]))
+                .add_op(SumReduce(i))
                 .input(grad.id, 0, grad.shape)
                 .finish();
-            grad.shape.remove_dim(fwd.shape.indexes[i]);
+            grad.shape.remove_dim(i);
             grad.shape = grad.shape.contiguous();
         }
     }
+
     // Check to see if a reshape was done here. If so, we may need to assert grad shape is contiguous or insert a contiguous call
     if let Some((_, _, mut pre_fwd_shape)) = graph.get_sources(fwd.id).first() {
         if let Some(SumReduce(dim)) = graph.try_get_op(fwd.id) {
@@ -243,7 +243,7 @@ fn add_grad(
         let existing_grad =
             GraphTensor::<()>::from_id(existing_grad_node, existing_grad_shape, graph);
         let new_grad = grad + existing_grad;
-        grad_map.insert(fwd.id, (new_grad.id, grad.shape));
+        grad_map.insert(fwd.id, (new_grad.id, new_grad.shape));
     } else {
         grad_map.insert(fwd.id, (grad.id, grad.shape));
     }
@@ -251,17 +251,30 @@ fn add_grad(
 
 #[cfg(test)]
 mod tests {
-    use crate::{nn, prelude::Module};
-
+    use crate::{nn, prelude::Module as LModule};
+    use dfdx::nn::Module as DModule;
     crate::test_imports!();
 
-    fn get_vec(id: NodeIndex, cx: &mut Graph) -> &Vec<f32> {
-        cx.get_tensor_ref(id, 0)
-            .unwrap()
-            .data
-            .as_any()
-            .downcast_ref::<Vec<f32>>()
-            .unwrap()
+    fn get_vec(grad: (NodeIndex, ShapeTracker), cx: &mut Graph) -> Vec<f32> {
+        GraphTensor::<()>::from_id(grad.0, grad.1, cx).data()
+    }
+
+    #[test]
+    fn test_autograd_max_reduce() {
+        let mut cx = Graph::new();
+        let a = cx.named_tensor("Input").set([10., 5.]);
+        let b = a.max_reduce();
+
+        let grads = cx.compile(Autograd::new(a, b), ());
+        cx.keep_tensors(&grads);
+        cx.execute();
+
+        let dev = dfdx::prelude::Cpu::default();
+        let d_a = dev.tensor([10., 5.]);
+        let d_b = d_a.trace(Gradients::leaky()).max();
+        let d_grads = d_b.backward();
+
+        assert_exact(&get_vec(grads[0], &mut cx), &d_grads.get(&d_a).as_vec());
     }
 
     #[test]
@@ -281,7 +294,7 @@ mod tests {
         let out = inp.trace(Gradients::leaky()).matmul(w1.clone()).sum();
         let d_grads = out.backward();
 
-        assert_exact(get_vec(grads[0], &mut cx), &d_grads.get(&w1).as_vec());
+        assert_exact(&get_vec(grads[0], &mut cx), &d_grads.get(&w1).as_vec());
     }
 
     #[test]
@@ -293,23 +306,246 @@ mod tests {
         let input = cx.named_tensor("Input").set([10., 5.]);
         let output = model.forward(input).sum_reduce();
 
-        let grads = cx.compile(Autograd::new(params(model), output), ());
+        let mut grads = cx.compile(Autograd::new(params(model), output), ());
         cx.keep_tensors(&grads);
+        cx.compile(GenericCompiler::default(), &mut grads);
         cx.execute();
 
         let dev = dfdx::prelude::Cpu::default();
-        let w1 = dev.tensor([[2., 4.], [3., 1.]]);
-        let w2 = dev.tensor([[6.], [5.]]);
+        let mut d_model = dev.build_module::<(
+            dfdx::nn::builders::UnbiasedLinear<2, 2>,
+            dfdx::nn::builders::ReLU,
+            dfdx::nn::builders::UnbiasedLinear<2, 1>,
+        ), f32>();
+        d_model.0.weight = dev.tensor([[2., 4.], [3., 1.]]).permute();
+        d_model.2.weight = dev.tensor([[6.], [5.]]).permute();
         let inp = dev.tensor([10., 5.]);
-        let out = inp
-            .trace(Gradients::leaky())
-            .matmul(w1.clone())
-            .relu()
-            .matmul(w2.clone())
-            .sum();
+        let out = d_model.forward(inp.trace(Gradients::leaky())).sum();
         let d_grads = out.backward();
 
-        assert_exact(get_vec(grads[0], &mut cx), &d_grads.get(&w1).as_vec());
-        assert_exact(get_vec(grads[1], &mut cx), &d_grads.get(&w2).as_vec());
+        assert_exact(
+            &get_vec(grads[0], &mut cx),
+            &d_grads.get(&d_model.0.weight).permute().as_vec(),
+        );
+        assert_exact(
+            &get_vec(grads[1], &mut cx),
+            &d_grads.get(&d_model.2.weight).as_vec(),
+        );
+    }
+
+    #[test]
+    fn test_autograd_layer_norm() {
+        let mut cx = Graph::new();
+        let a = cx.tensor().set([-1., 2., 3.]);
+        let mut b = a.layer_norm(1e-5).max_reduce().retrieve();
+
+        let grads = cx.compile(Autograd::new(a, b), &mut b);
+        cx.keep_tensors(&grads);
+        cx.compile(GenericCompiler::default(), &mut b);
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([-1., 2., 3.]);
+        let d_b = d_a.trace(Gradients::leaky()).normalize(1e-5).max();
+        assert_close(&b.data(), &d_b.as_vec());
+        let d_grads = d_b.backward();
+        assert_close(&get_vec(grads[0], &mut cx), &d_grads.get(&d_a).as_vec());
+    }
+
+    #[test]
+    fn test_autograd_softmax() {
+        let mut cx = Graph::new();
+        let a = cx.tensor().set([-1., 2., 3.]);
+        let mut b = a.softmax().max_reduce().retrieve();
+
+        let mut grads = cx.compile(Autograd::new(a, b), &mut b);
+        cx.keep_tensors(&grads);
+        cx.compile(GenericCompiler::default(), (&mut grads, &mut b));
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor([-1., 2., 3.]);
+        let d_b = d_a.trace(Gradients::leaky()).softmax().max();
+        assert_close(&b.data(), &d_b.as_vec());
+        let d_grads = d_b.backward();
+        assert_close(&get_vec(grads[0], &mut cx), &d_grads.get(&d_a).as_vec());
+    }
+
+    #[test]
+    fn test_autograd_transformer() {
+        let mut cx = Graph::new();
+        let model: crate::nn::TransformerEncoderBlock<3, 4, 1> = InitModule::initialize(&mut cx);
+        model
+            .attention
+            .w_k
+            .weight
+            .set(vec![1., 22., 3., 1., 2., 3., 1., 2., 3.]);
+        model
+            .attention
+            .w_q
+            .weight
+            .set(vec![3., 2., 3., 1.3, 2., 3., 3., 2., 3.]);
+        model
+            .attention
+            .w_v
+            .weight
+            .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3.]);
+        model
+            .attention
+            .w_o
+            .weight
+            .set(vec![1., 22., 3., 1., 2., 3., 1., 2., 3.]);
+        model
+            .ff
+            .0
+            .weight
+            .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 11., 2., 3.]);
+        model
+            .ff
+            .2
+            .weight
+            .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
+
+        let a = cx.tensor().set([[-1., 2., 3.], [3., 3., -1.]]);
+        let mut out = model.forward(a).max_reduce().retrieve();
+
+        let mut model_params = params(&model);
+        let grads = cx.compile(
+            Autograd::new((&model_params, a), out),
+            (&mut model_params, &mut out),
+        );
+        cx.keep_tensors(&grads);
+        // cx.display();
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let mut d_model = d_dev
+            .build_module::<dfdx::nn::modules::builders::TransformerEncoderBlock<3, 1, 4>, f32>();
+        d_model.self_attn.w_k.bias.copy_from(&[0.0, 0.0, 0.0]);
+        d_model.self_attn.w_v.bias.copy_from(&[0.0, 0.0, 0.0]);
+        d_model.self_attn.w_q.bias.copy_from(&[0.0, 0.0, 0.0]);
+        d_model.self_attn.w_o.bias.copy_from(&[0., 0., 0.]);
+        d_model.self_attn.w_o.weight = d_dev
+            .tensor_from_vec(
+                vec![1., 22., 3., 1., 2., 3., 1., 2., 3.],
+                (DConst::<3>, DConst::<3>),
+            )
+            .permute();
+        d_model.self_attn.w_k.weight = d_dev
+            .tensor_from_vec(
+                vec![1., 22., 3., 1., 2., 3., 1., 2., 3.],
+                (DConst::<3>, DConst::<3>),
+            )
+            .permute();
+        d_model.self_attn.w_q.weight = d_dev
+            .tensor_from_vec(
+                vec![3., 2., 3., 1.3, 2., 3., 3., 2., 3.],
+                (DConst::<3>, DConst::<3>),
+            )
+            .permute();
+        d_model.self_attn.w_v.weight = d_dev
+            .tensor_from_vec(
+                vec![-1., 12., 3., -1., 2., -3., 11., 2., 3.],
+                (DConst::<3>, DConst::<3>),
+            )
+            .permute();
+        d_model.ff.0 .0.weight = d_dev
+            .tensor_from_vec(
+                vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 11., 2., 3.],
+                (DConst::<3>, DConst::<4>),
+            )
+            .permute();
+        d_model.ff.0 .0.bias = d_dev.tensor_from_vec(vec![0., 0., 0., 0.], (DConst::<4>,));
+        d_model.ff.0 .2.weight = d_dev
+            .tensor_from_vec(
+                vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.],
+                (DConst::<4>, DConst::<3>),
+            )
+            .permute();
+        d_model.ff.0 .2.bias = d_dev.tensor_from_vec(vec![0., 0., 0.], (DConst::<3>,));
+        d_model.norm1.gamma = d_dev.tensor_from_vec(vec![1., 1., 1.], (DConst::<3>,));
+        d_model.norm2.gamma = d_dev.tensor_from_vec(vec![1., 1., 1.], (DConst::<3>,));
+        d_model.norm1.epsilon = 1e-5;
+        d_model.norm2.beta = d_dev.tensor_from_vec(vec![0., 0., 0.], (DConst::<3>,));
+        d_model.norm1.beta = d_dev.tensor_from_vec(vec![0., 0., 0.], (DConst::<3>,));
+        d_model.norm2.epsilon = 1e-5;
+        let d_a = d_dev.tensor_from_vec(vec![-1., 2., 3., 3., 3., -1.], (DConst::<2>, DConst::<3>));
+        let d_b = d_model.forward(d_a.trace(Gradients::leaky())).max();
+
+        assert_close(&out.data(), &d_b.as_vec());
+
+        let d_grads = d_b.backward();
+        assert_close(
+            &get_vec(
+                grads[model_params
+                    .iter()
+                    .position(|i| *i == model.ff.2.weight.id)
+                    .unwrap()],
+                &mut cx,
+            ),
+            &d_grads.get(&d_model.ff.0 .2.weight).permute().as_vec(),
+        );
+        assert_close(
+            &get_vec(
+                grads[model_params
+                    .iter()
+                    .position(|i| *i == model.ff.0.weight.id)
+                    .unwrap()],
+                &mut cx,
+            ),
+            &d_grads.get(&d_model.ff.0 .0.weight).permute().as_vec(),
+        );
+        assert_close(
+            &get_vec(
+                grads[model_params
+                    .iter()
+                    .position(|i| *i == model.attention.w_o.weight.id)
+                    .unwrap()],
+                &mut cx,
+            ),
+            &d_grads
+                .get(&d_model.self_attn.w_o.weight)
+                .permute()
+                .as_vec(),
+        );
+        assert_close(
+            &get_vec(
+                grads[model_params
+                    .iter()
+                    .position(|i| *i == model.attention.w_q.weight.id)
+                    .unwrap()],
+                &mut cx,
+            ),
+            &d_grads
+                .get(&d_model.self_attn.w_q.weight)
+                .permute()
+                .as_vec(),
+        );
+        assert_close(
+            &get_vec(
+                grads[model_params
+                    .iter()
+                    .position(|i| *i == model.attention.w_k.weight.id)
+                    .unwrap()],
+                &mut cx,
+            ),
+            &d_grads
+                .get(&d_model.self_attn.w_k.weight)
+                .permute()
+                .as_vec(),
+        );
+        assert_close(
+            &get_vec(
+                grads[model_params
+                    .iter()
+                    .position(|i| *i == model.attention.w_v.weight.id)
+                    .unwrap()],
+                &mut cx,
+            ),
+            &d_grads
+                .get(&d_model.self_attn.w_v.weight)
+                .permute()
+                .as_vec(),
+        );
     }
 }

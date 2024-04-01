@@ -1,8 +1,11 @@
 use crate::prelude::*;
 
-pub mod attention;
-pub mod decoder;
-pub mod encoder;
+mod attention;
+pub use attention::*;
+mod decoder;
+pub use decoder::*;
+mod encoder;
+pub use encoder::*;
 
 pub struct Transformer<
     const DIM: usize,

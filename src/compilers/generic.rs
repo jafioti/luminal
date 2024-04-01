@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use petgraph::{
+    algo::toposort,
     stable_graph::{NodeIndex, StableGraph},
     visit::EdgeRef,
     Direction,
@@ -13,7 +14,12 @@ use crate::{
 };
 
 /// Generic platform-agnostic optimizations. It's a good idea to use these all the time.
-pub type GenericCompiler = (RemoveSingleReductions, ArithmeticElimination, CSE);
+pub type GenericCompiler = (
+    //RemoveSingleReductions,
+    RemoveUnusedNodes,
+    ArithmeticElimination,
+    CSE,
+);
 
 /// [Common subexpression elimination](https://en.wikipedia.org/wiki/Common_subexpression_elimination)
 #[derive(Default)]
@@ -158,18 +164,15 @@ impl Compiler for RemoveUnusedNodes {
     type Output = ();
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, _: T) {
         // Reverse topo sort
-        for node in graph.graph.node_indices().collect::<Vec<_>>() {
-            if graph
-                .graph
-                .edges_directed(node, petgraph::Direction::Outgoing)
-                .count()
-                == 0
+        for node in toposort(&graph.graph, None).unwrap().into_iter().rev() {
+            if graph.edges_directed(node, Direction::Outgoing).count() == 0
                 && !graph.no_delete.contains(&node)
             {
                 // No dependencies and not marked for no_delete, so remove
-                graph.graph.remove_node(node);
+                graph.remove_node(node);
             }
         }
+        // graph.display();
     }
 }
 
@@ -325,7 +328,7 @@ impl Compiler for ArithmeticElimination {
                 // If any output shape is non-contiguous, we need to keep the op for it's contiguous functionality TODO: replace with explicit contiguous op here
                 if graph
                     .graph
-                    .edges_directed(add, Direction::Outgoing)
+                    .edges_connecting(inp, add)
                     .filter_map(|e| e.weight().as_data())
                     .any(|(_, _, sh)| sh.is_reshaped())
                 {
@@ -390,7 +393,7 @@ impl Compiler for ArithmeticElimination {
                 // If any output shape is non-contiguous, we need to keep the op for it's contiguous functionality TODO: replace with explicit contiguous op here
                 if graph
                     .graph
-                    .edges_directed(mul, Direction::Outgoing)
+                    .edges_connecting(inp, mul)
                     .filter_map(|e| e.weight().as_data())
                     .any(|(_, _, sh)| sh.is_reshaped())
                 {
