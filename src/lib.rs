@@ -21,4 +21,5 @@ pub mod prelude {
     pub use half::{bf16, f16};
     pub use luminal_macro::*;
     pub use petgraph;
+    pub use tinyvec;
 }

@@ -1,3 +1,5 @@
+workspace = { members = ["crates/luminal_train"] }
+
 [package]
 name = "luminal"
 version = "0.2.0"

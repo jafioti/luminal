@@ -130,6 +130,18 @@ impl<T: ToIds> ToIds for FxHashMap<String, T> {
     }
 }
 
+impl ToIds for (NodeIndex, ShapeTracker) {
+    fn to_ids(&self) -> Vec<NodeIndex> {
+        vec![self.0]
+    }
+}
+
+impl ToIdsMut for (NodeIndex, ShapeTracker) {
+    fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
+        vec![&mut self.0]
+    }
+}
+
 macro_rules! tuple_impls {
     ([$($name:ident),+] , [$($idx:tt),+]) => {
         impl<
