@@ -172,7 +172,6 @@ impl Compiler for RemoveUnusedNodes {
                 graph.remove_node(node);
             }
         }
-        // graph.display();
     }
 }
 
@@ -482,6 +481,5 @@ impl Compiler for ArithmeticElimination {
             graph.remove_node(out);
             graph.safe_remove_node(intermediate, 0);
         }
-        // graph.display();
     }
 }

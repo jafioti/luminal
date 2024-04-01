@@ -410,12 +410,15 @@ mod tests {
         let mut out = model.forward(a).max_reduce().retrieve();
 
         let mut model_params = params(&model);
-        let grads = cx.compile(
+        let mut grads = cx.compile(
             Autograd::new((&model_params, a), out),
             (&mut model_params, &mut out),
         );
         cx.keep_tensors(&grads);
-        // cx.display();
+        cx.compile(
+            GenericCompiler::default(),
+            (&mut model_params, &mut grads, &mut out),
+        );
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -475,6 +478,10 @@ mod tests {
         assert_close(&out.data(), &d_b.as_vec());
 
         let d_grads = d_b.backward();
+        assert_close(
+            &get_vec(*grads.last().unwrap(), &mut cx),
+            &d_grads.get(&d_a).as_vec(),
+        );
         assert_close(
             &get_vec(
                 grads[model_params
