@@ -1,6 +1,6 @@
 use luminal::prelude::*;
 use luminal_nn::{Linear, Swish};
-use luminal_training::{mse_loss, sgd, Autograd};
+use luminal_training::{mse_loss, sgd_on_graph, Autograd};
 use rand::{rngs::ThreadRng, thread_rng, Rng};
 
 // This is a simple example of using luminal to train.
@@ -8,25 +8,28 @@ use rand::{rngs::ThreadRng, thread_rng, Rng};
 
 fn main() {
     // Setup gradient graph
-    let mut grad_cx = Graph::new();
-    let model =
-        <(Linear<8, 16>, Swish, Linear<16, 16>, Swish, Linear<16, 5>)>::initialize(&mut grad_cx);
-    let mut input = grad_cx.tensor::<R1<8>>();
-    let mut target = grad_cx.tensor::<R1<5>>();
+    let mut cx = Graph::new();
+    let model = <(Linear<8, 16>, Swish, Linear<16, 16>, Swish, Linear<16, 5>)>::initialize(&mut cx);
+    let mut input = cx.tensor::<R1<8>>();
+    let mut target = cx.tensor::<R1<5>>();
     let mut output = model.forward(input).retrieve();
     let mut loss = mse_loss(output, target).retrieve();
 
-    let weights = params(&model);
-    grad_cx.keep_tensors(&weights);
-    let grads = grad_cx.compile(
-        Autograd::new(&weights, loss),
-        (&mut input, &mut target, &mut loss, &mut output),
-    );
-    grad_cx.keep_tensors(&grads);
-
-    // Setup opt graph
-    let (old_weights, opt_grads, new_weights, mut opt_cx, lr) = sgd(&grads);
+    let mut weights = params(&model);
+    let grads = cx.compile(Autograd::new(&weights, loss), ());
+    let (new_weights, lr) = sgd_on_graph(&mut cx, &weights, &grads);
     lr.set(1e-1);
+
+    cx.compile(
+        GenericCompiler::default(),
+        (
+            &mut input,
+            &mut target,
+            &mut loss,
+            &mut output,
+            &mut weights,
+        ),
+    );
 
     let mut rng = thread_rng();
     let (mut loss_avg, mut acc_avg) = (ExponentialAverage::new(1.0), ExponentialAverage::new(0.0));
@@ -34,17 +37,12 @@ fn main() {
     while acc_avg.value < 0.995 {
         // Generate problem
         let (problem, answer) = make_problem(&mut rng);
-
-        // Get gradients
         input.set(problem);
         target.set(answer);
-        grad_cx.execute();
 
-        // Update weights
-        transfer_data(&weights, &mut grad_cx, &old_weights, &mut opt_cx);
-        transfer_data(&grads, &mut grad_cx, &opt_grads, &mut opt_cx);
-        opt_cx.execute();
-        transfer_data(&new_weights, &mut opt_cx, &weights, &mut grad_cx);
+        // Execute graph and update weights
+        cx.execute();
+        transfer_data_same_graph(&new_weights, &weights, &mut cx);
 
         // Report progress
         loss_avg.update(loss.data()[0]);

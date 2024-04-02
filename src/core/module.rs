@@ -19,14 +19,14 @@ pub trait Module<I> {
 }
 
 /// Mapping from weight name to node id
-pub fn param_dict<M: SerializeModule>(model: M) -> FxHashMap<String, NodeIndex> {
+pub fn param_dict(model: impl SerializeModule) -> FxHashMap<String, NodeIndex> {
     let mut s = Serializer::default();
     model.serialize(&mut s);
     s.state
 }
 
 /// Set of weight node ids
-pub fn params<M: SerializeModule>(model: M) -> Vec<NodeIndex> {
+pub fn params(model: impl SerializeModule) -> Vec<NodeIndex> {
     param_dict(model)
         .into_iter()
         .sorted_by_key(|(k, _)| k.clone())
@@ -35,10 +35,10 @@ pub fn params<M: SerializeModule>(model: M) -> Vec<NodeIndex> {
 }
 
 /// Transfer data from one set of nodes in one graph to another set in another graph
-pub fn transfer_data<A: ToIds, B: ToIds>(
-    srcs: A,
+pub fn transfer_data(
+    srcs: impl ToIds,
     src_graph: &mut Graph,
-    dests: B,
+    dests: impl ToIds,
     dest_graph: &mut Graph,
 ) {
     for (src, dest) in srcs.to_ids().into_iter().zip(dests.to_ids().into_iter()) {
@@ -51,7 +51,7 @@ pub fn transfer_data<A: ToIds, B: ToIds>(
 }
 
 /// Transfer data from one set of nodes to another set in the same graph
-pub fn transfer_data_same_graph<A: ToIds, B: ToIds>(srcs: A, dests: B, graph: &mut Graph) {
+pub fn transfer_data_same_graph(srcs: impl ToIds, dests: impl ToIds, graph: &mut Graph) {
     for (src, dest) in srcs.to_ids().into_iter().zip(dests.to_ids().into_iter()) {
         let mut output_num = 0;
         while let Some(tensor) = graph.tensors.remove(&(src, output_num)) {
@@ -62,7 +62,7 @@ pub fn transfer_data_same_graph<A: ToIds, B: ToIds>(srcs: A, dests: B, graph: &m
 }
 
 /// Delete all incoming nodes to this set of nodes
-pub fn delete_inputs<T: ToIds>(nodes: T, graph: &mut Graph) {
+pub fn delete_inputs(nodes: impl ToIds, graph: &mut Graph) {
     for node in nodes.to_ids() {
         delete_upstream(graph, node);
     }
@@ -83,7 +83,7 @@ fn delete_upstream(graph: &mut Graph, node: NodeIndex) {
 }
 
 /// Get the downstream set from an original set, in a deterministic order
-pub fn downstream<T: ToIds>(nodes: T, graph: &Graph) -> Vec<NodeIndex> {
+pub fn downstream(nodes: impl ToIds, graph: &Graph) -> Vec<NodeIndex> {
     let orig_set = nodes.to_ids().into_iter().collect::<FxHashSet<_>>();
     let mut fin = vec![];
     let mut added = FxHashSet::default();

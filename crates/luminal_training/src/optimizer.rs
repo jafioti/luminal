@@ -13,24 +13,43 @@ pub fn sgd(
     GraphTensor<()>,
 ) {
     let mut opt_graph = Graph::new();
-    let lr = opt_graph.tensor().set(3e-4).keep();
-    let mut old_weights = vec![];
-    let mut gradients = vec![];
+    let (old_weights, gradients): (Vec<NodeIndex>, Vec<NodeIndex>) = grads
+        .iter()
+        .map(|_| (opt_graph.tensor::<()>().id, opt_graph.tensor::<()>().id))
+        .unzip();
+
+    let (new_weights, lr) = sgd_on_graph(
+        &mut opt_graph,
+        &old_weights,
+        &gradients
+            .iter()
+            .zip(grads)
+            .map(|(a, (_, b))| (*a, *b))
+            .collect::<Vec<_>>(),
+    );
+    (old_weights, gradients, new_weights, opt_graph, lr)
+}
+
+/// `new_weight = old_weight - (gradient * learning_rate)`
+///
+/// Output: (New weight outputs, Learning Rate Tensor)
+pub fn sgd_on_graph(
+    graph: &mut Graph,
+    old_weights: &impl ToIds,
+    grads: &[(NodeIndex, ShapeTracker)],
+) -> (Vec<NodeIndex>, GraphTensor<()>) {
+    let lr = graph.tensor().set(3e-4).keep(); // Karpathy constant
     let mut new_weights = vec![];
-    for (_, param) in grads {
-        let mut old_weight = opt_graph.named_tensor::<()>("old");
-        old_weight.shape = *param;
-        let mut gradient = opt_graph.named_tensor::<()>("grad");
-        gradient.shape = *param;
+    for ((grad_id, grad_shape), old_weight_id) in grads.iter().copied().zip(old_weights.to_ids()) {
+        let old_weight = GraphTensor::<()>::from_id(old_weight_id, grad_shape, graph);
+        let gradient = GraphTensor::<()>::from_id(grad_id, grad_shape, graph);
 
         // SGD
-        let new_weight = old_weight - (gradient * lr.expand_to(*param));
+        let new_weight = old_weight - (gradient * lr.expand_to(grad_shape));
         new_weight.keep();
 
-        old_weights.push(old_weight.id);
-        gradients.push(gradient.id);
         new_weights.push(new_weight.id);
     }
 
-    (old_weights, gradients, new_weights, opt_graph, lr)
+    (new_weights, lr)
 }

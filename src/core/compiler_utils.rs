@@ -341,6 +341,7 @@ impl Graph {
     /// let b = GraphTensor::<R1<3>>::from_id(b_id, a.shape, a.graph());
     /// ```
     pub fn add_op<O: Operator + 'static>(&mut self, op: O) -> NewOp {
+        self.linearized_graph = None;
         NewOp {
             new_op_id: self.graph.add_node(Box::new(op)),
             graph_ref: self,
