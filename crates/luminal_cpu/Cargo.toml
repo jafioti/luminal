@@ -1,0 +1,16 @@
+[package]
+name = "luminal_cpu"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+itertools = "0.12.1"
+luminal = {path="../.."}
+matrixmultiply = "0.3.8"
+rustc-hash = "1.1.0"
+
+[dev-dependencies]
+rand = "0.8.5"
+dfdx = { version = "0.13", features = ["f16"] }

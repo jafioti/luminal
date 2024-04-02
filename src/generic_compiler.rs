@@ -9,7 +9,7 @@ use petgraph::{
 };
 
 use crate::{
-    op::{Add, Function, MaxReduce, Mul, Operator, Recip, SumReduce},
+    op::{Add, Constant, ConstantValue, Function, MaxReduce, Mul, Operator, Recip, SumReduce},
     prelude::*,
 };
 
@@ -482,4 +482,19 @@ impl Compiler for ArithmeticElimination {
             graph.safe_remove_node(intermediate, 0);
         }
     }
+}
+
+pub(crate) fn constant(num: f32) -> SelectGraph {
+    let mut n = op::<Constant>();
+    n.check(move |o, _| {
+        if let Some(c) = o.as_any().downcast_ref::<Constant>() {
+            match c.0 {
+                ConstantValue::Float(f) => f == num,
+                _ => false,
+            }
+        } else {
+            false
+        }
+    });
+    n
 }

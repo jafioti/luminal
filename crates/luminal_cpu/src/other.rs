@@ -1,4 +1,4 @@
-use crate::{
+use luminal::{
     op::*,
     prelude::{petgraph::visit::EdgeRef, *},
     shape::symbolic::BigExpression,
@@ -32,7 +32,7 @@ impl Compiler for ARangeCompiler {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         // TODO: Make sure this actually checks the shape transformations to ensure pooling happens
-        let one = constant(1.);
+        let one = super::constant(1.);
         let contig1 = unary::<Contiguous>(one.clone());
         let sum_reduce =
             unary::<SumReduce>(unary::<Contiguous>(unary::<Contiguous>(

@@ -1,4 +1,4 @@
-use crate::{
+use luminal::{
     op::*,
     prelude::{petgraph::visit::EdgeRef, *},
 };
@@ -47,7 +47,7 @@ impl Compiler for SubtractionCompiler {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let (lhs, rhs) = (node(), node());
-        let mul = binary::<Mul>(rhs.clone(), constant(-1.));
+        let mul = binary::<Mul>(rhs.clone(), super::constant(-1.));
         let add = binary::<Add>(lhs.clone(), mul.clone());
         let mut s = add.clone().search(graph);
 
@@ -135,7 +135,7 @@ pub struct EqualCompiler;
 impl Compiler for EqualCompiler {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
-        let one = constant(1.);
+        let one = super::constant(1.);
         let (lhs, rhs) = (node(), node());
         let lt1 = binary::<LessThan>(lhs.clone(), rhs.clone());
         let ne = binary::<Add>(lt1.clone(), binary::<LessThan>(rhs.clone(), lhs.clone()));

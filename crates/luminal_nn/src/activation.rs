@@ -117,10 +117,7 @@ mod tests {
         let unoptimized_b = b.data();
         let unoptimized_batch_out = batch_out.data();
 
-        cx.compile(
-            <(GenericCompiler, CPUCompiler)>::default(),
-            (&mut b, &mut batch_out),
-        );
+        cx.compile(GenericCompiler::default(), (&mut b, &mut batch_out));
         cx.execute();
 
         assert_close(&unoptimized_b, &b.data());

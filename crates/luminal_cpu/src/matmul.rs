@@ -1,4 +1,4 @@
-use crate::{
+use luminal::{
     op::{InputTensor, Mul, Operator, SumReduce},
     prelude::*,
 };

@@ -176,7 +176,7 @@ pub trait Shape:
     type LastAxis: Axes;
 
     fn realized_shape() -> Vec<Expression>;
-    fn to_tracker() -> crate::core::shape::tracker::ShapeTracker;
+    fn to_tracker() -> crate::shape::tracker::ShapeTracker;
 }
 
 /// Represents a [Shape] that has all [ConstDim]s

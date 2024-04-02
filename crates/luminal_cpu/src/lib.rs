@@ -7,7 +7,7 @@ use std::any::Any;
 use itertools::Itertools;
 use petgraph::visit::EdgeRef;
 
-use crate::{
+use luminal::{
     op::{Constant, ConstantValue, Exp2, InputTensor, Log2, Operator, Recip, Sin},
     prelude::*,
 };
@@ -143,8 +143,10 @@ impl Operator for FusedUnary {
 mod tests {
     use rand::{rngs::StdRng, SeedableRng};
 
-    use crate::prelude::*;
-    crate::test_imports!();
+    use luminal::prelude::*;
+
+    use crate::CPUCompiler;
+    luminal::test_imports!();
 
     #[test]
     fn test_matmul() {
@@ -155,7 +157,7 @@ mod tests {
 
         cx.compile(CPUCompiler::default(), &mut c);
 
-        let d_dev = Cpu::default();
+        let d_dev = dfdx::prelude::Cpu::default();
         for m in (1..23).step_by(4) {
             for k in (1..35).step_by(3) {
                 for n in (1..70).step_by(7) {

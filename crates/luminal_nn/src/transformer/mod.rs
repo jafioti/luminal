@@ -401,7 +401,7 @@ mod tests {
         let enc = cx.tensor::<R2<24, 32>>().set(enc_data.clone()).keep();
         let trg = cx.tensor::<R2<20, 32>>().set(trg_data.clone()).keep();
         let mut out1 = model.forward((trg, enc)).retrieve();
-        cx.compile(CPUCompiler::default(), &mut out1);
+        cx.compile(GenericCompiler::default(), &mut out1);
 
         cx.execute_no_delete();
 
@@ -415,7 +415,7 @@ mod tests {
         let trg = cx.tensor::<R2<20, 32>>().set(trg_data);
         let mut out2 = model.forward((trg, enc)).retrieve();
 
-        cx.compile(CPUCompiler::default(), &mut out2);
+        cx.compile(GenericCompiler::default(), &mut out2);
         cx.execute();
 
         assert_close(&out1, &out2.data());
