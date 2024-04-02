@@ -34,9 +34,7 @@ impl Operator for Sub {
             };
             data[i] = lhs - rhs;
         }
-        vec![Tensor {
-            data: Box::new(data),
-        }]
+        vec![Tensor::new(data)]
     }
 }
 
@@ -123,9 +121,7 @@ impl Operator for Equal {
             };
             data[i] = if a < b { 1. } else { 0. };
         }
-        vec![Tensor {
-            data: Box::new(data),
-        }]
+        vec![Tensor::new(data)]
     }
 }
 
@@ -185,20 +181,8 @@ pub struct Gather {
 impl Operator for Gather {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         // Inp 1 should be Vec<f32> and inp 2 should be a CudaSlice<T>
-        let indexes = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Vec<f32>>()
-            .unwrap();
-        let weights = tensors[1]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Vec<f32>>()
-            .unwrap();
+        let indexes = tensors[0].0.borrowed().downcast_ref::<Vec<f32>>().unwrap();
+        let weights = tensors[1].0.borrowed().downcast_ref::<Vec<f32>>().unwrap();
 
         let mut out = vec![0.; indexes.len() * self.embed_dim];
         for token in 0..indexes.len() {
@@ -208,9 +192,7 @@ impl Operator for Gather {
             }
         }
 
-        vec![Tensor {
-            data: Box::new(out),
-        }]
+        vec![Tensor::new(out)]
     }
 }
 

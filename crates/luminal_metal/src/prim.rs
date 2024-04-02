@@ -23,15 +23,13 @@ impl<T> MetalCopyToDevice<T> {
 
 impl<T: MetalFloat> Operator for MetalCopyToDevice<T> {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        if inp[0].0.borrowed().data.as_any().is::<MetalBuffer>() {
+        if inp[0].0.borrowed().is::<MetalBuffer>() {
             // Already on device
             return vec![inp.pop().unwrap().0.cloned()];
         }
         let mut data = inp[0]
             .0
             .borrowed()
-            .data
-            .as_any()
             .downcast_ref::<Vec<f32>>()
             .unwrap()
             .iter()
@@ -64,7 +62,7 @@ impl<T> MetalCopyFromDevice<T> {
 
 impl<T: MetalFloat> Operator for MetalCopyFromDevice<T> {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        if inp[0].0.borrowed().data.as_any().is::<Vec<f32>>() {
+        if inp[0].0.borrowed().is::<Vec<f32>>() {
             // Already off device
             return vec![inp.pop().unwrap().0.cloned()];
         }
@@ -75,9 +73,7 @@ impl<T: MetalFloat> Operator for MetalCopyFromDevice<T> {
             *d = unsafe { *ptr.add(i) }.to_f32();
         }
 
-        vec![Tensor {
-            data: Box::new(data),
-        }]
+        vec![Tensor::new(data)]
     }
 }
 
@@ -109,13 +105,11 @@ impl<T: MetalFloat> Operator for MetalConstant<T> {
             }
             ConstantValue::Float(f) => *f,
         });
-        vec![Tensor {
-            data: Box::new(MetalBuffer(self.1.new_buffer_with_data(
-                &val as *const T as *const _,
-                std::mem::size_of::<T>() as u64,
-                MTLResourceOptions::StorageModeShared,
-            ))),
-        }]
+        vec![Tensor::new(MetalBuffer(self.1.new_buffer_with_data(
+            &val as *const T as *const _,
+            std::mem::size_of::<T>() as u64,
+            MTLResourceOptions::StorageModeShared,
+        )))]
     }
 
     fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
@@ -1444,8 +1438,6 @@ impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
             let a = tensors[0]
                 .0
                 .borrowed()
-                .data
-                .as_any()
                 .downcast_ref::<MetalBuffer>()
                 .unwrap();
 

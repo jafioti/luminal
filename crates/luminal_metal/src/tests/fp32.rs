@@ -1,10 +1,8 @@
 use dfdx::prelude::{Module as DfdxModule, *};
 use rand::{rngs::StdRng, SeedableRng};
 
-use luminal::{
-    nn::{activation::ReLU, linear::Linear},
-    prelude::{Module, *},
-};
+use luminal::{module::Module, prelude::*};
+use luminal_nn::{Linear, ReLU};
 
 use crate::{binary_test, unary_test, MetalCompiler};
 luminal::test_imports!();
@@ -17,13 +15,13 @@ unary_test!(|a| a.ln(), |a| a.ln(), test_ln, f32);
 unary_test!(|a| a.log2(), |a| a.ln() / 2_f32.ln(), test_log2, f32);
 unary_test!(|a| a.exp2(), |a| (a * 2_f32.ln()).exp(), test_exp2, f32);
 unary_test!(
-    |a| a.softmax::<0>(),
+    |a| a.softmax::<LAxis<0>>(),
     |a| a.softmax::<DAxis<0>>(),
     test_softmax,
     f32
 );
 unary_test!(
-    |a| a.mean_norm::<0>().std_norm::<0, _>(1e-5),
+    |a| a.mean_norm::<LAxis<0>>().std_norm::<LAxis<0>, _>(1e-5),
     |a| a.normalize::<DAxis<0>>(1e-5),
     test_norm,
     f32
@@ -296,8 +294,7 @@ fn test_relu_and_linear() {
 #[test]
 fn test_transformer_encoder_block() {
     let mut cx = Graph::new();
-    let model: luminal::nn::transformer::encoder::TransformerEncoderBlock<3, 4, 1> =
-        InitModule::initialize(&mut cx);
+    let model: luminal_nn::TransformerEncoderBlock<3, 4, 1> = InitModule::initialize(&mut cx);
     model
         .attention
         .w_k

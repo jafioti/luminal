@@ -144,9 +144,7 @@ impl Loader for SafeTensorLoader {
                                     .collect(),
                                 _ => panic!("{:?} is not a supported dtype", tensor_view.dtype()),
                             };
-                            return vec![Tensor {
-                                data: Box::new(data),
-                            }];
+                            return vec![Tensor::new(data)];
                         }
                     }
 
@@ -199,9 +197,7 @@ impl<'data> View for &'data Tensor {
         &[]
     }
     fn data(&self) -> Cow<[u8]> {
-        self.data
-            .as_any()
-            .downcast_ref::<Vec<f32>>()
+        self.downcast_ref::<Vec<f32>>()
             .unwrap()
             .iter()
             .flat_map(|f| f.to_le_bytes().into_iter())
@@ -209,14 +205,12 @@ impl<'data> View for &'data Tensor {
             .into()
     }
     fn data_len(&self) -> usize {
-        self.data.as_any().downcast_ref::<Vec<f32>>().unwrap().len()
+        self.downcast_ref::<Vec<f32>>().unwrap().len()
     }
 }
 
 impl<'a> std::convert::From<safetensors::tensor::TensorView<'a>> for Tensor {
     fn from(value: safetensors::tensor::TensorView<'a>) -> Self {
-        Tensor {
-            data: Box::new(unsafe { std::mem::transmute::<_, &'a [f32]>(value.data()) }.to_vec()),
-        }
+        Tensor::new(unsafe { std::mem::transmute::<_, &'a [f32]>(value.data()) }.to_vec())
     }
 }

@@ -19,9 +19,9 @@ impl Operator for ARange {
             .size
             .exec(unsafe { self.dyn_map.as_ref().unwrap() })
             .unwrap();
-        vec![Tensor {
-            data: Box::new((0..n_elements).map(|i| i as f32).collect::<Vec<_>>()),
-        }]
+        vec![Tensor::new(
+            (0..n_elements).map(|i| i as f32).collect::<Vec<_>>(),
+        )]
     }
 }
 

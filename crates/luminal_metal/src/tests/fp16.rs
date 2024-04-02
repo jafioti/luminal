@@ -2,10 +2,8 @@ use dfdx::prelude::{Module as DfdxModule, *};
 use metal_rs::objc::rc::autoreleasepool;
 use rand::{rngs::StdRng, SeedableRng};
 
-use luminal::{
-    nn::{activation::ReLU, linear::Linear, norm::RMSNorm},
-    prelude::{symbolic::Expression, Module, *},
-};
+use luminal::{module::Module, prelude::*};
+use luminal_nn::{Linear, RMSNorm, ReLU};
 
 use crate::{binary_test, unary_test, MetalCompiler};
 luminal::test_imports!();
@@ -23,13 +21,13 @@ unary_test!(
 );
 unary_test!(|a| a.exp2(), |a| (a * 2_f32.ln()).exp(), test_exp2, f16);
 unary_test!(
-    |a| a.softmax::<0>(),
+    |a| a.softmax::<LAxis<0>>(),
     |a| a.softmax::<DAxis<0>>(),
     test_softmax,
     f16
 );
 unary_test!(
-    |a| a.mean_norm::<0>().std_norm::<0, _>(1e-5),
+    |a| a.mean_norm::<LAxis<0>>().std_norm::<LAxis<0>, _>(1e-5),
     |a| a
         .to_dtype::<f32>()
         .normalize::<DAxis<0>>(1e-5)
@@ -554,8 +552,8 @@ fn test_layer_norm() {
     let mut cx = Graph::new();
     let a_data = random_vec(15 * 16 * 32);
     let a = cx.tensor::<R3<15, 16, 32>>().set(a_data.clone());
-    let mut b = a.layer_norm::<0, _>(1e-5).retrieve();
-    let mut c = a.layer_norm::<2, _>(1e-5).retrieve();
+    let mut b = a.layer_norm::<LAxis<0>, _>(1e-5).retrieve();
+    let mut c = a.layer_norm::<LAxis<2>, _>(1e-5).retrieve();
     cx.compile(
         <(GenericCompiler, MetalCompiler<f16>)>::default(),
         (&mut b, &mut c),
@@ -574,8 +572,7 @@ fn test_layer_norm() {
 #[test]
 fn test_transformer_encoder_block() {
     let mut cx = Graph::new();
-    let model: luminal::nn::transformer::encoder::TransformerEncoderBlock<32, 64, 1> =
-        InitModule::initialize(&mut cx);
+    let model: luminal_nn::TransformerEncoderBlock<32, 64, 1> = InitModule::initialize(&mut cx);
     let w_k_weight = random_vec(32 * 32);
     model.attention.w_k.weight.set(w_k_weight.clone());
     let w_q_weight = random_vec(32 * 32);
@@ -594,7 +591,7 @@ fn test_transformer_encoder_block() {
         .tensor::<(Dyn<'b'>, Dyn<'a'>, luminal::prelude::Const<32>)>()
         .set_dyn(a_data.clone(), &[1, 2, 3])
         .keep();
-    cx.keep_tensors(state_dict(&model));
+    cx.keep_tensors(param_dict(&model));
     let mut b = model.forward(a).retrieve();
     cx.execute();
     let unopt_b = b.data();
@@ -672,7 +669,7 @@ fn test_embedding() {
         .set(vec![1.0, 0.0, 1.0])
         .keep();
 
-    let model: luminal::nn::embedding::Embedding<3, 4> = InitModule::initialize(&mut cx);
+    let model: luminal_nn::Embedding<3, 4> = InitModule::initialize(&mut cx);
     model
         .weight
         .set(vec![1.1, 2., 3., 1., 2., 3., 14., 2., 33., 1., 2., 3.]);

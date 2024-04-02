@@ -123,13 +123,7 @@ pub struct FusedUnary(Vec<fn(f32) -> f32>);
 impl Operator for FusedUnary {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let mut t = inp.pop().unwrap().0.cloned();
-        for a in t
-            .data
-            .as_any_mut()
-            .downcast_mut::<Vec<f32>>()
-            .unwrap()
-            .iter_mut()
-        {
+        for a in t.downcast_mut::<Vec<f32>>().unwrap().iter_mut() {
             for f in &self.0 {
                 *a = (f)(*a);
             }

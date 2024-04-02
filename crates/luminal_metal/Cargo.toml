@@ -19,3 +19,4 @@ unzip3 = "1.0.0"
 dfdx = { version = "0.13", features = ["f16"] }
 paste = "1.0.14"
 rand = "0.8.5"
+luminal_nn = {path="../../crates/luminal_nn"}

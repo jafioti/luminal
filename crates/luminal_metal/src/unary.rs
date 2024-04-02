@@ -365,8 +365,6 @@ impl<T: 'static + Clone> Operator for MetalStdNorm<T> {
             let a = tensors[0]
                 .0
                 .borrowed()
-                .data
-                .as_any()
                 .downcast_ref::<MetalBuffer>()
                 .unwrap();
             let out = self.device.new_buffer(
@@ -568,8 +566,6 @@ impl<T: MetalFloat> Operator for MetalExp<T> {
             let a_inp = tensors[0]
                 .0
                 .borrowed()
-                .data
-                .as_any()
                 .downcast_ref::<MetalBuffer>()
                 .unwrap();
             let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
@@ -709,8 +705,6 @@ impl<T: MetalFloat> Operator for MetalCos<T> {
             let a = tensors[0]
                 .0
                 .borrowed()
-                .data
-                .as_any()
                 .downcast_ref::<MetalBuffer>()
                 .unwrap();
             let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();

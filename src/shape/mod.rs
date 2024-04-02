@@ -6,15 +6,13 @@ mod slice;
 pub mod symbolic;
 pub mod tracker;
 
-pub use realize::*;
-pub use slice::*;
-
 pub use axes::*;
 pub use broadcast::*;
 pub use permute::*;
+pub use realize::*;
+pub use slice::*;
+pub use symbolic::*;
 pub use tracker::*;
-
-use self::symbolic::Expression;
 
 // This currently is a lot more complicated than it needs to be, because it's based on dfdx and is ready to do dynamic dimensions.
 // TODO: Actually use dynamic dimensions

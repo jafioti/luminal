@@ -5,7 +5,7 @@ use dyn_clone::{clone_trait_object, DynClone};
 /// A tensor with data. The data can be anything that implements the Data trait
 #[derive(Debug, Clone)]
 pub struct Tensor {
-    pub data: Box<dyn Data>,
+    data: Box<dyn Data>,
 }
 
 impl Tensor {
@@ -13,6 +13,15 @@ impl Tensor {
         Self {
             data: Box::new(data),
         }
+    }
+    pub fn downcast_ref<T: Data>(&self) -> Option<&T> {
+        self.data.as_any().downcast_ref()
+    }
+    pub fn downcast_mut<T: Data>(&mut self) -> Option<&mut T> {
+        self.data.as_any_mut().downcast_mut()
+    }
+    pub fn is<T: Data>(&self) -> bool {
+        self.data.as_any().is::<T>()
     }
 }
 

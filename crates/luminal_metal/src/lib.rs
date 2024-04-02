@@ -443,8 +443,6 @@ fn get_idx_valid_exps(shape: ShapeTracker) -> (String, String) {
 fn get_buffer_from_tensor<'a>(tensor: &'a InputTensor) -> &'a MetalBuffer {
     tensor
         .borrowed()
-        .data
-        .as_any()
         .downcast_ref::<MetalBuffer>()
         .expect("Tensor does not contain a metal buffer")
 }

@@ -95,11 +95,7 @@ impl<S: Shape> GraphTensor<S> {
             .downcast_mut::<Function>()
             .unwrap();
         // We shouldn't do cloning here!
-        node.1 = Box::new(move |_| {
-            vec![Tensor {
-                data: Box::new(data.clone()),
-            }]
-        });
+        node.1 = Box::new(move |_| vec![Tensor::new(data.clone())]);
         self
     }
 
@@ -146,7 +142,7 @@ impl<S: Shape> GraphTensor<S> {
         let mut st = self.shape;
         st.resolve_global_dyn_dims(&self.graph().dyn_map);
         let tensor = self.graph().get_tensor_ref(self.id, 0).unwrap();
-        let orig_data = tensor.data.as_any().downcast_ref::<Vec<f32>>().unwrap();
+        let orig_data = tensor.downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; st.n_elements().to_usize().unwrap()];
         let ind = st.index_expression();
         let val = st.valid_expression();
@@ -189,11 +185,7 @@ impl<S: ConstShape> GraphTensor<S> {
             .unwrap();
 
         // Set the closure here
-        node.1 = Box::new(move |_| {
-            vec![Tensor {
-                data: Box::new(loader()),
-            }]
-        });
+        node.1 = Box::new(move |_| vec![Tensor::new(loader())]);
 
         // Return
         self

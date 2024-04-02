@@ -87,12 +87,7 @@ impl Operator for Print {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         for (i, (tensor, tracker)) in inp.iter().enumerate() {
             println!("{}", self.0);
-            let d = tensor
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Vec<f32>>()
-                .unwrap();
+            let d = tensor.borrowed().downcast_ref::<Vec<f32>>().unwrap();
             println!("{} Data: {:?}", i + 1, &d[..d.len().min(10)]);
             println!("{} Shape: {:?}", i + 1, tracker);
         }
@@ -114,12 +109,7 @@ impl Operator for Diff {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         // Get tensor data and file data
         let (tensor, shape) = inp.pop().unwrap();
-        let d = tensor
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Vec<f32>>()
-            .unwrap();
+        let d = tensor.borrowed().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; d.len()];
         let (ind, val) = (shape.index_expression(), shape.valid_expression());
         #[allow(unused_mut)]
@@ -284,14 +274,12 @@ impl Debug for Constant {
 
 impl Operator for Constant {
     fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        vec![Tensor {
-            data: Box::new(vec![match &self.0 {
-                ConstantValue::Expression(e) => {
-                    e.exec(unsafe { self.1.as_ref().unwrap() }).unwrap() as f32
-                }
-                ConstantValue::Float(f) => *f,
-            }]),
-        }]
+        vec![Tensor::new(vec![match &self.0 {
+            ConstantValue::Expression(e) => {
+                e.exec(unsafe { self.1.as_ref().unwrap() }).unwrap() as f32
+            }
+            ConstantValue::Float(f) => *f,
+        }])]
     }
 }
 
@@ -642,16 +630,11 @@ impl Operator for MaxReduce {
 }
 
 pub fn get_vec_from_tensor<'a>(tensor: &'a InputTensor<'a>) -> &'a Vec<f32> {
-    tensor
-        .borrowed()
-        .data
-        .as_any()
-        .downcast_ref::<Vec<f32>>()
-        .unwrap()
+    tensor.borrowed().downcast_ref::<Vec<f32>>().unwrap()
 }
 
 pub fn get_vec_from_tensor_owned(tensor: &mut Tensor) -> &mut Vec<f32> {
-    tensor.data.as_any_mut().downcast_mut::<Vec<f32>>().unwrap()
+    tensor.downcast_mut::<Vec<f32>>().unwrap()
 }
 
 #[cfg(test)]

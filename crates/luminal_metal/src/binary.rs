@@ -402,13 +402,7 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup buffers
-            let indexes = tensors[0]
-                .0
-                .borrowed()
-                .data
-                .as_any()
-                .downcast_ref::<Vec<f32>>()
-                .unwrap();
+            let indexes = tensors[0].0.borrowed().downcast_ref::<Vec<f32>>().unwrap();
             let index_buffer = self.device.new_buffer_with_data(
                 unsafe { std::mem::transmute(indexes.as_ptr()) },
                 (indexes.len() * std::mem::size_of::<f32>()) as u64,
@@ -417,8 +411,6 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
             let b_inp = tensors[1]
                 .0
                 .borrowed()
-                .data
-                .as_any()
                 .downcast_ref::<MetalBuffer>()
                 .unwrap();
 
