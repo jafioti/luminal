@@ -9,17 +9,15 @@ pub struct Linear<const A: usize, const B: usize> {
 
 impl<const A: usize, const B: usize> InitModule for Linear<A, B> {
     fn initialize(cx: &mut Graph) -> Self {
-        let s = Self {
-            weight: cx.named_tensor("Weight"),
-        };
         // Init weight as uniform(-1, 1)
         let mut rng = thread_rng();
-        s.weight.set(
-            (0..(A * B))
-                .map(|_| rng.gen_range(-1_f32..1_f32))
-                .collect::<Vec<_>>(),
-        );
-        s
+        Self {
+            weight: cx.named_tensor("Weight").set(
+                (0..(A * B))
+                    .map(|_| rng.gen_range(-1_f32..1_f32))
+                    .collect::<Vec<_>>(),
+            ),
+        }
     }
 }
 

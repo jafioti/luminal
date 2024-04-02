@@ -185,3 +185,7 @@ tuple_impls!([M1, M2, M3] [0, 1, 2], M3, [M2, M1]);
 tuple_impls!([M1, M2, M3, M4] [0, 1, 2, 3], M4, [M3, M2, M1]);
 tuple_impls!([M1, M2, M3, M4, M5] [0, 1, 2, 3, 4], M5, [M4, M3, M2, M1]);
 tuple_impls!([M1, M2, M3, M4, M5, M6] [0, 1, 2, 3, 4, 5], M6, [M5, M4, M3, M2, M1]);
+tuple_impls!([M1, M2, M3, M4, M5, M6, M7] [0, 1, 2, 3, 4, 5, 6], M7, [M6, M5, M4, M3, M2, M1]);
+tuple_impls!([M1, M2, M3, M4, M5, M6, M7, M8] [0, 1, 2, 3, 4, 5, 6, 7], M8, [M7, M6, M5, M4, M3, M2, M1]);
+tuple_impls!([M1, M2, M3, M4, M5, M6, M7, M8, M9] [0, 1, 2, 3, 4, 5, 6, 7, 8], M9, [M8, M7, M6, M5, M4, M3, M2, M1]);
+tuple_impls!([M1, M2, M3, M4, M5, M6, M7, M8, M9, M10] [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], M10, [M9, M8, M7, M6, M5, M4, M3, M2, M1]);
