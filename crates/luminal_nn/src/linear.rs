@@ -38,6 +38,42 @@ where
     }
 }
 
+/// A simple unbiased linear layer with a permuted weight matrix
+pub struct PermutedLinear<const A: usize, const B: usize> {
+    pub weight: GraphTensor<R2<B, A>>,
+}
+
+impl<const A: usize, const B: usize> InitModule for PermutedLinear<A, B> {
+    fn initialize(cx: &mut Graph) -> Self {
+        // Init weight as uniform(-1, 1)
+        let mut rng = thread_rng();
+        Self {
+            weight: cx.named_tensor("Weight").set(
+                (0..(A * B))
+                    .map(|_| rng.gen_range(-1_f32..1_f32))
+                    .collect::<Vec<_>>(),
+            ),
+        }
+    }
+}
+
+impl<const A: usize, const B: usize> SerializeModule for PermutedLinear<A, B> {
+    fn serialize(&self, s: &mut luminal::serialization::Serializer) {
+        s.tensor("weight", self.weight);
+    }
+}
+
+impl<const A: usize, const B: usize, S: Shape> Module<GraphTensor<S>> for PermutedLinear<A, B>
+where
+    GraphTensor<S>: Matmul<R2<A, B>>,
+{
+    type Output = <GraphTensor<S> as Matmul<R2<A, B>>>::Output;
+
+    fn forward(&self, input: GraphTensor<S>) -> Self::Output {
+        input.matmul(self.weight.permute())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Linear;

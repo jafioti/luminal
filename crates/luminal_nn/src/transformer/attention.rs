@@ -3,7 +3,7 @@ use std::ops::Mul;
 use crate::Linear;
 use luminal::prelude::*;
 
-// This is still single head attention because I need a runtime reshape, like the try_reshape in dfdx
+/// Multi-head self attention as layed out in [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762).
 pub struct MultiHeadSelfAttention<
     const DIM: usize,
     const K_DIM: usize,

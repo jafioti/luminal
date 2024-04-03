@@ -3,7 +3,7 @@ use luminal::prelude::*;
 
 use super::attention::MultiHeadSelfAttention;
 
-/// A transformer encoder as layed out in *Attention Is All You Need*.
+/// A transformer encoder as layed out in [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762).
 pub type TransformerEncoder<
     const DIM: usize,
     const FF: usize,

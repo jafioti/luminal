@@ -112,10 +112,11 @@ impl Operator for Diff {
         let d = tensor.borrowed().downcast_ref::<Vec<f32>>().unwrap();
         let mut data = vec![0.; d.len()];
         let (ind, val) = (shape.index_expression(), shape.valid_expression());
+        let mut stack = vec![];
         #[allow(unused_mut)]
         for (i, mut r) in data.iter_mut().enumerate() {
-            if val.exec_single_var(i) != 0 {
-                *r = d[ind.exec_single_var(i)];
+            if val.exec_single_var_stack(i, &mut stack) != 0 {
+                *r = d[ind.exec_single_var_stack(i, &mut stack)];
             }
         }
         let bin_data = std::fs::read(&self.0)
@@ -293,9 +294,10 @@ impl Operator for Contiguous {
         let mut res = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
         let ind = inp[0].1.index_expression();
         let val = inp[0].1.valid_expression();
+        let mut stack = vec![];
         for i in 0..res.len() {
-            if val.exec_single_var(i) != 0 {
-                res[i] = src[ind.exec_single_var(i)];
+            if val.exec_single_var_stack(i, &mut stack) != 0 {
+                res[i] = src[ind.exec_single_var_stack(i, &mut stack)];
             }
         }
         vec![Tensor::new(res)]
@@ -320,9 +322,10 @@ impl Operator for Log2 {
             let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
             let inp_data = get_vec_from_tensor(&inp[0].0);
             let (ind, val) = (inp[0].1.index_expression(), inp[0].1.valid_expression());
+            let mut stack = vec![];
             for i in 0..data.len() {
-                if val.exec_single_var(i) != 0 {
-                    data[i] = inp_data[ind.exec_single_var(i)].log2();
+                if val.exec_single_var_stack(i, &mut stack) != 0 {
+                    data[i] = inp_data[ind.exec_single_var_stack(i, &mut stack)].log2();
                 }
             }
             vec![Tensor::new(data)]
@@ -344,9 +347,10 @@ impl Operator for Exp2 {
             let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
             let inp_data = get_vec_from_tensor(&inp[0].0);
             let (ind, val) = (inp[0].1.index_expression(), inp[0].1.valid_expression());
+            let mut stack = vec![];
             for i in 0..data.len() {
-                if val.exec_single_var(i) != 0 {
-                    data[i] = inp_data[ind.exec_single_var(i)].exp2();
+                if val.exec_single_var_stack(i, &mut stack) != 0 {
+                    data[i] = inp_data[ind.exec_single_var_stack(i, &mut stack)].exp2();
                 }
             }
             vec![Tensor::new(data)]
@@ -368,9 +372,10 @@ impl Operator for Sin {
             let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
             let inp_data = get_vec_from_tensor(&inp[0].0);
             let (ind, val) = (inp[0].1.index_expression(), inp[0].1.valid_expression());
+            let mut stack = vec![];
             for i in 0..data.len() {
-                if val.exec_single_var(i) != 0 {
-                    data[i] = inp_data[ind.exec_single_var(i)].sin();
+                if val.exec_single_var_stack(i, &mut stack) != 0 {
+                    data[i] = inp_data[ind.exec_single_var_stack(i, &mut stack)].sin();
                 }
             }
             vec![Tensor::new(data)]
@@ -392,9 +397,10 @@ impl Operator for Recip {
             let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
             let inp_data = get_vec_from_tensor(&inp[0].0);
             let (ind, val) = (inp[0].1.index_expression(), inp[0].1.valid_expression());
+            let mut stack = vec![];
             for i in 0..data.len() {
-                if val.exec_single_var(i) != 0 {
-                    data[i] = inp_data[ind.exec_single_var(i)].recip();
+                if val.exec_single_var_stack(i, &mut stack) != 0 {
+                    data[i] = inp_data[ind.exec_single_var_stack(i, &mut stack)].recip();
                 }
             }
             vec![Tensor::new(data)]
@@ -430,15 +436,16 @@ impl Operator for Add {
             inp[1].1.index_expression(),
             inp[1].1.valid_expression(),
         );
+        let mut stack = vec![];
         let mut data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
         for i in 0..data.len() {
-            let lhs = if a_val.exec_single_var(i) != 0 {
-                a_data[a_ind.exec_single_var(i)]
+            let lhs = if a_val.exec_single_var_stack(i, &mut stack) != 0 {
+                a_data[a_ind.exec_single_var_stack(i, &mut stack)]
             } else {
                 0.0
             };
-            let rhs = if b_val.exec_single_var(i) != 0 {
-                b_data[b_ind.exec_single_var(i)]
+            let rhs = if b_val.exec_single_var_stack(i, &mut stack) != 0 {
+                b_data[b_ind.exec_single_var_stack(i, &mut stack)]
             } else {
                 0.0
             };
@@ -463,13 +470,14 @@ impl Operator for Mul {
             inp[1].1.index_expression(),
             inp[1].1.valid_expression(),
         );
+        let mut stack = vec![];
         for i in 0..data.len() {
-            data[i] = if a_val.exec_single_var(i) != 0 {
-                a_data[a_ind.exec_single_var(i)]
+            data[i] = if a_val.exec_single_var_stack(i, &mut stack) != 0 {
+                a_data[a_ind.exec_single_var_stack(i, &mut stack)]
             } else {
                 0.0
-            } * if b_val.exec_single_var(i) != 0 {
-                b_data[b_ind.exec_single_var(i)]
+            } * if b_val.exec_single_var_stack(i, &mut stack) != 0 {
+                b_data[b_ind.exec_single_var_stack(i, &mut stack)]
             } else {
                 0.0
             };
@@ -493,13 +501,14 @@ impl Operator for Mod {
             inp[1].1.index_expression(),
             inp[1].1.valid_expression(),
         );
+        let mut stack = vec![];
         for i in 0..data.len() {
-            data[i] = if a_val.exec_single_var(i) != 0 {
-                a_data[a_ind.exec_single_var(i)]
+            data[i] = if a_val.exec_single_var_stack(i, &mut stack) != 0 {
+                a_data[a_ind.exec_single_var_stack(i, &mut stack)]
             } else {
                 0.0
-            } % if b_val.exec_single_var(i) != 0 {
-                b_data[b_ind.exec_single_var(i)]
+            } % if b_val.exec_single_var_stack(i, &mut stack) != 0 {
+                b_data[b_ind.exec_single_var_stack(i, &mut stack)]
             } else {
                 0.0
             };
@@ -523,14 +532,15 @@ impl Operator for LessThan {
             inp[1].1.index_expression(),
             inp[1].1.valid_expression(),
         );
+        let mut stack = vec![];
         for i in 0..data.len() {
-            let a = if a_val.exec_single_var(i) != 0 {
-                a_data[a_ind.exec_single_var(i)]
+            let a = if a_val.exec_single_var_stack(i, &mut stack) != 0 {
+                a_data[a_ind.exec_single_var_stack(i, &mut stack)]
             } else {
                 0.0
             };
-            let b = if b_val.exec_single_var(i) != 0 {
-                b_data[b_ind.exec_single_var(i)]
+            let b = if b_val.exec_single_var_stack(i, &mut stack) != 0 {
+                b_data[b_ind.exec_single_var_stack(i, &mut stack)]
             } else {
                 0.0
             };
@@ -570,14 +580,16 @@ impl Operator for SumReduce {
         let a_data = get_vec_from_tensor(&inp[0].0);
         let ind = inp[0].1.index_expression();
         let val = inp[0].1.valid_expression();
+        let mut stack = vec![];
 
         for i in 0..front_size {
             for j in 0..back_size {
                 for k in 0..dim_size {
                     let original_index = i * dim_size * back_size + k * back_size + j;
                     let new_index = i * back_size + j;
-                    if val.exec_single_var(original_index) != 0 {
-                        result[new_index] += a_data[ind.exec_single_var(original_index)];
+                    if val.exec_single_var_stack(original_index, &mut stack) != 0 {
+                        result[new_index] +=
+                            a_data[ind.exec_single_var_stack(original_index, &mut stack)];
                     }
                 }
             }
@@ -612,15 +624,16 @@ impl Operator for MaxReduce {
         let a_data = get_vec_from_tensor(&inp[0].0);
         let ind = inp[0].1.index_expression();
         let val = inp[0].1.valid_expression();
+        let mut stack = vec![];
 
         for i in 0..front_size {
             for j in 0..back_size {
                 for k in 0..dim_size {
                     let original_index = i * dim_size * back_size + k * back_size + j;
                     let new_index = i * back_size + j;
-                    if val.exec_single_var(original_index) != 0 {
-                        result[new_index] =
-                            result[new_index].max(a_data[ind.exec_single_var(original_index)]);
+                    if val.exec_single_var_stack(original_index, &mut stack) != 0 {
+                        result[new_index] = result[new_index]
+                            .max(a_data[ind.exec_single_var_stack(original_index, &mut stack)]);
                     }
                 }
             }

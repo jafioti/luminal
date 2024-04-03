@@ -64,9 +64,7 @@ impl Loader for DfdxDeferredLoader {
                         )
                     };
 
-                    vec![Tensor {
-                        data: Box::new(data),
-                    }]
+                    vec![Tensor::new(data)]
                 });
             };
         }

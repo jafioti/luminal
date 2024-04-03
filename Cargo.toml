@@ -32,11 +32,13 @@ members = [
     "crates/luminal_cpu", 
     "crates/luminal_nn",
     "crates/luminal_training", 
-    "examples/train_math_net"
+    "examples/train_math_net",
+    "examples/llama",
+    "examples/mistral", 
+    "examples/whisper",
+     "examples/simple"
 ]
 exclude = [
-    "crates/luminal_metal","crates/luminal_cuda",
-    "examples/llama",
-    "examples/mistral",
-    "examples/simple"
+    "crates/luminal_metal",
+    "crates/luminal_cuda",
 ]

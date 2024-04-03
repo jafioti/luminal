@@ -66,11 +66,11 @@ fn main() {
         (
             GenericCompiler::default(),
             #[cfg(feature = "metal")]
-            luminal_metal::MetalQuantizedCompiler::<f32>::new(quantized_weight_nodes),
+            luminal_metal::quantized::MetalQuantizedCompiler::<f32>::new(quantized_weight_nodes),
             #[cfg(feature = "cuda")]
             luminal_cuda::CudaQuantizedCompiler::<f32>::new(quantized_weight_nodes),
             #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
-            luminal::compilers::CPUCompiler::default(),
+            luminal_cpu::CPUCompiler::default(),
         ),
         (&mut input, &mut logits, &mut cache_src, &mut cache_dest),
     );

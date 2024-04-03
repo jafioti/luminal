@@ -20,7 +20,7 @@ type DeviceCompiler = luminal_metal::MetalCompiler<luminal::prelude::f16>;
 #[cfg(feature = "cuda")]
 type DeviceCompiler = luminal_cuda::CudaCompiler<luminal::prelude::f16>;
 #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
-type DeviceCompiler = CPUCompiler;
+type DeviceCompiler = luminal_cpu::CPUCompiler;
 
 fn main() {
     let prompt = "Here is a python implementation of merge sort:";

@@ -284,6 +284,10 @@ where
     /// Evaluate the expression with one value for all variables.
     pub fn exec_single_var(&self, value: usize) -> usize {
         let mut stack = Vec::new();
+        self.exec_single_var_stack(value, &mut stack)
+    }
+    /// Evaluate the expression with one value for all variables. Uses a provided stack
+    pub fn exec_single_var_stack(&self, value: usize, stack: &mut Vec<i32>) -> usize {
         for term in &self.terms {
             match term {
                 Term::Num(n) => stack.push(*n),
