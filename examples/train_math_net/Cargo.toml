@@ -5,8 +5,12 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+metal = ["dep:luminal_metal"]
+
 [dependencies]
 luminal = {path="../.."}
 luminal_training = {path="../../crates/luminal_training"}
 luminal_nn =  {path="../../crates/luminal_nn"}
 rand = "0.8.5"
+luminal_metal = {path="../../crates/luminal_metal", optional=true}

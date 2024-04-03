@@ -30,7 +30,8 @@ dfdx = { version = "0.13", features = ["f16"] }
 [workspace]
 members = [ 
     "crates/luminal_cpu", 
-    "crates/luminal_nn","crates/luminal_training", 
+    "crates/luminal_nn",
+    "crates/luminal_training", 
     "examples/train_math_net"
 ]
 exclude = [

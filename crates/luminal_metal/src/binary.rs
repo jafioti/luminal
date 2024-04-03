@@ -145,7 +145,7 @@ pub struct MetalSubtractionCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
     type Output = ();
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let (lhs, rhs) = (node(), node());
@@ -167,14 +167,13 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
                 .next()
                 .map(|e| (e.source(), e.weight().as_data().unwrap()))
                 .unwrap();
-            let b_final_shape = graph
+            let (_, _, b_final_shape) = graph
                 .edges_connecting(s.get(&mul), add)
                 .next()
                 .unwrap()
                 .weight()
                 .as_data()
-                .unwrap()
-                .2;
+                .unwrap();
             if b_final_shape.is_reshaped() {
                 continue;
             }
@@ -190,6 +189,7 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
                 .input(b, b_edge.1, b_edge.2)
                 .finish();
             move_outgoing_edge(add, sub, graph);
+            remap(add, sub, &mut ids, graph);
 
             graph.remove_node(add);
             s.try_delete();
@@ -322,7 +322,7 @@ pub struct MetalEqualCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
     type Output = ();
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let one = constant::<T>(1.);
@@ -367,6 +367,7 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
                 .input(rhs, b_edge.1, b_edge.2)
                 .finish();
             move_outgoing_edge(eq, equals, graph);
+            remap(eq, equals, &mut ids, graph);
 
             graph.remove_node(eq);
             s.try_delete();
@@ -461,7 +462,7 @@ pub struct MetalGatherCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
     type Output = ();
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
         let indexes = node();
@@ -498,6 +499,8 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
                 .input(s.get(&embeddings), 0, emb_shape)
                 .finish();
             move_outgoing_edge(s.get(&sum_reduce), gather, graph);
+            remap(s.get(&sum_reduce), gather, &mut ids, graph);
+
             graph.remove_node(s.get(&sum_reduce));
             s.try_delete();
         }

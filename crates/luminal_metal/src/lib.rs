@@ -8,20 +8,19 @@ use std::{
 #[cfg(test)]
 mod tests;
 
-mod binary;
-mod command_buffer;
-mod elementwise_fusion;
-mod matmul;
-mod other;
-mod prim;
-mod quantized;
-mod storage_buffer;
-mod unary;
+pub mod binary;
+pub mod command_buffer;
+pub mod elementwise_fusion;
+pub mod matmul;
+pub mod other;
+pub mod prim;
+pub mod quantized;
+pub mod storage_buffer;
+pub mod unary;
 
 use itertools::Itertools;
 use metal_rs::*;
 use prim::MetalConstant;
-pub use quantized::*;
 use rustc_hash::FxHashMap;
 
 use luminal::{

@@ -5,6 +5,7 @@ use rand::{rngs::ThreadRng, thread_rng, Rng};
 
 // This is a simple example of using luminal to train.
 // Here we are training an MLP to add 4 bit numbers together into a resultant 5 bit number.
+// Run with the "metal" feature to compile to Metal backend with luminal_metal
 
 fn main() {
     // Setup gradient graph
@@ -17,7 +18,7 @@ fn main() {
 
     let mut weights = params(&model);
     let grads = cx.compile(Autograd::new(&weights, loss), ());
-    let (new_weights, lr) = sgd_on_graph(&mut cx, &weights, &grads);
+    let (mut new_weights, lr) = sgd_on_graph(&mut cx, &weights, &grads);
     lr.set(1e-1);
 
     cx.compile(
@@ -28,12 +29,27 @@ fn main() {
             &mut loss,
             &mut output,
             &mut weights,
+            &mut new_weights,
+        ),
+    );
+
+    #[cfg(feature = "metal")]
+    cx.compile(
+        luminal_metal::MetalCompiler::<f32>::default(),
+        (
+            &mut input,
+            &mut target,
+            &mut loss,
+            &mut output,
+            &mut weights,
+            &mut new_weights,
         ),
     );
 
     let mut rng = thread_rng();
     let (mut loss_avg, mut acc_avg) = (ExponentialAverage::new(1.0), ExponentialAverage::new(0.0));
     let mut iter = 0;
+    let start = std::time::Instant::now();
     while acc_avg.value < 0.995 {
         // Generate problem
         let (problem, answer) = make_problem(&mut rng);
@@ -64,6 +80,10 @@ fn main() {
         iter += 1;
     }
     println!("Finished in {iter} iterations");
+    println!(
+        "Took {:.2}s",
+        (std::time::Instant::now() - start).as_secs_f32()
+    );
 }
 
 // Generate data

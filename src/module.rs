@@ -47,6 +47,9 @@ pub fn transfer_data(
             dest_graph.tensors.insert((dest, output_num), tensor);
             output_num += 1;
         }
+        if output_num == 0 {
+            panic!("No source tensor found for node {}", src.index());
+        }
     }
 }
 
@@ -57,6 +60,9 @@ pub fn transfer_data_same_graph(srcs: impl ToIds, dests: impl ToIds, graph: &mut
         while let Some(tensor) = graph.tensors.remove(&(src, output_num)) {
             graph.tensors.insert((dest, output_num), tensor);
             output_num += 1;
+        }
+        if output_num == 0 {
+            panic!("No source tensor found for node {}", src.index());
         }
     }
 }

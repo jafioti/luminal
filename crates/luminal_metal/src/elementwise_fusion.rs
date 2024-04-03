@@ -119,6 +119,18 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 let equation = multi_replace(&expression_b, &b_replacements);
 
                 // Create new fused op
+                let output_buffer_sizes = graph
+                    .node_custom::<MetalKernelWrapper, _>(b, "metal", Box::<()>::default())
+                    .unwrap()
+                    .0
+                    .output_buffer_sizes(
+                        &graph
+                            .edges_directed(b, Direction::Incoming)
+                            .filter_map(|e| e.weight().as_data())
+                            .sorted_by_key(|(i, _, _)| *i)
+                            .map(|(_, _, s)| s)
+                            .collect::<Vec<_>>(),
+                    );
                 let new_op = graph
                     .add_op(FusedElementwiseOp::<T> {
                         kernel: None,
@@ -128,12 +140,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                         queue: queue.clone(),
                         device: device.clone(),
                         input_views: b_inputs.iter().map(|(v, _, _, _, _)| v.clone()).collect(),
-                        output_buffer_sizes: graph
-                            .edges_directed(b, Direction::Outgoing)
-                            .filter_map(|e| e.weight().as_data())
-                            .sorted_by_key(|(i, _, _)| *i)
-                            .map(|(_, _, sh)| sh.n_physical_elements())
-                            .collect(),
+                        output_buffer_sizes,
                         _phantom: Default::default(),
                     })
                     .finish();
