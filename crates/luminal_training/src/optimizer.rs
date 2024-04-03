@@ -1,5 +1,7 @@
 use luminal::prelude::*;
 
+/// [Stochastic Gradient Descent](https://en.wikipedia.org/wiki/Stochastic_gradient_descent)
+///
 /// `new_weight = old_weight - (gradient * learning_rate)`
 ///
 /// Output: (Old weight inputs, Gradient inputs, New weight outputs, Optimizer Graph, Learning Rate Tensor)
@@ -30,6 +32,8 @@ pub fn sgd(
     (old_weights, gradients, new_weights, opt_graph, lr)
 }
 
+/// [Stochastic Gradient Descent](https://en.wikipedia.org/wiki/Stochastic_gradient_descent)
+///
 /// `new_weight = old_weight - (gradient * learning_rate)`
 ///
 /// Output: (New weight outputs, Learning Rate Tensor)
@@ -53,3 +57,6 @@ pub fn sgd_on_graph(
 
     (new_weights, lr)
 }
+
+// /// Implements the [Adam](https://arxiv.org/abs/1412.6980) algorithm.
+// pub fn adam(grads: &[(NodeIndex, ShapeTracker)]) {}

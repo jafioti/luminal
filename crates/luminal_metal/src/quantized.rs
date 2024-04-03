@@ -570,7 +570,7 @@ mod tests {
     use metal_rs::{Device, MTLResourceOptions};
     use rand::{thread_rng, Rng};
 
-    use crate::{MetalBuffer, MetalQuantizedCompiler};
+    use crate::{quantized::MetalQuantizedCompiler, MetalBuffer};
 
     #[repr(C, packed)]
     struct BlockQ8_0 {
