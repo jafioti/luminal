@@ -544,7 +544,7 @@ impl Operator for LessThan {
             } else {
                 0.0
             };
-            data[i] = if a < b { 1. } else { 0. };
+            data[i] = (a < b) as i32 as f32;
         }
         vec![Tensor::new(data)]
     }
@@ -552,44 +552,31 @@ impl Operator for LessThan {
 
 // Reduce Ops (A -> B (different shape))
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SumReduce(pub usize);
 impl Operator for SumReduce {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let front_size = inp[0]
+        let sh = inp[0]
             .1
             .shape()
             .iter()
-            .take(self.0)
-            .filter_map(BigExpression::to_usize)
-            .product::<usize>()
-            .max(1);
-        let back_size: usize = inp[0]
-            .1
-            .shape()
-            .iter()
-            .skip(self.0 + 1)
-            .filter_map(BigExpression::to_usize)
-            .product::<usize>()
-            .max(1);
-        let dim_size = match inp[0].1.shape()[self.0].to_usize() {
-            Some(n) => n,
-            None => panic!("Can't reduce over an unknown dimension"),
-        };
+            .map(|e| e.to_usize().unwrap())
+            .collect::<Vec<_>>();
+        let front_size = sh.iter().take(self.0).product::<usize>().max(1);
+        let back_size = sh.iter().skip(self.0 + 1).product::<usize>().max(1);
+        let dim_size = sh[self.0];
         let mut result: Vec<f32> = vec![0.0; front_size * back_size];
-        let a_data = get_vec_from_tensor(&inp[0].0);
-        let ind = inp[0].1.index_expression();
-        let val = inp[0].1.valid_expression();
+        let input = get_vec_from_tensor(&inp[0].0);
+        let (ind, val) = (inp[0].1.index_expression(), inp[0].1.valid_expression());
         let mut stack = vec![];
 
         for i in 0..front_size {
             for j in 0..back_size {
                 for k in 0..dim_size {
                     let original_index = i * dim_size * back_size + k * back_size + j;
-                    let new_index = i * back_size + j;
                     if val.exec_single_var_stack(original_index, &mut stack) != 0 {
-                        result[new_index] +=
-                            a_data[ind.exec_single_var_stack(original_index, &mut stack)];
+                        result[i * back_size + j] +=
+                            input[ind.exec_single_var_stack(original_index, &mut stack)];
                     }
                 }
             }
@@ -598,32 +585,22 @@ impl Operator for SumReduce {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MaxReduce(pub usize);
 impl Operator for MaxReduce {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let front_size: usize = inp[0]
+        let sh = inp[0]
             .1
             .shape()
             .iter()
-            .take(self.0)
-            .filter_map(BigExpression::to_usize)
-            .product();
-        let back_size: usize = inp[0]
-            .1
-            .shape()
-            .iter()
-            .skip(self.0 + 1)
-            .filter_map(BigExpression::to_usize)
-            .product();
-        let dim_size = match inp[0].1.shape()[self.0].to_usize() {
-            Some(n) => n,
-            None => panic!("Can't reduce over an unknown dimension"),
-        };
+            .map(|e| e.to_usize().unwrap())
+            .collect::<Vec<_>>();
+        let front_size = sh.iter().take(self.0).product::<usize>().max(1);
+        let back_size = sh.iter().skip(self.0 + 1).product::<usize>().max(1);
+        let dim_size = sh[self.0];
         let mut result: Vec<f32> = vec![-f32::INFINITY; front_size * back_size];
         let a_data = get_vec_from_tensor(&inp[0].0);
-        let ind = inp[0].1.index_expression();
-        let val = inp[0].1.valid_expression();
+        let (ind, val) = (inp[0].1.index_expression(), inp[0].1.valid_expression());
         let mut stack = vec![];
 
         for i in 0..front_size {

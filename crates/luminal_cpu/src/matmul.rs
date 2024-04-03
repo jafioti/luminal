@@ -21,7 +21,12 @@ impl Compiler for MatMul2DCompiler {
             [Some(true), Some(false), Some(false)],
         ]);
         let mut sum_reduce = unary::<SumReduce>(mul.clone());
-        sum_reduce.check(|o, _| o.is_equal(&SumReduce(2)));
+        sum_reduce.check(|o, _| {
+            o.as_any()
+                .downcast_ref::<SumReduce>()
+                .map(|o| o.0 == 2)
+                .unwrap_or_default()
+        });
         let mut s = sum_reduce.clone().search(graph);
         while s.next_match() {
             if s.check_no_delete(&[sum_reduce.id]) {
@@ -102,7 +107,12 @@ impl Compiler for BatchMatMul2DCompiler {
             [Some(true), Some(true), Some(false), Some(false)],
         ]);
         let mut sum_reduce = unary::<SumReduce>(mul.clone());
-        sum_reduce.check(|o, _| o.is_equal(&SumReduce(3)));
+        sum_reduce.check(|o, _| {
+            o.as_any()
+                .downcast_ref::<SumReduce>()
+                .map(|o| o.0 == 3)
+                .unwrap_or_default()
+        });
         let mut s = sum_reduce.clone().search(graph);
         while s.next_match() {
             if s.check_no_delete(&[sum_reduce.id]) {
