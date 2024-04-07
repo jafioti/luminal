@@ -1,12 +1,6 @@
 #![allow(clippy::needless_range_loop)]
 
-use crate::{
-    compiler_utils::Compiler,
-    graph_tensor::GraphTensor,
-    op::{self, InputTensor, Operator},
-    shape::*,
-    tensor::Tensor,
-};
+use crate::prelude::*;
 use std::{
     io::Write,
     ops::{Deref, DerefMut},
@@ -124,7 +118,7 @@ impl Graph {
     /// Create a new tensor with shape S and a name. This name will show up on the graph when displayed
     pub fn named_tensor<S: Shape>(&mut self, name: &str) -> GraphTensor<S> {
         GraphTensor {
-            id: self.graph.add_node(Box::new(op::Function(
+            id: self.graph.add_node(Box::new(Function(
                 format!("{name} Load"),
                 Box::new(|_| panic!("You must set a value for this tensor!")),
             ))),

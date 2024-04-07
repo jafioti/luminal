@@ -111,8 +111,8 @@ impl Compiler for StorageBufferCompiler {
                     .into_iter()
                     .map(|(_, _, i)| i)
                     .collect::<Vec<_>>();
-                let output_buffers = wrapper.0.output_buffer_sizes(&input_shapes);
-                let intermediate_buffers = wrapper.0.intermediate_buffer_sizes(&input_shapes);
+                let output_buffers = wrapper.output_buffer_sizes(&input_shapes);
+                let intermediate_buffers = wrapper.intermediate_buffer_sizes(&input_shapes);
                 (n, (output_buffers, intermediate_buffers))
             })
             .collect::<FxHashMap<_, _>>();
@@ -140,7 +140,7 @@ impl Compiler for StorageBufferCompiler {
                 .map(|(_, _, i)| i)
                 .collect::<Vec<_>>();
             // Assign output buffers
-            for required_buffer in wrapper.0.output_buffer_sizes(&input_shapes) {
+            for required_buffer in wrapper.output_buffer_sizes(&input_shapes) {
                 // Find an applicable buffer
                 if let Some((buffer_index, source_node, _)) = first_pass[&node]
                     .1
@@ -169,7 +169,7 @@ impl Compiler for StorageBufferCompiler {
                 }
             }
             // Assign intermediate buffers
-            for required_buffer in wrapper.0.intermediate_buffer_sizes(&input_shapes) {
+            for required_buffer in wrapper.intermediate_buffer_sizes(&input_shapes) {
                 // Find an applicable buffer
                 if let Some((buffer_index, source_node, _)) = first_pass[&node]
                     .1
@@ -218,13 +218,13 @@ impl Compiler for StorageBufferCompiler {
                 .map(|(_, _, i)| i)
                 .collect::<Vec<_>>();
             // Assign output buffers
-            for required_buffer in wrapper.0.output_buffer_sizes(&input_shapes) {
+            for required_buffer in wrapper.output_buffer_sizes(&input_shapes) {
                 // Allocate new buffer
                 buffer_map.get_mut(node).unwrap().0.push(buffers.len());
                 buffers.push(required_buffer);
             }
             // Assign intermediate buffers
-            for required_buffer in wrapper.0.intermediate_buffer_sizes(&input_shapes) {
+            for required_buffer in wrapper.intermediate_buffer_sizes(&input_shapes) {
                 // Allocate new buffer
                 buffer_map.get_mut(node).unwrap().1.push(buffers.len());
                 buffers.push(required_buffer);
@@ -369,7 +369,7 @@ impl Operator for StorageBufferWrapper {
             .iter()
             .map(|i| &buffers[*i])
             .collect::<Vec<_>>();
-        self.wrapper.0.without_command_buffer(
+        self.wrapper.without_command_buffer(
             &inp.iter()
                 .map(|(t, sh)| (get_buffer_from_tensor(t).deref(), *sh))
                 .collect::<Vec<_>>(),

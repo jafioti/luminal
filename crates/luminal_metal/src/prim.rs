@@ -1651,47 +1651,6 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
             }
         }
 
-        // Copy prints and diffs from device
-        for (output_node, edge) in graph
-            .node_indices()
-            // Filter non-functions
-            .filter(|n| {
-                graph.node_weight(*n).unwrap().as_any().is::<Print>()
-                    || graph.node_weight(*n).unwrap().as_any().is::<Diff>()
-            })
-            .map(|n| {
-                (
-                    n,
-                    graph
-                        .edges_directed(n, petgraph::Direction::Incoming)
-                        .find(|e| !e.weight().is_schedule())
-                        .unwrap()
-                        .id(),
-                )
-            })
-            .collect::<Vec<_>>()
-        {
-            // Create copy node
-            let (source, shape) = (
-                graph.edge_endpoints(edge).unwrap().0,
-                graph.edge_weight(edge).unwrap().as_data().unwrap().2,
-            );
-            let copy_node = graph
-                .add_op(MetalCopyFromDevice::<T>::new(dev.clone()))
-                .input(source, 0, shape)
-                .finish();
-            graph.add_edge(
-                copy_node,
-                output_node,
-                Dependency::Data {
-                    input_order: 0,
-                    output_order: 0,
-                    shape,
-                },
-            );
-            graph.remove_edge(edge);
-        }
-
         // Swap primitive ops
         for id in graph.node_indices().collect::<Vec<_>>() {
             let src_shapes = graph

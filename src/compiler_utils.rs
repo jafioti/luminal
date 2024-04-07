@@ -370,7 +370,7 @@ impl Graph {
     }
 
     /// Convert to debug-viewable graph
-    pub fn debug_graph(
+    fn debug_graph(
         &self,
         show_shapes: bool,
     ) -> (
@@ -381,15 +381,11 @@ impl Graph {
         let mut new_graph = StableGraph::default();
         let mut id_map = FxHashMap::default();
         for (id, node) in self.graph.node_indices().zip(self.graph.node_weights()) {
-            id_map.insert(id, new_graph.add_node(format!("{node:?}")));
+            id_map.insert(id, new_graph.add_node(format!("{node:?} | {}", id.index())));
         }
 
         let mut schedule_edges = vec![];
         for node in self.graph.node_indices() {
-            new_graph
-                .node_weight_mut(id_map[&node])
-                .unwrap()
-                .push_str(&node.index().to_string());
             for edge in self
                 .graph
                 .edges_directed(node, Direction::Outgoing)

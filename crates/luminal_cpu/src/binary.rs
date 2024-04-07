@@ -10,10 +10,7 @@ pub struct Sub;
 
 impl Operator for Sub {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let (a_data, b_data) = (
-            get_vec_from_tensor(&tensors[0].0),
-            get_vec_from_tensor(&tensors[1].0),
-        );
+        let (a_data, b_data) = (get_vec(&tensors[0].0), get_vec(&tensors[1].0));
         let (a_ind, a_val, b_ind, b_val) = (
             tensors[0].1.index_expression(),
             tensors[0].1.valid_expression(),
@@ -97,10 +94,7 @@ pub struct Equal;
 
 impl Operator for Equal {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let (a_data, b_data) = (
-            get_vec_from_tensor(&tensors[0].0),
-            get_vec_from_tensor(&tensors[1].0),
-        );
+        let (a_data, b_data) = (get_vec(&tensors[0].0), get_vec(&tensors[1].0));
         let mut data = vec![0.; tensors[0].1.n_elements().to_usize().unwrap()];
         let (a_ind, a_val, b_ind, b_val) = (
             tensors[0].1.index_expression(),
@@ -232,4 +226,8 @@ impl Compiler for GatherCompiler {
             s.try_delete();
         }
     }
+}
+
+fn get_vec<'a>(tensor: &'a InputTensor<'a>) -> &'a Vec<f32> {
+    tensor.borrowed().downcast_ref::<Vec<f32>>().unwrap()
 }

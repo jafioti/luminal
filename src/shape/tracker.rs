@@ -171,7 +171,14 @@ impl ShapeTracker {
                 if greater_than != BigExpression::from(0) {
                     ret = ret & dim_ind.clone().gte(greater_than);
                 }
-                ret = ret & dim_ind.lt((BigExpression::from(sh) + bottom_padding).min(top_slice));
+                ret = ret & dim_ind.lt(BigExpression::from(sh) + bottom_padding);
+                if top_slice
+                    .to_usize()
+                    .map(|s| sh.to_usize().map(|dim| s < dim).unwrap_or(true))
+                    .unwrap_or(true)
+                {
+                    ret = ret.min(top_slice);
+                }
             }
             acc = acc * logical_sh;
         }
@@ -263,6 +270,11 @@ impl ShapeTracker {
                     .min(self.slices[i].1)
             })
             .collect()
+    }
+
+    /// Realize the true shape and convert it to usizes. All dyn dims must be replaced already
+    pub fn shape_usize(&self) -> Vec<usize> {
+        self.shape().iter().map(|e| e.to_usize().unwrap()).collect()
     }
 
     /// Take a slice

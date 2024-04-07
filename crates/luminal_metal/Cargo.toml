@@ -12,6 +12,7 @@ itertools = "0.12.1"
 luminal = { path = "../.." }
 metal-rs = { version = "0.27.0", package = "metal", features = ["mps"] }
 num-traits = "0.2.18"
+regex = "1.10.4"
 rustc-hash = "1.1.0"
 unzip3 = "1.0.0"
 

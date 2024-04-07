@@ -216,6 +216,13 @@ impl Default for MetalKernelWrapper {
     }
 }
 
+impl Deref for MetalKernelWrapper {
+    type Target = Box<dyn MetalKernel>;
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref()
+    }
+}
+
 impl MetalKernel for () {
     fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<BigExpression> {
         vec![]

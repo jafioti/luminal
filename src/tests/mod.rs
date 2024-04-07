@@ -5,6 +5,8 @@ mod dynamic;
 #[cfg(test)]
 pub mod harness;
 pub mod test_graphs;
+#[cfg(test)]
+mod test_prim;
 
 use std::fmt::Debug;
 

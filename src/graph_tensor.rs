@@ -1,12 +1,6 @@
-use crate::{
-    graph::Graph,
-    op::{self, Function},
-    prelude::Data,
-    shape::*,
-    tensor::Tensor,
-};
+use crate::prelude::*;
+use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::{fmt::Debug, path::Path};
 
 use petgraph::graph::NodeIndex;
 
@@ -110,26 +104,6 @@ impl<S: Shape> GraphTensor<S> {
             .downcast_mut::<Function>()
             .unwrap();
         node.0 = name.to_string();
-    }
-
-    /// Print the value of this tensor when the graph is ran
-    pub fn print<T: ToString>(&self, message: T) {
-        let id = self
-            .graph()
-            .add_op(op::Print(message.to_string()))
-            .input(self.id, 0, self.shape)
-            .finish();
-        self.graph().no_delete.insert(id);
-    }
-
-    /// Check the tensor value against a binary file
-    pub fn diff<T: AsRef<Path>>(&self, file: T, threshold: f32) {
-        let id = self
-            .graph()
-            .add_op(op::Diff(file.as_ref().into(), threshold))
-            .input(self.id, 0, self.shape)
-            .finish();
-        self.graph().no_delete.insert(id);
     }
 
     /// Convert tensor to a shapeless tensor

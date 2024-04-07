@@ -1,3 +1,8 @@
+use std::path::Path;
+
+use colored::Colorize;
+use itertools::Itertools;
+
 use crate::{
     op::{self, Constant, ConstantValue},
     prelude::{symbolic::BigExpression, *},
@@ -141,6 +146,194 @@ impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
             .expand::<(B, S), _>()
             .equals(indexes.expand());
         (one_hot.expand::<(B, S, Const<DIM>), _>() * self.expand()).sum_reduce::<_, Axis<1>>()
+    }
+}
+
+impl<S: Shape> GraphTensor<S> {
+    /// Print the value of this tensor when the graph is ran
+    pub fn print<T: ToString>(&self, message: T) {
+        let message = message.to_string();
+        self.graph()
+            .add_op(op::Function(
+                "Print".to_string(),
+                Box::new(move |inp| {
+                    for (i, (tensor, tracker)) in inp.iter().enumerate() {
+                        println!("{message}");
+                        let d = tensor.borrowed().downcast_ref::<Vec<f32>>().unwrap();
+                        println!("{} Data: {:?}", i + 1, &d[..d.len().min(10)]);
+                        println!("{} Shape: {:?}", i + 1, tracker);
+                    }
+                    vec![]
+                }),
+            ))
+            .input(self.id, 0, self.shape)
+            .finish();
+    }
+
+    /// Check the tensor value against a binary file
+    pub fn diff<T: AsRef<Path>>(&self, file: T, threshold: f32) {
+        let path = file.as_ref().to_owned();
+        self.graph()
+            .add_op(op::Function(
+                "Diff".to_string(),
+                Box::new(move |mut inp| {
+                    // Get tensor data and file data
+                    let (tensor, shape) = inp.pop().unwrap();
+                    let d = tensor.borrowed().downcast_ref::<Vec<f32>>().unwrap();
+                    let mut data = vec![0.; d.len()];
+                    let (ind, val) = (shape.index_expression(), shape.valid_expression());
+                    let mut stack = vec![];
+                    #[allow(unused_mut)]
+                    for (i, mut r) in data.iter_mut().enumerate() {
+                        if val.exec_single_var_stack(i, &mut stack) != 0 {
+                            *r = d[ind.exec_single_var_stack(i, &mut stack)];
+                        }
+                    }
+                    let bin_data = std::fs::read(&path)
+                        .unwrap()
+                        .chunks(4)
+                        .map(|i| f32::from_ne_bytes([i[0], i[1], i[2], i[3]]))
+                        .collect::<Vec<_>>();
+                    if data.len() != bin_data.len() {
+                        println!(
+                            "{}",
+                            format!(
+                                "{} | Length mismatch! Data: {}, File: {}",
+                                path.as_os_str().to_str().unwrap(),
+                                data.len(),
+                                bin_data.len()
+                            )
+                            .bold()
+                            .red()
+                        );
+                        println!("Data Shape: {shape:?}");
+                        return vec![];
+                    }
+                    let data_nan = data.iter().any(|i| i.is_nan());
+                    let file_nan = bin_data.iter().any(|i| i.is_nan());
+                    if data_nan {
+                        println!(
+                            "{}",
+                            format!("{} | Data contains nan!", path.to_str().unwrap())
+                                .bold()
+                                .red()
+                        );
+                    }
+                    if file_nan {
+                        println!(
+                            "{}",
+                            format!("{} | File contains nan!", path.to_str().unwrap())
+                                .bold()
+                                .red()
+                        );
+                    }
+                    if data_nan || file_nan {
+                        return vec![];
+                    }
+                    let mut matched = true;
+                    for (i, (a, b)) in data.iter().zip(bin_data.iter()).enumerate() {
+                        if (a - b).abs() > threshold {
+                            println!(
+                                "{}",
+                                format!("{} | Mismatch!", path.to_str().unwrap())
+                                    .bold()
+                                    .red()
+                            );
+                            if let Some((i, _)) = data.iter().enumerate().find(|(_, i)| i.is_nan())
+                            {
+                                println!("Index {} is nan!", i.to_string().bold());
+                            }
+                            println!("{a} is not equal to {b}, index {i}");
+                            let avg_dist = data
+                                .iter()
+                                .zip(bin_data.iter())
+                                .map(|(a, b)| (a - b).abs())
+                                .sum::<f32>()
+                                / data.len() as f32;
+                            let max_dist = data
+                                .iter()
+                                .zip(bin_data.iter())
+                                .map(|(a, b)| (a - b).abs())
+                                .max_by(|a, b| {
+                                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                                })
+                                .unwrap();
+                            let sum_dist = data
+                                .iter()
+                                .zip(bin_data.iter())
+                                .map(|(a, b)| (a - b) * (a - b))
+                                .sum::<f32>();
+                            println!(
+                                "Avg dist: {}, Max dist: {} Sum dist: {}",
+                                avg_dist.to_string().bold().red(),
+                                max_dist.to_string().bold().red(),
+                                sum_dist.to_string().bold().red(),
+                            );
+                            println!("Data Shape: {shape:?}");
+                            println!("{}: {:?}", "This".bold(), &data[..10]);
+                            println!("{}: {:?}", "File".bold(), &bin_data[..10]);
+                            println!(
+                                "Largest Mismatches: {:?}",
+                                data.iter()
+                                    .zip(bin_data.iter())
+                                    .filter(|(a, b)| (**a - **b).abs() > 0.01)
+                                    .sorted_by(|(a, b), (c, d)| (**c - **d)
+                                        .abs()
+                                        .partial_cmp(&(**a - **b).abs())
+                                        .unwrap_or(std::cmp::Ordering::Equal))
+                                    .take(10)
+                                    .collect::<Vec<_>>()
+                            );
+                            println!(
+                                "A avg: {} B avg: {}",
+                                data.iter().sum::<f32>() / data.len() as f32,
+                                bin_data.iter().sum::<f32>() / bin_data.len() as f32
+                            );
+                            println!(
+                                "A max: {} B max: {}",
+                                data.iter()
+                                    .max_by(|a, b| a
+                                        .partial_cmp(b)
+                                        .unwrap_or(std::cmp::Ordering::Equal))
+                                    .unwrap(),
+                                bin_data
+                                    .iter()
+                                    .max_by(|a, b| a
+                                        .partial_cmp(b)
+                                        .unwrap_or(std::cmp::Ordering::Equal))
+                                    .unwrap()
+                            );
+                            println!(
+                                "A min: {} B min: {}",
+                                data.iter()
+                                    .min_by(|a, b| a
+                                        .partial_cmp(b)
+                                        .unwrap_or(std::cmp::Ordering::Equal))
+                                    .unwrap(),
+                                bin_data
+                                    .iter()
+                                    .min_by(|a, b| a
+                                        .partial_cmp(b)
+                                        .unwrap_or(std::cmp::Ordering::Equal))
+                                    .unwrap()
+                            );
+                            matched = false;
+                            break;
+                        }
+                    }
+                    if matched {
+                        println!(
+                            "{}",
+                            format!("{} matched", path.to_str().unwrap())
+                                .bold()
+                                .bright_green()
+                        );
+                    }
+                    vec![]
+                }),
+            ))
+            .input(self.id, 0, self.shape)
+            .finish();
     }
 }
 

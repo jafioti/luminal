@@ -236,10 +236,10 @@ impl MetalKernel for CommandBufferWrapper {
         &self,
         input_shapes: &[ShapeTracker],
     ) -> Vec<symbolic::BigExpression> {
-        self.wrapper.0.intermediate_buffer_sizes(input_shapes)
+        self.wrapper.intermediate_buffer_sizes(input_shapes)
     }
     fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<symbolic::BigExpression> {
-        self.wrapper.0.output_buffer_sizes(input_shapes)
+        self.wrapper.output_buffer_sizes(input_shapes)
     }
     fn metal_forward(
         &self,
@@ -248,7 +248,7 @@ impl MetalKernel for CommandBufferWrapper {
         intermediate_buffers: &[&Buffer],
         output_buffers: &[&Buffer],
     ) {
-        self.wrapper.0.metal_forward(
+        self.wrapper.metal_forward(
             inputs,
             unsafe { &*self.buffer.get() },
             intermediate_buffers,

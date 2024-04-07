@@ -74,6 +74,7 @@ fn main() {
         ),
         (&mut input, &mut logits, &mut cache_src, &mut cache_dest),
     );
+
     // Keep model weights
     let model_weights = downstream(params(&model), &cx);
     cx.keep_tensors(&model_weights);
