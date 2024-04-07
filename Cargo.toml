@@ -28,15 +28,11 @@ uuid = { version = "1.7.0", features = ["v4"] }
 dfdx = { version = "0.13", features = ["f16"] }
 
 [workspace]
-members = [ 
-    "crates/luminal_cpu", 
+members = [
+    "examples/*",
+    "crates/luminal_cpu",
     "crates/luminal_nn",
-    "crates/luminal_training", 
-    "examples/train_math_net",
-    "examples/llama",
-    "examples/mistral", 
-    "examples/whisper",
-     "examples/simple"
+    "crates/luminal_training",
 ]
 exclude = [
     "crates/luminal_metal",

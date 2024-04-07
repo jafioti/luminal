@@ -44,6 +44,8 @@ fn main() {
         .collect();
     cache_src.set_dyn(vec![], &[1, model::N_KV_HEADS, 0, model::HEAD_DIM]);
     let model = model::MistralLM::initialize(&mut cx);
+    let mut model_weights = downstream(params(&model), &cx);
+    cx.keep_tensors(&model_weights);
     let (logits, mut cache_dest) =
         model.forward((input, Some(cache_src.clone()), PhantomData::<Dyn<'t'>>));
     let mut logits = logits
@@ -72,12 +74,16 @@ fn main() {
             #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
             luminal_cpu::CPUCompiler::default(),
         ),
-        (&mut input, &mut logits, &mut cache_src, &mut cache_dest),
+        (
+            &mut input,
+            &mut logits,
+            &mut cache_src,
+            &mut cache_dest,
+            &mut model_weights,
+        ),
     );
 
     // Keep model weights
-    let model_weights = downstream(params(&model), &cx);
-    cx.keep_tensors(&model_weights);
     let cache_src_set = downstream(&cache_src, &cx);
     let cache_dest_set = cache_dest.to_ids();
     println!("\t\t - {}ms", now.elapsed().as_millis());

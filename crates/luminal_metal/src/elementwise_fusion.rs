@@ -620,25 +620,27 @@ mod tests {
     fn test_fusion_rope_full() {
         let mut cx = Graph::new();
         let mut rng = StdRng::seed_from_u64(0);
+        const BATCH: usize = 1;
+        const N_HEADS: usize = 8;
         const SEQ: usize = 2;
         const HEAD_DIM: usize = 4;
         const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
         let a = cx
-            .named_tensor::<R2<SEQ, HEAD_DIM>>("a")
-            .set(random_vec_rng(SEQ * HEAD_DIM, &mut rng))
+            .named_tensor::<R4<BATCH, N_HEADS, SEQ, HEAD_DIM>>("a")
+            .set(random_vec_rng(BATCH * N_HEADS * SEQ * HEAD_DIM, &mut rng))
             .keep();
         let freqs = (cx.arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
         let freqs = 1000000_f32.pow(freqs);
         let pos = cx.arange::<Const<SEQ>>() + BigExpression::from(0);
         let emb = pos.expand::<(_, Const<1>), _>().matmul(freqs.expand());
         // Split input into evens and odds
-        let split = a.reshape::<R3<SEQ, HEAD_DIM_OVER_2, 2>>();
-        let x0: GraphTensor<R3<SEQ, HEAD_DIM_OVER_2, 1>> = split
-            .slice((.., .., ..Expression::from(1)))
+        let split = a.reshape::<R5<BATCH, N_HEADS, SEQ, HEAD_DIM_OVER_2, 2>>();
+        let x0: GraphTensor<R5<BATCH, N_HEADS, SEQ, HEAD_DIM_OVER_2, 1>> = split
+            .slice((.., .., .., .., ..Expression::from(1)))
             .contiguous()
             .realize();
-        let x1: GraphTensor<R3<SEQ, HEAD_DIM_OVER_2, 1>> = split
-            .slice((.., .., Expression::from(1)..))
+        let x1: GraphTensor<R5<BATCH, N_HEADS, SEQ, HEAD_DIM_OVER_2, 1>> = split
+            .slice((.., .., .., .., Expression::from(1)..))
             .contiguous()
             .realize();
 
@@ -647,8 +649,8 @@ mod tests {
         let x1_out = x0 * emb.sin().expand() + x1 * emb.cos().expand();
 
         // Combine back into output
-        let mut out: GraphTensor<R2<SEQ, HEAD_DIM>> = x0_out
-            .concat_along::<R3<SEQ, HEAD_DIM_OVER_2, 2>, Axis<2>, _>(x1_out)
+        let mut out: GraphTensor<R4<BATCH, N_HEADS, SEQ, HEAD_DIM>> = x0_out
+            .concat_along::<R5<BATCH, N_HEADS, SEQ, HEAD_DIM_OVER_2, 2>, Axis<4>, _>(x1_out)
             .reshape()
             .retrieve();
         cx.execute();
