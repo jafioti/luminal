@@ -419,7 +419,7 @@ mod tests {
             d_dev.tensor_from_vec(b_mat, (dfdx::shapes::Const::<N>, dfdx::shapes::Const::<M>));
         let d_c = d_a.matmul(d_b.permute());
 
-        assert_close_precision(&c.data(), &d_c.as_vec(), 2);
+        assert_close_precision(&c.data(), &d_c.as_vec(), 1e-2);
     }
 
     #[test]
@@ -451,6 +451,6 @@ mod tests {
             d_dev.tensor_from_vec(b_mat, (dfdx::shapes::Const::<M>, dfdx::shapes::Const::<N>));
         let d_c = d_a.matmul(d_b);
 
-        assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 2);
+        assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 1e-2);
     }
 }

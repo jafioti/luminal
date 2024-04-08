@@ -27,7 +27,7 @@ unary_test!(
     f16
 );
 unary_test!(
-    |a| a.mean_norm::<LAxis<0>>().std_norm::<LAxis<0>, _>(1e-5),
+    |a| a.layer_norm::<LAxis<0>, _>(1e-5),
     |a| a
         .to_dtype::<f32>()
         .normalize::<DAxis<0>>(1e-5)
@@ -259,7 +259,7 @@ fn test_matmul() {
                     let d_a = d_dev.tensor_from_vec(a_data, (m, k));
                     let d_b = d_dev.tensor_from_vec(b_data, (k, n));
                     let d_c = d_a.matmul(d_b);
-                    assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 2);
+                    assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 1e-2);
                     c.drop();
                 })
             }
@@ -328,7 +328,7 @@ fn test_batch_matmul() {
                     let d_b = d_dev.tensor_from_vec(b_data, (k, n));
                     let d_c = d_a.matmul(d_b);
 
-                    assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 2);
+                    assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 1e-2);
                     c.drop();
                 });
             }
@@ -390,10 +390,10 @@ fn test_batch_matmul_transpose() {
         .permute::<_, dfdx::shapes::Axes3<0, 2, 1>>()
         .matmul(d_b_t);
 
-    assert_close_precision(&a_b.data(), &d_a_b.as_vec(), 1);
-    assert_close_precision(&a_b_t.data(), &d_a_b_t.as_vec(), 1);
-    assert_close_precision(&a_t_b.data(), &d_a_t_b.as_vec(), 1);
-    assert_close_precision(&a_t_b_t.data(), &d_a_t_b_t.as_vec(), 1);
+    assert_close_precision(&a_b.data(), &d_a_b.as_vec(), 1e-2);
+    assert_close_precision(&a_b_t.data(), &d_a_b_t.as_vec(), 1e-2);
+    assert_close_precision(&a_t_b.data(), &d_a_t_b.as_vec(), 1e-2);
+    assert_close_precision(&a_t_b_t.data(), &d_a_t_b_t.as_vec(), 1e-2);
 }
 
 #[test]
@@ -488,8 +488,8 @@ fn test_relu_and_linear() {
     );
     cx.execute();
 
-    assert_close_precision(&unoptimized_b, &b.data(), 2);
-    assert_close_precision(&unoptimized_batch_out, &batch_out.data(), 2);
+    assert_close_precision(&unoptimized_b, &b.data(), 1e-2);
+    assert_close_precision(&unoptimized_batch_out, &batch_out.data(), 1e-2);
 
     // Test against dfdx
     let dev = Cpu::default();
@@ -512,7 +512,7 @@ fn test_relu_and_linear() {
         .to_dtype::<f16>();
     let out = model.forward(a);
 
-    assert_close_precision(&unoptimized_b, &out.to_dtype::<f32>().as_vec(), 2);
+    assert_close_precision(&unoptimized_b, &out.to_dtype::<f32>().as_vec(), 1e-2);
 }
 
 #[test]
@@ -565,8 +565,8 @@ fn test_layer_norm() {
     let d_b = d_a.clone().normalize::<DAxis<0>>(1e-5);
     let d_c = d_a.normalize::<DAxis<2>>(1e-5);
 
-    assert_close_precision(&b.data(), &d_b.as_vec(), 2);
-    assert_close_precision(&c.data(), &d_c.as_vec(), 2);
+    assert_close_precision(&b.data(), &d_b.as_vec(), 1e-2);
+    assert_close_precision(&c.data(), &d_c.as_vec(), 1e-2);
 }
 
 #[test]
@@ -599,7 +599,7 @@ fn test_transformer_encoder_block() {
 
     cx.compile(<(GenericCompiler, MetalCompiler<f16>)>::default(), &mut b);
     cx.execute();
-    assert_close_precision(&unopt_b, &b.data(), 2);
+    assert_close_precision(&unopt_b, &b.data(), 1e-2);
 
     let d_dev = Cpu::default();
     let mut d_model: dfdx::nn::modules::TransformerEncoderBlock<32, 1, 64, f32, Cpu> =
@@ -638,7 +638,7 @@ fn test_transformer_encoder_block() {
     let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<32>));
     let d_b = d_model.forward(d_a);
 
-    assert_close_precision(&b.data(), &d_b.as_vec(), 2);
+    assert_close_precision(&b.data(), &d_b.as_vec(), 1e-2);
 }
 
 #[test]

@@ -401,5 +401,5 @@ fn test_shared_buffers() {
     cx.compile(crate::MetalCompiler::<f16>::default(), &mut e);
     cx.execute();
 
-    assert_close_precision(&e.data(), &e_unopt, 2);
+    assert_close_precision(&e.data(), &e_unopt, 1e-2);
 }

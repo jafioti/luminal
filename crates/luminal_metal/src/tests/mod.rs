@@ -1,3 +1,5 @@
+use luminal::{graph::Graph, op::Operator};
+
 mod fp16;
 mod fp32;
 
@@ -86,4 +88,11 @@ macro_rules! binary_test {
         $crate::single_binary_test!($luminal_func, $dfdx_func, $name, $type, 783);
         $crate::single_binary_test!($luminal_func, $dfdx_func, $name, $type, 4096);
     };
+}
+
+pub fn assert_op_in_graph<T: Operator + 'static>(graph: &Graph) {
+    assert!(
+        graph.node_indices().any(|i| graph.check_node_type::<T>(i)),
+        "Node not found in the graph!"
+    );
 }

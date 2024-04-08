@@ -153,7 +153,8 @@ impl<S: Shape> GraphTensor<S> {
     /// Print the value of this tensor when the graph is ran
     pub fn print<T: ToString>(&self, message: T) {
         let message = message.to_string();
-        self.graph()
+        let id = self
+            .graph()
             .add_op(op::Function(
                 "Print".to_string(),
                 Box::new(move |inp| {
@@ -168,12 +169,14 @@ impl<S: Shape> GraphTensor<S> {
             ))
             .input(self.id, 0, self.shape)
             .finish();
+        self.graph().no_delete.insert(id);
     }
 
     /// Check the tensor value against a binary file
     pub fn diff<T: AsRef<Path>>(&self, file: T, threshold: f32) {
         let path = file.as_ref().to_owned();
-        self.graph()
+        let id = self
+            .graph()
             .add_op(op::Function(
                 "Diff".to_string(),
                 Box::new(move |mut inp| {
@@ -334,6 +337,7 @@ impl<S: Shape> GraphTensor<S> {
             ))
             .input(self.id, 0, self.shape)
             .finish();
+        self.graph().no_delete.insert(id);
     }
 }
 

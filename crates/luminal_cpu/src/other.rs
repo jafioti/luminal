@@ -32,13 +32,14 @@ impl Compiler for ARangeCompiler {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         // TODO: Make sure this actually checks the shape transformations to ensure pooling happens
-        let one = super::constant(1.);
-        let contig1 = unary::<Contiguous>(one.clone());
+        let one1 = super::constant(1.);
+        let one2 = super::constant(1.);
+        let contig1 = unary::<Contiguous>(one1.clone());
         let sum_reduce =
             unary::<SumReduce>(unary::<Contiguous>(unary::<Contiguous>(
                 unary::<Contiguous>(contig1.clone()),
             )));
-        let sub = binary::<Sub>(sum_reduce, one.clone());
+        let sub = binary::<Sub>(sum_reduce, one2.clone());
         let mut s = sub.clone().search(graph);
 
         while s.next_match() {
@@ -48,7 +49,7 @@ impl Compiler for ARangeCompiler {
                     .edge_weight(
                         graph
                             .graph
-                            .edges_connecting(s.get(&one), s.get(&contig1))
+                            .edges_connecting(s.get(&one1), s.get(&contig1))
                             .next()
                             .unwrap()
                             .id(),

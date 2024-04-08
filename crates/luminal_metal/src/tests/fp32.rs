@@ -268,8 +268,8 @@ fn test_relu_and_linear() {
     );
     cx.execute();
 
-    assert_close_precision(&unoptimized_b, &b.data(), 2);
-    assert_close_precision(&unoptimized_batch_out, &batch_out.data(), 2);
+    assert_close_precision(&unoptimized_b, &b.data(), 1e-2);
+    assert_close_precision(&unoptimized_batch_out, &batch_out.data(), 1e-2);
 
     // Test against dfdx
     let dev = Cpu::default();
@@ -288,7 +288,7 @@ fn test_relu_and_linear() {
     let a = dev.tensor_from_vec(input_data, (DConst::<32>,));
     let out = model.forward(a);
 
-    assert_close_precision(&unoptimized_b, &out.as_vec(), 2);
+    assert_close_precision(&unoptimized_b, &out.as_vec(), 1e-2);
 }
 
 #[test]

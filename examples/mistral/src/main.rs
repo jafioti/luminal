@@ -24,7 +24,7 @@ pub struct CLIArgs {
     gen_tokens: i32,
 
     /// Prompt for the model
-    #[clap(short = 'p', long = "prompt", default_value = include_str!("../prompts/asimov.txt"))]
+    #[clap(short = 'p', long = "prompt", default_value = include_str!("../prompts/merge_sort.txt"))]
     prompt: String,
 }
 
@@ -89,20 +89,21 @@ fn main() {
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
     // Initial forward pass to load weights
-    print!("Loading model");
-    io::stdout().flush().unwrap();
-    let now = Instant::now();
-    input.set_dyn(vec![0.], &[1, 1]);
-    cx.set_dyn_dim('t', 1);
-    cx.execute();
-    logits.drop();
-    cache_dest.drop();
-    println!("\t\t - {}ms", now.elapsed().as_millis());
+    // print!("Loading model");
+    // io::stdout().flush().unwrap();
+    // let now = Instant::now();
+    // input.set_dyn(vec![1.], &[1, 1]);
+    // cx.set_dyn_dim('t', 1);
+    // cx.execute();
+    // logits.drop();
+    // cache_dest.drop();
+    // println!("\t\t - {}ms", now.elapsed().as_millis());
 
     // Now that weights are loaded, delete the loading nodes so they don't run again
     delete_inputs(&model_weights, &mut cx);
     // Run prompt processing pass
     let mut input_ids = encode(&tokenizer, &cli_args.prompt);
+    input_ids.insert(0, 1);
     input.set_dyn(
         input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
         &[1, input_ids.len()],
@@ -135,7 +136,8 @@ fn main() {
     // Decode loop
     let mut token_decode_times = vec![];
     let mut prev_output_len = 0;
-    for _ in 0..cli_args.gen_tokens {
+    // for _ in 0..cli_args.gen_tokens {
+    for _ in 0..1 {
         input.set_dyn(vec![*input_ids.last().unwrap() as f32], &[1, 1]);
         cx.set_dyn_dim('p', input_ids.len() - 1);
         cx.set_dyn_dim('t', input_ids.len());

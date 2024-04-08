@@ -196,13 +196,7 @@ impl<T: MetalFloat> Compiler for MeanReduceCompiler<T> {
                 continue;
             }
             let (sum_reduce, mul) = (s.get(&sum_reduce), s.get(&mul));
-            let dim = graph
-                .node_weight(sum_reduce)
-                .unwrap()
-                .as_any()
-                .downcast_ref::<MetalSumReduce<T>>()
-                .unwrap()
-                .dim;
+            let dim = graph.get_op::<MetalSumReduce<T>>(sum_reduce).dim;
             // Insert MeanReduce op
             let src = graph.get_sources(sum_reduce)[0];
             let mean_reduce = graph
@@ -362,11 +356,7 @@ impl<T: 'static + Clone> Operator for MetalStdNorm<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             let command_buffer = self.queue.new_command_buffer();
-            let a = tensors[0]
-                .0
-                .borrowed()
-                .downcast_ref::<MetalBuffer>()
-                .unwrap();
+            let a = get_buffer_from_tensor(&tensors[0].0);
             let out = self.device.new_buffer(
                 (tensors[0].1.n_elements().to_usize().unwrap() * size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
@@ -408,7 +398,7 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
         eps.check(|op, _| {
             if let Some(c) = op.as_any().downcast_ref::<MetalConstant<T>>() {
                 if let ConstantValue::Float(v) = c.0 {
-                    v <= 1e-3 && v > 0.0
+                    v <= 1e-2 && v > 0.0
                 } else {
                     false
                 }
@@ -428,23 +418,12 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
                 // An intermediate node can't be deleted
                 continue;
             }
-            let ConstantValue::Float(epsilon_num) = graph
-                .node_weight(s.get(&eps))
-                .unwrap()
-                .as_any()
-                .downcast_ref::<MetalConstant<T>>()
-                .unwrap()
-                .0
+            let ConstantValue::Float(epsilon_num) = graph.get_op::<MetalConstant<T>>(s.get(&eps)).0
             else {
                 continue;
             };
             let (mut x, _, mut sh) = graph.get_sources(s.get(&square))[0];
-            if let Some(mean_reduce) = graph
-                .node_weight(s.get(&mean))
-                .unwrap()
-                .as_any()
-                .downcast_ref::<MetalMeanReduce<T>>()
-            {
+            if let Some(mean_reduce) = graph.try_get_op::<MetalMeanReduce<T>>(s.get(&mean)) {
                 if mean_reduce.3 != sh.len() - 1 {
                     continue;
                 }
@@ -563,11 +542,7 @@ impl<T: MetalFloat> Operator for MetalExp<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup buffers
-            let a_inp = tensors[0]
-                .0
-                .borrowed()
-                .downcast_ref::<MetalBuffer>()
-                .unwrap();
+            let a_inp = get_buffer_from_tensor(&tensors[0].0);
             let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
             let out = self.device.new_buffer(
                 (inp_size * std::mem::size_of::<T>()) as u64,
@@ -702,11 +677,7 @@ impl<T: MetalFloat> MetalKernel for MetalCos<T> {
 impl<T: MetalFloat> Operator for MetalCos<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
-            let a = tensors[0]
-                .0
-                .borrowed()
-                .downcast_ref::<MetalBuffer>()
-                .unwrap();
+            let a = get_buffer_from_tensor(&tensors[0].0);
             let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
             let out = self.device.new_buffer(
                 (inp_size * std::mem::size_of::<T>()) as u64,
@@ -939,5 +910,32 @@ impl<T: MetalFloat> Compiler for SoftmaxCompiler<T> {
             graph.remove_node(mul);
             s.try_delete();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use luminal::prelude::*;
+
+    use crate::tests::assert_op_in_graph;
+
+    use super::{MetalMeanReduce, MetalStdNorm};
+    #[test]
+    fn test_norms() {
+        let mut cx = Graph::new();
+        let a = cx.tensor().set([0.; 32]);
+        let mut b = a.layer_norm::<Axis<0>, _>(1e-5).retrieve();
+
+        cx.compile(
+            <(
+                GenericCompiler,
+                crate::prim::PrimitiveCompiler<f16>,
+                crate::SpecialOpsCompiler<f16>,
+            )>::default(),
+            &mut b,
+        );
+
+        assert_op_in_graph::<MetalStdNorm<f16>>(&cx);
+        assert_op_in_graph::<MetalMeanReduce<f16>>(&cx);
     }
 }

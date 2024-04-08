@@ -724,7 +724,7 @@ mod tests {
             (dfdx::shapes::Const::<16>, dfdx::shapes::Const::<1024>),
         );
         let d_c = d_b.matmul(d_a.permute());
-        assert_close_precision(&out.data(), &d_c.as_vec(), 0);
+        assert_close_precision(&out.data(), &d_c.as_vec(), 1e-0);
         // This is imprecise currently because we accumulate in fp16 in the matmul. TODO: accumulate in fp32 and convert before saving to dest
     }
 }

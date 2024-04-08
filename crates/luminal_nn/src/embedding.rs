@@ -1,4 +1,4 @@
-use luminal::prelude::*;
+use luminal::{prelude::*, tests::random_vec};
 
 pub struct Embedding<const N: usize, const DIM: usize> {
     pub weight: GraphTensor<R2<N, DIM>>,
@@ -7,7 +7,7 @@ pub struct Embedding<const N: usize, const DIM: usize> {
 impl<const A: usize, const B: usize> InitModule for Embedding<A, B> {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
-            weight: cx.named_tensor("Embedding Weight"),
+            weight: cx.named_tensor("Embedding Weight").set(random_vec(A * B)),
         }
     }
 }

@@ -1570,25 +1570,31 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
             .filter(|n| graph.node_weight(*n).unwrap().as_any().is::<LFunction>())
             .collect::<Vec<_>>()
         {
-            // Create copy node
-            let copy_node = graph
-                .add_op(MetalCopyToDevice::<T>::new(dev.clone()))
-                .input(function_node, 0, ShapeTracker::new(&[]))
-                .finish();
-
-            // Switch outgoing edges from input to copy_node
-            for (edge_id, weight, dest) in graph
+            if graph
                 .edges_directed(function_node, petgraph::Direction::Outgoing)
-                .map(|e| (e.id(), *e.weight(), e.target()))
-                .filter(|(_, _, trg)| *trg != copy_node)
-                .collect::<Vec<_>>()
+                .count()
+                > 0
             {
-                graph.add_edge(copy_node, dest, weight);
-                graph.remove_edge(edge_id);
-            }
+                // Copy outputs from device
+                let copy_node = graph
+                    .add_op(MetalCopyToDevice::<T>::new(dev.clone()))
+                    .input(function_node, 0, ShapeTracker::new(&[]))
+                    .finish();
 
-            if let Some(w) = graph.to_retrieve.get(&function_node) {
-                graph.to_retrieve.insert(copy_node, *w);
+                // Switch outgoing edges from input to copy_node
+                for (edge_id, weight, dest) in graph
+                    .edges_directed(function_node, petgraph::Direction::Outgoing)
+                    .map(|e| (e.id(), *e.weight(), e.target()))
+                    .filter(|(_, _, trg)| *trg != copy_node)
+                    .collect::<Vec<_>>()
+                {
+                    graph.add_edge(copy_node, dest, weight);
+                    graph.remove_edge(edge_id);
+                }
+
+                if let Some(w) = graph.to_retrieve.get(&function_node) {
+                    graph.to_retrieve.insert(copy_node, *w);
+                }
             }
 
             // Insert copy from device for function inputs

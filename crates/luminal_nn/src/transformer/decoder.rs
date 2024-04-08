@@ -54,7 +54,7 @@ impl<
             GraphTensor<(Const<1>, S1, Const<DIM>)>,
             GraphTensor<(Const<1>, S2, Const<DIM>)>,
         )>>::forward(self, (input.expand(), from_enc.expand()))
-        .max_reduce()
+        .reshape()
     }
 }
 
@@ -91,9 +91,9 @@ impl<
 
 /// A single transformer decoder block
 pub struct TransformerDecoderBlock<const DIM: usize, const FF: usize, const HEADS: usize> {
-    pub(crate) self_attention: MultiHeadSelfAttention<DIM, DIM, DIM, HEADS>,
-    pub(crate) cross_attention: MultiHeadSelfAttention<DIM, DIM, DIM, HEADS>,
-    pub(crate) ff: (Linear<DIM, FF>, ReLU, Linear<FF, DIM>),
+    pub self_attention: MultiHeadSelfAttention<DIM, DIM, DIM, HEADS>,
+    pub cross_attention: MultiHeadSelfAttention<DIM, DIM, DIM, HEADS>,
+    pub ff: (Linear<DIM, FF>, ReLU, Linear<FF, DIM>),
 }
 
 impl<const DIM: usize, const FF: usize, const HEADS: usize> InitModule
@@ -134,7 +134,7 @@ impl<const DIM: usize, const FF: usize, const HEADS: usize, S1: Dimension, S2: D
             GraphTensor<(Const<1>, S1, Const<DIM>)>,
             GraphTensor<(Const<1>, S2, Const<DIM>)>,
         )>>::forward(self, (input.expand(), from_enc.expand()))
-        .max_reduce()
+        .reshape()
     }
 }
 

@@ -89,10 +89,10 @@ pub fn assert_close(a_vec: &[f32], b_vec: &[f32]) {
 }
 
 /// Ensure two arrays are nearly equal to a decimal place
-pub fn assert_close_precision(a_vec: &[f32], b_vec: &[f32], precision: u8) {
+pub fn assert_close_precision(a_vec: &[f32], b_vec: &[f32], threshold: f32) {
     assert_eq!(a_vec.len(), b_vec.len(), "Number of elements doesn't match");
     for (i, (a, b)) in a_vec.iter().zip(b_vec.iter()).enumerate() {
-        if (a - b).abs() > f32::powf(10., -(precision as f32)) {
+        if (a - b).abs() > threshold {
             panic!(
                 "{a} is not close to {b}, index {i}, avg distance: {}",
                 a_vec

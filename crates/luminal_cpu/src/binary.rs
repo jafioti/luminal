@@ -199,7 +199,7 @@ impl Compiler for GatherCompiler {
         let arange = op::<ARange>();
         let eq = unary::<Equal>(arange);
         let inp = node();
-        let mul = binary::<Mul>(eq.clone(), inp.clone());
+        let mul = binary::<Mul>(inp.clone(), eq.clone());
         let sum_reduce = unary::<SumReduce>(mul.clone());
         let mut s = sum_reduce.clone().search(graph);
         while s.next_match() {
