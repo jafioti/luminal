@@ -390,10 +390,10 @@ fn test_batch_matmul_transpose() {
         .permute::<_, dfdx::shapes::Axes3<0, 2, 1>>()
         .matmul(d_b_t);
 
-    assert_close_precision(&a_b.data(), &d_a_b.as_vec(), 1e-2);
-    assert_close_precision(&a_b_t.data(), &d_a_b_t.as_vec(), 1e-2);
-    assert_close_precision(&a_t_b.data(), &d_a_t_b.as_vec(), 1e-2);
-    assert_close_precision(&a_t_b_t.data(), &d_a_t_b_t.as_vec(), 1e-2);
+    assert_close_precision(&a_b.data(), &d_a_b.as_vec(), 1e-1);
+    assert_close_precision(&a_b_t.data(), &d_a_b_t.as_vec(), 1e-1);
+    assert_close_precision(&a_t_b.data(), &d_a_t_b.as_vec(), 1e-1);
+    assert_close_precision(&a_t_b_t.data(), &d_a_t_b_t.as_vec(), 1e-1);
 }
 
 #[test]

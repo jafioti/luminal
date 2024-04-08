@@ -131,32 +131,50 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     ) -> Self::Output {
         // Apply the Projections
         let queries = x.matmul(self.q_proj.permute());
-        queries.diff(
-            format!("/Users/jafioti/Desktop/saves/query{index}.bin"),
-            1e-2,
-        );
+        // if index == 0 {
+        //     queries.diff(
+        //         format!("/Users/jafioti/Desktop/saves/query{index}.bin"),
+        //         1e-2,
+        //     );
+        // }
         let queries = queries
             .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         let keys = x.matmul(self.k_proj.permute());
-        keys.diff(format!("/Users/jafioti/Desktop/saves/key{index}.bin"), 1e-2);
+        // if index == 0 {
+        //     keys.diff(format!("/Users/jafioti/Desktop/saves/key{index}.bin"), 1e-2);
+        // }
         let keys = keys
             .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         let values = x.matmul(self.v_proj.permute());
-        values.diff(
-            format!("/Users/jafioti/Desktop/saves/value{index}.bin"),
-            1e-2,
-        );
+        // if index == 0 {
+        //     values.diff(
+        //         format!("/Users/jafioti/Desktop/saves/value{index}.bin"),
+        //         1e-2,
+        //     );
+        // }
         let values = values
             .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         // Rotary embed queries and keys
         let queries = apply_rotary_embeddings_ggml(queries, PrevSeq::const_size().into());
+        // if index == 0 {
+        //     queries.diff(
+        //         format!("/Users/jafioti/Desktop/saves/query_rope{index}.bin"),
+        //         1e-2,
+        //     );
+        // }
         let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::const_size().into());
+        // if index == 0 {
+        //     keys.diff(
+        //         format!("/Users/jafioti/Desktop/saves/key_rope{index}.bin"),
+        //         1e-2,
+        //     );
+        // }
 
         // Add KV cache
         let (keys, values) = if let Some((k_cache, v_cache)) = cache {
@@ -165,7 +183,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
                 v_cache.concat_along::<_, Axis<2>, _>(values),
             )
         } else {
-            (keys.realize(), values.contiguous().realize())
+            (keys.contiguous().realize(), values.contiguous().realize())
         };
 
         // Repeat the KV States for Grouped-Query Attention
@@ -197,10 +215,12 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         let output = output
             // Apply output projection
             .matmul(self.o_proj.permute());
-        output.diff(
-            format!("/Users/jafioti/Desktop/saves/attn_out{index}.bin"),
-            1e-2,
-        );
+        // if index == 0 {
+        //     output.diff(
+        //         format!("/Users/jafioti/Desktop/saves/attn_out{index}.bin"),
+        //         1e-2,
+        //     );
+        // }
         (output, (keys.contiguous(), values.contiguous())) // Cache needs to be contiguous for transferring to another graph
     }
 }
@@ -255,10 +275,10 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     ) -> Self::Output {
         // Attention
         let normed = self.attention_norm.forward(x);
-        normed.diff(
-            format!("/Users/jafioti/Desktop/saves/normed{index}.bin"),
-            1e-2,
-        );
+        // normed.diff(
+        //     format!("/Users/jafioti/Desktop/saves/normed{index}.bin"),
+        //     1e-2,
+        // );
         let (y, cache) = self
             .attention
             .forward((normed, cache, PhantomData::<TotSeq>, index));
@@ -278,16 +298,14 @@ impl InitModule for TransformerBlock {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             attention: InitModule::initialize(cx),
-            attention_norm: {
-                let mut norm = RMSNorm::initialize(cx);
-                norm.epsilon = 1e-5;
-                norm
+            attention_norm: RMSNorm {
+                weight: cx.named_tensor("RMS Norm Weight"),
+                epsilon: 1e-5,
             },
             feed_forward: InitModule::initialize(cx),
-            feed_forward_norm: {
-                let mut norm = RMSNorm::initialize(cx);
-                norm.epsilon = 1e-5;
-                norm
+            feed_forward_norm: RMSNorm {
+                weight: cx.named_tensor("RMS Norm Weight"),
+                epsilon: 1e-5,
             },
         }
     }
@@ -343,12 +361,12 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
                 layer.forward((x, cache.as_ref().map(|c| c[i]), PhantomData::<TotSeq>, i));
             new_caches.push(new_cache);
         }
-        x.diff("/Users/jafioti/Desktop/saves/output_prenorm.bin", 1e-2);
+        // x.diff("/Users/jafioti/Desktop/saves/output_prenorm.bin", 1e-2);
         // Run through last norm and output projection
         let normed = self.norm.forward(x);
-        normed.diff("/Users/jafioti/Desktop/saves/output_normed.bin", 1e-2);
+        // normed.diff("/Users/jafioti/Desktop/saves/output_normed.bin", 1e-2);
         let output = normed.matmul(self.lm_head.permute());
-        output.diff("/Users/jafioti/Desktop/saves/logits.bin", 1e-2);
+        // output.diff("/Users/jafioti/Desktop/saves/logits.bin", 1e-2);
         (output, new_caches)
     }
 }
@@ -356,11 +374,12 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
 impl InitModule for MistralLM {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
-            embedding: InitModule::initialize(cx),
-            norm: {
-                let mut norm = RMSNorm::initialize(cx);
-                norm.epsilon = 1e-5;
-                norm
+            embedding: Embedding {
+                weight: cx.named_tensor("Embedding Weight"),
+            },
+            norm: RMSNorm {
+                weight: cx.named_tensor("RMS Norm Weight"),
+                epsilon: 1e-5,
             },
             lm_head: cx.named_tensor("LM Head"),
             layers: (0..NUM_LAYERS)

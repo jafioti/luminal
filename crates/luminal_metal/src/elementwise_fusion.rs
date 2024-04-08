@@ -141,38 +141,45 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 subexpressions_a.last_mut().unwrap().1 = connecting_shape;
                 // Re-reference b intermediates
                 for i in (0..subexpressions_b.len()).rev() {
+                    let re = Regex::new(&format!("intermediate{i}([^0-9]|$)")).unwrap();
                     for (exp, _) in subexpressions_b.iter_mut() {
-                        *exp = exp.replace(
-                            &format!("intermediate{i}"),
-                            &format!("intermediate{}", i + subexpressions_a.len()),
-                        );
+                        *exp = re
+                            .replace_all(
+                                exp,
+                                format!("intermediate{}$1", i + subexpressions_a.len()),
+                            )
+                            .to_string();
                     }
                 }
                 // Re-reference b inputs to a
                 for index in &a_to_b_indexes {
+                    let re = Regex::new(&format!(r"input{index}([^0-9]|$)")).unwrap();
                     for (exp, _) in subexpressions_b.iter_mut() {
-                        *exp = exp.replace(
-                            &format!("input{index}"),
-                            &format!("intermediate{}", subexpressions_a.len() - 1),
-                        );
+                        *exp = re
+                            .replace_all(
+                                exp,
+                                format!("intermediate{}$1", subexpressions_a.len() - 1),
+                            )
+                            .to_string();
                     }
                 }
                 // Re-reference b inputs
                 for (sub_factor, index) in a_to_b_indexes.iter().enumerate() {
                     for i in (*index - sub_factor + 1)..(b_inputs.len() + a_to_b_indexes.len()) {
+                        let re = Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap();
                         for (exp, _) in subexpressions_b.iter_mut() {
-                            *exp = exp.replace(&format!("input{i}"), &format!("input{}", i - 1));
+                            *exp = re.replace_all(exp, format!("input{}$1", i - 1)).to_string();
                         }
                     }
                 }
                 // Combine inputs for a and b
                 for i in (0..a_inputs.len()).rev() {
                     // Re-reference the a inputs
+                    let re = Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap();
                     for (exp, _) in subexpressions_a.iter_mut() {
-                        *exp = exp.replace(
-                            &format!("input{i}"),
-                            &format!("input{}", i + b_inputs.len()),
-                        );
+                        *exp = re
+                            .replace_all(exp, format!("input{}$1", i + b_inputs.len()))
+                            .to_string();
                     }
                 }
                 b_inputs.extend(a_inputs);
@@ -242,7 +249,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 .collect::<Vec<_>>();
             let op = graph.get_op_mut::<FusedElementwiseOp<T>>(fused_op);
             // Stack index expressions and replace them in the subexpressions
-            let intermediate_match = Regex::new(r"intermediate(\d+)").unwrap();
+            let intermediate_match = Regex::new(r"intermediate(\d+)([^0-9]|$)").unwrap();
             // Track all shapes used, will pull dyn dims from these
             let shapes_used = op
                 .subexpressions
@@ -273,10 +280,11 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 .enumerate()
                 .map(|(i, s)| {
                     // Find the first subexpression that uses this input
+                    let re = Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap();
                     let using_subexp = op
                         .subexpressions
                         .iter()
-                        .position(|(s, _)| s.contains(&format!("input{i}")))
+                        .position(|(s, _)| re.is_match(s))
                         .unwrap();
 
                     once(*s)
@@ -306,10 +314,16 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
             {
                 // Index
                 for (i, ind_exp) in stacked_index_expressions.iter().enumerate() {
-                    *subexp = subexp.replace(
-                        &format!("input{i}"),
-                        &format!("(float)input{i}[{}]", expr_to_metal_string(ind_exp.clone())),
-                    );
+                    let re = Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap();
+                    *subexp = re
+                        .replace_all(
+                            subexp,
+                            &format!(
+                                "(float)input{i}[{}]$1",
+                                expr_to_metal_string(ind_exp.clone())
+                            ),
+                        )
+                        .to_string();
                 }
                 // Valid (not on last subexpression)
                 if i != n_subexpressions - 1 {
@@ -357,7 +371,6 @@ kernel void mkernel({} device {type_name} *out [[buffer({})]], device uint& n_el
                     op.subexpressions.iter().take(op.subexpressions.len() - 1).enumerate().map(|(i, (subexp, _))| format!("float intermediate{i} = {subexp};")).join("\n        "),
                     op.subexpressions.last().unwrap().0
                 );
-            println!("{kernel}");
             op.kernel = Some(compile_function("mkernel", &kernel, &device));
             op.dyn_chars = dyn_chars;
         }
@@ -458,7 +471,7 @@ mod tests {
     };
     use luminal_nn::*;
     use rand::{rngs::StdRng, SeedableRng};
-    use std::ops::Div;
+    use std::{marker::PhantomData, ops::Div};
 
     use crate::MetalCompiler;
 
@@ -683,6 +696,11 @@ mod tests {
             pub up_proj: PermutedLinear<H, I>,
         }
 
+        pub type KVCache<Batch, Seq> = (
+            GraphTensor<(Batch, Const<N_KV_HEADS>, Seq, Const<HEAD_DIM>)>,
+            GraphTensor<(Batch, Const<N_KV_HEADS>, Seq, Const<HEAD_DIM>)>,
+        );
+
         impl<Sh: Shape, Im: Shape, const I: usize, const H: usize> Module<GraphTensor<Sh>> for Mlp<I, H>
         where
             GraphTensor<Sh>: Matmul<R2<H, I>, Output = GraphTensor<Im>>,
@@ -691,10 +709,9 @@ mod tests {
             type Output = GraphTensor<Sh>;
 
             fn forward(&self, input: GraphTensor<Sh>) -> Self::Output {
-                input
-                // let gate = self.gate_proj.forward(input).swish();
-                // let up = self.up_proj.forward(input) * gate;
-                // self.down_proj.forward(up)
+                let gate = self.gate_proj.forward(input).swish();
+                let up = self.up_proj.forward(input) * gate;
+                self.down_proj.forward(up)
             }
         }
         impl<const I: usize, const H: usize> InitModule for Mlp<I, H> {
@@ -749,28 +766,54 @@ mod tests {
             pub o_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
         }
 
-        impl<Batch: Dimension, CurSeq: Dimension>
-            Module<GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>> for SelfAttention
+        impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
+            Module<(
+                GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
+                Option<KVCache<Batch, PrevSeq>>,
+                PhantomData<TotSeq>,
+            )> for SelfAttention
         {
-            type Output = GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>;
-            fn forward(&self, x: GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>) -> Self::Output {
+            type Output = (
+                GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
+                KVCache<Batch, TotSeq>,
+            );
+            fn forward(
+                &self,
+                (x, cache, _): (
+                    GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
+                    Option<KVCache<Batch, PrevSeq>>,
+                    PhantomData<TotSeq>,
+                ),
+            ) -> Self::Output {
                 // Apply the Projections
                 let queries = x
                     .matmul(self.q_proj.permute())
                     .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
                     .permute::<_, Axes4<0, 2, 1, 3>>();
+
                 let keys = x
                     .matmul(self.k_proj.permute())
                     .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
                     .permute::<_, Axes4<0, 2, 1, 3>>();
+
                 let values = x
                     .matmul(self.v_proj.permute())
                     .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
                     .permute::<_, Axes4<0, 2, 1, 3>>();
 
                 // Rotary embed queries and keys
-                let queries = apply_rotary_embeddings_ggml(queries, 0.into());
-                let keys = apply_rotary_embeddings_ggml(keys, 0.into());
+                let queries = apply_rotary_embeddings_ggml(queries, PrevSeq::const_size().into());
+                let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::const_size().into());
+
+                // Add KV cache
+                let (keys, values) = if let Some((k_cache, v_cache)) = cache {
+                    (
+                        k_cache.concat_along::<_, Axis<2>, _>(keys),
+                        v_cache.concat_along::<_, Axis<2>, _>(values),
+                    )
+                } else {
+                    (keys.contiguous().realize(), values.contiguous().realize())
+                };
 
                 // Repeat the KV States for Grouped-Query Attention
                 let repeated_keys = keys.expand::<(_, _, Const<N_ATTENTION_GROUPS>, _, _), _>();
@@ -778,18 +821,17 @@ mod tests {
 
                 // Calculate attention weights
                 let mut attention_weights = queries
-                    .reshape::<(
-                        Batch,
-                        Const<N_KV_HEADS>,
-                        Const<N_ATTENTION_GROUPS>,
-                        CurSeq,
-                        Const<HEAD_DIM>,
-                    )>() // Split query heads into groups
+                    .reshape::<(_, Const<N_KV_HEADS>, Const<N_ATTENTION_GROUPS>, _, _)>() // Split query heads into groups
                     .matmul(repeated_keys.permute())
                     .div((HEAD_DIM as f32).sqrt());
 
                 let attention_mask = self.k_proj.graph().triu::<CurSeq>(1) * f16::MIN.to_f32();
-                attention_weights += attention_mask.expand();
+                attention_weights += attention_mask
+                    .pad::<(CurSeq, TotSeq), _, _>(&[
+                        (0.into(), Expression::from(0)),
+                        (TotSeq::const_size() - CurSeq::const_size(), 0.into()),
+                    ])
+                    .expand();
 
                 // Calculate final outputs
                 let output = attention_weights
@@ -802,7 +844,7 @@ mod tests {
                 let output = output
                     // Apply output projection
                     .matmul(self.o_proj.permute());
-                output
+                (output, (keys.contiguous(), values.contiguous())) // Cache needs to be contiguous for transferring to another graph
             }
         }
 
@@ -841,17 +883,30 @@ mod tests {
             pub feed_forward_norm: RMSNorm<HIDDEN_DIM>,
         }
 
-        impl<Batch: Dimension, CurSeq: Dimension>
-            Module<GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>> for TransformerBlock
+        impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
+            Module<(
+                GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
+                Option<KVCache<Batch, PrevSeq>>,
+                PhantomData<TotSeq>,
+            )> for TransformerBlock
         {
-            type Output = GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>;
+            type Output = (
+                GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
+                KVCache<Batch, TotSeq>,
+            );
             fn forward(
                 &self,
-                mut x: GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
+                (mut x, cache, _): (
+                    GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
+                    Option<KVCache<Batch, PrevSeq>>,
+                    PhantomData<TotSeq>,
+                ),
             ) -> Self::Output {
                 // Attention
-                // let normed = self.attention_norm.forward(x);
-                let y = self.attention.forward(x);
+                let normed = self.attention_norm.forward(x);
+                let (y, cache) = self
+                    .attention
+                    .forward((normed, cache, PhantomData::<TotSeq>));
 
                 // Residual Addition
                 x += y;
@@ -860,7 +915,7 @@ mod tests {
                 let y = self.feed_forward.forward(self.feed_forward_norm.forward(x));
 
                 // Residual Addition
-                x + y
+                (x + y, cache)
             }
         }
 
@@ -885,12 +940,26 @@ mod tests {
 
         let mut cx = Graph::new();
         let model = TransformerBlock::initialize(&mut cx);
-
+        let cache_k = cx
+            .tensor::<(Const<1>, Const<N_KV_HEADS>, Dyn<'p'>, Const<HEAD_DIM>)>()
+            .set_dyn(
+                random_vec(10 * N_KV_HEADS * HEAD_DIM),
+                &[1, N_KV_HEADS, 10, HEAD_DIM],
+            );
+        let cache_v = cx
+            .tensor::<(Const<1>, Const<N_KV_HEADS>, Dyn<'p'>, Const<HEAD_DIM>)>()
+            .set_dyn(
+                random_vec(10 * N_KV_HEADS * HEAD_DIM),
+                &[1, N_KV_HEADS, 10, HEAD_DIM],
+            );
         let input = cx
             .tensor::<(Const<1>, Dyn<'s'>, luminal::shape::Const<HIDDEN_DIM>)>()
             .set_dyn(random_vec(2 * HIDDEN_DIM), &[1, 2, HIDDEN_DIM]);
-        let mut out = model.forward(input).retrieve();
+        let (mut out, _) =
+            model.forward((input, Some((cache_k, cache_v)), PhantomData::<Dyn<'t'>>));
+        out.retrieve();
 
+        cx.set_dyn_dim('t', 10 + 2);
         cx.execute();
 
         let unopt_out = out.data();
