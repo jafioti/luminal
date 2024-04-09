@@ -74,13 +74,15 @@ fn is_more_than_one_view(
 impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
-        // graph.display();
+        println!("RUNNING");
         let device = Device::system_default().unwrap();
         let queue = device.new_command_queue();
         // Track fused ops to compile later
         let mut fused_ops = FxHashSet::default();
 
         let mut matched = true;
+        let mut n_matched = 0;
+        let mut broken_op = None;
         while matched {
             matched = false;
             for edge in graph.edge_indices().collect::<Vec<_>>() {
@@ -236,6 +238,12 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     remap(a, new_op, &mut ids, graph);
                 }
                 remap(b, new_op, &mut ids, graph);
+                n_matched += 1;
+                if n_matched > 10000000 {
+                    broken_op = Some(new_op);
+                    matched = false;
+                    break;
+                }
             }
         }
         // Compile all the kernels we placed
@@ -298,13 +306,28 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 })
                 .collect();
             // Stack index expressions
-            let stacked_index_expressions = stacked_shapes
+            let stacked_index_expressions_partial = stacked_shapes
                 .iter()
                 .map(|s| {
-                    s.iter().rev().fold(BigExpression::from('z'), |acc, inp| {
-                        inp.index_expression().substitute('z', acc)
-                    })
+                    s.iter()
+                        .rev()
+                        .take(s.len() - 1)
+                        .fold(BigExpression::from('z'), |acc, inp| {
+                            inp.index_expression().substitute('z', acc)
+                        })
                 })
+                .collect::<Vec<_>>();
+            let stacked_index_expressions = stacked_index_expressions_partial
+                .iter()
+                .cloned()
+                .zip(&stacked_shapes)
+                .map(|(partial, sh)| sh[0].index_expression().substitute('z', partial))
+                .collect::<Vec<_>>();
+            let stacked_valid_expressions = stacked_index_expressions_partial
+                .iter()
+                .cloned()
+                .zip(&stacked_shapes)
+                .map(|(partial, sh)| sh[0].valid_expression().substitute('z', partial))
                 .collect::<Vec<_>>();
 
             // Replace in subexpressions
@@ -313,13 +336,18 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 op.subexpressions.iter_mut().zip(subexp_views).enumerate()
             {
                 // Index
-                for (i, ind_exp) in stacked_index_expressions.iter().enumerate() {
+                for (i, (ind_exp, val_exp)) in stacked_index_expressions
+                    .iter()
+                    .zip(&stacked_valid_expressions)
+                    .enumerate()
+                {
                     let re = Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap();
                     *subexp = re
                         .replace_all(
                             subexp,
                             &format!(
-                                "(float)input{i}[{}]$1",
+                                "({} != 0 ? (float)input{i}[{}] : 0.0)$1",
+                                expr_to_metal_string(val_exp.clone()),
                                 expr_to_metal_string(ind_exp.clone())
                             ),
                         )
@@ -371,6 +399,11 @@ kernel void mkernel({} device {type_name} *out [[buffer({})]], device uint& n_el
                     op.subexpressions.iter().take(op.subexpressions.len() - 1).enumerate().map(|(i, (subexp, _))| format!("float intermediate{i} = {subexp};")).join("\n        "),
                     op.subexpressions.last().unwrap().0
                 );
+            if let Some(o) = broken_op {
+                if o == fused_op {
+                    println!("{kernel}");
+                }
+            }
             op.kernel = Some(compile_function("mkernel", &kernel, &device));
             op.dyn_chars = dyn_chars;
         }
@@ -686,6 +719,8 @@ mod tests {
         pub const N_HEADS: usize = 2;
         pub const N_KV_HEADS: usize = 2;
         pub const MLP_DIM: usize = 256;
+        pub const NUM_LAYERS: usize = 2;
+        pub const SEQ_LEN: usize = 65;
         pub const N_ATTENTION_GROUPS: usize = N_HEADS / N_KV_HEADS;
         pub const HEAD_DIM: usize = HIDDEN_DIM / N_HEADS;
         pub const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
@@ -769,7 +804,7 @@ mod tests {
         impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             Module<(
                 GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
-                Option<KVCache<Batch, PrevSeq>>,
+                KVCache<Batch, PrevSeq>,
                 PhantomData<TotSeq>,
             )> for SelfAttention
         {
@@ -779,9 +814,9 @@ mod tests {
             );
             fn forward(
                 &self,
-                (x, cache, _): (
+                (x, (k_cache, v_cache), _): (
                     GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
-                    Option<KVCache<Batch, PrevSeq>>,
+                    KVCache<Batch, PrevSeq>,
                     PhantomData<TotSeq>,
                 ),
             ) -> Self::Output {
@@ -806,14 +841,10 @@ mod tests {
                 let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::const_size().into());
 
                 // Add KV cache
-                let (keys, values) = if let Some((k_cache, v_cache)) = cache {
-                    (
-                        k_cache.concat_along::<_, Axis<2>, _>(keys),
-                        v_cache.concat_along::<_, Axis<2>, _>(values),
-                    )
-                } else {
-                    (keys.contiguous().realize(), values.contiguous().realize())
-                };
+                let (keys, values) = (
+                    k_cache.concat_along::<_, Axis<2>, _>(keys),
+                    v_cache.concat_along::<_, Axis<2>, _>(values),
+                );
 
                 // Repeat the KV States for Grouped-Query Attention
                 let repeated_keys = keys.expand::<(_, _, Const<N_ATTENTION_GROUPS>, _, _), _>();
@@ -886,7 +917,7 @@ mod tests {
         impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             Module<(
                 GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
-                Option<KVCache<Batch, PrevSeq>>,
+                KVCache<Batch, PrevSeq>,
                 PhantomData<TotSeq>,
             )> for TransformerBlock
         {
@@ -898,7 +929,7 @@ mod tests {
                 &self,
                 (mut x, cache, _): (
                     GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
-                    Option<KVCache<Batch, PrevSeq>>,
+                    KVCache<Batch, PrevSeq>,
                     PhantomData<TotSeq>,
                 ),
             ) -> Self::Output {
@@ -938,28 +969,83 @@ mod tests {
             }
         }
 
+        pub struct MistralLM {
+            // Transformer layers
+            pub layers: Vec<TransformerBlock>,
+            // Final Norm layer
+            pub norm: RMSNorm<HIDDEN_DIM>,
+        }
+
+        impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
+            Module<(
+                GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
+                Vec<KVCache<Batch, PrevSeq>>,
+                PhantomData<TotSeq>,
+            )> for MistralLM
+        {
+            type Output = (
+                GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
+                Vec<KVCache<Batch, TotSeq>>,
+            );
+            fn forward(
+                &self,
+                (input, cache, _): (
+                    GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
+                    Vec<KVCache<Batch, PrevSeq>>,
+                    PhantomData<TotSeq>,
+                ),
+            ) -> Self::Output {
+                let mut x = input;
+
+                // Run through layers and collect new caches
+                let mut new_caches = vec![];
+                let mut new_cache;
+                for (i, layer) in self.layers.iter().enumerate() {
+                    (x, new_cache) = layer.forward((x, cache[i], PhantomData::<TotSeq>));
+                    new_caches.push(new_cache);
+                }
+                // Run through last norm and output projection
+                let normed = self.norm.forward(x);
+                (normed, new_caches)
+            }
+        }
+
+        impl InitModule for MistralLM {
+            fn initialize(cx: &mut Graph) -> Self {
+                Self {
+                    norm: RMSNorm::initialize(cx),
+                    layers: (0..NUM_LAYERS)
+                        .map(|_| InitModule::initialize(cx))
+                        .collect(),
+                }
+            }
+        }
+
         let mut cx = Graph::new();
-        let model = TransformerBlock::initialize(&mut cx);
-        let cache_k = cx
-            .tensor::<(Const<1>, Const<N_KV_HEADS>, Dyn<'p'>, Const<HEAD_DIM>)>()
-            .set_dyn(
-                random_vec(10 * N_KV_HEADS * HEAD_DIM),
-                &[1, N_KV_HEADS, 10, HEAD_DIM],
-            );
-        let cache_v = cx
-            .tensor::<(Const<1>, Const<N_KV_HEADS>, Dyn<'p'>, Const<HEAD_DIM>)>()
-            .set_dyn(
-                random_vec(10 * N_KV_HEADS * HEAD_DIM),
-                &[1, N_KV_HEADS, 10, HEAD_DIM],
-            );
+        let model = MistralLM::initialize(&mut cx);
+        let caches = (0..NUM_LAYERS)
+            .map(|_| {
+                (
+                    cx.tensor::<(Const<1>, Const<N_KV_HEADS>, Dyn<'p'>, Const<HEAD_DIM>)>()
+                        .set_dyn(
+                            random_vec(SEQ_LEN * N_KV_HEADS * HEAD_DIM),
+                            &[1, N_KV_HEADS, SEQ_LEN, HEAD_DIM],
+                        ),
+                    cx.tensor::<(Const<1>, Const<N_KV_HEADS>, Dyn<'p'>, Const<HEAD_DIM>)>()
+                        .set_dyn(
+                            random_vec(SEQ_LEN * N_KV_HEADS * HEAD_DIM),
+                            &[1, N_KV_HEADS, SEQ_LEN, HEAD_DIM],
+                        ),
+                )
+            })
+            .collect();
         let input = cx
             .tensor::<(Const<1>, Dyn<'s'>, luminal::shape::Const<HIDDEN_DIM>)>()
             .set_dyn(random_vec(2 * HIDDEN_DIM), &[1, 2, HIDDEN_DIM]);
-        let (mut out, _) =
-            model.forward((input, Some((cache_k, cache_v)), PhantomData::<Dyn<'t'>>));
+        let (mut out, _) = model.forward((input, caches, PhantomData::<Dyn<'t'>>));
         out.retrieve();
 
-        cx.set_dyn_dim('t', 10 + 2);
+        cx.set_dyn_dim('t', SEQ_LEN + 2);
         cx.execute();
 
         let unopt_out = out.data();

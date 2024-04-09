@@ -24,7 +24,7 @@ pub struct CLIArgs {
     gen_tokens: i32,
 
     /// Prompt for the model
-    #[clap(short = 'p', long = "prompt", default_value = include_str!("../prompts/merge_sort.txt"))]
+    #[clap(short = 'p', long = "prompt", default_value = include_str!("../prompts/asimov.txt"))]
     prompt: String,
 }
 
@@ -46,8 +46,7 @@ fn main() {
     let model = model::MistralLM::initialize(&mut cx);
     let mut model_weights = downstream(params(&model), &cx);
     cx.keep_tensors(&model_weights);
-    let (logits, mut cache_dest) =
-        model.forward((input, Some(cache_src.clone()), PhantomData::<Dyn<'t'>>));
+    let (logits, mut cache_dest) = model.forward((input, &cache_src, PhantomData::<Dyn<'t'>>));
     let mut logits = logits
         .slice((.., (Expression::from('s') - 1).., ..))
         .retrieve();
