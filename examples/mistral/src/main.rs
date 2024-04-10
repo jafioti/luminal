@@ -13,7 +13,7 @@ mod loader;
 mod model;
 
 use crate::model::KVCache;
-use luminal::{prelude::*, shape::symbolic::Expression};
+use luminal::prelude::*;
 
 // Command args parser
 #[derive(Debug, Parser)]
@@ -55,9 +55,9 @@ fn main() {
     // Set up model loading
     #[cfg(any(feature = "metal", feature = "cuda"))]
     let quantized_weight_nodes =
-        loader::Q8Loader::new("setup/mistral-7b-instruct-v0.2.Q8_0.gguf").load(&model, &mut cx);
+        loader::q8_load("setup/mistral-7b-instruct-v0.2.Q8_0.gguf", &model, &mut cx);
     #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
-    loader::Q8Loader::new("setup/mistral-7b-instruct-v0.2.Q8_0.gguf").load(&model, &mut cx);
+    loader::q8_load("setup/mistral-7b-instruct-v0.2.Q8_0.gguf", &model, &mut cx);
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
     print!("Compiling graph");
@@ -134,16 +134,13 @@ fn main() {
     transfer_data_same_graph(&cache_dest_set, &cache_src_set, &mut cx);
 
     // Decode loop
-    let mut token_decode_times = vec![];
+    let start_decode = std::time::Instant::now();
     let mut prev_output_len = 0;
     for _ in 0..cli_args.gen_tokens {
-        // for _ in 0..1 {
         input.set_dyn(vec![*input_ids.last().unwrap() as f32], &[1, 1]);
         cx.set_dyn_dim('p', input_ids.len() - 1);
         cx.set_dyn_dim('t', input_ids.len());
-        let now = Instant::now();
         cx.execute();
-        token_decode_times.push(now.elapsed().as_micros());
 
         // Sample tokens
         let output_id = sample_index(&logits.data());
@@ -167,11 +164,9 @@ fn main() {
     }
 
     println!();
-    let avg_token_time = token_decode_times
-        .iter()
-        .map(|t| *t as f32 / 1000.)
-        .sum::<f32>()
-        / token_decode_times.len() as f32;
+    let avg_token_time = (std::time::Instant::now() - start_decode).as_micros() as f32
+        / (output_ids.len() - 1) as f32
+        / 1000.0;
     println!(
         "\nAverage token generated in {:.2}ms\t - ({:.2} tok/s)",
         avg_token_time,

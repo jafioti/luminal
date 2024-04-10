@@ -1,4 +1,4 @@
-use std::{any::Any, cell::UnsafeCell, ops::Deref, sync::Arc};
+use std::{any::Any, cell::UnsafeCell, fmt::Debug, ops::Deref, sync::Arc};
 
 use itertools::Itertools;
 use metal_rs::{Buffer, CommandBuffer, CommandQueue, Device};
@@ -18,7 +18,7 @@ use crate::{MetalBuffer, MetalKernel, MetalKernelWrapper};
 
 use super::get_buffer_from_tensor;
 
-#[derive(Default, LuminalPrint)]
+#[derive(Default, Debug)]
 pub struct CommandBufferCompiler;
 
 impl Compiler for CommandBufferCompiler {
@@ -202,10 +202,14 @@ impl Compiler for CommandBufferCompiler {
     }
 }
 
-#[derive(LuminalEqFalse, LuminalPrint)]
 struct ExecuteMetalKernels {
     queue: CommandQueue,
     buffer: Arc<UnsafeCell<CommandBuffer>>,
+}
+impl Debug for ExecuteMetalKernels {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ExecuteMetalKernels")
+    }
 }
 
 impl Operator for ExecuteMetalKernels {
@@ -218,7 +222,7 @@ impl Operator for ExecuteMetalKernels {
     }
 }
 
-#[derive(Clone, LuminalEqFalse)]
+#[derive(Clone)]
 struct CommandBufferWrapper {
     wrapper: Box<MetalKernelWrapper>,
     buffer: Arc<UnsafeCell<CommandBuffer>>,
@@ -232,13 +236,10 @@ impl std::fmt::Debug for CommandBufferWrapper {
 }
 
 impl MetalKernel for CommandBufferWrapper {
-    fn intermediate_buffer_sizes(
-        &self,
-        input_shapes: &[ShapeTracker],
-    ) -> Vec<symbolic::BigExpression> {
+    fn intermediate_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         self.wrapper.intermediate_buffer_sizes(input_shapes)
     }
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<symbolic::BigExpression> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
         self.wrapper.output_buffer_sizes(input_shapes)
     }
     fn metal_forward(

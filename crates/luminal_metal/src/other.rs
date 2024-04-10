@@ -3,7 +3,6 @@ use std::{any::Any, marker::PhantomData, sync::Arc};
 use luminal::{
     op::{InputTensor, Operator},
     prelude::{petgraph::visit::EdgeRef, *},
-    shape::symbolic::BigExpression,
 };
 use metal_rs::{
     objc::rc::autoreleasepool, Buffer, CommandBufferRef, CommandQueue, ComputePassDescriptor,
@@ -20,7 +19,7 @@ use crate::{
 use super::binary::MetalSub;
 
 /// Sometimes CopyTo -> CopyFrom and CopyFrom -> CopyTo patterns remain, so let's clean them up
-#[derive(LuminalPrint, Default)]
+#[derive(Debug, Default)]
 pub struct CopyCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for CopyCompiler<T> {
@@ -67,7 +66,7 @@ impl<T: MetalFloat> Compiler for CopyCompiler<T> {
 }
 
 /// Special kernel for producing aranges
-#[derive(Clone, LuminalEqFalse)]
+#[derive(Clone)]
 pub struct MetalARange<T: MetalFloat> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -175,7 +174,7 @@ impl<T: MetalFloat> Operator for MetalARange<T> {
 }
 
 /// Replace the arange pattern with a special kernel. This must be ran **after** the subtraction compiler
-#[derive(Default, LuminalPrint)]
+#[derive(Default, Debug)]
 pub struct ARangeCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for ARangeCompiler<T> {

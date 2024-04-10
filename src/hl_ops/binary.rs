@@ -7,10 +7,6 @@ use std::ops::RemAssign;
 use std::ops::SubAssign;
 use std::ops::{Add, Div, Mul, Rem, Sub};
 
-use self::symbolic::ExpressionStorage;
-use self::symbolic::GenericExpression;
-use self::symbolic::Term;
-
 impl<S: Shape> Add for GraphTensor<S> {
     type Output = GraphTensor<S>;
 

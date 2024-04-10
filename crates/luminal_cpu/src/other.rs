@@ -1,13 +1,12 @@
 use luminal::{
     op::*,
     prelude::{petgraph::visit::EdgeRef, *},
-    shape::symbolic::BigExpression,
 };
 use rustc_hash::FxHashMap;
 
 use super::binary::Sub;
 
-#[derive(LuminalPrint, Clone, LuminalEqFalse)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ARange {
     pub size: BigExpression,
     dyn_map: *const FxHashMap<char, usize>,
@@ -25,7 +24,7 @@ impl Operator for ARange {
     }
 }
 
-#[derive(LuminalPrint, Default)]
+#[derive(Debug, Default)]
 pub struct ARangeCompiler;
 
 impl Compiler for ARangeCompiler {

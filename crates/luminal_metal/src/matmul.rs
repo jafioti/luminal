@@ -1,9 +1,8 @@
-use std::{any::Any, marker::PhantomData, mem::size_of, sync::Arc};
+use std::{any::Any, fmt::Debug, marker::PhantomData, mem::size_of, sync::Arc};
 
 use luminal::{
     op::{InputTensor, Operator},
     prelude::*,
-    shape::symbolic::BigExpression,
 };
 
 use metal_rs::{objc::rc::autoreleasepool, *};
@@ -15,13 +14,18 @@ use crate::{
 };
 
 /// Multiplies a BxMxK matrix with a KxN matrix, resulting in a BxMxN matrix
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct Matmul<T> {
     matmul_pipeline: ComputePipelineState,
     matvec_pipeline: ComputePipelineState,
     queue: CommandQueue,
     device: Device,
     _phantom: PhantomData<T>,
+}
+impl<T> Debug for Matmul<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Matmul")
+    }
 }
 
 const BM: u64 = 8;
@@ -146,7 +150,7 @@ impl<T> MetalKernel for Matmul<T> {
     }
 }
 
-impl<T: 'static + Clone> Operator for Matmul<T> {
+impl<T: MetalFloat> Operator for Matmul<T> {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup command queue / command buffer / encoder

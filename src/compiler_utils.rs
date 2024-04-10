@@ -1,12 +1,6 @@
 // Lots of utilities used by compilers
 
-use std::{
-    any::{Any, TypeId},
-    borrow::Borrow,
-    collections::HashSet,
-    fmt::Debug,
-    sync::Arc,
-};
+use std::{any::TypeId, borrow::Borrow, collections::HashSet, fmt::Debug, sync::Arc};
 
 use colored::Colorize;
 use itertools::Itertools;
@@ -20,13 +14,7 @@ use regex::Regex;
 use rustc_hash::FxHashMap;
 use uuid::Uuid;
 
-use crate::{
-    graph::Graph,
-    op::Operator,
-    prelude::{Dependency, MainGraph, Shape, ShapeTracker},
-};
-
-use super::{graph_tensor::GraphTensor, shape::symbolic::Expression};
+use crate::{graph::Graph, op::Operator, prelude::*};
 
 pub trait ToIdsMut {
     fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex>;
@@ -614,35 +602,6 @@ pub fn move_incoming_edge<N, E: Clone>(
         graph.add_edge(source, to, weight);
     }
 }
-
-pub trait TraitObjEq {
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-    fn is_equal(&self, _: &dyn Operator) -> bool;
-}
-
-// Implement TraitObjEq for all 'static types implementing PartialEq.
-impl<S: 'static + PartialEq> TraitObjEq for S {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn is_equal(&self, other: &dyn Operator) -> bool {
-        // Do a type-safe casting. If the types are different,
-        // return false, otherwise test the values for equality.
-        other
-            .as_any()
-            .downcast_ref::<S>()
-            .map(|a| self == a)
-            .unwrap_or_default()
-    }
-}
-
-// type SelectionGraph = StableGraph<SelectOp, Option<u8>>;
 
 pub struct GraphSearch {
     current: FxHashMap<Uuid, NodeIndex>,

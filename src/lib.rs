@@ -5,7 +5,6 @@ pub mod graph_tensor;
 pub mod hl_ops;
 pub mod module;
 pub mod op;
-pub mod serialization;
 pub mod shape;
 
 pub mod tests;
@@ -18,10 +17,9 @@ pub mod prelude {
     pub use crate::hl_ops::*;
     pub use crate::module::*;
     pub use crate::op::*;
-    pub use crate::serialization::*;
     pub use crate::shape::*;
     pub use half::{bf16, f16};
-    pub use luminal_macro::*;
+    pub use luminal_symbolic::*;
     pub use petgraph;
     pub use tinyvec;
 }

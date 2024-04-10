@@ -1,9 +1,6 @@
 use std::{marker::PhantomData, ops::Div};
 
-use luminal::{
-    prelude::{binary::F32Pow, *},
-    shape::symbolic::{BigExpression, Expression},
-};
+use luminal::prelude::{binary::F32Pow, *};
 use luminal_nn::{Embedding, PermutedLinear, RMSNorm};
 
 // Mistral 7B Config
@@ -82,11 +79,9 @@ fn apply_rotary_embeddings_ggml<const N_HEADS: usize, Batch: Dimension, Seq: Dim
     let split = input.reshape::<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<2>)>();
     let x0: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<1>)> = split
         .slice((.., .., .., .., ..Expression::from(1)))
-        .contiguous()
         .realize();
     let x1: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<1>)> = split
         .slice((.., .., .., .., Expression::from(1)..))
-        .contiguous()
         .realize();
 
     // Apply sin and cos embeddings

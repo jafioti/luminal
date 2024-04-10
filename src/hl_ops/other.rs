@@ -5,10 +5,8 @@ use itertools::Itertools;
 
 use crate::{
     op::{self, Constant, ConstantValue},
-    prelude::{symbolic::BigExpression, *},
+    prelude::*,
 };
-
-use self::symbolic::Expression;
 
 impl<S: Shape> GraphTensor<S> {
     /// Cumulative sum last dimension
@@ -85,7 +83,7 @@ impl Graph {
     pub fn constant_expr<E: Into<BigExpression>>(&mut self, expr: E) -> GraphTensor<R0> {
         GraphTensor::from_id(
             self.add_op(Constant(
-                ConstantValue::Expression(expr.into().minimize()),
+                ConstantValue::Expression(expr.into().simplify()),
                 &self.dyn_map,
             ))
             .finish(),

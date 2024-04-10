@@ -74,7 +74,7 @@ impl<'a> InputTensor<'a> {
 /// The main operator trait.
 ///
 /// Defines an operator that takes in a vector of input tensors and shapes and produces a vector of output tensors
-pub trait Operator: Debug + TraitObjEq {
+pub trait Operator: Debug + as_any::AsAny {
     /// Process the input tensors and produce output tensors
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor>;
     /// Implement custom functionality

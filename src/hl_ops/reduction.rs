@@ -2,7 +2,7 @@ use itertools::Itertools;
 
 use crate::{
     op::{self},
-    prelude::{symbolic::Expression, *},
+    prelude::*,
 };
 
 impl<S: Shape> GraphTensor<S> {

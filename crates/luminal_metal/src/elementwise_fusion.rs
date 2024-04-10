@@ -1,6 +1,6 @@
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::{any::Any, iter::once, marker::PhantomData, ops::Deref, sync::Arc};
+use std::{any::Any, fmt::Debug, iter::once, marker::PhantomData, ops::Deref, sync::Arc};
 
 use itertools::Itertools;
 use metal_rs::{
@@ -20,8 +20,6 @@ use crate::{
     expr_to_metal_string, get_buffer_from_tensor, prim::MetalConstant, MetalBuffer, MetalFloat,
     MetalKernel, MetalKernelWrapper,
 };
-
-use self::symbolic::BigExpression;
 
 use super::{compile_function, input_dyn_dims, render_dyn_dim_inputs, DispatchNElements, SetInt};
 
@@ -409,7 +407,7 @@ kernel void mkernel({} device {type_name} *out [[buffer({})]], device uint& n_el
     }
 }
 
-#[derive(LuminalPrint, LuminalEqFalse, Clone)]
+#[derive(Clone)]
 pub struct FusedElementwiseOp<T> {
     kernel: Option<ComputePipelineState>,
     dyn_map: *const FxHashMap<char, usize>,
@@ -419,6 +417,11 @@ pub struct FusedElementwiseOp<T> {
     device: Device,
     output_buffer_sizes: Vec<BigExpression>,
     _phantom: PhantomData<T>,
+}
+impl<T> Debug for FusedElementwiseOp<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FusedElementwiseOp")
+    }
 }
 impl<T> MetalKernel for FusedElementwiseOp<T> {
     fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<BigExpression> {
@@ -498,7 +501,6 @@ impl<T: MetalFloat> Operator for FusedElementwiseOp<T> {
 mod tests {
     use luminal::{
         prelude::{binary::F32Pow, *},
-        shape::symbolic::{BigExpression, Expression},
         tests::{assert_close, assert_close_precision, random_vec, random_vec_rng},
     };
     use luminal_nn::*;

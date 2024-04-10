@@ -58,7 +58,8 @@ impl Compiler for CSE {
                         let Some(b) = graph.graph.node_weight(*other_node) else {
                             continue;
                         };
-                        if !a.is_equal(b.as_ref()) {
+                        if format!("{a:?}") != format!("{b:?}") {
+                            // Sloppy way to check if ops are equal, but we only expect primops here so it's ok
                             continue;
                         }
                         let a_src_shapes = graph
@@ -175,6 +176,7 @@ impl Compiler for RemoveUnusedNodes {
     }
 }
 
+/// Enforce the graph gets ran in strictly depth-first order
 #[derive(Default)]
 pub struct DepthFirst;
 
@@ -484,14 +486,11 @@ impl Compiler for ArithmeticElimination {
     }
 }
 
-pub(crate) fn constant(num: f32) -> SelectGraph {
+fn constant(num: f32) -> SelectGraph {
     let mut n = op::<Constant>();
     n.check(move |o, _| {
-        if let Some(c) = o.as_any().downcast_ref::<Constant>() {
-            match c.0 {
-                ConstantValue::Float(f) => f == num,
-                _ => false,
-            }
+        if let Some(Constant(ConstantValue::Float(f), _)) = o.as_any().downcast_ref::<Constant>() {
+            *f == num
         } else {
             false
         }

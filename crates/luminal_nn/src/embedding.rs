@@ -13,7 +13,7 @@ impl<const A: usize, const B: usize> InitModule for Embedding<A, B> {
 }
 
 impl<const A: usize, const B: usize> SerializeModule for Embedding<A, B> {
-    fn serialize(&self, s: &mut luminal::serialization::Serializer) {
+    fn serialize(&self, s: &mut luminal::module::Serializer) {
         s.tensor("weight", self.weight);
     }
 }

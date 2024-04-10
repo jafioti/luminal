@@ -1,12 +1,10 @@
-#![allow(private_bounds)]
-// Super minimal symbolic algebra library
+use super::Term;
 
 use std::{
     fmt::Debug,
     ops::{Add, BitAnd, BitOr, Div, IndexMut, Mul, Rem, Sub},
 };
 
-use itertools::Itertools;
 use rustc_hash::FxHashMap;
 use tinyvec::ArrayVec;
 
@@ -110,9 +108,9 @@ impl<S: ExpressionStorage + Clone> Debug for GenericExpression<S> {
 }
 
 impl<S: ExpressionStorage> GenericExpression<S> {
-    /// Reduce the expression to its minimal terms
-    pub fn minimize(self) -> Self {
-        reduce_triples(self)
+    /// Simplify the expression to its minimal terms
+    pub fn simplify(self) -> Self {
+        crate::simplify::reduce_triples(self)
     }
 
     /// Minimum
@@ -123,7 +121,7 @@ impl<S: ExpressionStorage> GenericExpression<S> {
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Min);
-        rhs.minimize()
+        rhs.simplify()
     }
 
     /// Maximum
@@ -134,7 +132,7 @@ impl<S: ExpressionStorage> GenericExpression<S> {
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Max);
-        rhs.minimize()
+        rhs.simplify()
     }
 
     /// Greater than or equals
@@ -145,7 +143,7 @@ impl<S: ExpressionStorage> GenericExpression<S> {
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Gte);
-        rhs.minimize()
+        rhs.simplify()
     }
 
     /// Less than
@@ -161,7 +159,7 @@ impl<S: ExpressionStorage> GenericExpression<S> {
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Lt);
-        rhs.minimize()
+        rhs.simplify()
     }
 
     /// Substitute an expression for a variable
@@ -179,98 +177,8 @@ impl<S: ExpressionStorage> GenericExpression<S> {
                 }
             }
         }
-        Self { terms: new_terms }.minimize()
+        Self { terms: new_terms }.simplify()
     }
-}
-
-fn reduce_triples<S: ExpressionStorage>(mut expr: GenericExpression<S>) -> GenericExpression<S> {
-    fn get_triples<S: ExpressionStorage>(
-        exp: &GenericExpression<S>,
-    ) -> Vec<(Option<usize>, usize, Option<usize>)> {
-        // Mark all terms with their index
-        let terms = exp
-            .terms
-            .clone()
-            .into_iter()
-            .enumerate()
-            .collect::<Vec<_>>();
-        let mut stack = Vec::new();
-        let mut triples = vec![];
-        for (index, term) in terms {
-            match term {
-                Term::Num(_) | Term::Var(_) => stack.push((Some(index), term)),
-                _ => {
-                    let (a_ind, a_term) = stack.pop().unwrap();
-                    let (b_ind, b_term) = stack.pop().unwrap();
-                    triples.push((a_ind, index, b_ind));
-                    if let (Term::Num(a), Term::Num(b)) = (a_term, b_term) {
-                        stack.push((None, Term::Num(term.as_op().unwrap()(a, b))));
-                    } else if let Term::Var(a) = a_term {
-                        stack.push((None, Term::Var(a)));
-                    } else if let Term::Var(b) = b_term {
-                        stack.push((None, Term::Var(b)));
-                    }
-                }
-            }
-        }
-        triples
-    }
-    fn remove_terms<S: ExpressionStorage>(terms: &mut S, inds: &[usize]) {
-        for ind in inds.iter().sorted().rev() {
-            terms.remove(*ind);
-        }
-    }
-
-    #[macro_export]
-    macro_rules! unwrap_cont {
-        ($i: expr) => {
-            if let Some(s) = $i {
-                s
-            } else {
-                continue;
-            }
-        };
-    }
-    let mut changed = true;
-    while changed {
-        changed = false;
-        let triples = get_triples(&expr);
-        for (a_ind, op_ind, b_ind) in triples {
-            let mut inner_changed = true;
-            match (
-                a_ind.map(|a| expr.terms[a]),
-                expr.terms[op_ind],
-                b_ind.map(|b| expr.terms[b]),
-            ) {
-                (Some(Term::Num(a)), term, Some(Term::Num(b))) if term.as_op().is_some() => {
-                    expr.terms[unwrap_cont!(a_ind)] = Term::Num(term.as_op().unwrap()(a, b));
-                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
-                }
-                // Remove min(i, inf) and min(inf, i)
-                (Some(Term::Num(a)), Term::Min, _) if a == i32::MAX => {
-                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
-                }
-                (_, Term::Min, Some(Term::Num(b))) if b == i32::MAX => {
-                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
-                }
-                // Remove max(i, inf) and max(inf, i)
-                (_, Term::Max, Some(Term::Num(i))) if i == i32::MAX => {
-                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
-                }
-                (Some(Term::Num(i)), Term::Max, _) if i == i32::MAX => {
-                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
-                }
-                _ => {
-                    inner_changed = false;
-                }
-            }
-            if inner_changed {
-                changed = true;
-                break;
-            }
-        }
-    }
-    expr
 }
 
 impl<S: ExpressionStorage> GenericExpression<S>
@@ -350,69 +258,6 @@ where
             .clone()
             .into_iter()
             .any(|t| matches!(t, Term::Var('-')))
-    }
-}
-
-/// A single term of a symbolic expression such as a variable, number or operation.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Term {
-    Num(i32),
-    Var(char),
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Mod,
-    Min,
-    Max,
-    And,
-    Or,
-    Gte,
-    Lt,
-}
-
-impl Debug for Term {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Term::Num(n) => write!(f, "{n}"),
-            Term::Var(c) => write!(f, "{c}"),
-            Term::Add => write!(f, "+"),
-            Term::Sub => write!(f, "-"),
-            Term::Mul => write!(f, "*"),
-            Term::Div => write!(f, "/"),
-            Term::Mod => write!(f, "%"),
-            Term::Min => write!(f, "min"),
-            Term::Max => write!(f, "max"),
-            Term::And => write!(f, "&&"),
-            Term::Or => write!(f, "||"),
-            Term::Gte => write!(f, ">="),
-            Term::Lt => write!(f, "<"),
-        }
-    }
-}
-
-impl Default for Term {
-    fn default() -> Self {
-        Self::Num(0)
-    }
-}
-
-impl Term {
-    pub fn as_op(self) -> Option<fn(i32, i32) -> i32> {
-        match self {
-            Term::Add => Some(std::ops::Add::add),
-            Term::Sub => Some(std::ops::Sub::sub),
-            Term::Mul => Some(std::ops::Mul::mul),
-            Term::Div => Some(std::ops::Div::div),
-            Term::Mod => Some(std::ops::Rem::rem),
-            Term::Max => Some(core::cmp::Ord::max),
-            Term::Min => Some(core::cmp::Ord::min),
-            Term::And => Some(|a, b| (a != 0 && b != 0) as i32),
-            Term::Or => Some(|a, b| (a != 0 || b != 0) as i32),
-            Term::Gte => Some(|a, b| (a >= b) as i32),
-            Term::Lt => Some(|a, b| (a < b) as i32),
-            _ => None,
-        }
     }
 }
 
@@ -509,7 +354,7 @@ impl<S: ExpressionStorage, E: Into<Self>> Add<E> for GenericExpression<S> {
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Add);
-        rhs.minimize()
+        rhs.simplify()
     }
 }
 
@@ -525,7 +370,7 @@ impl<S: ExpressionStorage, E: Into<Self>> Sub<E> for GenericExpression<S> {
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Sub);
-        rhs.minimize()
+        rhs.simplify()
     }
 }
 
@@ -544,7 +389,7 @@ impl<S: ExpressionStorage, E: Into<Self>> Mul<E> for GenericExpression<S> {
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Mul);
-        rhs.minimize()
+        rhs.simplify()
     }
 }
 
@@ -563,7 +408,7 @@ impl<S: ExpressionStorage, E: Into<Self>> Div<E> for GenericExpression<S> {
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Div);
-        rhs.minimize()
+        rhs.simplify()
     }
 }
 
@@ -576,7 +421,7 @@ impl<S: ExpressionStorage, E: Into<Self>> Rem<E> for GenericExpression<S> {
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Mod);
-        rhs.minimize()
+        rhs.simplify()
     }
 }
 
@@ -595,7 +440,7 @@ impl<S: ExpressionStorage, E: Into<Self>> BitAnd<E> for GenericExpression<S> {
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::And);
-        rhs.minimize()
+        rhs.simplify()
     }
 }
 
@@ -608,7 +453,7 @@ impl<S: ExpressionStorage, E: Into<Self>> BitOr<E> for GenericExpression<S> {
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Or);
-        rhs.minimize()
+        rhs.simplify()
     }
 }
 
@@ -621,33 +466,5 @@ impl<S: ExpressionStorage> std::iter::Product for GenericExpression<S> {
             p = p * n;
         }
         p
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn test_expressions() {
-        let n = (Expression::from('x') + Term::Num(255)) / Term::Num(256) * Term::Num(256);
-        assert_eq!(n.exec(&[('x', 767)].into_iter().collect()).unwrap(), 768);
-
-        let n = (Expression::from('x') + Term::Num(255)) / Term::Num(256) * Term::Num(256);
-        assert_eq!(n.exec(&[('x', 767)].into_iter().collect()).unwrap(), 768);
-    }
-
-    #[test]
-    fn test_minimizations() {
-        let expr = ((BigExpression::from('a') * 1) + 0) / 1 + (1 - 1);
-        let reduced_expr = expr.minimize();
-        assert_eq!(reduced_expr, 'a'.into());
-    }
-
-    #[test]
-    fn test_substitution() {
-        let main = Expression::from('x') - 255;
-        let sub = Expression::from('x') / 2;
-        let new = main.substitute('x', sub);
-        assert_eq!(new, (Expression::from('x') / 2) - 255);
     }
 }

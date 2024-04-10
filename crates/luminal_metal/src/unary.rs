@@ -7,7 +7,6 @@ use petgraph::visit::EdgeRef;
 use luminal::{
     op::{ConstantValue, InputTensor, Operator},
     prelude::*,
-    shape::symbolic::BigExpression,
 };
 
 use metal_rs::{objc::rc::autoreleasepool, *};
@@ -21,7 +20,7 @@ use crate::{
 use super::binary::MetalSub;
 
 /// Special kernel for efficient mean reduction
-#[derive(LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalMeanReduce<T>(
     ComputePipelineState,
     CommandQueue,
@@ -31,6 +30,7 @@ pub struct MetalMeanReduce<T>(
     *const FxHashMap<char, usize>,
     PhantomData<T>,
 );
+crate::debug_type!(MetalMeanReduce<T>);
 
 impl<T> PartialEq for MetalMeanReduce<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -222,7 +222,7 @@ impl<T: MetalFloat> Compiler for MeanReduceCompiler<T> {
 }
 
 /// Special kernel for efficient std norming
-#[derive(LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalStdNorm<T> {
     pipeline: ComputePipelineState,
     device: Device,
@@ -230,6 +230,7 @@ pub struct MetalStdNorm<T> {
     epsilon: f32, // Epsilon
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(MetalStdNorm<T>);
 
 impl<T> PartialEq for MetalStdNorm<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -482,13 +483,14 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
     }
 }
 
-#[derive(LuminalEqTrue, LuminalPrint, Clone)]
-pub struct MetalExp<T: MetalFloat> {
+#[derive(Clone)]
+pub struct MetalExp<T> {
     pipeline: ComputePipelineState,
     device: Device,
     queue: CommandQueue,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(MetalExp<T>);
 
 impl<T: MetalFloat> MetalExp<T> {
     fn new(device: Device, queue: CommandQueue) -> Self {
@@ -621,13 +623,14 @@ impl<T: MetalFloat> Compiler for MetalExpCompiler<T> {
 }
 
 /// Special kernel for cos
-#[derive(LuminalEqTrue, LuminalPrint, Clone)]
-pub struct MetalCos<T: MetalFloat> {
+#[derive(Clone)]
+pub struct MetalCos<T> {
     pipeline: ComputePipelineState,
     device: Device,
     queue: CommandQueue,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(MetalCos<T>);
 
 impl<T: MetalFloat> MetalCos<T> {
     fn new(device: Device, queue: CommandQueue) -> Self {
@@ -758,7 +761,7 @@ impl<T: MetalFloat> Compiler for MetalCosCompiler<T> {
 }
 
 /// Special kernel for efficient softmax. Currently only works on the last dim
-#[derive(LuminalPrint, LuminalEqTrue, Clone)]
+#[derive(Clone)]
 pub struct MetalSoftmax<T> {
     single_row_pipeline: ComputePipelineState,
     looped_pipeline: ComputePipelineState,
@@ -766,6 +769,7 @@ pub struct MetalSoftmax<T> {
     device: Device,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(MetalSoftmax<T>);
 
 const SOFTMAX_N_READS: usize = 4;
 const SOFTMAX_LOOPED_LIMIT: usize = 4096;

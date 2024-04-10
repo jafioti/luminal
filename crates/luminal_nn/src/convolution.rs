@@ -48,7 +48,7 @@ impl<
     > SerializeModule
     for Conv1D<CHANNELS_IN, CHANNELS_OUT, KERNEL, STRIDE, DILATION, CHANNELS_IN_TIMES_KERNEL>
 {
-    fn serialize(&self, s: &mut luminal::serialization::Serializer) {
+    fn serialize(&self, s: &mut luminal::module::Serializer) {
         s.tensor("weight", self.weight);
     }
 }
@@ -156,7 +156,7 @@ impl<
         CHANNELS_IN_TIMES_KERNELX_KERNELY,
     >
 {
-    fn serialize(&self, s: &mut luminal::serialization::Serializer) {
+    fn serialize(&self, s: &mut luminal::module::Serializer) {
         s.tensor("weight", self.weight);
     }
 }

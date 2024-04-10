@@ -35,7 +35,7 @@ impl Operator for Sub {
     }
 }
 
-#[derive(LuminalPrint, Default)]
+#[derive(Debug, Default)]
 pub struct SubtractionCompiler;
 
 impl Compiler for SubtractionCompiler {
@@ -119,7 +119,7 @@ impl Operator for Equal {
     }
 }
 
-#[derive(LuminalPrint, Default)]
+#[derive(Debug, Default)]
 pub struct EqualCompiler;
 
 impl Compiler for EqualCompiler {
@@ -167,7 +167,7 @@ impl Compiler for EqualCompiler {
     }
 }
 
-#[derive(LuminalPrint, Clone, LuminalEqFalse)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Gather {
     pub embed_dim: usize,
 }
@@ -190,7 +190,7 @@ impl Operator for Gather {
     }
 }
 
-#[derive(LuminalPrint, Default)]
+#[derive(Debug, Default)]
 pub struct GatherCompiler;
 
 impl Compiler for GatherCompiler {

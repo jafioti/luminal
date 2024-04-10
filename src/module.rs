@@ -3,9 +3,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
 
-use crate::prelude::{Graph, SerializeModule, Serializer};
-
-use super::compiler_utils::ToIds;
+use crate::prelude::*;
 
 /// A module that can initialize it's variables on the graph
 pub trait InitModule {
@@ -195,3 +193,48 @@ tuple_impls!([M1, M2, M3, M4, M5, M6, M7] [0, 1, 2, 3, 4, 5, 6], M7, [M6, M5, M4
 tuple_impls!([M1, M2, M3, M4, M5, M6, M7, M8] [0, 1, 2, 3, 4, 5, 6, 7], M8, [M7, M6, M5, M4, M3, M2, M1]);
 tuple_impls!([M1, M2, M3, M4, M5, M6, M7, M8, M9] [0, 1, 2, 3, 4, 5, 6, 7, 8], M9, [M8, M7, M6, M5, M4, M3, M2, M1]);
 tuple_impls!([M1, M2, M3, M4, M5, M6, M7, M8, M9, M10] [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], M10, [M9, M8, M7, M6, M5, M4, M3, M2, M1]);
+
+/// Tell luminal how to represent the module as a dict of (String, NodeIndex)'s
+pub trait SerializeModule {
+    fn serialize(&self, s: &mut Serializer);
+}
+
+impl<T: SerializeModule> SerializeModule for &T {
+    fn serialize(&self, s: &mut Serializer) {
+        (*self).serialize(s)
+    }
+}
+
+/// Serializer keeps track of the tensors and modules that make up a model
+#[derive(Debug, Default)]
+pub struct Serializer {
+    current_path: Vec<String>,
+    pub state: FxHashMap<String, NodeIndex>,
+}
+
+impl Serializer {
+    pub fn tensor<S: Shape>(&mut self, name: &str, tensor: GraphTensor<S>) {
+        if !name.is_empty() {
+            // Add new path component
+            self.current_path.push(name.to_string());
+        }
+        // Insert tensor id
+        self.state.insert(self.current_path.join("/"), tensor.id);
+        if !name.is_empty() {
+            // Remove new path component
+            self.current_path.pop();
+        }
+    }
+    pub fn module<T: SerializeModule>(&mut self, name: &str, module: &T) {
+        if !name.is_empty() {
+            // Add new path component
+            self.current_path.push(name.to_string());
+        }
+        // Serialize
+        module.serialize(self);
+        if !name.is_empty() {
+            // Remove new path component
+            self.current_path.pop();
+        }
+    }
+}

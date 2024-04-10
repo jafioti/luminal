@@ -23,13 +23,7 @@ use metal_rs::*;
 use prim::MetalConstant;
 use rustc_hash::FxHashMap;
 
-use luminal::{
-    op::InputTensor,
-    prelude::{
-        symbolic::{BigExpression, Term},
-        *,
-    },
-};
+use luminal::{op::InputTensor, prelude::*};
 
 /// Compile graphs to run on Metal-supported macOS devices in supported data formats
 pub type MetalCompiler<T> = (
@@ -80,7 +74,7 @@ impl Data for MetalBuffer {
     }
 }
 
-pub trait MetalFloat: Copy + 'static {
+pub trait MetalFloat: Copy + PartialEq + 'static {
     fn to_f32(self) -> f32;
     fn from_f32(a: f32) -> Self;
     fn is_f32() -> bool;
@@ -207,8 +201,13 @@ pub trait MetalKernel: Debug {
     }
 }
 
-#[derive(LuminalPrint, LuminalEqFalse, Clone)]
+#[derive(Clone)]
 pub struct MetalKernelWrapper(pub Arc<Box<dyn MetalKernel>>);
+impl Debug for MetalKernelWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MetalKernelWrapper")
+    }
+}
 
 impl Default for MetalKernelWrapper {
     fn default() -> Self {
@@ -467,4 +466,15 @@ pub fn constant<T: MetalFloat>(num: f32) -> SelectGraph {
         }
     });
     n
+}
+
+#[macro_export]
+macro_rules! debug_type {
+    ($t: ty) => {
+        impl<T> std::fmt::Debug for $t {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "$t")
+            }
+        }
+    };
 }

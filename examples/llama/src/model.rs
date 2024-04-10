@@ -10,10 +10,7 @@ pub const INTERMEDIATE: usize = 11008;
 pub const HEADS: usize = 32;
 pub const LAYERS: usize = 32;
 
-use luminal::{
-    prelude::*,
-    shape::symbolic::{BigExpression, Expression},
-};
+use luminal::prelude::*;
 use luminal_nn::{Embedding, RMSNorm};
 
 // Full LLaMa model implementation, heavily based off of https://github.com/coreylowman/llama-dfdx/blob/main/src/modeling.rs

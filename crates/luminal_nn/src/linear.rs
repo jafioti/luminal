@@ -22,7 +22,7 @@ impl<const A: usize, const B: usize> InitModule for Linear<A, B> {
 }
 
 impl<const A: usize, const B: usize> SerializeModule for Linear<A, B> {
-    fn serialize(&self, s: &mut luminal::serialization::Serializer) {
+    fn serialize(&self, s: &mut luminal::module::Serializer) {
         s.tensor("weight", self.weight);
     }
 }
@@ -58,7 +58,7 @@ impl<const A: usize, const B: usize> InitModule for PermutedLinear<A, B> {
 }
 
 impl<const A: usize, const B: usize> SerializeModule for PermutedLinear<A, B> {
-    fn serialize(&self, s: &mut luminal::serialization::Serializer) {
+    fn serialize(&self, s: &mut luminal::module::Serializer) {
         s.tensor("weight", self.weight);
     }
 }

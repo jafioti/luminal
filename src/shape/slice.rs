@@ -1,4 +1,4 @@
-use super::*;
+use crate::prelude::*;
 use std::ops::{Bound, Range, RangeBounds, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 
 fn get_start_bound<D: Into<Expression> + Copy>(bound: Bound<D>) -> Expression {

@@ -9,7 +9,6 @@ use petgraph::visit::EdgeRef;
 use luminal::{
     op::{InputTensor, Operator},
     prelude::*,
-    shape::symbolic::BigExpression,
 };
 
 use crate::{
@@ -20,7 +19,7 @@ use crate::{
 use super::{compile_function, SetInt};
 
 /// Multiplies a BxMxK matrix with a KxN matrix, resulting in a BxMxN matrix. This expects the first input to be a quantized 2D matrix
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct QuantizedMatmul<T> {
     matmul_pipeline: ComputePipelineState,
     matvec_pipeline: ComputePipelineState,
@@ -28,6 +27,7 @@ pub struct QuantizedMatmul<T> {
     device: Device,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(QuantizedMatmul<T>);
 
 impl<T: MetalFloat> QuantizedMatmul<T> {
     fn new(device: Device, queue: CommandQueue) -> Self {
@@ -365,7 +365,7 @@ impl<T> MetalKernel for QuantizedMatmul<T> {
     }
 }
 
-impl<T: 'static + Clone> Operator for QuantizedMatmul<T> {
+impl<T: MetalFloat> Operator for QuantizedMatmul<T> {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         autoreleasepool(|| {
             // Setup command queue / command buffer / encoder
@@ -414,7 +414,7 @@ impl<T: 'static + Clone> Operator for QuantizedMatmul<T> {
     }
 }
 
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct QuantizedGather<T> {
     pipeline: ComputePipelineState,
     device: Device,
@@ -422,6 +422,7 @@ pub struct QuantizedGather<T> {
     embed_dim: usize,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(QuantizedGather<T>);
 
 impl<T: MetalFloat> QuantizedGather<T> {
     fn new(device: Device, queue: CommandQueue, embed_dim: usize) -> Self {

@@ -1,10 +1,4 @@
-use crate::{
-    op,
-    prelude::{
-        symbolic::{BigExpression, Expression},
-        *,
-    },
-};
+use crate::{op, prelude::*};
 
 impl<S: Shape> GraphTensor<S> {
     pub fn permute<Dst: Shape, Ax: Axes>(mut self) -> GraphTensor<Dst>
@@ -214,8 +208,6 @@ mod tests {
         tensor::{Cpu, TensorFrom, TensorFromVec},
         tensor_ops::{RealizeTo, TryConcatAlong},
     };
-
-    use crate::prelude::symbolic::Expression;
 
     crate::test_imports!();
 

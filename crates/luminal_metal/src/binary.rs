@@ -1,4 +1,4 @@
-use std::{any::Any, marker::PhantomData, mem::size_of, sync::Arc};
+use std::{any::Any, fmt::Debug, marker::PhantomData, mem::size_of, sync::Arc};
 
 use metal_rs::{
     objc::rc::autoreleasepool, Buffer, CommandBufferRef, CommandQueue, ComputePassDescriptor,
@@ -16,12 +16,11 @@ use super::prim::*;
 use luminal::{
     op::{InputTensor, Operator},
     prelude::{petgraph::visit::EdgeRef, *},
-    shape::symbolic::BigExpression,
 };
 
 use super::other::MetalARange;
 
-#[derive(LuminalEqTrue, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalSub<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -29,6 +28,11 @@ pub struct MetalSub<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
+}
+impl<T> Debug for MetalSub<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MetalSub")
+    }
 }
 
 impl<T: MetalFloat> MetalSub<T> {
@@ -140,7 +144,7 @@ impl<T: MetalFloat> Operator for MetalSub<T> {
     }
 }
 
-#[derive(LuminalPrint, Default)]
+#[derive(Debug, Default)]
 pub struct MetalSubtractionCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
@@ -197,7 +201,7 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
     }
 }
 
-#[derive(LuminalEqTrue, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalEqual<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -205,6 +209,11 @@ pub struct MetalEqual<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
+}
+impl<T> Debug for MetalEqual<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MetalEqual")
+    }
 }
 
 impl<T: MetalFloat> MetalEqual<T> {
@@ -317,7 +326,7 @@ impl<T: MetalFloat> Operator for MetalEqual<T> {
     }
 }
 
-#[derive(LuminalPrint, Default)]
+#[derive(Debug, Default)]
 pub struct MetalEqualCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
@@ -375,13 +384,18 @@ impl<T: MetalFloat> Compiler for MetalEqualCompiler<T> {
     }
 }
 
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalGather<T> {
     pipeline: ComputePipelineState,
     device: Device,
     queue: CommandQueue,
     pub embed_dim: usize,
     _phantom: PhantomData<T>,
+}
+impl<T> Debug for MetalGather<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MetalGather")
+    }
 }
 
 impl<T: MetalFloat> MetalGather<T> {
@@ -457,7 +471,7 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
     }
 }
 
-#[derive(LuminalPrint, Default)]
+#[derive(Debug, Default)]
 pub struct MetalGatherCompiler<T: MetalFloat>(PhantomData<T>);
 
 impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {

@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
 use tinyvec::ArrayVec;
 
-use super::symbolic::{BigExpression, Expression};
+use crate::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ShapeTracker {
@@ -144,7 +144,7 @@ impl ShapeTracker {
             }
             acc = acc.clone() * logical_sh.clone();
         }
-        ret.minimize()
+        ret.simplify()
     }
 
     /// If this BigExpression evaluates to 0, the logical index is invalid. Otherwise it is valid
@@ -182,7 +182,7 @@ impl ShapeTracker {
             }
             acc = acc * logical_sh;
         }
-        ret.minimize()
+        ret.simplify()
     }
 
     /// The number of elements in this tensor, including pads and slices

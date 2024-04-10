@@ -8,13 +8,13 @@ use std::{
 };
 
 use colored::Colorize;
-use luminal::{prelude::*, shape::symbolic::Expression};
+use luminal::prelude::*;
 use rust_tokenizers::tokenizer::{
     SentencePieceBpeTokenizer, Tokenizer,
     TruncationStrategy::{self},
 };
 
-use crate::model::KVCache;
+use crate::{loader::load, model::KVCache};
 #[cfg(feature = "metal")]
 type DeviceCompiler = luminal_metal::MetalCompiler<luminal::prelude::f16>;
 #[cfg(feature = "cuda")]
@@ -45,7 +45,7 @@ fn main() {
         .slice((.., (Expression::from('s') - 1).., ..))
         .retrieve();
     cache_dest.keep();
-    loader::DfdxDeferredLoader::new("setup/llama-7b-hf").load(&model, &mut cx);
+    load("setup/llama-7b-hf", &model, &mut cx);
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
     print!("Compiling graph");

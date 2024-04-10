@@ -16,6 +16,10 @@ use super::compiler_utils::{ToIds, ToIdsMut};
 pub type MainGraph = StableGraph<Box<dyn Operator>, Dependency>;
 pub use petgraph::stable_graph::NodeIndex;
 
+/// A Luminal compute graph.
+///
+/// All computation is represented as a directed acyclic graph.
+/// All data is stored inside this object as well.
 #[derive(Debug, Default)]
 pub struct Graph {
     /// The store of tensors in the graph. Indexed by node index and output index.

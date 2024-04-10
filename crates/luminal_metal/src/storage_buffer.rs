@@ -1,6 +1,7 @@
 use std::{
     cell::UnsafeCell,
     collections::{BTreeMap, BTreeSet},
+    fmt::Debug,
     ops::Deref,
     sync::Arc,
 };
@@ -13,7 +14,6 @@ use luminal::{
     op::{InputTensor, Operator},
     prelude::{
         petgraph::{algo::toposort, stable_graph::NodeIndex, visit::EdgeRef, Direction},
-        symbolic::BigExpression,
         *,
     },
 };
@@ -22,7 +22,7 @@ use crate::{MetalBuffer, MetalKernelWrapper};
 
 use super::get_buffer_from_tensor;
 
-#[derive(Default, LuminalPrint)]
+#[derive(Default, Debug)]
 pub struct StorageBufferCompiler;
 
 impl Compiler for StorageBufferCompiler {
@@ -296,12 +296,16 @@ fn btreeset_intersection<T: Ord>(mut a: BTreeSet<T>, b: &BTreeSet<T>) -> BTreeSe
     a
 }
 
-#[derive(LuminalEqFalse, LuminalPrint)]
 struct AllocateMetalBuffers {
     dev: Device,
     dyn_map: *const FxHashMap<char, usize>,
     buffer_sizes: Vec<BigExpression>,
     buffers: Arc<UnsafeCell<Vec<Buffer>>>,
+}
+impl Debug for AllocateMetalBuffers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "AllocateMetalBuffers")
+    }
 }
 
 impl Operator for AllocateMetalBuffers {
@@ -342,7 +346,6 @@ impl Operator for AllocateMetalBuffers {
     }
 }
 
-#[derive(LuminalEqFalse)]
 struct StorageBufferWrapper {
     wrapper: Box<MetalKernelWrapper>,
     buffers: Arc<UnsafeCell<Vec<Buffer>>>,

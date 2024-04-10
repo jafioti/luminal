@@ -1,9 +1,6 @@
 use std::{marker::PhantomData, ops::Div};
 
-use luminal::{
-    prelude::{binary::F32Pow, *},
-    shape::symbolic::{BigExpression, Expression},
-};
+use luminal::prelude::{binary::F32Pow, *};
 use luminal_nn::{Embedding, RMSNorm};
 
 // Mistral 7B Config

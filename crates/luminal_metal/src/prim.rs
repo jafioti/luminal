@@ -12,8 +12,9 @@ use luminal::{
 };
 
 /// Copy a tensor to the GPU
-#[derive(LuminalEqTrue, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalCopyToDevice<T>(Device, PhantomData<T>);
+crate::debug_type!(MetalCopyToDevice<T>);
 
 impl<T> MetalCopyToDevice<T> {
     pub fn new(dev: Device) -> Self {
@@ -51,8 +52,9 @@ impl<T: MetalFloat> Operator for MetalCopyToDevice<T> {
 }
 
 /// Copy a tensor from the GPU
-#[derive(LuminalEqTrue, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalCopyFromDevice<T>(Device, PhantomData<T>);
+crate::debug_type!(MetalCopyFromDevice<T>);
 
 impl<T> MetalCopyFromDevice<T> {
     pub fn new(dev: Device) -> Self {
@@ -122,7 +124,7 @@ impl<T: MetalFloat> Operator for MetalConstant<T> {
     }
 }
 
-#[derive(LuminalEqTrue, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalContiguous<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -131,6 +133,7 @@ pub struct MetalContiguous<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(MetalContiguous<T>);
 
 impl<T: MetalFloat> MetalContiguous<T> {
     pub fn new(
@@ -235,7 +238,7 @@ impl<T: MetalFloat> Operator for MetalContiguous<T> {
     }
 }
 
-#[derive(LuminalEqTrue, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalLog2<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -244,6 +247,7 @@ pub struct MetalLog2<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(MetalLog2<T>);
 
 impl<T: MetalFloat> MetalLog2<T> {
     pub fn new(
@@ -344,7 +348,7 @@ impl<T: MetalFloat> Operator for MetalLog2<T> {
     }
 }
 
-#[derive(LuminalEqTrue, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalExp2<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -353,6 +357,7 @@ pub struct MetalExp2<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(MetalExp2<T>);
 
 impl<T: MetalFloat> MetalExp2<T> {
     pub fn new(
@@ -452,7 +457,7 @@ impl<T: MetalFloat> Operator for MetalExp2<T> {
     }
 }
 
-#[derive(LuminalEqTrue, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalSin<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -461,6 +466,7 @@ pub struct MetalSin<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(MetalSin<T>);
 
 impl<T: MetalFloat> MetalSin<T> {
     pub fn new(
@@ -560,7 +566,7 @@ impl<T: MetalFloat> Operator for MetalSin<T> {
     }
 }
 
-#[derive(LuminalEqTrue, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalSqrt<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -569,6 +575,7 @@ pub struct MetalSqrt<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(MetalSqrt<T>);
 
 impl<T: MetalFloat> MetalSqrt<T> {
     pub fn new(
@@ -668,7 +675,7 @@ impl<T: MetalFloat> Operator for MetalSqrt<T> {
     }
 }
 
-#[derive(LuminalEqTrue, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalRecip<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -677,6 +684,7 @@ pub struct MetalRecip<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(MetalRecip<T>);
 
 impl<T: MetalFloat> MetalRecip<T> {
     pub fn new(
@@ -776,7 +784,7 @@ impl<T: MetalFloat> Operator for MetalRecip<T> {
     }
 }
 
-#[derive(LuminalPrint, LuminalEqTrue, Clone)]
+#[derive(Clone)]
 pub struct MetalAdd<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -785,6 +793,7 @@ pub struct MetalAdd<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
 }
+crate::debug_type!(MetalAdd<T>);
 
 impl<T: MetalFloat> MetalAdd<T> {
     pub fn new(
@@ -893,7 +902,7 @@ impl<T: MetalFloat> Operator for MetalAdd<T> {
     }
 }
 
-#[derive(LuminalPrint, LuminalEqTrue, Clone)]
+#[derive(Clone)]
 pub struct MetalMul<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -902,6 +911,7 @@ pub struct MetalMul<T> {
     _phantom: PhantomData<T>,
     dyn_map: *const FxHashMap<char, usize>,
 }
+crate::debug_type!(MetalMul<T>);
 
 impl<T: MetalFloat> MetalMul<T> {
     pub fn new(
@@ -1011,7 +1021,7 @@ impl<T: MetalFloat> Operator for MetalMul<T> {
     }
 }
 
-#[derive(LuminalEqTrue, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalLessThan<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -1020,6 +1030,7 @@ pub struct MetalLessThan<T> {
     _phantom: PhantomData<T>,
     dyn_map: *const FxHashMap<char, usize>,
 }
+crate::debug_type!(MetalLessThan<T>);
 
 impl<T: MetalFloat> MetalLessThan<T> {
     pub fn new(
@@ -1137,7 +1148,7 @@ impl<T: MetalFloat> Operator for MetalLessThan<T> {
     }
 }
 
-#[derive(LuminalEqTrue, LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalMod<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -1146,6 +1157,7 @@ pub struct MetalMod<T> {
     _phantom: PhantomData<T>,
     dyn_map: *const FxHashMap<char, usize>,
 }
+crate::debug_type!(MetalMod<T>);
 
 impl<T: MetalFloat> MetalMod<T> {
     pub fn new(
@@ -1253,7 +1265,7 @@ impl<T: MetalFloat> Operator for MetalMod<T> {
     }
 }
 
-#[derive(LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalSumReduce<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -1263,6 +1275,7 @@ pub struct MetalSumReduce<T> {
     _phantom: PhantomData<T>,
     dyn_map: *const FxHashMap<char, usize>,
 }
+crate::debug_type!(MetalSumReduce<T>);
 
 impl<T> PartialEq for MetalSumReduce<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -1404,7 +1417,7 @@ impl<T: MetalFloat> Operator for MetalSumReduce<T> {
     }
 }
 
-#[derive(LuminalPrint, Clone)]
+#[derive(Clone)]
 pub struct MetalMaxReduce<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
@@ -1414,6 +1427,7 @@ pub struct MetalMaxReduce<T> {
     _phantom: PhantomData<T>,
     dyn_map: *const FxHashMap<char, usize>,
 }
+crate::debug_type!(MetalMaxReduce<T>);
 
 impl<T> PartialEq for MetalMaxReduce<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -1555,7 +1569,7 @@ impl<T: MetalFloat> Operator for MetalMaxReduce<T> {
     }
 }
 
-#[derive(Default, LuminalPrint)]
+#[derive(Default, Debug)]
 pub struct PrimitiveCompiler<T>(PhantomData<T>);
 
 impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {

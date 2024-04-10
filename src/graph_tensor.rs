@@ -66,8 +66,6 @@ impl<S: Shape> GraphTensor<S> {
     ///     .tensor()
     ///     .set_dyn(vec![1., 2., 3., 4.], &[2, 2]);
     /// ```
-    ///
-    /// TODO: shape should be a const sized array. Blocked by https://github.com/rust-lang/rust/issues/60551
     pub fn set_dyn<T: Data + Clone>(self, data: T, shape: &[usize]) -> Self {
         // Report dyn dim values to graph dyn map
         assert_eq!(
@@ -80,30 +78,14 @@ impl<S: Shape> GraphTensor<S> {
                 self.graph().dyn_map.insert(c, *s);
             }
         }
-        let node = self
-            .graph()
-            .graph
-            .node_weight_mut(self.id)
-            .unwrap()
-            .as_any_mut()
-            .downcast_mut::<Function>()
-            .unwrap();
-        // We shouldn't do cloning here!
-        node.1 = Box::new(move |_| vec![Tensor::new(data.clone())]);
+        self.graph().get_op_mut::<Function>(self.id).1 =
+            Box::new(move |_| vec![Tensor::new(data.to_owned())]);
         self
     }
 
     /// Set the name of a tensor
     pub fn set_name(&self, name: &str) {
-        let node = self
-            .graph()
-            .graph
-            .node_weight_mut(self.id)
-            .unwrap()
-            .as_any_mut()
-            .downcast_mut::<Function>()
-            .unwrap();
-        node.0 = name.to_string();
+        self.graph().get_op_mut::<Function>(self.id).0 = name.to_string();
     }
 
     /// Convert tensor to a shapeless tensor
@@ -113,13 +95,15 @@ impl<S: Shape> GraphTensor<S> {
 
     /// Get the contiguous data of the tensor
     pub fn data(&self) -> Vec<f32> {
-        let mut st = self.shape;
-        st.resolve_global_dyn_dims(&self.graph().dyn_map);
         let tensor = self.graph().get_tensor_ref(self.id, 0).unwrap();
         let orig_data = tensor.downcast_ref::<Vec<f32>>().unwrap();
+        let mut st = self.shape;
+        if !st.is_reshaped() {
+            return orig_data.clone();
+        }
+        st.resolve_global_dyn_dims(&self.graph().dyn_map);
         let mut data = vec![0.; st.n_elements().to_usize().unwrap()];
-        let ind = st.index_expression();
-        let val = st.valid_expression();
+        let (ind, val) = (st.index_expression(), st.valid_expression());
         #[allow(unused_mut)]
         for (i, mut r) in data.iter_mut().enumerate() {
             if val.exec_single_var(i) != 0 {
@@ -133,35 +117,16 @@ impl<S: Shape> GraphTensor<S> {
 impl<S: ConstShape> GraphTensor<S> {
     /// Set the value of the tensor matching the constant shape
     pub fn set<T: Data + Clone, D: ToData<S, T>>(self, data: D) -> Self {
-        let node = self
-            .graph()
-            .graph
-            .node_weight_mut(self.id)
-            .unwrap()
-            .as_any_mut()
-            .downcast_mut::<Function>()
-            .unwrap();
         let data = data.to_data_vec();
-        // We shouldn't do cloning here!
-        node.1 = Box::new(move |_| vec![Tensor::new(data.clone())]);
+        self.graph().get_op_mut::<Function>(self.id).1 =
+            Box::new(move |_| vec![Tensor::new(data.to_owned())]);
         self
     }
 
     /// Set the tensor with a generating closure to be ran at runtime
     pub fn set_deferred(self, loader: impl Fn() -> Vec<f32> + 'static) -> Self {
-        let node = self
-            .graph()
-            .graph
-            .node_weight_mut(self.id)
-            .unwrap()
-            .as_any_mut()
-            .downcast_mut::<Function>()
-            .unwrap();
-
-        // Set the closure here
-        node.1 = Box::new(move |_| vec![Tensor::new(loader())]);
-
-        // Return
+        self.graph().get_op_mut::<Function>(self.id).1 =
+            Box::new(move |_| vec![Tensor::new(loader())]);
         self
     }
 }
@@ -249,22 +214,14 @@ fn pretty_print_tensor_recursive(
 
 impl<S: Shape> Debug for GraphTensor<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Get the data
-        let data = self.data();
-
-        // Get the shape
-        let shape = self
-            .shape
-            .shape()
-            .iter()
-            .map(|expr| expr.exec(&self.graph().dyn_map).unwrap())
-            .collect::<Vec<_>>();
-
         // Print the shape
+        let mut shape = self.shape;
+        shape.resolve_global_dyn_dims(&self.graph().dyn_map);
+        let shape = shape.shape_usize();
         writeln!(f, "Tensor with Shape: {:?}", shape)?;
 
         // Print the data by going dimension by dimension, recursively
-        pretty_print_tensor_recursive(f, &data, &shape, 0)
+        pretty_print_tensor_recursive(f, &self.data(), &shape, 0)
     }
 }
 

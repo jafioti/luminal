@@ -3,7 +3,6 @@ mod broadcast;
 mod permute;
 mod realize;
 mod slice;
-pub mod symbolic;
 pub mod tracker;
 
 pub use axes::*;
@@ -11,12 +10,11 @@ pub use broadcast::*;
 pub use permute::*;
 pub use realize::*;
 pub use slice::*;
-pub use symbolic::*;
 pub use tracker::*;
 
-// This currently is a lot more complicated than it needs to be, because it's based on dfdx and is ready to do dynamic dimensions.
-// TODO: Actually use dynamic dimensions
-// TODO: Simplify this code
+use crate::prelude::*;
+
+// This currently is a lot more complicated than it needs to be. Can it be simplified?
 
 /// Represents a single dimension of a multi dimensional [Shape]
 pub trait Dimension:
@@ -225,7 +223,7 @@ macro_rules! shape {
             type AllAxes = $All<$($Idx,)*>;
             type LastAxis = Axis<{$Num - 1}>;
 
-            fn realized_shape() -> Vec<crate::prelude::symbolic::Expression> {
+            fn realized_shape() -> Vec<crate::prelude::Expression> {
                 vec![$($D::const_size(), )*]
             }
             fn to_tracker() -> ShapeTracker {
@@ -246,7 +244,7 @@ macro_rules! shape {
             type AllAxes = $All<$($Idx,)*>;
             type LastAxis = Axis<{$Num - 1}>;
 
-            fn realized_shape() -> Vec<crate::prelude::symbolic::Expression> {
+            fn realized_shape() -> Vec<crate::prelude::Expression> {
                 vec!['-'.into(); $Num]
             }
 
