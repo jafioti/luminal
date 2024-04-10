@@ -74,7 +74,6 @@ fn is_more_than_one_view(
 impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
-        println!("RUNNING");
         let device = Device::system_default().unwrap();
         let queue = device.new_command_queue();
         // Track fused ops to compile later
