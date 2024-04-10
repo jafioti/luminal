@@ -6,6 +6,7 @@ use std::{
 
 use clap::Parser;
 use colored::Colorize;
+use itertools::Itertools;
 use tokenizers::Tokenizer;
 
 mod gguf;
@@ -54,8 +55,7 @@ fn main() {
 
     // Set up model loading
     #[cfg(any(feature = "metal", feature = "cuda"))]
-    let quantized_weight_nodes =
-        loader::q8_load("setup/mistral-7b-instruct-v0.2.Q8_0.gguf", &model, &mut cx);
+    let q_weights = loader::q8_load("setup/mistral-7b-instruct-v0.2.Q8_0.gguf", &model, &mut cx);
     #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
     loader::q8_load("setup/mistral-7b-instruct-v0.2.Q8_0.gguf", &model, &mut cx);
     println!("\t\t - {}ms", now.elapsed().as_millis());
@@ -67,9 +67,9 @@ fn main() {
         (
             GenericCompiler::default(),
             #[cfg(feature = "metal")]
-            luminal_metal::quantized::MetalQuantizedCompiler::<f32>::new(quantized_weight_nodes),
+            luminal_metal::quantized::MetalQuantizedCompiler::<f32>::new(q_weights),
             #[cfg(feature = "cuda")]
-            luminal_cuda::CudaQuantizedCompiler::<f32>::new(quantized_weight_nodes),
+            luminal_cuda::CudaQuantizedCompiler::<f32>::new(q_weights),
             #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
             luminal_cpu::CPUCompiler::default(),
         ),
@@ -81,7 +81,6 @@ fn main() {
             &mut model_weights,
         ),
     );
-    // cx.display();
 
     // Keep model weights
     let cache_src_set = downstream(&cache_src, &cx);
@@ -102,7 +101,11 @@ fn main() {
     // Now that weights are loaded, delete the loading nodes so they don't run again
     delete_inputs(&model_weights, &mut cx);
     // Run prompt processing pass
-    let mut input_ids = encode(&tokenizer, &cli_args.prompt);
+    let mut input_ids = tokenizer
+        .encode(&cli_args.prompt as &str, false)
+        .unwrap()
+        .get_ids()
+        .to_vec();
     input_ids.insert(0, 1);
     input.set_dyn(
         input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
@@ -120,14 +123,12 @@ fn main() {
         input_ids.len()
     );
     delete_inputs(&cache_src_set, &mut cx);
-    let output_id = sample_index(&logits.data());
+    let mut output_ids = vec![sample_index(&logits.data())];
     logits.drop();
-    input_ids.push(output_id);
-
-    let mut output_ids = vec![output_id];
 
     // Decode token
     print!("{}", cli_args.prompt.white().bold());
+    print!("{}", tokenizer.decode(&output_ids, false).unwrap());
     io::stdout().flush().unwrap();
 
     // Swap caches
@@ -137,19 +138,18 @@ fn main() {
     let start_decode = std::time::Instant::now();
     let mut prev_output_len = 0;
     for _ in 0..cli_args.gen_tokens {
-        input.set_dyn(vec![*input_ids.last().unwrap() as f32], &[1, 1]);
-        cx.set_dyn_dim('p', input_ids.len() - 1);
-        cx.set_dyn_dim('t', input_ids.len());
+        input.set_dyn(vec![*output_ids.last().unwrap() as f32], &[1, 1]);
+        cx.set_dyn_dim('p', input_ids.len() + output_ids.len() - 1);
+        cx.set_dyn_dim('t', input_ids.len() + output_ids.len());
         cx.execute();
 
         // Sample tokens
         let output_id = sample_index(&logits.data());
         logits.drop();
-        input_ids.push(output_id);
         output_ids.push(output_id);
 
         // Get the current decoded output
-        let current_output = decode(&tokenizer, &output_ids);
+        let current_output = tokenizer.decode(&output_ids, false).unwrap();
 
         // Print the new substring added to the decoded output
         let new_substring = &current_output[prev_output_len..];
@@ -174,20 +174,9 @@ fn main() {
     );
 }
 
-fn encode(tokenizer: &Tokenizer, text: &str) -> Vec<u32> {
-    let vector = tokenizer.encode(text, false).unwrap();
-    vector.get_ids().to_owned()
-}
-
-fn decode(tokenizer: &Tokenizer, token_ids: &[u32]) -> String {
-    tokenizer.decode(token_ids, false).unwrap()
-}
-
 // Currently just an argmax, do actual sampling here
 fn sample_index(dist: &[f32]) -> u32 {
     dist.iter()
-        .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-        .unwrap()
-        .0 as u32
+        .position_max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap() as u32
 }
