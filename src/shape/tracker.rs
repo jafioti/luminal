@@ -34,9 +34,7 @@ impl ShapeTracker {
     /// Create a shape tracker where all dims are fake
     pub fn fake(dims: &[Expression]) -> Self {
         let mut s = Self::new(dims);
-        for i in 0..dims.len() {
-            s.fake[i] = true;
-        }
+        s.fake.iter_mut().for_each(|i| *i = true);
         s
     }
 
@@ -76,16 +74,13 @@ impl ShapeTracker {
     }
 
     /// Strides without permute applied
-    fn unordered_strides(&self) -> Vec<Expression> {
-        let mut strides = self
-            .dims
-            .iter()
-            .enumerate()
+    fn unordered_strides(&self) -> Vec<BigExpression> {
+        let mut strides = (0..self.len())
             .rev()
-            .scan(Expression::from(1), |state, (i, x)| {
-                let ret = *state;
+            .scan(BigExpression::from(1), |state, i| {
+                let ret = state.clone();
                 if !self.fake[i] {
-                    *state = *state * *x;
+                    *state = state.clone() * self.dims[i];
                 }
                 Some(ret)
             })
@@ -95,9 +90,12 @@ impl ShapeTracker {
     }
 
     /// Compute strides
-    pub fn strides(&self) -> Vec<Expression> {
+    pub fn strides(&self) -> Vec<BigExpression> {
         let strides = self.unordered_strides();
-        self.indexes.into_iter().map(|i| strides[i]).collect()
+        self.indexes
+            .into_iter()
+            .map(|i| strides[i].clone())
+            .collect()
     }
 
     pub fn index_expression(&self) -> BigExpression {
@@ -105,20 +103,7 @@ impl ShapeTracker {
             return 'z'.into();
         }
         // Create strides in original order
-        let mut strides = self
-            .dims
-            .iter()
-            .enumerate()
-            .rev()
-            .scan(BigExpression::from(1), |state, (i, x)| {
-                let ret = state.clone();
-                if !self.fake[i] {
-                    *state = state.clone() * *x;
-                }
-                Some(ret)
-            })
-            .collect::<Vec<_>>();
-        strides.reverse();
+        let strides = self.unordered_strides();
         let mut ret = BigExpression::from(0);
         let mut acc = BigExpression::from(1);
         let logical = BigExpression::from('z');
@@ -367,5 +352,39 @@ pub fn resolve_local_dyn_dims(a: &mut ShapeTracker, b: &mut ShapeTracker, defaul
                 b.dims[b.indexes[i]] = 1.into();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::prelude::*;
+    #[test]
+    fn test_idx_expr() {
+        let mut tracker = ShapeTracker::new(&[
+            Expression::from(10),
+            Expression::from(5),
+            Expression::from(3),
+        ]);
+        tracker.permute(&[0, 2, 1]);
+        println!("Strides: {:?}", tracker.strides());
+        println!("Ind: {:?}", tracker.index_expression());
+    }
+
+    #[test]
+    fn test_fusion_rotate() {
+        let mut cx = Graph::new();
+        const SEQ: usize = 2;
+        const HEAD_DIM: usize = 4;
+        const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
+        let a = cx.named_tensor::<R2<SEQ, HEAD_DIM>>("a").keep();
+        let b = cx.tensor::<R3<SEQ, HEAD_DIM_OVER_2, 1>>().keep();
+        // Split input into evens and odds
+        let split = a.reshape::<R3<SEQ, HEAD_DIM_OVER_2, 2>>();
+        let x0: GraphTensor<R3<SEQ, HEAD_DIM_OVER_2, 1>> =
+            split.slice((.., .., ..Expression::from(1))).realize();
+        let x1: GraphTensor<R3<SEQ, HEAD_DIM_OVER_2, 1>> =
+            split.slice((.., .., Expression::from(1)..)).realize();
+
+        println!("x0: {:?}", x0.shape.index_expression());
     }
 }
