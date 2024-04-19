@@ -65,7 +65,7 @@ fn main() {
     let now = Instant::now();
     cx.compile(
         (
-            GenericCompiler::default(),
+            Timed(GenericCompiler::default()),
             #[cfg(feature = "metal")]
             luminal_metal::quantized::MetalQuantizedCompiler::<f32>::new(q_weights),
             #[cfg(feature = "cuda")]
@@ -81,8 +81,6 @@ fn main() {
             &mut model_weights,
         ),
     );
-
-    // Keep model weights
     let cache_src_set = downstream(&cache_src, &cx);
     let cache_dest_set = cache_dest.to_ids();
     println!("\t\t - {}ms", now.elapsed().as_millis());

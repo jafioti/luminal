@@ -3,7 +3,7 @@ use std::{marker::PhantomData, ops::Div};
 use luminal::prelude::{binary::F32Pow, *};
 use luminal_nn::{Embedding, PermutedLinear, RMSNorm};
 
-// Mistral 7B Config
+// Llama3 8B Config
 pub const VOCAB_SIZE: usize = 128256;
 pub const HIDDEN_DIM: usize = 4096;
 pub const NUM_LAYERS: usize = 32;

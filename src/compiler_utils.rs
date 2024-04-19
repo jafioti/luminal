@@ -184,6 +184,7 @@ impl Compiler for () {
 }
 
 /// Wrap this around a compiler to rerun the compiler until it doesn't change the graph anymore
+#[derive(Debug)]
 pub struct Looped<C: Compiler + Debug>(C);
 
 impl<C: Compiler + Debug> Compiler for Looped<C> {
@@ -209,6 +210,7 @@ impl<C: Default + Compiler + Debug> Default for Looped<C> {
 }
 
 /// Wrap this around a compiler to measure the time it takes to compile
+#[derive(Debug)]
 pub struct Timed<C: Compiler + Debug>(pub C);
 
 impl<C: Compiler + Debug> Compiler for Timed<C> {

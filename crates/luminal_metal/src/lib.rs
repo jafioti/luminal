@@ -74,7 +74,7 @@ impl Data for MetalBuffer {
     }
 }
 
-pub trait MetalFloat: Copy + PartialEq + 'static {
+pub trait MetalFloat: Copy + Debug + PartialEq + 'static {
     fn to_f32(self) -> f32;
     fn from_f32(a: f32) -> Self;
     fn is_f32() -> bool;
