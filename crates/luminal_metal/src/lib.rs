@@ -473,7 +473,7 @@ macro_rules! debug_type {
     ($t: ty) => {
         impl<T> std::fmt::Debug for $t {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "$t")
+                write!(f, stringify!($t))
             }
         }
     };

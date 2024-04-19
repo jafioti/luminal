@@ -63,6 +63,14 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
+    pub fn sync_shape(self) -> Self {
+        GraphTensor::from_id(
+            self.id,
+            ShapeTracker::new(&S::realized_shape()),
+            self.graph_ref,
+        )
+    }
+
     pub fn contiguous(self) -> GraphTensor<S> {
         if !self.shape.is_reshaped() {
             return self;
@@ -197,7 +205,7 @@ impl<S: Shape> GraphTensor<S> {
         let mut b_padding = vec![(Expression::default(), Expression::default()); rhs.shape.len()];
         b_padding[dim].0 = self.shape.shape()[dim].clone().into();
         // Pad and add
-        self.pad(&a_padding) + rhs.pad(&b_padding)
+        (self.pad(&a_padding) + rhs.pad(&b_padding)).sync_shape()
     }
 }
 
