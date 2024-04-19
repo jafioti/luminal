@@ -128,7 +128,10 @@ fn main() {
 
     // Decode token
     print!("{}", cli_args.prompt.white().bold());
-    print!("{}", tokenizer.decode(&output_ids, false).unwrap());
+    print!(
+        "{}",
+        tokenizer.decode(&output_ids, false).unwrap().bright_green()
+    );
     io::stdout().flush().unwrap();
 
     // Swap caches

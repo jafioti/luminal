@@ -12,5 +12,6 @@ Cargo.lock
 
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
-setup/llama-7b-hf
+setup/*.gguf
+setup/*.json
 .vscode

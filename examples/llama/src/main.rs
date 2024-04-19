@@ -1,63 +1,88 @@
-mod loader;
-mod model;
-
 use std::{
     io::{self, Write},
     marker::PhantomData,
     time::Instant,
 };
 
+use clap::Parser;
 use colored::Colorize;
-use luminal::prelude::*;
-use rust_tokenizers::tokenizer::{
-    SentencePieceBpeTokenizer, Tokenizer,
-    TruncationStrategy::{self},
-};
+use itertools::Itertools;
+use tokenizers::Tokenizer;
 
-use crate::{loader::load, model::KVCache};
-#[cfg(feature = "metal")]
-type DeviceCompiler = luminal_metal::MetalCompiler<luminal::prelude::f16>;
-#[cfg(feature = "cuda")]
-type DeviceCompiler = luminal_cuda::CudaCompiler<luminal::prelude::f16>;
-#[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
-type DeviceCompiler = luminal_cpu::CPUCompiler;
+mod gguf;
+mod loader;
+mod model;
+
+use crate::model::KVCache;
+use luminal::prelude::*;
+
+// Command args parser
+#[derive(Debug, Parser)]
+#[command(author, version, about, long_about = None)]
+pub struct CLIArgs {
+    /// Number of tokens to generate
+    #[clap(short = 't', long = "gen_tokens", default_value = "128")]
+    gen_tokens: i32,
+
+    /// Prompt for the model
+    #[clap(short = 'p', long = "prompt", default_value = include_str!("../prompts/merge_sort.txt"))]
+    prompt: String,
+}
 
 fn main() {
-    let prompt = "Here is a python implementation of merge sort:";
-    let tokens_to_generate = 128;
-    let tokenizer =
-        SentencePieceBpeTokenizer::from_file("setup/llama-7b-hf/tokenizer.model", false).unwrap();
+    let cli_args = CLIArgs::parse();
+    let tokenizer = Tokenizer::from_file("setup/tokenizer.json").unwrap();
 
     print!("Defining graph");
     io::stdout().flush().unwrap();
     let now = Instant::now();
 
+    // Set up graph
     let mut cx = Graph::new();
     let mut input = cx.named_tensor::<(Const<1>, Dyn<'s'>)>("Input");
-    let mut cache_src: Vec<KVCache<Const<1>, Dyn<'p'>>> = (0..model::LAYERS)
+    let mut cache_src: Vec<KVCache<Const<1>, Dyn<'p'>>> = (0..model::NUM_LAYERS)
         .map(|_| (cx.named_tensor("Key Cache"), cx.named_tensor("Value Cache")))
         .collect();
-    cache_src.set_dyn(vec![], &[1, model::HEADS, 0, model::HEAD_DIM]);
-    let model = model::Llama::initialize(&mut cx);
-    let (logits, mut cache_dest) =
-        model.forward((input, Some(cache_src.clone()), PhantomData::<Dyn<'t'>>));
+    cache_src.set_dyn(vec![], &[1, model::N_KV_HEADS, 0, model::HEAD_DIM]);
+    let model = model::MistralLM::initialize(&mut cx);
+    let mut model_weights = downstream(params(&model), &cx);
+    cx.keep_tensors(&model_weights);
+    let (logits, mut cache_dest) = model.forward((input, &cache_src, PhantomData::<Dyn<'t'>>));
     let mut logits = logits
         .slice((.., (Expression::from('s') - 1).., ..))
         .retrieve();
     cache_dest.keep();
-    load("setup/llama-7b-hf", &model, &mut cx);
+
+    // Set up model loading
+    #[cfg(any(feature = "metal", feature = "cuda"))]
+    let q_weights = loader::q8_load("setup/llama3-8b.gguf", &model, &mut cx);
+    #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
+    loader::q8_load("setup/llama3-8b.gguf", &model, &mut cx);
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
     print!("Compiling graph");
     io::stdout().flush().unwrap();
     let now = Instant::now();
     cx.compile(
-        <(GenericCompiler, DeviceCompiler)>::default(),
-        (&mut input, &mut logits, &mut cache_src, &mut cache_dest),
+        (
+            GenericCompiler::default(),
+            #[cfg(feature = "metal")]
+            luminal_metal::quantized::MetalQuantizedCompiler::<f32>::new(q_weights),
+            #[cfg(feature = "cuda")]
+            luminal_cuda::CudaQuantizedCompiler::<f32>::new(q_weights),
+            #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
+            luminal_cpu::CPUCompiler::default(),
+        ),
+        (
+            &mut input,
+            &mut logits,
+            &mut cache_src,
+            &mut cache_dest,
+            &mut model_weights,
+        ),
     );
+
     // Keep model weights
-    let model_weights = downstream(params(&model), &cx);
-    cx.keep_tensors(&model_weights);
     let cache_src_set = downstream(&cache_src, &cx);
     let cache_dest_set = cache_dest.to_ids();
     println!("\t\t - {}ms", now.elapsed().as_millis());
@@ -66,7 +91,7 @@ fn main() {
     print!("Loading model");
     io::stdout().flush().unwrap();
     let now = Instant::now();
-    input.set_dyn(vec![0.], &[1, 1]);
+    input.set_dyn(vec![1.], &[1, 1]);
     cx.set_dyn_dim('t', 1);
     cx.execute();
     logits.drop();
@@ -76,7 +101,12 @@ fn main() {
     // Now that weights are loaded, delete the loading nodes so they don't run again
     delete_inputs(&model_weights, &mut cx);
     // Run prompt processing pass
-    let mut input_ids = encode(&tokenizer, prompt);
+    let mut input_ids = tokenizer
+        .encode(&cli_args.prompt as &str, false)
+        .unwrap()
+        .get_ids()
+        .to_vec();
+    input_ids.insert(0, 1);
     input.set_dyn(
         input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
         &[1, input_ids.len()],
@@ -88,19 +118,19 @@ fn main() {
     cx.execute();
     let elapsed_ms = now.elapsed().as_millis();
     println!(
-        "\t - {elapsed_ms}ms ({:.2} tok/s)",
-        1000.0 * (input_ids.len() as f64) / (elapsed_ms as f64)
+        "\t - {elapsed_ms}ms ({:.2} tok/s, {} prompt tokens)",
+        1000.0 * (input_ids.len() as f64) / (elapsed_ms as f64),
+        input_ids.len()
     );
     delete_inputs(&cache_src_set, &mut cx);
-    let output_id = sample_index(&logits.data());
+    let mut output_ids = vec![sample_index(&logits.data())];
     logits.drop();
-    input_ids.push(output_id);
 
     // Decode token
+    print!("{}", cli_args.prompt.white().bold());
     print!(
-        "{}{}",
-        prompt.white().bold(),
-        decode(&tokenizer, &[output_id]).bright_green()
+        "{}",
+        tokenizer.decode(&output_ids, false).unwrap().bright_green()
     );
     io::stdout().flush().unwrap();
 
@@ -108,31 +138,38 @@ fn main() {
     transfer_data_same_graph(&cache_dest_set, &cache_src_set, &mut cx);
 
     // Decode loop
-    let mut token_decode_times = vec![];
-    for _ in 0..tokens_to_generate {
-        input.set_dyn(vec![*input_ids.last().unwrap() as f32], &[1, 1]);
-        cx.set_dyn_dim('p', input_ids.len() - 1);
-        cx.set_dyn_dim('t', input_ids.len());
-
-        let now = Instant::now();
+    let start_decode = std::time::Instant::now();
+    let mut prev_output_len = 0;
+    for _ in 0..cli_args.gen_tokens {
+        input.set_dyn(vec![*output_ids.last().unwrap() as f32], &[1, 1]);
+        cx.set_dyn_dim('p', input_ids.len() + output_ids.len() - 1);
+        cx.set_dyn_dim('t', input_ids.len() + output_ids.len());
         cx.execute();
-        token_decode_times.push(now.elapsed().as_micros());
 
         // Sample tokens
         let output_id = sample_index(&logits.data());
         logits.drop();
-        input_ids.push(output_id);
-        print!("{}", decode(&tokenizer, &[output_id]).bright_green());
+        output_ids.push(output_id);
+
+        // Get the current decoded output
+        let current_output = tokenizer.decode(&output_ids, false).unwrap();
+
+        // Print the new substring added to the decoded output
+        let new_substring = &current_output[prev_output_len..];
+        print!("{}", new_substring.bright_green());
         io::stdout().flush().unwrap();
+
+        // Update the previous output
+        prev_output_len = current_output.len();
 
         // Swap caches
         transfer_data_same_graph(&cache_dest_set, &cache_src_set, &mut cx);
     }
-    let avg_token_time = token_decode_times
-        .iter()
-        .map(|t| *t as f32 / 1000.)
-        .sum::<f32>()
-        / token_decode_times.len() as f32;
+
+    println!();
+    let avg_token_time = (std::time::Instant::now() - start_decode).as_micros() as f32
+        / (output_ids.len() - 1) as f32
+        / 1000.0;
     println!(
         "\nAverage token generated in {:.2}ms\t - ({:.2} tok/s)",
         avg_token_time,
@@ -140,25 +177,9 @@ fn main() {
     );
 }
 
-fn encode(tokenizer: &SentencePieceBpeTokenizer, text: &str) -> Vec<i64> {
-    let mut vector = tokenizer
-        .encode(text, None, text.len(), &TruncationStrategy::LongestFirst, 0)
-        .token_ids;
-    vector.insert(0, 1); // Start token
-    vector
-}
-
-fn decode(tokenizer: &SentencePieceBpeTokenizer, token_ids: &[i64]) -> String {
-    tokenizer
-        .decode(token_ids, true, false)
-        .replace("<0x0A>", "\n")
-}
-
 // Currently just an argmax, do actual sampling here
-fn sample_index(dist: &[f32]) -> i64 {
+fn sample_index(dist: &[f32]) -> u32 {
     dist.iter()
-        .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-        .unwrap()
-        .0 as i64
+        .position_max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap() as u32
 }

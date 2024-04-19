@@ -1,0 +1,3 @@
+<|begin_of_text|>Here is an implementation of merge sort:
+
+```python
