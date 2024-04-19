@@ -22,7 +22,7 @@ pub type GenericCompiler = (
 );
 
 /// [Common subexpression elimination](https://en.wikipedia.org/wiki/Common_subexpression_elimination)
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct CSE;
 
 impl Compiler for CSE {
@@ -158,7 +158,7 @@ impl Compiler for RemoveSingleReductions {
 }
 
 /// Remove unused nodes
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct RemoveUnusedNodes;
 
 impl Compiler for RemoveUnusedNodes {
@@ -177,7 +177,7 @@ impl Compiler for RemoveUnusedNodes {
 }
 
 /// Enforce the graph gets ran in strictly depth-first order
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct DepthFirst;
 
 impl Compiler for DepthFirst {
@@ -231,65 +231,6 @@ impl Compiler for DepthFirst {
             graph.add_schedule_dependency(nodes[i], nodes[i + 1]);
         }
     }
-}
-
-/// Mark no_delete as far downstream as possible
-#[derive(Debug, Default)]
-pub struct RemapDownstream(pub Vec<NodeIndex>);
-
-impl Compiler for RemapDownstream {
-    type Output = ();
-    fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
-        let set = self.0.iter().copied().collect::<HashSet<_>>();
-        // Loop through state dict tensors marked as no_delete
-        for mut node in self.0.iter().copied() {
-            // Go downstream as far as possible along a single stream of ops
-            while graph
-                .graph
-                .edges_directed(node, Direction::Outgoing)
-                .count()
-                == 1
-            {
-                let new_node = graph
-                    .graph
-                    .edges_directed(node, Direction::Outgoing)
-                    .next()
-                    .unwrap()
-                    .target();
-                if !is_from_set(new_node, graph, &set) {
-                    break;
-                }
-                // Remap node to new node
-                for id in remap.to_ids_mut() {
-                    if *id == node {
-                        *id = new_node;
-                    }
-                }
-                node = new_node;
-            }
-        }
-    }
-}
-
-fn is_from_set(node: NodeIndex, graph: &Graph, set: &HashSet<NodeIndex>) -> bool {
-    // Reverse dfs upward
-    let mut stack = vec![node];
-    while let Some(node) = stack.pop() {
-        if !set.contains(&node) {
-            let mut new_nodes = graph
-                .graph
-                .edges_directed(node, Direction::Incoming)
-                .filter(|e| !e.weight().is_schedule())
-                .map(|e| e.source())
-                .collect_vec();
-            if new_nodes.is_empty() {
-                // Node isn't from set and doesn't have upstream nodes
-                return false;
-            }
-            stack.append(&mut new_nodes);
-        }
-    }
-    true
 }
 
 /// **Reduces arithmetic expressions**

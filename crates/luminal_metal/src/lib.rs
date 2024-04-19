@@ -35,13 +35,13 @@ pub type MetalCompiler<T> = (
 );
 
 /// Compilers to share command and storage buffers
-pub(crate) type BufferCompilers = (
+pub type BufferCompilers = (
     command_buffer::CommandBufferCompiler,
     storage_buffer::StorageBufferCompiler,
 );
 
 /// Compiler to replace metal ops with specialized variants
-pub(crate) type SpecialOpsCompiler<T> = (
+pub type SpecialOpsCompiler<T> = (
     binary::MetalSubtractionCompiler<T>,
     binary::MetalEqualCompiler<T>,
     other::ARangeCompiler<T>,
