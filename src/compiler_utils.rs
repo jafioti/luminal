@@ -209,7 +209,7 @@ impl<C: Default + Compiler + Debug> Default for Looped<C> {
 }
 
 /// Wrap this around a compiler to measure the time it takes to compile
-pub struct Timed<C: Compiler + Debug>(C);
+pub struct Timed<C: Compiler + Debug>(pub C);
 
 impl<C: Compiler + Debug> Compiler for Timed<C> {
     type Output = ();
