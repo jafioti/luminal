@@ -25,7 +25,9 @@ pub fn reduce_triples<S: ExpressionStorage>(
                     let (b_ind, b_term) = stack.pop().unwrap();
                     triples.push((a_ind, index, b_ind));
                     if let (Term::Num(a), Term::Num(b)) = (a_term, b_term) {
-                        stack.push((None, Term::Num(term.as_op().unwrap()(a, b))));
+                        if let Some(c) = term.as_op().unwrap()(a, b) {
+                            stack.push((None, Term::Num(c)));
+                        }
                     } else if let Term::Var(a) = a_term {
                         stack.push((None, Term::Var(a)));
                     } else if let Term::Var(b) = b_term {
@@ -64,8 +66,12 @@ pub fn reduce_triples<S: ExpressionStorage>(
                 b_ind.map(|b| expr.terms[b]),
             ) {
                 (Some(Term::Num(a)), term, Some(Term::Num(b))) if term.as_op().is_some() => {
-                    expr.terms[unwrap_cont!(a_ind)] = Term::Num(term.as_op().unwrap()(a, b));
-                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
+                    if let Some(c) = term.as_op().unwrap()(a, b) {
+                        expr.terms[unwrap_cont!(a_ind)] = Term::Num(c);
+                        remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
+                    } else {
+                        inner_changed = false;
+                    }
                 }
                 // Remove min(i, inf) and min(inf, i)
                 (Some(Term::Num(a)), Term::Min, _) if a == i32::MAX => {

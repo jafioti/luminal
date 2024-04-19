@@ -203,7 +203,7 @@ where
                 _ => {
                     let a = stack.pop().unwrap();
                     let b = stack.pop().unwrap();
-                    stack.push(term.as_op().unwrap()(a, b));
+                    stack.push(term.as_op().unwrap()(a, b).unwrap());
                 }
             }
         }
@@ -234,7 +234,7 @@ where
                 _ => {
                     let a = stack.pop().unwrap();
                     let b = stack.pop().unwrap();
-                    stack.push(term.as_op().unwrap()(a, b));
+                    stack.push(term.as_op().unwrap()(a, b).unwrap());
                 }
             }
         }

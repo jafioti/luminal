@@ -371,18 +371,18 @@ mod tests {
     }
 
     #[test]
-    fn test_fusion_rotate() {
+    fn test_symbolic_idx() {
         let mut cx = Graph::new();
         const SEQ: usize = 2;
         const HEAD_DIM: usize = 4;
         const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
         let a = cx.named_tensor::<R2<SEQ, HEAD_DIM>>("a").keep();
-        let b = cx.tensor::<R3<SEQ, HEAD_DIM_OVER_2, 1>>().keep();
+        let _b = cx.tensor::<R3<SEQ, HEAD_DIM_OVER_2, 1>>().keep();
         // Split input into evens and odds
         let split = a.reshape::<R3<SEQ, HEAD_DIM_OVER_2, 2>>();
         let x0: GraphTensor<R3<SEQ, HEAD_DIM_OVER_2, 1>> =
             split.slice((.., .., ..Expression::from(1))).realize();
-        let x1: GraphTensor<R3<SEQ, HEAD_DIM_OVER_2, 1>> =
+        let _x1: GraphTensor<R3<SEQ, HEAD_DIM_OVER_2, 1>> =
             split.slice((.., .., Expression::from(1)..)).realize();
 
         println!("x0: {:?}", x0.shape.index_expression());

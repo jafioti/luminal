@@ -43,19 +43,19 @@ impl Default for Term {
 }
 
 impl Term {
-    pub fn as_op(self) -> Option<fn(i32, i32) -> i32> {
+    pub fn as_op(self) -> Option<fn(i32, i32) -> Option<i32>> {
         match self {
-            Term::Add => Some(std::ops::Add::add),
-            Term::Sub => Some(std::ops::Sub::sub),
-            Term::Mul => Some(std::ops::Mul::mul),
-            Term::Div => Some(std::ops::Div::div),
-            Term::Mod => Some(std::ops::Rem::rem),
-            Term::Max => Some(core::cmp::Ord::max),
-            Term::Min => Some(core::cmp::Ord::min),
-            Term::And => Some(|a, b| (a != 0 && b != 0) as i32),
-            Term::Or => Some(|a, b| (a != 0 || b != 0) as i32),
-            Term::Gte => Some(|a, b| (a >= b) as i32),
-            Term::Lt => Some(|a, b| (a < b) as i32),
+            Term::Add => Some(|a, b| a.checked_add(b)),
+            Term::Sub => Some(|a, b| a.checked_sub(b)),
+            Term::Mul => Some(|a, b| a.checked_mul(b)),
+            Term::Div => Some(|a, b| a.checked_div(b)),
+            Term::Mod => Some(|a, b| a.checked_rem(b)),
+            Term::Max => Some(|a, b| Some(a.max(b))),
+            Term::Min => Some(|a, b| Some(a.min(b))),
+            Term::And => Some(|a, b| Some((a != 0 && b != 0) as i32)),
+            Term::Or => Some(|a, b| Some((a != 0 || b != 0) as i32)),
+            Term::Gte => Some(|a, b| Some((a >= b) as i32)),
+            Term::Lt => Some(|a, b| Some((a < b) as i32)),
             _ => None,
         }
     }
