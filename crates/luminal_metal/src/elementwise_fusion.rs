@@ -78,8 +78,14 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
         let mut fused_ops = FxHashSet::default();
 
         let mut matched = true;
-        let mut n_matched = 0;
-        let mut broken_op = None;
+        let mut elementwise_ops = FxHashMap::default();
+        for op in graph.node_indices().collect::<Vec<_>>() {
+            if let Some(exp) = graph.node_custom::<String, _>(op, "elementwise", ()) {
+                elementwise_ops.insert(op, exp);
+            }
+        }
+        let mut intermediate_regexes = FxHashMap::default();
+        let mut input_regexes = FxHashMap::default();
         while matched {
             matched = false;
             for edge in graph.edge_indices().collect::<Vec<_>>() {
@@ -97,10 +103,9 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 {
                     continue; // A is not a constant and is feeding into some other node
                 }
-                let (Some(expression_a), Some(expression_b)) = (
-                    graph.node_custom::<String, _>(a, "elementwise", ()),
-                    graph.node_custom::<String, _>(b, "elementwise", ()),
-                ) else {
+                let (Some(expression_a), Some(expression_b)) =
+                    (elementwise_ops.get(&a), elementwise_ops.get(&b))
+                else {
                     continue;
                 };
                 // a and b are elementwise ops
@@ -116,7 +121,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 let mut subexpressions_b = graph
                     .try_get_op::<FusedElementwiseOp<T>>(b)
                     .map(|o| o.subexpressions.clone())
-                    .unwrap_or_else(|| vec![(expression_b, ShapeTracker::new(&[]))]);
+                    .unwrap_or_else(|| vec![(expression_b.clone(), ShapeTracker::new(&[]))]);
                 let a_to_b_indexes = graph
                     .edges_connecting(a, b)
                     .map(|e| e.weight().as_data().unwrap().0 as usize)
@@ -136,11 +141,19 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 let mut subexpressions_a = graph
                     .try_get_op::<FusedElementwiseOp<T>>(a)
                     .map(|o| o.subexpressions.clone())
-                    .unwrap_or_else(|| vec![(expression_a, ShapeTracker::new(&[]))]);
+                    .unwrap_or_else(|| vec![(expression_a.clone(), ShapeTracker::new(&[]))]);
                 subexpressions_a.last_mut().unwrap().1 = connecting_shape;
                 // Re-reference b intermediates
                 for i in (0..subexpressions_b.len()).rev() {
-                    let re = Regex::new(&format!("intermediate{i}([^0-9]|$)")).unwrap();
+                    let re = if let Some(r) = intermediate_regexes.get(&i) {
+                        r
+                    } else {
+                        intermediate_regexes.insert(
+                            i,
+                            Regex::new(&format!(r"intermediate{i}([^0-9]|$)")).unwrap(),
+                        );
+                        intermediate_regexes.get(&i).unwrap()
+                    };
                     for (exp, _) in subexpressions_b.iter_mut() {
                         *exp = re
                             .replace_all(
@@ -152,7 +165,15 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 }
                 // Re-reference b inputs to a
                 for index in &a_to_b_indexes {
-                    let re = Regex::new(&format!(r"input{index}([^0-9]|$)")).unwrap();
+                    let re = if let Some(r) = input_regexes.get(index) {
+                        r
+                    } else {
+                        input_regexes.insert(
+                            *index,
+                            Regex::new(&format!(r"input{index}([^0-9]|$)")).unwrap(),
+                        );
+                        input_regexes.get(index).unwrap()
+                    };
                     for (exp, _) in subexpressions_b.iter_mut() {
                         *exp = re
                             .replace_all(
@@ -165,7 +186,13 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 // Re-reference b inputs
                 for (sub_factor, index) in a_to_b_indexes.iter().enumerate() {
                     for i in (*index - sub_factor + 1)..(b_inputs.len() + a_to_b_indexes.len()) {
-                        let re = Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap();
+                        let re = if let Some(r) = input_regexes.get(&i) {
+                            r
+                        } else {
+                            input_regexes
+                                .insert(i, Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap());
+                            input_regexes.get(&i).unwrap()
+                        };
                         for (exp, _) in subexpressions_b.iter_mut() {
                             *exp = re.replace_all(exp, format!("input{}$1", i - 1)).to_string();
                         }
@@ -174,7 +201,13 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 // Combine inputs for a and b
                 for i in (0..a_inputs.len()).rev() {
                     // Re-reference the a inputs
-                    let re = Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap();
+                    let re = if let Some(r) = input_regexes.get(&i) {
+                        r
+                    } else {
+                        input_regexes
+                            .insert(i, Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap());
+                        input_regexes.get(&i).unwrap()
+                    };
                     for (exp, _) in subexpressions_a.iter_mut() {
                         *exp = re
                             .replace_all(exp, format!("input{}$1", i + b_inputs.len()))
@@ -231,20 +264,18 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 fused_ops.remove(&a);
                 fused_ops.remove(&b);
                 fused_ops.insert(new_op);
+                elementwise_ops.remove(&a);
+                elementwise_ops.remove(&b);
+                elementwise_ops.insert(new_op, String::new());
                 if !graph.contains_node(a) {
                     remap(a, new_op, &mut ids, graph);
                 }
                 remap(b, new_op, &mut ids, graph);
-                n_matched += 1;
-                if n_matched > 10000000 {
-                    broken_op = Some(new_op);
-                    matched = false;
-                    break;
-                }
             }
         }
         // Compile all the kernels we placed
         let type_name = T::type_name();
+        let intermediate_match = Regex::new(r"intermediate(\d+)([^0-9]|$)").unwrap();
         for fused_op in fused_ops {
             let inputs = graph
                 .edges_directed(fused_op, Direction::Incoming)
@@ -254,7 +285,6 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 .collect::<Vec<_>>();
             let op = graph.get_op_mut::<FusedElementwiseOp<T>>(fused_op);
             // Stack index expressions and replace them in the subexpressions
-            let intermediate_match = Regex::new(r"intermediate(\d+)([^0-9]|$)").unwrap();
             // Track all shapes used, will pull dyn dims from these
             let shapes_used = op
                 .subexpressions
@@ -285,7 +315,13 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 .enumerate()
                 .map(|(i, s)| {
                     // Find the first subexpression that uses this input
-                    let re = Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap();
+                    let re = if let Some(r) = input_regexes.get(&i) {
+                        r
+                    } else {
+                        input_regexes
+                            .insert(i, Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap());
+                        input_regexes.get(&i).unwrap()
+                    };
                     let using_subexp = op
                         .subexpressions
                         .iter()
@@ -338,7 +374,13 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     .zip(&stacked_valid_expressions)
                     .enumerate()
                 {
-                    let re = Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap();
+                    let re = if let Some(r) = input_regexes.get(&i) {
+                        r
+                    } else {
+                        input_regexes
+                            .insert(i, Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap());
+                        input_regexes.get(&i).unwrap()
+                    };
                     *subexp = re
                         .replace_all(
                             subexp,
@@ -396,11 +438,6 @@ kernel void mkernel({} device {type_name} *out [[buffer({})]], device uint& n_el
                     op.subexpressions.iter().take(op.subexpressions.len() - 1).enumerate().map(|(i, (subexp, _))| format!("float intermediate{i} = {subexp};")).join("\n        "),
                     op.subexpressions.last().unwrap().0
                 );
-            if let Some(o) = broken_op {
-                if o == fused_op {
-                    println!("{kernel}");
-                }
-            }
             op.kernel = Some(compile_function("mkernel", &kernel, &device));
             op.dyn_chars = dyn_chars;
         }
