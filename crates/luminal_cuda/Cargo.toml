@@ -16,8 +16,10 @@ luminal_cudarc = { version="0.10.0", features = [
 itertools = "0.12.1"
 rustc-hash = "1.1.0"
 num-traits = "0.2.18"
+fmt-derive = "0.1.1"
 
 [dev-dependencies]
 dfdx = { version = "0.13", features = ["f16"] }
 rand = "0.8.5"
 paste = "1.0.14"
+luminal_nn = {path="../../crates/luminal_nn"}

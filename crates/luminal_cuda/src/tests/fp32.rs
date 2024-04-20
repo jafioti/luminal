@@ -2,10 +2,7 @@ use dfdx::prelude::{Module as DfdxModule, *};
 use itertools::Itertools;
 use rand::{rngs::StdRng, SeedableRng};
 
-use luminal::{
-    nn::{activation::ReLU, linear::Linear, norm::RMSNorm},
-    prelude::{symbolic::Expression, Module, *},
-};
+use luminal::{module::Module, prelude::*};
 
 #[allow(unused_imports)]
 use dfdx::prelude::{
@@ -60,7 +57,7 @@ fn test_softmax() {
     let mut cx = Graph::new();
     let data = random_vec(12);
     let a = cx.tensor::<R2<1, 12>>().set(data.clone());
-    let mut b = a.softmax::<1>().retrieve();
+    let mut b = a.softmax::<LAxis<1>>().retrieve();
     cx.compile(CudaCompiler::<f32>::default(), &mut b);
     cx.execute();
 
@@ -343,7 +340,7 @@ fn test_attn_matmul() {
         (DConst::<1>, DConst::<32>, DConst::<128>, DConst::<11>),
     );
     let d_c = d_a.matmul(d_b);
-    assert_close_precision(&c.data(), &d_c.as_vec(), 2);
+    assert_close_precision(&c.data(), &d_c.as_vec(), 0.01);
 }
 
 #[test]
@@ -370,7 +367,7 @@ fn test_batch_matmul() {
                 let d_b = d_dev.tensor_from_vec(b_data, (k, n));
                 let d_c = d_a.matmul(d_b);
 
-                assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 2);
+                assert_close_precision(&c.data(), &d_c.to_dtype::<f32>().as_vec(), 0.01);
                 c.drop();
             }
         }
@@ -422,10 +419,10 @@ fn test_batch_matmul_transpose() {
         .matmul(d_b.permute::<_, DAxes2<1, 0>>());
     let d_a_t_b_t = d_a_t.permute::<_, DAxes3<0, 2, 1>>().matmul(d_b_t);
 
-    assert_close_precision(&a_b.data(), &d_a_b.as_vec(), 1);
-    assert_close_precision(&a_b_t.data(), &d_a_b_t.as_vec(), 1);
-    assert_close_precision(&a_t_b.data(), &d_a_t_b.as_vec(), 1);
-    assert_close_precision(&a_t_b_t.data(), &d_a_t_b_t.as_vec(), 1);
+    assert_close_precision(&a_b.data(), &d_a_b.as_vec(), 0.1);
+    assert_close_precision(&a_b_t.data(), &d_a_b_t.as_vec(), 0.1);
+    assert_close_precision(&a_t_b.data(), &d_a_t_b.as_vec(), 0.1);
+    assert_close_precision(&a_t_b_t.data(), &d_a_t_b_t.as_vec(), 0.1);
 }
 
 #[test]
@@ -490,7 +487,11 @@ fn test_relu_and_linear() {
         .set(random_vec(32 * 2));
     let a = cx.named_tensor::<R1<32>>("Single").set(input_data.clone());
 
-    let model: (Linear<32, 64>, ReLU, Linear<64, 32>) = InitModule::initialize(&mut cx);
+    let model: (
+        luminal_nn::Linear<32, 64>,
+        luminal_nn::ReLU,
+        luminal_nn::Linear<64, 32>,
+    ) = InitModule::initialize(&mut cx);
     model.0.weight.set(w1.clone());
     model.2.weight.set(w2.clone());
     let mut b = model.forward(a).retrieve();
@@ -507,8 +508,8 @@ fn test_relu_and_linear() {
     );
     cx.execute();
 
-    assert_close_precision(&unoptimized_b, &b.data(), 2);
-    assert_close_precision(&unoptimized_batch_out, &batch_out.data(), 2);
+    assert_close_precision(&unoptimized_b, &b.data(), 0.01);
+    assert_close_precision(&unoptimized_batch_out, &batch_out.data(), 0.01);
 
     // Test against dfdx
     let dev = Cpu::default();
@@ -527,7 +528,7 @@ fn test_relu_and_linear() {
     let a = dev.tensor_from_vec(input_data, (dfdx::shapes::Const::<32>,));
     let out = model.forward(a);
 
-    assert_close_precision(&unoptimized_b, &out.as_vec(), 2);
+    assert_close_precision(&unoptimized_b, &out.as_vec(), 0.01);
 }
 
 #[test]
@@ -538,7 +539,7 @@ fn test_rms_norm() {
     let mut cx = Graph::new();
     let a = cx.tensor::<R2<15, 32>>().set(inp_data.clone());
 
-    let model = RMSNorm::<32>::initialize(&mut cx);
+    let model = luminal_nn::RMSNorm::<32>::initialize(&mut cx);
     model.weight.set(weight_data.clone());
     let mut b = model.forward(a).retrieve();
 
@@ -562,8 +563,8 @@ fn test_layer_norm() {
     let mut cx = Graph::new();
     let a_data = random_vec(15 * 16 * 32);
     let a = cx.tensor::<R3<15, 16, 32>>().set(a_data.clone());
-    let mut b = a.layer_norm::<0, _>(1e-5).retrieve();
-    let mut c = a.layer_norm::<2, _>(1e-5).retrieve();
+    let mut b = a.layer_norm::<LAxis<0>, _>(1e-5).retrieve();
+    let mut c = a.layer_norm::<LAxis<2>, _>(1e-5).retrieve();
     cx.compile(
         <(GenericCompiler, CudaCompiler<f32>)>::default(),
         (&mut b, &mut c),
@@ -575,15 +576,14 @@ fn test_layer_norm() {
     let d_b = d_a.clone().normalize::<DAxis<0>>(1e-5);
     let d_c = d_a.normalize::<DAxis<2>>(1e-5);
 
-    assert_close_precision(&b.data(), &d_b.as_vec(), 2);
-    assert_close_precision(&c.data(), &d_c.as_vec(), 2);
+    assert_close_precision(&b.data(), &d_b.as_vec(), 0.01);
+    assert_close_precision(&c.data(), &d_c.as_vec(), 0.01);
 }
 
 #[test]
 fn test_transformer_encoder_block() {
     let mut cx = Graph::new();
-    let model: luminal::nn::transformer::encoder::TransformerEncoderBlock<32, 64, 1> =
-        InitModule::initialize(&mut cx);
+    let model: luminal_nn::TransformerEncoderBlock<32, 64, 1> = InitModule::initialize(&mut cx);
     let w_k_weight = random_vec(32 * 32);
     model.attention.w_k.weight.set(w_k_weight.clone());
     let w_q_weight = random_vec(32 * 32);
@@ -602,7 +602,7 @@ fn test_transformer_encoder_block() {
         .tensor::<(Dyn<'b'>, Dyn<'a'>, LConst<32>)>()
         .set_dyn(a_data.clone(), &[1, 2, 3])
         .keep();
-    cx.keep_tensors(state_dict(&model));
+    cx.keep_tensors(params(&model));
     let mut b = model.forward(a).retrieve();
     cx.execute();
     let unopt_b = b.data();
@@ -610,7 +610,7 @@ fn test_transformer_encoder_block() {
 
     cx.compile(<(GenericCompiler, CudaCompiler<f32>)>::default(), &mut b);
     cx.execute();
-    assert_close_precision(&unopt_b, &b.data(), 2);
+    assert_close_precision(&unopt_b, &b.data(), 0.01);
 
     let d_dev = Cpu::default();
     let mut d_model: dfdx::nn::modules::TransformerEncoderBlock<32, 1, 64, f32, Cpu> =
@@ -649,7 +649,7 @@ fn test_transformer_encoder_block() {
     let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<32>));
     let d_b = d_model.forward(d_a);
 
-    assert_close_precision(&b.data(), &d_b.as_vec(), 2);
+    assert_close_precision(&b.data(), &d_b.as_vec(), 0.01);
 }
 
 #[test]
@@ -664,7 +664,7 @@ fn test_embedding() {
         .set(vec![1.0, 0.0, 1.0])
         .keep();
 
-    let model: luminal::nn::embedding::Embedding<3, 4> = InitModule::initialize(&mut cx);
+    let model: luminal_nn::Embedding<3, 4> = InitModule::initialize(&mut cx);
     model
         .weight
         .set(vec![1.1, 2., 3., 1., 2., 3., 14., 2., 33., 1., 2., 3.]);

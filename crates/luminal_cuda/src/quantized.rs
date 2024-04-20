@@ -1,5 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
+use fmt_derive::Debug;
 use luminal_cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
 use petgraph::visit::EdgeRef;
 
@@ -13,7 +14,7 @@ use crate::{
 };
 
 /// Multiplies a BxMxK matrix with a KxN matrix, resulting in a BxMxN matrix. This expects the first input to be a quantized 2D matrix
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone, Debug)]
 pub struct QuantizedMatmul<T> {
     matvec_function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -169,7 +170,7 @@ impl<T: 'static + CudaFloat> Operator for QuantizedMatmul<T> {
     }
 }
 
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone, Debug)]
 pub struct QuantizedGather<T> {
     pipeline: CudaFunction,
     device: Arc<CudaDevice>,
@@ -203,13 +204,7 @@ extern \"C\" __global__ void kernel(const float* inp, const block_q8_0* weights,
 impl<T: CudaFloat> Operator for QuantizedGather<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         // Setup buffers
-        let indexes = tensors[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Vec<f32>>()
-            .unwrap();
+        let indexes = tensors[0].0.borrowed().downcast_ref::<Vec<f32>>().unwrap();
         let mut index_buffer = unsafe { self.device.alloc::<f32>(indexes.len()).unwrap() };
         self.device
             .htod_copy_into(indexes.clone(), &mut index_buffer)
@@ -249,7 +244,7 @@ impl<T: CudaFloat> Operator for QuantizedGather<T> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct CudaQuantizedCompiler<T>(Vec<NodeIndex>, PhantomData<T>);
 
 impl<T> CudaQuantizedCompiler<T> {
@@ -467,7 +462,7 @@ mod tests {
             (dfdx::shapes::Const::<16>, dfdx::shapes::Const::<1024>),
         );
         let d_c = d_b.matmul(d_a.permute());
-        assert_close_precision(&out.data(), &d_c.as_vec(), 0);
+        assert_close_precision(&out.data(), &d_c.as_vec(), 1.0);
         // This is imprecise currently because we accumulate in fp16 in the matmul. TODO: accumulate in fp32 and convert before saving to dest
 
         blocks.leak(); // Segfaults without this
