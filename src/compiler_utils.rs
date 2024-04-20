@@ -6,7 +6,7 @@ use colored::Colorize;
 use itertools::Itertools;
 use petgraph::{
     algo::toposort,
-    stable_graph::{EdgeIndex, EdgeReference, NodeIndex, StableGraph},
+    stable_graph::{EdgeIndex, EdgeReference, StableGraph},
     visit::EdgeRef,
     Direction,
 };
@@ -14,7 +14,7 @@ use regex::Regex;
 use rustc_hash::FxHashMap;
 use uuid::Uuid;
 
-use crate::{graph::Graph, op::Operator, prelude::*};
+use crate::prelude::*;
 
 pub trait ToIdsMut {
     fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex>;

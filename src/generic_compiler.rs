@@ -237,6 +237,7 @@ impl Compiler for DepthFirst {
 ///
 /// - Current: x + 0 => x, x * 1 => x
 /// - TODO: x / x => 1, x - x => 0, x * 0 => 0, x - 0 => x, x * 0 => 0, 0 / x => 0
+/// - TODO: Find a much cleaner way to do these eliminations
 #[derive(Debug, Default)]
 pub struct ArithmeticElimination;
 
