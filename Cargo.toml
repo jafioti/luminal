@@ -33,6 +33,7 @@ members = [
     "crates/luminal_nn",
     "crates/luminal_training",
     "crates/luminal_symbolic",
+    "crates/luminal_onnx",
 ]
 exclude = [
     "crates/luminal_metal",
