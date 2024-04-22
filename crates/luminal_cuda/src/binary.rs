@@ -1,5 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
+use fmt_derive::Debug;
 use luminal_cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
 
 use luminal::{
@@ -15,7 +16,7 @@ use crate::{
     render_dyn_dim_inputs, CudaData, CudaFloat,
 };
 
-#[derive(LuminalEqTrue, LuminalPrint, Clone)]
+#[derive(Clone, Debug)]
 pub struct CudaSub<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -81,7 +82,7 @@ impl<T: CudaFloat> Operator for CudaSub<T> {
     }
 }
 
-#[derive(LuminalPrint, Default)]
+#[derive(Debug, Default)]
 pub struct SubtractionCompiler<T: CudaFloat>(PhantomData<T>);
 
 impl<T: CudaFloat> Compiler for SubtractionCompiler<T> {
@@ -139,7 +140,7 @@ impl<T: CudaFloat> Compiler for SubtractionCompiler<T> {
     }
 }
 
-#[derive(LuminalEqTrue, LuminalPrint, Clone)]
+#[derive(Clone, Debug)]
 pub struct CudaEqual<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -205,7 +206,7 @@ impl<T: CudaFloat> Operator for CudaEqual<T> {
     }
 }
 
-#[derive(LuminalPrint, Default)]
+#[derive(Debug, Default)]
 pub struct EqualCompiler<T: CudaFloat>(PhantomData<T>);
 
 impl<T: CudaFloat> Compiler for EqualCompiler<T> {
@@ -262,7 +263,7 @@ impl<T: CudaFloat> Compiler for EqualCompiler<T> {
     }
 }
 
-#[derive(LuminalPrint, Clone, LuminalEqFalse)]
+#[derive(Clone, Debug)]
 pub struct CudaGather<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -294,13 +295,7 @@ extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *weights
 impl<T: CudaFloat> Operator for CudaGather<T> {
     fn process(&mut self, inputs: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         // Inp 1 should be Vec<f32> and inp 2 should be a CudaSlice<T>
-        let indexes = inputs[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Vec<f32>>()
-            .unwrap();
+        let indexes = inputs[0].0.borrowed().downcast_ref::<Vec<f32>>().unwrap();
         let weights = get_buffer_from_tensor::<T>(&inputs[1].0);
 
         let mut indexes_buffer = unsafe { self.device.alloc::<f32>(indexes.len()).unwrap() };
@@ -335,13 +330,11 @@ impl<T: CudaFloat> Operator for CudaGather<T> {
                 .unwrap();
         }
 
-        vec![Tensor {
-            data: Box::new(CudaData(out)),
-        }]
+        vec![Tensor::new(CudaData(out))]
     }
 }
 
-#[derive(LuminalPrint, Default)]
+#[derive(Debug, Default)]
 pub struct GatherCompiler<T: CudaFloat>(PhantomData<T>);
 
 impl<T: CudaFloat> Compiler for GatherCompiler<T> {

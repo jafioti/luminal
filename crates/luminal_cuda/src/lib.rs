@@ -20,8 +20,6 @@ use std::{collections::hash_map::DefaultHasher, ffi::c_void, fmt::Write, hash::H
 
 use luminal::{op::InputTensor, prelude::*};
 
-use self::symbolic::{BigExpression, Term};
-
 pub type CudaCompiler<T> = (
     prim::PrimitiveCompiler<T>,
     binary::SubtractionCompiler<T>,
@@ -80,16 +78,6 @@ impl<T: CudaFloat> Data for CudaData<T> {
     }
 }
 
-impl Data for CudaData<u8> {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-}
-
 impl CudaFloat for f16 {
     fn from_f32(a: f32) -> Self {
         f16::from_f32(a)
@@ -102,6 +90,21 @@ impl CudaFloat for f16 {
     }
     fn type_name() -> &'static str {
         "__half"
+    }
+}
+
+impl CudaFloat for u8 {
+    fn from_f32(a: f32) -> Self {
+        a as u8
+    }
+    fn to_f32(self) -> f32 {
+        self as f32
+    }
+    fn is_f32() -> bool {
+        false
+    }
+    fn type_name() -> &'static str {
+        "uint8_t"
     }
 }
 
@@ -195,14 +198,8 @@ fn hash<T: std::hash::Hash>(obj: T) -> u64 {
     hasher.finish()
 }
 
-fn get_buffer_from_tensor<'a, T: 'static>(tensor: &'a InputTensor) -> &'a CudaSlice<T> {
-    &tensor
-        .borrowed()
-        .data
-        .as_any()
-        .downcast_ref::<CudaData<T>>()
-        .unwrap()
-        .0
+fn get_buffer_from_tensor<'a, T: CudaFloat>(tensor: &'a InputTensor) -> &'a CudaSlice<T> {
+    &tensor.borrowed().downcast_ref::<CudaData<T>>().unwrap().0
 }
 
 fn input_dyn_dims(

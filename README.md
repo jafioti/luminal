@@ -28,9 +28,9 @@ println!("Result: {:?}", c);
 ```
 
 ## Getting Started
-**Mistral 7B**
+**Llama 3 8B**
 ```bash
-cd ./examples/mistral
+cd ./examples/llama
 # Download the model
 bash ./setup/setup.sh
 # Run the model
@@ -41,7 +41,7 @@ cargo run --release                     # CPU
 
 ## Features
 ### Speed
-Luminal can run Q8 Mistral 7B on M-series Macbooks at 15-25 tokens per second. The goal is to become the fastest ML framework for any model on any device.
+Luminal can run Q8 Llama 3 8B on M-series Macbooks at 15-25 tokens per second. The goal is to become the fastest ML framework for any model on any device.
 
 ### Simplicity
 The core of luminal is and always will be minimal. It should be possible to understand the entire core library in an afternoon.
@@ -88,7 +88,7 @@ Once you've written all your computation code, run `cx.display()` to see the ent
 ## Where are we?
 - Metal and Cuda are supported for running models on Macs and Nvidia GPUs respectively, in both full and half precision.
 - Performance on M-series macs with LLMs is within 20% of llama.cpp (a *heavily* optimized library)
-- Mistral 7B and Llama 7B are implemented in `examples/`. See instructions above for running.
+- Mistral 7B and Llama 8B are implemented in `examples/`. See instructions above for running.
 - We have a small library of NN modules in `nn`, including transformers.
 - A significant amount of high-level ops are implemented in `hl_ops`. We are aiming to match the most used ~80% of the pytorch api.
 - The aim for 0.3 is to achieve SOTA performance on an M1 pro (50 tok/s), and near SOTA on single nvidia gpus (>100 tok/s), as well as support many mainstream models (Whisper, Stable Diffusion, Yolo v9, etc.) See the tracking issue [here](https://github.com/jafioti/luminal/issues/29)

@@ -1,5 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
+use fmt_derive::Debug;
 use luminal_cudarc::{
     cublas::{sys::cublasOperation_t::*, CudaBlas},
     driver::{CudaDevice, DevicePtr, DevicePtrMut},
@@ -15,7 +16,7 @@ use luminal::{
     prelude::*,
 };
 
-#[derive(LuminalPrint, LuminalEqFalse, Clone)]
+#[derive(Clone, Debug)]
 pub struct Matmul<T>(Arc<CudaBlas>, Arc<CudaDevice>, PhantomData<T>);
 
 impl<T: CudaFloat> Operator for Matmul<T> {

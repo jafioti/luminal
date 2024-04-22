@@ -1,12 +1,12 @@
 use crate::{compile_and_load_kernel, get_buffer_from_tensor, input_dyn_dims, CudaData, CudaFloat};
 
 use super::{get_idx_valid_exps, render_dyn_dim_inputs};
+use fmt_derive::Debug;
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use std::{
     any::{Any, TypeId},
-    fmt::Debug,
     marker::PhantomData,
     sync::Arc,
 };
@@ -19,7 +19,7 @@ use luminal::{
 };
 
 /// Copy a tensor to the GPU
-#[derive(Clone, LuminalEqFalse, LuminalPrint)]
+#[derive(Clone, Debug)]
 pub struct CudaCopyToDevice<T>(Arc<CudaDevice>, PhantomData<T>);
 
 impl<T> CudaCopyToDevice<T> {
@@ -30,19 +30,11 @@ impl<T> CudaCopyToDevice<T> {
 
 impl<T: CudaFloat> Operator for CudaCopyToDevice<T> {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        if inp[0].0.borrowed().data.as_any().is::<CudaData<T>>()
-            || inp[0].0.borrowed().data.as_any().is::<CudaData<u8>>()
-        {
+        if inp[0].0.borrowed().is::<CudaData<T>>() || inp[0].0.borrowed().is::<CudaData<u8>>() {
             // Already on device
             return vec![inp.pop().unwrap().0.cloned()];
         }
-        let cpu_data = inp[0]
-            .0
-            .borrowed()
-            .data
-            .as_any()
-            .downcast_ref::<Vec<f32>>()
-            .unwrap();
+        let cpu_data = inp[0].0.borrowed().downcast_ref::<Vec<f32>>().unwrap();
         let vec = cpu_data
             .iter()
             .copied()
@@ -53,7 +45,7 @@ impl<T: CudaFloat> Operator for CudaCopyToDevice<T> {
 }
 
 /// Copy a tensor from the GPU
-#[derive(Clone, LuminalEqFalse, LuminalPrint)]
+#[derive(Clone, Debug)]
 pub struct CudaCopyFromDevice<T>(Arc<CudaDevice>, PhantomData<T>);
 
 impl<T> CudaCopyFromDevice<T> {
@@ -64,7 +56,7 @@ impl<T> CudaCopyFromDevice<T> {
 
 impl<T: CudaFloat> Operator for CudaCopyFromDevice<T> {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        if inp[0].0.borrowed().data.as_any().is::<Vec<f32>>() {
+        if inp[0].0.borrowed().is::<Vec<f32>>() {
             // Already off device
             return vec![inp.pop().unwrap().0.cloned()];
         }
@@ -79,14 +71,14 @@ impl<T: CudaFloat> Operator for CudaCopyFromDevice<T> {
 }
 
 /// Constant value on device
-#[derive(Clone, LuminalEqFalse)]
+#[derive(Clone)]
 pub struct CudaConstant<T> {
     pub value: ConstantValue,
     device: Arc<CudaDevice>,
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
-impl<T> Debug for CudaConstant<T> {
+impl<T> core::fmt::Debug for CudaConstant<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "CudaConstant({:?})", self.value)
     }
@@ -121,7 +113,7 @@ impl<T: CudaFloat> Operator for CudaConstant<T> {
     }
 }
 
-#[derive(LuminalPrint, Clone, LuminalEqFalse)]
+#[derive(Clone, Debug)]
 pub struct CudaContiguous<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -180,7 +172,7 @@ impl<T: CudaFloat> Operator for CudaContiguous<T> {
     }
 }
 
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone, Debug)]
 pub struct CudaLog2<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -235,7 +227,7 @@ impl<T: CudaFloat> Operator for CudaLog2<T> {
     }
 }
 
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone, Debug)]
 pub struct CudaExp2<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -289,7 +281,7 @@ impl<T: CudaFloat> Operator for CudaExp2<T> {
     }
 }
 
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone, Debug)]
 pub struct CudaSqrt<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -347,7 +339,7 @@ impl<T: CudaFloat> Operator for CudaSqrt<T> {
     }
 }
 
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone, Debug)]
 pub struct CudaSin<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -402,7 +394,7 @@ impl<T: CudaFloat> Operator for CudaSin<T> {
     }
 }
 
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone, Debug)]
 pub struct CudaRecip<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -461,7 +453,7 @@ impl<T: CudaFloat> Operator for CudaRecip<T> {
     }
 }
 
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone, Debug)]
 pub struct CudaAdd<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -534,7 +526,7 @@ impl<T: CudaFloat> Operator for CudaAdd<T> {
     }
 }
 
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone, Debug)]
 pub struct CudaMul<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -604,7 +596,7 @@ impl<T: CudaFloat> Operator for CudaMul<T> {
     }
 }
 
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone, Debug)]
 pub struct CudaMod<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -674,7 +666,7 @@ impl<T: CudaFloat> Operator for CudaMod<T> {
     }
 }
 
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone, Debug)]
 pub struct CudaLessThan<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -750,7 +742,7 @@ impl<T: CudaFloat> Operator for CudaLessThan<T> {
     }
 }
 
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone, Debug)]
 pub struct CudaSumReduce<T> {
     function: CudaFunction,
     pub device: Arc<CudaDevice>,
@@ -843,7 +835,7 @@ where
     }
 }
 
-#[derive(LuminalEqFalse, LuminalPrint, Clone)]
+#[derive(Clone, Debug)]
 pub struct CudaMaxReduce<T> {
     function: CudaFunction,
     pub device: Arc<CudaDevice>,
@@ -933,7 +925,7 @@ impl<T: CudaFloat> Operator for CudaMaxReduce<T> {
 }
 
 /// Convert all primitive ops to cuda primitive ops, and insert copy to and from device ops
-#[derive(LuminalPrint, Default)]
+#[derive(Debug, Default)]
 pub struct PrimitiveCompiler<T>(PhantomData<T>);
 
 impl<T: CudaFloat> Compiler for PrimitiveCompiler<T> {
@@ -1019,44 +1011,6 @@ impl<T: CudaFloat> Compiler for PrimitiveCompiler<T> {
 
                 remap(output_node, copy_node, &mut ids, graph);
             }
-        }
-
-        // Copy prints from device
-        for (output_node, edge) in graph
-            .node_indices()
-            // Filter non-functions
-            .filter(|n| graph.node_weight(*n).unwrap().as_any().is::<Print>())
-            .map(|n| {
-                (
-                    n,
-                    graph
-                        .edges_directed(n, petgraph::Direction::Incoming)
-                        .find(|e| !e.weight().is_schedule())
-                        .unwrap()
-                        .id(),
-                )
-            })
-            .collect::<Vec<_>>()
-        {
-            // Create copy node
-            let (source, shape) = (
-                graph.edge_endpoints(edge).unwrap().0,
-                graph.edge_weight(edge).unwrap().as_data().unwrap().2,
-            );
-            let copy_node = graph
-                .add_op(CudaCopyFromDevice::<T>::new(dev.clone()))
-                .input(source, 0, shape)
-                .finish();
-            graph.add_edge(
-                copy_node,
-                output_node,
-                Dependency::Data {
-                    shape,
-                    input_order: 0,
-                    output_order: 0,
-                },
-            );
-            graph.remove_edge(edge);
         }
 
         fn is<T: Any>(type_id: TypeId) -> bool {

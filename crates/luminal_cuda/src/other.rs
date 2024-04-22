@@ -2,7 +2,8 @@ use std::{marker::PhantomData, sync::Arc};
 
 use luminal_cudarc::driver::{CudaDevice, CudaFunction, LaunchAsync, LaunchConfig};
 
-use luminal::{op::*, prelude::*, shape::symbolic::BigExpression};
+use fmt_derive::Debug;
+use luminal::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -12,7 +13,7 @@ use crate::{
     CudaData, CudaFloat,
 };
 
-#[derive(LuminalPrint, Clone, LuminalEqFalse)]
+#[derive(Clone, Debug)]
 pub struct CudaARange<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -65,13 +66,11 @@ impl<T: CudaFloat> Operator for CudaARange<T> {
                 .unwrap();
         }
 
-        vec![Tensor {
-            data: Box::new(CudaData(out)),
-        }]
+        vec![Tensor::new(CudaData(out))]
     }
 }
 
-#[derive(LuminalPrint, Default)]
+#[derive(Debug, Default)]
 pub struct ARangeCompiler<T: CudaFloat>(PhantomData<T>);
 
 impl<T: CudaFloat> Compiler for ARangeCompiler<T> {
