@@ -65,7 +65,7 @@ fn main() {
     let now = Instant::now();
     cx.compile(
         (
-            Timed(GenericCompiler::default()),
+            GenericCompiler::default(),
             #[cfg(feature = "metal")]
             luminal_metal::quantized::MetalQuantizedCompiler::<f32>::new(q_weights),
             #[cfg(feature = "cuda")]
