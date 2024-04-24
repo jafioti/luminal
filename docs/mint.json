@@ -1,5 +1,11 @@
 {
-  "$schema": "https://mintlify.com/schema.json",
+  "metadata": {
+    "twitter:card": "summary_large_image",
+    "twitter:title": "Luminal - Deep learning at the speed of light",
+    "twitter:image": "https://luminalai.com/images/abstract.jpg",
+    "og:image": "https://luminalai.com/images/abstract.jpg",
+    "twitter:site": "https://luminalai.com/"
+  },
   "name": "Luminal",
   "logo": {
     "dark": "/logo/luminal_logo.png",
