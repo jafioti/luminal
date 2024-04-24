@@ -1,5 +1,10 @@
-# Luminal Introduction
+---
+title: GraphTensor API
+description: 'The high-level interface for writing ML code, checked at compile time.'
+icon: 'webhook'
+---
 
+## Familiarizing ourselves
 Let's get up to speed with how to use luminal, and how it works internally.
 
 First we'll take a look at what the simplest program will look like:
@@ -35,4 +40,22 @@ Then we set the data for these tensors. But if `GraphTensor` doesn't hold data, 
 
 Alright, that was a lot but now we've touched on all the main aspects of running a model in luminal.
 
-[Let's take a look at each piece in more depth.](https://github.com/jafioti/luminal/blob/main/docs/02%20GraphTensor%20API.md)
+## GraphTensors
+
+We're working with pretty complicated graphs to build our computation on, but we don't want to manually place all the nodes ourselves! So how can we build these static graphs in a nice, familiar way? GraphTensors!
+
+Essentially GraphTensors are pointers to a specific node on the graph, as well as some metadata about the output of that node, such as its shape. We can make a new GraphTensor by doing:
+```rust
+let mut cx = Graph::new(); // We need a graph to build!
+let a: GraphTensor<R1<3>> = cx.tensor(); // Here we create a new node on the graph and get a GraphTensor back, pointing to it.
+```
+Notice the type of `a`: `GraphTensor<R1<3>>`. So what's that generic all about? It's the shape! We make tensor shapes part of the type, so they're tracked at compile time! In this case, the shape is rank 1, with 3 elements, or in other words, a vector of 3 dimensions. (Side note: `R1<N>` is a typedef of `(Const<N>,)`) It should be impossible to accidentally get a runtime shape mismatch.
+
+Now we can use the `a` as you would in a library like PyTorch, performing linear algebra:
+```rust
+let b = a.exp().sqrt();
+let c = b + a;
+```
+We just placed some ops on the graph! It doesn't look like it because you don't need to think about the graph while writing ML code.
+
+Next we'll see how GraphTensors are used to build whole neural networks.

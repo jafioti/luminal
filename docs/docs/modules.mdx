@@ -1,4 +1,9 @@
-# NN Modules
+---
+title: Modules
+description: 'Composable building blocks of complex neural networks.'
+icon: 'shapes'
+---
+
 Like any good DL library, we organize our networks into `Module`s. Here is the module trait:
 ```rust
 /// A module with a forward pass
@@ -27,5 +32,3 @@ impl<const A: usize, const B: usize> Module<GraphTensor<R1<A>>> for Linear<A, B>
 Here we see a single weight matrix as the internal state, of size AxB. We've written a single forward function for single input vectors of shape (A,) and matmul it by our weight matrix to get an output of shape (B,).
 
 Now all of these ops are recorded on the graph, to be compiled and ran later on.
-
-[So how does this compilation work? Let's find out!](https://github.com/jafioti/luminal/blob/main/docs/04%20Compilers.md)

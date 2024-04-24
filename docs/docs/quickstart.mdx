@@ -1,0 +1,39 @@
+---
+title: 'Quickstart'
+description: 'Start running ML models in minutes.'
+icon: 'bolt'
+---
+
+## Clone the repo
+
+Clone the codebase locally by running the following:
+```bash
+git clone https://github.com/jafioti/luminal
+cd luminal
+```
+
+## Hello World
+
+Simple examples demonstrate how a library works without diving in too deep. Run your first Luminal code like so:
+```bash
+cd ./examples
+cargo run --release
+```
+Great! You've ran your first Luminal model!
+
+## Run Llama 3
+
+Run the following to start generating text with Llama 3 8B:
+```bash
+cd ./examples/llama
+# Download the model
+bash ./setup/setup.sh
+# Run the model
+cargo run --release --features metal    # MacOS (Recommended)
+cargo run --release --features cuda     # Nvidia
+cargo run --release                     # CPU
+```
+
+<Warning>
+  Luminal currently isn't well optimized for CPU usage, so running large models like Llama 3 on CPU isn't recommended.
+</Warning>

@@ -1,0 +1,48 @@
+---
+title: 'Luminal: Efficient ML in Rust through graph compilation'
+description: 'A new approach to ML'
+---
+![](https://raw.githubusercontent.com/jafioti/luminal/main/dag.jpeg)
+
+**Luminal is a deep learning library that uses composable compilers to achieve high performance.**
+
+Current ML libraries tend to be large and complex because they try to map high level operations directly on to low level handwritten kernels, and focus on eager execution. Libraries like PyTorch contain hundreds of thousands of lines of code, making it nearly impossible for a single programmer to understand it all, set aside do a large refactor.
+
+But does it need to be so complex? ML models tend to be static dataflow graphs made up of a few simple operators. This allows us to have a dirt simple core only supporting a few primitive operations, and use them to build up complex neural networks. We can then write compilers that modify the graph after we build it, to swap more efficient ops back in depending on which backend we're running on.
+
+Luminal takes this approach to the extreme, supporting only 11 primitive operations (primops):
+- **Unary** - Log2, Exp2, Sin, Sqrt, Recip
+- **Binary** - Add, Mul, Mod, LessThan
+- **Other** - SumReduce, MaxReduce, Contiguous
+
+Every complex operation boils down to these primitive operations, so when you do `a - b` for instance, `add(a, mul(b, -1))` gets written to the graph. Or when you do `a.matmul(b)`, what actually gets put on the graph is `sum_reduce(mul(reshape(a), reshape(b)))`.
+
+Once the graph is built, iterative compiler passes can modify it to replace primops with more efficient ops, depending on the device it's running on. On Nvidia cards, for instance, efficient Cuda kernels are written on the fly to replace these ops, and specialized cublas kernels are swapped in for supported operations.
+
+This approach leads to a simple library, and performance is only limited by the creativity of the compiler programmer, not the model programmer.
+
+Luminal has a number of other neat features, check out the repo [here](https://github.com/jafioti/luminal).
+
+## Welcome
+
+There are two ways to build API documentation: [OpenAPI](https://mintlify.com/docs/api-playground/openapi/setup) and [MDX components](https://mintlify.com/docs/api-playground/mdx/configuration). For the starter kit, we are using the following OpenAPI specification.
+
+<Card
+  title="Plant Store Endpoints"
+  icon="leaf"
+  href="https://github.com/mintlify/starter/blob/main/api-reference/openapi.json"
+>
+  View the OpenAPI specification file
+</Card>
+
+## Authentication
+
+All API endpoints are authenticated using Bearer tokens and picked up from the specification file.
+
+```json
+"security": [
+  {
+    "bearerAuth": []
+  }
+]
+```

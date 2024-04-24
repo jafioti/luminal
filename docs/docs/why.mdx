@@ -1,0 +1,66 @@
+---
+title: 'Why Luminal'
+description: 'ML is a crowded landscape. What makes Luminal different?'
+icon: 'lightbulb'
+---
+
+## The ML ecosystem is fragmented
+
+In recent years, ML has seen a flourishing of interest, especially after apps like ChatGPT gained huge traction. With this interest has come many fantastic open source projects and libraries lowering the barrier to entry.
+
+But despite all the effort, it still feels hard to take an existing model and deploy it to a new environment without jumping through hoops.
+
+#### Deployment
+ML deployments usually come in one of two flavors: extensions to training libraries, and specialized deployment libraries.
+
+PyTorch and JAX exemplify the current mainstream of training libraries. While there exist great deployment systems for these, typically they involve either trying to ship a standalone Python interpreter, or exporting the model to another library.
+
+ONNX-based runtimes represent the standard in dedicated deployment libraries. Once you get the model into a supported format, like ONNX, deployment to your chosen environment is fairly easy.
+
+#### Devices x Datatypes x Operations
+On top of this, frameworks are only usually able to support a handful of devices, since implementing a device involves implementing every operation the framework supports. Throw in datatypes and the amount of code needed grows exponentially.
+
+When faced with all of this, it's no wonder ML developers usually just opt for the cloud, an environment they can have full control over.
+
+## A better way
+
+Luminal was borne out of this frustration, and a want to deploy to user devices with the same piece of mind Rust developers are used to. It turns out most of these problems were already solved in the early days of computing.
+
+Why don't developers today hand-write assembly code? Why does code written on one machine work on all others? Do developers need to think about the differences between x86 and ARM ISA's? Of course not.
+
+Let's learn the same lesson in ML. If you want to know how something is achieved in Luminal, there's a good chance the answer is the same: **compilers**.
+
+## It's compilers all the way down
+
+How simple *could* an ML library get? Surely after you made a linear algebra library you'd need to deal with datatypes, devices, backprop, and all the usual list of ML concerns, right? What if you could throw all those things away and just worry about doing the minimum to support arbitrary neural networks?
+
+It turns out, it can get extremely simple. The core of Luminal is a few thousand lines of code and only 11 operations, which allows anyone to understand the whole thing in an afternoon.
+
+But wouldn't that make your library so limited it's useless? **No!** Not if you can use compilers to add functionality back, in a composable, isolated way.
+
+Let's see what we can do.
+
+#### Devices
+Since devices aren't handled by the core library, what if we had a compiler take each op present in the network and swap it out with equivalent operations on other devices, like CUDA GPUs? Or TPUs? Or quantum photonic retro-encabulators?
+
+If you only have 11 ops, it's extremely straightforward. We can also have the compilers insert copy-to-device and copy-from-device ops so our data is moved correctly without us thinking about it.
+
+So compilers get us support for other devices.
+
+#### Datatypes
+We want more than just fp32. If you tilt your head and squint, other datatypes are the same as other devices. It's just another seperate set of ops that processes your tensors slightly differently. So we can have a compiler insert the ops that support our desired datatype, and insert conversion to and from fp32 ops.
+
+So we get datatypes back as well, through compilers.
+
+#### Training
+Whether or not a library will support training is one of the first decisions a developer makes when starting out. So surely, if the core of luminal doesn't support training, there's no way it'll be added in externally, right?
+
+Nope! Compilers to the rescue again. With a limited op set, we can easily handle all possible cases of operations and derive the local gradients to get a full backward graph, and then connect it to the existing forward graph.
+
+Boom! We now have access to gradients! With a few more convenience functions, we can use those gradients to update the model's weights. Training has arrived!
+
+## In conclusion
+
+By now you should be seeing a trend. Everything we've removed from the core library we can add back in with external compilers. But now all that functionality is external to the core, hackable, and isolated. You can use the Autograd compiler with the CudaFp16 compiler (or any other device / datatype compiler) and be confident it will Just Work™.
+
+In the coming months you can expect to see advanced features like full 3D-parallel training, low-bit quantizations, and RL coming to Luminal, by way of external crates. Which means if you want to add something big, you probably can do it by writing your own compiler!
