@@ -1,0 +1,90 @@
+{
+  "$schema": "https://mintlify.com/schema.json",
+  "name": "Luminal",
+  "logo": {
+    "dark": "/logo/luminal_logo.png",
+    "light": "/logo/luminal_logo_light.png"
+  },
+  "favicon": "/favicon.png",
+  "modeToggle": {"default": "dark"},
+  "colors": {
+    "primary": "#0D9373",
+    "light": "#07C983",
+    "dark": "#0D9373",
+    "anchors": {
+      "from": "#0D9373",
+      "to": "#07C983"
+    }
+  },
+  "topbarLinks": [
+    {
+      "name": "Company",
+      "url": "https://www.gcog.ai/"
+    }
+  ],
+  "topbarCtaButton": {
+    "name": "Github",
+    "url": "https://github.com/jafioti/luminal"
+  },
+  "tabs": [
+    {
+      "name": "Blog",
+      "url": "blog"
+    },
+    {
+      "name": "Developers",
+      "url": "developers"
+    }
+  ],
+  "anchors": [
+    {
+      "name": "Documentation",
+      "icon": "book-open-cover",
+      "url": "/docs/introduction"
+    },
+    {
+      "name": "Blog",
+      "icon": "newspaper",
+      "url": "/blog/4-24-2024"
+    },
+    {
+      "name": "Developers",
+      "icon": "code",
+      "url": "/developers/introduction"
+    },
+    {
+      "name": "Community",
+      "icon": "discord",
+      "url": "https://discord.gg/VQf3j8WWNd"
+    }
+  ],
+  "navigation": [
+    {
+      "group": "Documentation",
+      "pages": [
+        "docs/introduction",
+        "docs/quickstart",
+        "docs/why",
+        "docs/graphtensor",
+        "docs/modules",
+        "docs/compilers"
+      ]
+    },
+    {
+      "group": "Blog",
+      "pages": [
+        "blog/4-24-2024"
+      ]
+    },
+    {
+      "group": "Developers",
+      "pages": [
+        "developers/introduction"
+      ]
+    }
+  ],
+  "footerSocials": {
+    "x": "https://x.com/luminal_ai",
+    "github": "https://github.com/jafioti/luminal"
+  }
+}
