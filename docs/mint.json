@@ -40,17 +40,17 @@
     {
       "name": "Documentation",
       "icon": "book-open-cover",
-      "url": "https://luminalai.com/docs/introduction"
+      "url": "docs"
     },
     {
       "name": "Blog",
       "icon": "newspaper",
-      "url": "https://luminalai.com/blog/4-24-2024"
+      "url": "blog"
     },
     {
       "name": "Developers",
       "icon": "code",
-      "url": "https://luminalai.com/developers/introduction"
+      "url": "developers"
     },
     {
       "name": "Community",
