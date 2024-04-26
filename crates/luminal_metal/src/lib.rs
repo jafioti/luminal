@@ -378,7 +378,7 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> (Vec<char>, 
                         .into_iter()
                         .flat_map(|i| [i.0.into(), i.1.into()]),
                 )
-                .chain(st.slices.into_iter().flat_map(|i| [i.0.into(), i.1.into()]))
+                .chain(st.mask.into_iter().flat_map(|i| [i.0.into(), i.1.into()]))
         })
         .flat_map(|d| d.to_symbols())
         .unique()
