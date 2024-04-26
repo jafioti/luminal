@@ -27,6 +27,8 @@ pub fn reduce_triples<S: ExpressionStorage>(
                     if let (Term::Num(a), Term::Num(b)) = (a_term, b_term) {
                         if let Some(c) = term.as_op().unwrap()(a, b) {
                             stack.push((None, Term::Num(c)));
+                        } else {
+                            break;
                         }
                     } else if let Term::Var(a) = a_term {
                         stack.push((None, Term::Var(a)));

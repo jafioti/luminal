@@ -100,9 +100,10 @@ impl ShapeTracker {
 
     /// Create an expression to translate logical indexes into physical indexes
     pub fn index_expression(&self) -> BigExpression {
-        println!("ORIG: {:?}", self);
+        if !self.is_reshaped() {
+            return 'z'.into();
+        }
         let shape = combine_dims(*self);
-        println!("Combined: {:?}", shape);
         let strides = shape.unordered_strides(); // Dimension strides in original order
         let mut ind_expr = BigExpression::from(0); // The final index expression
         let mut current_elem_size = BigExpression::from(1); // Keep track of the size of each element of the current dim (last dim elem size: 1)
@@ -138,6 +139,9 @@ impl ShapeTracker {
 
     /// If this expression evaluates to 0, the logical index is invalid. Otherwise it is valid
     pub fn valid_expression(&self) -> BigExpression {
+        if !self.is_reshaped() {
+            return true.into();
+        }
         let shape = combine_dims(*self);
         let mut ret = BigExpression::from(1);
         let mut acc = BigExpression::from(1);
