@@ -48,8 +48,8 @@ impl ShapeTracker {
     }
 
     /// Add fake dim along a certian axis
-    pub fn expand(&mut self, axis: usize, dim: Expression) {
-        self.add_dim(axis, dim);
+    pub fn expand(&mut self, axis: usize, dim: impl Into<Expression>) {
+        self.add_dim(axis, dim.into());
         self.fake[self.indexes[axis]] = true;
     }
 
@@ -99,33 +99,23 @@ impl ShapeTracker {
     }
 
     pub fn index_expression(&self) -> BigExpression {
-        if !self.is_reshaped() {
-            return 'z'.into();
-        }
         // Create strides in original order
         let strides = self.unordered_strides();
         let mut ret = BigExpression::from(0);
         let mut acc = BigExpression::from(1);
         let logical = BigExpression::from('z');
-        // Loop through all dims in current order
-        for (sh, stride, padding, slice, fake) in self.indexes.into_iter().rev().map(|i| {
-            (
-                self.dims[i],
-                strides[i].clone(),
-                self.padding[i],
-                self.slices[i],
-                self.fake[i],
-            )
-        }) {
+        // Loop through all dims in reverse order
+        for i in self.indexes.into_iter().rev() {
+            let (start_padding, end_padding) = self.padding[i];
+            let (start_slice, end_slice) = self.slices[i];
             let logical_sh =
-                (BigExpression::from(sh) + padding.0 + padding.1).min(slice.1) - slice.0;
-            if !fake {
+                (self.dims[i].big() + start_padding + end_padding).min(end_slice) - start_slice;
+            if !self.fake[i] {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
                 ret = ret
-                    + (dim_ind - padding.0
-                        + (BigExpression::from(slice.0)
-                            - BigExpression::from(padding.0).min(slice.0)))
-                        * stride;
+                    + (dim_ind - start_padding
+                        + (start_slice.big() - start_padding.big().min(start_slice)))
+                        * strides[i].clone();
             }
             acc = acc.clone() * logical_sh.clone();
         }
@@ -140,26 +130,21 @@ impl ShapeTracker {
         let mut ret = BigExpression::from(1);
         let mut acc = BigExpression::from(1);
         let logical = BigExpression::from('z');
-        for (sh, (bottom_padding, top_padding), (bottom_slice, top_slice), fake) in self
-            .indexes
-            .into_iter()
-            .rev()
-            .map(|i| (self.dims[i], self.padding[i], self.slices[i], self.fake[i]))
-        {
-            let logical_sh = (BigExpression::from(sh) + bottom_padding + top_padding)
-                .min(top_slice)
-                - bottom_slice;
-            if !fake {
+        for i in self.indexes.into_iter().rev() {
+            let (bottom_padding, top_padding) = self.padding[i];
+            let (bottom_slice, top_slice) = self.slices[i];
+            let logical_sh =
+                (self.dims[i].big() + bottom_padding + top_padding).min(top_slice) - bottom_slice;
+            if !self.fake[i] {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
-                let greater_than = BigExpression::from(bottom_padding)
-                    - BigExpression::from(bottom_slice).min(bottom_padding);
-                if greater_than != BigExpression::from(0) {
+                let greater_than = bottom_padding.big() - bottom_slice.big().min(bottom_padding);
+                if greater_than != 0 {
                     ret = ret & dim_ind.clone().gte(greater_than);
                 }
-                ret = ret & dim_ind.lt(BigExpression::from(sh) + bottom_padding);
+                ret = ret & dim_ind.lt(self.dims[i].big() + bottom_padding);
                 if top_slice
                     .to_usize()
-                    .map(|s| sh.to_usize().map(|dim| s < dim).unwrap_or(true))
+                    .map(|s| self.dims[i].to_usize().map(|dim| s < dim).unwrap_or(true))
                     .unwrap_or(true)
                 {
                     ret = ret.min(top_slice);
@@ -175,13 +160,13 @@ impl ShapeTracker {
         let r = self
             .indexes
             .into_iter()
-            .map(|i| (i, BigExpression::from(self.dims[i])))
+            .map(|i| (i, self.dims[i].big()))
             // Add pads
             .map(|(i, dim)| (i, dim + self.padding[i].0 + self.padding[i].1))
             // Slice
             .map(|(i, dim)| dim.min(self.slices[i].1) - self.slices[i].0)
             .product();
-        if r == 0.into() {
+        if r == 0 {
             1.into()
         } else {
             r
@@ -198,7 +183,7 @@ impl ShapeTracker {
             .filter(|(i, _)| !self.fake[*i])
             .map(|(_, i)| i.into())
             .product();
-        if r == 0.into() {
+        if r == 0 {
             1.into()
         } else {
             r
@@ -250,8 +235,7 @@ impl ShapeTracker {
         self.indexes
             .into_iter()
             .map(|i| {
-                (BigExpression::from(self.dims[i]) + self.padding[i].0 - self.slices[i].0
-                    + self.padding[i].1)
+                (self.dims[i].big() + self.padding[i].0 - self.slices[i].0 + self.padding[i].1)
                     .min(self.slices[i].1)
             })
             .collect()

@@ -12,7 +12,7 @@ fn test_expressions() {
 fn test_minimizations() {
     let expr = ((BigExpression::from('a') * 1) + 0) / 1 + (1 - 1);
     let reduced_expr = expr.simplify();
-    assert_eq!(reduced_expr, 'a'.into());
+    assert_eq!(reduced_expr, 'a');
 }
 
 #[test]

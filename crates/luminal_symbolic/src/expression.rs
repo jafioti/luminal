@@ -28,6 +28,7 @@ pub trait ExpressionStorage:
     fn push(&mut self, term: Term);
     fn pop(&mut self) -> Option<Term>;
     fn remove(&mut self, index: usize) -> Term;
+    fn into_vec(self) -> Vec<Term>;
 }
 
 // Implement the main storage types
@@ -43,6 +44,9 @@ impl ExpressionStorage for Vec<Term> {
     }
     fn remove(&mut self, index: usize) -> Term {
         Vec::remove(self, index)
+    }
+    fn into_vec(self) -> Vec<Term> {
+        self
     }
 }
 
@@ -62,12 +66,24 @@ where
     fn remove(&mut self, index: usize) -> Term {
         ArrayVec::remove(self, index)
     }
+    fn into_vec(self) -> Vec<Term> {
+        self.to_vec()
+    }
 }
 
 /// A symbolic expression
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, Eq)]
 pub struct GenericExpression<S: ExpressionStorage> {
     pub terms: S,
+}
+
+impl<S: ExpressionStorage, T> PartialEq<T> for GenericExpression<S>
+where
+    for<'a> &'a T: Into<Self>,
+{
+    fn eq(&self, other: &T) -> bool {
+        self.terms == other.into().terms
+    }
 }
 
 impl<S: ExpressionStorage> Default for GenericExpression<S> {
@@ -261,6 +277,18 @@ where
     }
 }
 
+impl Expression {
+    pub fn big(&self) -> BigExpression {
+        BigExpression::from(*self)
+    }
+}
+
+impl BigExpression {
+    pub fn small(&self) -> Expression {
+        Expression::from(self)
+    }
+}
+
 impl<S: ExpressionStorage> From<Term> for GenericExpression<S> {
     fn from(value: Term) -> Self {
         let mut terms = S::default();
@@ -317,17 +345,21 @@ impl<S: ExpressionStorage> From<&bool> for GenericExpression<S> {
     }
 }
 
+impl<S: ExpressionStorage, T: ExpressionStorage> From<&GenericExpression<T>>
+    for GenericExpression<S>
+{
+    fn from(value: &GenericExpression<T>) -> Self {
+        let mut s = S::default();
+        s.extend(value.terms.clone().into_vec());
+        Self { terms: s }
+    }
+}
+
 impl From<Expression> for BigExpression {
     fn from(value: Expression) -> Self {
         Self {
             terms: value.terms.to_vec(),
         }
-    }
-}
-
-impl From<&Expression> for Expression {
-    fn from(value: &Expression) -> Self {
-        *value
     }
 }
 
@@ -343,10 +375,10 @@ impl<S: ExpressionStorage, E: Into<Self>> Add<E> for GenericExpression<S> {
     type Output = Self;
     fn add(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
-        if rhs == Self::from(0) {
+        if rhs == 0 {
             return self;
         }
-        if self == Self::from(0) {
+        if self == 0 {
             return rhs;
         }
         if self == rhs {
@@ -362,7 +394,7 @@ impl<S: ExpressionStorage, E: Into<Self>> Sub<E> for GenericExpression<S> {
     type Output = Self;
     fn sub(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
-        if rhs == Self::from(0) {
+        if rhs == 0 {
             return self;
         }
         if self == rhs {
@@ -378,13 +410,13 @@ impl<S: ExpressionStorage, E: Into<Self>> Mul<E> for GenericExpression<S> {
     type Output = Self;
     fn mul(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
-        if rhs == Self::from(1) {
+        if rhs == 1 {
             return self;
         }
-        if self == Self::from(1) {
+        if self == 1 {
             return rhs;
         }
-        if rhs == Self::from(0) || self == Self::from(0) {
+        if rhs == 0 || self == 0 {
             return 0.into();
         }
         rhs.terms.extend(self.terms);
@@ -397,13 +429,13 @@ impl<S: ExpressionStorage, E: Into<Self>> Div<E> for GenericExpression<S> {
     type Output = Self;
     fn div(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
-        if rhs == Self::from(1) {
+        if rhs == 1 {
             return self;
         }
         if self == rhs {
             return 1.into();
         }
-        if self == Self::from(0) {
+        if self == 0 {
             return 0.into();
         }
         rhs.terms.extend(self.terms);
@@ -416,8 +448,8 @@ impl<S: ExpressionStorage, E: Into<Self>> Rem<E> for GenericExpression<S> {
     type Output = Self;
     fn rem(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
-        if rhs == Self::from(1) || rhs == self {
-            return Self::from(0);
+        if rhs == 1 || rhs == self {
+            return 0.into();
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Mod);
@@ -429,13 +461,13 @@ impl<S: ExpressionStorage, E: Into<Self>> BitAnd<E> for GenericExpression<S> {
     type Output = Self;
     fn bitand(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
-        if rhs == Self::from(0) || self == Self::from(0) {
-            return Self::from(0);
+        if rhs == 0 || self == 0 {
+            return 0.into();
         }
-        if rhs == Self::from(1) {
+        if rhs == 1 {
             return self;
         }
-        if self == Self::from(1) {
+        if self == 1 {
             return rhs;
         }
         rhs.terms.extend(self.terms);
@@ -448,7 +480,7 @@ impl<S: ExpressionStorage, E: Into<Self>> BitOr<E> for GenericExpression<S> {
     type Output = Self;
     fn bitor(self, rhs: E) -> Self::Output {
         let mut rhs = rhs.into();
-        if rhs == Self::from(1) || self == Self::from(1) {
+        if rhs == 1 || self == 1 {
             return 1.into();
         }
         rhs.terms.extend(self.terms);

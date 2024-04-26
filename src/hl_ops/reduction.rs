@@ -75,7 +75,7 @@ impl<S: Shape> GraphTensor<S> {
                     ShapeTracker::fake(
                         &shape
                             .shape()
-                            .into_iter()
+                            .iter()
                             .map(Expression::from)
                             .collect::<Vec<_>>(),
                     ),

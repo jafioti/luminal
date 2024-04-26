@@ -55,7 +55,7 @@ impl From<BigExpression> for ConstantValue {
 }
 impl From<Expression> for ConstantValue {
     fn from(value: Expression) -> Self {
-        ConstantValue::Expression(value.into())
+        ConstantValue::Expression((&value).into())
     }
 }
 impl From<&BigExpression> for ConstantValue {
@@ -65,7 +65,7 @@ impl From<&BigExpression> for ConstantValue {
 }
 impl From<&Expression> for ConstantValue {
     fn from(value: &Expression) -> Self {
-        ConstantValue::Expression((*value).into())
+        ConstantValue::Expression(value.into())
     }
 }
 

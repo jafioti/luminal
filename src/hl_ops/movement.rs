@@ -91,9 +91,9 @@ impl<S: Shape> GraphTensor<S> {
         let ranges = slice.to_range_vec();
         // This exists because currently padding and slicing on the same dimension (even on opposite sides) is unsupported
         if ranges.iter().zip(self.shape.indexes).any(|(range, ind)| {
-            (range.0 != 0.into() || range.1 != i32::MAX.into())
-                && (self.shape.padding[self.shape.indexes[ind]].0 != 0.into()
-                    || self.shape.padding[self.shape.indexes[ind]].1 != 0.into())
+            (range.0 != 0 || range.1 != i32::MAX)
+                && (self.shape.padding[self.shape.indexes[ind]].0 != 0
+                    || self.shape.padding[self.shape.indexes[ind]].1 != 0)
         }) {
             self = self.contiguous();
         }
@@ -114,7 +114,7 @@ impl<S: Shape> GraphTensor<S> {
         self = self.contiguous();
         // Expand a new dimension to do the slicing on
         let n_rows = total_size / (spacing + size);
-        self.shape.expand(n_dims, (spacing + size).into());
+        self.shape.expand(n_dims, spacing + size);
         // self = self.contiguous();
         self.shape.dims[self.shape.indexes[n_dims - 1]] = n_rows;
         self.shape.fake[self.shape.indexes[n_dims]] = false;
@@ -141,23 +141,21 @@ impl<S: Shape> GraphTensor<S> {
         let number_of_windows = ((dim_size - full_kernel) / stride) + 1;
         // Expand new dimension
         self.shape.expand(n_dims - 1, number_of_windows);
-
-        let orig_width = BigExpression::from(dim_size);
-
         self = self.contiguous();
         if n_dims > 1 {
             // View as single dimension of matrix with wider width
-            let mat_size = (orig_width.clone() + stride) * number_of_windows;
-            let actual_size = orig_width.clone() * self.shape.dims[self.shape.indexes[n_dims - 1]];
+            let mat_size = (dim_size.big() + stride.big()) * number_of_windows.big();
+            let actual_size =
+                dim_size.big() * self.shape.dims[self.shape.indexes[n_dims - 1]].big();
             // Reshape into single dimension to pad
             self.shape.remove_dim(n_dims);
-            self.shape.dims[self.shape.indexes[n_dims - 1]] = actual_size.clone().into();
-            self.shape.padding[self.shape.indexes[n_dims - 1]].1 = (mat_size - actual_size).into();
+            self.shape.dims[self.shape.indexes[n_dims - 1]] = actual_size.small();
+            self.shape.padding[self.shape.indexes[n_dims - 1]].1 = (mat_size - actual_size).small();
             self = self.contiguous();
             // Reshape back (mats should be full now)
-            self.shape.add_dim(n_dims, (orig_width + stride).into());
+            self.shape.add_dim(n_dims, dim_size + stride);
         } else {
-            self.shape.dims[self.shape.indexes[n_dims]] = (orig_width + stride).into();
+            self.shape.dims[self.shape.indexes[n_dims]] = dim_size + stride;
         }
         self.shape.dims[self.shape.indexes[n_dims - 1]] = number_of_windows;
         // Slice down to kernel size
@@ -184,9 +182,9 @@ impl<S: Shape> GraphTensor<S> {
             .collect::<Vec<_>>();
         // This exists because currently padding and slicing on the same dimension (even on opposite sides) is unsupported
         if ranges.iter().zip(self.shape.indexes).any(|(range, ind)| {
-            (range.0 != 0.into() || range.1 != 0.into())
-                && (self.shape.slices[self.shape.indexes[ind]].0 != 0.into()
-                    || self.shape.slices[self.shape.indexes[ind]].1 != i32::MAX.into())
+            (range.0 != 0 || range.1 != 0)
+                && (self.shape.slices[self.shape.indexes[ind]].0 != 0
+                    || self.shape.slices[self.shape.indexes[ind]].1 != i32::MAX)
         }) {
             self = self.contiguous();
         }
@@ -201,9 +199,9 @@ impl<S: Shape> GraphTensor<S> {
         let dim = Ax::as_array()[0];
         // Create padding
         let mut a_padding = vec![(Expression::default(), Expression::default()); self.shape.len()];
-        a_padding[dim].1 = rhs.shape.shape()[dim].clone().into();
+        a_padding[dim].1 = rhs.shape.shape()[dim].small();
         let mut b_padding = vec![(Expression::default(), Expression::default()); rhs.shape.len()];
-        b_padding[dim].0 = self.shape.shape()[dim].clone().into();
+        b_padding[dim].0 = self.shape.shape()[dim].small();
         // Pad and add
         (self.pad(&a_padding) + rhs.pad(&b_padding)).sync_shape()
     }
