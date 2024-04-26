@@ -8,12 +8,9 @@ use metal_rs::{
     ComputePipelineState, Device, MTLResourceOptions,
 };
 
-use luminal::{
-    op::{InputTensor, Operator},
-    prelude::{
-        petgraph::{visit::EdgeRef, Direction},
-        *,
-    },
+use luminal::prelude::{
+    petgraph::{visit::EdgeRef, Direction},
+    *,
 };
 
 use crate::{
@@ -384,11 +381,15 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     *subexp = re
                         .replace_all(
                             subexp,
-                            &format!(
-                                "({} != 0 ? (float)input{i}[{}] : 0.0)$1",
-                                expr_to_metal_string(val_exp.clone()),
-                                expr_to_metal_string(ind_exp.clone())
-                            ),
+                            &if *val_exp != true {
+                                format!(
+                                    "({} != 0 ? (float)input{i}[{}] : 0.0)$1",
+                                    expr_to_metal_string(val_exp),
+                                    expr_to_metal_string(ind_exp)
+                                )
+                            } else {
+                                format!("(float)input{i}[{}]$1", expr_to_metal_string(ind_exp))
+                            },
                         )
                         .to_string();
                 }
@@ -410,7 +411,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     if val_exp != true {
                         *subexp = format!(
                             "(({} != 0) ? {subexp} : 0.0)",
-                            expr_to_metal_string(val_exp)
+                            expr_to_metal_string(&val_exp)
                         );
                     }
                 }

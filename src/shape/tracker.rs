@@ -108,11 +108,6 @@ impl ShapeTracker {
         let mut ind_expr = BigExpression::from(0); // The final index expression
         let mut current_elem_size = BigExpression::from(1); // Keep track of the size of each element of the current dim (last dim elem size: 1)
 
-        // For combined dims
-        // divide by last dims (smallest) element size
-        // mod by combined dim size
-        // multiply by last dims (smallest) stride
-
         // Loop through all dims in reverse order
         for i in shape.indexes.into_iter().rev() {
             // Get logical dimension size with padding and mask
