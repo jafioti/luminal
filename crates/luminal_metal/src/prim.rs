@@ -52,15 +52,9 @@ impl<T: MetalFloat> Operator for MetalCopyToDevice<T> {
 }
 
 /// Copy a tensor from the GPU
-#[derive(Clone)]
-pub struct MetalCopyFromDevice<T>(Device, PhantomData<T>);
+#[derive(Clone, Default)]
+pub struct MetalCopyFromDevice<T>(PhantomData<T>);
 crate::debug_type!(MetalCopyFromDevice<T>);
-
-impl<T> MetalCopyFromDevice<T> {
-    pub fn new(dev: Device) -> Self {
-        Self(dev, Default::default())
-    }
-}
 
 impl<T: MetalFloat> Operator for MetalCopyFromDevice<T> {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -1620,7 +1614,7 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
             {
                 let (input_order, output_order, shape) = edge_weight.as_data().unwrap();
                 let copy_from_node = graph
-                    .add_op(MetalCopyFromDevice::<T>::new(dev.clone()))
+                    .add_op(MetalCopyFromDevice::<T>::default())
                     .input(source, output_order, shape)
                     .finish();
                 graph.add_edge(
@@ -1663,7 +1657,7 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
             } else {
                 // Create copy node
                 let copy_node = graph
-                    .add_op(MetalCopyFromDevice::<T>::new(dev.clone()))
+                    .add_op(MetalCopyFromDevice::<T>::default())
                     .input(output_node, 0, output_shape)
                     .finish();
 
