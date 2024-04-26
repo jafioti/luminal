@@ -8,7 +8,7 @@ pub struct ShapeTracker {
     pub dims: ArrayVec<[Expression; 6]>,
     pub indexes: ArrayVec<[usize; 6]>,
     pub fake: ArrayVec<[bool; 6]>,
-    pub slices: ArrayVec<[(Expression, Expression); 6]>,
+    pub mask: ArrayVec<[(Expression, Expression); 6]>,
     pub padding: ArrayVec<[(Expression, Expression); 6]>,
 }
 
@@ -18,14 +18,14 @@ impl ShapeTracker {
             dims: Default::default(),
             indexes: Default::default(),
             fake: Default::default(),
-            slices: Default::default(),
+            mask: Default::default(),
             padding: Default::default(),
         };
         for (i, d) in dims.iter().enumerate() {
             s.dims.push(*d);
             s.indexes.push(i);
             s.fake.push(false);
-            s.slices.push((0.into(), i32::MAX.into())); // Unset upper bound slices are i32::MAX
+            s.mask.push((0.into(), i32::MAX.into())); // Unset upper bound mask are i32::MAX
             s.padding.push((0.into(), 0.into()));
         }
         s
@@ -43,7 +43,7 @@ impl ShapeTracker {
         self.indexes.insert(axis, self.dims.len());
         self.dims.push(dim);
         self.fake.push(false);
-        self.slices.push((0.into(), i32::MAX.into()));
+        self.mask.push((0.into(), i32::MAX.into()));
         self.padding.push((0.into(), 0.into()));
     }
 
@@ -62,7 +62,7 @@ impl ShapeTracker {
                 *i -= 1;
             }
         }
-        self.slices.remove(index);
+        self.mask.remove(index);
         self.padding.remove(index);
         self.dims.remove(index)
     }
@@ -103,19 +103,13 @@ impl ShapeTracker {
         let strides = self.unordered_strides();
         let mut ret = BigExpression::from(0);
         let mut acc = BigExpression::from(1);
-        let logical = BigExpression::from('z');
+        let index = BigExpression::from('z');
         // Loop through all dims in reverse order
         for i in self.indexes.into_iter().rev() {
-            let (start_padding, end_padding) = self.padding[i];
-            let (start_slice, end_slice) = self.slices[i];
-            let logical_sh =
-                (self.dims[i].big() + start_padding + end_padding).min(end_slice) - start_slice;
+            let logical_sh = pad_mask_dim(self.dims[i].big(), self.padding[i], self.mask[i]);
             if !self.fake[i] {
-                let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
-                ret = ret
-                    + (dim_ind - start_padding
-                        + (start_slice.big() - start_padding.big().min(start_slice)))
-                        * strides[i].clone();
+                let dim_ind = (index.clone() / acc.clone()) % logical_sh.clone();
+                ret += (dim_ind + self.mask[i].0 - self.padding[i].0) * strides[i].clone();
             }
             acc = acc.clone() * logical_sh.clone();
         }
@@ -132,16 +126,16 @@ impl ShapeTracker {
         let logical = BigExpression::from('z');
         for i in self.indexes.into_iter().rev() {
             let (bottom_padding, top_padding) = self.padding[i];
-            let (bottom_slice, top_slice) = self.slices[i];
+            let (bottom_slice, top_slice) = self.mask[i];
             let logical_sh =
                 (self.dims[i].big() + bottom_padding + top_padding).min(top_slice) - bottom_slice;
             if !self.fake[i] {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
                 let greater_than = bottom_padding.big() - bottom_slice.big().min(bottom_padding);
                 if greater_than != 0 {
-                    ret = ret & dim_ind.clone().gte(greater_than);
+                    ret &= dim_ind.clone().gte(greater_than);
                 }
-                ret = ret & dim_ind.lt(self.dims[i].big() + bottom_padding);
+                ret &= dim_ind.lt(self.dims[i].big() + bottom_padding);
                 if top_slice
                     .to_usize()
                     .map(|s| self.dims[i].to_usize().map(|dim| s < dim).unwrap_or(true))
@@ -150,12 +144,12 @@ impl ShapeTracker {
                     ret = ret.min(top_slice);
                 }
             }
-            acc = acc * logical_sh;
+            acc *= logical_sh;
         }
         ret.simplify()
     }
 
-    /// The number of elements in this tensor, including pads and slices
+    /// The number of elements in this tensor, including pads and mask
     pub fn n_elements(&self) -> BigExpression {
         let r = self
             .indexes
@@ -164,7 +158,7 @@ impl ShapeTracker {
             // Add pads
             .map(|(i, dim)| (i, dim + self.padding[i].0 + self.padding[i].1))
             // Slice
-            .map(|(i, dim)| dim.min(self.slices[i].1) - self.slices[i].0)
+            .map(|(i, dim)| dim.min(self.mask[i].1) - self.mask[i].0)
             .product();
         if r == 0 {
             1.into()
@@ -173,7 +167,7 @@ impl ShapeTracker {
         }
     }
 
-    /// The number of elements in this tensor, not including pads and slices
+    /// The number of elements in this tensor, not including pads and mask
     pub fn n_physical_elements(&self) -> BigExpression {
         let r = self
             .dims
@@ -212,7 +206,7 @@ impl ShapeTracker {
             .indexes
             .into_iter()
             .map(|i| {
-                self.dims[i].min(self.slices[i].1 - self.slices[i].0)
+                self.dims[i].min(self.mask[i].1 - self.mask[i].0)
                     + self.padding[i].0
                     + self.padding[i].1
             })
@@ -235,8 +229,8 @@ impl ShapeTracker {
         self.indexes
             .into_iter()
             .map(|i| {
-                (self.dims[i].big() + self.padding[i].0 - self.slices[i].0 + self.padding[i].1)
-                    .min(self.slices[i].1)
+                (self.dims[i].big() + self.padding[i].0 - self.mask[i].0 + self.padding[i].1)
+                    .min(self.mask[i].1)
             })
             .collect()
     }
@@ -247,10 +241,10 @@ impl ShapeTracker {
     }
 
     /// Take a slice
-    pub fn slice(&mut self, slices: &[(Expression, Expression)]) {
-        for (i, (s, e)) in slices.iter().enumerate() {
-            self.slices[self.indexes[i]].0 = self.slices[self.indexes[i]].0.max(s.max(0));
-            self.slices[self.indexes[i]].1 = self.slices[self.indexes[i]].1.min(e.max(0));
+    pub fn slice(&mut self, mask: &[(Expression, Expression)]) {
+        for (i, (s, e)) in mask.iter().enumerate() {
+            self.mask[self.indexes[i]].0 = self.mask[self.indexes[i]].0.max(s.max(0));
+            self.mask[self.indexes[i]].1 = self.mask[self.indexes[i]].1.min(e.max(0));
         }
     }
 
@@ -258,13 +252,13 @@ impl ShapeTracker {
     pub fn pad(&mut self, padding: &[(Expression, Expression)]) {
         for (i, (s, e)) in padding.iter().enumerate() {
             if (e.to_usize().map(|n| n != 0).unwrap_or(true)
-                && self.slices[self.indexes[i]]
+                && self.mask[self.indexes[i]]
                     .1
                     .to_usize()
                     .map(|n| n as i32 != i32::MAX)
                     .unwrap_or(true))
                 || (s.to_usize().map(|n| n != 0).unwrap_or(true)
-                    && self.slices[self.indexes[i]]
+                    && self.mask[self.indexes[i]]
                         .0
                         .to_usize()
                         .map(|n| n as i32 != 0)
@@ -272,8 +266,8 @@ impl ShapeTracker {
             {
                 panic!("Adding padding to a slice isn't supported")
             }
-            self.padding[self.indexes[i]].0 = self.padding[self.indexes[i]].0 + s.max(0);
-            self.padding[self.indexes[i]].1 = self.padding[self.indexes[i]].1 + e.max(0);
+            self.padding[self.indexes[i]].0 += s.max(0);
+            self.padding[self.indexes[i]].1 += e.max(0);
         }
     }
 
@@ -295,14 +289,14 @@ impl ShapeTracker {
             *a = a.exec_stack(dyn_dim_map, stack).unwrap().into();
             *b = b.exec_stack(dyn_dim_map, stack).unwrap().into();
         }
-        for (a, b) in self.slices.iter_mut() {
+        for (a, b) in self.mask.iter_mut() {
             *a = a.exec_stack(dyn_dim_map, stack).unwrap().into();
             *b = b.exec_stack(dyn_dim_map, stack).unwrap().into();
         }
     }
 
     pub fn is_sliced(&self) -> bool {
-        self.slices.iter().any(|(b, e)| {
+        self.mask.iter().any(|(b, e)| {
             b.to_usize().map(|i| i != 0).unwrap_or(true)
                 || e.to_usize().map(|n| n as i32 != i32::MAX).unwrap_or(true)
         })
@@ -314,6 +308,14 @@ impl ShapeTracker {
                 || e.to_usize().map(|n| n != 0).unwrap_or(true)
         })
     }
+}
+
+fn pad_mask_dim(
+    dim: BigExpression,
+    padding: (Expression, Expression),
+    mask: (Expression, Expression),
+) -> BigExpression {
+    (dim + padding.0 + padding.1).min(mask.1) - mask.0
 }
 
 /// Resolve shapes between the two trackers to the best of our ability
@@ -344,12 +346,12 @@ mod tests {
     use crate::prelude::*;
     #[test]
     fn test_idx_expr() {
-        let mut tracker = ShapeTracker::new(&[
+        let tracker = ShapeTracker::new(&[
             Expression::from(10),
             Expression::from(5),
             Expression::from(3),
         ]);
-        tracker.permute(&[0, 2, 1]);
+        // tracker.permute(&[0, 2, 1]);
         println!("Strides: {:?}", tracker.strides());
         println!("Ind: {:?}", tracker.index_expression());
     }

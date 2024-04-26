@@ -120,7 +120,7 @@ impl<S: Shape> GraphTensor<S> {
         self.shape.fake[self.shape.indexes[n_dims]] = false;
 
         // Slice
-        self.shape.slices[self.shape.indexes[n_dims]].1 = spacing.into();
+        self.shape.mask[self.shape.indexes[n_dims]].1 = spacing.into();
 
         self = self.contiguous();
 
@@ -159,8 +159,8 @@ impl<S: Shape> GraphTensor<S> {
         }
         self.shape.dims[self.shape.indexes[n_dims - 1]] = number_of_windows;
         // Slice down to kernel size
-        self.shape.slices[self.shape.indexes[n_dims]].1 = full_kernel;
-        self.shape.slices[self.shape.indexes[n_dims - 1]].1 = number_of_windows;
+        self.shape.mask[self.shape.indexes[n_dims]].1 = full_kernel;
+        self.shape.mask[self.shape.indexes[n_dims - 1]].1 = number_of_windows;
         self = self.contiguous();
 
         if dilation > 0 {
@@ -183,8 +183,8 @@ impl<S: Shape> GraphTensor<S> {
         // This exists because currently padding and slicing on the same dimension (even on opposite sides) is unsupported
         if ranges.iter().zip(self.shape.indexes).any(|(range, ind)| {
             (range.0 != 0 || range.1 != 0)
-                && (self.shape.slices[self.shape.indexes[ind]].0 != 0
-                    || self.shape.slices[self.shape.indexes[ind]].1 != i32::MAX)
+                && (self.shape.mask[self.shape.indexes[ind]].0 != 0
+                    || self.shape.mask[self.shape.indexes[ind]].1 != i32::MAX)
         }) {
             self = self.contiguous();
         }

@@ -2,7 +2,10 @@ use super::Term;
 
 use std::{
     fmt::Debug,
-    ops::{Add, BitAnd, BitOr, Div, IndexMut, Mul, Rem, Sub},
+    ops::{
+        Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, Div, DivAssign, IndexMut, Mul,
+        MulAssign, Rem, RemAssign, Sub, SubAssign,
+    },
 };
 
 use rustc_hash::FxHashMap;
@@ -495,8 +498,50 @@ impl<S: ExpressionStorage> std::iter::Product for GenericExpression<S> {
             return 0.into();
         };
         for n in iter {
-            p = p * n;
+            p *= n;
         }
         p
+    }
+}
+
+impl<S: ExpressionStorage, E: Into<Self>> AddAssign<E> for GenericExpression<S> {
+    fn add_assign(&mut self, rhs: E) {
+        *self = self.clone() + rhs;
+    }
+}
+
+impl<S: ExpressionStorage, E: Into<Self>> SubAssign<E> for GenericExpression<S> {
+    fn sub_assign(&mut self, rhs: E) {
+        *self = self.clone() - rhs;
+    }
+}
+
+impl<S: ExpressionStorage, E: Into<Self>> MulAssign<E> for GenericExpression<S> {
+    fn mul_assign(&mut self, rhs: E) {
+        *self = self.clone() * rhs;
+    }
+}
+
+impl<S: ExpressionStorage, E: Into<Self>> DivAssign<E> for GenericExpression<S> {
+    fn div_assign(&mut self, rhs: E) {
+        *self = self.clone() / rhs;
+    }
+}
+
+impl<S: ExpressionStorage, E: Into<Self>> RemAssign<E> for GenericExpression<S> {
+    fn rem_assign(&mut self, rhs: E) {
+        *self = self.clone() % rhs;
+    }
+}
+
+impl<S: ExpressionStorage, E: Into<Self>> BitAndAssign<E> for GenericExpression<S> {
+    fn bitand_assign(&mut self, rhs: E) {
+        *self = self.clone() & rhs;
+    }
+}
+
+impl<S: ExpressionStorage, E: Into<Self>> BitOrAssign<E> for GenericExpression<S> {
+    fn bitor_assign(&mut self, rhs: E) {
+        *self = self.clone() | rhs;
     }
 }
