@@ -407,7 +407,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                             },
                         )
                         .0;
-                    if val_exp != true.into() {
+                    if val_exp != true {
                         *subexp = format!(
                             "(({} != 0) ? {subexp} : 0.0)",
                             expr_to_metal_string(val_exp)
@@ -875,8 +875,8 @@ mod tests {
                     .permute::<_, Axes4<0, 2, 1, 3>>();
 
                 // Rotary embed queries and keys
-                let queries = apply_rotary_embeddings_ggml(queries, PrevSeq::const_size().into());
-                let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::const_size().into());
+                let queries = apply_rotary_embeddings_ggml(queries, PrevSeq::const_size().big());
+                let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::const_size().big());
 
                 // Add KV cache
                 let (keys, values) = (

@@ -23,18 +23,15 @@ impl<
     for Conv1D<CHANNELS_IN, CHANNELS_OUT, KERNEL, STRIDE, DILATION, CHANNELS_IN_TIMES_KERNEL>
 {
     fn initialize(cx: &mut Graph) -> Self {
-        let conv = Self {
-            weight: cx.named_tensor("Weight"),
-        };
-
         // Init weight as uniform(-1, 1)
         let mut rng = thread_rng();
-        conv.weight.set(
-            (0..(CHANNELS_IN * CHANNELS_OUT * KERNEL))
-                .map(|_| rng.gen_range(-1_f32..1_f32))
-                .collect::<Vec<_>>(),
-        );
-        conv
+        Self {
+            weight: cx.named_tensor("Weight").set(
+                (0..(CHANNELS_IN * CHANNELS_OUT * KERNEL))
+                    .map(|_| rng.gen_range(-1_f32..1_f32))
+                    .collect::<Vec<_>>(),
+            ),
+        }
     }
 }
 
@@ -118,18 +115,15 @@ impl<
     >
 {
     fn initialize(cx: &mut Graph) -> Self {
-        let conv = Self {
-            weight: cx.named_tensor("Weight"),
-        };
-
         // Init weight as uniform(-1, 1)
         let mut rng = thread_rng();
-        conv.weight.set(
-            (0..(CHANNELS_IN * CHANNELS_OUT * KERNELX * KERNELY))
-                .map(|_| rng.gen_range(-1_f32..1_f32))
-                .collect::<Vec<_>>(),
-        );
-        conv
+        Self {
+            weight: cx.named_tensor("Weight").set(
+                (0..(CHANNELS_IN * CHANNELS_OUT * KERNELX * KERNELY))
+                    .map(|_| rng.gen_range(-1_f32..1_f32))
+                    .collect::<Vec<_>>(),
+            ),
+        }
     }
 }
 
