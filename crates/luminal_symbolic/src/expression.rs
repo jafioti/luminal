@@ -146,8 +146,11 @@ impl<S: ExpressionStorage> GenericExpression<S> {
     /// Maximum
     pub fn max<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
-        if rhs == self {
+        if rhs == self || rhs == 0 {
             return self;
+        }
+        if self == 0 {
+            return rhs;
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Max);

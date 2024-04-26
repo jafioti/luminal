@@ -395,9 +395,9 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> (Vec<char>, 
     )
 }
 
-fn expr_to_metal_string(expr: BigExpression) -> String {
+fn expr_to_metal_string(expr: &BigExpression) -> String {
     let mut symbols = vec![];
-    for term in expr.terms {
+    for term in expr.terms.clone() {
         let new_symbol = match term {
             Term::Num(n) => n.to_string(),
             Term::Var(c) => {
@@ -440,8 +440,8 @@ fn expr_to_metal_string(expr: BigExpression) -> String {
 
 fn get_idx_valid_exps(shape: ShapeTracker) -> (String, String) {
     (
-        expr_to_metal_string(shape.index_expression()),
-        expr_to_metal_string(shape.valid_expression()),
+        expr_to_metal_string(&shape.index_expression()),
+        expr_to_metal_string(&shape.valid_expression()),
     )
 }
 
