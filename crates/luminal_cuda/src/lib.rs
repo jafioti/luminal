@@ -159,7 +159,7 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker]) -> (Vec<char>, String) {
                         .into_iter()
                         .flat_map(|i| [i.0.into(), i.1.into()]),
                 )
-                .chain(st.slices.into_iter().flat_map(|i| [i.0.into(), i.1.into()]))
+                .chain(st.mask.into_iter().flat_map(|i| [i.0.into(), i.1.into()]))
         })
         .flat_map(|d| d.to_symbols())
         .unique()
@@ -234,4 +234,15 @@ fn compile_and_load_kernel(mut code: String, device: &Arc<CudaDevice>) -> CudaFu
             .unwrap();
     }
     device.get_func(&name, &name).unwrap()
+}
+
+#[macro_export]
+macro_rules! debug_type {
+    ($t: ty) => {
+        impl<T> std::fmt::Debug for $t {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, stringify!($t))
+            }
+        }
+    };
 }
