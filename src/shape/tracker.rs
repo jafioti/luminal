@@ -274,7 +274,7 @@ impl ShapeTracker {
     pub fn resolve_global_dyn_dims_stack(
         &mut self,
         dyn_dim_map: &FxHashMap<char, usize>,
-        stack: &mut Vec<i32>,
+        stack: &mut Vec<i64>,
     ) {
         for d in self.dims.iter_mut() {
             *d = d.exec_stack(dyn_dim_map, stack).unwrap().into();

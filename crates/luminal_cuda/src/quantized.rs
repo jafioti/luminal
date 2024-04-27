@@ -1,6 +1,5 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use fmt_derive::Debug;
 use luminal_cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
 use petgraph::visit::EdgeRef;
 
@@ -14,12 +13,13 @@ use crate::{
 };
 
 /// Multiplies a BxMxK matrix with a KxN matrix, resulting in a BxMxN matrix. This expects the first input to be a quantized 2D matrix
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct QuantizedMatmul<T> {
     matvec_function: CudaFunction,
     device: Arc<CudaDevice>,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(QuantizedMatmul<T>);
 
 impl<T: CudaFloat> QuantizedMatmul<T> {
     fn new(device: Arc<CudaDevice>) -> Self {
@@ -170,13 +170,14 @@ impl<T: 'static + CudaFloat> Operator for QuantizedMatmul<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct QuantizedGather<T> {
     pipeline: CudaFunction,
     device: Arc<CudaDevice>,
     embed_dim: usize,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(QuantizedGather<T>);
 
 impl<T: CudaFloat> QuantizedGather<T> {
     fn new(device: Arc<CudaDevice>, embed_dim: usize) -> Self {

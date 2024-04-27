@@ -33,8 +33,7 @@ binary_test!(|a, b| a + b, |a, b| a + b, test_add, f16);
 binary_test!(|a, b| a - b, |a, b| a - b, test_sub, f16);
 binary_test!(|a, b| a * b, |a, b| a * b, test_mul, f16);
 binary_test!(|a, b| a / b, |a, b| a * b.recip(), test_div, f16);
-// binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f16);
-single_binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f16, 3); // Why don't larger max tests work?
+binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f16);
 binary_test!(|a, b| a.min(b), |a, b| a.minimum(b), test_min, f16);
 
 #[test]

@@ -1,6 +1,5 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use fmt_derive::Debug;
 use luminal_cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
 
 use luminal::{
@@ -16,7 +15,7 @@ use crate::{
     render_dyn_dim_inputs, CudaData, CudaFloat,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaSub<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -24,6 +23,7 @@ pub struct CudaSub<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(CudaSub<T>);
 
 impl<T: CudaFloat> CudaSub<T> {
     pub fn new(
@@ -140,7 +140,7 @@ impl<T: CudaFloat> Compiler for SubtractionCompiler<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaEqual<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -148,6 +148,7 @@ pub struct CudaEqual<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(CudaEqual<T>);
 
 impl<T: CudaFloat> CudaEqual<T> {
     pub fn new(
@@ -263,13 +264,14 @@ impl<T: CudaFloat> Compiler for EqualCompiler<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaGather<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
     pub embed_dim: usize,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(CudaGather<T>);
 
 impl<T: CudaFloat> CudaGather<T> {
     pub fn new(device: Arc<CudaDevice>, embed_dim: usize) -> Self {

@@ -1,7 +1,6 @@
 use crate::{compile_and_load_kernel, get_buffer_from_tensor, input_dyn_dims, CudaData, CudaFloat};
 
 use super::{get_idx_valid_exps, render_dyn_dim_inputs};
-use fmt_derive::Debug;
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
@@ -19,8 +18,9 @@ use luminal::{
 };
 
 /// Copy a tensor to the GPU
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaCopyToDevice<T>(Arc<CudaDevice>, PhantomData<T>);
+crate::debug_type!(CudaCopyToDevice<T>);
 
 impl<T> CudaCopyToDevice<T> {
     pub fn new(dev: Arc<CudaDevice>) -> Self {
@@ -45,8 +45,9 @@ impl<T: CudaFloat> Operator for CudaCopyToDevice<T> {
 }
 
 /// Copy a tensor from the GPU
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaCopyFromDevice<T>(Arc<CudaDevice>, PhantomData<T>);
+crate::debug_type!(CudaCopyFromDevice<T>);
 
 impl<T> CudaCopyFromDevice<T> {
     pub fn new(dev: Arc<CudaDevice>) -> Self {
@@ -113,7 +114,7 @@ impl<T: CudaFloat> Operator for CudaConstant<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaContiguous<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -121,6 +122,7 @@ pub struct CudaContiguous<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
 }
+crate::debug_type!(CudaContiguous<T>);
 
 impl<T: CudaFloat> CudaContiguous<T> {
     pub fn new(
@@ -172,12 +174,13 @@ impl<T: CudaFloat> Operator for CudaContiguous<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaLog2<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(CudaLog2<T>);
 
 impl<T: CudaFloat> CudaLog2<T> {
     pub fn new(device: Arc<CudaDevice>) -> Self {
@@ -227,12 +230,13 @@ impl<T: CudaFloat> Operator for CudaLog2<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaExp2<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(CudaExp2<T>);
 
 impl<T: CudaFloat> CudaExp2<T> {
     pub fn new(device: Arc<CudaDevice>) -> Self {
@@ -281,12 +285,13 @@ impl<T: CudaFloat> Operator for CudaExp2<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaSqrt<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(CudaSqrt<T>);
 
 impl<T: CudaFloat> CudaSqrt<T> {
     pub fn new(device: Arc<CudaDevice>) -> Self {
@@ -339,12 +344,13 @@ impl<T: CudaFloat> Operator for CudaSqrt<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaSin<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(CudaSin<T>);
 
 impl<T: CudaFloat> CudaSin<T> {
     pub fn new(device: Arc<CudaDevice>) -> Self {
@@ -394,12 +400,13 @@ impl<T: CudaFloat> Operator for CudaSin<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaRecip<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(CudaRecip<T>);
 
 impl<T: CudaFloat> CudaRecip<T> {
     pub fn new(device: Arc<CudaDevice>) -> Self {
@@ -453,7 +460,7 @@ impl<T: CudaFloat> Operator for CudaRecip<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaAdd<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -461,6 +468,7 @@ pub struct CudaAdd<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
 }
+crate::debug_type!(CudaAdd<T>);
 
 impl<T: CudaFloat> CudaAdd<T> {
     pub fn new(
@@ -526,7 +534,7 @@ impl<T: CudaFloat> Operator for CudaAdd<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaMul<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -534,6 +542,7 @@ pub struct CudaMul<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
 }
+crate::debug_type!(CudaMul<T>);
 
 impl<T: CudaFloat> CudaMul<T> {
     pub fn new(
@@ -596,7 +605,7 @@ impl<T: CudaFloat> Operator for CudaMul<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaMod<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -604,6 +613,7 @@ pub struct CudaMod<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
 }
+crate::debug_type!(CudaMod<T>);
 
 impl<T: CudaFloat> CudaMod<T> {
     pub fn new(
@@ -666,7 +676,7 @@ impl<T: CudaFloat> Operator for CudaMod<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaLessThan<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -674,6 +684,7 @@ pub struct CudaLessThan<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
 }
+crate::debug_type!(CudaLessThan<T>);
 
 impl<T: CudaFloat> CudaLessThan<T> {
     pub fn new(
@@ -742,7 +753,7 @@ impl<T: CudaFloat> Operator for CudaLessThan<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaSumReduce<T> {
     function: CudaFunction,
     pub device: Arc<CudaDevice>,
@@ -751,6 +762,7 @@ pub struct CudaSumReduce<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
 }
+crate::debug_type!(CudaSumReduce<T>);
 
 impl<T: CudaFloat> CudaSumReduce<T> {
     pub fn new(
@@ -835,7 +847,7 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaMaxReduce<T> {
     function: CudaFunction,
     pub device: Arc<CudaDevice>,
@@ -844,6 +856,7 @@ pub struct CudaMaxReduce<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
 }
+crate::debug_type!(CudaMaxReduce<T>);
 
 impl<T: CudaFloat> CudaMaxReduce<T> {
     pub fn new(

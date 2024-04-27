@@ -1,9 +1,7 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use luminal_cudarc::driver::{CudaDevice, CudaFunction, LaunchAsync, LaunchConfig};
-
-use fmt_derive::Debug;
 use luminal::prelude::*;
+use luminal_cudarc::driver::{CudaDevice, CudaFunction, LaunchAsync, LaunchConfig};
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -13,7 +11,7 @@ use crate::{
     CudaData, CudaFloat,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CudaARange<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
@@ -21,6 +19,7 @@ pub struct CudaARange<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
+crate::debug_type!(CudaARange<T>);
 
 impl<T: CudaFloat> CudaARange<T> {
     pub fn new(
