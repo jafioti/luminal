@@ -209,6 +209,23 @@ impl<
             .reshape::<R3<CHANNELS_OUT, DIMX_OUT, DIMY_OUT>>()
     }
 }
+pub struct Conv3D<
+    const CHANNELS_IN: usize,
+    const CHANNELS_OUT: usize,
+    const KERNELX: usize,
+    const KERNELY: usize,
+    const KERNELZ: usize,
+    const STRIDEX: usize,
+    const STRIDEY: usize,
+    const STRIDEZ: usize,
+    const DILATIONX: usize,
+    const DILATIONY: usize,
+    const DILATIONZ: usize,
+    const CHANNELS_IN_TIMES_KERNELX_KERNELY_KERNELZ: usize,
+> {
+    pub weight: GraphTensor<R2<CHANNELS_OUT, CHANNELS_IN_TIMES_KERNELX_KERNELY_KERNELZ>>,
+}
+
 
 #[cfg(test)]
 mod tests {
