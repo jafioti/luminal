@@ -523,7 +523,6 @@ pub fn display_graph(
         );
     }
 
-    println!("GRAPGH STRING: {:?}", graph_string.len());
     let url = format!(
         "https://dreampuf.github.io/GraphvizOnline/#{}",
         urlencoding::encode(&graph_string)
