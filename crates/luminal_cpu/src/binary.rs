@@ -196,19 +196,35 @@ pub struct GatherCompiler;
 impl Compiler for GatherCompiler {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
-        let arange = op::<ARange>();
-        let eq = unary::<Equal>(arange);
-        let inp = node();
-        let mul = binary::<Mul>(inp.clone(), eq.clone());
+        let indexes = node();
+        let eq = binary::<Equal>(indexes.clone(), op::<ARange>());
+        let embedding = node();
+        let mul = binary::<Mul>(embedding.clone(), eq.clone());
         let sum_reduce = unary::<SumReduce>(mul.clone());
         let mut s = sum_reduce.clone().search(graph);
         while s.next_match() {
-            if s.check_no_delete(&[sum_reduce.id]) {
+            if s.check_no_delete(&[embedding.id]) {
                 continue;
             }
+            let emb_shape = graph
+                .edges_connecting(s.get(&embedding), s.get(&mul))
+                .next()
+                .unwrap()
+                .weight()
+                .as_data()
+                .unwrap()
+                .2;
+            let index_shape = graph
+                .edges_connecting(s.get(&indexes), s.get(&eq))
+                .next()
+                .unwrap()
+                .weight()
+                .as_data()
+                .unwrap()
+                .2;
             let embed_dim = graph
                 .graph
-                .edges_connecting(s.get(&inp), s.get(&mul))
+                .edges_connecting(s.get(&embedding), s.get(&mul))
                 .next()
                 .unwrap()
                 .weight()
@@ -218,11 +234,14 @@ impl Compiler for GatherCompiler {
                 .shape()[2]
                 .to_usize()
                 .unwrap();
-            let gather = graph.add_op(Gather { embed_dim }).finish();
-            move_incoming_edge(s.get(&eq), gather, &mut graph.graph);
-            graph.safe_remove_node(s.get(&eq), 1);
-            move_incoming_edge(s.get(&mul), gather, &mut graph.graph);
+
+            let gather = graph
+                .add_op(Gather { embed_dim })
+                .input(s.get(&indexes), 0, index_shape)
+                .input(s.get(&embedding), 0, emb_shape)
+                .finish();
             move_outgoing_edge(s.get(&sum_reduce), gather, &mut graph.graph);
+            graph.remove_node(s.get(&sum_reduce));
             s.try_delete();
         }
     }

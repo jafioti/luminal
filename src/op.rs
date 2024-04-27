@@ -316,7 +316,6 @@ impl Operator for SumReduce {
         let input = get_vec(&inp[0].0);
         let expr = (inp[0].1.index_expression(), inp[0].1.valid_expression());
         let mut stack = vec![];
-
         for i in 0..front_size {
             for j in 0..back_size {
                 for k in 0..dim_size {
@@ -363,7 +362,7 @@ fn get_vec<'a>(tensor: &'a InputTensor<'a>) -> &'a Vec<f32> {
 fn get_index(
     data: &[f32],
     (ind, val): &(BigExpression, BigExpression),
-    stack: &mut Vec<i32>,
+    stack: &mut Vec<i64>,
     index: usize,
 ) -> f32 {
     if val.exec_single_var_stack(index, stack) != 0 {
