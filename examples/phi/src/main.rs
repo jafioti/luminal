@@ -81,7 +81,6 @@ fn main() {
             &mut model_weights,
         ),
     );
-    cx.display();
     let cache_src_set = downstream(&cache_src, &cx);
     let cache_dest_set = cache_dest.to_ids();
     println!("\t\t - {}ms", now.elapsed().as_millis());

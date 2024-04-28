@@ -20,7 +20,7 @@ use luminal::{
 /// Copy a tensor to the GPU
 #[derive(Clone)]
 pub struct CudaCopyToDevice<T>(Arc<CudaDevice>, PhantomData<T>);
-crate::debug_type!(CudaCopyToDevice<T>);
+crate::debug_type!(CudaCopyToDevice);
 
 impl<T> CudaCopyToDevice<T> {
     pub fn new(dev: Arc<CudaDevice>) -> Self {
@@ -47,7 +47,7 @@ impl<T: CudaFloat> Operator for CudaCopyToDevice<T> {
 /// Copy a tensor from the GPU
 #[derive(Clone)]
 pub struct CudaCopyFromDevice<T>(Arc<CudaDevice>, PhantomData<T>);
-crate::debug_type!(CudaCopyFromDevice<T>);
+crate::debug_type!(CudaCopyFromDevice);
 
 impl<T> CudaCopyFromDevice<T> {
     pub fn new(dev: Arc<CudaDevice>) -> Self {
@@ -112,6 +112,15 @@ impl<T: CudaFloat> Operator for CudaConstant<T> {
         self.device.htod_copy_into(vec![value], &mut a).unwrap();
         vec![Tensor::new(CudaData(a))]
     }
+
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        if key == "elementwise" {
+            if let ConstantValue::Float(f) = self.value {
+                return Some(Box::new(format!("{f:?}")));
+            }
+        }
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -122,7 +131,7 @@ pub struct CudaContiguous<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
 }
-crate::debug_type!(CudaContiguous<T>);
+crate::debug_type!(CudaContiguous);
 
 impl<T: CudaFloat> CudaContiguous<T> {
     pub fn new(
@@ -172,6 +181,13 @@ impl<T: CudaFloat> Operator for CudaContiguous<T> {
 
         vec![Tensor::new(CudaData(out))]
     }
+
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        if key == "elementwise" {
+            return Some(Box::new("input0".to_string()));
+        }
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -180,7 +196,7 @@ pub struct CudaLog2<T> {
     device: Arc<CudaDevice>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(CudaLog2<T>);
+crate::debug_type!(CudaLog2);
 
 impl<T: CudaFloat> CudaLog2<T> {
     pub fn new(device: Arc<CudaDevice>) -> Self {
@@ -236,7 +252,7 @@ pub struct CudaExp2<T> {
     device: Arc<CudaDevice>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(CudaExp2<T>);
+crate::debug_type!(CudaExp2);
 
 impl<T: CudaFloat> CudaExp2<T> {
     pub fn new(device: Arc<CudaDevice>) -> Self {
@@ -291,7 +307,7 @@ pub struct CudaSqrt<T> {
     device: Arc<CudaDevice>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(CudaSqrt<T>);
+crate::debug_type!(CudaSqrt);
 
 impl<T: CudaFloat> CudaSqrt<T> {
     pub fn new(device: Arc<CudaDevice>) -> Self {
@@ -350,13 +366,15 @@ pub struct CudaSin<T> {
     device: Arc<CudaDevice>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(CudaSin<T>);
+crate::debug_type!(CudaSin);
 
 impl<T: CudaFloat> CudaSin<T> {
     pub fn new(device: Arc<CudaDevice>) -> Self {
         let type_name = T::type_name();
-        let code = format!(
-            "
+        Self {
+            function: compile_and_load_kernel(
+                format!(
+                    "
 #include \"cuda_fp16.h\"
 extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, int numel) {{
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -364,9 +382,9 @@ extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, in
         out[i] = sin(inp[i]);
     }}
 }}"
-        );
-        Self {
-            function: compile_and_load_kernel(code, &device),
+                ),
+                &device,
+            ),
             device,
             _phantom: Default::default(),
         }
@@ -406,7 +424,7 @@ pub struct CudaRecip<T> {
     device: Arc<CudaDevice>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(CudaRecip<T>);
+crate::debug_type!(CudaRecip);
 
 impl<T: CudaFloat> CudaRecip<T> {
     pub fn new(device: Arc<CudaDevice>) -> Self {
@@ -468,7 +486,7 @@ pub struct CudaAdd<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
 }
-crate::debug_type!(CudaAdd<T>);
+crate::debug_type!(CudaAdd);
 
 impl<T: CudaFloat> CudaAdd<T> {
     pub fn new(
@@ -542,7 +560,7 @@ pub struct CudaMul<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
 }
-crate::debug_type!(CudaMul<T>);
+crate::debug_type!(CudaMul);
 
 impl<T: CudaFloat> CudaMul<T> {
     pub fn new(
@@ -613,7 +631,7 @@ pub struct CudaMod<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
 }
-crate::debug_type!(CudaMod<T>);
+crate::debug_type!(CudaMod);
 
 impl<T: CudaFloat> CudaMod<T> {
     pub fn new(
@@ -684,7 +702,7 @@ pub struct CudaLessThan<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
 }
-crate::debug_type!(CudaLessThan<T>);
+crate::debug_type!(CudaLessThan);
 
 impl<T: CudaFloat> CudaLessThan<T> {
     pub fn new(
@@ -762,7 +780,7 @@ pub struct CudaSumReduce<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
 }
-crate::debug_type!(CudaSumReduce<T>);
+crate::debug_type!(CudaSumReduce);
 
 impl<T: CudaFloat> CudaSumReduce<T> {
     pub fn new(
@@ -856,7 +874,7 @@ pub struct CudaMaxReduce<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
 }
-crate::debug_type!(CudaMaxReduce<T>);
+crate::debug_type!(CudaMaxReduce);
 
 impl<T: CudaFloat> CudaMaxReduce<T> {
     pub fn new(
@@ -1105,82 +1123,6 @@ impl<T: CudaFloat> Compiler for PrimitiveCompiler<T> {
                     &graph.dyn_map,
                 ));
             }
-        }
-    }
-}
-
-// Sometimes CopyTo -> CopyFrom and CopyFrom -> CopyTo patterns remain, so let's clean them up
-#[derive(Debug, Default)]
-pub struct CopyCompiler<T>(PhantomData<T>);
-
-impl<T: CudaFloat> Compiler for CopyCompiler<T> {
-    type Output = ();
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
-        for (first, second) in graph
-            .edge_indices()
-            .filter_map(|e| graph.edge_endpoints(e))
-            .filter(|(a, b)| {
-                (graph
-                    .node_weight(*a)
-                    .unwrap()
-                    .as_any()
-                    .is::<CudaCopyToDevice<T>>()
-                    && graph
-                        .node_weight(*b)
-                        .unwrap()
-                        .as_any()
-                        .is::<CudaCopyFromDevice<T>>())
-                    || (graph
-                        .node_weight(*a)
-                        .unwrap()
-                        .as_any()
-                        .is::<CudaCopyFromDevice<T>>()
-                        && graph
-                            .node_weight(*b)
-                            .unwrap()
-                            .as_any()
-                            .is::<CudaCopyToDevice<T>>())
-            })
-            .unique_by(|n| n.0)
-            .unique_by(|n| n.1)
-            .collect::<Vec<_>>()
-        {
-            if graph
-                .edges_directed(first, petgraph::Direction::Outgoing)
-                .filter(|e| graph.contains_node(e.target()))
-                .filter(|e| {
-                    !graph
-                        .node_weight(e.target())
-                        .unwrap()
-                        .as_any()
-                        .is::<CudaCopyFromDevice<T>>()
-                        && !graph
-                            .node_weight(e.target())
-                            .unwrap()
-                            .as_any()
-                            .is::<CudaCopyToDevice<T>>()
-                })
-                .count()
-                > 0
-                || graph.no_delete.contains(&first)
-            {
-                continue;
-            }
-            let source = graph.get_sources(first)[0];
-            move_outgoing_edge(second, source.0, graph);
-            remap(second, source.0, &mut ids, graph);
-            graph.remove_node(second);
-            for dest in graph
-                .get_dests(first)
-                .iter()
-                .map(|(i, _)| *i)
-                .collect::<Vec<_>>()
-            {
-                move_outgoing_edge(dest, source.0, graph);
-                remap(dest, source.0, &mut ids, graph);
-                graph.remove_node(dest);
-            }
-            graph.remove_node(first);
         }
     }
 }
