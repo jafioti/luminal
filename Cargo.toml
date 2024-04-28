@@ -6,7 +6,7 @@ description = "Deep learning at the speed of light."
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-luminal_symbolic = {path="./crates/luminal_symbolic"}
+luminal_symbolic = { path = "./crates/luminal_symbolic" }
 itertools = "0.11.0"
 num-traits = "0.2.16"
 petgraph = "0.6.4"
@@ -32,9 +32,6 @@ members = [
     "crates/luminal_cpu",
     "crates/luminal_nn",
     "crates/luminal_training",
-    "crates/luminal_symbolic", "crates/luminal_server",
+    "crates/luminal_symbolic",
 ]
-exclude = [
-    "crates/luminal_metal",
-    "crates/luminal_cuda",
-]
+exclude = ["crates/luminal_metal", "crates/luminal_cuda"]
