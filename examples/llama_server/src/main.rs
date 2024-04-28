@@ -4,6 +4,8 @@ use axum::{
     Json, Router,
 };
 mod chat;
+mod llama;
+
 use chat::{respond_chat_request, ChatRequest, ChatResponse};
 
 #[tokio::main]
