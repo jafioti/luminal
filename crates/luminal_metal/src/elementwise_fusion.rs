@@ -1090,9 +1090,9 @@ mod tests {
         let unopt_out = out.data();
         out.drop();
 
-        cx.compile(<(GenericCompiler, MetalCompiler<f32>)>::default(), &mut out);
+        cx.compile(<(GenericCompiler, MetalCompiler<f16>)>::default(), &mut out);
         cx.execute();
 
-        assert_close_precision(&out.data(), &unopt_out, 1e-3);
+        assert_close_precision(&out.data(), &unopt_out, 1e-2);
     }
 }
