@@ -3,9 +3,11 @@ mod matmul;
 mod other;
 mod prim;
 mod quantized;
+mod unary;
 pub use quantized::*;
 
 #[cfg(test)]
+#[macro_use]
 mod tests;
 
 use itertools::Itertools;
@@ -20,14 +22,25 @@ use std::{collections::hash_map::DefaultHasher, ffi::c_void, fmt::Write, hash::H
 
 use luminal::{op::InputTensor, prelude::*};
 
+/// Compile graphs to run on Metal-supported macOS devices in supported data formats
 pub type CudaCompiler<T> = (
     prim::PrimitiveCompiler<T>,
+    SpecialOpsCompiler<T>,
+    other::CopyCompiler<T>,
+);
+
+/// Compiler to replace metal ops with specialized variants
+pub type SpecialOpsCompiler<T> = (
     binary::SubtractionCompiler<T>,
     binary::EqualCompiler<T>,
     other::ARangeCompiler<T>,
     binary::GatherCompiler<T>,
+    unary::CudaExpCompiler<T>,
+    unary::CudaCosCompiler<T>,
+    unary::MeanReduceCompiler<T>,
+    unary::StdNormCompiler<T>,
+    unary::SoftmaxCompiler<T>,
     matmul::MatMulCompiler<T>,
-    prim::CopyCompiler<T>,
 );
 
 pub trait CudaFloat:
