@@ -17,7 +17,7 @@ use luminal::{
 
 #[derive(Clone)]
 pub struct Matmul<T>(Arc<CudaBlas>, Arc<CudaDevice>, PhantomData<T>);
-crate::debug_type!(Matmul<T>);
+crate::debug_type!(Matmul);
 
 impl<T: CudaFloat> Operator for Matmul<T> {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -32,7 +32,6 @@ impl<T: CudaFloat> Operator for Matmul<T> {
             a_shape[a_shape.len() - 1].to_usize().unwrap() as i32,
             b_shape[b_shape.len() - 1].to_usize().unwrap() as i32,
         );
-        println!("{:?}", (batch_size, m, k, n));
         let a = get_buffer_from_tensor::<T>(&inp[0].0);
         let b = get_buffer_from_tensor::<T>(&inp[1].0);
         let mut out = self

@@ -30,7 +30,7 @@ pub struct CudaMeanReduce<T> {
     pub dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(CudaMeanReduce<T>);
+crate::debug_type!(CudaMeanReduce);
 
 impl<T> PartialEq for CudaMeanReduce<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -175,7 +175,7 @@ pub struct CudaStdNorm<T> {
     epsilon: f32, // Epsilon
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(CudaStdNorm<T>);
+crate::debug_type!(CudaStdNorm);
 
 impl<T> PartialEq for CudaStdNorm<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -403,7 +403,7 @@ pub struct CudaExp<T> {
     device: Arc<CudaDevice>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(CudaExp<T>);
+crate::debug_type!(CudaExp);
 
 impl<T: CudaFloat> CudaExp<T> {
     fn new(device: Arc<CudaDevice>) -> Self {
@@ -506,7 +506,7 @@ pub struct CudaCos<T> {
     device: Arc<CudaDevice>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(CudaCos<T>);
+crate::debug_type!(CudaCos);
 
 impl<T: CudaFloat> CudaCos<T> {
     fn new(device: Arc<CudaDevice>) -> Self {
@@ -611,7 +611,7 @@ pub struct CudaSoftmax<T> {
     device: Arc<CudaDevice>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(CudaSoftmax<T>);
+crate::debug_type!(CudaSoftmax);
 
 impl<T: CudaFloat> CudaSoftmax<T> {
     fn new(device: Arc<CudaDevice>) -> Self {

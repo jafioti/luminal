@@ -20,7 +20,7 @@ pub struct CudaARange<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(CudaARange<T>);
+crate::debug_type!(CudaARange);
 
 impl<T: CudaFloat> CudaARange<T> {
     pub fn new(

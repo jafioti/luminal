@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{any::Any, marker::PhantomData, sync::Arc};
 
 use luminal_cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
 
@@ -23,7 +23,7 @@ pub struct CudaSub<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(CudaSub<T>);
+crate::debug_type!(CudaSub);
 
 impl<T: CudaFloat> CudaSub<T> {
     pub fn new(
@@ -79,6 +79,13 @@ impl<T: CudaFloat> Operator for CudaSub<T> {
         }
 
         vec![Tensor::new(CudaData(out))]
+    }
+
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        if key == "elementwise" {
+            return Some(Box::new("input0 - input1".to_string()));
+        }
+        None
     }
 }
 
@@ -148,7 +155,7 @@ pub struct CudaEqual<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(CudaEqual<T>);
+crate::debug_type!(CudaEqual);
 
 impl<T: CudaFloat> CudaEqual<T> {
     pub fn new(
@@ -204,6 +211,13 @@ impl<T: CudaFloat> Operator for CudaEqual<T> {
         }
 
         vec![Tensor::new(CudaData(out))]
+    }
+
+    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        if key == "elementwise" {
+            return Some(Box::new("(float)(input0 == input1)".to_string()));
+        }
+        None
     }
 }
 
@@ -271,7 +285,7 @@ pub struct CudaGather<T> {
     pub embed_dim: usize,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(CudaGather<T>);
+crate::debug_type!(CudaGather);
 
 impl<T: CudaFloat> CudaGather<T> {
     pub fn new(device: Arc<CudaDevice>, embed_dim: usize) -> Self {

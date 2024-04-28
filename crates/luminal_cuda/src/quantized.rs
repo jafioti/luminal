@@ -19,7 +19,7 @@ pub struct QuantizedMatmul<T> {
     device: Arc<CudaDevice>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(QuantizedMatmul<T>);
+crate::debug_type!(QuantizedMatmul);
 
 impl<T: CudaFloat> QuantizedMatmul<T> {
     fn new(device: Arc<CudaDevice>) -> Self {
@@ -177,7 +177,7 @@ pub struct QuantizedGather<T> {
     embed_dim: usize,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(QuantizedGather<T>);
+crate::debug_type!(QuantizedGather);
 
 impl<T: CudaFloat> QuantizedGather<T> {
     fn new(device: Arc<CudaDevice>, embed_dim: usize) -> Self {
