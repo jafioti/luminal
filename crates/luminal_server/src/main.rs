@@ -3,43 +3,8 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde::{Deserialize, Serialize};
-
-#[derive(Deserialize)]
-struct ChatRequest {
-    model: String,
-    messages: Vec<Message>,
-}
-
-#[derive(Deserialize, Serialize)]
-struct Message {
-    role: String,
-    content: String,
-}
-
-#[derive(Serialize)]
-struct ChatResponse {
-    id: String,
-    object: String,
-    created: i64,
-    model: String,
-    choices: Vec<Choice>,
-    usage: Usage,
-}
-
-#[derive(Serialize)]
-struct Choice {
-    index: usize,
-    message: Message,
-    finish_reason: String,
-}
-
-#[derive(Serialize)]
-struct Usage {
-    prompt_tokens: u32,
-    completion_tokens: u32,
-    total_tokens: u32,
-}
+mod chat;
+use chat::{respond_chat_request, ChatRequest, ChatResponse};
 
 #[tokio::main]
 async fn main() {
@@ -66,25 +31,5 @@ async fn root() -> &'static str {
 
 // mock chat completions handler
 async fn chat_completions(Json(payload): Json<ChatRequest>) -> (StatusCode, Json<ChatResponse>) {
-    let response = ChatResponse {
-        id: "chatcmpl-9J4pxGD1wK3SQzmt70sspIuaZvFaP".to_string(),
-        object: "chat.completion".to_string(),
-        created: 1714333853,
-        model: "gpt-3.5-turbo-0125".to_string(),
-        choices: vec![Choice {
-            index: 0,
-            message: Message {
-                role: "assistant".to_string(),
-                content: "Hello! How can I assist you today?".to_string(),
-            },
-            finish_reason: "stop".to_string(),
-        }],
-        usage: Usage {
-            prompt_tokens: 19,
-            completion_tokens: 9,
-            total_tokens: 28,
-        },
-    };
-
-    (StatusCode::OK, Json(response))
+    (StatusCode::OK, Json(respond_chat_request(payload).await))
 }
