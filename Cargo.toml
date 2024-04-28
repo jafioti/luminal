@@ -32,7 +32,7 @@ members = [
     "crates/luminal_cpu",
     "crates/luminal_nn",
     "crates/luminal_training",
-    "crates/luminal_symbolic",
+    "crates/luminal_symbolic", "crates/luminal_server",
 ]
 exclude = [
     "crates/luminal_metal",
