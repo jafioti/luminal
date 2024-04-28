@@ -1,4 +1,5 @@
 mod binary;
+mod elementwise_fusion;
 mod matmul;
 mod other;
 mod prim;
@@ -22,14 +23,15 @@ use std::{collections::hash_map::DefaultHasher, ffi::c_void, fmt::Write, hash::H
 
 use luminal::{op::InputTensor, prelude::*};
 
-/// Compile graphs to run on Metal-supported macOS devices in supported data formats
+/// Compile graphs to run on CUDA GPUs in supported data formats
 pub type CudaCompiler<T> = (
     prim::PrimitiveCompiler<T>,
     SpecialOpsCompiler<T>,
     other::CopyCompiler<T>,
+    elementwise_fusion::ElementwiseFusionCompiler<T>,
 );
 
-/// Compiler to replace metal ops with specialized variants
+/// Compiler to replace cuda primops with specialized variants
 pub type SpecialOpsCompiler<T> = (
     binary::SubtractionCompiler<T>,
     binary::EqualCompiler<T>,
@@ -121,9 +123,9 @@ impl CudaFloat for u8 {
     }
 }
 
-fn expr_to_cuda_string(expr: BigExpression) -> String {
+fn expr_to_cuda_string(expr: &BigExpression) -> String {
     let mut symbols = vec![];
-    for term in expr.terms {
+    for term in expr.terms.clone() {
         let new_symbol = match term {
             Term::Num(n) => n.to_string(),
             Term::Var(c) => {
@@ -156,8 +158,8 @@ fn expr_to_cuda_string(expr: BigExpression) -> String {
 
 fn get_idx_valid_exps(shape: ShapeTracker) -> (String, String) {
     (
-        expr_to_cuda_string(shape.index_expression()),
-        expr_to_cuda_string(shape.valid_expression()),
+        expr_to_cuda_string(&shape.index_expression()),
+        expr_to_cuda_string(&shape.valid_expression()),
     )
 }
 
@@ -251,8 +253,8 @@ fn compile_and_load_kernel(mut code: String, device: &Arc<CudaDevice>) -> CudaFu
 
 #[macro_export]
 macro_rules! debug_type {
-    ($t: ty) => {
-        impl<T> std::fmt::Debug for $t {
+    ($t: ident) => {
+        impl<T> std::fmt::Debug for $t<T> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(f, stringify!($t))
             }
