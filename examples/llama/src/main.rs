@@ -45,7 +45,7 @@ fn main() {
         .collect();
     cache_src.set_dyn(vec![], &[1, model::N_KV_HEADS, 0, model::HEAD_DIM]);
     let model = model::MistralLM::initialize(&mut cx);
-    let mut model_weights = downstream(params(&model), &cx);
+    let mut model_weights = params(&model);
     cx.keep_tensors(&model_weights);
     let (logits, mut cache_dest) = model.forward((input, &cache_src, PhantomData::<Dyn<'t'>>));
     let mut logits = logits
@@ -67,9 +67,9 @@ fn main() {
         (
             GenericCompiler::default(),
             #[cfg(feature = "metal")]
-            luminal_metal::quantized::MetalQuantizedCompiler::<f32>::new(q_weights),
+            luminal_metal::quantized::MetalQuantizedCompiler::<f16>::new(q_weights),
             #[cfg(feature = "cuda")]
-            luminal_cuda::CudaQuantizedCompiler::<f32>::new(q_weights),
+            luminal_cuda::CudaQuantizedCompiler::<f16>::new(q_weights),
             #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
             luminal_cpu::CPUCompiler::default(),
         ),
@@ -97,7 +97,8 @@ fn main() {
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
     // Now that weights are loaded, delete the loading nodes so they don't run again
-    delete_inputs(&model_weights, &mut cx);
+    delete_inputs(&downstream(model_weights, &cx), &mut cx);
+
     // Run prompt processing pass
     let mut input_ids = tokenizer
         .encode(&cli_args.prompt as &str, false)
