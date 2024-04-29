@@ -613,13 +613,12 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let dev = Device::system_default().unwrap();
-        cx.tensors
-            .insert((weights.id, 0), quantized_buffer(&blocks, &dev));
-
         cx.compile(
             MetalQuantizedCompiler::<f32>::new(vec![weights.id]),
             &mut out,
         );
+        cx.tensors
+            .insert((weights.id, 0), quantized_buffer(&blocks, &dev));
         cx.execute();
 
         let mut cx1 = Graph::new();
@@ -659,13 +658,13 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let dev = Device::system_default().unwrap();
-        cx.tensors
-            .insert((weights.id, 0), quantized_buffer(&blocks, &dev));
 
         cx.compile(
             MetalQuantizedCompiler::<f32>::new(vec![weights.id]),
             &mut out,
         );
+        cx.tensors
+            .insert((weights.id, 0), quantized_buffer(&blocks, &dev));
         cx.execute();
 
         let cpu = dfdx::tensor::Cpu::default();
@@ -706,13 +705,13 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let dev = Device::system_default().unwrap();
-        cx.tensors
-            .insert((weights.id, 0), quantized_buffer(&blocks, &dev));
 
         cx.compile(
             MetalQuantizedCompiler::<f16>::new(vec![weights.id]),
             &mut out,
         );
+        cx.tensors
+            .insert((weights.id, 0), quantized_buffer(&blocks, &dev));
         cx.execute();
 
         let cpu = dfdx::tensor::Cpu::default();
