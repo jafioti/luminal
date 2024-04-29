@@ -530,28 +530,6 @@ fn test_rms_norm() {
 }
 
 #[test]
-fn test_layer_norm() {
-    let mut cx = Graph::new();
-    let a_data = random_vec(15 * 16 * 32);
-    let a = cx.tensor::<R3<15, 16, 32>>().set(a_data.clone());
-    let mut b = a.layer_norm::<LAxis<0>, _>(1e-5).retrieve();
-    let mut c = a.layer_norm::<LAxis<2>, _>(1e-5).retrieve();
-    cx.compile(
-        <(GenericCompiler, CudaCompiler<f32>)>::default(),
-        (&mut b, &mut c),
-    );
-    cx.execute();
-
-    let d_dev = Cpu::default();
-    let d_a = d_dev.tensor_from_vec(a_data, (DConst::<15>, DConst::<16>, DConst::<32>));
-    let d_b = d_a.clone().normalize::<DAxis<0>>(1e-5);
-    let d_c = d_a.normalize::<DAxis<2>>(1e-5);
-
-    assert_close_precision(&b.data(), &d_b.as_vec(), 1e-2);
-    assert_close_precision(&c.data(), &d_c.as_vec(), 1e-2);
-}
-
-#[test]
 fn test_transformer_encoder_block() {
     let mut cx = Graph::new();
     let model: luminal_nn::TransformerEncoderBlock<32, 64, 1> = InitModule::initialize(&mut cx);

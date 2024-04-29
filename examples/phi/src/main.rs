@@ -43,9 +43,9 @@ fn main() {
     let mut cache_src: Vec<KVCache<Const<1>, Dyn<'p'>>> = (0..model::NUM_LAYERS)
         .map(|_| (cx.named_tensor("Key Cache"), cx.named_tensor("Value Cache")))
         .collect();
-    cache_src.set_dyn(vec![], &[1, model::N_KV_HEADS, 0, model::HEAD_DIM]);
+    cache_src.set_dyn(vec![], &[1, model::N_HEADS, 0, model::HEAD_DIM]);
     let model = model::MistralLM::initialize(&mut cx);
-    let mut model_weights = downstream(params(&model), &cx);
+    let mut model_weights = params(&model);
     cx.keep_tensors(&model_weights);
     let (logits, mut cache_dest) = model.forward((input, &cache_src, PhantomData::<Dyn<'t'>>));
     let mut logits = logits
@@ -81,8 +81,8 @@ fn main() {
             &mut model_weights,
         ),
     );
-    let cache_src_set = downstream(&cache_src, &cx);
-    let cache_dest_set = cache_dest.to_ids();
+    let cache_src = downstream(&cache_src, &cx);
+    let cache_dest = cache_dest.to_ids();
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
     // Initial forward pass to load weights
@@ -93,11 +93,11 @@ fn main() {
     cx.set_dyn_dim('t', 1);
     cx.execute();
     logits.drop();
-    cache_dest.drop();
+    cx.drop_tensors(&cache_dest);
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
     // Now that weights are loaded, delete the loading nodes so they don't run again
-    delete_inputs(&model_weights, &mut cx);
+    delete_inputs(&downstream(model_weights, &cx), &mut cx);
     // Run prompt processing pass
     let mut input_ids = tokenizer
         .encode(&cli_args.prompt as &str, false)
@@ -120,7 +120,7 @@ fn main() {
         1000.0 * (input_ids.len() as f64) / (elapsed_ms as f64),
         input_ids.len()
     );
-    delete_inputs(&cache_src_set, &mut cx);
+    delete_inputs(&cache_src, &mut cx);
     let mut output_ids = vec![sample_index(&logits.data())];
     logits.drop();
 
@@ -133,7 +133,7 @@ fn main() {
     io::stdout().flush().unwrap();
 
     // Swap caches
-    transfer_data_same_graph(&cache_dest_set, &cache_src_set, &mut cx);
+    transfer_data_same_graph(&cache_dest, &cache_src, &mut cx);
 
     // Decode loop
     let start_decode = std::time::Instant::now();
@@ -162,7 +162,7 @@ fn main() {
         prev_output_len = current_output.len();
 
         // Swap caches
-        transfer_data_same_graph(&cache_dest_set, &cache_src_set, &mut cx);
+        transfer_data_same_graph(&cache_dest, &cache_src, &mut cx);
     }
 
     println!();

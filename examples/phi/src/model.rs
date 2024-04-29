@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ops::Div};
+use std::marker::PhantomData;
 
 use luminal::prelude::{binary::F32Pow, *};
 use luminal_nn::{Embedding, PermutedLinear, RMSNorm};
@@ -6,19 +6,17 @@ use luminal_nn::{Embedding, PermutedLinear, RMSNorm};
 // Llama3 8B Config
 pub const VOCAB_SIZE: usize = 32064;
 pub const HIDDEN_DIM: usize = 3072;
-pub const NUM_LAYERS: usize = 1;
+pub const NUM_LAYERS: usize = 32;
 pub const N_HEADS: usize = 32;
-pub const N_KV_HEADS: usize = 8;
 pub const MLP_DIM: usize = 8192;
 
-pub const N_ATTENTION_GROUPS: usize = N_HEADS / N_KV_HEADS;
 pub const HEAD_DIM: usize = HIDDEN_DIM / N_HEADS;
 pub const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
-pub const ATTN_PROJ_DIM: usize = HEAD_DIM * N_KV_HEADS;
+pub const ATTN_PROJ_DIM: usize = HEAD_DIM * N_HEADS;
 
 pub type KVCache<Batch, Seq> = (
-    GraphTensor<(Batch, Const<N_KV_HEADS>, Seq, Const<HEAD_DIM>)>,
-    GraphTensor<(Batch, Const<N_KV_HEADS>, Seq, Const<HEAD_DIM>)>,
+    GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)>,
+    GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)>,
 );
 
 pub struct Mlp<const I: usize, const H: usize> {
@@ -127,15 +125,13 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             .matmul(self.q_proj.permute())
             .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
-
         let keys = x
             .matmul(self.k_proj.permute())
-            .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
+            .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
-
         let values = x
             .matmul(self.v_proj.permute())
-            .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
+            .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         // Rotary embed queries and keys
@@ -146,15 +142,8 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         let keys = k_cache.concat_along::<_, Axis<2>, _>(keys);
         let values = v_cache.concat_along::<_, Axis<2>, _>(values);
 
-        // Repeat the KV States for Grouped-Query Attention
-        let repeated_keys = keys.expand::<(_, _, Const<N_ATTENTION_GROUPS>, _, _), _>();
-        let repeated_values = values.expand::<(_, _, Const<N_ATTENTION_GROUPS>, _, _), _>();
-
         // Calculate attention weights
-        let mut attention_weights = queries
-            .reshape::<(_, Const<N_KV_HEADS>, Const<N_ATTENTION_GROUPS>, _, _)>() // Split query heads into groups
-            .matmul(repeated_keys.permute())
-            .div((HEAD_DIM as f32).sqrt());
+        let mut attention_weights = queries.matmul(keys.permute()) / (HEAD_DIM as f32).sqrt();
 
         let attention_mask = self.k_proj.graph().triu::<CurSeq>(1) * f16::MIN.to_f32();
         attention_weights += attention_mask
@@ -166,11 +155,11 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
 
         // Calculate final outputs
         let output = attention_weights
-            .softmax::<Axis<4>>()
+            .softmax::<Axis<3>>()
             // Apply distribution to values
-            .matmul(repeated_values)
+            .matmul(values)
             // Merge heads
-            .permute::<_, Axes5<0, 3, 1, 2, 4>>()
+            .permute::<_, Axes4<0, 2, 1, 3>>()
             .reshape::<(Batch, CurSeq, Const<HIDDEN_DIM>)>();
         let output = output
             // Apply output projection
@@ -226,10 +215,9 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         ),
     ) -> Self::Output {
         // Attention
-        let normed = self.attention_norm.forward(x);
-        let (y, cache) = self
-            .attention
-            .forward((normed, cache, PhantomData::<TotSeq>));
+        let (y, cache) =
+            self.attention
+                .forward((self.attention_norm.forward(x), cache, PhantomData::<TotSeq>));
 
         // Residual Addition
         x += y;
