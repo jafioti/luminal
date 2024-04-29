@@ -45,33 +45,67 @@ pub struct Choice {
 
 #[derive(Serialize)]
 pub struct Usage {
-    pub prompt_tokens: u32,
-    pub completion_tokens: u32,
-    pub total_tokens: u32,
+    pub prompt_tokens: usize,
+    pub completion_tokens: usize,
+    pub total_tokens: usize,
+}
+
+pub fn apply_chat_template(messages: Vec<Message>) -> String {
+    let mut output = "<|begin_of_text|>".to_string();
+    for message in messages {
+        output += "<|start_header_id|>";
+        if message.role == Role::Assistant {
+            output += "assistant"
+        } else if message.role == Role::User {
+            output += "user"
+        } else if message.role == Role::System {
+            output += "system"
+        }
+        output += "<|end_header_id|>";
+        output += "\n";
+        output += message.content.as_str();
+        output += "<|eot_id|>";
+    }
+    output
 }
 
 /// Respond to chat request
-pub async fn respond_chat_request(model: &Model, request: ChatRequest) -> ChatResponse {
+pub async fn respond_chat_request(model: &mut Model, request: ChatRequest) -> ChatResponse {
     let created = Utc::now().timestamp();
     let raw_uuid = Uuid::new_v4();
     let id = format!("chatcmpl-{}", raw_uuid);
+
+    let prompt = apply_chat_template(request.messages);
+    let prompt_tokens = model.tokenizer.encode(prompt.clone(), false).unwrap();
+    let prompt_tokens = prompt_tokens.get_ids();
+    let prompt_tokens = prompt_tokens.len();
+
+    // Generate
+    let mut completion = vec![];
+    model.generate(&prompt, |token| {
+        completion.push(token);
+        true
+    });
+    let completion_str = model.tokenizer.decode(&completion, false).unwrap();
+    let completion_tokens = completion.len();
+
     let response = ChatResponse {
         id,
         created,
         object: "chat.completion".to_string(),
-        model: "gpt-3.5-turbo-0125".to_string(),
+        model: "meta-llama/Meta-Llama-3-70B-Instruct".to_string(),
         choices: vec![Choice {
             index: 0,
             message: Message {
                 role: Role::Assistant,
-                content: "Hello! How can I assist you today?".to_string(),
+                content: completion_str,
             },
             finish_reason: "stop".to_string(),
         }],
         usage: Usage {
-            prompt_tokens: 19,
-            completion_tokens: 9,
-            total_tokens: 28,
+            total_tokens: prompt_tokens + completion_tokens,
+            prompt_tokens,
+            completion_tokens,
         },
     };
 

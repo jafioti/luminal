@@ -123,13 +123,13 @@ impl Model {
     }
 
     /// Generate new tokens given some input
-    pub fn generate(&mut self, prompt: &str) {
+    pub fn generate(&mut self, prompt: &str, mut continue_callback: impl FnMut(u32) -> bool) {
         let input_tokens = self.tokenizer.encode(prompt, false).unwrap();
         let input_tokens = input_tokens.get_ids();
 
         self.generate_internal(input_tokens, |dist| {
             let output_id = argmax(dist);
-            (output_id, true)
+            (output_id, continue_callback(output_id))
         })
     }
 

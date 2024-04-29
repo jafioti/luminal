@@ -35,3 +35,5 @@ tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 chrono = "0.4.38"
 uuid = { version = "1.8.0", features = ["v4"] }
+async-trait = "0.1.80"
+serde_json = "1.0.116"
