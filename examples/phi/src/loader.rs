@@ -1,6 +1,4 @@
-use itertools::Itertools;
 use std::fs::File;
-use std::io::{Read, Seek};
 use std::path::Path;
 
 use luminal::{op::Function, prelude::*};
@@ -10,6 +8,11 @@ use {luminal_cuda::CudaData, luminal_cudarc::driver::CudaDevice};
 
 use crate::gguf::*;
 
+#[cfg(not(feature = "metal"))]
+use {
+    itertools::Itertools,
+    std::io::{Read, Seek},
+};
 #[cfg(feature = "metal")]
 use {
     luminal_metal::MetalBuffer,
@@ -50,48 +53,23 @@ pub fn q8_load<P: AsRef<Path>, M: SerializeModule>(
                 }
                 _ => panic!("Unsupported dtype: {data_type:?}"),
             };
-            if let GgmlDType::F32 = data_type {
-                loading_node.1 = Box::new(move |_| {
-                    // Read bytes
-                    let mut bytes = vec![0; n_bytes];
-                    let mut file = File::open(&file_path).unwrap();
-                    file.seek(std::io::SeekFrom::Start(
-                        buffer_offset as u64 + tensor_data_offset,
-                    ))
-                    .unwrap();
-                    file.read_exact(&mut bytes).unwrap();
-                    vec![Tensor::new(
-                        bytes
-                            .into_iter()
-                            .chunks(4)
-                            .into_iter()
-                            .map(|c| {
-                                let c = c.collect::<Vec<_>>();
-                                f32::from_le_bytes([c[0], c[1], c[2], c[3]])
-                            })
-                            .collect::<Vec<_>>(),
-                    )]
-                });
-            } else {
-                loading_node.1 = Box::new(move |_| {
-                    let mmap_buffer =
-                        unsafe { Mmap::map(&File::open(&file_path).unwrap()).unwrap() };
-                    let buffer = Device::system_default()
-                        .unwrap()
-                        .new_buffer_with_bytes_no_copy(
-                            unsafe {
-                                mmap_buffer
-                                    .as_ptr()
-                                    .add(buffer_offset + tensor_data_offset as usize)
-                                    as *const _
-                            },
-                            n_bytes as u64,
-                            MTLResourceOptions::StorageModeShared,
-                            None,
-                        );
-                    vec![Tensor::new(MetalBuffer(buffer))]
-                });
-            }
+            loading_node.1 = Box::new(move |_| {
+                let mmap_buffer = unsafe { Mmap::map(&File::open(&file_path).unwrap()).unwrap() };
+                let buffer = Device::system_default()
+                    .unwrap()
+                    .new_buffer_with_bytes_no_copy(
+                        unsafe {
+                            mmap_buffer
+                                .as_ptr()
+                                .add(buffer_offset + tensor_data_offset as usize)
+                                as *const _
+                        },
+                        n_bytes as u64,
+                        MTLResourceOptions::StorageModeShared,
+                        None,
+                    );
+                vec![Tensor::new(MetalBuffer(buffer))]
+            });
         }
     }
     q8_weights

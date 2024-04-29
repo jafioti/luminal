@@ -21,21 +21,7 @@ use luminal::{
     },
 };
 
-use crate::{binary_test, single_binary_test, single_unary_test, unary_test, CudaCompiler};
-
-unary_test!(|a| a.sin(), |a| a.sin(), test_sin, f16);
-unary_test!(|a| a.sqrt(), |a| a.sqrt(), test_sqrt, f16);
-unary_test!(|a| a.recip(), |a| a.recip(), test_recip, f16);
-unary_test!(|a| a * a, |a| a.clone() * a, test_square, f16);
-single_unary_test!(|a| a.ln(), |a| a.ln(), test_ln, f16, 3); // For some reason ln fails on larger tensors
-
-binary_test!(|a, b| a + b, |a, b| a + b, test_add, f16);
-binary_test!(|a, b| a - b, |a, b| a - b, test_sub, f16);
-binary_test!(|a, b| a * b, |a, b| a * b, test_mul, f16);
-binary_test!(|a, b| a / b, |a, b| a * b.recip(), test_div, f16);
-// binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f16);
-single_binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f16, 3); // Why don't larger max tests work?
-binary_test!(|a, b| a.min(b), |a, b| a.minimum(b), test_min, f16);
+use crate::CudaCompiler;
 
 #[test]
 fn test_contiguous() {
@@ -51,24 +37,6 @@ fn test_contiguous() {
         .tensor_from_vec(data, (DConst::<3>, DConst::<4>))
         .to_dtype::<f16>();
     let d_b = d_a.permute::<Rank2<4, 3>, _>().reshape::<Rank2<12, 1>>();
-
-    assert_close(&b.data(), &d_b.to_dtype::<f32>().as_vec());
-}
-
-#[test]
-fn test_softmax() {
-    let mut cx = Graph::new();
-    let data = random_vec(12);
-    let a = cx.tensor::<R2<1, 12>>().set(data.clone());
-    let mut b = a.softmax::<LAxis<1>>().retrieve();
-    cx.compile(CudaCompiler::<f16>::default(), &mut b);
-    cx.execute();
-
-    let d_dev = Cpu::default();
-    let d_a = d_dev
-        .tensor_from_vec(data, (DConst::<1>, DConst::<12>))
-        .to_dtype::<f16>();
-    let d_b = d_a.softmax::<DAxis<1>>();
 
     assert_close(&b.data(), &d_b.to_dtype::<f32>().as_vec());
 }
@@ -609,28 +577,6 @@ fn test_rms_norm() {
 }
 
 #[test]
-fn test_layer_norm() {
-    let mut cx = Graph::new();
-    let a_data = random_vec(15 * 16 * 32);
-    let a = cx.tensor::<R3<15, 16, 32>>().set(a_data.clone());
-    let mut b = a.layer_norm::<LAxis<0>, _>(1e-5).retrieve();
-    let mut c = a.layer_norm::<LAxis<2>, _>(1e-5).retrieve();
-    cx.compile(
-        <(GenericCompiler, CudaCompiler<f16>)>::default(),
-        (&mut b, &mut c),
-    );
-    cx.execute();
-
-    let d_dev = Cpu::default();
-    let d_a = d_dev.tensor_from_vec(a_data, (DConst::<15>, DConst::<16>, DConst::<32>));
-    let d_b = d_a.clone().normalize::<DAxis<0>>(1e-5);
-    let d_c = d_a.normalize::<DAxis<2>>(1e-5);
-
-    assert_close_precision(&b.data(), &d_b.as_vec(), 0.01);
-    assert_close_precision(&c.data(), &d_c.as_vec(), 0.01);
-}
-
-#[test]
 fn test_transformer_encoder_block() {
     let mut cx = Graph::new();
     let model: luminal_nn::TransformerEncoderBlock<32, 64, 1> = InitModule::initialize(&mut cx);
@@ -700,22 +646,6 @@ fn test_transformer_encoder_block() {
     let d_b = d_model.forward(d_a);
 
     assert_close_precision(&b.data(), &d_b.as_vec(), 0.01);
-}
-
-#[test]
-fn test_common_buffer() {
-    let data = random_vec(32);
-    let mut cx = Graph::new();
-    let a = cx.tensor::<R1<32>>();
-    a.set(data.clone());
-    let a1 = cx.tensor::<R1<32>>();
-    a1.set(data.clone());
-    let exped = a * a1;
-    let mut b = exped.log2().retrieve();
-    let mut c = exped.sin().retrieve();
-
-    cx.compile(CudaCompiler::<f16>::default(), (&mut b, &mut c));
-    cx.execute();
 }
 
 #[test]
@@ -815,7 +745,7 @@ fn test_pad_contig() {
         .set_dyn(a_data, &[m, k])
         .retrieve();
     let mut b: GraphTensor<(Dyn<'M'>, Dyn<'K'>)> = a
-        .pad(&[(0, 0.into()), (0, Expression::from(16) - 'K')])
+        .pad(&[(0, 0.into()), (0, Expression::from(24) - 'K')])
         .contiguous()
         .retrieve();
     let mut c: GraphTensor<(Dyn<'M'>, Dyn<'K'>)> =

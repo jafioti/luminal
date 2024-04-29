@@ -126,6 +126,12 @@ impl<S: ExpressionStorage + Clone> Debug for GenericExpression<S> {
     }
 }
 
+impl<S: ExpressionStorage + Clone> std::fmt::Display for GenericExpression<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 impl<S: ExpressionStorage> GenericExpression<S> {
     /// Simplify the expression to its minimal terms
     pub fn simplify(self) -> Self {
@@ -217,11 +223,11 @@ where
         self.exec_single_var_stack(value, &mut stack)
     }
     /// Evaluate the expression with one value for all variables. Uses a provided stack
-    pub fn exec_single_var_stack(&self, value: usize, stack: &mut Vec<i32>) -> usize {
+    pub fn exec_single_var_stack(&self, value: usize, stack: &mut Vec<i64>) -> usize {
         for term in &self.terms {
             match term {
-                Term::Num(n) => stack.push(*n),
-                Term::Var(_) => stack.push(value as i32),
+                Term::Num(n) => stack.push(*n as i64),
+                Term::Var(_) => stack.push(value as i64),
                 _ => {
                     let a = stack.pop().unwrap();
                     let b = stack.pop().unwrap();
@@ -239,16 +245,16 @@ where
     pub fn exec_stack(
         &self,
         variables: &FxHashMap<char, usize>,
-        stack: &mut Vec<i32>,
+        stack: &mut Vec<i64>,
     ) -> Option<usize> {
         for term in &self.terms {
             match term {
-                Term::Num(n) => stack.push(*n),
+                Term::Num(n) => stack.push(*n as i64),
                 Term::Var(c) =>
                 {
                     #[allow(clippy::needless_borrow)]
                     if let Some(n) = variables.get(&c) {
-                        stack.push(*n as i32)
+                        stack.push(*n as i64)
                     } else {
                         return None;
                     }

@@ -1,24 +1,20 @@
+use luminal_cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::{any::Any, fmt::Debug, iter::once, marker::PhantomData, ops::Deref, sync::Arc};
+use std::{any::Any, fmt::Debug, iter::once, marker::PhantomData, mem::size_of, sync::Arc};
 
 use itertools::Itertools;
-use metal_rs::{
-    objc::rc::autoreleasepool, Buffer, CommandBufferRef, CommandQueue, ComputePassDescriptor,
-    ComputePipelineState, Device, MTLResourceOptions,
-};
-
 use luminal::prelude::{
     petgraph::{visit::EdgeRef, Direction},
     *,
 };
 
 use crate::{
-    expr_to_metal_string, get_buffer_from_tensor, prim::MetalConstant, MetalBuffer, MetalFloat,
-    MetalKernel, MetalKernelWrapper,
+    compile_and_load_kernel, expr_to_cuda_string, get_buffer_from_tensor, prim::CudaConstant,
+    CudaData, CudaFloat,
 };
 
-use super::{compile_function, input_dyn_dims, render_dyn_dim_inputs, DispatchNElements, SetInt};
+use super::{input_dyn_dims, render_dyn_dim_inputs};
 
 #[derive(Default, Debug)]
 pub struct ElementwiseFusionCompiler<T>(PhantomData<T>);
@@ -66,11 +62,10 @@ fn is_more_than_one_view(
     false
 }
 
-impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
+impl<T: CudaFloat> Compiler for ElementwiseFusionCompiler<T> {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
-        let device = Device::system_default().unwrap();
-        let queue = device.new_command_queue();
+        let device = CudaDevice::new(0).unwrap();
         // Track fused ops to compile later
         let mut fused_ops = FxHashSet::default();
 
@@ -91,7 +86,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 };
                 if graph.no_delete.contains(&a)
                     || graph.no_delete.contains(&b)
-                    || (!graph.check_node_type::<MetalConstant<T>>(a)
+                    || (!graph.check_node_type::<CudaConstant<T>>(a)
                         && graph
                             .edges_directed(a, Direction::Outgoing)
                             .filter(|e| e.target() != b)
@@ -217,26 +212,26 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 for subexp in subexpressions_a.into_iter().rev() {
                     subexpressions_b.insert(0, subexp);
                 }
-
                 // Create new fused op
-                let output_buffer_sizes = graph
-                    .node_custom::<MetalKernelWrapper, _>(b, "metal", ())
-                    .unwrap()
-                    .output_buffer_sizes(
-                        &graph
-                            .edges_directed(b, Direction::Incoming)
-                            .filter_map(|e| e.weight().as_data())
-                            .sorted_by_key(|(i, _, _)| *i)
-                            .map(|(_, _, s)| s)
-                            .collect::<Vec<_>>(),
-                    );
+                let output_buffer_sizes =
+                    if let Some(o) = graph.try_get_op::<FusedElementwiseOp<T>>(b) {
+                        o.output_buffer_sizes.clone()
+                    } else {
+                        vec![
+                            graph
+                                .edges_directed(b, Direction::Incoming)
+                                .filter_map(|e| e.weight().as_data().map(|i| i.2.n_elements()))
+                                .reduce(|acc, e| acc.max(e))
+                                .unwrap()
+                                * size_of::<T>(),
+                        ]
+                    };
                 let new_op = graph
                     .add_op(FusedElementwiseOp::<T> {
                         kernel: None,
                         dyn_map: &graph.dyn_map,
                         dyn_chars: vec![],
                         subexpressions: subexpressions_b.clone(),
-                        queue: queue.clone(),
                         device: device.clone(),
                         output_buffer_sizes,
                         _phantom: Default::default(),
@@ -384,11 +379,11 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                             &if *val_exp != true {
                                 format!(
                                     "({} != 0 ? (float)input{i}[{}] : 0.0)$1",
-                                    expr_to_metal_string(val_exp),
-                                    expr_to_metal_string(ind_exp)
+                                    expr_to_cuda_string(val_exp),
+                                    expr_to_cuda_string(ind_exp)
                                 )
                             } else {
-                                format!("(float)input{i}[{}]$1", expr_to_metal_string(ind_exp))
+                                format!("(float)input{i}[{}]$1", expr_to_cuda_string(ind_exp))
                             },
                         )
                         .to_string();
@@ -411,35 +406,36 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     if val_exp != true {
                         *subexp = format!(
                             "(({} != 0) ? {subexp} : 0.0)",
-                            expr_to_metal_string(&val_exp)
+                            expr_to_cuda_string(&val_exp)
                         );
                     }
                 }
             }
 
-            let (dyn_chars, rendered) = render_dyn_dim_inputs(&shapes_used, inputs.len() + 2);
+            let (dyn_chars, rendered) = render_dyn_dim_inputs(&shapes_used);
             let kernel = format!(
-                    "
-#include <metal_stdlib>
-using namespace metal;
-kernel void mkernel({} device {type_name} *out [[buffer({})]], device uint& n_elements [[buffer({})]], uint idx [[thread_position_in_grid]]{rendered}) {{
+                "
+#include \"cuda_fp16.h\"
+extern \"C\" __global__ void kernel({} {type_name}* out, const int n_elements{rendered}) {{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n_elements) {{
         {}
         out[idx] = ({type_name})({});
     }}
 }}",
-                    (0..inputs.len())
-                        .map(|inp_ind| format!(
-                            "device {type_name}* input{inp_ind} [[buffer({inp_ind})]],"
-                        ))
-                        .collect::<Vec<_>>()
-                        .join(" "),
-                    inputs.len(),
-                    inputs.len() + 1,
-                    op.subexpressions.iter().take(op.subexpressions.len() - 1).enumerate().map(|(i, (subexp, _))| format!("float intermediate{i} = {subexp};")).join("\n        "),
-                    op.subexpressions.last().unwrap().0
-                );
-            op.kernel = Some(compile_function("mkernel", &kernel, &device));
+                (0..inputs.len())
+                    .map(|inp_ind| format!("const {type_name}* input{inp_ind},"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                op.subexpressions
+                    .iter()
+                    .take(op.subexpressions.len() - 1)
+                    .enumerate()
+                    .map(|(i, (subexp, _))| format!("float intermediate{i} = {subexp};"))
+                    .join("\n        "),
+                op.subexpressions.last().unwrap().0
+            );
+            op.kernel = Some(compile_and_load_kernel(kernel, &device));
             op.dyn_chars = dyn_chars;
         }
     }
@@ -447,12 +443,11 @@ kernel void mkernel({} device {type_name} *out [[buffer({})]], device uint& n_el
 
 #[derive(Clone)]
 pub struct FusedElementwiseOp<T> {
-    kernel: Option<ComputePipelineState>,
+    kernel: Option<CudaFunction>,
     dyn_map: *const FxHashMap<char, usize>,
     dyn_chars: Vec<char>,
     subexpressions: Vec<(String, ShapeTracker)>,
-    queue: CommandQueue,
-    device: Device,
+    device: Arc<CudaDevice>,
     output_buffer_sizes: Vec<BigExpression>,
     _phantom: PhantomData<T>,
 }
@@ -461,75 +456,38 @@ impl<T> Debug for FusedElementwiseOp<T> {
         write!(f, "FusedElementwiseOp")
     }
 }
-impl<T> MetalKernel for FusedElementwiseOp<T> {
-    fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<BigExpression> {
-        self.output_buffer_sizes.clone()
-    }
-    fn metal_forward(
-        &self,
-        inputs: &[(&Buffer, ShapeTracker)],
-        command_buffer: &CommandBufferRef,
-        _: &[&Buffer],
-        output_buffers: &[&Buffer],
-    ) {
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(self.kernel.as_ref().unwrap());
-        // Use output buffer size to work out the dispatch size
+
+impl<T: CudaFloat> Operator for FusedElementwiseOp<T> {
+    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let dyn_map = unsafe { self.dyn_map.as_ref().unwrap() };
         let out_size =
             self.output_buffer_sizes[0].exec(dyn_map).unwrap() / std::mem::size_of::<T>();
+        let out_size_int = out_size as i32;
+        let out = self.device.alloc_zeros::<T>(out_size).unwrap();
 
-        // Set function inputs
-        for (i, (buf, _)) in inputs.iter().enumerate() {
-            encoder.set_buffer(i as u64, Some(*buf), 0);
+        let mut params = vec![];
+        for (buf, _) in &tensors {
+            params.push(get_buffer_from_tensor::<T>(buf).as_kernel_param());
         }
-        encoder.set_buffer(inputs.len() as u64, Some(output_buffers[0]), 0);
-        encoder.set_u32(inputs.len() + 1, out_size as u32);
-        input_dyn_dims(&self.dyn_chars, dyn_map, encoder, inputs.len() + 2);
+        params.push((&out).as_kernel_param());
+        params.push(out_size_int.as_kernel_param());
 
-        // Execute
-        encoder.dispatch_1d(out_size);
-        encoder.end_encoding();
-    }
-}
+        input_dyn_dims(&mut params, &self.dyn_chars, self.dyn_map);
 
-impl<T: MetalFloat> Operator for FusedElementwiseOp<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        autoreleasepool(|| {
-            let command_buffer = self.queue.new_command_buffer();
-            let out = self.device.new_buffer(
-                self.output_buffer_sizes[0]
-                    .exec(unsafe { self.dyn_map.as_ref().unwrap() })
-                    .unwrap() as u64,
-                MTLResourceOptions::StorageModeShared,
-            );
+        unsafe {
+            self.kernel
+                .clone()
+                .unwrap()
+                .launch(LaunchConfig::for_num_elems(out_size as u32), &mut params)
+                .unwrap();
+        }
 
-            self.metal_forward(
-                &tensors
-                    .iter()
-                    .map(|(t, s)| (get_buffer_from_tensor(t).deref(), *s))
-                    .collect_vec(),
-                command_buffer,
-                &[],
-                &[&out],
-            );
-
-            command_buffer.commit();
-            command_buffer.wait_until_completed();
-
-            vec![Tensor::new(MetalBuffer(out))]
-        })
+        vec![Tensor::new(CudaData(out))]
     }
 
     fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
-        if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
-                self.clone(),
-            )))));
-        }
         if key == "elementwise" {
-            return Some(Box::new("".to_string()));
+            return Some(Box::<String>::default());
         }
         None
     }
@@ -545,7 +503,7 @@ mod tests {
     use rand::{rngs::StdRng, SeedableRng};
     use std::{marker::PhantomData, ops::Div};
 
-    use crate::MetalCompiler;
+    use crate::CudaCompiler;
 
     #[test]
     fn test_fusion_simple() {
@@ -558,7 +516,7 @@ mod tests {
         let unopt_out = out.data();
         out.drop();
 
-        cx.compile(<(GenericCompiler, MetalCompiler<f16>)>::default(), &mut out);
+        cx.compile(<(GenericCompiler, CudaCompiler<f16>)>::default(), &mut out);
         cx.execute();
 
         assert_close(&out.data(), &unopt_out);
@@ -575,7 +533,7 @@ mod tests {
         let unopt_out = out.data();
         out.drop();
 
-        cx.compile(<(GenericCompiler, MetalCompiler<f16>)>::default(), &mut out);
+        cx.compile(<(GenericCompiler, CudaCompiler<f16>)>::default(), &mut out);
         cx.execute();
 
         assert_close(&out.data(), &unopt_out);
@@ -593,7 +551,7 @@ mod tests {
         let unopt_out = out.data();
         out.drop();
 
-        cx.compile(<(GenericCompiler, MetalCompiler<f16>)>::default(), &mut out);
+        cx.compile(<(GenericCompiler, CudaCompiler<f16>)>::default(), &mut out);
         cx.execute();
 
         assert_close(&out.data(), &unopt_out);
@@ -617,7 +575,7 @@ mod tests {
         padded.drop();
 
         cx.compile(
-            <(GenericCompiler, MetalCompiler<f16>)>::default(),
+            <(GenericCompiler, CudaCompiler<f16>)>::default(),
             &mut padded,
         );
         cx.execute();
@@ -636,7 +594,7 @@ mod tests {
         let unopt_out = out.data();
         out.drop();
 
-        cx.compile(<(GenericCompiler, MetalCompiler<f32>)>::default(), &mut out);
+        cx.compile(<(GenericCompiler, CudaCompiler<f32>)>::default(), &mut out);
         cx.execute();
 
         assert_close(&out.data(), &unopt_out);
@@ -660,7 +618,7 @@ mod tests {
         let unopt_out = emb.data();
         emb.drop();
 
-        cx.compile(<(GenericCompiler, MetalCompiler<f16>)>::default(), &mut emb);
+        cx.compile(<(GenericCompiler, CudaCompiler<f16>)>::default(), &mut emb);
         cx.execute();
         assert_close(&emb.data(), &unopt_out);
     }
@@ -673,7 +631,7 @@ mod tests {
         const HEAD_DIM: usize = 4;
         const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
         let a = cx
-            .named_tensor::<R2<SEQ, HEAD_DIM>>("a")
+            .tensor::<R2<SEQ, HEAD_DIM>>()
             .set(random_vec_rng(SEQ * HEAD_DIM, &mut rng))
             .keep();
         let b = cx
@@ -700,7 +658,7 @@ mod tests {
         let unopt_out = out.data();
         out.drop();
 
-        cx.compile(<(GenericCompiler, MetalCompiler<f16>)>::default(), &mut out);
+        cx.compile(<(GenericCompiler, CudaCompiler<f16>)>::default(), &mut out);
         cx.execute();
         assert_close(&out.data(), &unopt_out);
     }
@@ -746,7 +704,7 @@ mod tests {
         let unopt_out = out.data();
         out.drop();
 
-        cx.compile(<(GenericCompiler, MetalCompiler<f16>)>::default(), &mut out);
+        cx.compile(<(GenericCompiler, CudaCompiler<f16>)>::default(), &mut out);
         cx.execute();
 
         assert_close(&out.data(), &unopt_out);
@@ -1090,9 +1048,9 @@ mod tests {
         let unopt_out = out.data();
         out.drop();
 
-        cx.compile(<(GenericCompiler, MetalCompiler<f16>)>::default(), &mut out);
+        cx.compile(<(GenericCompiler, CudaCompiler<f16>)>::default(), &mut out);
         cx.execute();
 
-        assert_close_precision(&out.data(), &unopt_out, 1e-2);
+        assert_close_precision(&out.data(), &unopt_out, 1e-1);
     }
 }

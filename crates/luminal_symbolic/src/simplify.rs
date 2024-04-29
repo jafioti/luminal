@@ -25,8 +25,8 @@ pub fn reduce_triples<S: ExpressionStorage>(
                     let (b_ind, b_term) = stack.pop().unwrap();
                     triples.push((a_ind, index, b_ind));
                     if let (Term::Num(a), Term::Num(b)) = (a_term, b_term) {
-                        if let Some(c) = term.as_op().unwrap()(a, b) {
-                            stack.push((None, Term::Num(c)));
+                        if let Some(c) = term.as_op().unwrap()(a as i64, b as i64) {
+                            stack.push((None, Term::Num(c as i32)));
                         } else {
                             break;
                         }
@@ -68,8 +68,8 @@ pub fn reduce_triples<S: ExpressionStorage>(
                 b_ind.map(|b| expr.terms[b]),
             ) {
                 (Some(Term::Num(a)), term, Some(Term::Num(b))) if term.as_op().is_some() => {
-                    if let Some(c) = term.as_op().unwrap()(a, b) {
-                        expr.terms[unwrap_cont!(a_ind)] = Term::Num(c);
+                    if let Some(c) = term.as_op().unwrap()(a as i64, b as i64) {
+                        expr.terms[unwrap_cont!(a_ind)] = Term::Num(c as i32);
                         remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
                     } else {
                         inner_changed = false;

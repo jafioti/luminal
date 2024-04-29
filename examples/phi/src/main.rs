@@ -21,7 +21,7 @@ use luminal::prelude::*;
 #[command(author, version, about, long_about = None)]
 pub struct CLIArgs {
     /// Number of tokens to generate
-    #[clap(short = 't', long = "gen_tokens", default_value = "128")]
+    #[clap(short = 't', long = "gen_tokens", default_value = "512")]
     gen_tokens: i32,
 
     /// Prompt for the model
@@ -43,7 +43,7 @@ fn main() {
     let mut cache_src: Vec<KVCache<Const<1>, Dyn<'p'>>> = (0..model::NUM_LAYERS)
         .map(|_| (cx.named_tensor("Key Cache"), cx.named_tensor("Value Cache")))
         .collect();
-    cache_src.set_dyn(vec![], &[1, model::N_KV_HEADS, 0, model::HEAD_DIM]);
+    cache_src.set_dyn(vec![], &[1, model::N_HEADS, 0, model::HEAD_DIM]);
     let model = model::MistralLM::initialize(&mut cx);
     let mut model_weights = params(&model);
     cx.keep_tensors(&model_weights);
@@ -55,9 +55,9 @@ fn main() {
 
     // Set up model loading
     #[cfg(any(feature = "metal", feature = "cuda"))]
-    let q_weights = loader::q8_load("setup/llama3-8b.gguf", &model, &mut cx);
+    let q_weights = loader::q8_load("setup/phi-3-mini-4k-instruct.Q8_0.gguf", &model, &mut cx);
     #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
-    loader::q8_load("setup/llama3-8b.gguf", &model, &mut cx);
+    loader::q8_load("setup/phi-3-mini-4k-instruct.Q8_0.gguf", &model, &mut cx);
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
     print!("Compiling graph");
@@ -98,7 +98,6 @@ fn main() {
 
     // Now that weights are loaded, delete the loading nodes so they don't run again
     delete_inputs(&downstream(model_weights, &cx), &mut cx);
-
     // Run prompt processing pass
     let mut input_ids = tokenizer
         .encode(&cli_args.prompt as &str, false)
@@ -147,6 +146,7 @@ fn main() {
 
         // Sample tokens
         let output_id = sample_index(&logits.data());
+        // println!("{:?}", &logits.data()[..10]);
         logits.drop();
         output_ids.push(output_id);
 
