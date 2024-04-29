@@ -64,7 +64,8 @@
     {
       "group": "Blog",
       "pages": [
-        "blog/intro"
+        "blog/intro",
+        "blog/gpu"
       ]
     },
     {
