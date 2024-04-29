@@ -21,11 +21,11 @@ use luminal::prelude::*;
 #[command(author, version, about, long_about = None)]
 pub struct CLIArgs {
     /// Number of tokens to generate
-    #[clap(short = 't', long = "gen_tokens", default_value = "128")]
+    #[clap(short = 't', long = "gen_tokens", default_value = "512")]
     gen_tokens: i32,
 
     /// Prompt for the model
-    #[clap(short = 'p', long = "prompt", default_value = include_str!("../../llama/prompts/merge_sort.txt"))]
+    #[clap(short = 'p', long = "prompt", default_value = include_str!("../prompts/merge_sort.txt"))]
     prompt: String,
 }
 
@@ -67,9 +67,9 @@ fn main() {
         (
             GenericCompiler::default(),
             #[cfg(feature = "metal")]
-            luminal_metal::quantized::MetalQuantizedCompiler::<f32>::new(q_weights),
+            luminal_metal::quantized::MetalQuantizedCompiler::<f16>::new(q_weights),
             #[cfg(feature = "cuda")]
-            luminal_cuda::CudaQuantizedCompiler::<f32>::new(q_weights),
+            luminal_cuda::CudaQuantizedCompiler::<f16>::new(q_weights),
             #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
             luminal_cpu::CPUCompiler::default(),
         ),
