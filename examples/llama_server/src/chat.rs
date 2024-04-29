@@ -89,14 +89,14 @@ pub async fn respond_chat_request(model: &mut Model, request: ChatRequest) -> Ch
     // Generate
     let mut completion = vec![];
     model.generate(&prompt, |token| {
-        completion.push(token);
-        // completion.len() < 128
-        // println!(" {}", token);
-
-        // TODO: Remove this hack, it's a sign the generation is not working
-        // token != 97720
+        const EOS_TOKEN: u32 = 128009;
+        if token != EOS_TOKEN {
+            completion.push(token);
+        }
         true
     });
+    // For now, just clear the cache each time
+    model.clear_cache();
     let completion_str = model.tokenizer.decode(&completion, false).unwrap();
     let completion_tokens = completion.len();
 
