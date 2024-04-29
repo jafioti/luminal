@@ -30,8 +30,8 @@ pub struct Model {
 unsafe impl Send for Model {}
 unsafe impl Sync for Model {}
 
-const TOKENIZER_PATH: &str = "../llama/setup/tokenizer.json";
-const MODEL_PATH: &str = "../llama/setup/llama3-8b.gguf";
+const TOKENIZER_PATH: &str = "./setup/tokenizer.json";
+const MODEL_PATH: &str = "./setup/llama3-8b.gguf";
 
 // Load the model
 impl Model {

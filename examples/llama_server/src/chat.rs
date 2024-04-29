@@ -77,6 +77,10 @@ pub async fn respond_chat_request(model: &mut Model, request: ChatRequest) -> Ch
 
     let mut prompt = apply_chat_template(request.messages);
     prompt += "<|start_header_id|>assistant<|end_header_id|>\n";
+    // let prompt = "<|begin_of_text|>Here is an implementation of merge sort:
+    //
+    // ```python"
+    // .to_string();
     let prompt_tokens = model.tokenizer.encode(prompt.clone(), false).unwrap();
     let prompt_tokens = prompt_tokens.get_ids();
     let prompt_tokens = prompt_tokens.len();
@@ -86,10 +90,12 @@ pub async fn respond_chat_request(model: &mut Model, request: ChatRequest) -> Ch
     let mut completion = vec![];
     model.generate(&prompt, |token| {
         completion.push(token);
-        println!(" {}", token);
+        // completion.len() < 128
+        // println!(" {}", token);
 
         // TODO: Remove this hack, it's a sign the generation is not working
-        token != 97720
+        // token != 97720
+        true
     });
     let completion_str = model.tokenizer.decode(&completion, false).unwrap();
     let completion_tokens = completion.len();
