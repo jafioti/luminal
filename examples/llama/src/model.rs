@@ -6,7 +6,7 @@ use luminal_nn::{Embedding, PermutedLinear, RMSNorm};
 // Llama3 8B Config
 pub const VOCAB_SIZE: usize = 128256;
 pub const HIDDEN_DIM: usize = 4096;
-pub const NUM_LAYERS: usize = 1;
+pub const NUM_LAYERS: usize = 32;
 pub const N_HEADS: usize = 32;
 pub const N_KV_HEADS: usize = 8;
 pub const MLP_DIM: usize = 14336;

@@ -16,6 +16,7 @@ luminal_cudarc = { version="0.10.0", features = [
 itertools = "0.12.1"
 rustc-hash = "1.1.0"
 num-traits = "0.2.18"
+regex = "1.10.4"
 
 [dev-dependencies]
 dfdx = { version = "0.13", features = ["f16"] }

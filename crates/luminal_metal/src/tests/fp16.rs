@@ -754,7 +754,7 @@ fn test_pad_contig() {
         .set_dyn(a_data, &[m, k])
         .retrieve();
     let mut b: GraphTensor<(Dyn<'M'>, Dyn<'K'>)> = a
-        .pad(&[(0, 0.into()), (0, Expression::from(16) - 'K')])
+        .pad(&[(0, 0.into()), (0, Expression::from(24) - 'K')])
         .contiguous()
         .retrieve();
     let mut c: GraphTensor<(Dyn<'M'>, Dyn<'K'>)> =

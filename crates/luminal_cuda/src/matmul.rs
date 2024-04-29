@@ -17,12 +17,11 @@ use luminal::{
 
 #[derive(Clone)]
 pub struct Matmul<T>(Arc<CudaBlas>, Arc<CudaDevice>, PhantomData<T>);
-crate::debug_type!(Matmul<T>);
+crate::debug_type!(Matmul);
 
 impl<T: CudaFloat> Operator for Matmul<T> {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
-        let a_strides = inp[0].1.strides();
         let (batch_size, m, k, n) = (
             a_shape
                 .iter()
@@ -49,6 +48,9 @@ impl<T: CudaFloat> Operator for Matmul<T> {
             (false, true) => (CUBLAS_OP_N, CUBLAS_OP_T),
             (true, false) => (CUBLAS_OP_T, CUBLAS_OP_N),
         };
+
+        let a_dims = inp[0].1.fake.iter().filter(|f| !**f).count();
+        let b_dims = inp[1].1.fake.iter().filter(|f| !**f).count();
         if T::is_f32() {
             unsafe {
                 luminal_cudarc::cublas::result::sgemm_strided_batched(
@@ -61,10 +63,10 @@ impl<T: CudaFloat> Operator for Matmul<T> {
                     &1.0_f32 as *const f32,
                     *b.device_ptr() as *const f32,
                     if b_row_major { n } else { k },
-                    0,
+                    if b_dims == 2 { 0 } else { (n * k) as i64 },
                     *a.device_ptr() as *const f32,
                     if a_row_major { k } else { m },
-                    a_strides[0].to_usize().unwrap() as i64,
+                    if a_dims == 2 { 0 } else { (m * k) as i64 },
                     &0.0_f32 as *const f32,
                     *out.device_ptr_mut() as *mut f32,
                     n,
@@ -85,10 +87,10 @@ impl<T: CudaFloat> Operator for Matmul<T> {
                     &f16::from_f32(1.0) as *const f16,
                     *b.device_ptr() as *const f16,
                     if b_row_major { n } else { k },
-                    0,
+                    if b_dims == 2 { 0 } else { (n * k) as i64 },
                     *a.device_ptr() as *const f16,
                     if a_row_major { k } else { m },
-                    a_strides[0].to_usize().unwrap() as i64,
+                    if a_dims == 2 { 0 } else { (m * k) as i64 },
                     &f16::from_f32(0.0) as *const f16,
                     *out.device_ptr_mut() as *mut f16,
                     n,
