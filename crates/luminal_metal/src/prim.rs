@@ -1600,7 +1600,7 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                     graph.remove_edge(edge_id);
                 }
 
-                if graph.no_delete.contains(&function_node) {
+                if graph.no_delete.remove(&function_node) {
                     graph.no_delete.insert(copy_node);
                 }
                 if let Some(w) = graph.to_retrieve.get(&function_node) {

@@ -290,7 +290,7 @@ impl Graph {
             if self.tensors.contains_key(&(*node, 0)) {
                 continue;
             }
-            let op_name = format!("{:?}", self.graph.node_weight(*node).unwrap());
+            let op_name = format!("{:?} | {}", self.node_weight(*node).unwrap(), node.index());
             print!("{}", op_name.bold().bright_green());
 
             let mut srcs =
