@@ -1,8 +1,12 @@
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+// src/chat.rs
+use crate::llama::setup::Model; // Import the Model struct
 
 #[derive(Deserialize)]
 pub struct ChatRequest {
-    pub model: String,
     pub messages: Vec<Message>,
 }
 
@@ -47,11 +51,14 @@ pub struct Usage {
 }
 
 /// Respond to chat request
-pub async fn respond_chat_request(request: ChatRequest) -> ChatResponse {
+pub async fn respond_chat_request(model: &Model, request: ChatRequest) -> ChatResponse {
+    let created = Utc::now().timestamp();
+    let raw_uuid = Uuid::new_v4();
+    let id = format!("chatcmpl-{}", raw_uuid);
     let response = ChatResponse {
-        id: "chatcmpl-9J4pxGD1wK3SQzmt70sspIuaZvFaP".to_string(),
+        id,
+        created,
         object: "chat.completion".to_string(),
-        created: 1714333853,
         model: "gpt-3.5-turbo-0125".to_string(),
         choices: vec![Choice {
             index: 0,

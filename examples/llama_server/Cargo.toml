@@ -33,3 +33,5 @@ serde = { version = "1.0.199", features = ["derive"] }
 tokio = { version = "1.37.0", features = ["rt-multi-thread"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+chrono = "0.4.38"
+uuid = { version = "1.8.0", features = ["v4"] }
