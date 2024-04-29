@@ -4,7 +4,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::net::TcpListener;
 
 mod chat;
@@ -17,7 +17,7 @@ use chat::{respond_chat_request, ChatRequest, ChatResponse};
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let model = Arc::new(RwLock::new(Model::setup()));
+    let model = Arc::new(Mutex::new(Model::setup()));
 
     let app = Router::new()
         .route("/", get(root))
@@ -34,10 +34,10 @@ async fn root() -> &'static str {
 }
 
 async fn chat_completions(
-    Extension(model): Extension<Arc<RwLock<Model>>>,
+    Extension(model): Extension<Arc<Mutex<Model>>>,
     Json(payload): Json<ChatRequest>,
 ) -> (StatusCode, Json<ChatResponse>) {
-    let mut model = model.write().unwrap(); // Acquire a write lock
+    let mut model = model.lock().unwrap(); // Acquire a write lock
 
     let response = respond_chat_request(&mut *model, payload).await;
     (StatusCode::OK, Json(response))
