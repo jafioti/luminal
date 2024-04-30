@@ -116,8 +116,13 @@ This actually is taken much furthur, fusing unary operations, binary operations,
 
 Here's an example of how many ops fusion can merge together. On the left is the unfused graph, on the right is the functionally identical fused graph:
 <img
-  className="block rounded-xl"
+  className="block dark:hidden rounded-xl"
   src="/images/fusion.png"
+  alt="The Luminal graph with and without kernel fusion"
+/>
+<img
+  className="hidden dark:block rounded-xl"
+  src="/images/fusion_dark.png"
   alt="The Luminal graph with and without kernel fusion"
 />
 
@@ -126,12 +131,37 @@ Here's an example of how many ops fusion can merge together. On the left is the 
 #### Storage Buffers
 Since we're reading buffers which may not be read again, it would make sense to re-use that memory directly. And since we know in advance how big all the buffers are, and when we'll be using them, we can decide at compile time which buffers should be used where.
 
-That's the concept behind Storage Buffer sharing. If for instance we have `a_buffer -> cos -> b_buffer -> exp -> c_buffer`, we can just re-use `a_buffer` as `c_buffer`, rather than allocate a third buffer. So the Metal StorageBufferCompiler does just this, computes the optimal buffer assignments to minimise memory usage, and adds a single op at the beginning of the graph to allocate all required buffers once. This op also keeps track of previously allocated buffers on earlier runs of the graph, and tries to re-use those buffers. Ideally each time a graph is ran, zero allocations need to happen!
+<img
+  className="block dark:hidden rounded-xl"
+  src="/images/storage_buffers_light.png"
+  alt="Shared Storage Buffers"
+/>
+<img
+  className="hidden dark:block rounded-xl"
+  src="/images/storage_buffers_dark.png"
+  alt="Shared Storage Buffers"
+/>
+
+
+The Metal StorageBufferCompiler does just this, computes the optimal buffer assignments to minimise memory usage, and adds a single op at the beginning of the graph to allocate all required buffers once.
+
+This op also keeps track of previously allocated buffers on earlier runs of the graph, and tries to re-use those buffers. Ideally each time a graph is ran, zero allocations need to happen!
 
 #### Command Buffers
 Another important concept in Metal is the Command Buffer. This is where we queue all our kernels to run. Naievely we can simply run the command buffer after queueing a single kernel, and simply do that for each op we run. But running the command buffer has latency, transferring the kernel to the GPU has latency, and this is a very inefficient use of the CommandBuffer.
 
 Instead, wouldn't it be great if we can just build a massive command buffer with all of our kernels, with inputs and outputs already set up, and just run the whole thing at once?
+
+<img
+  className="block dark:hidden rounded-xl"
+  src="/images/command_buffer_light.png"
+  alt="Shared Command Buffer"
+/>
+<img
+  className="hidden dark:block rounded-xl"
+  src="/images/command_buffer_dark.png"
+  alt="Shared Command Buffer"
+/>
 
 That's exactly what the CommandBufferCompiler does. It can create groups of ops to share the command buffer between, and run the command buffer only when we actually need the outputs. Usually we can put an entire model on a single command buffer. For instance, the entire Llama 3 8B uses just one command buffer!
 
