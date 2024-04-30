@@ -1,0 +1,16 @@
+[package]
+name = "luminal_onnx"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+luminal = {path="../.."}
+prost = { version = "0.12.4", default-features = false, features = ["prost-derive"] }
+# Only necessary if using Protobuf well-known types:
+prost-types = { version = "0.12.4", default-features = false }
+
+
+[build-dependencies]
+prost-build = { version = "0.12.4" }
