@@ -226,10 +226,157 @@ pub struct Conv3D<
     pub weight: GraphTensor<R2<CHANNELS_OUT, CHANNELS_IN_TIMES_KERNELX_KERNELY_KERNELZ>>,
 }
 
+impl<
+        const CHANNELS_IN: usize,
+        const CHANNELS_OUT: usize,
+        const KERNELX: usize,
+        const KERNELY: usize,
+        const KERNELZ: usize,
+        const STRIDEX: usize,
+        const STRIDEY: usize,
+        const STRIDEZ: usize,
+        const DILATIONX: usize,
+        const DILATIONY: usize,
+        const DILATIONZ: usize,
+        const CHANNELS_IN_TIMES_KERNELX_KERNELY_KERNELZ: usize,
+    > InitModule
+    for Conv3D<
+        CHANNELS_IN,
+        CHANNELS_OUT,
+        KERNELX,
+        KERNELY,
+        KERNELZ,
+        STRIDEX,
+        STRIDEY,
+        STRIDEZ,
+        DILATIONX,
+        DILATIONY,
+        DILATIONZ,
+        CHANNELS_IN_TIMES_KERNELX_KERNELY_KERNELZ,
+    >
+{
+    fn initialize(cx: &mut Graph) -> Self {
+        // Init weight as uniform(-1, 1)
+        let mut rng = thread_rng();
+        Self {
+            weight: cx.named_tensor("Weight").set(
+                (0..(CHANNELS_IN * CHANNELS_OUT * KERNELX * KERNELY * KERNELZ))
+                    .map(|_| rng.gen_range(-1_f32..1_f32))
+                    .collect::<Vec<_>>(),
+            ),
+        }
+    }
+}
+
+impl<
+        const CHANNELS_IN: usize,
+        const CHANNELS_OUT: usize,
+        const KERNELX: usize,
+        const KERNELY: usize,
+        const KERNELZ: usize,
+        const STRIDEX: usize,
+        const STRIDEY: usize,
+        const STRIDEZ: usize,
+        const DILATIONX: usize,
+        const DILATIONY: usize,
+        const DILATIONZ: usize,
+        const CHANNELS_IN_TIMES_KERNELX_KERNELY_KERNELZ: usize,
+    > SerializeModule
+    for Conv3D<
+        CHANNELS_IN,
+        CHANNELS_OUT,
+        KERNELX,
+        KERNELY,
+        KERNELZ,
+        STRIDEX,
+        STRIDEY,
+        STRIDEZ,
+        DILATIONX,
+        DILATIONY,
+        DILATIONZ,
+        CHANNELS_IN_TIMES_KERNELX_KERNELY_KERNELZ,
+    >
+{
+    fn serialize(&self, s: &mut luminal::module::Serializer) {
+        s.tensor("weight", self.weight);
+    }
+}
+
+impl<
+        const CHANNELS_IN: usize,
+        const CHANNELS_OUT: usize,
+        const KERNELX: usize,
+        const KERNELY: usize,
+        const KERNELZ: usize,
+        const STRIDEX: usize,
+        const STRIDEY: usize,
+        const STRIDEZ: usize,
+        const DILATIONX: usize,
+        const DILATIONY: usize,
+        const DILATIONZ: usize,
+        const CHANNELS_IN_TIMES_KERNELX_KERNELY_KERNELZ: usize,
+    >
+    Conv3D<
+        CHANNELS_IN,
+        CHANNELS_OUT,
+        KERNELX,
+        KERNELY,
+        KERNELZ,
+        STRIDEX,
+        STRIDEY,
+        STRIDEZ,
+        DILATIONX,
+        DILATIONY,
+        DILATIONZ,
+        CHANNELS_IN_TIMES_KERNELX_KERNELY_KERNELZ,
+    >
+{
+    pub fn forward<
+        const DIMX_IN: usize,
+        const DIMY_IN: usize,
+        const DIMZ_IN: usize,
+        const DIMX_OUT: usize,
+        const DIMY_OUT: usize,
+        const DIMZ_OUT: usize,
+        const DIMX_TIMES_DIMY_DIMZ_OUT: usize,
+    >(
+        &self,
+        input: GraphTensor<R4<CHANNELS_IN, DIMX_IN, DIMY_IN, DIMZ_IN>>,
+    ) -> GraphTensor<R4<CHANNELS_OUT, DIMX_OUT, DIMY_OUT, DIMZ_OUT>> {
+        let input_pooled = input
+            .pool_last_dim::<R5<CHANNELS_IN, DIMX_IN, DIMY_OUT, DIMZ_OUT, KERNELY>>(
+                KERNELY.into(),
+                STRIDEY.into(),
+                DILATIONY
+            )
+            .permute::<_, Axes5<0, 2, 3, 4, 1>>()
+            .pool_last_dim::<R6<CHANNELS_IN, DIMY_OUT, DIMZ_OUT, KERNELY, DIMX_OUT, KERNELX>>(
+                KERNELX.into(),
+                STRIDEX.into(),
+                DILATIONX
+            )
+            .permute::<_, Axes6<0, 5, 3, 4, 2, 1>>()
+            .reshape::<R5<CHANNELS_IN, KERNELX, KERNELY, DIMX_TIMES_DIMY_DIMZ_OUT, KERNELZ>>()
+            .pool_last_dim::<R5<CHANNELS_IN, KERNELX, KERNELY, DIMX_TIMES_DIMY_DIMZ_OUT, KERNELZ>>(
+                KERNELZ.into(),
+                STRIDEZ.into(),
+                DILATIONZ
+            )
+            .permute::<_, Axes5<0, 1, 2, 4, 3>>()
+            .reshape::<R2<CHANNELS_IN_TIMES_KERNELX_KERNELY_KERNELZ, DIMX_TIMES_DIMY_DIMZ_OUT>>();
+
+        self.weight
+            .matmul(input_pooled)
+            .reshape::<R4<CHANNELS_OUT, DIMX_OUT, DIMY_OUT, DIMZ_OUT>>()
+    }
+}
+
+
+
 
 #[cfg(test)]
 mod tests {
-    use super::{Conv1D, Conv2D};
+    use super::{Conv1D, Conv2D, Conv3D};
     use luminal::{prelude::*, tests::assert_close};
 
     #[test]
@@ -412,5 +559,99 @@ mod tests {
         cx.execute();
 
         assert_close(&out1.data(), &exp_out1.data())
+    }
+
+    #[test]
+    fn test_conv3d() {
+        let mut cx = Graph::new();
+
+        const CHANNELS_IN: usize = 3;
+        const CHANNELS_OUT: usize = 2;
+        const KERNELX: usize = 3;
+        const KERNELY: usize = 3;
+        const KERNELZ: usize = 3;
+        const STRIDEX: usize = 2;
+        const STRIDEY: usize = 2;
+        const STRIDEZ: usize = 2;
+        const DILATIONX: usize = 1;
+        const DILATIONY: usize = 1;
+        const DILATIONZ: usize = 1;
+        const DIMX_IN: usize = 8;
+        const DIMY_IN: usize = 8;
+        const DIMZ_IN: usize = 8;
+        const DIMX_OUT: usize = ((DIMX_IN - (DILATIONX + 1) * (KERNELX - 1) - 1) / STRIDEX) + 1;
+        const DIMY_OUT: usize = ((DIMY_IN - (DILATIONY + 1) * (KERNELY - 1) - 1) / STRIDEY) + 1;
+        const DIMZ_OUT: usize = ((DIMZ_IN - (DILATIONZ + 1) * (KERNELZ - 1) - 1) / STRIDEZ) + 1;
+        const DIMX_TIMES_DIMY_TIMES_DIMZ_OUT: usize = DIMX_OUT * DIMY_OUT * DIMZ_OUT;
+        const CHANNELS_IN_TIMES_KERNELX_KERNELY_KERNELZ: usize =
+            CHANNELS_IN * KERNELX * KERNELY * KERNELZ;
+
+        let inp1 = cx.tensor::<R4<CHANNELS_IN, DIMX_IN, DIMY_IN, DIMZ_IN>>();
+        inp1.set(vec![
+            1.0, 2.0, 3.0,
+            4.0, 5.0, 6.0,
+            7.0, 8.0, 9.0,
+
+            1.0, 2.0, 3.0,
+            4.0, 5.0, 6.0,
+            7.0, 8.0, 9.0,
+
+            1.0, 2.0, 3.0,
+            4.0, 5.0, 6.0,
+            7.0, 8.0, 9.0,
+
+            1.0, 2.0, 3.0,
+            4.0, 5.0, 6.0,
+            7.0, 8.0, 9.0,
+
+            1.0, 2.0, 3.0,
+            4.0, 5.0, 6.0,
+            7.0, 8.0, 9.0,
+
+            1.0, 2.0, 3.0,
+            4.0, 5.0, 6.0,
+            7.0, 8.0, 9.0,
+
+            1.0, 2.0, 3.0,
+            4.0, 5.0, 6.0,
+            7.0, 8.0, 9.0,
+
+            1.0, 2.0, 3.0,
+            4.0, 5.0, 6.0,
+            7.0, 8.0, 9.0
+        ]);
+
+        let exp_out1 = cx.tensor::<R4<CHANNELS_OUT, DIMX_OUT, DIMY_OUT, DIMZ_OUT>>();
+        exp_out1.set(vec![
+            13.0, 16.0, 13.0,
+            22.0, 28.0, 22.0,
+
+            13.0, 16.0, 13.0,
+            22.0, 28.0, 22.0
+        ]);
+        exp_out1.retrieve();
+
+        let model: Conv3D<
+            CHANNELS_IN,
+            CHANNELS_OUT,
+            KERNELX,
+            KERNELY,
+            KERNELZ,
+            STRIDEX,
+            STRIDEY,
+            STRIDEZ,
+            DILATIONX,
+            DILATIONY,
+            DILATIONZ,
+            CHANNELS_IN_TIMES_KERNELX_KERNELY_KERNELZ,
+        > = Conv3D::initialize(&mut cx);
+
+        let out1 = model
+            .forward::<DIMX_IN, DIMY_IN, DIMZ_IN, DIMX_OUT, DIMY_OUT, DIMZ_OUT, DIMX_TIMES_DIMY_TIMES_DIMZ_OUT>(inp1)
+            .retrieve();
+
+        cx.execute();
+
+        assert_close(&out1.data(), &exp_out1.data());
     }
 }
