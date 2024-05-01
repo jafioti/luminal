@@ -19,7 +19,6 @@ pub mod prelude {
     pub use crate::op::*;
     pub use crate::shape::*;
     pub use half::{bf16, f16};
-    pub use luminal_symbolic::*;
     pub use petgraph;
     pub use petgraph::stable_graph::NodeIndex;
     pub use tinyvec;
