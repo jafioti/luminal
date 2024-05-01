@@ -39,7 +39,7 @@ pub fn sgd(
 /// Output: (New weight outputs, Learning Rate Tensor)
 pub fn sgd_on_graph(
     graph: &mut Graph,
-    old_weights: &impl ToIds,
+    old_weights: impl ToIds,
     grads: &[(NodeIndex, ShapeTracker)],
 ) -> (Vec<NodeIndex>, GraphTensor<()>) {
     let lr = graph.named_tensor("Learning Rate").set(3e-4).keep(); // Karpathy constant
