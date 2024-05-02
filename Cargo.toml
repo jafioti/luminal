@@ -32,7 +32,4 @@ members = [
     "crates/luminal_nn",
     "crates/luminal_training",
 ]
-exclude = [
-    "crates/luminal_metal",
-    "crates/luminal_cuda",
-]
+exclude = ["crates/luminal_metal", "crates/luminal_cuda"]
