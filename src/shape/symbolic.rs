@@ -1,5 +1,3 @@
-use super::Term;
-
 use std::{
     fmt::Debug,
     ops::{
@@ -8,6 +6,7 @@ use std::{
     },
 };
 
+use itertools::Itertools;
 use rustc_hash::FxHashMap;
 use tinyvec::ArrayVec;
 
@@ -15,6 +14,69 @@ use tinyvec::ArrayVec;
 pub type Expression = GenericExpression<ArrayVec<[Term; 20]>>; // We need to figure out how to reduce this, can't be fixed at 20. ShapeTracker would take up 6 dims * 12 pads * 12 slices * 20 terms * 8 bytes = 138kb
 /// A symbolic expression stored on the heap
 pub type BigExpression = GenericExpression<Vec<Term>>;
+
+/// A single term of a symbolic expression such as a variable, number or operation.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Term {
+    Num(i32),
+    Var(char),
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Min,
+    Max,
+    And,
+    Or,
+    Gte,
+    Lt,
+}
+
+impl std::fmt::Debug for Term {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Term::Num(n) => write!(f, "{n}"),
+            Term::Var(c) => write!(f, "{c}"),
+            Term::Add => write!(f, "+"),
+            Term::Sub => write!(f, "-"),
+            Term::Mul => write!(f, "*"),
+            Term::Div => write!(f, "/"),
+            Term::Mod => write!(f, "%"),
+            Term::Min => write!(f, "min"),
+            Term::Max => write!(f, "max"),
+            Term::And => write!(f, "&&"),
+            Term::Or => write!(f, "||"),
+            Term::Gte => write!(f, ">="),
+            Term::Lt => write!(f, "<"),
+        }
+    }
+}
+
+impl Default for Term {
+    fn default() -> Self {
+        Self::Num(0)
+    }
+}
+
+impl Term {
+    pub fn as_op(self) -> Option<fn(i64, i64) -> Option<i64>> {
+        match self {
+            Term::Add => Some(|a, b| a.checked_add(b)),
+            Term::Sub => Some(|a, b| a.checked_sub(b)),
+            Term::Mul => Some(|a, b| a.checked_mul(b)),
+            Term::Div => Some(|a, b| a.checked_div(b)),
+            Term::Mod => Some(|a, b| a.checked_rem(b)),
+            Term::Max => Some(|a, b| Some(a.max(b))),
+            Term::Min => Some(|a, b| Some(a.min(b))),
+            Term::And => Some(|a, b| Some((a != 0 && b != 0) as i64)),
+            Term::Or => Some(|a, b| Some((a != 0 || b != 0) as i64)),
+            Term::Gte => Some(|a, b| Some((a >= b) as i64)),
+            Term::Lt => Some(|a, b| Some((a < b) as i64)),
+            _ => None,
+        }
+    }
+}
 
 /// Trait implemented on the 2 main symbolic expression storage types, Vec<Term> and ArrayVec<Term>
 #[allow(clippy::len_without_is_empty)]
@@ -135,7 +197,7 @@ impl<S: ExpressionStorage + Clone> std::fmt::Display for GenericExpression<S> {
 impl<S: ExpressionStorage> GenericExpression<S> {
     /// Simplify the expression to its minimal terms
     pub fn simplify(self) -> Self {
-        crate::simplify::reduce_triples(self)
+        reduce_triples(self)
     }
 
     /// Minimum
@@ -552,5 +614,133 @@ impl<S: ExpressionStorage, E: Into<Self>> BitAndAssign<E> for GenericExpression<
 impl<S: ExpressionStorage, E: Into<Self>> BitOrAssign<E> for GenericExpression<S> {
     fn bitor_assign(&mut self, rhs: E) {
         *self = self.clone() | rhs;
+    }
+}
+
+pub fn reduce_triples<S: ExpressionStorage>(
+    mut expr: GenericExpression<S>,
+) -> GenericExpression<S> {
+    fn get_triples<S: ExpressionStorage>(
+        exp: &GenericExpression<S>,
+    ) -> Vec<(Option<usize>, usize, Option<usize>)> {
+        // Mark all terms with their index
+        let terms = exp
+            .terms
+            .clone()
+            .into_iter()
+            .enumerate()
+            .collect::<Vec<_>>();
+        let mut stack = Vec::new();
+        let mut triples = vec![];
+        for (index, term) in terms {
+            match term {
+                Term::Num(_) | Term::Var(_) => stack.push((Some(index), term)),
+                _ => {
+                    let (a_ind, a_term) = stack.pop().unwrap();
+                    let (b_ind, b_term) = stack.pop().unwrap();
+                    triples.push((a_ind, index, b_ind));
+                    if let (Term::Num(a), Term::Num(b)) = (a_term, b_term) {
+                        if let Some(c) = term.as_op().unwrap()(a as i64, b as i64) {
+                            stack.push((None, Term::Num(c as i32)));
+                        } else {
+                            break;
+                        }
+                    } else if let Term::Var(a) = a_term {
+                        stack.push((None, Term::Var(a)));
+                    } else if let Term::Var(b) = b_term {
+                        stack.push((None, Term::Var(b)));
+                    }
+                }
+            }
+        }
+        triples
+    }
+    fn remove_terms<S: ExpressionStorage>(terms: &mut S, inds: &[usize]) {
+        for ind in inds.iter().sorted().rev() {
+            terms.remove(*ind);
+        }
+    }
+
+    #[macro_export]
+    macro_rules! unwrap_cont {
+        ($i: expr) => {
+            if let Some(s) = $i {
+                s
+            } else {
+                continue;
+            }
+        };
+    }
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let triples = get_triples(&expr);
+        for (a_ind, op_ind, b_ind) in triples {
+            let mut inner_changed = true;
+            match (
+                a_ind.map(|a| expr.terms[a]),
+                expr.terms[op_ind],
+                b_ind.map(|b| expr.terms[b]),
+            ) {
+                (Some(Term::Num(a)), term, Some(Term::Num(b))) if term.as_op().is_some() => {
+                    if let Some(c) = term.as_op().unwrap()(a as i64, b as i64) {
+                        expr.terms[unwrap_cont!(a_ind)] = Term::Num(c as i32);
+                        remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
+                    } else {
+                        inner_changed = false;
+                    }
+                }
+                // Remove min(i, inf) and min(inf, i)
+                (Some(Term::Num(a)), Term::Min, _) if a == i32::MAX => {
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
+                }
+                (_, Term::Min, Some(Term::Num(b))) if b == i32::MAX => {
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
+                }
+                // Remove max(i, inf) and max(inf, i)
+                (_, Term::Max, Some(Term::Num(i))) if i == i32::MAX => {
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
+                }
+                (Some(Term::Num(i)), Term::Max, _) if i == i32::MAX => {
+                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
+                }
+                _ => {
+                    inner_changed = false;
+                }
+            }
+            if inner_changed {
+                changed = true;
+                break;
+            }
+        }
+    }
+    expr
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::prelude::*;
+    #[test]
+    fn test_expressions() {
+        let n = (Expression::from('x') + Term::Num(255)) / Term::Num(256) * Term::Num(256);
+        assert_eq!(n.exec(&[('x', 767)].into_iter().collect()).unwrap(), 768);
+
+        let n = (Expression::from('x') + Term::Num(255)) / Term::Num(256) * Term::Num(256);
+        assert_eq!(n.exec(&[('x', 767)].into_iter().collect()).unwrap(), 768);
+    }
+
+    #[test]
+    fn test_minimizations() {
+        let expr = ((BigExpression::from('a') * 1) + 0) / 1 + (1 - 1);
+        let reduced_expr = expr.simplify();
+        assert_eq!(reduced_expr, 'a');
+    }
+
+    #[test]
+    fn test_substitution() {
+        let main = Expression::from('x') - 255;
+        let sub = Expression::from('x') / 2;
+        let new = main.substitute('x', sub);
+        assert_eq!(new, (Expression::from('x') / 2) - 255);
     }
 }
