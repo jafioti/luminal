@@ -55,9 +55,9 @@ fn main() {
 
     // Set up model loading
     #[cfg(any(feature = "metal", feature = "cuda"))]
-    let q_weights = loader::q8_load("setup/phi-3-mini-4k-instruct.Q8_0.gguf", &model, &mut cx);
+    let q_weights = loader::q8_load("setup/phi3.gguf", &model, &mut cx);
     #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
-    loader::q8_load("setup/phi-3-mini-4k-instruct.Q8_0.gguf", &model, &mut cx);
+    loader::q8_load("setup/phi3.gguf", &model, &mut cx);
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
     print!("Compiling graph");
