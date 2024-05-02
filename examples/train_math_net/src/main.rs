@@ -19,8 +19,11 @@ fn main() {
     let mut weights = params(&model);
     let grads = cx.compile(Autograd::new(&weights, loss), ());
     let (mut new_weights, lr) = sgd_on_graph(&mut cx, &weights, &grads);
+    cx.keep_tensors(&new_weights);
+    cx.keep_tensors(&weights);
     lr.set(1e-1);
 
+    #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
     cx.compile(
         GenericCompiler::default(),
         (
@@ -36,6 +39,19 @@ fn main() {
     #[cfg(feature = "metal")]
     cx.compile(
         luminal_metal::MetalCompiler::<f32>::default(),
+        (
+            &mut input,
+            &mut target,
+            &mut loss,
+            &mut output,
+            &mut weights,
+            &mut new_weights,
+        ),
+    );
+
+    #[cfg(feature = "cuda")]
+    cx.compile(
+        luminal_cuda::CudaCompiler::<f32>::default(),
         (
             &mut input,
             &mut target,
