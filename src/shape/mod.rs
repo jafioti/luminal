@@ -3,6 +3,7 @@ mod broadcast;
 mod permute;
 mod realize;
 mod slice;
+mod symbolic;
 pub mod tracker;
 
 pub use axes::*;
@@ -10,9 +11,8 @@ pub use broadcast::*;
 pub use permute::*;
 pub use realize::*;
 pub use slice::*;
+pub use symbolic::*;
 pub use tracker::*;
-
-use crate::prelude::*;
 
 // This currently is a lot more complicated than it needs to be. Can it be simplified?
 

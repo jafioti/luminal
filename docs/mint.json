@@ -11,7 +11,7 @@
     "dark": "/logo/luminal_logo.png",
     "light": "/logo/luminal_logo_light.png"
   },
-  "favicon": "/favicon.png",
+  "favicon": "/images/favicon.png",
   "modeToggle": {"default": "dark"},
   "colors": {
     "primary": "#0D9373",
@@ -64,7 +64,8 @@
     {
       "group": "Blog",
       "pages": [
-        "blog/4-24-2024"
+        "blog/intro",
+        "blog/gpu"
       ]
     },
     {
