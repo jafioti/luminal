@@ -81,8 +81,9 @@ fn main() {
     }
     println!("Finished in {iter} iterations");
     println!(
-        "Took {:.2}s",
-        (std::time::Instant::now() - start).as_secs_f32()
+        "Took {:.2}s, {:.2}µs / iter",
+        start.elapsed().as_secs_f32(),
+        start.elapsed().as_micros() / iter
     );
 }
 
