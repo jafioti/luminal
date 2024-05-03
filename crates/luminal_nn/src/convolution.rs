@@ -318,7 +318,7 @@ mod tests {
 
         exp_out1.retrieve();
 
-        let model: Conv2D<CH_IN, CH_OUT, KERNELX, KERNELY> = Conv2D::initialize(&mut cx);
+        let model = Conv2D::<CH_IN, CH_OUT, KERNELX, KERNELY>::initialize(&mut cx);
         model.weight.set(vec![
             0.1600, 0.2000, 0.1900, -0.1100, 0.0100, -0.0300, -0.1200, -0.0800, -0.1300, -0.0300,
             0.1600, -0.1700, -0.0000, 0.1900, 0.1300, 0.0300, -0.1500, 0.0900, 0.0100, 0.0200,
