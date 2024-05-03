@@ -37,7 +37,7 @@ impl<B: Dimension, S: Dimension, const N: usize, const DIM: usize> Module<GraphT
 
     fn forward(&self, input: GraphTensor<(B, S)>) -> Self::Output {
         self.weight
-            .gather(input.dyn_reshape::<(Dyn<'-'>,)>(vec![B::const_size() * S::const_size()]))
+            .gather(input.dyn_reshape::<(Dyn<'-'>,)>(vec![B::size() * S::size()]))
             .reshape()
     }
 }

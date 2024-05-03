@@ -172,14 +172,8 @@ impl<S: Shape> GraphTensor<S> {
         }
     }
 
-    pub fn pad<Dst: Shape, Start: Into<Expression> + Copy, End: Into<Expression> + Copy>(
-        mut self,
-        ranges: &[(Start, End)],
-    ) -> GraphTensor<Dst> {
-        let ranges = ranges
-            .iter()
-            .map(|i| (i.0.into(), i.1.into()))
-            .collect::<Vec<_>>();
+    pub fn pad<Dst: Shape>(mut self, ranges: impl PadOfShape<S>) -> GraphTensor<Dst> {
+        let ranges = ranges.to_pad_vec();
         // This exists because currently padding and slicing on the same dimension (even on opposite sides) is unsupported
         if ranges.iter().zip(self.shape.indexes).any(|(range, ind)| {
             (range.0 != 0 || range.1 != 0)
@@ -203,7 +197,7 @@ impl<S: Shape> GraphTensor<S> {
         let mut b_padding = vec![(Expression::default(), Expression::default()); rhs.shape.len()];
         b_padding[dim].0 = self.shape.shape()[dim].small();
         // Pad and add
-        (self.pad(&a_padding) + rhs.pad(&b_padding)).sync_shape()
+        (self.pad(a_padding) + rhs.pad(b_padding)).sync_shape()
     }
 }
 
@@ -296,9 +290,7 @@ mod tests {
         let a = cx
             .tensor::<R2<3, 2>>()
             .set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
-        let b = a
-            .pad::<R2<3, 4>, usize, usize>(&[(0, 0), (0, 2)])
-            .retrieve();
+        let b = a.pad::<R2<3, 4>>(((0, 0), (0, 2))).retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();

@@ -143,8 +143,8 @@ impl<
             .w_v
             .forward(values)
             .dyn_reshape::<(B, S1, Const<HEADS>, Dyn<'-'>)>(vec![
-                B::const_size(),
-                S1::const_size(),
+                B::size(),
+                S1::size(),
                 HEADS.into(),
                 (K_DIM / HEADS).into(),
             ])
@@ -153,8 +153,8 @@ impl<
             .w_k
             .forward(keys)
             .dyn_reshape::<(B, S1, Const<HEADS>, Dyn<'-'>)>(vec![
-                B::const_size(),
-                S1::const_size(),
+                B::size(),
+                S1::size(),
                 HEADS.into(),
                 (K_DIM / HEADS).into(),
             ])
@@ -163,8 +163,8 @@ impl<
             .w_q
             .forward(queries)
             .dyn_reshape::<(B, S2, Const<HEADS>, Dyn<'-'>)>(vec![
-                B::const_size(),
-                S2::const_size(),
+                B::size(),
+                S2::size(),
                 HEADS.into(),
                 (K_DIM / HEADS).into(),
             ])

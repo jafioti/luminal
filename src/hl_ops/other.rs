@@ -94,11 +94,7 @@ impl Graph {
 
     /// ARange from 0 to N
     pub fn arange<N: Dimension>(&mut self) -> GraphTensor<(N,)> {
-        if N::const_size()
-            .to_usize()
-            .map(|i| i == 1)
-            .unwrap_or_default()
-        {
+        if N::size().to_usize().map(|i| i == 1).unwrap_or_default() {
             // Single number ARange is just 0
             self.constant(0.).expand()
         } else {

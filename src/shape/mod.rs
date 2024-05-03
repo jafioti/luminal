@@ -1,13 +1,15 @@
 mod axes;
 mod broadcast;
+mod padding;
 mod permute;
 mod realize;
 mod slice;
 mod symbolic;
-pub mod tracker;
+mod tracker;
 
 pub use axes::*;
 pub use broadcast::*;
+pub use padding::*;
 pub use permute::*;
 pub use realize::*;
 pub use slice::*;
@@ -20,9 +22,7 @@ pub use tracker::*;
 pub trait Dimension:
     'static + Copy + Clone + std::fmt::Debug + Send + Sync + Eq + PartialEq
 {
-    // fn size(&self) -> usize;
-    fn const_size() -> Expression;
-    // fn from_size(size: usize) -> Option<Self>;
+    fn size() -> Expression;
 }
 
 /// Represents a single dimension where all
@@ -35,7 +35,7 @@ pub trait ConstDim: Default + Dimension {
 pub struct Dyn<const C: char>;
 
 impl<const C: char> Dimension for Dyn<C> {
-    fn const_size() -> Expression {
+    fn size() -> Expression {
         C.into()
     }
 }
@@ -44,7 +44,7 @@ impl<const C: char> Dimension for Dyn<C> {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Const<const M: usize>;
 impl<const M: usize> Dimension for Const<M> {
-    fn const_size() -> Expression {
+    fn size() -> Expression {
         M.into()
     }
 }
@@ -224,7 +224,7 @@ macro_rules! shape {
             type LastAxis = Axis<{$Num - 1}>;
 
             fn realized_shape() -> Vec<crate::prelude::Expression> {
-                vec![$($D::const_size(), )*]
+                vec![$($D::size(), )*]
             }
             fn to_tracker() -> ShapeTracker {
                 ShapeTracker::new(&Self::realized_shape())

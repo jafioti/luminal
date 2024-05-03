@@ -389,10 +389,8 @@ mod tests {
         let _b = cx.tensor::<R3<SEQ, HEAD_DIM_OVER_2, 1>>().keep();
         // Split input into evens and odds
         let split = a.reshape::<R3<SEQ, HEAD_DIM_OVER_2, 2>>();
-        let x0: GraphTensor<R3<SEQ, HEAD_DIM_OVER_2, 1>> =
-            split.slice((.., .., ..Expression::from(1))).realize();
-        let _x1: GraphTensor<R3<SEQ, HEAD_DIM_OVER_2, 1>> =
-            split.slice((.., .., Expression::from(1)..)).realize();
+        let x0: GraphTensor<R3<SEQ, HEAD_DIM_OVER_2, 1>> = split.slice((.., .., ..1)).realize();
+        let _x1: GraphTensor<R3<SEQ, HEAD_DIM_OVER_2, 1>> = split.slice((.., .., 1..)).realize();
 
         println!("x0: {:?}", x0.shape.index_expression());
     }

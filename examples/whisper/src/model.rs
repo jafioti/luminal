@@ -133,8 +133,8 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         // Rotary embed queries and keys
-        let queries = apply_rotary_embeddings_ggml(queries, PrevSeq::const_size().into());
-        let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::const_size().into());
+        let queries = apply_rotary_embeddings_ggml(queries, PrevSeq::size().into());
+        let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::size().into());
 
         // Add KV cache
         let (keys, values) = if let Some((k_cache, v_cache)) = cache {
@@ -158,10 +158,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
 
         let attention_mask = self.k_proj.graph().triu::<CurSeq>(1) * f16::MIN.to_f32();
         attention_weights += attention_mask
-            .pad::<(CurSeq, TotSeq), _, _>(&[
-                (0.into(), Expression::from(0)),
-                (TotSeq::const_size() - CurSeq::const_size(), 0.into()),
-            ])
+            .pad::<(CurSeq, TotSeq)>(((0, 0), (TotSeq::size() - CurSeq::size(), 0)))
             .expand();
 
         // Calculate final outputs
