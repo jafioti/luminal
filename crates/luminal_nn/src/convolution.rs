@@ -543,8 +543,6 @@ mod tests {
         const DIMX_TIMES_KERNELX: usize = DIMX_OUT * KERNELX;
         const DIMX_TIMES_DIMY_DIMZ_OUT:usize = DIMX_OUT * DIMY_OUT * DIMZ_OUT;
 
-        println!("DIMX_OUT, DIMY_OUT , DIMZ_OUT: {:?}, {:?}, {:?}",DIMX_OUT, DIMY_OUT , DIMZ_OUT);
-
         let inp1 = cx.tensor::<R4<CH_IN, DIMX_IN, DIMY_IN, DIMZ_IN>>();
         inp1.set(vec![
             // Example input data (5 channels, 2x3x5 volume)
@@ -560,7 +558,7 @@ mod tests {
         let exp_out1 = cx.tensor::<R4<CH_OUT, DIMX_OUT, DIMY_OUT, DIMZ_OUT>>();
         exp_out1.set(vec![
             // Example expected output data (2 channels, 1x1x2 volume)
-            3.9600, -0.3300, -1.7800, 4.040,
+            90.6935, 98.7138, 98.8273, 102.6553,
         ]);
 
         exp_out1.retrieve();
@@ -610,6 +608,6 @@ mod tests {
 
         cx.execute();
 
-        // assert_close(&out1.data(), &exp_out1.data());
+        assert_close(&out1.data(), &exp_out1.data());
     }
 }
