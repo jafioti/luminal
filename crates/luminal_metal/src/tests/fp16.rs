@@ -770,7 +770,7 @@ fn test_movement() {
     let data = random_vec(32);
     let mut cx = Graph::new();
     let a = cx.tensor::<R1<32>>().set(data.clone());
-    let b: GraphTensor<R1<42>> = a.pad(&[(0, 10)]).contiguous().retrieve();
+    let b: GraphTensor<R1<42>> = a.pad((0, 10)).contiguous().retrieve();
     let mut c: GraphTensor<R1<25>> = b
         .slice((..Expression::from(25),))
         .realize()

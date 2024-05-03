@@ -145,12 +145,11 @@ impl<S: Shape> GraphTensor<S> {
         if n_dims > 1 {
             // View as single dimension of matrix with wider width
             let mat_size = (dim_size.big() + stride.big()) * number_of_windows.big();
-            let actual_size =
-                dim_size.big() * self.shape.dims[self.shape.indexes[n_dims - 1]].big();
+            let actual_size = dim_size * self.shape.dims[self.shape.indexes[n_dims - 1]];
             // Reshape into single dimension to pad
             self.shape.remove_dim(n_dims);
-            self.shape.dims[self.shape.indexes[n_dims - 1]] = actual_size.small();
-            self.shape.padding[self.shape.indexes[n_dims - 1]].1 = (mat_size - actual_size).small();
+            self.shape.dims[self.shape.indexes[n_dims - 1]] = actual_size;
+            self.shape.padding[self.shape.indexes[n_dims - 1]].1 = mat_size.small() - actual_size;
             self = self.contiguous();
             // Reshape back (mats should be full now)
             self.shape.add_dim(n_dims, dim_size + stride);
