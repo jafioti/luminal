@@ -392,6 +392,87 @@ fn test_transformer_encoder_block() {
 }
 
 #[test]
+fn test_pool_1d_dims() {
+    let mut cx = Graph::new();
+
+    let inp1 = cx.tensor::<R2<4, 4>>().set(vec![
+        1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
+    ]);
+    // Stride 1
+    let out1 = inp1
+        .pool_last_dim::<R3<4, 2, 3>>(3.into(), 1.into(), 0)
+        .retrieve();
+
+    cx.execute();
+
+    assert_exact(
+        &out1.data(),
+        &[
+            1., 2., 3., 2., 3., 4., 5., 6., 7., 6., 7., 8., 9., 10., 11., 10., 11., 12., 13., 14.,
+            15., 14., 15., 16.,
+        ],
+    );
+}
+
+#[test]
+fn test_pool_2d() {
+    let mut cx = Graph::new();
+
+    let inp1 = cx.tensor::<R2<4, 4>>().set(vec![
+        1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
+    ]);
+    // 3x3 kernel
+    let out1 = inp1
+        // Pool first dim first by moving it to end
+        .permute::<_, LAxes2<1, 0>>()
+        .pool_last_dim::<R3<4, 2, 3>>(3.into(), 1.into(), 0)
+        // Now move other dim to end
+        .permute::<_, LAxes3<1, 2, 0>>()
+        .pool_last_dim::<R4<2, 3, 2, 3>>(3.into(), 1.into(), 0)
+        // Now swap middle two dims
+        .permute::<_, LAxes4<0, 2, 1, 3>>()
+        // Now merge both pooled dimensions
+        .reshape::<R3<4, 3, 3>>()
+        .retrieve();
+
+    cx.execute();
+
+    assert_exact(
+        &out1.data(),
+        &[
+            1.00, 2.00, 3.00, 5.00, 6.00, 7.00, 9.00, 10.00, 11.00, 2.00, 3.00, 4.00, 6.00, 7.00,
+            8.00, 10.00, 11.00, 12.00, 5.00, 6.00, 7.00, 9.00, 10.00, 11.00, 13.00, 14.00, 15.00,
+            6.00, 7.00, 8.00, 10.00, 11.00, 12.00, 14.00, 15.00, 16.00,
+        ],
+    );
+}
+
+#[test]
+fn test_pool_1d_dilation() {
+    let mut cx = Graph::new();
+
+    let inp1 = cx.tensor::<R1<5>>().set(vec![1., 2., 3., 4., 5.]);
+    // Stride 1
+    let out1 = inp1
+        .pool_last_dim::<R2<3, 2>>(2.into(), 1.into(), 1)
+        .retrieve();
+    // Stride 2
+    let out2 = inp1
+        .pool_last_dim::<R2<2, 2>>(2.into(), 2.into(), 1)
+        .retrieve();
+    // Stride 3
+    let out3 = inp1
+        .pool_last_dim::<R2<1, 2>>(2.into(), 3.into(), 1)
+        .retrieve();
+
+    cx.execute();
+
+    assert_exact(&out1.data(), &[1., 3., 2., 4., 3., 5.]);
+    assert_exact(&out2.data(), &[1., 3., 3., 5.]);
+    assert_exact(&out3.data(), &[1., 3.]);
+}
+
+#[test]
 fn test_conv2d() {
     let mut cx = Graph::new();
 

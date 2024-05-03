@@ -609,7 +609,7 @@ mod tests {
             .slice((..Expression::from(1), ..))
             .realize::<R2<1, 5>>()
             .cos()
-            .pad::<R2<2, 5>, _, _>(&[(0, 1), (0, 0)])
+            .pad::<R2<2, 5>>(((0, 1), (0, 0)))
             .exp2()
             .retrieve();
         cx.execute();
@@ -876,8 +876,8 @@ mod tests {
                     .permute::<_, Axes4<0, 2, 1, 3>>();
 
                 // Rotary embed queries and keys
-                let queries = apply_rotary_embeddings_ggml(queries, PrevSeq::const_size().big());
-                let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::const_size().big());
+                let queries = apply_rotary_embeddings_ggml(queries, PrevSeq::size().big());
+                let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::size().big());
 
                 // Add KV cache
                 let (keys, values) = (
@@ -897,10 +897,7 @@ mod tests {
 
                 let attention_mask = self.k_proj.graph().triu::<CurSeq>(1) * f16::MIN.to_f32();
                 attention_weights += attention_mask
-                    .pad::<(CurSeq, TotSeq), _, _>(&[
-                        (0.into(), Expression::from(0)),
-                        (TotSeq::const_size() - CurSeq::const_size(), 0.into()),
-                    ])
+                    .pad::<(CurSeq, TotSeq)>(((0, 0), (TotSeq::size() - CurSeq::size(), 0)))
                     .expand();
 
                 // Calculate final outputs
