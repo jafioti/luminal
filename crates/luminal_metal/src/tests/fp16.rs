@@ -793,6 +793,20 @@ fn test_movement() {
 }
 
 #[test]
+fn test_slice_add() {
+    let mut cx = Graph::new();
+    let a = cx.tensor().set(random_array::<256>());
+    let mut b = (a.slice(0..64) + a.slice(64..128) + a.slice(128..192) + a.slice(192..256))
+        .realize::<R1<64>>()
+        .expand::<R2<4, 64>, _>()
+        .retrieve();
+
+    cx.compile(MetalCompiler::<f16>::default(), &mut b);
+    cx.execute();
+    cx.display();
+}
+
+#[test]
 fn test_conv2d() {
     let mut cx = Graph::new();
 

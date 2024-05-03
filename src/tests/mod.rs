@@ -103,9 +103,22 @@ pub fn assert_exact<T: PartialEq + Debug>(a_vec: &[T], b_vec: &[T]) {
     }
 }
 
+pub fn random_array<const N: usize>() -> [f32; N] {
+    let mut rng = thread_rng();
+    random_array_rng(&mut rng)
+}
+
+pub fn random_array_rng<const N: usize, R: Rng>(rng: &mut R) -> [f32; N] {
+    let mut arr = [0.; N];
+    for i in &mut arr {
+        *i = rng.gen_range(-0.5..0.5);
+    }
+    arr
+}
+
 pub fn random_vec(n: usize) -> Vec<f32> {
     let mut rng = thread_rng();
-    (0..n).map(|_| rng.gen_range(-0.5..0.5)).collect()
+    random_vec_rng(n, &mut rng)
 }
 
 pub fn random_vec_rng<R: Rng>(n: usize, rng: &mut R) -> Vec<f32> {
@@ -127,13 +140,8 @@ macro_rules! test_imports {
                 Axis as LAxis, Const as LConst, *,
             },
             tests::{
-                assert_close,
-                assert_close_precision,
-                assert_exact,
-                // harness::{test_compilers_close, test_compilers_exact},
-                random_vec,
-                random_vec_rng,
-                test_graphs,
+                assert_close, assert_close_precision, assert_exact, random_array, random_array_rng,
+                random_vec, random_vec_rng, test_graphs,
             },
         };
     };

@@ -461,7 +461,7 @@ fn test_conv2d() {
     );
     cx.execute();
 
-    assert_close_precision(
+    assert_close(
         &out1.data(),
         &[
             3.9600, -0.3300, -1.7800, 4.0400, 1.5300, 0.2900, 2.8700, 3.0000, 0.9600, -1.8700,

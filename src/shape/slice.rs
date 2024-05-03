@@ -20,40 +20,94 @@ fn get_end_bound<D: Into<Expression> + Copy, S: Into<Expression>>(
     }
 }
 
-fn dim_to_size(r: Expression) -> usize {
-    r.to_usize().unwrap_or(i32::MAX as usize)
-}
-
 pub trait RangeToDim<D: Dimension> {
     type Dimension: Dimension;
+    fn bounds(&self, size: impl Into<Expression>) -> (Expression, Expression);
 }
 
 impl<D: Dimension> RangeToDim<D> for RangeFrom<usize> {
     type Dimension = Dyn<'-'>;
+    fn bounds(&self, size: impl Into<Expression>) -> (Expression, Expression) {
+        (
+            get_start_bound(self.start_bound()),
+            get_end_bound(self.end_bound(), size),
+        )
+    }
 }
 impl<D: Dimension> RangeToDim<D> for RangeTo<usize> {
     type Dimension = Dyn<'-'>;
+    fn bounds(&self, size: impl Into<Expression>) -> (Expression, Expression) {
+        (
+            get_start_bound(self.start_bound()),
+            get_end_bound(self.end_bound(), size),
+        )
+    }
 }
 impl<D: Dimension> RangeToDim<D> for RangeToInclusive<usize> {
     type Dimension = Dyn<'-'>;
+    fn bounds(&self, size: impl Into<Expression>) -> (Expression, Expression) {
+        (
+            get_start_bound(self.start_bound()),
+            get_end_bound(self.end_bound(), size),
+        )
+    }
 }
 impl<D: Dimension> RangeToDim<D> for Range<usize> {
     type Dimension = Dyn<'-'>;
+    fn bounds(&self, size: impl Into<Expression>) -> (Expression, Expression) {
+        (
+            get_start_bound(self.start_bound()),
+            get_end_bound(self.end_bound(), size),
+        )
+    }
 }
 impl<D: Dimension> RangeToDim<D> for RangeFrom<Expression> {
     type Dimension = Dyn<'-'>;
+    fn bounds(&self, size: impl Into<Expression>) -> (Expression, Expression) {
+        (
+            get_start_bound(self.start_bound()),
+            get_end_bound(self.end_bound(), size),
+        )
+    }
 }
 impl<D: Dimension> RangeToDim<D> for RangeTo<Expression> {
     type Dimension = Dyn<'-'>;
+    fn bounds(&self, size: impl Into<Expression>) -> (Expression, Expression) {
+        (
+            get_start_bound(self.start_bound()),
+            get_end_bound(self.end_bound(), size),
+        )
+    }
 }
 impl<D: Dimension> RangeToDim<D> for RangeToInclusive<Expression> {
     type Dimension = Dyn<'-'>;
+    fn bounds(&self, size: impl Into<Expression>) -> (Expression, Expression) {
+        (
+            get_start_bound(self.start_bound()),
+            get_end_bound(self.end_bound(), size),
+        )
+    }
 }
 impl<D: Dimension> RangeToDim<D> for Range<Expression> {
     type Dimension = Dyn<'-'>;
+    fn bounds(&self, size: impl Into<Expression>) -> (Expression, Expression) {
+        (
+            get_start_bound(self.start_bound()),
+            get_end_bound(self.end_bound(), size),
+        )
+    }
 }
 impl<D: Dimension> RangeToDim<D> for RangeFull {
     type Dimension = D;
+    fn bounds(&self, size: impl Into<Expression>) -> (Expression, Expression) {
+        (0.into(), size.into())
+    }
+}
+impl<D: Dimension, R: RangeToDim<D>> RangeToDim<D> for (R,) {
+    type Dimension = R::Dimension;
+    fn bounds(&self, size: impl Into<Expression>) -> (Expression, Expression) {
+        self.0.bounds(size)
+    }
 }
 
 pub trait SliceOfShape<S: Shape> {
@@ -68,34 +122,21 @@ impl SliceOfShape<R0> for () {
     }
 }
 
-impl<A: Dimension, R: RangeBounds<Expression> + RangeToDim<A>> SliceOfShape<(A,)> for (R,) {
+impl<A: Dimension, R: RangeToDim<A>> SliceOfShape<(A,)> for R {
     type OutputShape = (R::Dimension,);
     fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
-        vec![(
-            get_start_bound(self.0.start_bound()),
-            get_end_bound(self.0.end_bound(), dim_to_size(A::const_size())),
-        )]
+        vec![self.bounds(A::const_size())]
     }
 }
 
-impl<
-        A: Dimension,
-        B: Dimension,
-        R1: RangeBounds<Expression> + RangeToDim<A>,
-        R2: RangeBounds<Expression> + RangeToDim<B>,
-    > SliceOfShape<(A, B)> for (R1, R2)
+impl<A: Dimension, B: Dimension, R1: RangeToDim<A>, R2: RangeToDim<B>> SliceOfShape<(A, B)>
+    for (R1, R2)
 {
     type OutputShape = (R1::Dimension, R2::Dimension);
     fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
         vec![
-            (
-                get_start_bound(self.0.start_bound()),
-                get_end_bound(self.0.end_bound(), dim_to_size(A::const_size())),
-            ),
-            (
-                get_start_bound(self.1.start_bound()),
-                get_end_bound(self.1.end_bound(), dim_to_size(B::const_size())),
-            ),
+            self.0.bounds(A::const_size()),
+            self.1.bounds(B::const_size()),
         ]
     }
 }
@@ -104,26 +145,17 @@ impl<
         A: Dimension,
         B: Dimension,
         C: Dimension,
-        R1: RangeBounds<Expression> + RangeToDim<A>,
-        R2: RangeBounds<Expression> + RangeToDim<B>,
-        R3: RangeBounds<Expression> + RangeToDim<C>,
+        R1: RangeToDim<A>,
+        R2: RangeToDim<B>,
+        R3: RangeToDim<C>,
     > SliceOfShape<(A, B, C)> for (R1, R2, R3)
 {
     type OutputShape = (R1::Dimension, R2::Dimension, R3::Dimension);
     fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
         vec![
-            (
-                get_start_bound(self.0.start_bound()),
-                get_end_bound(self.0.end_bound(), dim_to_size(A::const_size())),
-            ),
-            (
-                get_start_bound(self.1.start_bound()),
-                get_end_bound(self.1.end_bound(), dim_to_size(B::const_size())),
-            ),
-            (
-                get_start_bound(self.2.start_bound()),
-                get_end_bound(self.2.end_bound(), dim_to_size(C::const_size())),
-            ),
+            self.0.bounds(A::const_size()),
+            self.1.bounds(B::const_size()),
+            self.2.bounds(C::const_size()),
         ]
     }
 }
@@ -133,31 +165,19 @@ impl<
         B: Dimension,
         C: Dimension,
         D: Dimension,
-        R1: RangeBounds<Expression> + RangeToDim<A>,
-        R2: RangeBounds<Expression> + RangeToDim<B>,
-        R3: RangeBounds<Expression> + RangeToDim<C>,
-        R4: RangeBounds<Expression> + RangeToDim<C>,
+        R1: RangeToDim<A>,
+        R2: RangeToDim<B>,
+        R3: RangeToDim<C>,
+        R4: RangeToDim<C>,
     > SliceOfShape<(A, B, C, D)> for (R1, R2, R3, R4)
 {
     type OutputShape = (R1::Dimension, R2::Dimension, R3::Dimension, R4::Dimension);
     fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
         vec![
-            (
-                get_start_bound(self.0.start_bound()),
-                get_end_bound(self.0.end_bound(), dim_to_size(A::const_size())),
-            ),
-            (
-                get_start_bound(self.1.start_bound()),
-                get_end_bound(self.1.end_bound(), dim_to_size(B::const_size())),
-            ),
-            (
-                get_start_bound(self.2.start_bound()),
-                get_end_bound(self.2.end_bound(), dim_to_size(C::const_size())),
-            ),
-            (
-                get_start_bound(self.3.start_bound()),
-                get_end_bound(self.3.end_bound(), dim_to_size(D::const_size())),
-            ),
+            self.0.bounds(A::const_size()),
+            self.1.bounds(B::const_size()),
+            self.2.bounds(C::const_size()),
+            self.3.bounds(D::const_size()),
         ]
     }
 }
@@ -168,11 +188,11 @@ impl<
         C: Dimension,
         D: Dimension,
         E: Dimension,
-        R1: RangeBounds<Expression> + RangeToDim<A>,
-        R2: RangeBounds<Expression> + RangeToDim<B>,
-        R3: RangeBounds<Expression> + RangeToDim<C>,
-        R4: RangeBounds<Expression> + RangeToDim<C>,
-        R5: RangeBounds<Expression> + RangeToDim<C>,
+        R1: RangeToDim<A>,
+        R2: RangeToDim<B>,
+        R3: RangeToDim<C>,
+        R4: RangeToDim<C>,
+        R5: RangeToDim<C>,
     > SliceOfShape<(A, B, C, D, E)> for (R1, R2, R3, R4, R5)
 {
     type OutputShape = (
@@ -184,26 +204,11 @@ impl<
     );
     fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
         vec![
-            (
-                get_start_bound(self.0.start_bound()),
-                get_end_bound(self.0.end_bound(), dim_to_size(A::const_size())),
-            ),
-            (
-                get_start_bound(self.1.start_bound()),
-                get_end_bound(self.1.end_bound(), dim_to_size(B::const_size())),
-            ),
-            (
-                get_start_bound(self.2.start_bound()),
-                get_end_bound(self.2.end_bound(), dim_to_size(C::const_size())),
-            ),
-            (
-                get_start_bound(self.3.start_bound()),
-                get_end_bound(self.3.end_bound(), dim_to_size(D::const_size())),
-            ),
-            (
-                get_start_bound(self.4.start_bound()),
-                get_end_bound(self.4.end_bound(), dim_to_size(E::const_size())),
-            ),
+            self.0.bounds(A::const_size()),
+            self.1.bounds(B::const_size()),
+            self.2.bounds(C::const_size()),
+            self.3.bounds(D::const_size()),
+            self.4.bounds(E::const_size()),
         ]
     }
 }
