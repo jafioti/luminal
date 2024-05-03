@@ -145,10 +145,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         let values = v_cache.concat_along::<_, Axis<2>, _>(values);
 
         // Calculate attention weights
-        let mut attention_weights = queries
-            .reshape::<(_, Const<N_HEADS>, _, _)>() // Split query heads into groups
-            .matmul(keys.permute())
-            / (HEAD_DIM as f32).sqrt();
+        let mut attention_weights = queries.matmul(keys.permute()) / (HEAD_DIM as f32).sqrt();
 
         let attention_mask = self.k_proj.graph().triu::<CurSeq>(1) * f16::MIN.to_f32();
         attention_weights += attention_mask
