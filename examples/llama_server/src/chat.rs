@@ -100,7 +100,7 @@ pub async fn respond_chat_request(model: &mut Model, request: ChatRequest) -> Ch
     let completion_str = model.tokenizer.decode(&completion, false).unwrap();
     let completion_tokens = completion.len();
 
-    let response = ChatResponse {
+    ChatResponse {
         id,
         created,
         object: "chat.completion".to_string(),
@@ -118,7 +118,5 @@ pub async fn respond_chat_request(model: &mut Model, request: ChatRequest) -> Ch
             prompt_tokens,
             completion_tokens,
         },
-    };
-
-    response
+    }
 }

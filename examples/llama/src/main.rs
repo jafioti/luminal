@@ -44,7 +44,7 @@ fn main() {
         .map(|_| (cx.named_tensor("Key Cache"), cx.named_tensor("Value Cache")))
         .collect();
     cache_src.set_dyn(vec![], &[1, model::N_KV_HEADS, 0, model::HEAD_DIM]);
-    let model = model::MistralLM::initialize(&mut cx);
+    let model = model::Llama::initialize(&mut cx);
     let mut model_weights = params(&model);
     cx.keep_tensors(&model_weights);
     let (logits, mut cache_dest) = model.forward((input, &cache_src, PhantomData::<Dyn<'t'>>));

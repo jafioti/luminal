@@ -125,10 +125,12 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             .matmul(self.q_proj.permute())
             .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
+
         let keys = x
             .matmul(self.k_proj.permute())
             .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
+
         let values = x
             .matmul(self.v_proj.permute())
             .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
@@ -143,7 +145,10 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         let values = v_cache.concat_along::<_, Axis<2>, _>(values);
 
         // Calculate attention weights
-        let mut attention_weights = queries.matmul(keys.permute()) / (HEAD_DIM as f32).sqrt();
+        let mut attention_weights = queries
+            .reshape::<(_, Const<N_HEADS>, _, _)>() // Split query heads into groups
+            .matmul(keys.permute())
+            / (HEAD_DIM as f32).sqrt();
 
         let attention_mask = self.k_proj.graph().triu::<CurSeq>(1) * f16::MIN.to_f32();
         attention_weights += attention_mask
@@ -215,9 +220,10 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         ),
     ) -> Self::Output {
         // Attention
-        let (y, cache) =
-            self.attention
-                .forward((self.attention_norm.forward(x), cache, PhantomData::<TotSeq>));
+        let normed = self.attention_norm.forward(x);
+        let (y, cache) = self
+            .attention
+            .forward((normed, cache, PhantomData::<TotSeq>));
 
         // Residual Addition
         x += y;
@@ -256,7 +262,7 @@ impl SerializeModule for TransformerBlock {
     }
 }
 
-pub struct MistralLM {
+pub struct Phi {
     // Token embeddings
     pub embedding: Embedding<VOCAB_SIZE, HIDDEN_DIM>,
     // Transformer layers
@@ -272,7 +278,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         GraphTensor<(Batch, CurSeq)>,
         &[KVCache<Batch, PrevSeq>],
         PhantomData<TotSeq>,
-    )> for MistralLM
+    )> for Phi
 {
     type Output = (
         GraphTensor<(Batch, CurSeq, Const<VOCAB_SIZE>)>,
@@ -303,7 +309,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     }
 }
 
-impl InitModule for MistralLM {
+impl InitModule for Phi {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             embedding: Embedding {
@@ -321,7 +327,7 @@ impl InitModule for MistralLM {
     }
 }
 
-impl SerializeModule for MistralLM {
+impl SerializeModule for Phi {
     fn serialize(&self, s: &mut Serializer) {
         s.module("token_embd", &self.embedding);
         s.module("output_norm", &self.norm);

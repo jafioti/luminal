@@ -93,8 +93,8 @@ impl Model {
                 &mut model_weights,
             ),
         );
-        let cache_src_set = downstream(&cache_src, &cx);
-        let cache_dest_set = cache_dest.to_ids();
+        let cache_src = downstream(&cache_src, &cx);
+        let cache_dest = cache_dest.to_ids();
         println!("\t\t - {}ms", now.elapsed().as_millis());
 
         // Initial forward pass to load weights
@@ -105,16 +105,16 @@ impl Model {
         cx.set_dyn_dim('t', 1);
         cx.execute();
         logits.drop();
-        cache_dest.drop();
+        cx.drop_tensors(&cache_dest);
         println!("\t\t - {}ms", now.elapsed().as_millis());
 
         // Now that weights are loaded, delete the loading nodes so they don't run again
-        delete_inputs(&downstream(model_weights, &cx), &mut cx);
+        delete_inputs(downstream(model_weights, &cx), &mut cx);
 
         Model {
             input,
             tokenizer,
-            kv_cache_src_set: downstream(&cache_src, &cx),
+            kv_cache_src_set: downstream(cache_src, &cx),
             kv_cache_dest_set: cache_dest.to_ids(),
             graph: cx,
             logits,

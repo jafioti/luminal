@@ -39,6 +39,6 @@ async fn chat_completions(
 ) -> (StatusCode, Json<ChatResponse>) {
     let mut model = model.lock().await;
 
-    let response = respond_chat_request(&mut *model, payload).await;
+    let response = respond_chat_request(&mut model, payload).await;
     (StatusCode::OK, Json(response))
 }

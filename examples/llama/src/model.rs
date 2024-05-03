@@ -268,7 +268,7 @@ impl SerializeModule for TransformerBlock {
     }
 }
 
-pub struct MistralLM {
+pub struct Llama {
     // Token embeddings
     pub embedding: Embedding<VOCAB_SIZE, HIDDEN_DIM>,
     // Transformer layers
@@ -284,7 +284,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         GraphTensor<(Batch, CurSeq)>,
         &[KVCache<Batch, PrevSeq>],
         PhantomData<TotSeq>,
-    )> for MistralLM
+    )> for Llama
 {
     type Output = (
         GraphTensor<(Batch, CurSeq, Const<VOCAB_SIZE>)>,
@@ -315,7 +315,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     }
 }
 
-impl InitModule for MistralLM {
+impl InitModule for Llama {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             embedding: Embedding {
@@ -333,7 +333,7 @@ impl InitModule for MistralLM {
     }
 }
 
-impl SerializeModule for MistralLM {
+impl SerializeModule for Llama {
     fn serialize(&self, s: &mut Serializer) {
         s.module("token_embd", &self.embedding);
         s.module("output_norm", &self.norm);

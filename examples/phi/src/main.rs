@@ -21,7 +21,7 @@ use luminal::prelude::*;
 #[command(author, version, about, long_about = None)]
 pub struct CLIArgs {
     /// Number of tokens to generate
-    #[clap(short = 't', long = "gen_tokens", default_value = "512")]
+    #[clap(short = 't', long = "gen_tokens", default_value = "128")]
     gen_tokens: i32,
 
     /// Prompt for the model
@@ -44,7 +44,7 @@ fn main() {
         .map(|_| (cx.named_tensor("Key Cache"), cx.named_tensor("Value Cache")))
         .collect();
     cache_src.set_dyn(vec![], &[1, model::N_HEADS, 0, model::HEAD_DIM]);
-    let model = model::MistralLM::initialize(&mut cx);
+    let model = model::Phi::initialize(&mut cx);
     let mut model_weights = params(&model);
     cx.keep_tensors(&model_weights);
     let (logits, mut cache_dest) = model.forward((input, &cache_src, PhantomData::<Dyn<'t'>>));
@@ -67,9 +67,9 @@ fn main() {
         (
             GenericCompiler::default(),
             #[cfg(feature = "metal")]
-            luminal_metal::quantized::MetalQuantizedCompiler::<f16>::new(q_weights),
+            luminal_metal::quantized::MetalQuantizedCompiler::<f32>::new(q_weights),
             #[cfg(feature = "cuda")]
-            luminal_cuda::CudaQuantizedCompiler::<f16>::new(q_weights),
+            luminal_cuda::CudaQuantizedCompiler::<f32>::new(q_weights),
             #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
             luminal_cpu::CPUCompiler::default(),
         ),
@@ -98,6 +98,7 @@ fn main() {
 
     // Now that weights are loaded, delete the loading nodes so they don't run again
     delete_inputs(&downstream(model_weights, &cx), &mut cx);
+
     // Run prompt processing pass
     let mut input_ids = tokenizer
         .encode(&cli_args.prompt as &str, false)
@@ -126,9 +127,9 @@ fn main() {
 
     // Decode token
     print!("{}", cli_args.prompt.white().bold());
-    let out_str = tokenizer.decode(&output_ids, false).unwrap();
+    let out_str = tokenizer.decode(&output_ids, false).unwrap().bright_green();
     let mut prev_output_len = out_str.len();
-    print!("{}", out_str.bright_green());
+    print!("{out_str}");
     io::stdout().flush().unwrap();
 
     // Swap caches
@@ -173,6 +174,7 @@ fn main() {
     );
 }
 
+// Currently just an argmax, do actual sampling here
 fn argmax(dist: &[f32]) -> u32 {
     dist.iter()
         .position_max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
