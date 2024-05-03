@@ -188,6 +188,7 @@ pub struct Conv3D<
     const DILATIONX: usize,
     const DILATIONY: usize,
     const DILATIONZ: usize,
+    const DIMX_TIMES_KERNELX: usize,
     const DIMX_TIMES_DIMY_DIMZ_OUT: usize
 > {
     pub weight: GraphTensor<R5<CH_OUT, CH_IN, KERNELX, KERNELY, KERNELZ>>,
@@ -205,6 +206,7 @@ impl<
         const DILATIONX: usize,
         const DILATIONY: usize,
         const DILATIONZ: usize,
+        const DIMX_TIMES_KERNELX: usize,
         const DIMX_TIMES_DIMY_DIMZ_OUT: usize
     > InitModule
     for Conv3D<
@@ -219,6 +221,7 @@ impl<
         DILATIONX,
         DILATIONY,
         DILATIONZ,
+        DIMX_TIMES_KERNELX,
         DIMX_TIMES_DIMY_DIMZ_OUT,
     >
 {
@@ -247,6 +250,7 @@ impl<
         const DILATIONX: usize,
         const DILATIONY: usize,
         const DILATIONZ: usize,
+        const DIMX_TIMES_KERNELX: usize,
         const DIMX_TIMES_DIMY_DIMZ_OUT: usize,
 > SerializeModule
     for Conv3D<
@@ -261,6 +265,7 @@ impl<
         DILATIONX,
         DILATIONY,
         DILATIONZ,
+        DIMX_TIMES_KERNELX,
         DIMX_TIMES_DIMY_DIMZ_OUT,
     >
 {
@@ -281,6 +286,7 @@ impl<
         const DILATIONX: usize,
         const DILATIONY: usize,
         const DILATIONZ: usize,
+        const DIMX_TIMES_KERNELX: usize,
         const DIMX_TIMES_DIMY_DIMZ_OUT: usize,
     >
     Conv3D<
@@ -295,6 +301,7 @@ impl<
         DILATIONX,
         DILATIONY,
         DILATIONZ,
+        DIMX_TIMES_KERNELX,
         DIMX_TIMES_DIMY_DIMZ_OUT,
     >
 {
@@ -315,20 +322,29 @@ impl<
                 STRIDEY.into(),
                 DILATIONY
             )
-            .permute::<_, Axes5<0, 2, 4, 1, 3>>()
-            .pool_last_dim::<R6<CH_IN, DIMY_OUT, KERNELY, DIMZ_OUT, DIMX_OUT, KERNELX>>(
+            .permute::<_, Axes5<0, 2, 3, 4, 1>>()
+            .pool_last_dim::<R6<CH_IN, DIMY_OUT, DIMZ_OUT, KERNELY, DIMX_OUT, KERNELX>>(
                 KERNELX.into(),
                 STRIDEX.into(),
                 DILATIONX
             )
-            .permute::<_, Axes6<0, 5, 2, 4, 3, 1>>()
-            .reshape::<R4<CH_IN, KERNELX, KERNELY, DIMX_TIMES_DIMY_DIMZ_OUT>>()
-            .pool_last_dim::<R5<CH_IN, KERNELX, KERNELY, DIMX_TIMES_DIMY_DIMZ_OUT, KERNELZ>>(
+            .dyn_reshape::<(Const<CH_IN>, Dyn<'-'>)>(vec![
+                CH_IN.into(),
+                DIMZ_OUT.into(),
+                KERNELY.into(),
+                (DIMX_OUT * KERNELX).into(),
+                DIMY_IN.into()
+            ]);
+
+        let last_pool = input_pooled
+            .pool_last_dim::<R6<CH_IN, DIMZ_OUT, KERNELY, DIMX_TIMES_KERNELX, DIMY_IN, KERNELZ>>(
                 KERNELZ.into(),
                 STRIDEZ.into(),
                 DILATIONZ
             )
-            .permute::<_, Axes5<0, 4, 1, 2, 3>>()
+            .permute::<_, Axes6<0, 2, 5, 3, 1, 4>>();
+
+        let reshaped = last_pool
             .dyn_reshape::<(_, Dyn<'-'>)>(vec![
                 (CH_IN * KERNELX * KERNELY * KERNELZ).into(),
                 DIMX_TIMES_DIMY_DIMZ_OUT.into(),
@@ -339,7 +355,7 @@ impl<
                 CH_OUT.into(),
                 (CH_IN * KERNELX * KERNELY * KERNELZ).into(),
             ])
-            .matmul(input_pooled)
+            .matmul(reshaped)
             .reshape::<R4<CH_OUT, DIMX_OUT, DIMY_OUT, DIMZ_OUT>>()
     }
 }
@@ -524,7 +540,10 @@ mod tests {
         const DIMX_OUT: usize = ((DIMX_IN - (DILATIONX + 1) * (KERNELX - 1) - 1) / STRIDEX) + 1;
         const DIMY_OUT: usize = ((DIMY_IN - (DILATIONY + 1) * (KERNELY - 1) - 1) / STRIDEY) + 1;
         const DIMZ_OUT: usize = ((DIMZ_IN - (DILATIONZ + 1) * (KERNELZ - 1) - 1) / STRIDEZ) + 1;
+        const DIMX_TIMES_KERNELX: usize = DIMX_OUT * KERNELX;
         const DIMX_TIMES_DIMY_DIMZ_OUT:usize = DIMX_OUT * DIMY_OUT * DIMZ_OUT;
+
+        println!("DIMX_OUT, DIMY_OUT , DIMZ_OUT: {:?}, {:?}, {:?}",DIMX_OUT, DIMY_OUT , DIMZ_OUT);
 
         let inp1 = cx.tensor::<R4<CH_IN, DIMX_IN, DIMY_IN, DIMZ_IN>>();
         inp1.set(vec![
@@ -558,6 +577,7 @@ mod tests {
             DILATIONX,
             DILATIONY,
             DILATIONZ,
+            DIMX_TIMES_KERNELX,
             DIMX_TIMES_DIMY_DIMZ_OUT,
         > = Conv3D::initialize(&mut cx);
         let weights = vec![
