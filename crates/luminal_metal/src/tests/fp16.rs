@@ -800,7 +800,6 @@ fn test_slice_add() {
 
     cx.compile(MetalCompiler::<f16>::default(), &mut b);
     cx.execute();
-    cx.display();
 }
 
 #[test]

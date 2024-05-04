@@ -154,15 +154,22 @@ impl<S: Shape> GraphTensor<S> {
 
     /// Get the indicies of the max elements along the last axis
     pub fn argmax(self) -> GraphTensor<<S as ReduceShape<<S as Shape>::LastAxis>>::Reduced> {
+        // Get one-hot along last dimension
         let x_equal = self.equals(self.max_reduce::<_, S::LastAxis>().expand_to(self.shape));
-        // ARange to shape
+        // Create index arange for last dimension
         let r = self
             .graph()
             .constant(1.)
-            .expand_to(self.shape)
+            .expand_to::<(Dyn<'-'>,)>(ShapeTracker::new(&[self
+                .shape
+                .shape()
+                .last()
+                .unwrap()
+                .small()]))
             .cumsum_last_dim()
             - 1.;
-        (x_equal * r).max_reduce::<_, S::LastAxis>()
+        // Multiply one-hot by expanded index arange
+        (x_equal * r.expand_to(self.shape)).max_reduce()
     }
 
     /// Take the absolute value
