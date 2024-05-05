@@ -198,7 +198,7 @@ impl<C: Compiler + Debug> Compiler for Looped<C> {
             if linearized == graph.linearized_graph {
                 break;
             }
-            linearized = graph.linearized_graph.clone();
+            linearized.clone_from(&graph.linearized_graph);
         }
     }
 }
@@ -350,9 +350,7 @@ impl Graph {
         key: &str,
         input: I,
     ) -> Option<O> {
-        let Some(node_weight) = self.graph.node_weight_mut(node) else {
-            return None;
-        };
+        let node_weight = self.graph.node_weight_mut(node)?;
 
         node_weight
             .custom(key, Box::new(input))
