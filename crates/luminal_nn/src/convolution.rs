@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use luminal::prelude::*;
 use rand::{thread_rng, Rng};
 
@@ -52,23 +54,94 @@ impl<
         const KERNEL: usize,
         const STRIDE: usize,
         const DILATION: usize,
-    > Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION>
+        DimIn: Dimension,
+        DimOut: Dimension,
+    > Module<(GraphTensor<(Const<CH_IN>, DimIn)>, PhantomData<DimOut>)>
+    for Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION>
 {
-    pub fn forward<const DIM_IN: usize, const DIM_OUT: usize>(
+    type Output = GraphTensor<(Const<CH_OUT>, DimOut)>;
+    fn forward(
         &self,
-        input: GraphTensor<R2<CH_IN, DIM_IN>>,
-    ) -> GraphTensor<R2<CH_OUT, DIM_OUT>> {
+        (input, ph): (GraphTensor<(Const<CH_IN>, DimIn)>, PhantomData<DimOut>),
+    ) -> Self::Output {
+        <Self as Module<(
+            GraphTensor<(Const<1>, Const<1>, Const<CH_IN>, DimIn)>,
+            PhantomData<DimOut>,
+        )>>::forward(self, (input.expand(), ph))
+        .reshape()
+    }
+}
+// Batch 1D
+impl<
+        const CH_IN: usize,
+        const CH_OUT: usize,
+        const KERNEL: usize,
+        const STRIDE: usize,
+        const DILATION: usize,
+        DimIn: Dimension,
+        DimOut: Dimension,
+        Batch: Dimension,
+    >
+    Module<(
+        GraphTensor<(Batch, Const<CH_IN>, DimIn)>,
+        PhantomData<DimOut>,
+    )> for Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION>
+{
+    type Output = GraphTensor<(Batch, Const<CH_OUT>, DimOut)>;
+    fn forward(
+        &self,
+        (input, ph): (
+            GraphTensor<(Batch, Const<CH_IN>, DimIn)>,
+            PhantomData<DimOut>,
+        ),
+    ) -> Self::Output {
+        <Self as Module<(
+            GraphTensor<(Const<1>, Batch, Const<CH_IN>, DimIn)>,
+            PhantomData<DimOut>,
+        )>>::forward(self, (input.expand(), ph))
+        .reshape()
+    }
+}
+// Batch 2D
+impl<
+        const CH_IN: usize,
+        const CH_OUT: usize,
+        const KERNEL: usize,
+        const STRIDE: usize,
+        const DILATION: usize,
+        DimIn: Dimension,
+        DimOut: Dimension,
+        Batch1: Dimension,
+        Batch2: Dimension,
+    >
+    Module<(
+        GraphTensor<(Batch1, Batch2, Const<CH_IN>, DimIn)>,
+        PhantomData<DimOut>,
+    )> for Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION>
+{
+    type Output = GraphTensor<(Batch1, Batch2, Const<CH_OUT>, DimOut)>;
+    fn forward(
+        &self,
+        (input, _): (
+            GraphTensor<(Batch1, Batch2, Const<CH_IN>, DimIn)>,
+            PhantomData<DimOut>,
+        ),
+    ) -> Self::Output {
         self.weight
             .dyn_reshape::<(Const<CH_OUT>, Dyn<'-'>)>(vec![CH_OUT.into(), (CH_IN * KERNEL).into()])
+            .expand::<(Batch1, Batch2, Const<CH_OUT>, Dyn<'-'>), _>()
             .matmul(
                 input
-                    .pool_last_dim::<R3<CH_IN, DIM_OUT, KERNEL>>(
-                        KERNEL.into(),
-                        STRIDE.into(),
-                        DILATION,
+                    .pool_last_dim::<(Batch1, Batch2, Const<CH_IN>, DimOut, Const<KERNEL>)>(
+                        KERNEL, STRIDE, DILATION,
                     )
-                    .permute::<_, Axes3<0, 2, 1>>()
-                    .dyn_reshape(vec![(CH_IN * KERNEL).into(), DIM_OUT.into()]),
+                    .permute::<_, Axes5<0, 1, 2, 4, 3>>()
+                    .dyn_reshape::<(Batch1, Batch2, Dyn<'-'>, DimOut)>(vec![
+                        Batch1::size(),
+                        Batch2::size(),
+                        (CH_IN * KERNEL).into(),
+                        DimOut::size(),
+                    ]),
             )
     }
 }
@@ -150,16 +223,10 @@ impl<
         input: GraphTensor<R3<CH_IN, DIMX_IN, DIMY_IN>>,
     ) -> GraphTensor<R3<CH_OUT, DIMX_OUT, DIMY_OUT>> {
         let input_pooled = input
-            .pool_last_dim::<R4<CH_IN, DIMX_IN, DIMY_OUT, KERNELY>>(
-                KERNELY.into(),
-                STRIDEY.into(),
-                DILATIONY,
-            )
+            .pool_last_dim::<R4<CH_IN, DIMX_IN, DIMY_OUT, KERNELY>>(KERNELY, STRIDEY, DILATIONY)
             .permute::<_, Axes4<0, 2, 3, 1>>()
             .pool_last_dim::<R5<CH_IN, DIMY_OUT, KERNELY, DIMX_OUT, KERNELX>>(
-                KERNELX.into(),
-                STRIDEX.into(),
-                DILATIONX,
+                KERNELX, STRIDEX, DILATIONX,
             )
             .permute::<_, Axes5<0, 4, 2, 3, 1>>()
             .dyn_reshape::<(_, Dyn<'-'>)>(vec![
@@ -179,6 +246,8 @@ impl<
 
 #[cfg(test)]
 mod tests {
+    use std::marker::PhantomData;
+
     use super::{Conv1D, Conv2D};
     use luminal::{prelude::*, tests::assert_close};
 
@@ -200,7 +269,9 @@ mod tests {
             .tensor::<R2<CH_IN, DIM_IN>>()
             .set([[3., 0., 9., 6., 0., 6.]]);
 
-        let out1 = model.forward::<DIM_IN, DIM_OUT>(inp1).retrieve();
+        let out1 = model
+            .forward((inp1, PhantomData::<Const<DIM_OUT>>))
+            .retrieve();
         cx.execute();
 
         assert_close(&out1.data(), &[0.0948, -0.9498, -1.2342]);
@@ -238,7 +309,9 @@ mod tests {
         ]);
         inp1.retrieve();
 
-        let out1 = model.forward::<DIM_IN, DIM_OUT>(inp1).retrieve();
+        let out1 = model
+            .forward((inp1, PhantomData::<Const<DIM_OUT>>))
+            .retrieve();
         cx.execute();
 
         assert_close(

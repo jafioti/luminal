@@ -150,6 +150,36 @@ impl<X> Module<X> for () {
     }
 }
 
+impl<X, M: Module<X, Output = X>> Module<X> for Vec<M> {
+    type Output = X;
+    fn forward(&self, mut x: X) -> Self::Output {
+        for layer in self {
+            x = layer.forward(x);
+        }
+        x
+    }
+}
+
+impl<X, M: Module<X, Output = X>> Module<X> for &[M] {
+    type Output = X;
+    fn forward(&self, mut x: X) -> Self::Output {
+        for layer in self.iter() {
+            x = layer.forward(x);
+        }
+        x
+    }
+}
+
+impl<const N: usize, X, M: Module<X, Output = X>> Module<X> for [M; N] {
+    type Output = X;
+    fn forward(&self, mut x: X) -> Self::Output {
+        for layer in self.iter() {
+            x = layer.forward(x);
+        }
+        x
+    }
+}
+
 macro_rules! tuple_impls {
     ([$($name:ident),+] [$($idx:tt),+], $last:ident, [$($rev_tail:ident),*]) => {
         impl<

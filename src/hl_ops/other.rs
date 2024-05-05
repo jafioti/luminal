@@ -21,7 +21,7 @@ impl<S: Shape> GraphTensor<S> {
         self = self.contiguous();
 
         // Pool
-        let mut pooled = self.pool_last_dim::<()>(orig_length, 1.into(), 0);
+        let mut pooled = self.pool_last_dim::<()>(orig_length, 1, 0);
         // Sum Reduce along new dimension
         let final_id = self
             .graph()

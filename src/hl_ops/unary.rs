@@ -207,6 +207,13 @@ impl<S: Shape> GraphTensor<S> {
     pub fn leaky_relu(self, neg_slope: f32) -> GraphTensor<S> {
         self.relu() - (self * -neg_slope).relu()
     }
+
+    /// The Gaussian Error Linear Unit activation function
+    #[allow(clippy::excessive_precision)]
+    pub fn gelu(self) -> GraphTensor<S> {
+        // Based on https://github.com/tinygrad/tinygrad/blob/9fc4465557831b614b56dd645eebc940ca0fa1bb/tinygrad/tensor.py#L1162C26-L1162C104
+        0.5 * self * (1. + (self * 0.7978845608 * (1. + 0.044715 * self * self)).tanh())
+    }
 }
 
 #[cfg(test)]
