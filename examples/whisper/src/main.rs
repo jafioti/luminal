@@ -1,3 +1,4 @@
+#![allow(unused)] // WIP
 use luminal::prelude::*;
 
 mod audio;

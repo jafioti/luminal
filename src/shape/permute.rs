@@ -31,6 +31,15 @@ macro_rules! impl_permute {
         {
         }
     };
+    ($Ax0:tt, $Ax1:tt, $Ax2:tt, $Ax3:tt, $Ax4:tt, $Ax5:tt) => {
+        impl<D1, D2, D3, D4, D5, D6>
+            PermuteShapeTo<
+                (d!($Ax0), d!($Ax1), d!($Ax2), d!($Ax3), d!($Ax4), d!($Ax5)),
+                Axes6<$Ax0, $Ax1, $Ax2, $Ax3, $Ax4, $Ax5>,
+            > for (D1, D2, D3, D4, D5, D6)
+        {
+        }
+    };
 }
 
 /// Expand out all the possible permutations for 2-4d
@@ -125,3 +134,4 @@ permutations!([0, 1]);
 permutations!([0, 1, 2]);
 permutations!([0, 1, 2, 3]);
 permutations!([0, 1, 2, 3, 4]);
+permutations!([0, 1, 2, 3, 4, 5]);
