@@ -333,10 +333,11 @@ impl Graph {
             for (i, tensor) in tensors.into_iter().enumerate() {
                 self.tensors.insert((*node, i as u8), tensor);
             }
-            if let Some(t) = op_times.get_mut(&op_name) {
+            let timed_op_name = format!("{:?}", self.node_weight(*node).unwrap());
+            if let Some(t) = op_times.get_mut(&timed_op_name) {
                 *t += elapsed;
             } else {
-                op_times.insert(op_name, elapsed);
+                op_times.insert(timed_op_name, elapsed);
             }
 
             // Check if we can delete the source tensors now
