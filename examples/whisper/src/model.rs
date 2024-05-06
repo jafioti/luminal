@@ -1,26 +1,49 @@
 use std::marker::PhantomData;
 
 use luminal::prelude::{binary::F32Pow, *};
-use luminal_nn::{Conv1D, Embedding, RMSNorm};
+use luminal_nn::{Conv1D, Embedding, PermutedLinear, RMSNorm};
 
 // Encoder
-pub const N_MEL_BINS: usize = 1;
-pub const N_STATE: usize = 1;
+pub const NUM_MEL_BINS: usize = 80;
+pub const D_MODEL: usize = 384;
+pub const ENC_LAYERS: usize = 4;
+pub const ENC_FFN_DIM: usize = 1536;
 
-// Mistral 7B Config
-pub const VOCAB_SIZE: usize = 32000;
-pub const HIDDEN_DIM: usize = 4096;
-pub const NUM_LAYERS: usize = 32;
-pub const N_HEADS: usize = 32;
-pub const MLP_DIM: usize = 14336;
+// Decoder
+pub const VOCAB_SIZE: usize = 51865;
+pub const DEC_LAYERS: usize = 4;
+pub const DEC_FFN_DIM: usize = 1536;
 
-pub const HEAD_DIM: usize = HIDDEN_DIM / N_HEADS;
-pub const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
-pub const ATTN_PROJ_DIM: usize = HEAD_DIM * N_HEADS;
+// Shared
+pub const HEADS: usize = 6;
+pub const HEAD_DIM: usize = D_MODEL / HEADS;
+pub const MAX_TARGET_POSITION: usize = 448;
+
+// Audio parameters.
+pub const N_MEL_BINS: usize = 80;
+pub const SAMPLE_RATE: usize = 16000;
+pub const N_FFT: usize = 400;
+pub const HOP_LENGTH: usize = 160;
+pub const CHUNK_LENGTH: usize = 30;
+pub const N_SAMPLES: usize = CHUNK_LENGTH * SAMPLE_RATE; // 480000 samples in a 30-second chunk
+pub const N_FRAMES: usize = N_SAMPLES / HOP_LENGTH; // 3000 frames in a mel spectrogram input
+
+pub const NO_SPEECH_THRESHOLD: f64 = 0.6;
+pub const LOGPROB_THRESHOLD: f64 = -1.0;
+pub const TEMPERATURES: [f64; 6] = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0];
+pub const COMPRESSION_RATIO_THRESHOLD: f64 = 2.4;
+
+// Tokenizer dependent bits.
+pub const SOT_TOKEN: &str = "<|startoftranscript|>";
+pub const TRANSCRIBE_TOKEN: &str = "<|transcribe|>";
+pub const TRANSLATE_TOKEN: &str = "<|translate|>";
+pub const NO_TIMESTAMPS_TOKEN: &str = "<|notimestamps|>";
+pub const EOT_TOKEN: &str = "<|endoftext|>";
+pub const NO_SPEECH_TOKENS: [&str; 2] = ["<|nocaptions|>", "<|nospeech|>"];
 
 pub type KVCache<Batch, Seq> = (
-    GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)>,
-    GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)>,
+    GraphTensor<(Batch, Const<HEADS>, Seq, Const<HEAD_DIM>)>,
+    GraphTensor<(Batch, Const<HEADS>, Seq, Const<HEAD_DIM>)>,
 );
 
 pub struct Mlp<const I: usize, const H: usize> {
@@ -61,39 +84,6 @@ impl<const I: usize, const H: usize> SerializeModule for Mlp<I, H> {
     }
 }
 
-fn apply_rotary_embeddings_ggml<const N_HEADS: usize, Batch: Dimension, Seq: Dimension>(
-    input: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)>,
-    prev_seq: BigExpression,
-) -> GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)> {
-    // Get freqs
-    let freqs = (input.graph().arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
-    let freqs = 1000000_f32.pow(freqs);
-    let pos = input.graph().arange::<Seq>() + prev_seq;
-    let emb = pos.expand::<(_, Const<1>), _>().matmul(freqs.expand());
-
-    // Split input into evens and odds
-    let split = input.reshape::<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<2>)>();
-    let x0: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<1>)> = split
-        .slice((.., .., .., .., ..Expression::from(1)))
-        .contiguous()
-        .realize();
-    let x1: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<1>)> = split
-        .slice((.., .., .., .., Expression::from(1)..))
-        .contiguous()
-        .realize();
-
-    // Apply sin and cos embeddings
-    let x0_out = x0 * emb.cos().expand() - x1 * emb.sin().expand();
-    let x1_out = x0 * emb.sin().expand() + x1 * emb.cos().expand();
-
-    // Combine back into output
-    x0_out
-        .concat_along::<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<2>), Axis<4>, _>(
-            x1_out,
-        )
-        .reshape()
-}
-
 pub struct SelfAttention<const HIDDEN: usize> {
     pub q_proj: GraphTensor<R2<HIDDEN, HIDDEN>>,
     pub k_proj: GraphTensor<R2<HIDDEN, HIDDEN>>,
@@ -131,22 +121,18 @@ impl<
         // Apply the Projections
         let queries = x
             .matmul(self.q_proj.permute())
-            .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
+            .reshape::<(Batch, CurSeq, Const<HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         let keys = x
             .matmul(self.k_proj.permute())
-            .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
+            .reshape::<(Batch, CurSeq, Const<HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         let values = x
             .matmul(self.v_proj.permute())
-            .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
+            .reshape::<(Batch, CurSeq, Const<HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
-
-        // Rotary embed queries and keys
-        let queries = apply_rotary_embeddings_ggml(queries, PrevSeq::size().into());
-        let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::size().into());
 
         // Add KV cache
         let (keys, values) = if let Some((k_cache, v_cache)) = cache {
@@ -192,21 +178,20 @@ impl<const HIDDEN: usize> SelfAttention<HIDDEN> {
         values: GraphTensor<(Batch, EncSeq, Const<HIDDEN>)>,
     ) -> (
         GraphTensor<(Batch, DecSeq, Const<HIDDEN>)>,
-        GraphTensor<(Batch, Const<N_HEADS>, EncSeq, Const<HEAD_DIM>)>,
-        GraphTensor<(Batch, Const<N_HEADS>, EncSeq, Const<HEAD_DIM>)>,
+        KVCache<Batch, EncSeq>,
     ) {
         // Apply the projections
         let queries = queries
             .matmul(self.q_proj.permute())
-            .reshape::<(Batch, DecSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
+            .reshape::<(Batch, DecSeq, Const<HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let keys = keys
             .matmul(self.k_proj.permute())
-            .reshape::<(Batch, EncSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
+            .reshape::<(Batch, EncSeq, Const<HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
         let values = values
             .matmul(self.v_proj.permute())
-            .reshape::<(Batch, EncSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
+            .reshape::<(Batch, EncSeq, Const<HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         // Calculate attention weights
@@ -229,7 +214,7 @@ impl<const HIDDEN: usize> SelfAttention<HIDDEN> {
             // Apply output projection
             .matmul(self.o_proj.permute());
 
-        (output, keys, values)
+        (output, (keys, values))
     }
 }
 
@@ -253,18 +238,18 @@ impl<const HIDDEN: usize> SerializeModule for SelfAttention<HIDDEN> {
     }
 }
 
-pub struct EncoderTransformerBlock<const HIDDEN: usize> {
-    pub attention: SelfAttention<HIDDEN>,
-    pub attention_norm: RMSNorm<HIDDEN>,
-    pub feed_forward: Mlp<MLP_DIM, HIDDEN>,
-    pub feed_forward_norm: RMSNorm<HIDDEN>,
+pub struct EncoderTransformerBlock {
+    pub attention: SelfAttention<D_MODEL>,
+    pub attention_norm: RMSNorm<D_MODEL>,
+    pub feed_forward: Mlp<ENC_FFN_DIM, D_MODEL>,
+    pub feed_forward_norm: RMSNorm<D_MODEL>,
 }
 
-impl<const HIDDEN: usize, Batch: Dimension, Seq: Dimension>
-    Module<GraphTensor<(Batch, Seq, Const<HIDDEN>)>> for EncoderTransformerBlock<HIDDEN>
+impl<Batch: Dimension, Seq: Dimension> Module<GraphTensor<(Batch, Seq, Const<D_MODEL>)>>
+    for EncoderTransformerBlock
 {
-    type Output = GraphTensor<(Batch, Seq, Const<HIDDEN>)>;
-    fn forward(&self, mut x: GraphTensor<(Batch, Seq, Const<HIDDEN>)>) -> Self::Output {
+    type Output = GraphTensor<(Batch, Seq, Const<D_MODEL>)>;
+    fn forward(&self, mut x: GraphTensor<(Batch, Seq, Const<D_MODEL>)>) -> Self::Output {
         // Attention
         let (y, _) = self.attention.forward((
             self.attention_norm.forward(x),
@@ -284,7 +269,7 @@ impl<const HIDDEN: usize, Batch: Dimension, Seq: Dimension>
     }
 }
 
-impl<const HIDDEN: usize> InitModule for EncoderTransformerBlock<HIDDEN> {
+impl InitModule for EncoderTransformerBlock {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             attention: InitModule::initialize(cx),
@@ -303,7 +288,7 @@ impl<const HIDDEN: usize> InitModule for EncoderTransformerBlock<HIDDEN> {
     }
 }
 
-impl<const HIDDEN: usize> SerializeModule for EncoderTransformerBlock<HIDDEN> {
+impl SerializeModule for EncoderTransformerBlock {
     fn serialize(&self, s: &mut Serializer) {
         s.module("", &self.attention);
         s.module("attn_norm", &self.attention_norm);
@@ -314,10 +299,10 @@ impl<const HIDDEN: usize> SerializeModule for EncoderTransformerBlock<HIDDEN> {
 
 pub struct AudioEncoder {
     // Conv layers (based on https://github.com/huggingface/candle/blob/59b18d974ec3cad6963b774aa245e23f8c80414f/candle-transformers/src/models/whisper/model.rs#L246)
-    pub conv1: Conv1D<N_MEL_BINS, N_STATE, 3, 1, 1>,
-    pub conv2: Conv1D<N_STATE, N_STATE, 3, 2, 1>,
+    pub conv1: Conv1D<N_MEL_BINS, D_MODEL, 3, 1, 1>,
+    pub conv2: Conv1D<D_MODEL, D_MODEL, 3, 2, 1>,
     // Transformer layers
-    pub layers: Vec<EncoderTransformerBlock<N_STATE>>,
+    pub layers: Vec<EncoderTransformerBlock>,
 }
 
 fn sinusoids<const CHANNELS: usize, Length: Dimension>(
@@ -341,7 +326,7 @@ fn sinusoids<const CHANNELS: usize, Length: Dimension>(
 impl<Batch: Dimension, Seq: Dimension> Module<GraphTensor<(Batch, Seq, Const<N_MEL_BINS>)>>
     for AudioEncoder
 {
-    type Output = GraphTensor<(Batch, Seq, Const<N_STATE>)>;
+    type Output = GraphTensor<(Batch, Seq, Const<D_MODEL>)>;
     fn forward(&self, input: GraphTensor<(Batch, Seq, Const<N_MEL_BINS>)>) -> Self::Output {
         // Conv layers
         let x = self
@@ -354,7 +339,7 @@ impl<Batch: Dimension, Seq: Dimension> Module<GraphTensor<(Batch, Seq, Const<N_M
             .gelu()
             .permute::<_, Axes3<0, 2, 1>>();
         // Sinusoidal positional embedding
-        x += sinusoids::<N_MEL_BINS, Seq>(x.graph()).expand();
+        x += sinusoids::<D_MODEL, Seq>(x.graph()).expand();
         // Transformer layers
         let output = self.layers.forward(x);
         // Final layer norm
@@ -367,7 +352,7 @@ impl InitModule for AudioEncoder {
         Self {
             conv1: InitModule::initialize(cx),
             conv2: InitModule::initialize(cx),
-            layers: (0..NUM_LAYERS)
+            layers: (0..ENC_LAYERS)
                 .map(|_| InitModule::initialize(cx))
                 .collect(),
         }
@@ -378,6 +363,190 @@ impl SerializeModule for AudioEncoder {
     fn serialize(&self, s: &mut Serializer) {
         s.module("conv1", &self.conv1);
         s.module("conv2", &self.conv2);
+        for (i, layer) in self.layers.iter().enumerate() {
+            s.module(&format!("blk/{i}"), layer);
+        }
+    }
+}
+
+pub struct DecoderTransformerBlock {
+    pub attention: SelfAttention<D_MODEL>,
+    pub attention_norm: RMSNorm<D_MODEL>,
+    pub cross_attention: SelfAttention<D_MODEL>,
+    pub cross_attention_norm: RMSNorm<D_MODEL>,
+    pub feed_forward: Mlp<DEC_FFN_DIM, D_MODEL>,
+    pub feed_forward_norm: RMSNorm<D_MODEL>,
+}
+
+impl<
+        Batch: Dimension,
+        EncSeq: Dimension,
+        CurSeq: Dimension,
+        PrevSeq: Dimension,
+        TotSeq: Dimension,
+    >
+    Module<(
+        GraphTensor<(Batch, CurSeq, Const<D_MODEL>)>,
+        GraphTensor<(Batch, EncSeq, Const<D_MODEL>)>,
+        KVCache<Batch, PrevSeq>,
+        PhantomData<TotSeq>,
+    )> for DecoderTransformerBlock
+{
+    type Output = (
+        GraphTensor<(Batch, CurSeq, Const<D_MODEL>)>,
+        KVCache<Batch, EncSeq>,
+        KVCache<Batch, TotSeq>,
+    );
+    fn forward(
+        &self,
+        (mut x, encoded, cache, tot): (
+            GraphTensor<(Batch, CurSeq, Const<D_MODEL>)>,
+            GraphTensor<(Batch, EncSeq, Const<D_MODEL>)>,
+            KVCache<Batch, PrevSeq>,
+            PhantomData<TotSeq>,
+        ),
+    ) -> Self::Output {
+        // Self Attention
+        let (y, cache) =
+            self.attention
+                .forward((self.attention_norm.forward(x), Some(cache), true, tot));
+
+        // Residual Addition
+        x += y;
+
+        // Cross Attention
+        let (y, enc_states) = self.cross_attention.cross_attention_forward(
+            self.cross_attention_norm.forward(x),
+            encoded,
+            encoded,
+        );
+
+        // Residual Addition
+        x += y;
+
+        // Feed Forward
+        let y = self.feed_forward.forward(self.feed_forward_norm.forward(x));
+
+        // Residual Addition
+        (x + y, enc_states, cache)
+    }
+}
+
+impl InitModule for DecoderTransformerBlock {
+    fn initialize(cx: &mut Graph) -> Self {
+        Self {
+            attention: InitModule::initialize(cx),
+            attention_norm: {
+                let mut norm = RMSNorm::initialize(cx);
+                norm.epsilon = 1e-5;
+                norm
+            },
+            cross_attention: InitModule::initialize(cx),
+            cross_attention_norm: {
+                let mut norm = RMSNorm::initialize(cx);
+                norm.epsilon = 1e-5;
+                norm
+            },
+            feed_forward: InitModule::initialize(cx),
+            feed_forward_norm: {
+                let mut norm = RMSNorm::initialize(cx);
+                norm.epsilon = 1e-5;
+                norm
+            },
+        }
+    }
+}
+
+impl SerializeModule for DecoderTransformerBlock {
+    fn serialize(&self, s: &mut Serializer) {
+        s.module("", &self.attention);
+        s.module("attn_norm", &self.attention_norm);
+        s.module("", &self.cross_attention);
+        s.module("attn_norm", &self.cross_attention);
+        s.module("ffn_norm", &self.feed_forward_norm);
+        s.module("", &self.feed_forward);
+    }
+}
+
+pub struct TextDecoder {
+    // Embeddings
+    pub embedding: Embedding<VOCAB_SIZE, D_MODEL>,
+    pub pos_embedding: GraphTensor<R2<MAX_TARGET_POSITION, D_MODEL>>,
+    // Transformer layers
+    pub layers: Vec<DecoderTransformerBlock>,
+    // LM head
+    pub lm_head: (RMSNorm<D_MODEL>, PermutedLinear<D_MODEL, VOCAB_SIZE>),
+}
+
+impl<
+        Batch: Dimension,
+        EncSeq: Dimension,
+        PrevDecSeq: Dimension,
+        CurDecSeq: Dimension,
+        TotDecSeq: Dimension,
+    >
+    Module<(
+        Vec<GraphTensor<(Batch, EncSeq, Const<D_MODEL>)>>,
+        GraphTensor<(Batch, CurDecSeq)>,
+        Vec<KVCache<Batch, PrevDecSeq>>,
+        PhantomData<TotDecSeq>,
+    )> for TextDecoder
+{
+    type Output = (
+        GraphTensor<(Batch, CurDecSeq, Const<VOCAB_SIZE>)>,
+        Vec<KVCache<Batch, EncSeq>>,    // Encoder projected states
+        Vec<KVCache<Batch, TotDecSeq>>, // Decoder KV cache
+    );
+    fn forward(
+        &self,
+        (enc_output, input, cache, _): (
+            Vec<GraphTensor<(Batch, EncSeq, Const<D_MODEL>)>>,
+            GraphTensor<(Batch, CurDecSeq)>,
+            Vec<KVCache<Batch, PrevDecSeq>>,
+            PhantomData<TotDecSeq>,
+        ),
+    ) -> Self::Output {
+        // Embed text
+        let mut x = self.embedding.forward(input);
+        x += self
+            .pos_embedding
+            .slice((
+                PrevDecSeq::size()..CurDecSeq::size() + PrevDecSeq::size(),
+                ..,
+            ))
+            .realize::<(CurDecSeq, Const<D_MODEL>)>()
+            .expand();
+        // Run through layers and collect new caches
+        let (mut new_caches, mut enc_states) = (vec![], vec![]);
+        let (mut new_cache, mut enc_state);
+        for (i, layer) in self.layers.iter().enumerate() {
+            (x, enc_state, new_cache) =
+                layer.forward((x, enc_output[i], cache[i], PhantomData::<TotDecSeq>));
+            new_caches.push(new_cache);
+            enc_states.push(enc_state);
+        }
+        // Run through last norm and output projection
+        (self.lm_head.forward(x), enc_states, new_caches)
+    }
+}
+
+impl InitModule for TextDecoder {
+    fn initialize(cx: &mut Graph) -> Self {
+        Self {
+            embedding: InitModule::initialize(cx),
+            pos_embedding: cx.tensor(),
+            lm_head: InitModule::initialize(cx),
+            layers: (0..DEC_LAYERS)
+                .map(|_| InitModule::initialize(cx))
+                .collect(),
+        }
+    }
+}
+
+impl SerializeModule for TextDecoder {
+    fn serialize(&self, s: &mut Serializer) {
+        s.module("embedding", &self.embedding);
+        s.module("head", &self.lm_head);
         for (i, layer) in self.layers.iter().enumerate() {
             s.module(&format!("blk/{i}"), layer);
         }

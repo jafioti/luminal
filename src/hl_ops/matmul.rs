@@ -1,5 +1,9 @@
 use crate::prelude::*;
 
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` and `GraphTensor<{S}>` cannot be matrix multiplied! The last dimension of the left hand tensor and the second to last dimension of the right hand tensor must match.",
+    label = "Left hand tensor: `{Self}`"
+)]
 pub trait Matmul<S: Shape> {
     type Output;
     fn matmul(self, rhs: GraphTensor<S>) -> Self::Output;

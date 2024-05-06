@@ -268,10 +268,8 @@ pub struct Llama {
     pub embedding: Embedding<VOCAB_SIZE, HIDDEN_DIM>,
     // Transformer layers
     pub layers: Vec<TransformerBlock>,
-    // Final Norm layer
-    pub norm: RMSNorm<HIDDEN_DIM>,
-    // LM Head Layer
-    pub lm_head: GraphTensor<R2<VOCAB_SIZE, HIDDEN_DIM>>,
+    // Norm + LM head
+    pub head: (RMSNorm<HIDDEN_DIM>, PermutedLinear<HIDDEN_DIM, VOCAB_SIZE>),
 }
 
 impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
@@ -304,9 +302,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             new_caches.push(new_cache);
         }
         // Run through last norm and output projection
-        let output = self.norm.forward(x).matmul(self.lm_head.permute());
-
-        (output, new_caches)
+        (self.head.forward(x), new_caches)
     }
 }
 
@@ -316,11 +312,13 @@ impl InitModule for Llama {
             embedding: Embedding {
                 weight: cx.named_tensor("Embedding Weight"),
             },
-            norm: RMSNorm {
-                weight: cx.named_tensor("RMS Norm Weight"),
-                epsilon: 1e-5,
-            },
-            lm_head: cx.named_tensor("LM Head"),
+            head: (
+                RMSNorm {
+                    weight: cx.named_tensor("RMS Norm Weight"),
+                    epsilon: 1e-5,
+                },
+                InitModule::initialize(cx),
+            ),
             layers: (0..NUM_LAYERS)
                 .map(|_| InitModule::initialize(cx))
                 .collect(),
@@ -331,8 +329,8 @@ impl InitModule for Llama {
 impl SerializeModule for Llama {
     fn serialize(&self, s: &mut Serializer) {
         s.module("token_embd", &self.embedding);
-        s.module("output_norm", &self.norm);
-        s.tensor("output/weight", self.lm_head);
+        s.module("output_norm", &self.head.0);
+        s.module("output", &self.head.1);
         for (i, layer) in self.layers.iter().enumerate() {
             s.module(&format!("blk/{i}"), layer);
         }

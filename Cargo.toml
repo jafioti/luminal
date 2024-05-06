@@ -2,6 +2,7 @@
 name = "luminal"
 version = "0.2.0"
 edition = "2021"
+rust-version = "1.78"
 description = "Deep learning at the speed of light."
 license = "MIT OR Apache-2.0"
 

@@ -262,7 +262,7 @@ pub struct Phi {
     // Final Norm layer
     pub norm: RMSNorm<HIDDEN_DIM>,
     // LM Head Layer
-    pub lm_head: GraphTensor<R2<VOCAB_SIZE, HIDDEN_DIM>>,
+    pub lm_head: PermutedLinear<HIDDEN_DIM, VOCAB_SIZE>,
 }
 
 impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
@@ -295,7 +295,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             new_caches.push(new_cache);
         }
         // Run through last norm and output projection
-        let output = self.norm.forward(x).matmul(self.lm_head.permute());
+        let output = self.lm_head.forward(self.norm.forward(x));
 
         (output, new_caches)
     }
@@ -311,7 +311,7 @@ impl InitModule for Phi {
                 weight: cx.named_tensor("RMS Norm Weight"),
                 epsilon: 1e-5,
             },
-            lm_head: cx.named_tensor("LM Head"),
+            lm_head: InitModule::initialize(cx),
             layers: (0..NUM_LAYERS)
                 .map(|_| InitModule::initialize(cx))
                 .collect(),
@@ -323,7 +323,7 @@ impl SerializeModule for Phi {
     fn serialize(&self, s: &mut Serializer) {
         s.module("token_embd", &self.embedding);
         s.module("output_norm", &self.norm);
-        s.tensor("output/weight", self.lm_head);
+        s.module("output", &self.lm_head);
         for (i, layer) in self.layers.iter().enumerate() {
             s.module(&format!("blk/{i}"), layer);
         }
