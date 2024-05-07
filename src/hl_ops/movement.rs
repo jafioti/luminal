@@ -139,28 +139,30 @@ impl<S: Shape> GraphTensor<S> {
         let n_dims = self.shape.len();
         let full_kernel = kernel + dilation;
         let dim_size = self.shape.dims[self.shape.indexes[n_dims - 1]];
-        let number_of_windows = ((dim_size - full_kernel) / stride) + 1;
+        let number_of_windows = (((dim_size.big() - full_kernel) / stride) + 1).simplify();
         // Expand new dimension
-        self.shape.expand(n_dims - 1, number_of_windows);
+        self.shape.expand(n_dims - 1, number_of_windows.clone());
         self = self.contiguous();
         if n_dims > 1 {
             // View as single dimension of matrix with wider width
-            let mat_size = (dim_size.big() + stride.big()) * number_of_windows.big();
-            let actual_size = dim_size * self.shape.dims[self.shape.indexes[n_dims - 1]];
+            let mat_size = (dim_size.big() + stride.big()) * number_of_windows.clone();
+            let actual_size =
+                (dim_size * self.shape.dims[self.shape.indexes[n_dims - 1]]).simplify();
             // Reshape into single dimension to pad
             self.shape.remove_dim(n_dims);
             self.shape.dims[self.shape.indexes[n_dims - 1]] = actual_size;
-            self.shape.padding[self.shape.indexes[n_dims - 1]].1 = mat_size.small() - actual_size;
+            self.shape.padding[self.shape.indexes[n_dims - 1]].1 =
+                mat_size.simplify().small() - actual_size;
             self = self.contiguous();
             // Reshape back (mats should be full now)
             self.shape.add_dim(n_dims, dim_size + stride);
         } else {
             self.shape.dims[self.shape.indexes[n_dims]] = dim_size + stride;
         }
-        self.shape.dims[self.shape.indexes[n_dims - 1]] = number_of_windows;
+        self.shape.dims[self.shape.indexes[n_dims - 1]] = number_of_windows.small();
         // Slice down to kernel size
         self.shape.mask[self.shape.indexes[n_dims]].1 = full_kernel;
-        self.shape.mask[self.shape.indexes[n_dims - 1]].1 = number_of_windows;
+        self.shape.mask[self.shape.indexes[n_dims - 1]].1 = number_of_windows.small();
         self = self.contiguous();
 
         if dilation > 0 {

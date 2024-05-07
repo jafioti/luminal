@@ -1,22 +1,16 @@
 use std::{
-    collections::HashMap,
     fmt::Debug,
-    iter::{once, repeat},
     ops::{
         Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, Div, DivAssign, IndexMut, Mul,
         MulAssign, Rem, RemAssign, Sub, SubAssign,
     },
 };
 
-use cas_compute::{
-    primitive::int,
-    symbolic::{
-        expr::{self, Expr, Primary},
-        simplify,
-    },
+use cas_compute::symbolic::{
+    expr::{Expr, Primary},
+    simplify,
 };
 use cas_parser::parser::{ast::Expr as AstExpr, Parser};
-use itertools::Itertools;
 use rustc_hash::FxHashMap;
 use tinyvec::ArrayVec;
 
@@ -207,27 +201,41 @@ impl<S: ExpressionStorage + Clone> std::fmt::Display for GenericExpression<S> {
 impl<S: ExpressionStorage> GenericExpression<S> {
     /// Simplify the expression to its minimal terms
     pub fn simplify(self) -> Self {
+        // cas-rs doesn't support some ops
+        if self.terms.clone().into_iter().any(|i| {
+            matches!(
+                i,
+                Term::Mod | Term::Max | Term::Min | Term::And | Term::Or | Term::Gte | Term::Lt
+            )
+        }) {
+            return self;
+        }
         let str = format!("{self:?}");
         let mut parser = Parser::new(&str);
         let ast_expr = parser.try_parse_full::<AstExpr>().unwrap();
-        println!("B: {:?}", self);
-        println!("B: {:?}", self.terms);
-        println!("Before: {:?}", Expr::from(ast_expr.clone()));
         let simplified = simplify(&ast_expr.into());
         let mut storage = S::default();
-        println!("SIMPLIFIED: {:?}", simplified);
         storage.extend(cas_expr_to_luminal_expr(&simplified));
+        Self { terms: storage }
+    }
 
-        let s = Self { terms: storage };
-        println!("Done: {:?}", s);
-        s
+    pub fn as_num(&self) -> Option<i32> {
+        if let Term::Num(n) = self.terms[0] {
+            if self.terms.len() == 1 {
+                return Some(n);
+            }
+        }
+        None
     }
 
     /// Minimum
     pub fn min<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
-        if rhs == self {
+        if rhs == self || rhs == i32::MAX {
             return self;
+        }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return a.min(b).into();
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Min);
@@ -237,11 +245,14 @@ impl<S: ExpressionStorage> GenericExpression<S> {
     /// Maximum
     pub fn max<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
-        if rhs == self || rhs == 0 {
+        if rhs == self || rhs == 0 || self == i32::MAX {
             return self;
         }
-        if self == 0 {
+        if self == 0 || rhs == i32::MAX {
             return rhs;
+        }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return a.max(b).into();
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Max);
@@ -252,7 +263,13 @@ impl<S: ExpressionStorage> GenericExpression<S> {
     pub fn gte<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         if rhs == self {
-            return 1.into();
+            return true.into();
+        }
+        if rhs == i32::MAX {
+            return false.into();
+        }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a >= b).into();
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Gte);
@@ -263,12 +280,15 @@ impl<S: ExpressionStorage> GenericExpression<S> {
     pub fn lt<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         if rhs == self {
-            return 0.into();
+            return false.into();
         }
         if let Term::Num(n) = rhs.terms[0] {
             if self.terms[self.terms.len() - 1] == Term::Mod && self.terms[0] == Term::Num(n) {
-                return 1.into();
+                return true.into();
             }
+        }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a < b).into();
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Lt);
@@ -290,9 +310,7 @@ impl<S: ExpressionStorage> GenericExpression<S> {
                 }
             }
         }
-        let s = Self { terms: new_terms };
-        println!("{:?}", s);
-        s.simplify()
+        Self { terms: new_terms }.simplify()
     }
 }
 
@@ -483,6 +501,9 @@ impl<S: ExpressionStorage, E: Into<Self>> Add<E> for GenericExpression<S> {
         if self == rhs {
             return self * 2;
         }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a + b).into();
+        }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Add);
         rhs
@@ -498,6 +519,9 @@ impl<S: ExpressionStorage, E: Into<Self>> Sub<E> for GenericExpression<S> {
         }
         if self == rhs {
             return 0.into();
+        }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a - b).into();
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Sub);
@@ -518,6 +542,9 @@ impl<S: ExpressionStorage, E: Into<Self>> Mul<E> for GenericExpression<S> {
         if rhs == 0 || self == 0 {
             return 0.into();
         }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a * b).into();
+        }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Mul);
         rhs
@@ -537,6 +564,9 @@ impl<S: ExpressionStorage, E: Into<Self>> Div<E> for GenericExpression<S> {
         if self == 0 {
             return 0.into();
         }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a / b).into();
+        }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Div);
         rhs
@@ -549,6 +579,9 @@ impl<S: ExpressionStorage, E: Into<Self>> Rem<E> for GenericExpression<S> {
         let mut rhs = rhs.into();
         if rhs == 1 || rhs == self {
             return 0.into();
+        }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a % b).into();
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Mod);
@@ -569,6 +602,9 @@ impl<S: ExpressionStorage, E: Into<Self>> BitAnd<E> for GenericExpression<S> {
         if self == 1 {
             return rhs;
         }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a != 0 && b != 0).into();
+        }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::And);
         rhs
@@ -581,6 +617,9 @@ impl<S: ExpressionStorage, E: Into<Self>> BitOr<E> for GenericExpression<S> {
         let mut rhs = rhs.into();
         if rhs == 1 || self == 1 {
             return 1.into();
+        }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a != 0 || b != 0).into();
         }
         rhs.terms.extend(self.terms);
         rhs.terms.push(Term::Or);
@@ -661,8 +700,8 @@ fn cas_expr_to_luminal_expr(expr: &Expr) -> Vec<Term> {
             if let Expr::Exp(expr, pow) = &terms[1] {
                 if let Some(Some(-1)) = pow.as_integer().map(|i| i.to_i32()) {
                     assert!(terms.len() == 2);
-                    let mut v = cas_expr_to_luminal_expr(&terms[0]);
-                    v.extend(cas_expr_to_luminal_expr(expr));
+                    let mut v = cas_expr_to_luminal_expr(expr);
+                    v.extend(cas_expr_to_luminal_expr(&terms[0]));
                     v.push(Term::Div);
                     return v;
                 }
@@ -670,8 +709,8 @@ fn cas_expr_to_luminal_expr(expr: &Expr) -> Vec<Term> {
             if let Expr::Exp(expr, pow) = &terms[0] {
                 if let Some(Some(-1)) = pow.as_integer().map(|i| i.to_i32()) {
                     assert!(terms.len() == 2);
-                    let mut v = cas_expr_to_luminal_expr(&terms[1]);
-                    v.extend(cas_expr_to_luminal_expr(expr));
+                    let mut v = cas_expr_to_luminal_expr(expr);
+                    v.extend(cas_expr_to_luminal_expr(&terms[1]));
                     v.push(Term::Div);
                     return v;
                 }
@@ -695,7 +734,7 @@ fn cas_expr_to_luminal_expr(expr: &Expr) -> Vec<Term> {
             for _ in 0..pow {
                 result.extend(cas_expr_to_luminal_expr(base));
             }
-            for _ in 0..pow {
+            for _ in 0..pow - 1 {
                 result.push(Term::Mul);
             }
             result
@@ -709,16 +748,7 @@ mod tests {
     use crate::prelude::*;
     #[test]
     fn test_expressions() {
-        let n = Expression::from('x') - (Expression::from('x') % Term::Num(255));
-        println!("n: {:?}", n);
-        assert_eq!(
-            n.simplify()
-                .exec(&[('x', 767)].into_iter().collect())
-                .unwrap(),
-            768
-        );
-
-        let n = (Expression::from('x') + Term::Num(255)) / Term::Num(256) * Term::Num(256);
+        let n = Expression::from('x') + (Expression::from(256) - (Expression::from('x') % 256));
         assert_eq!(
             n.simplify()
                 .exec(&[('x', 767)].into_iter().collect())
@@ -738,17 +768,18 @@ mod tests {
     fn test_substitution() {
         let main = Expression::from('x') - 255;
         let sub = Expression::from('x') / 2;
-        println!("Main: {:?}", main);
-        println!("Sub: {:?}", sub);
         let new = main.substitute('x', sub);
-        assert_eq!(new, (Expression::from('x') / 2) - 255);
+        assert_eq!(new, Expression::from(-255) + (Expression::from('x') / 2));
     }
 
     #[test]
     fn test_group_terms() {
-        let main = Expression::from('x') - 255;
-        let sub = Expression::from('x') / 2;
-        let new = main.substitute('x', sub);
-        assert_eq!(new, (Expression::from('x') / 2) - 255);
+        let s = BigExpression::from('s');
+        let expr = (s.clone() * ((s.clone() - 4) + 1))
+            + (((s.clone() + 1) * ((s.clone() - 4) + 1)) - (s.clone() * ((s.clone() - 4) + 1)));
+        assert_eq!(
+            expr.simplify(),
+            (((Expression::from('s') * Expression::from('s')) + (Expression::from('s') * -2)) + -3)
+        );
     }
 }
