@@ -103,7 +103,10 @@ impl<S: Shape> GraphTensor<S> {
         }
         st.resolve_global_dyn_dims(&self.graph().dyn_map);
         let mut data = vec![0.; st.n_elements().to_usize().unwrap()];
-        let (ind, val) = (st.index_expression(), st.valid_expression());
+        let (ind, val) = (
+            st.index_expression_no_simplify(),
+            st.valid_expression_no_simplify(),
+        );
         #[allow(unused_mut)]
         for (i, mut r) in data.iter_mut().enumerate() {
             if val.exec_single_var(i) != 0 {

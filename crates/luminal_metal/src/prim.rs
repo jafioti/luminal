@@ -1583,7 +1583,7 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                 .count()
                 > 0
             {
-                // Copy outputs from device
+                // Copy outputs to device
                 let copy_node = graph
                     .add_op(MetalCopyToDevice::<T>::new(dev.clone()))
                     .input(function_node, 0, ShapeTracker::new(&[]))
@@ -1603,8 +1603,8 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                 if graph.no_delete.remove(&function_node) {
                     graph.no_delete.insert(copy_node);
                 }
-                if let Some(w) = graph.to_retrieve.get(&function_node) {
-                    graph.to_retrieve.insert(copy_node, *w);
+                if let Some(w) = graph.to_retrieve.remove(&function_node) {
+                    graph.to_retrieve.insert(copy_node, w);
                 }
             }
 

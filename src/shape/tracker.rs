@@ -98,8 +98,8 @@ impl ShapeTracker {
             .collect()
     }
 
-    /// Create an expression to translate logical indexes into physical indexes
-    pub fn index_expression(&self) -> BigExpression {
+    /// Create an expression to translate logical indexes into physical indexes, without expression simplification
+    pub fn index_expression_no_simplify(&self) -> BigExpression {
         if !self.is_reshaped() {
             return 'z'.into();
         }
@@ -129,11 +129,16 @@ impl ShapeTracker {
             // Keep track of element size for next dimension
             current_elem_size *= current_size;
         }
-        ind_expr.simplify()
+        ind_expr
     }
 
-    /// If this expression evaluates to 0, the logical index is invalid. Otherwise it is valid
-    pub fn valid_expression(&self) -> BigExpression {
+    /// Create an expression to translate logical indexes into physical indexes
+    pub fn index_expression(&self) -> BigExpression {
+        self.index_expression_no_simplify().simplify()
+    }
+
+    /// If this expression evaluates to 0, the logical index is invalid. Otherwise it is valid. No simplification
+    pub fn valid_expression_no_simplify(&self) -> BigExpression {
         if !self.is_reshaped() {
             return true.into();
         }
@@ -161,7 +166,12 @@ impl ShapeTracker {
             }
             acc *= logical_sh;
         }
-        ret.simplify()
+        ret
+    }
+
+    /// If this expression evaluates to 0, the logical index is invalid. Otherwise it is valid
+    pub fn valid_expression(&self) -> BigExpression {
+        self.valid_expression_no_simplify().simplify()
     }
 
     /// The number of elements in this tensor, including padding and mask
@@ -201,7 +211,7 @@ impl ShapeTracker {
             &self
                 .shape()
                 .into_iter()
-                .map(|i| i.small())
+                .map(|i| i.simplify().small())
                 .collect::<Vec<_>>(),
         )
     }

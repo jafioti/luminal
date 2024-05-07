@@ -8,5 +8,6 @@ edition = "2021"
 [dependencies]
 luminal = {path="../.."}
 luminal_nn = {path="../../crates/luminal_nn"}
+luminal_metal = { path = "../../crates/luminal_metal" }
 num-traits = "0.2.18"
 num_cpus = "1.16.0"

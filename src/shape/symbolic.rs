@@ -6,7 +6,11 @@ use std::{
     },
 };
 
-use itertools::Itertools;
+// use cas_compute::symbolic::{
+//     expr::{Expr, Primary},
+//     simplify,
+// };
+// use cas_parser::parser::{ast::Expr as AstExpr, Parser};
 use rustc_hash::FxHashMap;
 use tinyvec::ArrayVec;
 
@@ -198,59 +202,99 @@ impl<S: ExpressionStorage + Clone> std::fmt::Display for GenericExpression<S> {
 impl<S: ExpressionStorage> GenericExpression<S> {
     /// Simplify the expression to its minimal terms
     pub fn simplify(self) -> Self {
-        reduce_triples(self)
+        self
+        // // cas-rs doesn't support some ops
+        // if self.terms.clone().into_iter().any(|i| {
+        //     matches!(
+        //         i,
+        //         Term::Mod | Term::Max | Term::Min | Term::And | Term::Or | Term::Gte | Term::Lt
+        //     )
+        // }) {
+        //     return self;
+        // }
+        // let str = format!("{self:?}");
+        // let mut parser = Parser::new(&str);
+        // let ast_expr = parser.try_parse_full::<AstExpr>().unwrap();
+        // let simplified = simplify(&ast_expr.into());
+        // let mut storage = S::default();
+        // storage.extend(cas_expr_to_luminal_expr(&simplified));
+        // Self { terms: storage }
+    }
+
+    pub fn as_num(&self) -> Option<i32> {
+        if let Term::Num(n) = self.terms[0] {
+            if self.terms.len() == 1 {
+                return Some(n);
+            }
+        }
+        None
     }
 
     /// Minimum
     pub fn min<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
-        if rhs == self {
+        if rhs == self || rhs == i32::MAX {
             return self;
+        }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return a.min(b).into();
         }
         rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Min);
-        rhs.simplify()
+        rhs
     }
 
     /// Maximum
     pub fn max<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
-        if rhs == self || rhs == 0 {
+        if rhs == self || rhs == 0 || self == i32::MAX {
             return self;
         }
-        if self == 0 {
+        if self == 0 || rhs == i32::MAX {
             return rhs;
+        }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return a.max(b).into();
         }
         rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Max);
-        rhs.simplify()
+        rhs
     }
 
     /// Greater than or equals
     pub fn gte<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         if rhs == self {
-            return 1.into();
+            return true.into();
+        }
+        if rhs == i32::MAX {
+            return false.into();
+        }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a >= b).into();
         }
         rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Gte);
-        rhs.simplify()
+        rhs
     }
 
     /// Less than
     pub fn lt<E: Into<Self>>(self, rhs: E) -> Self {
         let mut rhs = rhs.into();
         if rhs == self {
-            return 0.into();
+            return false.into();
         }
         if let Term::Num(n) = rhs.terms[0] {
             if self.terms[self.terms.len() - 1] == Term::Mod && self.terms[0] == Term::Num(n) {
-                return 1.into();
+                return true.into();
             }
+        }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a < b).into();
         }
         rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Lt);
-        rhs.simplify()
+        rhs
     }
 
     /// Substitute an expression for a variable
@@ -452,9 +496,12 @@ impl<S: ExpressionStorage, E: Into<Self>> Add<E> for GenericExpression<S> {
         if self == rhs {
             return self * 2;
         }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a + b).into();
+        }
         rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Add);
-        rhs.simplify()
+        rhs
     }
 }
 
@@ -468,9 +515,12 @@ impl<S: ExpressionStorage, E: Into<Self>> Sub<E> for GenericExpression<S> {
         if self == rhs {
             return 0.into();
         }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a - b).into();
+        }
         rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Sub);
-        rhs.simplify()
+        rhs
     }
 }
 
@@ -487,9 +537,12 @@ impl<S: ExpressionStorage, E: Into<Self>> Mul<E> for GenericExpression<S> {
         if rhs == 0 || self == 0 {
             return 0.into();
         }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a * b).into();
+        }
         rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Mul);
-        rhs.simplify()
+        rhs
     }
 }
 
@@ -506,9 +559,12 @@ impl<S: ExpressionStorage, E: Into<Self>> Div<E> for GenericExpression<S> {
         if self == 0 {
             return 0.into();
         }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a / b).into();
+        }
         rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Div);
-        rhs.simplify()
+        rhs
     }
 }
 
@@ -519,9 +575,12 @@ impl<S: ExpressionStorage, E: Into<Self>> Rem<E> for GenericExpression<S> {
         if rhs == 1 || rhs == self {
             return 0.into();
         }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a % b).into();
+        }
         rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Mod);
-        rhs.simplify()
+        rhs
     }
 }
 
@@ -538,9 +597,12 @@ impl<S: ExpressionStorage, E: Into<Self>> BitAnd<E> for GenericExpression<S> {
         if self == 1 {
             return rhs;
         }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a != 0 && b != 0).into();
+        }
         rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::And);
-        rhs.simplify()
+        rhs
     }
 }
 
@@ -551,9 +613,12 @@ impl<S: ExpressionStorage, E: Into<Self>> BitOr<E> for GenericExpression<S> {
         if rhs == 1 || self == 1 {
             return 1.into();
         }
+        if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
+            return (a != 0 || b != 0).into();
+        }
         rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Or);
-        rhs.simplify()
+        rhs
     }
 }
 
@@ -611,116 +676,80 @@ impl<S: ExpressionStorage, E: Into<Self>> BitOrAssign<E> for GenericExpression<S
     }
 }
 
-pub fn reduce_triples<S: ExpressionStorage>(
-    mut expr: GenericExpression<S>,
-) -> GenericExpression<S> {
-    fn get_triples<S: ExpressionStorage>(
-        exp: &GenericExpression<S>,
-    ) -> Vec<(Option<usize>, usize, Option<usize>)> {
-        // Mark all terms with their index
-        let terms = exp
-            .terms
-            .iter_ref()
-            .copied()
-            .enumerate()
-            .collect::<Vec<_>>();
-        let mut stack = Vec::new();
-        let mut triples = vec![];
-        for (index, term) in terms {
-            match term {
-                Term::Num(_) | Term::Var(_) => stack.push((Some(index), term)),
-                _ => {
-                    let (a_ind, a_term) = stack.pop().unwrap();
-                    let (b_ind, b_term) = stack.pop().unwrap();
-                    triples.push((a_ind, index, b_ind));
-                    if let (Term::Num(a), Term::Num(b)) = (a_term, b_term) {
-                        if let Some(c) = term.as_op().unwrap()(a as i64, b as i64) {
-                            stack.push((None, Term::Num(c as i32)));
-                        } else {
-                            break;
-                        }
-                    } else if let Term::Var(a) = a_term {
-                        stack.push((None, Term::Var(a)));
-                    } else if let Term::Var(b) = b_term {
-                        stack.push((None, Term::Var(b)));
-                    }
-                }
-            }
-        }
-        triples
-    }
-    fn remove_terms<S: ExpressionStorage>(terms: &mut S, inds: &[usize]) {
-        for ind in inds.iter().sorted().rev() {
-            terms.remove(*ind);
-        }
-    }
-
-    #[macro_export]
-    macro_rules! unwrap_cont {
-        ($i: expr) => {
-            if let Some(s) = $i {
-                s
-            } else {
-                continue;
-            }
-        };
-    }
-    let mut changed = true;
-    while changed {
-        changed = false;
-        let triples = get_triples(&expr);
-        for (a_ind, op_ind, b_ind) in triples {
-            let mut inner_changed = true;
-            match (
-                a_ind.map(|a| expr.terms[a]),
-                expr.terms[op_ind],
-                b_ind.map(|b| expr.terms[b]),
-            ) {
-                (Some(Term::Num(a)), term, Some(Term::Num(b))) if term.as_op().is_some() => {
-                    if let Some(c) = term.as_op().unwrap()(a as i64, b as i64) {
-                        expr.terms[unwrap_cont!(a_ind)] = Term::Num(c as i32);
-                        remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
-                    } else {
-                        inner_changed = false;
-                    }
-                }
-                // Remove min(i, inf) and min(inf, i)
-                (Some(Term::Num(a)), Term::Min, _) if a == i32::MAX => {
-                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
-                }
-                (_, Term::Min, Some(Term::Num(b))) if b == i32::MAX => {
-                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
-                }
-                // Remove max(i, inf) and max(inf, i)
-                (_, Term::Max, Some(Term::Num(i))) if i == i32::MAX => {
-                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(a_ind)]);
-                }
-                (Some(Term::Num(i)), Term::Max, _) if i == i32::MAX => {
-                    remove_terms(&mut expr.terms, &[op_ind, unwrap_cont!(b_ind)]);
-                }
-                _ => {
-                    inner_changed = false;
-                }
-            }
-            if inner_changed {
-                changed = true;
-                break;
-            }
-        }
-    }
-    expr
-}
+// // Convert expression from cas_rs::Expr to a list of Terms in RPN
+// fn cas_expr_to_luminal_expr(expr: &Expr) -> Vec<Term> {
+//     match expr {
+//         Expr::Primary(Primary::Symbol(symb)) => vec![Term::Var(symb.chars().next().unwrap())],
+//         Expr::Primary(Primary::Integer(num)) => vec![Term::Num(num.to_i32().unwrap())],
+//         Expr::Add(terms) => {
+//             let mut result = Vec::new();
+//             for term in terms {
+//                 result.extend(cas_expr_to_luminal_expr(term));
+//             }
+//             for _ in 1..terms.len() {
+//                 result.push(Term::Add);
+//             }
+//             result
+//         }
+//         Expr::Mul(terms) => {
+//             if let Expr::Exp(expr, pow) = &terms[1] {
+//                 if let Some(Some(-1)) = pow.as_integer().map(|i| i.to_i32()) {
+//                     assert!(terms.len() == 2);
+//                     let mut v = cas_expr_to_luminal_expr(expr);
+//                     v.extend(cas_expr_to_luminal_expr(&terms[0]));
+//                     v.push(Term::Div);
+//                     return v;
+//                 }
+//             }
+//             if let Expr::Exp(expr, pow) = &terms[0] {
+//                 if let Some(Some(-1)) = pow.as_integer().map(|i| i.to_i32()) {
+//                     assert!(terms.len() == 2);
+//                     let mut v = cas_expr_to_luminal_expr(expr);
+//                     v.extend(cas_expr_to_luminal_expr(&terms[1]));
+//                     v.push(Term::Div);
+//                     return v;
+//                 }
+//             }
+//             let mut result = Vec::new();
+//             for term in terms {
+//                 result.extend(cas_expr_to_luminal_expr(term));
+//             }
+//             for _ in 1..terms.len() {
+//                 result.push(Term::Mul);
+//             }
+//             result
+//         }
+//         Expr::Exp(base, exponent) => {
+//             let pow = exponent
+//                 .as_integer()
+//                 .unwrap()
+//                 .to_usize()
+//                 .expect("Pow is not positive!");
+//             let mut result = Vec::new();
+//             for _ in 0..pow {
+//                 result.extend(cas_expr_to_luminal_expr(base));
+//             }
+//             for _ in 0..pow - 1 {
+//                 result.push(Term::Mul);
+//             }
+//             result
+//         }
+//         _ => panic!("Invalid term encountered: {expr:?}"),
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
     use crate::prelude::*;
     #[test]
     fn test_expressions() {
-        let n = (Expression::from('x') + Term::Num(255)) / Term::Num(256) * Term::Num(256);
-        assert_eq!(n.exec(&[('x', 767)].into_iter().collect()).unwrap(), 768);
-
-        let n = (Expression::from('x') + Term::Num(255)) / Term::Num(256) * Term::Num(256);
-        assert_eq!(n.exec(&[('x', 767)].into_iter().collect()).unwrap(), 768);
+        let n = Expression::from('x') + (Expression::from(256) - (Expression::from('x') % 256));
+        assert_eq!(
+            n.simplify()
+                .exec(&[('x', 767)].into_iter().collect())
+                .unwrap(),
+            768
+        );
     }
 
     #[test]
@@ -735,6 +764,17 @@ mod tests {
         let main = Expression::from('x') - 255;
         let sub = Expression::from('x') / 2;
         let new = main.substitute('x', sub);
-        assert_eq!(new, (Expression::from('x') / 2) - 255);
+        assert_eq!(new, Expression::from(-255) + (Expression::from('x') / 2));
+    }
+
+    #[test]
+    fn test_group_terms() {
+        let s = BigExpression::from('s');
+        let expr = (s.clone() * ((s.clone() - 4) + 1))
+            + (((s.clone() + 1) * ((s.clone() - 4) + 1)) - (s.clone() * ((s.clone() - 4) + 1)));
+        assert_eq!(
+            expr.simplify(),
+            (((Expression::from('s') * Expression::from('s')) + (Expression::from('s') * -2)) + -3)
+        );
     }
 }
