@@ -81,19 +81,14 @@ impl Term {
 /// Trait implemented on the 2 main symbolic expression storage types, Vec<Term> and ArrayVec<Term>
 #[allow(clippy::len_without_is_empty)]
 pub trait ExpressionStorage:
-    Clone
-    + IndexMut<usize, Output = Term>
-    + std::iter::Extend<Term>
-    + IntoIterator<Item = Term>
-    + Default
-    + PartialEq
-    + Debug
+    Clone + IndexMut<usize, Output = Term> + std::iter::Extend<Term> + Default + PartialEq + Debug
 {
     fn len(&self) -> usize;
     fn push(&mut self, term: Term);
     fn pop(&mut self) -> Option<Term>;
     fn remove(&mut self, index: usize) -> Term;
     fn into_vec(self) -> Vec<Term>;
+    fn iter_ref(&self) -> impl Iterator<Item = &Term>;
 }
 
 // Implement the main storage types
@@ -112,6 +107,9 @@ impl ExpressionStorage for Vec<Term> {
     }
     fn into_vec(self) -> Vec<Term> {
         self
+    }
+    fn iter_ref(&self) -> impl Iterator<Item = &Term> {
+        self.iter()
     }
 }
 
@@ -133,6 +131,9 @@ where
     }
     fn into_vec(self) -> Vec<Term> {
         self.to_vec()
+    }
+    fn iter_ref(&self) -> impl Iterator<Item = &Term> {
+        self.iter()
     }
 }
 
@@ -162,7 +163,7 @@ impl<S: ExpressionStorage> Default for GenericExpression<S> {
 impl<S: ExpressionStorage + Clone> Debug for GenericExpression<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut symbols = vec![];
-        for term in self.terms.clone() {
+        for term in self.terms.iter_ref() {
             let new_symbol = match term {
                 Term::Num(n) => n.to_string(),
                 Term::Var(c) => c.to_string(),
@@ -206,7 +207,7 @@ impl<S: ExpressionStorage> GenericExpression<S> {
         if rhs == self {
             return self;
         }
-        rhs.terms.extend(self.terms);
+        rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Min);
         rhs.simplify()
     }
@@ -220,7 +221,7 @@ impl<S: ExpressionStorage> GenericExpression<S> {
         if self == 0 {
             return rhs;
         }
-        rhs.terms.extend(self.terms);
+        rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Max);
         rhs.simplify()
     }
@@ -231,7 +232,7 @@ impl<S: ExpressionStorage> GenericExpression<S> {
         if rhs == self {
             return 1.into();
         }
-        rhs.terms.extend(self.terms);
+        rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Gte);
         rhs.simplify()
     }
@@ -247,7 +248,7 @@ impl<S: ExpressionStorage> GenericExpression<S> {
                 return 1.into();
             }
         }
-        rhs.terms.extend(self.terms);
+        rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Lt);
         rhs.simplify()
     }
@@ -255,15 +256,15 @@ impl<S: ExpressionStorage> GenericExpression<S> {
     /// Substitute an expression for a variable
     pub fn substitute<N: ExpressionStorage>(self, var: char, expr: GenericExpression<N>) -> Self {
         let mut new_terms = S::default();
-        for term in self.terms.clone().into_iter() {
+        for term in self.terms.iter_ref() {
             match term {
-                Term::Var(c) if c == var => {
-                    for t in expr.terms.clone().into_iter() {
-                        new_terms.push(t);
+                Term::Var(c) if *c == var => {
+                    for t in expr.terms.iter_ref() {
+                        new_terms.push(*t);
                     }
                 }
                 _ => {
-                    new_terms.push(term);
+                    new_terms.push(*term);
                 }
             }
         }
@@ -271,10 +272,7 @@ impl<S: ExpressionStorage> GenericExpression<S> {
     }
 }
 
-impl<S: ExpressionStorage> GenericExpression<S>
-where
-    for<'a> &'a S: IntoIterator<Item = &'a Term>,
-{
+impl<S: ExpressionStorage> GenericExpression<S> {
     /// Evaluate the expression with no variables. Returns Some(value) if no variables are required, otherwise returns None.
     pub fn to_usize(&self) -> Option<usize> {
         self.exec(&FxHashMap::default())
@@ -286,7 +284,7 @@ where
     }
     /// Evaluate the expression with one value for all variables. Uses a provided stack
     pub fn exec_single_var_stack(&self, value: usize, stack: &mut Vec<i64>) -> usize {
-        for term in &self.terms {
+        for term in self.terms.iter_ref() {
             match term {
                 Term::Num(n) => stack.push(*n as i64),
                 Term::Var(_) => stack.push(value as i64),
@@ -309,7 +307,7 @@ where
         variables: &FxHashMap<char, usize>,
         stack: &mut Vec<i64>,
     ) -> Option<usize> {
-        for term in &self.terms {
+        for term in self.terms.iter_ref() {
             match term {
                 Term::Num(n) => stack.push(*n as i64),
                 Term::Var(c) =>
@@ -333,10 +331,9 @@ where
     /// Retrieve all symbols in the expression.
     pub fn to_symbols(&self) -> Vec<char> {
         self.terms
-            .clone()
-            .into_iter()
+            .iter_ref()
             .filter_map(|t| match t {
-                Term::Var(c) => Some(c),
+                Term::Var(c) => Some(*c),
                 _ => None,
             })
             .collect()
@@ -344,10 +341,7 @@ where
 
     /// Check if the '-' variable exists in the expression.
     pub fn is_unknown(&self) -> bool {
-        self.terms
-            .clone()
-            .into_iter()
-            .any(|t| matches!(t, Term::Var('-')))
+        self.terms.iter_ref().any(|t| matches!(t, Term::Var('-')))
     }
 }
 
@@ -424,7 +418,7 @@ impl<S: ExpressionStorage, T: ExpressionStorage> From<&GenericExpression<T>>
 {
     fn from(value: &GenericExpression<T>) -> Self {
         let mut s = S::default();
-        s.extend(value.terms.clone().into_vec());
+        s.extend(value.terms.iter_ref().copied());
         Self { terms: s }
     }
 }
@@ -458,7 +452,7 @@ impl<S: ExpressionStorage, E: Into<Self>> Add<E> for GenericExpression<S> {
         if self == rhs {
             return self * 2;
         }
-        rhs.terms.extend(self.terms);
+        rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Add);
         rhs.simplify()
     }
@@ -474,7 +468,7 @@ impl<S: ExpressionStorage, E: Into<Self>> Sub<E> for GenericExpression<S> {
         if self == rhs {
             return 0.into();
         }
-        rhs.terms.extend(self.terms);
+        rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Sub);
         rhs.simplify()
     }
@@ -493,7 +487,7 @@ impl<S: ExpressionStorage, E: Into<Self>> Mul<E> for GenericExpression<S> {
         if rhs == 0 || self == 0 {
             return 0.into();
         }
-        rhs.terms.extend(self.terms);
+        rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Mul);
         rhs.simplify()
     }
@@ -512,7 +506,7 @@ impl<S: ExpressionStorage, E: Into<Self>> Div<E> for GenericExpression<S> {
         if self == 0 {
             return 0.into();
         }
-        rhs.terms.extend(self.terms);
+        rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Div);
         rhs.simplify()
     }
@@ -525,7 +519,7 @@ impl<S: ExpressionStorage, E: Into<Self>> Rem<E> for GenericExpression<S> {
         if rhs == 1 || rhs == self {
             return 0.into();
         }
-        rhs.terms.extend(self.terms);
+        rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Mod);
         rhs.simplify()
     }
@@ -544,7 +538,7 @@ impl<S: ExpressionStorage, E: Into<Self>> BitAnd<E> for GenericExpression<S> {
         if self == 1 {
             return rhs;
         }
-        rhs.terms.extend(self.terms);
+        rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::And);
         rhs.simplify()
     }
@@ -557,7 +551,7 @@ impl<S: ExpressionStorage, E: Into<Self>> BitOr<E> for GenericExpression<S> {
         if rhs == 1 || self == 1 {
             return 1.into();
         }
-        rhs.terms.extend(self.terms);
+        rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Or);
         rhs.simplify()
     }
@@ -626,8 +620,8 @@ pub fn reduce_triples<S: ExpressionStorage>(
         // Mark all terms with their index
         let terms = exp
             .terms
-            .clone()
-            .into_iter()
+            .iter_ref()
+            .copied()
             .enumerate()
             .collect::<Vec<_>>();
         let mut stack = Vec::new();
