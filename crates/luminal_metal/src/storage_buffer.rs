@@ -142,7 +142,7 @@ impl Compiler for StorageBufferCompiler {
             // Assign output buffers
             for required_buffer in wrapper.output_buffer_sizes(&input_shapes) {
                 // Find an applicable buffer
-                if let Some((buffer_index, source_node, _)) = first_pass[&node]
+                if let Some((buffer_index, source_node, _)) = first_pass[node]
                     .1
                     .iter()
                     .filter(|i| !graph.no_delete.contains(i))
@@ -171,7 +171,7 @@ impl Compiler for StorageBufferCompiler {
             // Assign intermediate buffers
             for required_buffer in wrapper.intermediate_buffer_sizes(&input_shapes) {
                 // Find an applicable buffer
-                if let Some((buffer_index, source_node, _)) = first_pass[&node]
+                if let Some((buffer_index, source_node, _)) = first_pass[node]
                     .1
                     .iter()
                     .filter(|i| !graph.no_delete.contains(i))

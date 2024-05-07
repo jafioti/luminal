@@ -302,6 +302,7 @@ impl DispatchNElements for ComputeCommandEncoderRef {
     }
 }
 
+#[allow(dead_code)]
 trait SetInt {
     fn set_i32(&self, index: usize, value: i32);
     fn set_u32(&self, index: usize, value: u32);

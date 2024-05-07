@@ -399,9 +399,7 @@ fn test_pool_1d_dims() {
         1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
     ]);
     // Stride 1
-    let out1 = inp1
-        .pool_last_dim::<R3<4, 2, 3>>(3.into(), 1.into(), 0)
-        .retrieve();
+    let out1 = inp1.pool_last_dim::<R3<4, 2, 3>>(3, 1, 0).retrieve();
 
     cx.execute();
 
@@ -425,10 +423,10 @@ fn test_pool_2d() {
     let out1 = inp1
         // Pool first dim first by moving it to end
         .permute::<_, LAxes2<1, 0>>()
-        .pool_last_dim::<R3<4, 2, 3>>(3.into(), 1.into(), 0)
+        .pool_last_dim::<R3<4, 2, 3>>(3, 1, 0)
         // Now move other dim to end
         .permute::<_, LAxes3<1, 2, 0>>()
-        .pool_last_dim::<R4<2, 3, 2, 3>>(3.into(), 1.into(), 0)
+        .pool_last_dim::<R4<2, 3, 2, 3>>(3, 1, 0)
         // Now swap middle two dims
         .permute::<_, LAxes4<0, 2, 1, 3>>()
         // Now merge both pooled dimensions
@@ -453,17 +451,11 @@ fn test_pool_1d_dilation() {
 
     let inp1 = cx.tensor::<R1<5>>().set(vec![1., 2., 3., 4., 5.]);
     // Stride 1
-    let out1 = inp1
-        .pool_last_dim::<R2<3, 2>>(2.into(), 1.into(), 1)
-        .retrieve();
+    let out1 = inp1.pool_last_dim::<R2<3, 2>>(2, 1, 1).retrieve();
     // Stride 2
-    let out2 = inp1
-        .pool_last_dim::<R2<2, 2>>(2.into(), 2.into(), 1)
-        .retrieve();
+    let out2 = inp1.pool_last_dim::<R2<2, 2>>(2, 2, 1).retrieve();
     // Stride 3
-    let out3 = inp1
-        .pool_last_dim::<R2<1, 2>>(2.into(), 3.into(), 1)
-        .retrieve();
+    let out3 = inp1.pool_last_dim::<R2<1, 2>>(2, 3, 1).retrieve();
 
     cx.execute();
 
