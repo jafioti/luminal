@@ -6,11 +6,11 @@ use std::{
     },
 };
 
-use cas_compute::symbolic::{
-    expr::{Expr, Primary},
-    simplify,
-};
-use cas_parser::parser::{ast::Expr as AstExpr, Parser};
+// use cas_compute::symbolic::{
+//     expr::{Expr, Primary},
+//     simplify,
+// };
+// use cas_parser::parser::{ast::Expr as AstExpr, Parser};
 use rustc_hash::FxHashMap;
 use tinyvec::ArrayVec;
 
@@ -201,22 +201,23 @@ impl<S: ExpressionStorage + Clone> std::fmt::Display for GenericExpression<S> {
 impl<S: ExpressionStorage> GenericExpression<S> {
     /// Simplify the expression to its minimal terms
     pub fn simplify(self) -> Self {
-        // cas-rs doesn't support some ops
-        if self.terms.clone().into_iter().any(|i| {
-            matches!(
-                i,
-                Term::Mod | Term::Max | Term::Min | Term::And | Term::Or | Term::Gte | Term::Lt
-            )
-        }) {
-            return self;
-        }
-        let str = format!("{self:?}");
-        let mut parser = Parser::new(&str);
-        let ast_expr = parser.try_parse_full::<AstExpr>().unwrap();
-        let simplified = simplify(&ast_expr.into());
-        let mut storage = S::default();
-        storage.extend(cas_expr_to_luminal_expr(&simplified));
-        Self { terms: storage }
+        self
+        // // cas-rs doesn't support some ops
+        // if self.terms.clone().into_iter().any(|i| {
+        //     matches!(
+        //         i,
+        //         Term::Mod | Term::Max | Term::Min | Term::And | Term::Or | Term::Gte | Term::Lt
+        //     )
+        // }) {
+        //     return self;
+        // }
+        // let str = format!("{self:?}");
+        // let mut parser = Parser::new(&str);
+        // let ast_expr = parser.try_parse_full::<AstExpr>().unwrap();
+        // let simplified = simplify(&ast_expr.into());
+        // let mut storage = S::default();
+        // storage.extend(cas_expr_to_luminal_expr(&simplified));
+        // Self { terms: storage }
     }
 
     pub fn as_num(&self) -> Option<i32> {
@@ -681,67 +682,67 @@ impl<S: ExpressionStorage, E: Into<Self>> BitOrAssign<E> for GenericExpression<S
     }
 }
 
-// Convert expression from cas_rs::Expr to a list of Terms in RPN
-fn cas_expr_to_luminal_expr(expr: &Expr) -> Vec<Term> {
-    match expr {
-        Expr::Primary(Primary::Symbol(symb)) => vec![Term::Var(symb.chars().next().unwrap())],
-        Expr::Primary(Primary::Integer(num)) => vec![Term::Num(num.to_i32().unwrap())],
-        Expr::Add(terms) => {
-            let mut result = Vec::new();
-            for term in terms {
-                result.extend(cas_expr_to_luminal_expr(term));
-            }
-            for _ in 1..terms.len() {
-                result.push(Term::Add);
-            }
-            result
-        }
-        Expr::Mul(terms) => {
-            if let Expr::Exp(expr, pow) = &terms[1] {
-                if let Some(Some(-1)) = pow.as_integer().map(|i| i.to_i32()) {
-                    assert!(terms.len() == 2);
-                    let mut v = cas_expr_to_luminal_expr(expr);
-                    v.extend(cas_expr_to_luminal_expr(&terms[0]));
-                    v.push(Term::Div);
-                    return v;
-                }
-            }
-            if let Expr::Exp(expr, pow) = &terms[0] {
-                if let Some(Some(-1)) = pow.as_integer().map(|i| i.to_i32()) {
-                    assert!(terms.len() == 2);
-                    let mut v = cas_expr_to_luminal_expr(expr);
-                    v.extend(cas_expr_to_luminal_expr(&terms[1]));
-                    v.push(Term::Div);
-                    return v;
-                }
-            }
-            let mut result = Vec::new();
-            for term in terms {
-                result.extend(cas_expr_to_luminal_expr(term));
-            }
-            for _ in 1..terms.len() {
-                result.push(Term::Mul);
-            }
-            result
-        }
-        Expr::Exp(base, exponent) => {
-            let pow = exponent
-                .as_integer()
-                .unwrap()
-                .to_usize()
-                .expect("Pow is not positive!");
-            let mut result = Vec::new();
-            for _ in 0..pow {
-                result.extend(cas_expr_to_luminal_expr(base));
-            }
-            for _ in 0..pow - 1 {
-                result.push(Term::Mul);
-            }
-            result
-        }
-        _ => panic!("Invalid term encountered: {expr:?}"),
-    }
-}
+// // Convert expression from cas_rs::Expr to a list of Terms in RPN
+// fn cas_expr_to_luminal_expr(expr: &Expr) -> Vec<Term> {
+//     match expr {
+//         Expr::Primary(Primary::Symbol(symb)) => vec![Term::Var(symb.chars().next().unwrap())],
+//         Expr::Primary(Primary::Integer(num)) => vec![Term::Num(num.to_i32().unwrap())],
+//         Expr::Add(terms) => {
+//             let mut result = Vec::new();
+//             for term in terms {
+//                 result.extend(cas_expr_to_luminal_expr(term));
+//             }
+//             for _ in 1..terms.len() {
+//                 result.push(Term::Add);
+//             }
+//             result
+//         }
+//         Expr::Mul(terms) => {
+//             if let Expr::Exp(expr, pow) = &terms[1] {
+//                 if let Some(Some(-1)) = pow.as_integer().map(|i| i.to_i32()) {
+//                     assert!(terms.len() == 2);
+//                     let mut v = cas_expr_to_luminal_expr(expr);
+//                     v.extend(cas_expr_to_luminal_expr(&terms[0]));
+//                     v.push(Term::Div);
+//                     return v;
+//                 }
+//             }
+//             if let Expr::Exp(expr, pow) = &terms[0] {
+//                 if let Some(Some(-1)) = pow.as_integer().map(|i| i.to_i32()) {
+//                     assert!(terms.len() == 2);
+//                     let mut v = cas_expr_to_luminal_expr(expr);
+//                     v.extend(cas_expr_to_luminal_expr(&terms[1]));
+//                     v.push(Term::Div);
+//                     return v;
+//                 }
+//             }
+//             let mut result = Vec::new();
+//             for term in terms {
+//                 result.extend(cas_expr_to_luminal_expr(term));
+//             }
+//             for _ in 1..terms.len() {
+//                 result.push(Term::Mul);
+//             }
+//             result
+//         }
+//         Expr::Exp(base, exponent) => {
+//             let pow = exponent
+//                 .as_integer()
+//                 .unwrap()
+//                 .to_usize()
+//                 .expect("Pow is not positive!");
+//             let mut result = Vec::new();
+//             for _ in 0..pow {
+//                 result.extend(cas_expr_to_luminal_expr(base));
+//             }
+//             for _ in 0..pow - 1 {
+//                 result.push(Term::Mul);
+//             }
+//             result
+//         }
+//         _ => panic!("Invalid term encountered: {expr:?}"),
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

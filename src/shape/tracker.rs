@@ -211,7 +211,7 @@ impl ShapeTracker {
             &self
                 .shape()
                 .into_iter()
-                .map(|i| i.small())
+                .map(|i| i.simplify().small())
                 .collect::<Vec<_>>(),
         )
     }
