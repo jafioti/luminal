@@ -1653,10 +1653,12 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                     .neighbors_directed(output_node, petgraph::Direction::Incoming)
                     .next()
                     .unwrap();
-                graph.no_delete.remove(&output_node);
-                graph.no_delete.insert(src);
-                let w = graph.to_retrieve.remove(&output_node).unwrap();
-                graph.to_retrieve.insert(src, w);
+                if graph.no_delete.remove(&output_node) {
+                    graph.no_delete.insert(src);
+                }
+                if let Some(w) = graph.to_retrieve.remove(&output_node) {
+                    graph.to_retrieve.insert(src, w);
+                }
             } else {
                 // Create copy node
                 let copy_node = graph
