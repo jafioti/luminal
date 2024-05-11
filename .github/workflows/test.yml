@@ -18,7 +18,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Run tests
-      run: cargo upgrade; cargo test --workspace --verbose
+      run: cargo update; cargo test --workspace --verbose
 
   clippy:
     name: Clippy
