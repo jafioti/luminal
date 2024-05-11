@@ -23,6 +23,7 @@ rustc-hash = "1.1.0"
 uuid = { version = "1.7.0", features = ["v4"] }
 as-any = "0.3.1"
 egg = "0.9.5"
+symbolic_expressions = "5.0.3"
 
 [dev-dependencies]
 dfdx = { version = "0.13", features = ["f16"] }

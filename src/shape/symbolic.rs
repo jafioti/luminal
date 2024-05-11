@@ -297,7 +297,7 @@ impl<S: ExpressionStorage> GenericExpression<S> {
                 }
             }
         }
-        Self { terms: new_terms }.simplify()
+        Self { terms: new_terms }
     }
 }
 
@@ -960,7 +960,7 @@ mod tests {
     fn test_substitution() {
         let main = Expression::from('x') - 255;
         let sub = Expression::from('x') / 2;
-        let new = main.substitute('x', sub);
+        let new = main.substitute('x', sub).simplify();
         assert_eq!(new, (Expression::from('x') / 2) + -255);
     }
 

@@ -11,3 +11,10 @@ luminal_nn = {path="../../crates/luminal_nn"}
 luminal_metal = { path = "../../crates/luminal_metal" }
 num-traits = "0.2.18"
 num_cpus = "1.16.0"
+byteorder = "1.5.0"
+memmap2 = "0.9.4"
+tokenizers = "0.15.2"
+itertools = "0.12.1"
+metal-rs = { version = "0.27.0", package = "metal", features = [
+    "mps",
+] }

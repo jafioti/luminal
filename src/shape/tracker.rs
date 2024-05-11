@@ -103,24 +103,23 @@ impl ShapeTracker {
         if !self.is_reshaped() {
             return 'z'.into();
         }
-        let shape = combine_dims(*self);
-        let strides = shape.unordered_strides(); // Dimension strides in original order
+        let strides = self.unordered_strides(); // Dimension strides in original order
         let mut ind_expr = BigExpression::from(0); // The final index expression
         let mut current_elem_size = BigExpression::from(1); // Keep track of the size of each element of the current dim (last dim elem size: 1)
 
         // Loop through all dims in reverse order
-        for i in shape.indexes.into_iter().rev() {
+        for i in self.indexes.into_iter().rev() {
             // Get logical dimension size with padding and mask
-            let current_size = pad_mask_dim(shape.dims[i], shape.padding[i], shape.mask[i]);
+            let current_size = pad_mask_dim(self.dims[i], self.padding[i], self.mask[i]);
             // Don't include fake dimensions in the index expression
-            if !shape.fake[i] {
+            if !self.fake[i] {
                 let mut dim_ind = BigExpression::from('z');
                 // Remove other dim components
                 dim_ind /= current_elem_size.clone();
                 // Get position in current dim
                 dim_ind %= current_size.clone();
                 // Add offset
-                dim_ind += shape.mask[i].0 - shape.padding[i].0;
+                dim_ind += self.mask[i].0 - self.padding[i].0;
                 // Multiply by stride
                 dim_ind *= strides[i].clone();
                 // Add to index expression
@@ -142,23 +141,22 @@ impl ShapeTracker {
         if !self.is_reshaped() {
             return true.into();
         }
-        let shape = combine_dims(*self);
         let mut ret = BigExpression::from(1);
         let mut acc = BigExpression::from(1);
         let logical = BigExpression::from('z');
-        for i in shape.indexes.into_iter().rev() {
-            let (bottom_slice, top_slice) = shape.mask[i];
-            let logical_sh = pad_mask_dim(shape.dims[i], shape.padding[i], shape.mask[i]);
-            if !shape.fake[i] {
+        for i in self.indexes.into_iter().rev() {
+            let (bottom_slice, top_slice) = self.mask[i];
+            let logical_sh = pad_mask_dim(self.dims[i], self.padding[i], self.mask[i]);
+            if !self.fake[i] {
                 let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
-                let greater_than = shape.padding[i].0.big() - bottom_slice;
+                let greater_than = self.padding[i].0.big() - bottom_slice;
                 if greater_than != 0 {
                     ret &= dim_ind.clone().gte(greater_than);
                 }
-                ret &= dim_ind.lt(shape.dims[i].big() + shape.padding[i].0);
+                ret &= dim_ind.lt(self.dims[i].big() + self.padding[i].0);
                 if top_slice
                     .to_usize()
-                    .map(|s| shape.dims[i].to_usize().map(|dim| s < dim).unwrap_or(true))
+                    .map(|s| self.dims[i].to_usize().map(|dim| s < dim).unwrap_or(true))
                     .unwrap_or(true)
                 {
                     ret = ret.min(top_slice);
@@ -320,33 +318,6 @@ fn pad_mask_dim(
     mask: (Expression, Expression),
 ) -> BigExpression {
     (dim.into() + padding.0 + padding.1).min(mask.1) - mask.0
-}
-
-// Combine non-permuted, non-padded, non-fake, non-masked dimensions together
-fn combine_dims(mut shape: ShapeTracker) -> ShapeTracker {
-    for i in (1..shape.len()).rev() {
-        let (ind_i, ind_i_minus_1) = (shape.indexes[i], shape.indexes[i - 1]);
-        // Test permute
-        if (ind_i != ind_i_minus_1 + 1)
-            // Fakes
-            || (shape.fake[ind_i] || shape.fake[ind_i_minus_1])
-            // Dim i padding
-            || (shape.padding[ind_i].0 != 0 || shape.padding[ind_i].1 != 0)
-            // Dim i mask
-            || (shape.mask[ind_i].0 != 0 || shape.mask[ind_i].1 != i32::MAX)
-            // Dim i - 1 padding
-            || (shape.padding[ind_i_minus_1].0 != 0 || shape.padding[ind_i_minus_1].1 != 0)
-            // Dim i - 1 mask
-            || (shape.mask[ind_i_minus_1].0 != 0 || shape.mask[ind_i_minus_1].1 != i32::MAX)
-        {
-            continue;
-        }
-        // We can combine dimension i and i - 1
-        let dim_i = shape.dims[ind_i];
-        shape.dims[ind_i_minus_1] *= dim_i;
-        shape.remove_dim(i);
-    }
-    shape
 }
 
 /// Resolve shapes between the two trackers to the best of our ability

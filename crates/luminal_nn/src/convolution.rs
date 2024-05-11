@@ -11,6 +11,7 @@ pub struct Conv1D<
     const DILATION: usize = 0,
 > {
     pub weight: GraphTensor<R3<CH_OUT, CH_IN, KERNEL>>,
+    pub bias: Option<GraphTensor<R1<CH_OUT>>>,
 }
 
 impl<
@@ -30,6 +31,35 @@ impl<
                     .map(|_| rng.gen_range(-1_f32..1_f32))
                     .collect::<Vec<_>>(),
             ),
+            bias: None,
+        }
+    }
+}
+
+impl<
+        const CH_IN: usize,
+        const CH_OUT: usize,
+        const KERNEL: usize,
+        const STRIDE: usize,
+        const DILATION: usize,
+    > Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION>
+{
+    pub fn initialize_bias(cx: &mut Graph) -> Self {
+        // Init weight as uniform(-1, 1)
+        let mut rng = thread_rng();
+        Self {
+            weight: cx.named_tensor("Weight").set(
+                (0..(CH_IN * CH_OUT * KERNEL))
+                    .map(|_| rng.gen_range(-1_f32..1_f32))
+                    .collect::<Vec<_>>(),
+            ),
+            bias: Some(
+                cx.named_tensor("Bias").set(
+                    (0..CH_OUT)
+                        .map(|_| rng.gen_range(-1_f32..1_f32))
+                        .collect::<Vec<_>>(),
+                ),
+            ),
         }
     }
 }
@@ -44,6 +74,9 @@ impl<
 {
     fn serialize(&self, s: &mut luminal::module::Serializer) {
         s.tensor("weight", self.weight);
+        if let Some(bias) = self.bias {
+            s.tensor("bias", bias);
+        }
     }
 }
 
@@ -127,7 +160,8 @@ impl<
             PhantomData<DimOut>,
         ),
     ) -> Self::Output {
-        self.weight
+        let mut o = self
+            .weight
             .dyn_reshape::<(Const<CH_OUT>, Dyn<'-'>)>(vec![CH_OUT.into(), (CH_IN * KERNEL).into()])
             .expand::<(Batch1, Batch2, Const<CH_OUT>, Dyn<'-'>), _>()
             .matmul(
@@ -142,7 +176,11 @@ impl<
                         (CH_IN * KERNEL).into(),
                         DimOut::size(),
                     ]),
-            )
+            );
+        if let Some(b) = self.bias {
+            o += b.expand();
+        }
+        o
     }
 }
 

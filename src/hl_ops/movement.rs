@@ -139,13 +139,15 @@ impl<S: Shape> GraphTensor<S> {
         let n_dims = self.shape.len();
         let full_kernel = kernel + dilation;
         let dim_size = self.shape.dims[self.shape.indexes[n_dims - 1]];
-        let number_of_windows = (((dim_size.big() - full_kernel) / stride) + 1).simplify();
+        let number_of_windows = (((dim_size.big() - full_kernel) / stride) + 1)
+            .simplify()
+            .small();
         // Expand new dimension
-        self.shape.expand(n_dims - 1, number_of_windows.clone());
+        self.shape.expand(n_dims - 1, number_of_windows);
         self = self.contiguous();
         if n_dims > 1 {
             // View as single dimension of matrix with wider width
-            let mat_size = (dim_size.big() + stride.big()) * number_of_windows.clone();
+            let mat_size = (dim_size.big() + stride.big()) * number_of_windows;
             let actual_size =
                 (dim_size * self.shape.dims[self.shape.indexes[n_dims - 1]]).simplify();
             // Reshape into single dimension to pad
@@ -159,10 +161,10 @@ impl<S: Shape> GraphTensor<S> {
         } else {
             self.shape.dims[self.shape.indexes[n_dims]] = dim_size + stride;
         }
-        self.shape.dims[self.shape.indexes[n_dims - 1]] = number_of_windows.small();
+        self.shape.dims[self.shape.indexes[n_dims - 1]] = number_of_windows;
         // Slice down to kernel size
         self.shape.mask[self.shape.indexes[n_dims]].1 = full_kernel;
-        self.shape.mask[self.shape.indexes[n_dims - 1]].1 = number_of_windows.small();
+        self.shape.mask[self.shape.indexes[n_dims - 1]].1 = number_of_windows;
         self = self.contiguous();
 
         if dilation > 0 {

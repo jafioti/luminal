@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use luminal::prelude::{binary::F32Pow, *};
-use luminal_nn::{Conv1D, Embedding, PermutedLinear, RMSNorm};
+use luminal_nn::{Conv1D, Embedding, Linear, PermutedLinear, RMSNorm};
 
 // Encoder
 pub const NUM_MEL_BINS: usize = 80;
@@ -45,44 +45,6 @@ pub type KVCache<Batch, Seq> = (
     GraphTensor<(Batch, Const<HEADS>, Seq, Const<HEAD_DIM>)>,
     GraphTensor<(Batch, Const<HEADS>, Seq, Const<HEAD_DIM>)>,
 );
-
-pub struct Mlp<const I: usize, const H: usize> {
-    pub gate_proj: GraphTensor<(Const<I>, Const<H>)>,
-    pub down_proj: GraphTensor<(Const<H>, Const<I>)>,
-    pub up_proj: GraphTensor<(Const<I>, Const<H>)>,
-}
-
-impl<Sh: Shape, Im: Shape, const I: usize, const H: usize> Module<GraphTensor<Sh>> for Mlp<I, H>
-where
-    GraphTensor<Sh>: Matmul<R2<H, I>, Output = GraphTensor<Im>>,
-    GraphTensor<Im>: Matmul<R2<I, H>, Output = GraphTensor<Sh>>,
-{
-    type Output = GraphTensor<Sh>;
-
-    fn forward(&self, input: GraphTensor<Sh>) -> Self::Output {
-        let gate = input.matmul(self.gate_proj.permute()).swish();
-        let up = input.matmul(self.up_proj.permute()) * gate;
-        up.matmul(self.down_proj.permute())
-    }
-}
-
-impl<const I: usize, const H: usize> InitModule for Mlp<I, H> {
-    fn initialize(cx: &mut Graph) -> Self {
-        Self {
-            gate_proj: cx.named_tensor("Gate Weight"),
-            up_proj: cx.named_tensor("Up Weight"),
-            down_proj: cx.named_tensor("Down Weight"),
-        }
-    }
-}
-
-impl<const I: usize, const H: usize> SerializeModule for Mlp<I, H> {
-    fn serialize(&self, s: &mut Serializer) {
-        s.tensor("ffn_gate/weight", self.gate_proj);
-        s.tensor("ffn_up/weight", self.up_proj);
-        s.tensor("ffn_down/weight", self.down_proj);
-    }
-}
 
 pub struct SelfAttention<const HIDDEN: usize> {
     pub q_proj: GraphTensor<R2<HIDDEN, HIDDEN>>,
@@ -231,17 +193,20 @@ impl<const HIDDEN: usize> InitModule for SelfAttention<HIDDEN> {
 
 impl<const HIDDEN: usize> SerializeModule for SelfAttention<HIDDEN> {
     fn serialize(&self, s: &mut Serializer) {
-        s.tensor("attn_q/weight", self.q_proj);
-        s.tensor("attn_v/weight", self.v_proj);
-        s.tensor("attn_k/weight", self.k_proj);
-        s.tensor("attn_output/weight", self.o_proj);
+        s.tensor("q_proj/weight", self.q_proj);
+        s.tensor("v_proj/weight", self.v_proj);
+        s.tensor("k_proj/weight", self.k_proj);
+        s.tensor("out_proj/weight", self.o_proj);
     }
 }
 
 pub struct EncoderTransformerBlock {
     pub attention: SelfAttention<D_MODEL>,
     pub attention_norm: RMSNorm<D_MODEL>,
-    pub feed_forward: Mlp<ENC_FFN_DIM, D_MODEL>,
+    pub ff1: Linear<D_MODEL, ENC_FFN_DIM>,
+    pub ff1_bias: GraphTensor<R1<ENC_FFN_DIM>>,
+    pub ff2: Linear<ENC_FFN_DIM, D_MODEL>,
+    pub ff2_bias: GraphTensor<R1<D_MODEL>>,
     pub feed_forward_norm: RMSNorm<D_MODEL>,
 }
 
@@ -262,7 +227,8 @@ impl<Batch: Dimension, Seq: Dimension> Module<GraphTensor<(Batch, Seq, Const<D_M
         x += y;
 
         // Feed Forward
-        let y = self.feed_forward.forward(self.feed_forward_norm.forward(x));
+        let y = self.ff1.forward(x) + self.ff1_bias.expand();
+        let y = self.ff2.forward(y) + self.ff2_bias.expand();
 
         // Residual Addition
         x + y
@@ -278,7 +244,14 @@ impl InitModule for EncoderTransformerBlock {
                 norm.epsilon = 1e-5;
                 norm
             },
-            feed_forward: InitModule::initialize(cx),
+            ff1: Linear {
+                weight: cx.tensor(),
+            },
+            ff1_bias: cx.tensor(),
+            ff2: Linear {
+                weight: cx.tensor(),
+            },
+            ff2_bias: cx.tensor(),
             feed_forward_norm: {
                 let mut norm = RMSNorm::initialize(cx);
                 norm.epsilon = 1e-5;
@@ -290,10 +263,13 @@ impl InitModule for EncoderTransformerBlock {
 
 impl SerializeModule for EncoderTransformerBlock {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("", &self.attention);
-        s.module("attn_norm", &self.attention_norm);
-        s.module("ffn_norm", &self.feed_forward_norm);
-        s.module("", &self.feed_forward);
+        s.module("self_attn", &self.attention);
+        s.module("self_attn_layer_norm", &self.attention_norm);
+        s.module("final_layer_norm", &self.feed_forward_norm);
+        s.module("fc1", &self.ff1);
+        s.tensor("fc1/bias", self.ff1_bias);
+        s.module("fc2", &self.ff2);
+        s.tensor("fc2/bias", self.ff2_bias);
     }
 }
 
@@ -313,11 +289,15 @@ fn sinusoids<const CHANNELS: usize, Length: Dimension>(
     let inv_timescales = (0..CHANNELS / 2)
         .map(|i| (i as f32 * (-log_timescale_increment)).exp())
         .collect::<Vec<_>>();
-    let inv_timescales = cx
+    let mut inv_timescales = cx
         .tensor::<(Dyn<'-'>,)>()
         .set_dyn(inv_timescales, &[CHANNELS / 2]);
+    inv_timescales.shape.dims[0] = (CHANNELS / 2).into();
     let arange = cx.arange::<Length>();
-    let scaled_time: GraphTensor<(Length, Dyn<'-'>)> = arange.expand() * inv_timescales.expand();
+    let mut mul_shape = arange.shape;
+    mul_shape.add_dim(1, CHANNELS / 2);
+    let scaled_time: GraphTensor<(Length, Dyn<'-'>)> =
+        arange.expand_to(mul_shape) * inv_timescales.expand_to(mul_shape);
     scaled_time
         .sin()
         .concat_along::<_, Axis<1>, _>(scaled_time.cos())
@@ -350,8 +330,8 @@ impl<Batch: Dimension, Seq: Dimension> Module<GraphTensor<(Batch, Seq, Const<N_M
 impl InitModule for AudioEncoder {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
-            conv1: InitModule::initialize(cx),
-            conv2: InitModule::initialize(cx),
+            conv1: Conv1D::initialize_bias(cx),
+            conv2: Conv1D::initialize_bias(cx),
             layers: (0..ENC_LAYERS)
                 .map(|_| InitModule::initialize(cx))
                 .collect(),
@@ -361,10 +341,10 @@ impl InitModule for AudioEncoder {
 
 impl SerializeModule for AudioEncoder {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("conv1", &self.conv1);
-        s.module("conv2", &self.conv2);
+        s.module("model/encoder/conv1", &self.conv1);
+        s.module("model/encoder/conv2", &self.conv2);
         for (i, layer) in self.layers.iter().enumerate() {
-            s.module(&format!("blk/{i}"), layer);
+            s.module(&format!("model/encoder/layers/{i}"), layer);
         }
     }
 }
@@ -374,7 +354,10 @@ pub struct DecoderTransformerBlock {
     pub attention_norm: RMSNorm<D_MODEL>,
     pub cross_attention: SelfAttention<D_MODEL>,
     pub cross_attention_norm: RMSNorm<D_MODEL>,
-    pub feed_forward: Mlp<DEC_FFN_DIM, D_MODEL>,
+    pub ff1: Linear<D_MODEL, DEC_FFN_DIM>,
+    pub ff1_bias: GraphTensor<R1<DEC_FFN_DIM>>,
+    pub ff2: Linear<DEC_FFN_DIM, D_MODEL>,
+    pub ff2_bias: GraphTensor<R1<D_MODEL>>,
     pub feed_forward_norm: RMSNorm<D_MODEL>,
 }
 
@@ -425,7 +408,8 @@ impl<
         x += y;
 
         // Feed Forward
-        let y = self.feed_forward.forward(self.feed_forward_norm.forward(x));
+        let y = self.ff1.forward(x) + self.ff1_bias.expand();
+        let y = self.ff2.forward(y) + self.ff2_bias.expand();
 
         // Residual Addition
         (x + y, enc_states, cache)
@@ -447,7 +431,14 @@ impl InitModule for DecoderTransformerBlock {
                 norm.epsilon = 1e-5;
                 norm
             },
-            feed_forward: InitModule::initialize(cx),
+            ff1: Linear {
+                weight: cx.tensor(),
+            },
+            ff1_bias: cx.tensor(),
+            ff2: Linear {
+                weight: cx.tensor(),
+            },
+            ff2_bias: cx.tensor(),
             feed_forward_norm: {
                 let mut norm = RMSNorm::initialize(cx);
                 norm.epsilon = 1e-5;
@@ -459,12 +450,15 @@ impl InitModule for DecoderTransformerBlock {
 
 impl SerializeModule for DecoderTransformerBlock {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("", &self.attention);
-        s.module("attn_norm", &self.attention_norm);
-        s.module("", &self.cross_attention);
-        s.module("attn_norm", &self.cross_attention);
-        s.module("ffn_norm", &self.feed_forward_norm);
-        s.module("", &self.feed_forward);
+        s.module("self_attn", &self.attention);
+        s.module("self_attn_layer_norm", &self.attention_norm);
+        s.module("encoder_attn", &self.cross_attention);
+        s.module("encoder_attn_layer_norm", &self.cross_attention_norm);
+        s.module("final_layer_norm", &self.feed_forward_norm);
+        s.module("fc1", &self.ff1);
+        s.tensor("fc1/bias", self.ff1_bias);
+        s.module("fc2", &self.ff2);
+        s.tensor("fc2/bias", self.ff2_bias);
     }
 }
 
@@ -474,8 +468,8 @@ pub struct TextDecoder {
     pub pos_embedding: GraphTensor<R2<MAX_TARGET_POSITION, D_MODEL>>,
     // Transformer layers
     pub layers: Vec<DecoderTransformerBlock>,
-    // LM head
-    pub lm_head: (RMSNorm<D_MODEL>, PermutedLinear<D_MODEL, VOCAB_SIZE>),
+    // Final layer norm
+    pub layer_norm: RMSNorm<D_MODEL>,
 }
 
 impl<
@@ -486,9 +480,9 @@ impl<
         TotDecSeq: Dimension,
     >
     Module<(
-        Vec<GraphTensor<(Batch, EncSeq, Const<D_MODEL>)>>,
+        &[GraphTensor<(Batch, EncSeq, Const<D_MODEL>)>],
         GraphTensor<(Batch, CurDecSeq)>,
-        Vec<KVCache<Batch, PrevDecSeq>>,
+        &[KVCache<Batch, PrevDecSeq>],
         PhantomData<TotDecSeq>,
     )> for TextDecoder
 {
@@ -500,9 +494,9 @@ impl<
     fn forward(
         &self,
         (enc_output, input, cache, _): (
-            Vec<GraphTensor<(Batch, EncSeq, Const<D_MODEL>)>>,
+            &[GraphTensor<(Batch, EncSeq, Const<D_MODEL>)>],
             GraphTensor<(Batch, CurDecSeq)>,
-            Vec<KVCache<Batch, PrevDecSeq>>,
+            &[KVCache<Batch, PrevDecSeq>],
             PhantomData<TotDecSeq>,
         ),
     ) -> Self::Output {
@@ -526,7 +520,13 @@ impl<
             enc_states.push(enc_state);
         }
         // Run through last norm and output projection
-        (self.lm_head.forward(x), enc_states, new_caches)
+        (
+            self.layer_norm
+                .forward(x)
+                .matmul(self.embedding.weight.permute()),
+            enc_states,
+            new_caches,
+        )
     }
 }
 
@@ -535,7 +535,10 @@ impl InitModule for TextDecoder {
         Self {
             embedding: InitModule::initialize(cx),
             pos_embedding: cx.tensor(),
-            lm_head: InitModule::initialize(cx),
+            layer_norm: RMSNorm {
+                weight: cx.tensor(),
+                epsilon: 1e-5,
+            },
             layers: (0..DEC_LAYERS)
                 .map(|_| InitModule::initialize(cx))
                 .collect(),
@@ -545,10 +548,10 @@ impl InitModule for TextDecoder {
 
 impl SerializeModule for TextDecoder {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("embedding", &self.embedding);
-        s.module("head", &self.lm_head);
+        s.module("model/decoder/embed_tokens", &self.embedding);
+        s.module("model/decoder/layer_norm", &self.layer_norm);
         for (i, layer) in self.layers.iter().enumerate() {
-            s.module(&format!("blk/{i}"), layer);
+            s.module(&format!("model/decoder/layers/{i}"), layer);
         }
     }
 }

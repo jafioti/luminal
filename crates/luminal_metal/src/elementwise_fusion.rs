@@ -378,17 +378,18 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                             .insert(i, Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap());
                         input_regexes.get(&i).unwrap()
                     };
+                    let (ind, val) = (ind_exp.clone().simplify(), val_exp.clone().simplify());
                     *subexp = re
                         .replace_all(
                             subexp,
-                            &if *val_exp != true {
+                            &if val != true {
                                 format!(
                                     "({} != 0 ? (float)input{i}[{}] : 0.0)$1",
-                                    expr_to_metal_string(val_exp),
-                                    expr_to_metal_string(ind_exp)
+                                    expr_to_metal_string(&val),
+                                    expr_to_metal_string(&ind)
                                 )
                             } else {
-                                format!("(float)input{i}[{}]$1", expr_to_metal_string(ind_exp))
+                                format!("(float)input{i}[{}]$1", expr_to_metal_string(&ind))
                             },
                         )
                         .to_string();
@@ -407,7 +408,8 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                                 )
                             },
                         )
-                        .0;
+                        .0
+                        .simplify();
                     if val_exp != true {
                         *subexp = format!(
                             "(({} != 0) ? {subexp} : 0.0)",
