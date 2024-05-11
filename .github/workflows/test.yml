@@ -28,7 +28,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Run tests
-      run: cargo clippy --all-targets -- -D warnings
+      run: rustup update; cargo clippy --all-targets -- -D warnings
 
   fmt:
     name: Fmt
