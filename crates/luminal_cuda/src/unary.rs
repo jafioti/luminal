@@ -1,4 +1,4 @@
-use luminal_cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
 use num_traits::float::FloatConst;
 use rustc_hash::FxHashMap;
 use std::{any::Any, marker::PhantomData, mem::size_of, sync::Arc};

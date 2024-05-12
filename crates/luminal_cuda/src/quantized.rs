@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use luminal_cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
 use petgraph::visit::EdgeRef;
 
 use luminal::{
@@ -294,6 +294,7 @@ impl<T: CudaFloat + Default> Compiler for CudaQuantizedCompiler<T> {
 mod tests {
     use std::sync::Arc;
 
+    use cudarc::driver::CudaDevice;
     use dfdx::{
         tensor::TensorFromVec,
         tensor_ops::{PermuteTo, TryMatMul},
@@ -302,7 +303,6 @@ mod tests {
         prelude::*,
         tests::{assert_close, assert_close_precision, random_vec_rng},
     };
-    use luminal_cudarc::driver::CudaDevice;
     use rand::{thread_rng, Rng};
 
     use crate::{CudaData, CudaQuantizedCompiler};

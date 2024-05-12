@@ -716,10 +716,7 @@ fn test_pad() {
     let data = random_vec(8 * 2);
     let mut cx = Graph::new();
     let a = cx.tensor::<R2<8, 2>>().set(data.clone());
-    let mut c = a
-        .pad::<R2<10, 4>, _, _>(&[(0, 2), (0, 2)])
-        .contiguous()
-        .retrieve();
+    let mut c = a.pad::<R2<10, 4>>(((0, 2), (0, 2))).contiguous().retrieve();
 
     cx.compile(CudaCompiler::<f16>::default(), &mut c);
     cx.execute();

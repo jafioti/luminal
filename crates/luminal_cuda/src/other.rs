@@ -1,8 +1,8 @@
 use std::{marker::PhantomData, sync::Arc};
 
+use cudarc::driver::{CudaDevice, CudaFunction, LaunchAsync, LaunchConfig};
 use itertools::Itertools;
 use luminal::prelude::{petgraph::visit::EdgeRef, *};
-use luminal_cudarc::driver::{CudaDevice, CudaFunction, LaunchAsync, LaunchConfig};
 use rustc_hash::FxHashMap;
 
 use crate::{

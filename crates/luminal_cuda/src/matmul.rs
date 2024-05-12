@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use luminal_cudarc::{
+use cudarc::{
     cublas::{sys::cublasOperation_t::*, CudaBlas},
     driver::{CudaDevice, DevicePtr, DevicePtrMut},
 };
@@ -53,7 +53,7 @@ impl<T: CudaFloat> Operator for Matmul<T> {
         let b_dims = inp[1].1.fake.iter().filter(|f| !**f).count();
         if T::is_f32() {
             unsafe {
-                luminal_cudarc::cublas::result::sgemm_strided_batched(
+                cudarc::cublas::result::sgemm_strided_batched(
                     *self.0.handle(),
                     transa,
                     transb,
@@ -77,7 +77,7 @@ impl<T: CudaFloat> Operator for Matmul<T> {
             }
         } else {
             unsafe {
-                luminal_cudarc::cublas::result::hgemm_strided_batched(
+                cudarc::cublas::result::hgemm_strided_batched(
                     *self.0.handle(),
                     transa,
                     transb,

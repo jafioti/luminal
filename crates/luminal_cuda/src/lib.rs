@@ -7,15 +7,17 @@ mod quantized;
 mod unary;
 pub use quantized::*;
 
+pub use cudarc::driver::CudaDevice;
+
 #[cfg(test)]
 #[macro_use]
 mod tests;
 
-use itertools::Itertools;
-use luminal_cudarc::{
-    driver::{CudaDevice, CudaFunction, CudaSlice, DeviceRepr},
+use cudarc::{
+    driver::{CudaFunction, CudaSlice, DeviceRepr},
     nvrtc::{compile_ptx_with_opts, CompileOptions},
 };
+use itertools::Itertools;
 use prim::CudaConstant;
 use rustc_hash::FxHashMap;
 
@@ -49,9 +51,9 @@ pub trait CudaFloat:
     std::fmt::Debug
     + Copy
     + Default
-    + luminal_cudarc::driver::DeviceRepr
+    + cudarc::driver::DeviceRepr
     + std::marker::Unpin
-    + luminal_cudarc::driver::ValidAsZeroBits
+    + cudarc::driver::ValidAsZeroBits
     + 'static
 {
     fn to_f32(self) -> f32;

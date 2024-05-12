@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 metal = ["dep:luminal_metal", "dep:metal-rs"]
-cuda = ["dep:luminal_cuda", "dep:luminal_cudarc"]
+cuda = ["dep:luminal_cuda"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -23,10 +23,6 @@ metal-rs = { version = "0.27.0", package = "metal", features = [
 ], optional = true }
 colored = "2.1.0"
 itertools = "0.12.1"
-luminal_cudarc = { version = "0.10.0", features = [
-    "cublas",
-    "f16",
-], optional = true }
 tokenizers = "0.15.2"
 axum = "0.7.5"
 serde = { version = "1.0.199", features = ["derive"] }

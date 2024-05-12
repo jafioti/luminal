@@ -4,7 +4,7 @@ use std::path::Path;
 use luminal::{op::Function, prelude::*};
 
 #[cfg(feature = "cuda")]
-use {luminal_cuda::CudaData, luminal_cudarc::driver::CudaDevice};
+use luminal_cuda::{CudaData, CudaDevice};
 
 use crate::gguf::*;
 
