@@ -154,8 +154,7 @@ fn main() {
         let current_output = tokenizer.decode(&output_ids, false).unwrap();
 
         // Print the new substring added to the decoded output
-        let new_substring = &current_output[prev_output_len..];
-        print!("{}", new_substring.bright_green());
+        print!("{}", current_output[prev_output_len..].bright_green());
         io::stdout().flush().unwrap();
 
         // Update the previous output

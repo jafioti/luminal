@@ -120,10 +120,11 @@ impl Graph {
 
     /// Create a new tensor with shape S and a name. This name will show up on the graph when displayed
     pub fn named_tensor<S: Shape>(&mut self, name: &str) -> GraphTensor<S> {
+        let name = name.to_string();
         GraphTensor {
             id: self.graph.add_node(Box::new(Function(
                 format!("{name} Load"),
-                Box::new(|_| panic!("You must set a value for this tensor!")),
+                Box::new(move |_| panic!("You must set a value for this tensor! ({name})")),
             ))),
             graph_ref: self,
             shape: S::to_tracker(),

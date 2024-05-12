@@ -152,8 +152,7 @@ fn main() {
         let current_output = tokenizer.decode(&output_ids, false).unwrap();
 
         // Print the new substring added to the decoded output
-        let new_substring = &current_output[prev_output_len..];
-        print!("{}", new_substring.bright_green());
+        print!("{}", current_output[prev_output_len..].bright_green());
         io::stdout().flush().unwrap();
 
         // Update the previous output
@@ -174,7 +173,6 @@ fn main() {
     );
 }
 
-// Currently just an argmax, do actual sampling here
 fn argmax(dist: &[f32]) -> u32 {
     dist.iter()
         .position_max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
