@@ -75,9 +75,10 @@ fn main() {
     audio_input.set_dyn(mel, &[1, mel_len / 80, 80]);
     enc_cx.execute();
     transfer_data(encoded, &mut enc_cx, encoder_output, &mut dec_cx);
+    dec_cx.set_dyn_dim('e', enc_cx.dyn_map[&'s']);
+    dec_cx.set_dyn_dim('t', 1);
 
-    // // Decode text
-    // for _ in 0..1000 {
-
-    // }
+    // Decode text
+    text_input.set_dyn(vec![0.0], &[1, 1]);
+    dec_cx.execute();
 }

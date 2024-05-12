@@ -458,11 +458,11 @@ impl SerializeModule for DecoderTransformerBlock {
         s.module("self_attn_layer_norm", &self.attention_norm);
         s.module("encoder_attn", &self.cross_attention);
         s.module("encoder_attn_layer_norm", &self.cross_attention_norm);
-        s.module("final_layer_norm", &self.feed_forward_norm);
         s.module("fc1", &self.ff1);
         s.tensor("fc1/bias", self.ff1_bias);
         s.module("fc2", &self.ff2);
         s.tensor("fc2/bias", self.ff2_bias);
+        s.module("final_layer_norm", &self.feed_forward_norm);
     }
 }
 
@@ -553,6 +553,7 @@ impl InitModule for TextDecoder {
 impl SerializeModule for TextDecoder {
     fn serialize(&self, s: &mut Serializer) {
         s.module("model/decoder/embed_tokens", &self.embedding);
+        s.tensor("model/decoder/embed_positions/weight", self.pos_embedding);
         s.module("model/decoder/layer_norm", &self.layer_norm);
         for (i, layer) in self.layers.iter().enumerate() {
             s.module(&format!("model/decoder/layers/{i}"), layer);
