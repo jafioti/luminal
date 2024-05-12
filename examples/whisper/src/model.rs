@@ -306,7 +306,7 @@ fn sinusoids<const CHANNELS: usize, Length: Dimension>(
 impl<Batch: Dimension, Seq: Dimension> Module<GraphTensor<(Batch, Seq, Const<N_MEL_BINS>)>>
     for AudioEncoder
 {
-    type Output = GraphTensor<(Batch, Seq, Const<D_MODEL>)>;
+    type Output = Vec<GraphTensor<(Batch, Seq, Const<D_MODEL>)>>;
     fn forward(&self, input: GraphTensor<(Batch, Seq, Const<N_MEL_BINS>)>) -> Self::Output {
         // Conv layers
         let x = self
@@ -321,9 +321,13 @@ impl<Batch: Dimension, Seq: Dimension> Module<GraphTensor<(Batch, Seq, Const<N_M
         // Sinusoidal positional embedding
         x += sinusoids::<D_MODEL, Seq>(x.graph()).expand();
         // Transformer layers
-        let output = self.layers.forward(x);
-        // Final layer norm
-        output.layer_norm::<Axis<2>, _>(1e-5)
+        let mut outputs = vec![];
+        let mut output = x;
+        for l in &self.layers {
+            output = l.forward(output);
+            outputs.push(output);
+        }
+        outputs
     }
 }
 

@@ -255,7 +255,7 @@ impl Serializer {
             self.current_path.pop();
         }
     }
-    pub fn module<T: SerializeModule>(&mut self, name: &str, module: &T) {
+    pub fn module(&mut self, name: &str, module: impl SerializeModule) {
         if !name.is_empty() {
             // Add new path component
             self.current_path.push(name.to_string());

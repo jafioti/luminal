@@ -27,7 +27,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - name: Run tests
+    - name: Run clippy
       run: rustup update; cargo clippy --all-targets -- -D warnings
 
   fmt:
@@ -37,7 +37,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - name: Run tests
+    - name: Format
       run: cargo fmt --all --check
 
 #   macos_test:

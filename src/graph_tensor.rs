@@ -69,9 +69,9 @@ impl<S: Shape> GraphTensor<S> {
     pub fn set_dyn<T: Data + Clone>(self, data: T, shape: &[usize]) -> Self {
         // Report dyn dim values to graph dyn map
         assert_eq!(
-            S::realized_shape().len(),
+            S::NUM_DIMS,
             shape.len(),
-            "Number of dimensions don't match!"
+            "Number of dimensions do not match!"
         );
         for (d, s) in S::realized_shape().iter().zip(shape.iter()) {
             if let Some(c) = d.to_symbols().pop() {
