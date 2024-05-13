@@ -131,15 +131,15 @@ impl<S: Shape> GraphTensor<S> {
     /// Pool elements along the last dimension, pools are exposed as a new dimension
     pub fn pool_last_dim<Dst: Shape>(
         mut self,
-        kernel: impl Into<Expression>,
-        stride: impl Into<Expression>,
+        kernel: impl Into<BigExpression>,
+        stride: impl Into<BigExpression>,
         dilation: usize,
     ) -> GraphTensor<Dst> {
         let (kernel, stride) = (kernel.into(), stride.into());
         let n_dims = self.shape.len();
-        let full_kernel = kernel + dilation;
-        let dim_size = self.shape.dims[self.shape.indexes[n_dims - 1]];
-        let number_of_windows = (((dim_size.big() - full_kernel) / stride) + 1)
+        let full_kernel = kernel.clone() + (kernel - 1) * dilation;
+        let dim_size = self.shape.shape().pop().unwrap().simplify().small();
+        let number_of_windows = (((dim_size.big() - full_kernel.clone()) / stride.clone()) + 1)
             .simplify()
             .small();
         // Expand new dimension
@@ -147,23 +147,24 @@ impl<S: Shape> GraphTensor<S> {
         self = self.contiguous();
         if n_dims > 1 {
             // View as single dimension of matrix with wider width
-            let mat_size = (dim_size.big() + stride.big()) * number_of_windows;
-            let actual_size =
-                (dim_size * self.shape.dims[self.shape.indexes[n_dims - 1]]).simplify();
+            let mat_size = (dim_size.big() + stride.clone()) * number_of_windows;
+            let actual_size = (dim_size.big() * self.shape.dims[self.shape.indexes[n_dims - 1]])
+                .simplify()
+                .small();
             // Reshape into single dimension to pad
             self.shape.remove_dim(n_dims);
             self.shape.dims[self.shape.indexes[n_dims - 1]] = actual_size;
             self.shape.padding[self.shape.indexes[n_dims - 1]].1 =
-                mat_size.simplify().small() - actual_size;
+                (mat_size - actual_size).simplify().small();
             self = self.contiguous();
             // Reshape back (mats should be full now)
-            self.shape.add_dim(n_dims, dim_size + stride);
+            self.shape.add_dim(n_dims, dim_size + stride.clone());
         } else {
             self.shape.dims[self.shape.indexes[n_dims]] = dim_size + stride;
         }
         self.shape.dims[self.shape.indexes[n_dims - 1]] = number_of_windows;
         // Slice down to kernel size
-        self.shape.mask[self.shape.indexes[n_dims]].1 = full_kernel;
+        self.shape.mask[self.shape.indexes[n_dims]].1 = full_kernel.simplify().small();
         self.shape.mask[self.shape.indexes[n_dims - 1]].1 = number_of_windows;
         self = self.contiguous();
 
@@ -176,17 +177,17 @@ impl<S: Shape> GraphTensor<S> {
         }
     }
 
-    pub fn pad<Dst: Shape>(mut self, ranges: impl PadOfShape<S>) -> GraphTensor<Dst> {
-        let ranges = ranges.to_pad_vec();
+    pub fn pad<Dst: Shape>(mut self, padding: impl PadOfShape<S>) -> GraphTensor<Dst> {
+        let padding = padding.to_pad_vec();
         // This exists because currently padding and slicing on the same dimension (even on opposite sides) is unsupported
-        if ranges.iter().zip(self.shape.indexes).any(|(range, ind)| {
+        if padding.iter().zip(self.shape.indexes).any(|(range, ind)| {
             (range.0 != 0 || range.1 != 0)
                 && (self.shape.mask[self.shape.indexes[ind]].0 != 0
                     || self.shape.mask[self.shape.indexes[ind]].1 != i32::MAX)
         }) {
             self = self.contiguous();
         }
-        self.shape.pad(&ranges);
+        self.shape.pad(&padding);
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
@@ -356,19 +357,56 @@ mod tests {
     fn test_pool_1d() {
         let mut cx = Graph::new();
 
-        let inp1 = cx.tensor::<R1<5>>().set(vec![1., 2., 3., 4., 5.]);
+        let inp1 = cx.tensor::<R1<5>>().set([1., 2., 3., 4., 5.]);
+        let inp2 = cx
+            .tensor::<R2<2, 5>>()
+            .set([[15., 14., 13., 12., 11.], [1., 2., 3., 4., 5.]]);
         // Stride 1
         let out1 = inp1.pool_last_dim::<R2<3, 3>>(3, 1, 0).retrieve();
         // Stride 2
         let out2 = inp1.pool_last_dim::<R2<2, 3>>(3, 2, 0).retrieve();
         // Stride 3
         let out3 = inp1.pool_last_dim::<R2<1, 3>>(3, 3, 0).retrieve();
+        // Dilation 1
+        let out4 = inp1.pool_last_dim::<R2<1, 3>>(3, 1, 1).retrieve();
+        // Dilation 1 Padding 1
+        let out5 = inp1
+            .pad::<R1<7>>(((1, 1),))
+            .pool_last_dim::<R2<3, 3>>(3, 1, 1)
+            .retrieve();
+        // Stride 1 Batch 2
+        let out6 = inp2.pool_last_dim::<R3<2, 3, 3>>(3, 1, 0).retrieve();
+        // Stride 3
+        let out7 = inp2.pool_last_dim::<R3<2, 1, 3>>(3, 3, 0).retrieve();
+        // Dilation 1
+        let out8 = inp2.pool_last_dim::<R3<2, 1, 3>>(3, 1, 1).retrieve();
+        // Dilation 1 Padding 1
+        let out9 = inp2
+            .pad::<R2<2, 7>>(((0, 0), (1, 1)))
+            .pool_last_dim::<R3<2, 3, 3>>(3, 1, 1)
+            .retrieve();
 
         cx.execute();
 
         assert_exact(&out1.data(), &[1., 2., 3., 2., 3., 4., 3., 4., 5.]);
         assert_exact(&out2.data(), &[1., 2., 3., 3., 4., 5.]);
         assert_exact(&out3.data(), &[1., 2., 3.]);
+        assert_exact(&out4.data(), &[1., 3., 5.]);
+        assert_exact(&out5.data(), &[0., 2., 4., 1., 3., 5., 2., 4., 0.]);
+        assert_exact(
+            &out6.data(),
+            &[
+                15., 14., 13., 14., 13., 12., 13., 12., 11., 1., 2., 3., 2., 3., 4., 3., 4., 5.,
+            ],
+        );
+        assert_exact(&out7.data(), &[15., 14., 13., 1., 2., 3.]);
+        assert_exact(&out8.data(), &[15., 13., 11., 1., 3., 5.]);
+        assert_exact(
+            &out9.data(),
+            &[
+                0., 14., 12., 15., 13., 11., 14., 12., 0., 0., 2., 4., 1., 3., 5., 2., 4., 0.,
+            ],
+        );
     }
 
     #[test]

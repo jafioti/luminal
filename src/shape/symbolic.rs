@@ -925,14 +925,24 @@ fn make_rules() -> Vec<Rewrite> {
 
 fn egg_simplify<S: ExpressionStorage>(expr: GenericExpression<S>) -> GenericExpression<S> {
     // Convert to egg expression
-    let expr = luminal_to_egg(&expr);
+    let mut expr = luminal_to_egg(&expr);
+    let mut cost = None;
     // Simplify
-    let runner = Runner::default().with_expr(&expr).run(&make_rules());
-    let root = runner.roots[0];
-    let extractor = Extractor::new(&runner.egraph, AstSize);
-    let (_, best) = extractor.find_best(root);
+    loop {
+        let runner = Runner::default().with_expr(&expr).run(&make_rules());
+        let root = runner.roots[0];
+        let extractor = Extractor::new(&runner.egraph, AstSize);
+        let (new_cost, best) = extractor.find_best(root);
+        if let Some(c) = cost {
+            if new_cost == c {
+                break;
+            }
+        }
+        cost = Some(new_cost);
+        expr = best;
+    }
     // Convert back to luminal expression
-    egg_to_luminal(best)
+    egg_to_luminal(expr)
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
-use std::fs::File;
+use std::io::Read;
 use std::path::Path;
+use std::{fs::File, io::Seek};
 
 use crate::gguf::*;
 use luminal::{op::Function, prelude::*};
@@ -33,21 +34,17 @@ pub fn load<P: AsRef<Path>, M: SerializeModule>(path: P, model: &M, graph: &mut 
                 _ => panic!("Unsupported dtype: {data_type:?}"),
             };
             loading_node.1 = Box::new(move |_| {
-                let mmap_buffer = unsafe { Mmap::map(&File::open(&file_path).unwrap()).unwrap() };
-                let buffer = Device::system_default()
-                    .unwrap()
-                    .new_buffer_with_bytes_no_copy(
-                        unsafe {
-                            mmap_buffer
-                                .as_ptr()
-                                .add(buffer_offset + tensor_data_offset as usize)
-                                as *const _
-                        },
-                        n_bytes as u64,
-                        MTLResourceOptions::StorageModeShared,
-                        None,
-                    );
-                vec![Tensor::new(MetalBuffer(buffer))]
+                let mut bytes = vec![0; n_bytes];
+                let mut file = File::open(&file_path).unwrap();
+                file.seek(std::io::SeekFrom::Start(
+                    buffer_offset as u64 + tensor_data_offset,
+                ))
+                .unwrap();
+                file.read_exact(&mut bytes).unwrap();
+                let mut nums = vec![0f32; n_elements];
+                <byteorder::LittleEndian as byteorder::ByteOrder>::read_f32_into(&bytes, &mut nums);
+
+                vec![Tensor::new(nums)]
             });
         }
     }

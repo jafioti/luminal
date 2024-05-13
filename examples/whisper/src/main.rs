@@ -20,9 +20,10 @@ fn main() {
     let mut enc_cx = Graph::new();
     let encoder = model::AudioEncoder::initialize(&mut enc_cx);
     enc_cx.keep_tensors(params(&encoder));
-    let mut audio_input = enc_cx.tensor::<(Const<1>, Dyn<'s'>, Const<{ model::N_MEL_BINS }>)>();
-    let mut encoded = encoder.forward(audio_input);
-    encoded.keep();
+    let mut audio_input = enc_cx.tensor::<(Const<1>, Const<{ model::N_MEL_BINS }>, Dyn<'s'>)>();
+    let mut encoded = encoder
+        .forward((audio_input, PhantomData::<Dyn<'d'>>))
+        .keep();
     loader::load("setup/whisper.gguf", &encoder, &mut enc_cx);
 
     // Construct decoder graph
@@ -30,11 +31,8 @@ fn main() {
     let decoder = model::TextDecoder::initialize(&mut dec_cx);
     dec_cx.keep_tensors(params(&decoder));
     let mut text_input = dec_cx.tensor::<(Const<1>, Dyn<'s'>)>();
-    let mut encoder_output = (0..model::DEC_LAYERS)
-        .map(|_| {
-            dec_cx.named_tensor::<(Const<1>, Dyn<'e'>, Const<{ model::D_MODEL }>)>("Enc Output")
-        })
-        .collect::<Vec<_>>();
+    let mut encoder_output =
+        dec_cx.named_tensor::<(Const<1>, Dyn<'e'>, Const<{ model::D_MODEL }>)>("Enc Output");
     let mut cache_src: Vec<KVCache<Const<1>, Dyn<'p'>>> = (0..model::DEC_LAYERS)
         .map(|_| {
             (
@@ -44,15 +42,13 @@ fn main() {
         })
         .collect();
     cache_src.set_dyn(vec![], &[1, 6, 0, 64]);
-    let (logits, _, mut cache_dest) = decoder.forward((
-        &encoder_output,
+    let (mut logits, _, mut cache_dest) = decoder.forward((
+        encoder_output,
         text_input,
         &cache_src,
         PhantomData::<Dyn<'t'>>,
     ));
-    let mut logits = logits
-        .slice((.., Expression::from('s') - 1.., ..))
-        .retrieve();
+    logits.retrieve();
     cache_dest.keep();
     loader::load("setup/whisper.gguf", &decoder, &mut dec_cx);
 
@@ -71,7 +67,7 @@ fn main() {
         ),
     );
     let cache_src = downstream(cache_src, &dec_cx);
-    let encoder_output = downstream(&encoder_output, &dec_cx);
+    let encoder_output = downstream(encoder_output, &dec_cx);
     dec_cx.keep_tensors(&encoder_output);
     delete_inputs(&encoder_output, &mut dec_cx);
 
@@ -84,12 +80,13 @@ fn main() {
     let mel_len = mel.len();
 
     // Encode audio
-    audio_input.set_dyn(mel, &[1, mel_len / 80, 80]);
+    audio_input.set_dyn(mel, &[1, 80, mel_len / 80]);
+    enc_cx.set_dyn_dim('d', mel_len / 80 / 2);
     enc_cx.execute();
     transfer_data(encoded, &mut enc_cx, encoder_output, &mut dec_cx);
 
     // Decode text
-    dec_cx.set_dyn_dim('e', enc_cx.dyn_map[&'s']);
+    dec_cx.set_dyn_dim('e', mel_len / 80 / 2);
     dec_cx.set_dyn_dim('t', 1);
     let mut output_tokens = vec![];
     text_input.set_dyn(vec![0.0], &[1, 1]);

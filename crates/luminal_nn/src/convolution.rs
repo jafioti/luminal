@@ -9,6 +9,7 @@ pub struct Conv1D<
     const KERNEL: usize,
     const STRIDE: usize = KERNEL,
     const DILATION: usize = 0,
+    const PADDING: usize = 0,
 > {
     pub weight: GraphTensor<R3<CH_OUT, CH_IN, KERNEL>>,
     pub bias: Option<GraphTensor<R1<CH_OUT>>>,
@@ -20,7 +21,8 @@ impl<
         const KERNEL: usize,
         const STRIDE: usize,
         const DILATION: usize,
-    > InitModule for Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION>
+        const PADDING: usize,
+    > InitModule for Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION, PADDING>
 {
     fn initialize(cx: &mut Graph) -> Self {
         // Init weight as uniform(-1, 1)
@@ -42,7 +44,8 @@ impl<
         const KERNEL: usize,
         const STRIDE: usize,
         const DILATION: usize,
-    > Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION>
+        const PADDING: usize,
+    > Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION, PADDING>
 {
     pub fn initialize_bias(cx: &mut Graph) -> Self {
         // Init weight as uniform(-1, 1)
@@ -70,7 +73,8 @@ impl<
         const KERNEL: usize,
         const STRIDE: usize,
         const DILATION: usize,
-    > SerializeModule for Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION>
+        const PADDING: usize,
+    > SerializeModule for Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION, PADDING>
 {
     fn serialize(&self, s: &mut luminal::module::Serializer) {
         s.tensor("weight", self.weight);
@@ -87,10 +91,11 @@ impl<
         const KERNEL: usize,
         const STRIDE: usize,
         const DILATION: usize,
+        const PADDING: usize,
         DimIn: Dimension,
         DimOut: Dimension,
     > Module<(GraphTensor<(Const<CH_IN>, DimIn)>, PhantomData<DimOut>)>
-    for Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION>
+    for Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION, PADDING>
 {
     type Output = GraphTensor<(Const<CH_OUT>, DimOut)>;
     fn forward(
@@ -111,6 +116,7 @@ impl<
         const KERNEL: usize,
         const STRIDE: usize,
         const DILATION: usize,
+        const PADDING: usize,
         DimIn: Dimension,
         DimOut: Dimension,
         Batch: Dimension,
@@ -118,7 +124,7 @@ impl<
     Module<(
         GraphTensor<(Batch, Const<CH_IN>, DimIn)>,
         PhantomData<DimOut>,
-    )> for Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION>
+    )> for Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION, PADDING>
 {
     type Output = GraphTensor<(Batch, Const<CH_OUT>, DimOut)>;
     fn forward(
@@ -142,6 +148,7 @@ impl<
         const KERNEL: usize,
         const STRIDE: usize,
         const DILATION: usize,
+        const PADDING: usize,
         DimIn: Dimension,
         DimOut: Dimension,
         Batch1: Dimension,
@@ -150,36 +157,48 @@ impl<
     Module<(
         GraphTensor<(Batch1, Batch2, Const<CH_IN>, DimIn)>,
         PhantomData<DimOut>,
-    )> for Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION>
+    )> for Conv1D<CH_IN, CH_OUT, KERNEL, STRIDE, DILATION, PADDING>
 {
     type Output = GraphTensor<(Batch1, Batch2, Const<CH_OUT>, DimOut)>;
     fn forward(
         &self,
-        (input, _): (
+        (mut input, _): (
             GraphTensor<(Batch1, Batch2, Const<CH_IN>, DimIn)>,
             PhantomData<DimOut>,
         ),
     ) -> Self::Output {
         let mut o = self
             .weight
+            // Combine last two dimensions in kernel
             .dyn_reshape::<(Const<CH_OUT>, Dyn<'-'>)>(vec![CH_OUT.into(), (CH_IN * KERNEL).into()])
-            .expand::<(Batch1, Batch2, Const<CH_OUT>, Dyn<'-'>), _>()
+            // Broadcast along batch dims
+            .expand::<(Batch1, Batch2, _, _), _>()
+            // Matmul by input
             .matmul(
                 input
+                    // Add padding
+                    .pad::<(Batch1, Batch2, Const<CH_IN>, DimIn)>((
+                        (0, 0),
+                        (0, 0),
+                        (0, 0),
+                        (PADDING, PADDING),
+                    ))
+                    // Pool
                     .pool_last_dim::<(Batch1, Batch2, Const<CH_IN>, DimOut, Const<KERNEL>)>(
                         KERNEL, STRIDE, DILATION,
                     )
+                    // Combine channel_in and kernel
                     .permute::<_, Axes5<0, 1, 2, 4, 3>>()
-                    .dyn_reshape::<(Batch1, Batch2, Dyn<'-'>, DimOut)>(vec![
+                    .dyn_reshape(vec![
                         Batch1::size(),
                         Batch2::size(),
                         (CH_IN * KERNEL).into(),
                         DimOut::size(),
                     ]),
             );
-        if let Some(b) = self.bias {
-            o += b.expand();
-        }
+        // if let Some(b) = self.bias {
+        //     o += b.expand();
+        // }
         o
     }
 }

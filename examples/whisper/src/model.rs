@@ -275,8 +275,8 @@ impl SerializeModule for EncoderTransformerBlock {
 
 pub struct AudioEncoder {
     // Conv layers (based on https://github.com/huggingface/candle/blob/59b18d974ec3cad6963b774aa245e23f8c80414f/candle-transformers/src/models/whisper/model.rs#L246)
-    pub conv1: Conv1D<N_MEL_BINS, D_MODEL, 3, 1, 1>,
-    pub conv2: Conv1D<D_MODEL, D_MODEL, 3, 2, 1>,
+    pub conv1: Conv1D<N_MEL_BINS, D_MODEL, 3, 1, 1, 1>,
+    pub conv2: Conv1D<D_MODEL, D_MODEL, 3, 2, 1, 1>,
     // Transformer layers
     pub layers: Vec<EncoderTransformerBlock>,
 }
@@ -303,31 +303,32 @@ fn sinusoids<const CHANNELS: usize, Length: Dimension>(
         .concat_along::<_, Axis<1>, _>(scaled_time.cos())
 }
 
-impl<Batch: Dimension, Seq: Dimension> Module<GraphTensor<(Batch, Seq, Const<N_MEL_BINS>)>>
-    for AudioEncoder
+impl<Batch: Dimension, Seq: Dimension, SeqDivTwo: Dimension>
+    Module<(
+        GraphTensor<(Batch, Const<N_MEL_BINS>, Seq)>,
+        PhantomData<SeqDivTwo>,
+    )> for AudioEncoder
 {
-    type Output = Vec<GraphTensor<(Batch, Seq, Const<D_MODEL>)>>;
-    fn forward(&self, input: GraphTensor<(Batch, Seq, Const<N_MEL_BINS>)>) -> Self::Output {
+    type Output = GraphTensor<(Batch, SeqDivTwo, Const<D_MODEL>)>;
+    fn forward(
+        &self,
+        (input, _): (
+            GraphTensor<(Batch, Const<N_MEL_BINS>, Seq)>,
+            PhantomData<SeqDivTwo>,
+        ),
+    ) -> Self::Output {
         // Conv layers
-        let x = self
-            .conv1
-            .forward((input.permute::<_, Axes3<0, 2, 1>>(), PhantomData::<Seq>))
-            .gelu();
+        let x = self.conv1.forward((input, PhantomData::<Seq>));
+        x.print("conv");
         let mut x = self
             .conv2
-            .forward((x, PhantomData::<Seq>))
+            .forward((x, PhantomData::<SeqDivTwo>))
             .gelu()
             .permute::<_, Axes3<0, 2, 1>>();
         // Sinusoidal positional embedding
-        x += sinusoids::<D_MODEL, Seq>(x.graph()).expand();
+        x += sinusoids::<D_MODEL, SeqDivTwo>(x.graph()).expand();
         // Transformer layers
-        let mut outputs = vec![];
-        let mut output = x;
-        for l in &self.layers {
-            output = l.forward(output);
-            outputs.push(output);
-        }
-        outputs
+        self.layers.forward(x)
     }
 }
 
@@ -484,7 +485,7 @@ impl<
         TotDecSeq: Dimension,
     >
     Module<(
-        &[GraphTensor<(Batch, EncSeq, Const<D_MODEL>)>],
+        GraphTensor<(Batch, EncSeq, Const<D_MODEL>)>,
         GraphTensor<(Batch, CurDecSeq)>,
         &[KVCache<Batch, PrevDecSeq>],
         PhantomData<TotDecSeq>,
@@ -498,7 +499,7 @@ impl<
     fn forward(
         &self,
         (enc_output, input, cache, _): (
-            &[GraphTensor<(Batch, EncSeq, Const<D_MODEL>)>],
+            GraphTensor<(Batch, EncSeq, Const<D_MODEL>)>,
             GraphTensor<(Batch, CurDecSeq)>,
             &[KVCache<Batch, PrevDecSeq>],
             PhantomData<TotDecSeq>,
@@ -519,7 +520,7 @@ impl<
         let (mut new_cache, mut enc_state);
         for (i, layer) in self.layers.iter().enumerate() {
             (x, enc_state, new_cache) =
-                layer.forward((x, enc_output[i], cache[i], PhantomData::<TotDecSeq>));
+                layer.forward((x, enc_output, cache[i], PhantomData::<TotDecSeq>));
             new_caches.push(new_cache);
             enc_states.push(enc_state);
         }
