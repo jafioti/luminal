@@ -142,7 +142,7 @@ impl<
         let values = self
             .w_v
             .forward(values)
-            .dyn_reshape::<(B, S1, Const<HEADS>, Dyn<'-'>)>(vec![
+            .dyn_reshape::<(B, S1, Const<HEADS>, Dyn<'-'>), _>(&[
                 B::size(),
                 S1::size(),
                 HEADS.into(),
@@ -152,7 +152,7 @@ impl<
         let keys = self
             .w_k
             .forward(keys)
-            .dyn_reshape::<(B, S1, Const<HEADS>, Dyn<'-'>)>(vec![
+            .dyn_reshape::<(B, S1, Const<HEADS>, Dyn<'-'>), _>(&[
                 B::size(),
                 S1::size(),
                 HEADS.into(),
@@ -162,7 +162,7 @@ impl<
         let queries = self
             .w_q
             .forward(queries)
-            .dyn_reshape::<(B, S2, Const<HEADS>, Dyn<'-'>)>(vec![
+            .dyn_reshape::<(B, S2, Const<HEADS>, Dyn<'-'>), _>(&[
                 B::size(),
                 S2::size(),
                 HEADS.into(),

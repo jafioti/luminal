@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, ops::Div};
 
 use luminal::prelude::{binary::F32Pow, *};
-use luminal_nn::{Embedding, PermutedLinear, RMSNorm};
+use luminal_nn::{Embedding, LayerNorm, PermutedLinear};
 
 // Llama3 8B Config
 pub const VOCAB_SIZE: usize = 128256;
@@ -196,9 +196,9 @@ impl SerializeModule for SelfAttention {
 
 pub struct TransformerBlock {
     pub attention: SelfAttention,
-    pub attention_norm: RMSNorm<HIDDEN_DIM>,
+    pub attention_norm: LayerNorm<HIDDEN_DIM>,
     pub feed_forward: Mlp<MLP_DIM, HIDDEN_DIM>,
-    pub feed_forward_norm: RMSNorm<HIDDEN_DIM>,
+    pub feed_forward_norm: LayerNorm<HIDDEN_DIM>,
 }
 
 impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
@@ -241,15 +241,9 @@ impl InitModule for TransformerBlock {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
             attention: InitModule::initialize(cx),
-            attention_norm: RMSNorm {
-                weight: cx.named_tensor("RMS Norm Weight"),
-                epsilon: 1e-5,
-            },
+            attention_norm: LayerNorm::new(true, false, false, 1e-5, cx),
             feed_forward: InitModule::initialize(cx),
-            feed_forward_norm: RMSNorm {
-                weight: cx.named_tensor("RMS Norm Weight"),
-                epsilon: 1e-5,
-            },
+            feed_forward_norm: LayerNorm::new(true, false, false, 1e-5, cx),
         }
     }
 }
@@ -269,7 +263,10 @@ pub struct Llama {
     // Transformer layers
     pub layers: Vec<TransformerBlock>,
     // Norm + LM head
-    pub head: (RMSNorm<HIDDEN_DIM>, PermutedLinear<HIDDEN_DIM, VOCAB_SIZE>),
+    pub head: (
+        LayerNorm<HIDDEN_DIM>,
+        PermutedLinear<HIDDEN_DIM, VOCAB_SIZE>,
+    ),
 }
 
 impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
@@ -313,10 +310,7 @@ impl InitModule for Llama {
                 weight: cx.named_tensor("Embedding Weight"),
             },
             head: (
-                RMSNorm {
-                    weight: cx.named_tensor("RMS Norm Weight"),
-                    epsilon: 1e-5,
-                },
+                LayerNorm::new(true, false, false, 1e-5, cx),
                 InitModule::initialize(cx),
             ),
             layers: (0..NUM_LAYERS)

@@ -171,6 +171,7 @@ kernel void matmul(
     if ((r0 + 1) * BLOCK_SIZE_M <= ne0 && (r1 + 1) * BLOCK_SIZE_N <= ne1) {{
         device {type_name} * C = dst + (BLOCK_SIZE_M * r0 + 32 * (sgitg &  1)) \
                                + (BLOCK_SIZE_N * r1 + 16 * (sgitg >> 1)) * ne0 + im*ne1*ne0;
+        #pragma unroll(8)
         for (int i = 0; i < 8; i++) {{
             simdgroup_store(c_res[i], C + 8 * (i%4) + 8 * ne0 * (i/4), ne0);
         }}
@@ -179,6 +180,7 @@ kernel void matmul(
         threadgroup_barrier(mem_flags::mem_threadgroup);
         threadgroup {type_name} * temp_str = ((threadgroup {type_name} *)shared_memory) \
                                       + 32 * (sgitg&1) + (16 * (sgitg>>1)) * BLOCK_SIZE_M;
+        #pragma unroll(8)
         for (int i = 0; i < 8; i++) {{
             simdgroup_store(c_res[i], temp_str + 8 * (i%4) + 8 * BLOCK_SIZE_M * (i/4), BLOCK_SIZE_M);
         }}

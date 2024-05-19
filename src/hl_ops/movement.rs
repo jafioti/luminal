@@ -1,6 +1,7 @@
 use crate::{op, prelude::*};
 
 impl<S: Shape> GraphTensor<S> {
+    /// Swap dimensions of the tensor
     pub fn permute<Dst: Shape, Ax: Axes>(mut self) -> GraphTensor<Dst>
     where
         S: PermuteShapeTo<Dst, Ax>,
@@ -10,6 +11,7 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
+    /// Broadcast tensor along new dimensions
     pub fn expand<Dst: Shape, Ax: Axes>(mut self) -> GraphTensor<Dst>
     where
         S: BroadcastShapeTo<Dst, Ax>,
@@ -24,6 +26,7 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
+    /// Broadcast tensor along new dimensions (with explicitly given dest shape)
     pub fn expand_to<Dst: Shape>(mut self, shape: ShapeTracker) -> GraphTensor<Dst> {
         for (i, s) in shape.indexes.iter().map(|i| shape.dims[*i]).enumerate() {
             if self.shape.len() <= i || self.shape.dims[self.shape.indexes[i]] != s {
@@ -34,6 +37,7 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
+    /// Convert tensor to a new shape with an equivalent number of elements
     pub fn reshape<N: Shape>(mut self) -> GraphTensor<N> {
         // Insert contiguous call
         self = self.contiguous();
@@ -45,13 +49,20 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Dynamically reshape with annotations for the shape tracker
-    pub fn dyn_reshape<N: Shape>(mut self, shape: Vec<Expression>) -> GraphTensor<N> {
+    pub fn dyn_reshape<N: Shape, T>(mut self, shape: &[T]) -> GraphTensor<N>
+    where
+        for<'a> Expression: From<&'a T>,
+    {
         if !self.shape.indexes.iter().enumerate().all(|(a, b)| a == *b) {
             // Insert contiguous call
             self = self.contiguous();
         }
 
-        GraphTensor::from_id(self.id, ShapeTracker::new(&shape), self.graph_ref)
+        GraphTensor::from_id(
+            self.id,
+            ShapeTracker::new(&shape.iter().map(Expression::from).collect::<Vec<_>>()),
+            self.graph_ref,
+        )
     }
 
     pub fn realize<Dst: Shape<Concrete = <<S as HasShape>::Shape as Shape>::Concrete>>(
@@ -137,7 +148,7 @@ impl<S: Shape> GraphTensor<S> {
     ) -> GraphTensor<Dst> {
         let (kernel, stride) = (kernel.into(), stride.into());
         let n_dims = self.shape.len();
-        let full_kernel = kernel.clone() + (kernel - 1) * dilation;
+        let full_kernel = kernel.clone() + (kernel.clone() - 1) * dilation;
         let dim_size = self.shape.shape().pop().unwrap().simplify().small();
         let number_of_windows = (((dim_size.big() - full_kernel.clone()) / stride.clone()) + 1)
             .simplify()
@@ -148,9 +159,7 @@ impl<S: Shape> GraphTensor<S> {
         if n_dims > 1 {
             // View as single dimension of matrix with wider width
             let mat_size = (dim_size.big() + stride.clone()) * number_of_windows;
-            let actual_size = (dim_size.big() * self.shape.dims[self.shape.indexes[n_dims - 1]])
-                .simplify()
-                .small();
+            let actual_size = (dim_size.big() * number_of_windows).simplify().small();
             // Reshape into single dimension to pad
             self.shape.remove_dim(n_dims);
             self.shape.dims[self.shape.indexes[n_dims - 1]] = actual_size;
@@ -159,10 +168,10 @@ impl<S: Shape> GraphTensor<S> {
             self = self.contiguous();
             // Reshape back (mats should be full now)
             self.shape.add_dim(n_dims, dim_size + stride.clone());
+            self.shape.dims[self.shape.indexes[n_dims - 1]] = number_of_windows;
         } else {
             self.shape.dims[self.shape.indexes[n_dims]] = dim_size + stride;
         }
-        self.shape.dims[self.shape.indexes[n_dims - 1]] = number_of_windows;
         // Slice down to kernel size
         self.shape.mask[self.shape.indexes[n_dims]].1 = full_kernel.simplify().small();
         self.shape.mask[self.shape.indexes[n_dims - 1]].1 = number_of_windows;
@@ -170,7 +179,6 @@ impl<S: Shape> GraphTensor<S> {
 
         if dilation > 0 {
             // Remove dilations
-            self = self.contiguous();
             self.excise(1, dilation)
         } else {
             GraphTensor::from_id(self.id, self.shape, self.graph_ref)

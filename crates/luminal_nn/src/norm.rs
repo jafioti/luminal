@@ -1,79 +1,60 @@
-use std::{marker::PhantomData, ops::Mul};
-
 use luminal::prelude::*;
 
-/// A simple layer norm layer. Calls `tensor.layer_norm::<DIM>()`.
+/// A simple layer norm with an optional weight and bias
 #[derive(Default)]
-pub struct LayerNorm<Ax: Axes>(PhantomData<Ax>);
-
-impl<Ax: Axes> InitModule for LayerNorm<Ax> {
-    fn initialize(_: &mut luminal::prelude::Graph) -> Self {
-        Self::default()
-    }
+pub struct LayerNorm<const DIM: usize> {
+    pub weight: Option<GraphTensor<R1<DIM>>>,
+    pub bias: Option<GraphTensor<R1<DIM>>>,
+    mean_norm: bool,
+    epsilon: f32,
 }
 
-impl<Ax: Axes, S: ConstShape> Module<GraphTensor<S>> for LayerNorm<Ax>
-where
-    S: ReduceShape<Ax>,
-    <S as ReduceShape<Ax>>::Reduced: ConstShape,
-{
-    type Output = GraphTensor<S>;
-    fn forward(&self, input: GraphTensor<S>) -> Self::Output {
-        input.layer_norm::<Ax, _>(1e-5)
-    }
-}
-
-impl<Ax: Axes> SerializeModule for LayerNorm<Ax> {
-    fn serialize(&self, _: &mut Serializer) {}
-}
-
-/// RMSNorm normalization
-pub struct RMSNorm<const DIM: usize> {
-    pub weight: GraphTensor<R1<DIM>>,
-    pub epsilon: f32,
-}
-
-impl<const DIM: usize> InitModule for RMSNorm<DIM> {
-    fn initialize(cx: &mut Graph) -> Self {
+impl<const DIM: usize> LayerNorm<DIM> {
+    pub fn new(weight: bool, bias: bool, mean_norm: bool, epsilon: f32, cx: &mut Graph) -> Self {
         Self {
-            weight: cx.named_tensor("RMSNorm Weight").set(vec![1.0; DIM]),
-            epsilon: 1e-6,
+            weight: if weight {
+                Some(cx.named_tensor("LayerNorm Weight"))
+            } else {
+                None
+            },
+            bias: if bias {
+                Some(cx.named_tensor("LayerNorm Bias"))
+            } else {
+                None
+            },
+            mean_norm,
+            epsilon,
         }
     }
 }
 
-impl<const DIM: usize> SerializeModule for RMSNorm<DIM> {
-    fn serialize(&self, s: &mut Serializer) {
-        s.tensor("weight", self.weight);
-    }
-}
-
-impl<const DIM: usize> Module<GraphTensor<R1<DIM>>> for RMSNorm<DIM> {
-    type Output = GraphTensor<R1<DIM>>;
-
-    fn forward(&self, input: GraphTensor<R1<DIM>>) -> Self::Output {
-        input.std_norm::<Axis<0>, _>(self.epsilon).mul(self.weight)
-    }
-}
-
-impl<S: Dimension, const DIM: usize> Module<GraphTensor<(S, Const<DIM>)>> for RMSNorm<DIM> {
-    type Output = GraphTensor<(S, Const<DIM>)>;
-
-    fn forward(&self, input: GraphTensor<(S, Const<DIM>)>) -> Self::Output {
-        input
-            .std_norm::<Axis<1>, _>(self.epsilon)
-            .mul(self.weight.expand())
-    }
-}
-
-impl<B: Dimension, S: Dimension, const DIM: usize> Module<GraphTensor<(B, S, Const<DIM>)>>
-    for RMSNorm<DIM>
+impl<const DIM: usize, S: Shape> Module<GraphTensor<S>> for LayerNorm<DIM>
+where
+    (Const<DIM>,): BroadcastShapeTo<S, S::AllButLast>,
 {
-    type Output = GraphTensor<(B, S, Const<DIM>)>;
-
-    fn forward(&self, input: GraphTensor<(B, S, Const<DIM>)>) -> Self::Output {
+    type Output = GraphTensor<S>;
+    fn forward(&self, mut input: GraphTensor<S>) -> Self::Output {
+        if self.mean_norm {
+            input = input.mean_norm::<S::LastAxis>();
+        }
+        input = input.std_norm(self.epsilon);
+        if let Some(w) = self.weight {
+            input *= w.expand();
+        }
+        if let Some(b) = self.bias {
+            input += b.expand();
+        }
         input
-            .std_norm::<Axis<2>, _>(self.epsilon)
-            .mul(self.weight.expand())
+    }
+}
+
+impl<const DIM: usize> SerializeModule for LayerNorm<DIM> {
+    fn serialize(&self, s: &mut Serializer) {
+        if let Some(w) = self.weight {
+            s.tensor("weight", w);
+        }
+        if let Some(b) = self.bias {
+            s.tensor("bias", b);
+        }
     }
 }

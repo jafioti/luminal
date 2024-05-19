@@ -165,9 +165,8 @@ fn main() {
     }
 
     println!();
-    let avg_token_time = (std::time::Instant::now() - start_decode).as_micros() as f32
-        / (output_ids.len() - 1) as f32
-        / 1000.0;
+    let avg_token_time =
+        start_decode.elapsed().as_micros() as f32 / (output_ids.len() - 1) as f32 / 1000.0;
     println!(
         "\nAverage token generated in {:.2}ms\t - ({:.2} tok/s)",
         avg_token_time,

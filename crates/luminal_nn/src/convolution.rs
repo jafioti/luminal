@@ -141,7 +141,7 @@ impl<
         .reshape()
     }
 }
-// Batch 2D
+// Batch x Batch
 impl<
         const CH_IN: usize,
         const CH_OUT: usize,
@@ -162,43 +162,41 @@ impl<
     type Output = GraphTensor<(Batch1, Batch2, Const<CH_OUT>, DimOut)>;
     fn forward(
         &self,
-        (mut input, _): (
+        (input, _): (
             GraphTensor<(Batch1, Batch2, Const<CH_IN>, DimIn)>,
             PhantomData<DimOut>,
         ),
     ) -> Self::Output {
-        let mut o = self
-            .weight
-            // Combine last two dimensions in kernel
-            .dyn_reshape::<(Const<CH_OUT>, Dyn<'-'>)>(vec![CH_OUT.into(), (CH_IN * KERNEL).into()])
-            // Broadcast along batch dims
-            .expand::<(Batch1, Batch2, _, _), _>()
-            // Matmul by input
+        let mut o = input
+            // Add padding
+            .pad::<(Batch1, Batch2, Const<CH_IN>, DimIn)>(((0, 0), (0, 0), (0, 0), (PADDING, 0)))
+            .contiguous()
+            .pad::<(Batch1, Batch2, Const<CH_IN>, DimIn)>(((0, 0), (0, 0), (0, 0), (0, PADDING)))
+            // Pool
+            .pool_last_dim::<(Batch1, Batch2, Const<CH_IN>, DimOut, Const<KERNEL>)>(
+                KERNEL, STRIDE, DILATION,
+            )
+            // Combine channel_in and kernel
+            .permute::<_, Axes5<0, 1, 3, 2, 4>>()
+            .dyn_reshape::<(Batch1, Batch2, DimOut, Dyn<'-'>), _>(&[
+                Batch1::size(),
+                Batch2::size(),
+                DimOut::size(),
+                (CH_IN * KERNEL).into(),
+            ])
             .matmul(
-                input
-                    // Add padding
-                    .pad::<(Batch1, Batch2, Const<CH_IN>, DimIn)>((
-                        (0, 0),
-                        (0, 0),
-                        (0, 0),
-                        (PADDING, PADDING),
-                    ))
-                    // Pool
-                    .pool_last_dim::<(Batch1, Batch2, Const<CH_IN>, DimOut, Const<KERNEL>)>(
-                        KERNEL, STRIDE, DILATION,
-                    )
-                    // Combine channel_in and kernel
-                    .permute::<_, Axes5<0, 1, 2, 4, 3>>()
-                    .dyn_reshape(vec![
-                        Batch1::size(),
-                        Batch2::size(),
-                        (CH_IN * KERNEL).into(),
-                        DimOut::size(),
-                    ]),
-            );
-        // if let Some(b) = self.bias {
-        //     o += b.expand();
-        // }
+                self.weight
+                    // Combine last two dimensions in kernel
+                    // .permute::<_, Axes3<0, 2, 1>>()
+                    .dyn_reshape::<(Const<CH_OUT>, Dyn<'-'>), _>(&[CH_OUT, CH_IN * KERNEL])
+                    .permute()
+                    // Broadcast along batch dims
+                    .expand(),
+            )
+            .permute();
+        if let Some(b) = self.bias {
+            o += b.expand();
+        }
         o
     }
 }
@@ -286,16 +284,10 @@ impl<
                 KERNELX, STRIDEX, DILATIONX,
             )
             .permute::<_, Axes5<0, 4, 2, 3, 1>>()
-            .dyn_reshape::<(_, Dyn<'-'>)>(vec![
-                (CH_IN * KERNELX * KERNELY).into(),
-                (DIMX_OUT * DIMY_OUT).into(),
-            ]);
+            .dyn_reshape::<(_, Dyn<'-'>), _>(&[CH_IN * KERNELX * KERNELY, DIMX_OUT * DIMY_OUT]);
 
         self.weight
-            .dyn_reshape::<(Const<CH_OUT>, Dyn<'-'>)>(vec![
-                CH_OUT.into(),
-                (CH_IN * KERNELX * KERNELY).into(),
-            ])
+            .dyn_reshape::<(Const<CH_OUT>, Dyn<'-'>), _>(&[CH_OUT, CH_IN * KERNELX * KERNELY])
             .matmul(input_pooled)
             .reshape::<R3<CH_OUT, DIMX_OUT, DIMY_OUT>>()
     }
@@ -434,12 +426,12 @@ impl<
             .pool_last_dim::<R6<CH_IN, DIMY_OUT, DIMZ_OUT, KERNELY, DIMX_OUT, KERNELX>>(
                 KERNELX, STRIDEX, DILATIONX,
             )
-            .dyn_reshape::<(Const<CH_IN>, Dyn<'-'>)>(vec![
-                CH_IN.into(),
-                DIMZ_OUT.into(),
-                KERNELY.into(),
-                (DIMX_OUT * KERNELX).into(),
-                DIMY_IN.into(),
+            .dyn_reshape::<(Const<CH_IN>, Dyn<'-'>), _>(&[
+                CH_IN,
+                DIMZ_OUT,
+                KERNELY,
+                DIMX_OUT * KERNELX,
+                DIMY_IN,
             ]);
 
         let last_pool = input_pooled
@@ -453,15 +445,15 @@ impl<
             )>(KERNELZ, STRIDEZ, DILATIONZ)
             .permute::<_, Axes6<0, 2, 5, 3, 1, 4>>();
 
-        let reshaped = last_pool.dyn_reshape::<(_, Dyn<'-'>)>(vec![
-            (CH_IN * KERNELX * KERNELY * KERNELZ).into(),
-            (DIMX_OUT * DIMY_OUT * DIMZ_OUT).into(),
+        let reshaped = last_pool.dyn_reshape::<(_, Dyn<'-'>), _>(&[
+            CH_IN * KERNELX * KERNELY * KERNELZ,
+            DIMX_OUT * DIMY_OUT * DIMZ_OUT,
         ]);
 
         self.weight
-            .dyn_reshape::<(Const<CH_OUT>, Dyn<'-'>)>(vec![
-                CH_OUT.into(),
-                (CH_IN * KERNELX * KERNELY * KERNELZ).into(),
+            .dyn_reshape::<(Const<CH_OUT>, Dyn<'-'>), _>(&[
+                CH_OUT,
+                CH_IN * KERNELX * KERNELY * KERNELZ,
             ])
             .matmul(reshaped)
             .reshape::<R4<CH_OUT, DIMX_OUT, DIMY_OUT, DIMZ_OUT>>()
@@ -471,7 +463,12 @@ impl<
 #[cfg(test)]
 mod tests {
     use super::{Conv1D, Conv2D, Conv3D};
-    use luminal::{prelude::*, tests::assert_close};
+    use candle_core::{Device, Tensor};
+    use luminal::{
+        prelude::*,
+        tests::{assert_close, random_vec_rng},
+    };
+    use rand::{rngs::StdRng, SeedableRng};
     use std::marker::PhantomData;
 
     #[test]
@@ -498,6 +495,40 @@ mod tests {
         cx.execute();
 
         assert_close(&out1.data(), &[0.0948, -0.9498, -1.2342]);
+    }
+
+    #[test]
+    fn test_conv1d_pad_stride() {
+        let mut cx = Graph::new();
+        let mut rng = StdRng::seed_from_u64(0);
+
+        const CH_IN: usize = 80;
+        const CH_OUT: usize = 384;
+        const KERNEL: usize = 3;
+        const STRIDE: usize = 1;
+        const PADDING: usize = 1;
+        const DIM_IN: usize = 10;
+        let kernel_data = random_vec_rng(KERNEL * CH_IN * CH_OUT, &mut rng);
+        let input_data = random_vec_rng(CH_IN * DIM_IN, &mut rng);
+
+        let model = Conv1D::<CH_IN, CH_OUT, KERNEL, STRIDE, 0, PADDING>::initialize(&mut cx);
+        model.weight.set(kernel_data.clone());
+
+        let inp1 = cx
+            .tensor::<(Const<1>, Const<CH_IN>, Dyn<'s'>)>()
+            .set_dyn(input_data.clone(), &[1, CH_IN, DIM_IN]);
+
+        let out1 = model.forward((inp1, PhantomData::<Dyn<'s'>>)).retrieve();
+        cx.execute();
+
+        let input = Tensor::from_vec(input_data, (1, CH_IN, DIM_IN), &Device::Cpu).unwrap();
+        let kernel = Tensor::from_vec(kernel_data, (CH_OUT, CH_IN, KERNEL), &Device::Cpu).unwrap();
+        let output = input.conv1d(&kernel, PADDING, STRIDE, 1, 1).unwrap();
+
+        assert_close(
+            &out1.data(),
+            &output.flatten_all().unwrap().to_vec1::<f32>().unwrap(),
+        );
     }
 
     #[test]

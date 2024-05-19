@@ -947,9 +947,9 @@ mod tests {
 
         pub struct TransformerBlock {
             pub attention: SelfAttention,
-            pub attention_norm: RMSNorm<HIDDEN_DIM>,
+            pub attention_norm: LayerNorm<HIDDEN_DIM>,
             pub feed_forward: Mlp<MLP_DIM, HIDDEN_DIM>,
-            pub feed_forward_norm: RMSNorm<HIDDEN_DIM>,
+            pub feed_forward_norm: LayerNorm<HIDDEN_DIM>,
         }
 
         impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
@@ -992,17 +992,9 @@ mod tests {
             fn initialize(cx: &mut Graph) -> Self {
                 Self {
                     attention: InitModule::initialize(cx),
-                    attention_norm: {
-                        let mut norm = RMSNorm::initialize(cx);
-                        norm.epsilon = 1e-5;
-                        norm
-                    },
+                    attention_norm: LayerNorm::new(false, false, false, 1e-5, cx),
                     feed_forward: InitModule::initialize(cx),
-                    feed_forward_norm: {
-                        let mut norm = RMSNorm::initialize(cx);
-                        norm.epsilon = 1e-5;
-                        norm
-                    },
+                    feed_forward_norm: LayerNorm::new(false, false, false, 1e-5, cx),
                 }
             }
         }
@@ -1011,7 +1003,7 @@ mod tests {
             // Transformer layers
             pub layers: Vec<TransformerBlock>,
             // Final Norm layer
-            pub norm: RMSNorm<HIDDEN_DIM>,
+            pub norm: LayerNorm<HIDDEN_DIM>,
         }
 
         impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
@@ -1051,7 +1043,7 @@ mod tests {
         impl InitModule for MistralLM {
             fn initialize(cx: &mut Graph) -> Self {
                 Self {
-                    norm: RMSNorm::initialize(cx),
+                    norm: LayerNorm::new(false, false, false, 1e-5, cx),
                     layers: (0..NUM_LAYERS)
                         .map(|_| InitModule::initialize(cx))
                         .collect(),

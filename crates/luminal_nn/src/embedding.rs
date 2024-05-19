@@ -37,7 +37,50 @@ impl<B: Dimension, S: Dimension, const N: usize, const DIM: usize> Module<GraphT
 
     fn forward(&self, input: GraphTensor<(B, S)>) -> Self::Output {
         self.weight
-            .gather(input.dyn_reshape::<(Dyn<'-'>,)>(vec![B::size() * S::size()]))
+            .gather(input.dyn_reshape::<(Dyn<'-'>,), _>(&[B::size() * S::size()]))
+            .reshape()
+    }
+}
+
+pub struct PermutedEmbedding<const N: usize, const DIM: usize> {
+    pub weight: GraphTensor<R2<DIM, N>>,
+}
+
+impl<const A: usize, const B: usize> InitModule for PermutedEmbedding<A, B> {
+    fn initialize(cx: &mut Graph) -> Self {
+        Self {
+            weight: cx.named_tensor("Embedding Weight").set(random_vec(A * B)),
+        }
+    }
+}
+
+impl<const A: usize, const B: usize> SerializeModule for PermutedEmbedding<A, B> {
+    fn serialize(&self, s: &mut luminal::module::Serializer) {
+        s.tensor("weight", self.weight);
+    }
+}
+
+// Single
+impl<S: Dimension, const N: usize, const DIM: usize> Module<GraphTensor<(S,)>>
+    for PermutedEmbedding<N, DIM>
+{
+    type Output = GraphTensor<(S, Const<DIM>)>;
+
+    fn forward(&self, input: GraphTensor<(S,)>) -> Self::Output {
+        self.weight.permute().gather(input)
+    }
+}
+
+// Batch
+impl<B: Dimension, S: Dimension, const N: usize, const DIM: usize> Module<GraphTensor<(B, S)>>
+    for PermutedEmbedding<N, DIM>
+{
+    type Output = GraphTensor<(B, S, Const<DIM>)>;
+
+    fn forward(&self, input: GraphTensor<(B, S)>) -> Self::Output {
+        self.weight
+            .permute()
+            .gather(input.dyn_reshape::<(Dyn<'-'>,), _>(&[B::size() * S::size()]))
             .reshape()
     }
 }

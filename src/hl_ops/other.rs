@@ -137,7 +137,7 @@ impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
 
 impl<S: Shape> GraphTensor<S> {
     /// Print the value of this tensor when the graph is ran
-    pub fn print<T: ToString>(&self, message: T) {
+    pub fn print<T: ToString>(&self, message: T) -> Self {
         let message = message.to_string();
         let id = self
             .graph()
@@ -145,10 +145,17 @@ impl<S: Shape> GraphTensor<S> {
                 "Print".to_string(),
                 Box::new(move |inp| {
                     for (i, (tensor, tracker)) in inp.iter().enumerate() {
-                        println!("{message}");
+                        println!("{message} ({})", i + 1);
                         let d = tensor.borrowed().downcast_ref::<Vec<f32>>().unwrap();
-                        println!("{} Data: {:?}", i + 1, &d[..d.len().min(10)]);
-                        println!("{} Shape: {:?}", i + 1, tracker);
+                        println!(
+                            "Elements: {} Start: {:?} Mid: {:?} End: {:?}",
+                            d.len(),
+                            &d[..d.len().min(5)],
+                            &d[d.len().saturating_div(2)
+                                ..(d.len().saturating_div(2) + 5).min(d.len())],
+                            &d[d.len().saturating_sub(5)..]
+                        );
+                        println!("Shape: {:?}", tracker);
                     }
                     vec![]
                 }),
@@ -156,10 +163,11 @@ impl<S: Shape> GraphTensor<S> {
             .input(self.id, 0, self.shape)
             .finish();
         self.graph().no_delete.insert(id);
+        *self
     }
 
     /// Check the tensor value against a binary file
-    pub fn diff<T: AsRef<Path>>(&self, file: T, threshold: f32) {
+    pub fn diff<T: AsRef<Path>>(&self, file: T, threshold: f32) -> Self {
         let path = file.as_ref().to_owned();
         let id = self
             .graph()
@@ -324,6 +332,7 @@ impl<S: Shape> GraphTensor<S> {
             .input(self.id, 0, self.shape)
             .finish();
         self.graph().no_delete.insert(id);
+        *self
     }
 }
 

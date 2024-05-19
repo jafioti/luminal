@@ -171,6 +171,9 @@ pub trait Shape:
     /// The last axis of this shape
     type LastAxis: Axes;
 
+    /// All axes but the last axis
+    type AllButLast: Axes;
+
     fn realized_shape() -> Vec<Expression>;
     fn to_tracker() -> crate::shape::tracker::ShapeTracker;
 }
@@ -216,11 +219,12 @@ pub type R6<const M: usize, const N: usize, const O: usize, const P: usize, cons
     (Const<M>, Const<N>, Const<O>, Const<P>, Const<Q>, Const<R>);
 
 macro_rules! shape {
-    (($($D:tt $Idx:tt),*), rank=$Num:expr, all=$All:tt) => {
+    (($($D:tt $Idx:tt),*), rank=$Num:expr, all=$All:tt, all_but_last=$AllButLast:ty) => {
         impl<$($D: Dimension, )*> Shape for ($($D, )*) {
             const NUM_DIMS: usize = $Num;
             type Concrete = [usize; $Num];
             type AllAxes = $All<$($Idx,)*>;
+            type AllButLast = $AllButLast;
             type LastAxis = Axis<{$Num - 1}>;
 
             fn realized_shape() -> Vec<crate::prelude::Expression> {
@@ -242,6 +246,7 @@ macro_rules! shape {
             const NUM_DIMS: usize = $Num;
             type Concrete = Self;
             type AllAxes = $All<$($Idx,)*>;
+            type AllButLast = $AllButLast;
             type LastAxis = Axis<{$Num - 1}>;
 
             fn realized_shape() -> Vec<crate::prelude::Expression> {
@@ -261,6 +266,7 @@ impl Shape for () {
     type Concrete = [usize; 0];
     type AllAxes = Axis<0>;
     type LastAxis = Axis<0>;
+    type AllButLast = Axis<0>; // Not technically correct
     fn realized_shape() -> Vec<Expression> {
         vec![]
     }
@@ -276,12 +282,12 @@ impl ConstShape for () {
     }
 }
 
-shape!((D1 0), rank=1, all=Axis);
-shape!((D1 0, D2 1), rank=2, all=Axes2);
-shape!((D1 0, D2 1, D3 2), rank=3, all=Axes3);
-shape!((D1 0, D2 1, D3 2, D4 3), rank=4, all=Axes4);
-shape!((D1 0, D2 1, D3 2, D4 3, D5 4), rank=5, all=Axes5);
-shape!((D1 0, D2 1, D3 2, D4 3, D5 4, D6 5), rank=6, all=Axes6);
+shape!((D1 0), rank=1, all=Axis, all_but_last=Axis<0>);
+shape!((D1 0, D2 1), rank=2, all=Axes2, all_but_last=Axis<0>);
+shape!((D1 0, D2 1, D3 2), rank=3, all=Axes3, all_but_last=Axes2<0, 1>);
+shape!((D1 0, D2 1, D3 2, D4 3), rank=4, all=Axes4, all_but_last=Axes3<0, 1, 2>);
+shape!((D1 0, D2 1, D3 2, D4 3, D5 4), rank=5, all=Axes5, all_but_last=Axes4<0, 1, 2, 3>);
+shape!((D1 0, D2 1, D3 2, D4 3, D5 4, D6 5), rank=6, all=Axes6, all_but_last=Axes5<0, 1, 2, 3, 4>);
 
 /// Marker for shapes that have the same number of elements as `Dst`
 pub trait AssertSameNumel<Dst: ConstShape>: ConstShape {

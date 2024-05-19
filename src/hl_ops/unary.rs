@@ -212,7 +212,7 @@ impl<S: Shape> GraphTensor<S> {
     #[allow(clippy::excessive_precision)]
     pub fn gelu(self) -> GraphTensor<S> {
         // Based on https://github.com/tinygrad/tinygrad/blob/9fc4465557831b614b56dd645eebc940ca0fa1bb/tinygrad/tensor.py#L1162C26-L1162C104
-        0.5 * self * (1. + (self * 0.7978845608 * (1. + 0.044715 * self * self)).tanh())
+        0.5 * self * (1. + (0.7978845608 * self * (1. + 0.044715 * self * self)).tanh())
     }
 }
 
@@ -316,6 +316,23 @@ mod tests {
         let d_dev = Cpu::default();
         let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<2>));
         let d_b = d_a.relu();
+        assert_close(&b.data(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_gelu() {
+        let mut cx = Graph::new();
+        let a_data = random_vec(4);
+        let a = cx
+            .tensor::<(Dyn<'a'>, Dyn<'b'>)>()
+            .set_dyn(a_data.clone(), &[2, 2]);
+        let b = a.gelu().retrieve();
+
+        cx.execute();
+
+        let d_dev = Cpu::default();
+        let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<2>));
+        let d_b = d_a.fast_gelu();
         assert_close(&b.data(), &d_b.as_vec());
     }
 

@@ -1,8 +1,10 @@
+use std::marker::PhantomData;
+
 use dfdx::prelude::{Module as DfdxModule, *};
 use rand::{rngs::StdRng, SeedableRng};
 
 use luminal::{module::Module, prelude::*};
-use luminal_nn::{Linear, ReLU};
+use luminal_nn::{Conv1D, Linear, ReLU};
 
 use crate::{binary_test, unary_test, MetalCompiler};
 luminal::test_imports!();
@@ -545,5 +547,47 @@ fn test_conv2d() {
             1.5000, -1.9700, 1.2800, -2.8200, -2.3200, 0.2200, -0.3800, 2.1800, -0.8200, -1.5700,
             1.2000, -3.4200, -1.6700, 0.9000,
         ],
+    );
+}
+
+#[test]
+fn test_conv1d_pad_stride() {
+    let mut cx = Graph::new();
+    let mut rng = StdRng::seed_from_u64(0);
+
+    const CH_IN: usize = 80;
+    const CH_OUT: usize = 384;
+    const KERNEL: usize = 3;
+    const STRIDE: usize = 1;
+    const PADDING: usize = 1;
+    const DIM_IN: usize = 10;
+    let kernel_data = random_vec_rng(KERNEL * CH_IN * CH_OUT, &mut rng);
+    let input_data = random_vec_rng(CH_IN * DIM_IN, &mut rng);
+
+    let model = Conv1D::<CH_IN, CH_OUT, KERNEL, STRIDE, 0, PADDING>::initialize(&mut cx);
+    model.weight.set(kernel_data.clone());
+
+    let inp1 = cx
+        .tensor::<(LConst<1>, LConst<CH_IN>, Dyn<'s'>)>()
+        .set_dyn(input_data.clone(), &[1, CH_IN, DIM_IN]);
+
+    let mut out1 = model.forward((inp1, PhantomData::<Dyn<'s'>>)).retrieve();
+    cx.compile(crate::MetalCompiler::<f32>::default(), &mut out1);
+    cx.execute();
+
+    let input =
+        candle_core::Tensor::from_vec(input_data, (1, CH_IN, DIM_IN), &candle_core::Device::Cpu)
+            .unwrap();
+    let kernel = candle_core::Tensor::from_vec(
+        kernel_data,
+        (CH_OUT, CH_IN, KERNEL),
+        &candle_core::Device::Cpu,
+    )
+    .unwrap();
+    let output = input.conv1d(&kernel, PADDING, STRIDE, 1, 1).unwrap();
+
+    assert_close(
+        &out1.data(),
+        &output.flatten_all().unwrap().to_vec1::<f32>().unwrap(),
     );
 }

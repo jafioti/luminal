@@ -4,47 +4,37 @@ use std::{fs::File, io::Seek};
 
 use crate::gguf::*;
 use luminal::{op::Function, prelude::*};
-use {
-    luminal_metal::MetalBuffer,
-    memmap2::Mmap,
-    metal_rs::{Device, MTLResourceOptions},
-};
+use memmap2::MmapOptions;
+use safetensors::{Dtype, SafeTensors};
 
-pub fn load<P: AsRef<Path>, M: SerializeModule>(path: P, model: &M, graph: &mut Graph) {
-    // Read metadata from file
-    let mut reader = File::open(&path).unwrap();
-    let Content {
-        mut tensor_infos,
-        tensor_data_offset,
-        ..
-    } = Content::read(&mut reader).unwrap();
-
-    // Create weight loading closures
+pub fn load<M: SerializeModule>(path: &str, model: &M, graph: &mut Graph) {
     for (weight_name, node_index) in param_dict(model) {
         if let Some(loading_node) = graph
             .graph
             .node_weight_mut(node_index)
             .and_then(|op| op.as_any_mut().downcast_mut::<Function>())
         {
-            let file_path = path.as_ref().to_owned();
-            let (n_elements, buffer_offset, data_type) =
-                tensor_infos.remove(&weight_name.replace('/', ".")).unwrap();
-            let n_bytes = match data_type {
-                GgmlDType::F32 => n_elements * 4,
-                _ => panic!("Unsupported dtype: {data_type:?}"),
-            };
+            let path = path.to_string();
             loading_node.1 = Box::new(move |_| {
-                let mut bytes = vec![0; n_bytes];
-                let mut file = File::open(&file_path).unwrap();
-                file.seek(std::io::SeekFrom::Start(
-                    buffer_offset as u64 + tensor_data_offset,
-                ))
-                .unwrap();
-                file.read_exact(&mut bytes).unwrap();
-                let mut nums = vec![0f32; n_elements];
-                <byteorder::LittleEndian as byteorder::ByteOrder>::read_f32_into(&bytes, &mut nums);
+                let mut bytes = vec![];
+                let mut file = File::open(&path).unwrap();
+                file.read_to_end(&mut bytes).unwrap();
+                let safetensors = SafeTensors::deserialize(&bytes).unwrap();
 
-                vec![Tensor::new(nums)]
+                if let Ok(tensor_view) = safetensors.tensor(&weight_name.replace('/', ".")) {
+                    // Convert to fp32
+                    let data: Vec<f32> = match tensor_view.dtype() {
+                        Dtype::F32 => tensor_view
+                            .data()
+                            .chunks_exact(4)
+                            .map(|c| f32::from_ne_bytes([c[0], c[1], c[2], c[3]]))
+                            .collect(),
+                        _ => panic!("{:?} is not a supported dtype", tensor_view.dtype()),
+                    };
+                    return vec![Tensor::new(data)];
+                }
+
+                panic!("Tensor \"{weight_name}\" not found in files");
             });
         }
     }
