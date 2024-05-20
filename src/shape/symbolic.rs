@@ -6,6 +6,7 @@ use std::{
         MulAssign, Rem, RemAssign, Sub, SubAssign,
     },
 };
+use symbolic_expressions::Sexp;
 
 // use cas_compute::symbolic::{
 //     expr::{Expr, Primary},
@@ -203,6 +204,9 @@ impl<S: ExpressionStorage + Clone> std::fmt::Display for GenericExpression<S> {
 impl<S: ExpressionStorage> GenericExpression<S> {
     /// Simplify the expression to its minimal terms
     pub fn simplify(self) -> Self {
+        if self.terms.len() == 1 {
+            return self;
+        }
         egg_simplify(self)
     }
 
@@ -675,17 +679,51 @@ fn luminal_to_egg<S: ExpressionStorage>(expr: &GenericExpression<S>) -> RecExpr<
 
     for term in expr.terms.iter_ref() {
         match term {
-            Term::Num(_) | Term::Var(_) => stack.push(format!("{term:?}")),
+            Term::Num(_) | Term::Var(_) => {
+                stack.push(symbolic_expressions::Sexp::String(format!("{term:?}")))
+            }
             _ => {
                 let left = stack.pop().unwrap();
                 let right = stack.pop().unwrap();
-                let subexpr = format!("({term:?} {left} {right})");
+                let subexpr = symbolic_expressions::Sexp::List(vec![
+                    symbolic_expressions::Sexp::String(format!("{term:?}")),
+                    left,
+                    right,
+                ]);
                 stack.push(subexpr);
             }
         }
     }
+    fn parse_sexp_into<L: FromOp>(
+        sexp: &Sexp,
+        expr: &mut RecExpr<L>,
+    ) -> Result<Id, RecExprParseError<L::Error>> {
+        match sexp {
+            Sexp::Empty => Err(egg::RecExprParseError::EmptySexp),
+            Sexp::String(s) => {
+                let node = L::from_op(s, vec![]).map_err(egg::RecExprParseError::BadOp)?;
+                Ok(expr.add(node))
+            }
+            Sexp::List(list) if list.is_empty() => Err(egg::RecExprParseError::EmptySexp),
+            Sexp::List(list) => match &list[0] {
+                Sexp::Empty => unreachable!("Cannot be in head position"),
+                list @ Sexp::List(..) => Err(egg::RecExprParseError::HeadList(list.to_owned())),
+                Sexp::String(op) => {
+                    let arg_ids: Vec<Id> = list[1..]
+                        .iter()
+                        .map(|s| parse_sexp_into(s, expr))
+                        .collect::<Result<_, _>>()?;
+                    let node = L::from_op(op, arg_ids).map_err(egg::RecExprParseError::BadOp)?;
+                    Ok(expr.add(node))
+                }
+            },
+        }
+    }
 
-    stack.pop().unwrap().parse().unwrap()
+    let sexp = stack.pop().unwrap();
+    let mut expr = RecExpr::default();
+    parse_sexp_into(&sexp, &mut expr).unwrap();
+    expr
 }
 
 fn egg_to_luminal<S: ExpressionStorage>(expr: RecExpr<Math>) -> GenericExpression<S> {
@@ -790,85 +828,69 @@ define_language! {
 #[derive(Default)]
 pub struct ConstantFold;
 impl Analysis<Math> for ConstantFold {
-    type Data = Option<(i32, PatternAst<Math>)>;
+    type Data = Option<i32>;
 
     fn make(egraph: &egg::EGraph<Math, ConstantFold>, enode: &Math) -> Self::Data {
-        let x = |i: &Id| egraph[*i].data.as_ref().map(|d| d.0);
+        let x = |i: &Id| egraph[*i].data.as_ref().map(|d| *d);
         Some(match enode {
-            Math::Num(c) => (*c, format!("{}", c).parse().unwrap()),
-            Math::Add([a, b]) => (
-                x(a)?.checked_add(x(b)?)?,
-                format!("(+ {} {})", x(a)?, x(b)?).parse().unwrap(),
-            ),
-            Math::Sub([a, b]) => (
-                x(a)?.checked_sub(x(b)?)?,
-                format!("(- {} {})", x(a)?, x(b)?).parse().unwrap(),
-            ),
-            Math::Mul([a, b]) => (
-                x(a)?.checked_mul(x(b)?)?,
-                format!("(* {} {})", x(a)?, x(b)?).parse().unwrap(),
-            ),
+            Math::Num(c) => *c,
+            Math::Add([a, b]) => x(a)?.checked_add(x(b)?)?,
+            Math::Sub([a, b]) => x(a)?.checked_sub(x(b)?)?,
+            Math::Mul([a, b]) => x(a)?.checked_mul(x(b)?)?,
             Math::Div([a, b]) if x(b) != Some(0) => {
                 let (a, b) = (x(a)?, x(b)?);
                 if a % b != 0 {
                     return None;
                 } else {
-                    (a.checked_div(b)?, format!("(/ {a} {b})").parse().unwrap())
+                    a.checked_div(b)?
                 }
             }
-            Math::Mod([a, b]) if x(b) != Some(0) => (
-                x(a)?.checked_rem(x(b)?)?,
-                format!("(% {} {})", x(a)?, x(b)?).parse().unwrap(),
-            ),
-            Math::Min([a, b]) if x(b) != Some(0) => (
-                x(a)?.min(x(b)?),
-                format!("(min {} {})", x(a)?, x(b)?).parse().unwrap(),
-            ),
-            Math::Max([a, b]) if x(b) != Some(0) => (
-                x(a)?.max(x(b)?),
-                format!("(max {} {})", x(a)?, x(b)?).parse().unwrap(),
-            ),
-            Math::And([a, b]) if x(b) != Some(0) => (
-                if x(a)? != 0 && x(b)? != 0 { 1 } else { 0 },
-                format!("(&& {} {})", x(a)?, x(b)?).parse().unwrap(),
-            ),
-            Math::Or([a, b]) if x(b) != Some(0) => (
-                if x(a)? != 0 || x(b)? != 0 { 1 } else { 0 },
-                format!("(|| {} {})", x(a)?, x(b)?).parse().unwrap(),
-            ),
-            Math::LessThan([a, b]) if x(b) != Some(0) => (
-                if x(a)? < x(b)? { 1 } else { 0 },
-                format!("(< {} {})", x(a)?, x(b)?).parse().unwrap(),
-            ),
-            Math::GreaterThanEqual([a, b]) if x(b) != Some(0) => (
-                if x(a)? >= x(b)? { 1 } else { 0 },
-                format!("(>= {} {})", x(a)?, x(b)?).parse().unwrap(),
-            ),
+            Math::Mod([a, b]) if x(b) != Some(0) => x(a)?.checked_rem(x(b)?)?,
+            Math::Min([a, b]) if x(b) != Some(0) => x(a)?.min(x(b)?),
+            Math::Max([a, b]) if x(b) != Some(0) => x(a)?.max(x(b)?),
+            Math::And([a, b]) if x(b) != Some(0) => {
+                if x(a)? != 0 && x(b)? != 0 {
+                    1
+                } else {
+                    0
+                }
+            }
+            Math::Or([a, b]) if x(b) != Some(0) => {
+                if x(a)? != 0 || x(b)? != 0 {
+                    1
+                } else {
+                    0
+                }
+            }
+            Math::LessThan([a, b]) if x(b) != Some(0) => {
+                if x(a)? < x(b)? {
+                    1
+                } else {
+                    0
+                }
+            }
+            Math::GreaterThanEqual([a, b]) if x(b) != Some(0) => {
+                if x(a)? >= x(b)? {
+                    1
+                } else {
+                    0
+                }
+            }
             _ => return None,
         })
     }
 
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
         merge_option(to, from, |a, b| {
-            assert_eq!(a.0, b.0, "Merged non-equal constants");
+            assert_eq!(*a, b, "Merged non-equal constants");
             DidMerge(false, false)
         })
     }
 
     fn modify(egraph: &mut EGraph, id: Id) {
-        let data = egraph[id].data.clone();
-        if let Some((c, pat)) = data {
-            if egraph.are_explanations_enabled() {
-                egraph.union_instantiations(
-                    &pat,
-                    &format!("{}", c).parse().unwrap(),
-                    &Default::default(),
-                    "constant_fold".to_string(),
-                );
-            } else {
-                let added = egraph.add(Math::Num(c));
-                egraph.union(id, added);
-            }
+        if let Some(c) = egraph[id].data {
+            let added = egraph.add(Math::Num(c));
+            egraph.union(id, added);
             // to not prune, comment this out
             egraph[id].nodes.retain(|n| n.is_leaf());
         }
@@ -877,13 +899,7 @@ impl Analysis<Math> for ConstantFold {
 
 fn is_not_zero(var: &str) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
     let var = var.parse().unwrap();
-    move |egraph, _, subst| {
-        if let Some(n) = &egraph[subst[var]].data {
-            n.0 != 0
-        } else {
-            true
-        }
-    }
+    move |egraph, _, subst| egraph[subst[var]].data.map(|i| i != 0).unwrap_or(true)
 }
 
 fn make_rules() -> Vec<Rewrite> {
@@ -913,8 +929,8 @@ fn make_rules() -> Vec<Rewrite> {
         rewrite!("min-i32-max"; "(min ?a 2147483647)" => "?a"),
         rewrite!("max-i32-max"; "(max ?a 2147483647)" => "2147483647"),
         rewrite!("recip-mul-div"; "(* ?x (/ 1 ?x))" => "1" if is_not_zero("?x")),
-        rewrite!("add-zero"; "?a" => "(+ ?a 0)"),
-        rewrite!("mul-one";  "?a" => "(* ?a 1)"),
+        // rewrite!("add-zero"; "?a" => "(+ ?a 0)"),
+        // rewrite!("mul-one";  "?a" => "(* ?a 1)"),
         rewrite!("cancel-sub"; "(- ?a ?a)" => "0"),
         rewrite!("cancel-div"; "(/ ?a ?a)" => "1" if is_not_zero("?a")),
         // Other
@@ -925,24 +941,16 @@ fn make_rules() -> Vec<Rewrite> {
 
 fn egg_simplify<S: ExpressionStorage>(expr: GenericExpression<S>) -> GenericExpression<S> {
     // Convert to egg expression
-    let mut expr = luminal_to_egg(&expr);
-    let mut cost = None;
+    let expr = luminal_to_egg(&expr);
     // Simplify
-    loop {
-        let runner = Runner::default().with_expr(&expr).run(&make_rules());
-        let root = runner.roots[0];
-        let extractor = Extractor::new(&runner.egraph, AstSize);
-        let (new_cost, best) = extractor.find_best(root);
-        if let Some(c) = cost {
-            if new_cost == c {
-                break;
-            }
-        }
-        cost = Some(new_cost);
-        expr = best;
-    }
+    let runner = Runner::default()
+        .with_expr(&expr)
+        .with_iter_limit(10)
+        .run(&make_rules());
+    let extractor = Extractor::new(&runner.egraph, AstSize);
+    let (_, best) = extractor.find_best(runner.roots[0]);
     // Convert back to luminal expression
-    egg_to_luminal(expr)
+    egg_to_luminal(best)
 }
 
 #[cfg(test)]

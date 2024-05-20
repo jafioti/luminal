@@ -2,7 +2,6 @@ use std::io::Read;
 use std::path::Path;
 use std::{fs::File, io::Seek};
 
-use crate::gguf::*;
 use luminal::{op::Function, prelude::*};
 use memmap2::MmapOptions;
 use safetensors::{Dtype, SafeTensors};

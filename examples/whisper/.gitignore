@@ -14,4 +14,6 @@ Cargo.lock
 *.pdb
 setup/*.gguf
 setup/*.json
+setup/*.safetensors
+setup/*.wav
 .vscode

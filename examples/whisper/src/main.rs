@@ -8,7 +8,6 @@ use model::KVCache;
 use tokenizers::Tokenizer;
 
 mod audio;
-mod gguf;
 mod loader;
 mod model;
 
@@ -39,18 +38,10 @@ fn main() {
     let mut encoder_output =
         dec_cx.named_tensor::<(Const<1>, Dyn<'e'>, Const<{ model::D_MODEL }>)>("Enc Output");
     let mut cache_src: Vec<KVCache<Const<1>, Dyn<'p'>>> = (0..model::DEC_LAYERS)
-        .map(|_| {
-            (
-                dec_cx
-                    .named_tensor("Key Cache")
-                    .set_dyn(vec![], &[1, 6, 64, 0]),
-                dec_cx
-                    .named_tensor("Value Cache")
-                    .set_dyn(vec![], &[1, 6, 0, 64]),
-            )
-        })
+        .map(|_| (dec_cx.named_tensor("Keys"), dec_cx.named_tensor("Values")))
         .collect();
-    let (logits, _, mut cache_dest) = decoder.forward((
+    cache_src.set_dyn(vec![], &[1, 6, 64, 0]);
+    let (logits, _, cache_dest) = decoder.forward((
         encoder_output,
         text_input,
         &cache_src,
@@ -128,7 +119,7 @@ fn main() {
     let mel_bytes = include_bytes!("../setup/melfilters.bytes").as_slice();
     let mut mel_filters = vec![0f32; mel_bytes.len() / 4];
     <byteorder::LittleEndian as byteorder::ByteOrder>::read_f32_into(mel_bytes, &mut mel_filters);
-    let (pcm_data, sample_rate) = audio::pcm_decode("setup/jfk.wav").unwrap();
+    let (pcm_data, _) = audio::pcm_decode("setup/jfk.wav").unwrap();
     let mel = audio::pcm_to_mel(80, &pcm_data, &mel_filters);
     let mel_len = mel.len();
 
