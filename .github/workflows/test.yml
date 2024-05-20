@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Run tests
       run: rustup update; cargo test --workspace --verbose
 
@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Run clippy
       run: rustup update; cargo clippy --all-targets -- -D warnings
 
@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Format
       run: cargo fmt --all --check
 
@@ -46,7 +46,7 @@ jobs:
 #     timeout-minutes: 20
 
 #     steps:
-#     - uses: actions/checkout@v3
+#     - uses: actions/checkout@v4
 #     - name: Build
 #       run: cargo build --verbose
 #     - name: Run tests
