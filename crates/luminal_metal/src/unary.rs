@@ -29,8 +29,9 @@ pub struct MetalMeanReduce<T>(
     Vec<char>,
     *const FxHashMap<char, usize>,
     PhantomData<T>,
+    pub ShapeTracker,
 );
-crate::debug_type!(MetalMeanReduce<T>);
+crate::debug_type!(MetalMeanReduce);
 
 impl<T> PartialEq for MetalMeanReduce<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -39,7 +40,7 @@ impl<T> PartialEq for MetalMeanReduce<T> {
 }
 
 impl<T: MetalFloat> MetalMeanReduce<T> {
-    fn new(
+    pub fn new(
         dev: Device,
         queue: CommandQueue,
         dim: usize,
@@ -76,6 +77,7 @@ kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *o
             dyn_symbols,
             dyn_map,
             Default::default(),
+            shape,
         )
     }
 }
@@ -227,10 +229,10 @@ pub struct MetalStdNorm<T> {
     pipeline: ComputePipelineState,
     device: Device,
     queue: CommandQueue,
-    epsilon: f32, // Epsilon
+    pub epsilon: f32, // Epsilon
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(MetalStdNorm<T>);
+crate::debug_type!(MetalStdNorm);
 
 impl<T> PartialEq for MetalStdNorm<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -239,7 +241,7 @@ impl<T> PartialEq for MetalStdNorm<T> {
 }
 
 impl<T: MetalFloat> MetalStdNorm<T> {
-    fn new(epsilon: f32, device: Device, queue: CommandQueue) -> Self {
+    pub fn new(epsilon: f32, device: Device, queue: CommandQueue) -> Self {
         let type_name = T::type_name();
         let kernel_code = format!("#include <metal_stdlib>
 #define SIMD_WIDTH 32
@@ -490,7 +492,7 @@ pub struct MetalExp<T> {
     queue: CommandQueue,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(MetalExp<T>);
+crate::debug_type!(MetalExp);
 
 impl<T: MetalFloat> MetalExp<T> {
     fn new(device: Device, queue: CommandQueue) -> Self {
@@ -630,7 +632,7 @@ pub struct MetalCos<T> {
     queue: CommandQueue,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(MetalCos<T>);
+crate::debug_type!(MetalCos);
 
 impl<T: MetalFloat> MetalCos<T> {
     fn new(device: Device, queue: CommandQueue) -> Self {
@@ -763,13 +765,13 @@ impl<T: MetalFloat> Compiler for MetalCosCompiler<T> {
 /// Special kernel for efficient softmax. Currently only works on the last dim
 #[derive(Clone)]
 pub struct MetalSoftmax<T> {
-    single_row_pipeline: ComputePipelineState,
-    looped_pipeline: ComputePipelineState,
-    queue: CommandQueue,
-    device: Device,
-    _phantom: PhantomData<T>,
+    pub single_row_pipeline: ComputePipelineState,
+    pub looped_pipeline: ComputePipelineState,
+    pub queue: CommandQueue,
+    pub device: Device,
+    pub _phantom: PhantomData<T>,
 }
-crate::debug_type!(MetalSoftmax<T>);
+crate::debug_type!(MetalSoftmax);
 
 const SOFTMAX_N_READS: usize = 4;
 const SOFTMAX_LOOPED_LIMIT: usize = 4096;

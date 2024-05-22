@@ -235,6 +235,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                         kernel: None,
                         dyn_map: &graph.dyn_map,
                         dyn_chars: vec![],
+                        input_shapes: vec![],
                         subexpressions: subexpressions_b.clone(),
                         queue: queue.clone(),
                         device: device.clone(),
@@ -270,8 +271,41 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 remap(b, new_op, &mut ids, graph);
             }
         }
+        // Convert non-fused elementwise ops to fused elementwise ops
+        for (op, op_string) in elementwise_ops {
+            if !fused_ops.contains(&op) {
+                let input_shapes = graph
+                    .edges_directed(op, Direction::Incoming)
+                    .filter_map(|e| e.weight().as_data())
+                    .sorted_by_key(|(i, _, _)| *i)
+                    .map(|(_, _, s)| s)
+                    .collect::<Vec<_>>();
+                let output_buffer_sizes = graph
+                    .node_custom::<MetalKernelWrapper, _>(op, "metal", ())
+                    .unwrap()
+                    .output_buffer_sizes(&input_shapes);
+                let new_op = graph
+                    .add_op(FusedElementwiseOp::<T> {
+                        kernel: None,
+                        dyn_map: &graph.dyn_map,
+                        dyn_chars: vec![],
+                        input_shapes: vec![],
+                        subexpressions: vec![(op_string, ShapeTracker::new(&[]))],
+                        queue: queue.clone(),
+                        device: device.clone(),
+                        output_buffer_sizes,
+                        _phantom: Default::default(),
+                    })
+                    .finish();
+                // Add edges to new op
+                move_incoming_edge(op, new_op, graph);
+                move_outgoing_edge(op, new_op, graph);
+                graph.remove_node(op);
+                remap(op, new_op, &mut ids, graph);
+                fused_ops.insert(new_op);
+            }
+        }
         // Compile all the kernels we placed
-        let type_name = T::type_name();
         let intermediate_match = Regex::new(r"intermediate(\d+)([^0-9]|$)").unwrap();
         for fused_op in fused_ops {
             let inputs = graph
@@ -283,186 +317,195 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
             let op = graph.get_op_mut::<FusedElementwiseOp<T>>(fused_op);
             // Stack index expressions and replace them in the subexpressions
             // Track all shapes used, will pull dyn dims from these
-            let shapes_used = op
-                .subexpressions
-                .iter()
-                .map(|(_, s)| *s)
-                .chain(inputs.clone())
-                .collect::<Vec<_>>();
-            // Track the views of each subexpression by going in reverse order and appending the current subexpression's views to the referenced subexpression
-            let mut subexp_views = op
-                .subexpressions
-                .iter()
-                .map(|(_, sh)| vec![*sh]) // Start with the current view for this subexpression
-                .collect::<Vec<_>>();
-            for i in (0..subexp_views.len() - 1).rev() {
-                for capture in intermediate_match.captures_iter(&op.subexpressions[i].0) {
-                    let index = capture.get(1).unwrap().as_str().parse::<usize>().unwrap();
-                    if subexp_views[index].len() == 1 {
-                        let v = subexp_views[i].clone();
-                        subexp_views[index].extend(v);
-                    } else {
-                        assert_eq!(subexp_views[index][1..], subexp_views[i][..]);
-                    }
-                }
-            }
-            // Stack views for each input by going to the first subexpression that uses it and combining it's stacked shape with the input's shape
-            let stacked_shapes: Vec<Vec<ShapeTracker>> = inputs
-                .iter()
-                .enumerate()
-                .map(|(i, s)| {
-                    // Find the first subexpression that uses this input
-                    let re = if let Some(r) = input_regexes.get(&i) {
-                        r
-                    } else {
-                        input_regexes
-                            .insert(i, Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap());
-                        input_regexes.get(&i).unwrap()
-                    };
-                    let using_subexp = op
-                        .subexpressions
-                        .iter()
-                        .position(|(s, _)| re.is_match(s))
-                        .unwrap();
-
-                    once(*s)
-                        .chain(
-                            subexp_views[using_subexp]
-                                .iter()
-                                .copied()
-                                .filter(|s| !s.is_empty()),
-                        )
-                        .collect()
-                })
-                .collect();
-            // Stack index expressions
-            let stacked_index_expressions_partial = stacked_shapes
-                .iter()
-                .map(|s| {
-                    s.iter()
-                        .rev()
-                        .take(s.len() - 1)
-                        .fold(BigExpression::from('z'), |acc, inp| {
-                            inp.index_expression().substitute('z', acc)
-                        })
-                })
-                .collect::<Vec<_>>();
-            let stacked_index_expressions = stacked_index_expressions_partial
-                .iter()
-                .cloned()
-                .zip(&stacked_shapes)
-                .map(|(partial, sh)| sh[0].index_expression().substitute('z', partial))
-                .collect::<Vec<_>>();
-            let stacked_valid_expressions = stacked_index_expressions_partial
-                .iter()
-                .cloned()
-                .zip(&stacked_shapes)
-                .map(|(partial, sh)| sh[0].valid_expression().substitute('z', partial))
-                .collect::<Vec<_>>();
-
-            // Replace in subexpressions
-            let n_subexpressions = op.subexpressions.len();
-            for (i, ((subexp, _), stacked_shapes)) in
-                op.subexpressions.iter_mut().zip(subexp_views).enumerate()
-            {
-                // Index
-                for (i, (ind_exp, val_exp)) in stacked_index_expressions
-                    .iter()
-                    .zip(&stacked_valid_expressions)
-                    .enumerate()
-                {
-                    let re = if let Some(r) = input_regexes.get(&i) {
-                        r
-                    } else {
-                        input_regexes
-                            .insert(i, Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap());
-                        input_regexes.get(&i).unwrap()
-                    };
-                    let (ind, val) = (ind_exp.clone().simplify(), val_exp.clone().simplify());
-                    *subexp = re
-                        .replace_all(
-                            subexp,
-                            &if val != true {
-                                format!(
-                                    "({} != 0 ? (float)input{i}[{}] : 0.0)$1",
-                                    expr_to_metal_string(&val),
-                                    expr_to_metal_string(&ind)
-                                )
-                            } else {
-                                format!("(float)input{i}[{}]$1", expr_to_metal_string(&ind))
-                            },
-                        )
-                        .to_string();
-                }
-                // Valid (not on last subexpression)
-                if i != n_subexpressions - 1 {
-                    let val_exp = stacked_shapes
-                        .iter()
-                        .rev()
-                        .fold(
-                            (BigExpression::from(true), BigExpression::from('z')),
-                            |(_, ind_acc), inp| {
-                                (
-                                    inp.valid_expression().substitute('z', ind_acc.clone()),
-                                    inp.index_expression().substitute('z', ind_acc),
-                                )
-                            },
-                        )
-                        .0
-                        .simplify();
-                    if val_exp != true {
-                        *subexp = format!(
-                            "(({} != 0) ? {subexp} : 0.0)",
-                            expr_to_metal_string(&val_exp)
-                        );
-                    }
-                }
-            }
-
-            let (dyn_chars, rendered) = render_dyn_dim_inputs(&shapes_used, inputs.len() + 2);
-            let kernel = format!(
-                    "
-#include <metal_stdlib>
-using namespace metal;
-kernel void mkernel({} device {type_name} *out [[buffer({})]], device uint& n_elements [[buffer({})]], uint idx [[thread_position_in_grid]]{rendered}) {{
-    if (idx < n_elements) {{
-        {}
-        out[idx] = ({type_name})({});
-    }}
-}}",
-                    (0..inputs.len())
-                        .map(|inp_ind| format!(
-                            "device {type_name}* input{inp_ind} [[buffer({inp_ind})]],"
-                        ))
-                        .collect::<Vec<_>>()
-                        .join(" "),
-                    inputs.len(),
-                    inputs.len() + 1,
-                    op.subexpressions.iter().take(op.subexpressions.len() - 1).enumerate().map(|(i, (subexp, _))| format!("float intermediate{i} = {subexp};")).join("\n        "),
-                    op.subexpressions.last().unwrap().0
-                );
-            op.kernel = Some(compile_function("mkernel", &kernel, &device));
-            op.dyn_chars = dyn_chars;
+            op.input_shapes = inputs;
+            op.compile(&device, &mut input_regexes, &intermediate_match);
         }
     }
 }
 
 #[derive(Clone)]
 pub struct FusedElementwiseOp<T> {
-    kernel: Option<ComputePipelineState>,
-    dyn_map: *const FxHashMap<char, usize>,
-    dyn_chars: Vec<char>,
-    subexpressions: Vec<(String, ShapeTracker)>,
-    queue: CommandQueue,
-    device: Device,
-    output_buffer_sizes: Vec<BigExpression>,
-    _phantom: PhantomData<T>,
+    pub kernel: Option<ComputePipelineState>,
+    pub dyn_map: *const FxHashMap<char, usize>,
+    pub input_shapes: Vec<ShapeTracker>,
+    pub dyn_chars: Vec<char>,
+    pub subexpressions: Vec<(String, ShapeTracker)>,
+    pub queue: CommandQueue,
+    pub device: Device,
+    pub output_buffer_sizes: Vec<BigExpression>,
+    pub _phantom: PhantomData<T>,
 }
-impl<T> Debug for FusedElementwiseOp<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "FusedElementwiseOp")
+crate::debug_type!(FusedElementwiseOp);
+
+impl<T: MetalFloat> FusedElementwiseOp<T> {
+    pub fn compile(
+        &mut self,
+        device: &Device,
+        input_regexes: &mut FxHashMap<usize, Regex>,
+        intermediate_match: &Regex,
+    ) {
+        let mut subexpressions = self.subexpressions.clone();
+        let shapes_used = subexpressions
+            .iter()
+            .map(|(_, s)| *s)
+            .chain(self.input_shapes.clone())
+            .collect::<Vec<_>>();
+        // Track the views of each subexpression by going in reverse order and appending the current subexpression's views to the referenced subexpression
+        let mut subexp_views = subexpressions
+            .iter()
+            .map(|(_, sh)| vec![*sh]) // Start with the current view for this subexpression
+            .collect::<Vec<_>>();
+        for i in (0..subexp_views.len() - 1).rev() {
+            for capture in intermediate_match.captures_iter(&subexpressions[i].0) {
+                let index = capture.get(1).unwrap().as_str().parse::<usize>().unwrap();
+                if subexp_views[index].len() == 1 {
+                    let v = subexp_views[i].clone();
+                    subexp_views[index].extend(v);
+                } else {
+                    assert_eq!(subexp_views[index][1..], subexp_views[i][..]);
+                }
+            }
+        }
+        // Stack views for each input by going to the first subexpression that uses it and combining it's stacked shape with the input's shape
+        let stacked_shapes: Vec<Vec<ShapeTracker>> = self
+            .input_shapes
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                // Find the first subexpression that uses this input
+                let re = if let Some(r) = input_regexes.get(&i) {
+                    r
+                } else {
+                    input_regexes.insert(i, Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap());
+                    input_regexes.get(&i).unwrap()
+                };
+                let using_subexp = subexpressions
+                    .iter()
+                    .position(|(s, _)| re.is_match(s))
+                    .unwrap();
+
+                once(*s)
+                    .chain(
+                        subexp_views[using_subexp]
+                            .iter()
+                            .copied()
+                            .filter(|s| !s.is_empty()),
+                    )
+                    .collect()
+            })
+            .collect();
+        // Stack index expressions
+        let stacked_index_expressions_partial = stacked_shapes
+            .iter()
+            .map(|s| {
+                s.iter()
+                    .rev()
+                    .take(s.len() - 1)
+                    .fold(BigExpression::from('z'), |acc, inp| {
+                        inp.index_expression().substitute('z', acc)
+                    })
+            })
+            .collect::<Vec<_>>();
+        let stacked_index_expressions = stacked_index_expressions_partial
+            .iter()
+            .cloned()
+            .zip(&stacked_shapes)
+            .map(|(partial, sh)| sh[0].index_expression().substitute('z', partial))
+            .collect::<Vec<_>>();
+        let stacked_valid_expressions = stacked_index_expressions_partial
+            .iter()
+            .cloned()
+            .zip(&stacked_shapes)
+            .map(|(partial, sh)| sh[0].valid_expression().substitute('z', partial))
+            .collect::<Vec<_>>();
+
+        // Replace in subexpressions
+        let n_subexpressions = subexpressions.len();
+        for (i, ((subexp, _), stacked_shapes)) in
+            subexpressions.iter_mut().zip(subexp_views).enumerate()
+        {
+            // Index
+            for (i, (ind_exp, val_exp)) in stacked_index_expressions
+                .iter()
+                .zip(&stacked_valid_expressions)
+                .enumerate()
+            {
+                let re = if let Some(r) = input_regexes.get(&i) {
+                    r
+                } else {
+                    input_regexes.insert(i, Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap());
+                    input_regexes.get(&i).unwrap()
+                };
+                let (ind, val) = (ind_exp.clone().simplify(), val_exp.clone().simplify());
+                *subexp = re
+                    .replace_all(
+                        subexp,
+                        &if val != true {
+                            format!(
+                                "({} != 0 ? (float)input{i}[{}] : 0.0)$1",
+                                expr_to_metal_string(&val),
+                                expr_to_metal_string(&ind)
+                            )
+                        } else {
+                            format!("(float)input{i}[{}]$1", expr_to_metal_string(&ind))
+                        },
+                    )
+                    .to_string();
+            }
+            // Valid (not on last subexpression)
+            if i != n_subexpressions - 1 {
+                let val_exp = stacked_shapes
+                    .iter()
+                    .rev()
+                    .fold(
+                        (BigExpression::from(true), BigExpression::from('z')),
+                        |(_, ind_acc), inp| {
+                            (
+                                inp.valid_expression().substitute('z', ind_acc.clone()),
+                                inp.index_expression().substitute('z', ind_acc),
+                            )
+                        },
+                    )
+                    .0
+                    .simplify();
+                if val_exp != true {
+                    *subexp = format!(
+                        "(({} != 0) ? {subexp} : 0.0)",
+                        expr_to_metal_string(&val_exp)
+                    );
+                }
+            }
+        }
+
+        let (dyn_chars, rendered) =
+            render_dyn_dim_inputs(&shapes_used, self.input_shapes.len() + 2);
+        let type_name = T::type_name();
+        let kernel = format!(
+            "
+#include <metal_stdlib>
+using namespace metal;
+kernel void mkernel({} device {type_name} *out [[buffer({})]], device uint& n_elements [[buffer({})]], uint idx [[thread_position_in_grid]]{rendered}) {{
+if (idx < n_elements) {{
+{}
+out[idx] = ({type_name})({});
+}}
+}}",
+            (0..self.input_shapes.len())
+                .map(|inp_ind| format!(
+                    "device {type_name}* input{inp_ind} [[buffer({inp_ind})]],"
+                ))
+                .collect::<Vec<_>>()
+                .join(" "),
+            self.input_shapes.len(),
+            self.input_shapes.len() + 1,
+            subexpressions.iter().take(subexpressions.len() - 1).enumerate().map(|(i, (subexp, _))| format!("float intermediate{i} = {subexp};")).join("\n        "),
+            subexpressions.last().unwrap().0
+        );
+        self.kernel = Some(compile_function("mkernel", &kernel, device));
+        self.dyn_chars = dyn_chars;
     }
 }
+
 impl<T> MetalKernel for FusedElementwiseOp<T> {
     fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<BigExpression> {
         self.output_buffer_sizes.clone()

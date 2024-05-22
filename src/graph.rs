@@ -39,7 +39,7 @@ pub struct Graph {
 }
 
 /// A dependency between two nodes
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum Dependency {
     /// A data dependency (transferring a tensor from one node to the next)

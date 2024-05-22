@@ -26,12 +26,14 @@ use rustc_hash::FxHashMap;
 use luminal::{op::InputTensor, prelude::*};
 
 /// Compile graphs to run on Metal-supported macOS devices in supported data formats
-pub type MetalCompiler<T> = (
+pub type MetalCompiler<T> = (MetalCompilerPreBuffer<T>, BufferCompilers);
+
+/// All metal compilers coming before buffer compilers
+pub type MetalCompilerPreBuffer<T> = (
     prim::PrimitiveCompiler<T>,
     SpecialOpsCompiler<T>,
     other::CopyCompiler<T>,
     elementwise_fusion::ElementwiseFusionCompiler<T>,
-    BufferCompilers,
 );
 
 /// Compilers to share command and storage buffers
@@ -471,8 +473,8 @@ pub fn constant<T: MetalFloat>(num: f32) -> SelectGraph {
 
 #[macro_export]
 macro_rules! debug_type {
-    ($t: ty) => {
-        impl<T> std::fmt::Debug for $t {
+    ($t: ident) => {
+        impl<T> std::fmt::Debug for $t<T> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(f, stringify!($t))
             }

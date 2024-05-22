@@ -14,7 +14,7 @@ use luminal::{
 /// Copy a tensor to the GPU
 #[derive(Clone)]
 pub struct MetalCopyToDevice<T>(Device, PhantomData<T>);
-crate::debug_type!(MetalCopyToDevice<T>);
+crate::debug_type!(MetalCopyToDevice);
 
 impl<T> MetalCopyToDevice<T> {
     pub fn new(dev: Device) -> Self {
@@ -54,7 +54,7 @@ impl<T: MetalFloat> Operator for MetalCopyToDevice<T> {
 /// Copy a tensor from the GPU
 #[derive(Clone, Default)]
 pub struct MetalCopyFromDevice<T>(PhantomData<T>);
-crate::debug_type!(MetalCopyFromDevice<T>);
+crate::debug_type!(MetalCopyFromDevice);
 
 impl<T: MetalFloat> Operator for MetalCopyFromDevice<T> {
     fn process(&mut self, mut inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -127,7 +127,7 @@ pub struct MetalContiguous<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(MetalContiguous<T>);
+crate::debug_type!(MetalContiguous);
 
 impl<T: MetalFloat> MetalContiguous<T> {
     pub fn new(
@@ -241,7 +241,7 @@ pub struct MetalLog2<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(MetalLog2<T>);
+crate::debug_type!(MetalLog2);
 
 impl<T: MetalFloat> MetalLog2<T> {
     pub fn new(
@@ -351,7 +351,7 @@ pub struct MetalExp2<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(MetalExp2<T>);
+crate::debug_type!(MetalExp2);
 
 impl<T: MetalFloat> MetalExp2<T> {
     pub fn new(
@@ -460,7 +460,7 @@ pub struct MetalSin<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(MetalSin<T>);
+crate::debug_type!(MetalSin);
 
 impl<T: MetalFloat> MetalSin<T> {
     pub fn new(
@@ -569,7 +569,7 @@ pub struct MetalSqrt<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(MetalSqrt<T>);
+crate::debug_type!(MetalSqrt);
 
 impl<T: MetalFloat> MetalSqrt<T> {
     pub fn new(
@@ -678,7 +678,7 @@ pub struct MetalRecip<T> {
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(MetalRecip<T>);
+crate::debug_type!(MetalRecip);
 
 impl<T: MetalFloat> MetalRecip<T> {
     pub fn new(
@@ -787,7 +787,7 @@ pub struct MetalAdd<T> {
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
 }
-crate::debug_type!(MetalAdd<T>);
+crate::debug_type!(MetalAdd);
 
 impl<T: MetalFloat> MetalAdd<T> {
     pub fn new(
@@ -905,7 +905,7 @@ pub struct MetalMul<T> {
     _phantom: PhantomData<T>,
     dyn_map: *const FxHashMap<char, usize>,
 }
-crate::debug_type!(MetalMul<T>);
+crate::debug_type!(MetalMul);
 
 impl<T: MetalFloat> MetalMul<T> {
     pub fn new(
@@ -1024,7 +1024,7 @@ pub struct MetalLessThan<T> {
     _phantom: PhantomData<T>,
     dyn_map: *const FxHashMap<char, usize>,
 }
-crate::debug_type!(MetalLessThan<T>);
+crate::debug_type!(MetalLessThan);
 
 impl<T: MetalFloat> MetalLessThan<T> {
     pub fn new(
@@ -1151,7 +1151,7 @@ pub struct MetalMod<T> {
     _phantom: PhantomData<T>,
     dyn_map: *const FxHashMap<char, usize>,
 }
-crate::debug_type!(MetalMod<T>);
+crate::debug_type!(MetalMod);
 
 impl<T: MetalFloat> MetalMod<T> {
     pub fn new(
@@ -1265,11 +1265,12 @@ pub struct MetalSumReduce<T> {
     queue: CommandQueue,
     device: Device,
     pub dim: usize,
+    pub shape: ShapeTracker,
     dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
     dyn_map: *const FxHashMap<char, usize>,
 }
-crate::debug_type!(MetalSumReduce<T>);
+crate::debug_type!(MetalSumReduce);
 
 impl<T> PartialEq for MetalSumReduce<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -1311,6 +1312,7 @@ kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *o
             queue,
             device,
             dim,
+            shape,
             dyn_symbols,
             _phantom: Default::default(),
             dyn_map,
@@ -1416,12 +1418,13 @@ pub struct MetalMaxReduce<T> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
     device: Device,
-    dim: usize,
+    pub dim: usize,
+    pub shape: ShapeTracker,
     dyn_symbols: Vec<char>,
     _phantom: PhantomData<T>,
     dyn_map: *const FxHashMap<char, usize>,
 }
-crate::debug_type!(MetalMaxReduce<T>);
+crate::debug_type!(MetalMaxReduce);
 
 impl<T> PartialEq for MetalMaxReduce<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -1463,6 +1466,7 @@ kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *o
             queue,
             device,
             dim,
+            shape,
             dyn_symbols,
             _phantom: Default::default(),
             dyn_map,

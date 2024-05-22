@@ -110,7 +110,7 @@ impl Debug for Function {
 }
 
 /// A constant value placed on the graph at runtime. Can either be an expression evaluated at runtime, or a constant float
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ConstantValue {
     Expression(BigExpression),
     Float(f32),

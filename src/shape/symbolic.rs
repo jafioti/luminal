@@ -22,7 +22,7 @@ pub type Expression = GenericExpression<ArrayVec<[Term; 20]>>; // We need to fig
 pub type BigExpression = GenericExpression<Vec<Term>>;
 
 /// A single term of a symbolic expression such as a variable, number or operation.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Term {
     Num(i32),
     Var(char),
@@ -144,7 +144,7 @@ where
 }
 
 /// A symbolic expression
-#[derive(Clone, Copy, Hash, Eq)]
+#[derive(Clone, Copy, Hash, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GenericExpression<S: ExpressionStorage> {
     pub terms: S, // Terms in postfix notation
 }

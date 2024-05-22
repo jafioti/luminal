@@ -1,4 +1,13 @@
-use std::{any::Any, marker::PhantomData, mem::size_of, sync::Arc};
+use std::{
+    any::Any,
+    fs::File,
+    io::Write,
+    marker::PhantomData,
+    mem::size_of,
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::Arc,
+};
 
 use metal_rs::{
     objc::rc::autoreleasepool, Buffer, CommandBufferRef, CommandQueue, ComputePassDescriptor,
@@ -10,10 +19,21 @@ use luminal::{
     op::{InputTensor, Operator},
     prelude::*,
 };
+use regex::Regex;
+use rustc_hash::FxHashMap;
+use serde_json::{json, Value};
 
 use crate::{
-    binary::MetalGather, get_buffer_from_tensor, MetalBuffer, MetalFloat, MetalKernel,
-    MetalKernelWrapper,
+    binary::MetalGather,
+    compile_lib,
+    elementwise_fusion::FusedElementwiseOp,
+    get_buffer_from_tensor,
+    matmul::Matmul,
+    other::MetalARange,
+    prim::{MetalConstant, MetalCopyFromDevice, MetalCopyToDevice, MetalMaxReduce, MetalSumReduce},
+    select_function_from_lib,
+    unary::{MetalMeanReduce, MetalSoftmax, MetalStdNorm},
+    MetalBuffer, MetalFloat, MetalKernel, MetalKernelWrapper,
 };
 
 use super::{compile_function, SetInt};
@@ -27,7 +47,7 @@ pub struct QuantizedMatmul<T> {
     device: Device,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(QuantizedMatmul<T>);
+crate::debug_type!(QuantizedMatmul);
 
 impl<T: MetalFloat> QuantizedMatmul<T> {
     fn new(device: Device, queue: CommandQueue) -> Self {
@@ -421,10 +441,10 @@ pub struct QuantizedGather<T> {
     pipeline: ComputePipelineState,
     device: Device,
     queue: CommandQueue,
-    embed_dim: usize,
+    pub embed_dim: usize,
     _phantom: PhantomData<T>,
 }
-crate::debug_type!(QuantizedGather<T>);
+crate::debug_type!(QuantizedGather);
 
 impl<T: MetalFloat> QuantizedGather<T> {
     fn new(device: Device, queue: CommandQueue, embed_dim: usize) -> Self {
@@ -502,34 +522,26 @@ impl<T: MetalFloat> Operator for QuantizedGather<T> {
 }
 
 #[derive(Default)]
-pub struct MetalQuantizedCompiler<T>(Vec<NodeIndex>, PhantomData<T>);
+pub struct MetalQuantizedCompiler<T> {
+    quantized_weights: Vec<NodeIndex>,
+    _phantom: PhantomData<T>,
+}
 
-impl<T> MetalQuantizedCompiler<T> {
-    pub fn new<To: ToIds>(weights: To) -> Self {
-        Self(weights.to_ids(), Default::default())
+impl<T: MetalFloat> MetalQuantizedCompiler<T> {
+    pub fn new(weights: impl ToIds) -> Self {
+        Self {
+            quantized_weights: weights.to_ids(),
+            _phantom: Default::default(),
+        }
     }
 }
 
 impl<T: MetalFloat + Default> Compiler for MetalQuantizedCompiler<T> {
     type Output = ();
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let device = Device::system_default().unwrap();
         let queue = device.new_command_queue();
-        let mut weight_ids = self.0.clone();
-        let mut local_remap = remap.to_ids_mut();
-        for w in &mut weight_ids {
-            local_remap.push(w);
-        }
-        // Normal metal compilation
-        graph.compile(
-            <(
-                super::prim::PrimitiveCompiler<T>,
-                super::SpecialOpsCompiler<T>,
-                super::other::CopyCompiler<T>,
-                super::elementwise_fusion::ElementwiseFusionCompiler<T>,
-            )>::default(),
-            &mut local_remap,
-        );
+        let weight_ids = self.quantized_weights.clone();
         // Modify ops directly downstream of weights
         for weight in downstream(&weight_ids, graph) {
             for (target, (inp_ind, _, _)) in graph
@@ -555,8 +567,319 @@ impl<T: MetalFloat + Default> Compiler for MetalQuantizedCompiler<T> {
                 }
             }
         }
-        // Finish normal metal compilation
-        graph.compile(super::BufferCompilers::default(), &mut remap);
+    }
+}
+
+#[derive(Default)]
+pub struct SerializeQuantizedGraph<T> {
+    path: PathBuf,
+    _phantom: PhantomData<T>,
+}
+
+impl<T: MetalFloat> SerializeQuantizedGraph<T> {
+    pub fn new(path: impl AsRef<Path>) -> Self {
+        Self {
+            path: path.as_ref().to_path_buf(),
+            _phantom: Default::default(),
+        }
+    }
+}
+
+impl<T: MetalFloat + Default> Compiler for SerializeQuantizedGraph<T> {
+    type Output = ();
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut nodes: To) {
+        // Serialize and save graph away
+        let mut ops = vec![];
+        for node in graph.node_indices().collect::<Vec<_>>() {
+            if graph.check_node_type::<Function>(node) {
+                continue;
+            }
+            let data = if let Some(op) = graph.try_get_op::<MetalMeanReduce<T>>(node) {
+                json!({
+                    "dim": op.3,
+                    "shape": op.7,
+                })
+            } else if let Some(op) = graph.try_get_op::<MetalARange<T>>(node) {
+                json!({
+                    "size": op.size,
+                })
+            } else if let Some(op) = graph.try_get_op::<MetalStdNorm<T>>(node) {
+                json!({
+                    "eps": op.epsilon,
+                })
+            } else if let Some(op) = graph.try_get_op::<MetalSumReduce<T>>(node) {
+                json!({
+                    "dim": op.dim,
+                    "shape": op.shape,
+                })
+            } else if let Some(op) = graph.try_get_op::<MetalMaxReduce<T>>(node) {
+                json!({
+                    "dim": op.dim,
+                    "shape": op.shape,
+                })
+            } else if let Some(op) = graph.try_get_op::<QuantizedGather<T>>(node) {
+                json!({
+                    "embed_dim": op.embed_dim,
+                })
+            } else if let Some(op) = graph.try_get_op::<MetalConstant<T>>(node) {
+                json!({
+                    "value": op.0,
+                })
+            } else if let Some(op) = graph.try_get_op::<Matmul<T>>(node) {
+                json!({
+                    "matmul_kernel": op.matmul_kernel,
+                    "matvec_kernel": op.matvec_kernel,
+                })
+            } else if let Some(op) = graph.try_get_op::<FusedElementwiseOp<T>>(node) {
+                json!({
+                    "input_shapes": op.input_shapes,
+                    "dyn_chars": op.dyn_chars,
+                    "subexpressions": op.subexpressions,
+                    "output_buffer_sizes": op.output_buffer_sizes,
+                })
+            } else if graph.check_node_type::<QuantizedMatmul<T>>(node)
+                || graph.check_node_type::<MetalCopyFromDevice<T>>(node)
+                || graph.check_node_type::<MetalCopyToDevice<T>>(node)
+                || graph.check_node_type::<MetalSoftmax<T>>(node)
+            {
+                json!({})
+            } else {
+                panic!(
+                    "Found unserializable op: {:?}",
+                    graph.node_weight(node).unwrap()
+                );
+            };
+            ops.push(json!({
+                "type": format!("{:?}", graph.node_weight(node).unwrap()),
+                "id": node.index(),
+                "data": data
+            }));
+        }
+        let edges = graph
+            .edge_indices()
+            .map(|e| (e, graph.edge_endpoints(e).unwrap()))
+            .map(|(e, (a, b))| (a.index(), b.index(), *graph.edge_weight(e).unwrap()))
+            .collect::<Vec<_>>();
+        let value = json!({
+            "nodes": nodes.to_ids_mut().iter().map(|i| i.index()).collect::<Vec<_>>(),
+            "ops": ops,
+            "edges": edges,
+            "no_delete": graph.no_delete.iter().map(|i| i.index()).collect::<Vec<_>>(),
+            "to_retrieve": graph.to_retrieve.iter().map(|(k, v)| (k.index(), v)).collect::<Vec<_>>(),
+        });
+        File::create(&self.path)
+            .unwrap()
+            .write_all(value.to_string().as_bytes())
+            .unwrap();
+    }
+}
+
+/// Deserialize a metal graph
+#[derive(Debug, Clone)]
+pub struct DeserializeQuantizedGraph<T>(String, PhantomData<T>);
+
+impl<T> DeserializeQuantizedGraph<T> {
+    pub fn new(data: impl ToString) -> Self {
+        Self(data.to_string(), Default::default())
+    }
+}
+
+impl<T: MetalFloat> Compiler for DeserializeQuantizedGraph<T> {
+    type Output = ();
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) -> Self::Output {
+        let now = std::time::Instant::now();
+        let mut value = Value::from_str(&self.0).unwrap();
+        let dev = Device::system_default().unwrap();
+        let queue = dev.new_command_queue();
+        // Create ops
+        let mut op_map = FxHashMap::<usize, NodeIndex>::default();
+        let softmax_lib = compile_lib(&dev, include_str!("kernels/softmax.metal"));
+        let softmax_type_name = if T::is_f32() { "float32" } else { "float16" };
+        let softmax = MetalSoftmax::<T> {
+            queue: queue.clone(),
+            device: dev.clone(),
+            single_row_pipeline: select_function_from_lib(
+                &softmax_lib,
+                &format!("softmax_{softmax_type_name}"),
+                &dev,
+            ),
+            looped_pipeline: select_function_from_lib(
+                &softmax_lib,
+                &format!("softmax_looped_{softmax_type_name}"),
+                &dev,
+            ),
+            _phantom: Default::default(),
+        };
+        let mut input_regexes = FxHashMap::default();
+        let intermediate_match = Regex::new(r"intermediate(\d+)([^0-9]|$)").unwrap();
+        let matmul_library = compile_lib(&dev, include_str!("kernels/gemm.metal"));
+        let matvec_library = compile_lib(&dev, include_str!("kernels/gemv.metal"));
+        let quantized_matmul = QuantizedMatmul::<T>::new(dev.clone(), queue.clone());
+        let mut elementwise_cache = FxHashMap::<String, FusedElementwiseOp<T>>::default();
+        for op in value["ops"].as_array_mut().unwrap() {
+            let name = op["type"].as_str().unwrap();
+            let new_id = if name == "MetalMeanReduce" {
+                graph
+                    .add_op(MetalMeanReduce::<T>::new(
+                        dev.clone(),
+                        queue.clone(),
+                        op["data"]["dim"].as_u64().unwrap() as usize,
+                        serde_json::from_value(op["data"]["shape"].take()).unwrap(),
+                        &graph.dyn_map,
+                    ))
+                    .finish()
+            } else if name == "MetalSumReduce" {
+                graph
+                    .add_op(MetalSumReduce::<T>::new(
+                        serde_json::from_value(op["data"]["shape"].take()).unwrap(),
+                        op["data"]["dim"].as_u64().unwrap() as usize,
+                        dev.clone(),
+                        queue.clone(),
+                        &graph.dyn_map,
+                    ))
+                    .finish()
+            } else if name == "MetalMaxReduce" {
+                graph
+                    .add_op(MetalMaxReduce::<T>::new(
+                        serde_json::from_value(op["data"]["shape"].take()).unwrap(),
+                        op["data"]["dim"].as_u64().unwrap() as usize,
+                        dev.clone(),
+                        queue.clone(),
+                        &graph.dyn_map,
+                    ))
+                    .finish()
+            } else if name == "MetalStdNorm" {
+                graph
+                    .add_op(MetalStdNorm::<T>::new(
+                        op["data"]["eps"].as_f64().unwrap() as f32,
+                        dev.clone(),
+                        queue.clone(),
+                    ))
+                    .finish()
+            } else if name.contains("MetalARange") {
+                graph
+                    .add_op(MetalARange::<T>::new(
+                        dev.clone(),
+                        queue.clone(),
+                        serde_json::from_value(op["data"]["size"].take()).unwrap(),
+                        &graph.dyn_map,
+                    ))
+                    .finish()
+            } else if name == "QuantizedGather" {
+                graph
+                    .add_op(QuantizedGather::<T>::new(
+                        dev.clone(),
+                        queue.clone(),
+                        op["data"]["embed_dim"].as_u64().unwrap() as usize,
+                    ))
+                    .finish()
+            } else if name.contains("MetalConstant") {
+                graph
+                    .add_op(MetalConstant::<T>(
+                        serde_json::from_value(op["data"]["value"].take()).unwrap(),
+                        dev.clone(),
+                        &graph.dyn_map,
+                        Default::default(),
+                    ))
+                    .finish()
+            } else if name == "FusedElementwiseOp" {
+                if let Some(op) = elementwise_cache.get(&op["data"].to_string()) {
+                    graph.add_op(op.clone()).finish()
+                } else {
+                    let mut fused_op = FusedElementwiseOp::<T> {
+                        kernel: None,
+                        dyn_map: &graph.dyn_map,
+                        input_shapes: serde_json::from_value(op["data"]["input_shapes"].take())
+                            .unwrap(),
+                        dyn_chars: serde_json::from_value(op["data"]["dyn_chars"].take()).unwrap(),
+                        subexpressions: serde_json::from_value(op["data"]["subexpressions"].take())
+                            .unwrap(),
+                        queue: queue.clone(),
+                        device: dev.clone(),
+                        output_buffer_sizes: serde_json::from_value(
+                            op["data"]["output_buffer_sizes"].take(),
+                        )
+                        .unwrap(),
+                        _phantom: Default::default(),
+                    };
+                    fused_op.compile(&dev, &mut input_regexes, &intermediate_match);
+                    elementwise_cache.insert(op["data"].to_string(), fused_op.clone());
+                    graph.add_op(fused_op).finish()
+                }
+            } else if name == "MetalSoftmax" {
+                graph.add_op(softmax.clone()).finish()
+            } else if name == "Matmul" {
+                let matmul_kernel =
+                    serde_json::from_value::<String>(op["data"]["matmul_kernel"].take()).unwrap();
+                let matvec_kernel =
+                    serde_json::from_value::<String>(op["data"]["matvec_kernel"].take()).unwrap();
+                graph
+                    .add_op(Matmul::<T> {
+                        matmul_pipeline: select_function_from_lib(
+                            &matmul_library,
+                            &matmul_kernel,
+                            &dev,
+                        ),
+                        matvec_pipeline: select_function_from_lib(
+                            &matvec_library,
+                            &matvec_kernel,
+                            &dev,
+                        ),
+                        matmul_kernel,
+                        matvec_kernel,
+                        queue: queue.clone(),
+                        device: dev.clone(),
+                        _phantom: Default::default(),
+                    })
+                    .finish()
+            } else if name == "QuantizedMatmul" {
+                graph.add_op(quantized_matmul.clone()).finish()
+            } else if name == "MetalCopyToDevice" {
+                graph
+                    .add_op(MetalCopyToDevice::<T>::new(dev.clone()))
+                    .finish()
+            } else if name == "MetalCopyFromDevice" {
+                graph.add_op(MetalCopyFromDevice::<T>::default()).finish()
+            } else {
+                panic!("Found unexpected serialized op: {name}");
+            };
+            op_map.insert(op["id"].as_u64().unwrap() as usize, new_id);
+        }
+        // Remap nodes that are in the op_map
+        for (saved, mut new) in value["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(ids.to_ids_mut())
+        {
+            let saved = saved.as_u64().unwrap() as usize;
+            if let std::collections::hash_map::Entry::Vacant(e) = op_map.entry(saved) {
+                e.insert(*new);
+            } else {
+                graph.remove_node(*new);
+                remap(*new, op_map[&saved], &mut new, graph);
+            }
+        }
+        // Create edges
+        for edge in value["edges"].take().as_array_mut().unwrap() {
+            let (a, b, dep) =
+                serde_json::from_value::<(usize, usize, Dependency)>(edge.take()).unwrap();
+            graph.add_edge(op_map[&a], op_map[&b], dep);
+        }
+        // Update no_delete and to_retrieve
+        graph.no_delete = serde_json::from_value::<Vec<usize>>(value["no_delete"].take())
+            .unwrap()
+            .into_iter()
+            .map(|i| op_map[&i])
+            .collect();
+        graph.to_retrieve =
+            serde_json::from_value::<Vec<(usize, (u8, ShapeTracker))>>(value["to_retrieve"].take())
+                .unwrap()
+                .into_iter()
+                .map(|(k, v)| (op_map[&k], v))
+                .collect();
+
+        println!("Deserialize: {}ms", now.elapsed().as_millis());
     }
 }
 

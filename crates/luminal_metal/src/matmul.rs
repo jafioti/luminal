@@ -16,11 +16,13 @@ use crate::{
 /// Multiplies a BxMxK matrix with a KxN matrix, resulting in a BxMxN matrix
 #[derive(Clone)]
 pub struct Matmul<T> {
-    matmul_pipeline: ComputePipelineState,
-    matvec_pipeline: ComputePipelineState,
-    queue: CommandQueue,
-    device: Device,
-    _phantom: PhantomData<T>,
+    pub matmul_pipeline: ComputePipelineState,
+    pub matvec_pipeline: ComputePipelineState,
+    pub matmul_kernel: String,
+    pub matvec_kernel: String,
+    pub queue: CommandQueue,
+    pub device: Device,
+    pub _phantom: PhantomData<T>,
 }
 impl<T> Debug for Matmul<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -355,24 +357,44 @@ impl<T: MetalFloat> Compiler for MetalMatMulCompiler<T> {
                 src2_shape = src2_shape.contiguous();
             }
             let type_name = if T::is_f32() { "float32" } else { "float16" };
+            let matmul_kernel = format!(
+                "gemm_{}{}_{type_name}_{type_name}_bm32_bn32_bk16_wm2_wn2_MN_naligned_K_taligned",
+                if src1_shape.is_contiguous() { "n" } else { "t" },
+                if src2_shape.indexes[src2_shape.len() - 1]
+                    > src2_shape.indexes[src2_shape.len() - 2]
+                {
+                    "n"
+                } else {
+                    "t"
+                }
+            );
+            let matvec_kernel = format!(
+                "gemv_{}{type_name}_bm{BM}_bn{BN}_tm4_tn4",
+                if src2_shape.indexes[src2_shape.len() - 1]
+                    > src2_shape.indexes[src2_shape.len() - 2]
+                {
+                    "t_"
+                } else {
+                    ""
+                }
+            );
             let matmul_op = graph
                 .add_op(Matmul::<T> {
                     matmul_pipeline: select_function_from_lib(
                         &matmul_library,
-                        &format!( "gemm_{}{}_{type_name}_{type_name}_bm32_bn32_bk16_wm2_wn2_MN_naligned_K_taligned", if src1_shape.is_contiguous() {"n"} else {"t"}, if src2_shape.indexes[src2_shape.len() - 1] > src2_shape.indexes[src2_shape.len() - 2] {"n"} else {"t"}),
-                        &dev
+                        &matmul_kernel,
+                        &dev,
                     ),
                     matvec_pipeline: select_function_from_lib(
                         &matvec_library,
-                        &format!(
-                            "gemv_{}{type_name}_bm{BM}_bn{BN}_tm4_tn4",
-                            if src2_shape.indexes[src2_shape.len() - 1] > src2_shape.indexes[src2_shape.len() - 2] { "t_" } else { "" }
-                        ),
-                        &dev
+                        &matvec_kernel,
+                        &dev,
                     ),
+                    matmul_kernel,
+                    matvec_kernel,
                     queue: queue.clone(),
                     device: dev.clone(),
-                    _phantom: Default::default()
+                    _phantom: Default::default(),
                 })
                 .input(src1, 0, src1_shape)
                 .input(src2, 0, src2_shape)

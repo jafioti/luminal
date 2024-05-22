@@ -311,7 +311,9 @@ impl InitModule for Llama {
             },
             head: (
                 LayerNorm::new(true, false, false, 1e-5, cx),
-                InitModule::initialize(cx),
+                PermutedLinear {
+                    weight: cx.tensor(),
+                },
             ),
             layers: (0..NUM_LAYERS)
                 .map(|_| InitModule::initialize(cx))

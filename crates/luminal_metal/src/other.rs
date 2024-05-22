@@ -83,7 +83,7 @@ impl<T: MetalFloat> std::fmt::Debug for MetalARange<T> {
 }
 
 impl<T: MetalFloat> MetalARange<T> {
-    fn new(
+    pub fn new(
         device: Device,
         queue: CommandQueue,
         size: BigExpression,
