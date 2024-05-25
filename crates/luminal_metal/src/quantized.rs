@@ -1,5 +1,6 @@
 use std::{
     any::Any,
+    collections::hash_map::Entry,
     fs::File,
     io::Write,
     marker::PhantomData,
@@ -19,7 +20,6 @@ use luminal::{
     op::{InputTensor, Operator},
     prelude::*,
 };
-use regex::Regex;
 use rustc_hash::FxHashMap;
 use serde_json::{json, Value};
 
@@ -543,7 +543,7 @@ impl<T: MetalFloat + Default> Compiler for MetalQuantizedCompiler<T> {
         let queue = device.new_command_queue();
         let weight_ids = self.quantized_weights.clone();
         // Modify ops directly downstream of weights
-        for weight in downstream(&weight_ids, graph) {
+        for weight in downstream(weight_ids, graph) {
             for (target, (inp_ind, _, _)) in graph
                 .edges_directed(weight, petgraph::Direction::Outgoing)
                 .filter_map(|e| e.weight().as_data().map(|i| (e.target(), i)))
@@ -621,6 +621,10 @@ impl<T: MetalFloat + Default> Compiler for SerializeQuantizedGraph<T> {
                 json!({
                     "embed_dim": op.embed_dim,
                 })
+            } else if let Some(op) = graph.try_get_op::<MetalGather<T>>(node) {
+                json!({
+                    "embed_dim": op.embed_dim,
+                })
             } else if let Some(op) = graph.try_get_op::<MetalConstant<T>>(node) {
                 json!({
                     "value": op.0,
@@ -632,9 +636,8 @@ impl<T: MetalFloat + Default> Compiler for SerializeQuantizedGraph<T> {
                 })
             } else if let Some(op) = graph.try_get_op::<FusedElementwiseOp<T>>(node) {
                 json!({
-                    "input_shapes": op.input_shapes,
+                    "kernel_str": op.kernel_str,
                     "dyn_chars": op.dyn_chars,
-                    "subexpressions": op.subexpressions,
                     "output_buffer_sizes": op.output_buffer_sizes,
                 })
             } else if graph.check_node_type::<QuantizedMatmul<T>>(node)
@@ -687,7 +690,6 @@ impl<T> DeserializeQuantizedGraph<T> {
 impl<T: MetalFloat> Compiler for DeserializeQuantizedGraph<T> {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) -> Self::Output {
-        let now = std::time::Instant::now();
         let mut value = Value::from_str(&self.0).unwrap();
         let dev = Device::system_default().unwrap();
         let queue = dev.new_command_queue();
@@ -710,14 +712,11 @@ impl<T: MetalFloat> Compiler for DeserializeQuantizedGraph<T> {
             ),
             _phantom: Default::default(),
         };
-        let mut input_regexes = FxHashMap::default();
-        let intermediate_match = Regex::new(r"intermediate(\d+)([^0-9]|$)").unwrap();
         let matmul_library = compile_lib(&dev, include_str!("kernels/gemm.metal"));
         let matvec_library = compile_lib(&dev, include_str!("kernels/gemv.metal"));
         let quantized_matmul = QuantizedMatmul::<T>::new(dev.clone(), queue.clone());
-        let mut elementwise_cache = FxHashMap::<String, FusedElementwiseOp<T>>::default();
         for op in value["ops"].as_array_mut().unwrap() {
-            let name = op["type"].as_str().unwrap();
+            let name = op["type"].as_str().unwrap().to_string();
             let new_id = if name == "MetalMeanReduce" {
                 graph
                     .add_op(MetalMeanReduce::<T>::new(
@@ -773,6 +772,14 @@ impl<T: MetalFloat> Compiler for DeserializeQuantizedGraph<T> {
                         op["data"]["embed_dim"].as_u64().unwrap() as usize,
                     ))
                     .finish()
+            } else if name == "MetalGather" {
+                graph
+                    .add_op(MetalGather::<T>::new(
+                        dev.clone(),
+                        queue.clone(),
+                        op["data"]["embed_dim"].as_u64().unwrap() as usize,
+                    ))
+                    .finish()
             } else if name.contains("MetalConstant") {
                 graph
                     .add_op(MetalConstant::<T>(
@@ -783,29 +790,22 @@ impl<T: MetalFloat> Compiler for DeserializeQuantizedGraph<T> {
                     ))
                     .finish()
             } else if name == "FusedElementwiseOp" {
-                if let Some(op) = elementwise_cache.get(&op["data"].to_string()) {
-                    graph.add_op(op.clone()).finish()
-                } else {
-                    let mut fused_op = FusedElementwiseOp::<T> {
-                        kernel: None,
-                        dyn_map: &graph.dyn_map,
-                        input_shapes: serde_json::from_value(op["data"]["input_shapes"].take())
-                            .unwrap(),
-                        dyn_chars: serde_json::from_value(op["data"]["dyn_chars"].take()).unwrap(),
-                        subexpressions: serde_json::from_value(op["data"]["subexpressions"].take())
-                            .unwrap(),
-                        queue: queue.clone(),
-                        device: dev.clone(),
-                        output_buffer_sizes: serde_json::from_value(
-                            op["data"]["output_buffer_sizes"].take(),
-                        )
-                        .unwrap(),
-                        _phantom: Default::default(),
-                    };
-                    fused_op.compile(&dev, &mut input_regexes, &intermediate_match);
-                    elementwise_cache.insert(op["data"].to_string(), fused_op.clone());
-                    graph.add_op(fused_op).finish()
-                }
+                let mut fused_op = FusedElementwiseOp::<T> {
+                    kernel: None,
+                    dyn_map: &graph.dyn_map,
+                    kernel_str: op["data"]["kernel_str"].as_str().unwrap().to_string(),
+                    dyn_chars: serde_json::from_value(op["data"]["dyn_chars"].take()).unwrap(),
+                    subexpressions: vec![],
+                    queue: queue.clone(),
+                    device: dev.clone(),
+                    output_buffer_sizes: serde_json::from_value(
+                        op["data"]["output_buffer_sizes"].take(),
+                    )
+                    .unwrap(),
+                    _phantom: Default::default(),
+                };
+                fused_op.compile(&dev);
+                graph.add_op(fused_op).finish()
             } else if name == "MetalSoftmax" {
                 graph.add_op(softmax.clone()).finish()
             } else if name == "Matmul" {
@@ -853,7 +853,7 @@ impl<T: MetalFloat> Compiler for DeserializeQuantizedGraph<T> {
             .zip(ids.to_ids_mut())
         {
             let saved = saved.as_u64().unwrap() as usize;
-            if let std::collections::hash_map::Entry::Vacant(e) = op_map.entry(saved) {
+            if let Entry::Vacant(e) = op_map.entry(saved) {
                 e.insert(*new);
             } else {
                 graph.remove_node(*new);
@@ -861,9 +861,10 @@ impl<T: MetalFloat> Compiler for DeserializeQuantizedGraph<T> {
             }
         }
         // Create edges
-        for edge in value["edges"].take().as_array_mut().unwrap() {
-            let (a, b, dep) =
-                serde_json::from_value::<(usize, usize, Dependency)>(edge.take()).unwrap();
+        let edges =
+            serde_json::from_value::<Vec<(usize, usize, Dependency)>>(value["edges"].take())
+                .unwrap();
+        for (a, b, dep) in edges {
             graph.add_edge(op_map[&a], op_map[&b], dep);
         }
         // Update no_delete and to_retrieve
@@ -878,8 +879,6 @@ impl<T: MetalFloat> Compiler for DeserializeQuantizedGraph<T> {
                 .into_iter()
                 .map(|(k, v)| (op_map[&k], v))
                 .collect();
-
-        println!("Deserialize: {}ms", now.elapsed().as_millis());
     }
 }
 

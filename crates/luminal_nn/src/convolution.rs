@@ -187,7 +187,6 @@ impl<
             .matmul(
                 self.weight
                     // Combine last two dimensions in kernel
-                    // .permute::<_, Axes3<0, 2, 1>>()
                     .dyn_reshape::<(Const<CH_OUT>, Dyn<'-'>), _>(&[CH_OUT, CH_IN * KERNEL])
                     .permute()
                     // Broadcast along batch dims

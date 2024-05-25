@@ -232,10 +232,10 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     );
                 let new_op = graph
                     .add_op(FusedElementwiseOp::<T> {
+                        kernel_str: "".to_string(),
                         kernel: None,
                         dyn_map: &graph.dyn_map,
                         dyn_chars: vec![],
-                        input_shapes: vec![],
                         subexpressions: subexpressions_b.clone(),
                         queue: queue.clone(),
                         device: device.clone(),
@@ -286,10 +286,10 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     .output_buffer_sizes(&input_shapes);
                 let new_op = graph
                     .add_op(FusedElementwiseOp::<T> {
+                        kernel_str: "".to_string(),
                         kernel: None,
                         dyn_map: &graph.dyn_map,
                         dyn_chars: vec![],
-                        input_shapes: vec![],
                         subexpressions: vec![(op_string, ShapeTracker::new(&[]))],
                         queue: queue.clone(),
                         device: device.clone(),
@@ -317,8 +317,8 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
             let op = graph.get_op_mut::<FusedElementwiseOp<T>>(fused_op);
             // Stack index expressions and replace them in the subexpressions
             // Track all shapes used, will pull dyn dims from these
-            op.input_shapes = inputs;
-            op.compile(&device, &mut input_regexes, &intermediate_match);
+            op.pre_compile(inputs, &mut input_regexes, &intermediate_match);
+            op.compile(&device);
         }
     }
 }
@@ -326,8 +326,8 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
 #[derive(Clone)]
 pub struct FusedElementwiseOp<T> {
     pub kernel: Option<ComputePipelineState>,
+    pub kernel_str: String,
     pub dyn_map: *const FxHashMap<char, usize>,
-    pub input_shapes: Vec<ShapeTracker>,
     pub dyn_chars: Vec<char>,
     pub subexpressions: Vec<(String, ShapeTracker)>,
     pub queue: CommandQueue,
@@ -338,9 +338,9 @@ pub struct FusedElementwiseOp<T> {
 crate::debug_type!(FusedElementwiseOp);
 
 impl<T: MetalFloat> FusedElementwiseOp<T> {
-    pub fn compile(
+    pub fn pre_compile(
         &mut self,
-        device: &Device,
+        input_shapes: Vec<ShapeTracker>,
         input_regexes: &mut FxHashMap<usize, Regex>,
         intermediate_match: &Regex,
     ) {
@@ -348,7 +348,7 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
         let shapes_used = subexpressions
             .iter()
             .map(|(_, s)| *s)
-            .chain(self.input_shapes.clone())
+            .chain(input_shapes.clone())
             .collect::<Vec<_>>();
         // Track the views of each subexpression by going in reverse order and appending the current subexpression's views to the referenced subexpression
         let mut subexp_views = subexpressions
@@ -367,8 +367,7 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
             }
         }
         // Stack views for each input by going to the first subexpression that uses it and combining it's stacked shape with the input's shape
-        let stacked_shapes: Vec<Vec<ShapeTracker>> = self
-            .input_shapes
+        let stacked_shapes: Vec<Vec<ShapeTracker>> = input_shapes
             .iter()
             .enumerate()
             .map(|(i, s)| {
@@ -477,10 +476,9 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
             }
         }
 
-        let (dyn_chars, rendered) =
-            render_dyn_dim_inputs(&shapes_used, self.input_shapes.len() + 2);
+        let (dyn_chars, rendered) = render_dyn_dim_inputs(&shapes_used, input_shapes.len() + 2);
         let type_name = T::type_name();
-        let kernel = format!(
+        self.kernel_str = format!(
             "
 #include <metal_stdlib>
 using namespace metal;
@@ -490,19 +488,22 @@ if (idx < n_elements) {{
 out[idx] = ({type_name})({});
 }}
 }}",
-            (0..self.input_shapes.len())
+            (0..input_shapes.len())
                 .map(|inp_ind| format!(
                     "device {type_name}* input{inp_ind} [[buffer({inp_ind})]],"
                 ))
                 .collect::<Vec<_>>()
                 .join(" "),
-            self.input_shapes.len(),
-            self.input_shapes.len() + 1,
+            input_shapes.len(),
+            input_shapes.len() + 1,
             subexpressions.iter().take(subexpressions.len() - 1).enumerate().map(|(i, (subexp, _))| format!("float intermediate{i} = {subexp};")).join("\n        "),
             subexpressions.last().unwrap().0
         );
-        self.kernel = Some(compile_function("mkernel", &kernel, device));
         self.dyn_chars = dyn_chars;
+    }
+
+    pub fn compile(&mut self, device: &Device) {
+        self.kernel = Some(compile_function("mkernel", &self.kernel_str, device));
     }
 }
 

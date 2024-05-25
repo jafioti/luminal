@@ -1,4 +1,9 @@
-use std::{any::Any, fmt::Debug};
+use std::{
+    any::Any,
+    borrow::BorrowMut,
+    fmt::Debug,
+    sync::{Arc, Mutex},
+};
 
 use crate::prelude::*;
 
@@ -81,6 +86,23 @@ pub trait Operator: Debug + as_any::AsAny {
     #[allow(unused)]
     fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
         None
+    }
+}
+
+impl<T: Operator> Operator for Box<T> {
+    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        <T as Operator>::custom(self, key, input)
+    }
+    fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        <T as Operator>::process(self, inp)
+    }
+}
+impl<T: Operator> Operator for Arc<Mutex<T>> {
+    fn custom(&mut self, key: &str, input: Box<dyn Any>) -> Option<Box<dyn Any>> {
+        <T as Operator>::custom(self.lock().unwrap().borrow_mut(), key, input)
+    }
+    fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        <T as Operator>::process(self.lock().unwrap().borrow_mut(), inp)
     }
 }
 

@@ -241,13 +241,6 @@ impl MetalKernel for () {
 fn compile_lib(device: &Device, source: &str) -> Library {
     let options = CompileOptions::new();
     options.set_fast_math_enabled(true);
-    // options.set_install_name(
-    //     &rand::thread_rng()
-    //         .sample_iter(&rand::distributions::Alphanumeric)
-    //         .take(7)
-    //         .map(char::from)
-    //         .collect::<String>(),
-    // );
     device
         .new_library_with_source(
             &source.replace(

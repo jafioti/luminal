@@ -399,7 +399,7 @@ impl<T> Debug for MetalGather<T> {
 }
 
 impl<T: MetalFloat> MetalGather<T> {
-    fn new(device: Device, queue: CommandQueue, embed_dim: usize) -> Self {
+    pub fn new(device: Device, queue: CommandQueue, embed_dim: usize) -> Self {
         let type_name = T::type_name();
         Self {pipeline: compile_function("metal_gather", &format!(
             "

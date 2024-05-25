@@ -338,6 +338,15 @@ impl Graph {
             num_srcs: 0,
         }
     }
+    /// Add op on the graph, and get back a NewOp. Just like add_op, except a boxed op is expected.
+    pub fn add_boxed_op(&mut self, op: Box<dyn Operator + 'static>) -> NewOp {
+        self.linearized_graph = None;
+        NewOp {
+            new_op_id: self.graph.add_node(op),
+            graph_ref: self,
+            num_srcs: 0,
+        }
+    }
     /// Create a schedule dependency between a and b
     pub fn add_schedule_dependency(&mut self, a: NodeIndex, b: NodeIndex) {
         self.graph.add_edge(a, b, Dependency::Schedule);
