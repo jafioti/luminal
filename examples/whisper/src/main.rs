@@ -41,7 +41,7 @@ fn main() {
         .map(|_| (dec_cx.named_tensor("Keys"), dec_cx.named_tensor("Values")))
         .collect();
     cache_src.set_dyn(vec![], &[1, 6, 64, 0]);
-    let (logits, _, cache_dest) = decoder.forward((
+    let (logits, _, mut cache_dest) = decoder.forward((
         encoder_output,
         text_input,
         &cache_src,
@@ -85,6 +85,7 @@ fn main() {
             &mut text_input,
             &mut encoder_output,
             &mut cache_src,
+            &mut cache_dest,
             &mut logits,
             &mut decoder_params,
         ),
