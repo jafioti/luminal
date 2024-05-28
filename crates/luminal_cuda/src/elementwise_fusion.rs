@@ -435,7 +435,6 @@ extern \"C\" __global__ void kernel({} {type_name}* out, const int n_elements{re
                     .join("\n        "),
                 op.subexpressions.last().unwrap().0
             );
-            println!("{kernel}");
             op.kernel = Some(compile_and_load_kernel(kernel, &device));
             op.dyn_chars = dyn_chars;
         }
