@@ -65,7 +65,7 @@ fn main() {
             #[cfg(feature = "metal")]
             luminal_metal::MetalCompiler::<f16>::default(),
             #[cfg(feature = "cuda")]
-            luminal_cuda::CudaCompiler::<f16>::default(),
+            luminal_cuda::CudaCompiler::<f32>::default(),
             #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
             luminal_cpu::CPUCompiler::default(),
         ),
@@ -77,7 +77,7 @@ fn main() {
             #[cfg(feature = "metal")]
             luminal_metal::MetalCompiler::<f16>::default(),
             #[cfg(feature = "cuda")]
-            luminal_cuda::CudaCompiler::<f16>::default(),
+            luminal_cuda::CudaCompiler::<f32>::default(),
             #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
             luminal_cpu::CPUCompiler::default(),
         ),
@@ -102,7 +102,7 @@ fn main() {
     let now = std::time::Instant::now();
     audio_input.set_dyn(vec![0.; 160], &[1, 80, 2]);
     enc_cx.set_dyn_dim('d', 1);
-    enc_cx.execute();
+    enc_cx.execute_debug();
     delete_inputs(downstream(encoder_params, &enc_cx), &mut enc_cx);
     text_input.set_dyn(vec![0.], &[1, 1]);
     dec_cx.set_dyn_dim('e', 1);
@@ -131,7 +131,7 @@ fn main() {
 
     audio_input.set_dyn(mel, &[1, 80, mel_len / 80]);
     enc_cx.set_dyn_dim('d', (mel_len / 80) / 2);
-    enc_cx.execute();
+    enc_cx.execute_debug();
     transfer_data(encoded, &mut enc_cx, encoder_output, &mut dec_cx);
     println!("\t\t - {}ms", start_encoding.elapsed().as_millis());
 

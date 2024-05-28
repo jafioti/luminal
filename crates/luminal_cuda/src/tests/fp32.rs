@@ -510,8 +510,8 @@ fn test_rms_norm() {
     let mut cx = Graph::new();
     let a = cx.tensor::<R2<15, 32>>().set(inp_data.clone());
 
-    let model = luminal_nn::RMSNorm::<32>::initialize(&mut cx);
-    model.weight.set(weight_data.clone());
+    let model = luminal_nn::LayerNorm::<32>::new(true, false, false, 1e-5, &mut cx);
+    model.weight.unwrap().set(weight_data.clone());
     let mut b = model.forward(a).retrieve();
 
     cx.compile(<(GenericCompiler, CudaCompiler<f32>)>::default(), &mut b);

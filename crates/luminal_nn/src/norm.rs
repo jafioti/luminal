@@ -1,4 +1,5 @@
-use luminal::prelude::*;
+use luminal::{prelude::*, tests::random_vec_rng};
+use rand::thread_rng;
 
 /// A simple layer norm with an optional weight and bias
 #[derive(Default)]
@@ -19,6 +20,30 @@ impl<const DIM: usize> LayerNorm<DIM> {
             },
             bias: if bias {
                 Some(cx.named_tensor("LayerNorm Bias"))
+            } else {
+                None
+            },
+            mean_norm,
+            epsilon,
+        }
+    }
+    pub fn init(weight: bool, bias: bool, mean_norm: bool, epsilon: f32, cx: &mut Graph) -> Self {
+        // Init weight as uniform(-1, 1)
+        let mut rng = thread_rng();
+        Self {
+            weight: if weight {
+                Some(
+                    cx.named_tensor("LayerNorm Weight")
+                        .set(random_vec_rng(DIM, &mut rng)),
+                )
+            } else {
+                None
+            },
+            bias: if bias {
+                Some(
+                    cx.named_tensor("LayerNorm Bias")
+                        .set(random_vec_rng(DIM, &mut rng)),
+                )
             } else {
                 None
             },
