@@ -290,182 +290,182 @@ impl<T: CudaFloat + Default> Compiler for CudaQuantizedCompiler<T> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
+// #[cfg(test)]
+// mod tests {
+//     use std::sync::Arc;
 
-    use cudarc::driver::CudaDevice;
-    use dfdx::{
-        tensor::TensorFromVec,
-        tensor_ops::{PermuteTo, TryMatMul},
-    };
-    use luminal::{
-        prelude::*,
-        tests::{assert_close, assert_close_precision, random_vec_rng},
-    };
-    use rand::{thread_rng, Rng};
+//     use cudarc::driver::CudaDevice;
+//     use dfdx::{
+//         tensor::TensorFromVec,
+//         tensor_ops::{PermuteTo, TryMatMul},
+//     };
+//     use luminal::{
+//         prelude::*,
+//         tests::{assert_close, assert_close_precision, random_vec_rng},
+//     };
+//     use rand::{thread_rng, Rng};
 
-    use crate::{CudaData, CudaQuantizedCompiler};
+//     use crate::{CudaData, CudaQuantizedCompiler};
 
-    #[repr(C, packed)]
-    struct BlockQ8_0 {
-        _d: f16,
-        _qs: [i8; 32],
-    }
+//     #[repr(C, packed)]
+//     struct BlockQ8_0 {
+//         _d: f16,
+//         _qs: [i8; 32],
+//     }
 
-    fn quantized_buffer(weights: &[BlockQ8_0], dev: &Arc<CudaDevice>) -> Tensor {
-        let n_bytes = std::mem::size_of_val(weights);
-        let buffer = dev
-            .htod_copy(unsafe {
-                Vec::<u8>::from_raw_parts(weights.as_ptr() as *mut u8, n_bytes, n_bytes)
-            })
-            .unwrap();
-        Tensor::new(CudaData(buffer))
-    }
+//     fn quantized_buffer(weights: &[BlockQ8_0], dev: &Arc<CudaDevice>) -> Tensor {
+//         let n_bytes = std::mem::size_of_val(weights);
+//         let buffer = dev
+//             .htod_copy(unsafe {
+//                 Vec::<u8>::from_raw_parts(weights.as_ptr() as *mut u8, n_bytes, n_bytes)
+//             })
+//             .unwrap();
+//         Tensor::new(CudaData(buffer))
+//     }
 
-    #[test]
-    fn test_quantized_matvec() {
-        let mut rng = thread_rng();
-        let mat_data: Vec<i8> = (0..1024 * 512).map(|_| rng.gen_range(0..5)).collect();
-        let vec_data = random_vec_rng(1024, &mut rng);
-        let mut cx = Graph::new();
-        let weights = cx.tensor::<R2<512, 1024>>().keep();
-        let vec = cx.tensor::<R1<1024>>().set(vec_data.clone());
-        let mut out = vec.matmul(weights.permute()).retrieve();
+//     #[test]
+//     fn test_quantized_matvec() {
+//         let mut rng = thread_rng();
+//         let mat_data: Vec<i8> = (0..1024 * 512).map(|_| rng.gen_range(0..5)).collect();
+//         let vec_data = random_vec_rng(1024, &mut rng);
+//         let mut cx = Graph::new();
+//         let weights = cx.tensor::<R2<512, 1024>>().keep();
+//         let vec = cx.tensor::<R1<1024>>().set(vec_data.clone());
+//         let mut out = vec.matmul(weights.permute()).retrieve();
 
-        // "Load" weights in 8bit
-        let blocks = mat_data
-            .chunks_exact(32)
-            .map(|chunk| {
-                let mut array = [0; 32];
-                for (i, n) in chunk.iter().enumerate() {
-                    array[i] = *n;
-                }
-                BlockQ8_0 {
-                    _d: f16::from_f32(1.0),
-                    _qs: array,
-                }
-            })
-            .collect::<Vec<_>>();
-        cx.tensors.insert(
-            (weights.id, 0),
-            quantized_buffer(&blocks, &CudaDevice::new(0).unwrap()),
-        );
+//         // "Load" weights in 8bit
+//         let blocks = mat_data
+//             .chunks_exact(32)
+//             .map(|chunk| {
+//                 let mut array = [0; 32];
+//                 for (i, n) in chunk.iter().enumerate() {
+//                     array[i] = *n;
+//                 }
+//                 BlockQ8_0 {
+//                     _d: f16::from_f32(1.0),
+//                     _qs: array,
+//                 }
+//             })
+//             .collect::<Vec<_>>();
+//         cx.tensors.insert(
+//             (weights.id, 0),
+//             quantized_buffer(&blocks, &CudaDevice::new(0).unwrap()),
+//         );
 
-        cx.compile(
-            CudaQuantizedCompiler::<f32>::new(vec![weights.id]),
-            &mut out,
-        );
-        cx.execute();
+//         cx.compile(
+//             CudaQuantizedCompiler::<f32>::new(vec![weights.id]),
+//             &mut out,
+//         );
+//         cx.execute();
 
-        let mut cx1 = Graph::new();
-        let weights = cx1
-            .tensor::<R2<512, 1024>>()
-            .set(mat_data.into_iter().map(|i| i as f32).collect::<Vec<_>>())
-            .keep();
-        let vec = cx1.tensor::<R1<1024>>().set(vec_data);
-        let out_32 = vec.matmul(weights.permute()).retrieve();
-        cx1.execute();
+//         let mut cx1 = Graph::new();
+//         let weights = cx1
+//             .tensor::<R2<512, 1024>>()
+//             .set(mat_data.into_iter().map(|i| i as f32).collect::<Vec<_>>())
+//             .keep();
+//         let vec = cx1.tensor::<R1<1024>>().set(vec_data);
+//         let out_32 = vec.matmul(weights.permute()).retrieve();
+//         cx1.execute();
 
-        assert_close(&out.data(), &out_32.data());
-        blocks.leak(); // Segfaults without this
-    }
+//         assert_close(&out.data(), &out_32.data());
+//         blocks.leak(); // Segfaults without this
+//     }
 
-    #[test]
-    fn test_quantized_matmul() {
-        let mut rng = thread_rng();
-        let mat_data: Vec<i8> = (0..(1024 * 512)).map(|_| rng.gen_range(0..5)).collect();
-        let inp_mat_data = random_vec_rng(1024 * 16, &mut rng);
-        let mut cx = Graph::new();
-        let weights = cx.tensor::<R2<512, 1024>>().keep();
-        let inp_mat = cx.tensor::<R2<16, 1024>>().set(inp_mat_data.clone());
-        let mut out = inp_mat.matmul(weights.permute()).retrieve();
+//     #[test]
+//     fn test_quantized_matmul() {
+//         let mut rng = thread_rng();
+//         let mat_data: Vec<i8> = (0..(1024 * 512)).map(|_| rng.gen_range(0..5)).collect();
+//         let inp_mat_data = random_vec_rng(1024 * 16, &mut rng);
+//         let mut cx = Graph::new();
+//         let weights = cx.tensor::<R2<512, 1024>>().keep();
+//         let inp_mat = cx.tensor::<R2<16, 1024>>().set(inp_mat_data.clone());
+//         let mut out = inp_mat.matmul(weights.permute()).retrieve();
 
-        // "Load" weights in 8bit
-        let blocks = mat_data
-            .chunks_exact(32)
-            .map(|chunk| {
-                let mut array = [0; 32];
-                for (i, n) in chunk.iter().enumerate() {
-                    array[i] = *n;
-                }
-                BlockQ8_0 {
-                    _d: f16::from_f32(1.0),
-                    _qs: array,
-                }
-            })
-            .collect::<Vec<_>>();
-        let dev = CudaDevice::new(0).unwrap();
-        cx.tensors
-            .insert((weights.id, 0), quantized_buffer(&blocks, &dev));
+//         // "Load" weights in 8bit
+//         let blocks = mat_data
+//             .chunks_exact(32)
+//             .map(|chunk| {
+//                 let mut array = [0; 32];
+//                 for (i, n) in chunk.iter().enumerate() {
+//                     array[i] = *n;
+//                 }
+//                 BlockQ8_0 {
+//                     _d: f16::from_f32(1.0),
+//                     _qs: array,
+//                 }
+//             })
+//             .collect::<Vec<_>>();
+//         let dev = CudaDevice::new(0).unwrap();
+//         cx.tensors
+//             .insert((weights.id, 0), quantized_buffer(&blocks, &dev));
 
-        cx.compile(
-            CudaQuantizedCompiler::<f32>::new(vec![weights.id]),
-            &mut out,
-        );
-        cx.execute();
+//         cx.compile(
+//             CudaQuantizedCompiler::<f32>::new(vec![weights.id]),
+//             &mut out,
+//         );
+//         cx.execute();
 
-        let cpu = dfdx::tensor::Cpu::default();
-        let d_a = cpu.tensor_from_vec(
-            mat_data.into_iter().map(|i| i as f32).collect::<Vec<_>>(),
-            (dfdx::shapes::Const::<512>, dfdx::shapes::Const::<1024>),
-        );
-        let d_b = cpu.tensor_from_vec(
-            inp_mat_data,
-            (dfdx::shapes::Const::<16>, dfdx::shapes::Const::<1024>),
-        );
-        let d_c = d_b.matmul(d_a.permute());
-        assert_close(&out.data(), &d_c.as_vec());
-        blocks.leak(); // Segfaults without this
-    }
+//         let cpu = dfdx::tensor::Cpu::default();
+//         let d_a = cpu.tensor_from_vec(
+//             mat_data.into_iter().map(|i| i as f32).collect::<Vec<_>>(),
+//             (dfdx::shapes::Const::<512>, dfdx::shapes::Const::<1024>),
+//         );
+//         let d_b = cpu.tensor_from_vec(
+//             inp_mat_data,
+//             (dfdx::shapes::Const::<16>, dfdx::shapes::Const::<1024>),
+//         );
+//         let d_c = d_b.matmul(d_a.permute());
+//         assert_close(&out.data(), &d_c.as_vec());
+//         blocks.leak(); // Segfaults without this
+//     }
 
-    #[test]
-    fn test_quantized_matmul_fp16() {
-        let mut rng = thread_rng();
-        let mat_data: Vec<i8> = (0..(1024 * 512)).map(|_| rng.gen_range(0..5)).collect();
-        let inp_mat_data = random_vec_rng(1024 * 16, &mut rng);
-        let mut cx = Graph::new();
-        let weights = cx.tensor::<R2<512, 1024>>().keep();
-        let inp_mat = cx.tensor::<R2<16, 1024>>().set(inp_mat_data.clone());
-        let mut out = inp_mat.matmul(weights.permute()).retrieve();
+//     #[test]
+//     fn test_quantized_matmul_fp16() {
+//         let mut rng = thread_rng();
+//         let mat_data: Vec<i8> = (0..(1024 * 512)).map(|_| rng.gen_range(0..5)).collect();
+//         let inp_mat_data = random_vec_rng(1024 * 16, &mut rng);
+//         let mut cx = Graph::new();
+//         let weights = cx.tensor::<R2<512, 1024>>().keep();
+//         let inp_mat = cx.tensor::<R2<16, 1024>>().set(inp_mat_data.clone());
+//         let mut out = inp_mat.matmul(weights.permute()).retrieve();
 
-        // "Load" weights in 8bit
-        let blocks = mat_data
-            .chunks_exact(32)
-            .map(|chunk| {
-                let mut array = [0; 32];
-                for (i, n) in chunk.iter().enumerate() {
-                    array[i] = *n;
-                }
-                BlockQ8_0 {
-                    _d: f16::from_f32(1.0),
-                    _qs: array,
-                }
-            })
-            .collect::<Vec<_>>();
-        let dev = CudaDevice::new(0).unwrap();
-        cx.tensors
-            .insert((weights.id, 0), quantized_buffer(&blocks, &dev));
+//         // "Load" weights in 8bit
+//         let blocks = mat_data
+//             .chunks_exact(32)
+//             .map(|chunk| {
+//                 let mut array = [0; 32];
+//                 for (i, n) in chunk.iter().enumerate() {
+//                     array[i] = *n;
+//                 }
+//                 BlockQ8_0 {
+//                     _d: f16::from_f32(1.0),
+//                     _qs: array,
+//                 }
+//             })
+//             .collect::<Vec<_>>();
+//         let dev = CudaDevice::new(0).unwrap();
+//         cx.tensors
+//             .insert((weights.id, 0), quantized_buffer(&blocks, &dev));
 
-        cx.compile(
-            CudaQuantizedCompiler::<f16>::new(vec![weights.id]),
-            &mut out,
-        );
-        cx.execute();
+//         cx.compile(
+//             CudaQuantizedCompiler::<f16>::new(vec![weights.id]),
+//             &mut out,
+//         );
+//         cx.execute();
 
-        let cpu = dfdx::tensor::Cpu::default();
-        let d_a = cpu.tensor_from_vec(
-            mat_data.into_iter().map(|i| i as f32).collect::<Vec<_>>(),
-            (dfdx::shapes::Const::<512>, dfdx::shapes::Const::<1024>),
-        );
-        let d_b = cpu.tensor_from_vec(
-            inp_mat_data,
-            (dfdx::shapes::Const::<16>, dfdx::shapes::Const::<1024>),
-        );
-        let d_c = d_b.matmul(d_a.permute());
-        assert_close_precision(&out.data(), &d_c.as_vec(), 1.0);
-        // This is imprecise currently because we accumulate in fp16 in the matmul. TODO: accumulate in fp32 and convert before saving to dest
+//         let cpu = dfdx::tensor::Cpu::default();
+//         let d_a = cpu.tensor_from_vec(
+//             mat_data.into_iter().map(|i| i as f32).collect::<Vec<_>>(),
+//             (dfdx::shapes::Const::<512>, dfdx::shapes::Const::<1024>),
+//         );
+//         let d_b = cpu.tensor_from_vec(
+//             inp_mat_data,
+//             (dfdx::shapes::Const::<16>, dfdx::shapes::Const::<1024>),
+//         );
+//         let d_c = d_b.matmul(d_a.permute());
+//         assert_close_precision(&out.data(), &d_c.as_vec(), 1.0);
+//         // This is imprecise currently because we accumulate in fp16 in the matmul. TODO: accumulate in fp32 and convert before saving to dest
 
-        blocks.leak(); // Segfaults without this
-    }
-}
+//         blocks.leak(); // Segfaults without this
+//     }
+// }

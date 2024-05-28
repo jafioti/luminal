@@ -4,6 +4,7 @@ mod matmul;
 mod other;
 mod prim;
 mod quantized;
+#[macro_use]
 mod unary;
 pub use quantized::*;
 

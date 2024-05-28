@@ -123,360 +123,87 @@ impl<T: CudaFloat> Operator for CudaConstant<T> {
     }
 }
 
-#[derive(Clone)]
-pub struct CudaContiguous<T> {
-    function: CudaFunction,
-    device: Arc<CudaDevice>,
-    _phantom: PhantomData<T>,
-    dyn_symbols: Vec<char>,
-    dyn_map: *const FxHashMap<char, usize>,
-}
-crate::debug_type!(CudaContiguous);
-
-impl<T: CudaFloat> CudaContiguous<T> {
-    pub fn new(
-        shape: ShapeTracker,
-        device: Arc<CudaDevice>,
-        dyn_map: *const FxHashMap<char, usize>,
-    ) -> Self {
-        let (idx, valid) = get_idx_valid_exps(shape);
-        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape]);
-        let type_name = T::type_name();
-        let code = format!(
-            "
-#include \"cuda_fp16.h\"
-extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp_a, int numel{rendered}) {{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < numel && ({valid}) != 0) {{
-        out[idx] = inp_a[{idx}];
-    }}
-}}");
-        Self {
-            function: compile_and_load_kernel(code, &device),
-            device,
-            _phantom: Default::default(),
-            dyn_symbols,
-            dyn_map,
-        }
-    }
-}
-impl<T: CudaFloat> Operator for CudaContiguous<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let res_shape = tensors[0].1.contiguous();
-        let inp_size = res_shape.n_elements().to_usize().unwrap();
-        let a = get_buffer_from_tensor::<T>(&tensors[0].0);
-        let out = self.device.alloc_zeros::<T>(inp_size).unwrap();
-        let mut params = vec![
-            (&out).as_kernel_param(),
-            a.as_kernel_param(),
-            inp_size.as_kernel_param(),
-        ];
-        input_dyn_dims(&mut params, &self.dyn_symbols, self.dyn_map);
-        unsafe {
-            self.function
-                .clone()
-                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
-                .unwrap();
+#[macro_export]
+macro_rules! cuda_unary_op {
+    ($op: expr, $op_name: ident) => {
+        #[derive(Clone)]
+        pub struct $op_name<T> {
+            function: CudaFunction,
+            device: Arc<CudaDevice>,
+            dyn_symbols: Vec<char>,
+            dyn_map: *const FxHashMap<char, usize>,
+            _phantom: PhantomData<T>,
         }
 
-        vec![Tensor::new(CudaData(out))]
-    }
-
-    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
-        if key == "elementwise" {
-            return Some(Box::new("input0".to_string()));
-        }
-        None
-    }
-}
-
-#[derive(Clone)]
-pub struct CudaLog2<T> {
-    function: CudaFunction,
-    device: Arc<CudaDevice>,
-    _phantom: PhantomData<T>,
-}
-crate::debug_type!(CudaLog2);
-
-impl<T: CudaFloat> CudaLog2<T> {
-    pub fn new(device: Arc<CudaDevice>) -> Self {
-        let type_name = T::type_name();
-        let code = format!(
-            "
-#include \"cuda_fp16.h\"
-extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, int numel) {{
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < numel) {{
-        out[i] = log2(inp[i]);
-    }}
-}}"
-        );
-        Self {
-            function: compile_and_load_kernel(code, &device),
-            device,
-            _phantom: Default::default(),
-        }
-    }
-}
-
-impl<T: CudaFloat> Operator for CudaLog2<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp = get_buffer_from_tensor::<T>(&tensors[0].0);
-        let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
-        let mut out = self.device.alloc_zeros::<T>(inp_size).unwrap();
-        unsafe {
-            self.function
-                .clone()
-                .launch(
-                    LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
-                )
-                .unwrap();
-        }
-
-        vec![Tensor::new(CudaData(out))]
-    }
-
-    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
-        if key == "elementwise" {
-            return Some(Box::new("log2(input0)".to_string()));
-        }
-
-        None
-    }
-}
-
-#[derive(Clone)]
-pub struct CudaExp2<T> {
-    function: CudaFunction,
-    device: Arc<CudaDevice>,
-    _phantom: PhantomData<T>,
-}
-crate::debug_type!(CudaExp2);
-
-impl<T: CudaFloat> CudaExp2<T> {
-    pub fn new(device: Arc<CudaDevice>) -> Self {
-        let type_name = T::type_name();
-        let code = format!(
-            "
-#include \"cuda_fp16.h\"
-extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, int numel) {{
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < numel) {{
-        out[i] = exp2(inp[i]);
-    }}
-}}"
-        );
-        Self {
-            function: compile_and_load_kernel(code, &device),
-            device,
-            _phantom: Default::default(),
-        }
-    }
-}
-impl<T: CudaFloat> Operator for CudaExp2<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp = get_buffer_from_tensor::<T>(&tensors[0].0);
-        let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
-        let mut out = self.device.alloc_zeros::<T>(inp_size).unwrap();
-        unsafe {
-            self.function
-                .clone()
-                .launch(
-                    LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
-                )
-                .unwrap();
-        }
-
-        vec![Tensor::new(CudaData(out))]
-    }
-
-    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
-        if key == "elementwise" {
-            return Some(Box::new("exp2(input0)".to_string()));
-        }
-
-        None
-    }
-}
-
-#[derive(Clone)]
-pub struct CudaSqrt<T> {
-    function: CudaFunction,
-    device: Arc<CudaDevice>,
-    _phantom: PhantomData<T>,
-}
-crate::debug_type!(CudaSqrt);
-
-impl<T: CudaFloat> CudaSqrt<T> {
-    pub fn new(device: Arc<CudaDevice>) -> Self {
-        let type_name = T::type_name();
-        let code = format!(
-            "
-#include \"cuda_fp16.h\"
-extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, int numel) {{
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < numel) {{
-        out[i] = {}(inp[i]);
-    }}
-}}",
-            if T::is_f32() { "sqrt" } else { "hsqrt" }
-        );
-        Self {
-            function: compile_and_load_kernel(code, &device),
-            device,
-            _phantom: Default::default(),
-        }
-    }
-}
-impl<T: CudaFloat> Operator for CudaSqrt<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp = get_buffer_from_tensor::<T>(&tensors[0].0);
-        let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
-        let mut out = self.device.alloc_zeros::<T>(inp_size).unwrap();
-        unsafe {
-            self.function
-                .clone()
-                .launch(
-                    LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
-                )
-                .unwrap();
-        }
-
-        vec![Tensor::new(CudaData(out))]
-    }
-
-    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
-        if key == "elementwise" {
-            return Some(Box::new(format!(
-                "{}(input0)",
-                if T::is_f32() { "sqrt" } else { "hsqrt" }
-            )));
-        }
-
-        None
-    }
-}
-
-#[derive(Clone)]
-pub struct CudaSin<T> {
-    function: CudaFunction,
-    device: Arc<CudaDevice>,
-    _phantom: PhantomData<T>,
-}
-crate::debug_type!(CudaSin);
-
-impl<T: CudaFloat> CudaSin<T> {
-    pub fn new(device: Arc<CudaDevice>) -> Self {
-        let type_name = T::type_name();
-        Self {
-            function: compile_and_load_kernel(
-                format!(
+        impl<T: CudaFloat> $op_name<T> {
+            pub fn new(
+                shape: ShapeTracker,
+                device: Arc<CudaDevice>,
+                dyn_map: *const FxHashMap<char, usize>,
+            ) -> Self {
+                let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
+                let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[shape]);
+                let type_name = T::type_name();
+                let code = format!(
                     "
-#include \"cuda_fp16.h\"
-extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, int numel) {{
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < numel) {{
-        out[i] = sin(inp[i]);
-    }}
-}}"
-                ),
-                &device,
-            ),
-            device,
-            _phantom: Default::default(),
+        #include \"cuda_fp16.h\"
+        extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, int numel{rendered}) {{
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            if (idx < numel && {valid_exp} != 0) {{
+                out[idx] = {}(inp[{idx_exp}]);
+            }}
+        }}", $op
+                );
+                Self {
+                    function: compile_and_load_kernel(code, &device),
+                    device,
+                    dyn_symbols,
+                    dyn_map,
+                    _phantom: Default::default(),
+                }
+            }
         }
-    }
+
+        impl<T: CudaFloat> Operator for $op_name<T> {
+            fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+                let inp = get_buffer_from_tensor::<T>(&tensors[0].0);
+                let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
+                let out = self.device.alloc_zeros::<T>(inp_size).unwrap();
+                let mut params = vec![
+                    (&out).as_kernel_param(),
+                    inp.as_kernel_param(),
+                    inp_size.as_kernel_param(),
+                ];
+                input_dyn_dims(&mut params, &self.dyn_symbols, self.dyn_map);
+                unsafe {
+                    self.function
+                        .clone()
+                        .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+                        .unwrap();
+                }
+
+                vec![Tensor::new(CudaData(out))]
+            }
+
+            fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+                if key == "elementwise" {
+                    return Some(Box::new(format!("{}(input0)", $op)));
+                }
+
+                None
+            }
+        }
+
+        $crate::debug_type!($op_name);
+    };
 }
 
-impl<T: CudaFloat> Operator for CudaSin<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp = get_buffer_from_tensor::<T>(&tensors[0].0);
-        let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
-        let mut out = self.device.alloc_zeros::<T>(inp_size).unwrap();
-        unsafe {
-            self.function
-                .clone()
-                .launch(
-                    LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
-                )
-                .unwrap();
-        }
-
-        vec![Tensor::new(CudaData(out))]
-    }
-
-    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
-        if key == "elementwise" {
-            return Some(Box::new("sin(input0)".to_string()));
-        }
-
-        None
-    }
-}
-
-#[derive(Clone)]
-pub struct CudaRecip<T> {
-    function: CudaFunction,
-    device: Arc<CudaDevice>,
-    _phantom: PhantomData<T>,
-}
-crate::debug_type!(CudaRecip);
-
-impl<T: CudaFloat> CudaRecip<T> {
-    pub fn new(device: Arc<CudaDevice>) -> Self {
-        let type_name = T::type_name();
-        let code = format!(
-            "
-#include \"cuda_fp16.h\"
-extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, int numel) {{
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < numel) {{
-        out[i] = {}(inp[i]);
-    }}
-}}",
-            if T::is_f32() { "__frcp_rn" } else { "hrcp" }
-        );
-        Self {
-            function: compile_and_load_kernel(code, &device),
-            device,
-            _phantom: Default::default(),
-        }
-    }
-}
-
-impl<T: CudaFloat> Operator for CudaRecip<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp = get_buffer_from_tensor::<T>(&tensors[0].0);
-        let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
-        let mut out = self.device.alloc_zeros::<T>(inp_size).unwrap();
-        unsafe {
-            self.function
-                .clone()
-                .launch(
-                    LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
-                )
-                .unwrap();
-        }
-
-        vec![Tensor::new(CudaData(out))]
-    }
-
-    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
-        if key == "elementwise" {
-            return Some(Box::new(format!(
-                "{}(input0)",
-                if T::is_f32() { "__frcp_rn" } else { "hrcp" }
-            )));
-        }
-
-        None
-    }
-}
+cuda_unary_op!("", CudaContiguous);
+cuda_unary_op!("log2", CudaLog2);
+cuda_unary_op!("exp2", CudaExp2);
+cuda_unary_op!(if T::is_f32() { "sqrt" } else { "hsqrt" }, CudaSqrt);
+cuda_unary_op!("sin", CudaSin);
+cuda_unary_op!(if T::is_f32() { "__frcp_rn" } else { "hrcp" }, CudaRecip);
 
 #[derive(Clone)]
 pub struct CudaAdd<T> {
@@ -1062,11 +789,11 @@ impl<T: CudaFloat> Compiler for PrimitiveCompiler<T> {
             let op = graph.node_weight(id).unwrap().as_any().type_id();
             let op_ref = graph.graph.node_weight_mut(id).unwrap();
             if is::<Log2>(op) {
-                *op_ref = Box::new(CudaLog2::<T>::new(dev.clone()));
+                *op_ref = Box::new(CudaLog2::<T>::new(shapes[0], dev.clone(), &graph.dyn_map));
             } else if is::<Exp2>(op) {
-                *op_ref = Box::new(CudaExp2::<T>::new(dev.clone()));
+                *op_ref = Box::new(CudaExp2::<T>::new(shapes[0], dev.clone(), &graph.dyn_map));
             } else if is::<Sin>(op) {
-                *op_ref = Box::new(CudaSin::<T>::new(dev.clone()));
+                *op_ref = Box::new(CudaSin::<T>::new(shapes[0], dev.clone(), &graph.dyn_map));
             } else if let Some(c) = op_ref.as_any().downcast_ref::<Constant>() {
                 *op_ref = Box::new(CudaConstant::<T>::new(
                     dev.clone(),
@@ -1074,9 +801,9 @@ impl<T: CudaFloat> Compiler for PrimitiveCompiler<T> {
                     &graph.dyn_map,
                 ));
             } else if is::<Recip>(op) {
-                *op_ref = Box::new(CudaRecip::<T>::new(dev.clone()));
+                *op_ref = Box::new(CudaRecip::<T>::new(shapes[0], dev.clone(), &graph.dyn_map));
             } else if is::<Sqrt>(op) {
-                *op_ref = Box::new(CudaSqrt::<T>::new(dev.clone()));
+                *op_ref = Box::new(CudaSqrt::<T>::new(shapes[0], dev.clone(), &graph.dyn_map));
             } else if is::<Add>(op) {
                 *op_ref = Box::new(CudaAdd::<T>::new(
                     shapes[0],

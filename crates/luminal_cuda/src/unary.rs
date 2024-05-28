@@ -12,7 +12,8 @@ use luminal::{
 
 use crate::{
     binary::CudaSub,
-    compile_and_load_kernel, constant, get_buffer_from_tensor, get_idx_valid_exps, input_dyn_dims,
+    compile_and_load_kernel, constant, cuda_unary_op, get_buffer_from_tensor, get_idx_valid_exps,
+    input_dyn_dims,
     prim::{
         CudaAdd, CudaConstant, CudaContiguous, CudaExp2, CudaMaxReduce, CudaMul, CudaRecip,
         CudaSin, CudaSqrt, CudaSumReduce,
@@ -397,62 +398,7 @@ impl<T: CudaFloat> Compiler for StdNormCompiler<T> {
     }
 }
 
-#[derive(Clone)]
-pub struct CudaExp<T> {
-    function: CudaFunction,
-    device: Arc<CudaDevice>,
-    _phantom: PhantomData<T>,
-}
-crate::debug_type!(CudaExp);
-
-impl<T: CudaFloat> CudaExp<T> {
-    fn new(device: Arc<CudaDevice>) -> Self {
-        let type_name = T::type_name();
-        Self {
-            function: compile_and_load_kernel(
-                format!(
-                    "#include \"cuda_fp16.h\"
-extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, int numel) {{
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < numel) {{
-        out[i] = exp(inp[i]);
-    }}
-}}"
-                ),
-                &device,
-            ),
-            device,
-            _phantom: Default::default(),
-        }
-    }
-}
-
-impl<T: CudaFloat> Operator for CudaExp<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp = get_buffer_from_tensor::<T>(&tensors[0].0);
-        let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
-        let mut out = self.device.alloc_zeros::<T>(inp_size).unwrap();
-        unsafe {
-            self.function
-                .clone()
-                .launch(
-                    LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
-                )
-                .unwrap();
-        }
-
-        vec![Tensor::new(CudaData(out))]
-    }
-
-    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
-        if key == "elementwise" {
-            return Some(Box::new("exp(input0)".to_string()));
-        }
-
-        None
-    }
-}
+cuda_unary_op!("exp", CudaExp);
 
 #[derive(Default, Debug)]
 pub struct CudaExpCompiler<T: CudaFloat>(PhantomData<T>);
@@ -483,7 +429,7 @@ impl<T: CudaFloat> Compiler for CudaExpCompiler<T> {
                 .as_data()
                 .unwrap();
             let exp = graph
-                .add_op(CudaExp::<T>::new(dev.clone()))
+                .add_op(CudaExp::<T>::new(src_shape, dev.clone(), &graph.dyn_map))
                 .input(s.get(&inp), 0, src_shape)
                 .finish();
 
@@ -499,62 +445,8 @@ impl<T: CudaFloat> Compiler for CudaExpCompiler<T> {
     }
 }
 
-/// Special kernel for cos
-#[derive(Clone)]
-pub struct CudaCos<T> {
-    function: CudaFunction,
-    device: Arc<CudaDevice>,
-    _phantom: PhantomData<T>,
-}
-crate::debug_type!(CudaCos);
-
-impl<T: CudaFloat> CudaCos<T> {
-    fn new(device: Arc<CudaDevice>) -> Self {
-        let type_name = T::type_name();
-        Self {
-            function: compile_and_load_kernel(
-                format!(
-                    "#include \"cuda_fp16.h\"
-extern \"C\" __global__ void kernel({type_name} *out, const {type_name} *inp, int numel) {{
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < numel) {{
-        out[i] = cos(inp[i]);
-    }}
-}}"
-                ),
-                &device,
-            ),
-            device,
-            _phantom: Default::default(),
-        }
-    }
-}
-impl<T: CudaFloat> Operator for CudaCos<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let inp = get_buffer_from_tensor::<T>(&tensors[0].0);
-        let inp_size = tensors[0].1.n_physical_elements().to_usize().unwrap();
-        let mut out = self.device.alloc_zeros::<T>(inp_size).unwrap();
-        unsafe {
-            self.function
-                .clone()
-                .launch(
-                    LaunchConfig::for_num_elems(inp_size as u32),
-                    (&mut out, inp, inp_size),
-                )
-                .unwrap();
-        }
-
-        vec![Tensor::new(CudaData(out))]
-    }
-
-    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
-        if key == "elementwise" {
-            return Some(Box::new("cos(input0)".to_string()));
-        }
-
-        None
-    }
-}
+// Special kernel for cos
+cuda_unary_op!("cos", CudaCos);
 
 #[derive(Default, Debug)]
 pub struct CudaCosCompiler<T>(PhantomData<T>);
@@ -588,7 +480,7 @@ impl<T: CudaFloat> Compiler for CudaCosCompiler<T> {
                 .unwrap()
                 .2;
             let cos = graph
-                .add_op(CudaCos::<T>::new(dev.clone()))
+                .add_op(CudaCos::<T>::new(shape, dev.clone(), &graph.dyn_map))
                 .input(s.get(&inp), 0, shape)
                 .finish();
 
