@@ -1,4 +1,5 @@
 use egg::*;
+use rustc_hash::FxHashMap;
 use std::{
     fmt::Debug,
     ops::{
@@ -7,13 +8,6 @@ use std::{
     },
 };
 use symbolic_expressions::Sexp;
-
-// use cas_compute::symbolic::{
-//     expr::{Expr, Primary},
-//     simplify,
-// };
-// use cas_parser::parser::{ast::Expr as AstExpr, Parser};
-use rustc_hash::FxHashMap;
 use tinyvec::ArrayVec;
 
 /// A symbolic expression stored on the stack
@@ -914,7 +908,7 @@ fn make_rules() -> Vec<Rewrite> {
         // Associative properties
         rewrite!("assoc-add"; "(+ ?a (+ ?b ?c))" => "(+ (+ ?a ?b) ?c)"),
         rewrite!("assoc-mul"; "(* ?a (* ?b ?c))" => "(* (* ?a ?b) ?c)"),
-        // rewrite!("mul-div-associative"; "(/ (* ?x ?y) ?z)" => "(* ?x (/ ?y ?z))"),
+        rewrite!("mul-div-associative"; "(/ (* ?x ?y) ?z)" => "(* ?x (/ ?y ?z))"),
         rewrite!("sub-canon"; "(- ?a ?b)" => "(+ ?a (* -1 ?b))"),
         // Simple binary reductions
         rewrite!("add-0"; "(+ ?a 0)" => "?a"),
