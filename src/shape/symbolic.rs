@@ -521,7 +521,9 @@ impl<S: ExpressionStorage, E: Into<Self>> Mul<E> for GenericExpression<S> {
             return 0.into();
         }
         if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
-            return (a * b).into();
+            if let Some(c) = a.checked_mul(b) {
+                return c.into();
+            }
         }
         rhs.terms.extend(self.terms.iter_ref().copied());
         rhs.terms.push(Term::Mul);
