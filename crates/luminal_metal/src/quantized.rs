@@ -563,7 +563,7 @@ impl<T: MetalFloat + Default> Compiler for MetalQuantizedCompiler<T> {
                 } else if op_node.as_any().is::<super::matmul::Matmul<T>>() {
                     *op_node = Box::new(QuantizedMatmul::<T>::new(device.clone(), queue.clone()));
                 } else {
-                    panic!("Quantized weight {target:?} is an input to a node that isn't a matmul or gather!");
+                    panic!("Quantized weight {target:?} is an input to a node that isn't a matmul or gather ({op_node:?})!");
                 }
             }
         }
