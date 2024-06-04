@@ -1,7 +1,7 @@
 // Copyright © 2023 Apple Inc.
 
-#include "KERNEL_PATH/bf16.h"
-#include "KERNEL_PATH/gemm.h"
+BF16.H
+GEMM.H
 
 using namespace metal;
 

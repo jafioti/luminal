@@ -5,56 +5,13 @@ use std::{
     sync::Arc,
 };
 
-#[cfg(test)]
-mod tests;
-
-pub mod binary;
-pub mod command_buffer;
-pub mod elementwise_fusion;
-pub mod matmul;
-pub mod other;
-pub mod prim;
-pub mod quantized;
-pub mod storage_buffer;
-pub mod unary;
-
 use itertools::Itertools;
 use metal_rs::*;
-use prim::MetalConstant;
 use rustc_hash::FxHashMap;
 
 use luminal::{op::InputTensor, prelude::*};
 
-/// Compile graphs to run on Metal-supported macOS devices in supported data formats
-pub type MetalCompiler<T> = (MetalCompilerPreBuffer<T>, BufferCompilers);
-
-/// All metal compilers coming before buffer compilers
-pub type MetalCompilerPreBuffer<T> = (
-    prim::PrimitiveCompiler<T>,
-    SpecialOpsCompiler<T>,
-    other::CopyCompiler<T>,
-    elementwise_fusion::ElementwiseFusionCompiler<T>,
-);
-
-/// Compilers to share command and storage buffers
-pub type BufferCompilers = (
-    command_buffer::CommandBufferCompiler,
-    storage_buffer::StorageBufferCompiler,
-);
-
-/// Compiler to replace metal ops with specialized variants
-pub type SpecialOpsCompiler<T> = (
-    binary::MetalSubtractionCompiler<T>,
-    binary::MetalEqualCompiler<T>,
-    other::ARangeCompiler<T>,
-    binary::MetalGatherCompiler<T>,
-    unary::MetalExpCompiler<T>,
-    unary::MetalCosCompiler<T>,
-    unary::MeanReduceCompiler<T>,
-    unary::StdNormCompiler<T>,
-    unary::SoftmaxCompiler<T>,
-    matmul::MetalMatMulCompiler<T>,
-);
+mod language;
 
 #[derive(Debug, Clone)]
 pub struct MetalBuffer(pub Buffer);
@@ -81,27 +38,6 @@ pub trait MetalFloat: Copy + Debug + PartialEq + 'static + Default {
     fn from_f32(a: f32) -> Self;
     fn is_f32() -> bool;
     fn type_name() -> &'static str;
-}
-
-// Quantization types
-
-pub trait MetalQuantizationType {
-    type MatmulCompiler;
-}
-
-/// 8-bit quantization. Equivalent to the ggml Q8_0 datatype
-pub struct Q8_0;
-
-impl MetalQuantizationType for Q8_0 {
-    type MatmulCompiler = matmul::MetalMatMulCompiler<f16>;
-}
-
-impl MetalQuantizationType for f32 {
-    type MatmulCompiler = matmul::MetalMatMulCompiler<Self>;
-}
-
-impl MetalQuantizationType for f16 {
-    type MatmulCompiler = matmul::MetalMatMulCompiler<Self>;
 }
 
 // Main metal dtypes
@@ -239,13 +175,17 @@ impl MetalKernel for () {
 }
 
 fn compile_lib(device: &Device, source: &str) -> Library {
-    let mut source = source.replace("BF16.H", include_str!("kernels/bf16.h"));
-    source = source.replace("DEFINES.H", include_str!("kernels/defines.h"));
-    source = source.replace("GEMM.H", include_str!("kernels/gemm.h"));
-    source = source.replace("UTILS.H", include_str!("kernels/utils.h"));
     let options = CompileOptions::new();
     options.set_fast_math_enabled(true);
-    device.new_library_with_source(&source, &options).unwrap()
+    device
+        .new_library_with_source(
+            &source.replace(
+                "KERNEL_PATH",
+                &format!("{}/src/kernels", env!("CARGO_MANIFEST_DIR")),
+            ),
+            &options,
+        )
+        .unwrap()
 }
 
 fn select_function_from_lib(
@@ -442,22 +382,6 @@ fn get_buffer_from_tensor<'a>(tensor: &'a InputTensor) -> &'a MetalBuffer {
         .borrowed()
         .downcast_ref::<MetalBuffer>()
         .expect("Tensor does not contain a metal buffer")
-}
-
-pub fn constant<T: MetalFloat>(num: f32) -> SelectGraph {
-    let mut n = op::<MetalConstant<T>>();
-    n.check(move |o, _| {
-        if let Some(c) = o.as_any().downcast_ref::<MetalConstant<T>>() {
-            if let luminal::op::ConstantValue::Float(f) = c.0 {
-                (f - num).abs() < 1e-3
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    });
-    n
 }
 
 #[macro_export]

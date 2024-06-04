@@ -895,7 +895,9 @@ mod tests {
     use metal_rs::{Device, MTLResourceOptions};
     use rand::{thread_rng, Rng};
 
-    use crate::{quantized::MetalQuantizedCompiler, MetalBuffer};
+    use crate::{
+        quantized::MetalQuantizedCompiler, BufferCompilers, MetalBuffer, MetalCompilerPreBuffer,
+    };
 
     #[repr(C, packed)]
     struct BlockQ8_0 {
@@ -938,7 +940,11 @@ mod tests {
             .collect::<Vec<_>>();
         let dev = Device::system_default().unwrap();
         cx.compile(
-            MetalQuantizedCompiler::<f32>::new(vec![weights.id]),
+            (
+                MetalCompilerPreBuffer::<f32>::default(),
+                MetalQuantizedCompiler::<f32>::new(vec![weights.id]),
+                BufferCompilers::default(),
+            ),
             &mut out,
         );
         cx.tensors
@@ -984,7 +990,11 @@ mod tests {
         let dev = Device::system_default().unwrap();
 
         cx.compile(
-            MetalQuantizedCompiler::<f32>::new(vec![weights.id]),
+            (
+                MetalCompilerPreBuffer::<f32>::default(),
+                MetalQuantizedCompiler::<f32>::new(vec![weights.id]),
+                BufferCompilers::default(),
+            ),
             &mut out,
         );
         cx.tensors
@@ -1031,7 +1041,11 @@ mod tests {
         let dev = Device::system_default().unwrap();
 
         cx.compile(
-            MetalQuantizedCompiler::<f16>::new(vec![weights.id]),
+            (
+                MetalCompilerPreBuffer::<f16>::default(),
+                MetalQuantizedCompiler::<f16>::new(vec![weights.id]),
+                BufferCompilers::default(),
+            ),
             &mut out,
         );
         cx.tensors
