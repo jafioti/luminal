@@ -221,13 +221,13 @@ impl Compiler for StorageBufferCompiler {
             for required_buffer in wrapper.output_buffer_sizes(&input_shapes) {
                 // Allocate new buffer
                 buffer_map.get_mut(node).unwrap().0.push(buffers.len());
-                buffers.push(required_buffer);
+                buffers.push(required_buffer.simplify());
             }
             // Assign intermediate buffers
             for required_buffer in wrapper.intermediate_buffer_sizes(&input_shapes) {
                 // Allocate new buffer
                 buffer_map.get_mut(node).unwrap().1.push(buffers.len());
-                buffers.push(required_buffer);
+                buffers.push(required_buffer.simplify());
             }
         }
 
@@ -335,10 +335,9 @@ impl Operator for AllocateMetalBuffers {
                     // while length < size {
                     //     length *= 2;
                     // }
-                    let length = size;
                     *buffer = self
                         .dev
-                        .new_buffer(length, MTLResourceOptions::StorageModeShared);
+                        .new_buffer(size, MTLResourceOptions::StorageModeShared);
                 }
             }
         }

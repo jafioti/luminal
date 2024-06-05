@@ -75,7 +75,10 @@ fn main() {
         (
             GenericCompiler::default(),
             #[cfg(feature = "metal")]
-            luminal_metal::MetalCompiler::<f16>::default(),
+            (
+                luminal_metal::MetalCompilerPreBuffer::<f16>::default(),
+                luminal_metal::command_buffer::CommandBufferCompiler, // For some reason storage buffer causes a segfault on decoder
+            ),
             #[cfg(feature = "cuda")]
             luminal_cuda::CudaCompiler::<f32>::default(),
             #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]

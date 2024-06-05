@@ -18,6 +18,8 @@ pub mod quantized;
 pub mod storage_buffer;
 pub mod unary;
 
+pub use objc::rc::autoreleasepool;
+
 use itertools::Itertools;
 use metal_rs::*;
 use prim::MetalConstant;
