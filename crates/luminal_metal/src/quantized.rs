@@ -32,7 +32,7 @@ use crate::{
     other::MetalARange,
     prim::{MetalConstant, MetalCopyFromDevice, MetalCopyToDevice, MetalMaxReduce, MetalSumReduce},
     select_function_from_lib,
-    unary::{MetalMeanReduce, MetalSoftmax, MetalStdNorm},
+    unary::{MetalMeanReduce, MetalStdNorm},
     MetalBuffer, MetalFloat, MetalKernel, MetalKernelWrapper,
 };
 
@@ -643,7 +643,6 @@ impl<T: MetalFloat + Default> Compiler for SerializeQuantizedGraph<T> {
             } else if graph.check_node_type::<QuantizedMatmul<T>>(node)
                 || graph.check_node_type::<MetalCopyFromDevice<T>>(node)
                 || graph.check_node_type::<MetalCopyToDevice<T>>(node)
-                || graph.check_node_type::<MetalSoftmax<T>>(node)
             {
                 json!({})
             } else {
@@ -695,23 +694,6 @@ impl<T: MetalFloat> Compiler for DeserializeQuantizedGraph<T> {
         let queue = dev.new_command_queue();
         // Create ops
         let mut op_map = FxHashMap::<usize, NodeIndex>::default();
-        let softmax_lib = compile_lib(&dev, include_str!("kernels/softmax.metal"));
-        let softmax_type_name = if T::is_f32() { "float32" } else { "float16" };
-        let softmax = MetalSoftmax::<T> {
-            queue: queue.clone(),
-            device: dev.clone(),
-            single_row_pipeline: select_function_from_lib(
-                &softmax_lib,
-                &format!("softmax_{softmax_type_name}"),
-                &dev,
-            ),
-            looped_pipeline: select_function_from_lib(
-                &softmax_lib,
-                &format!("softmax_looped_{softmax_type_name}"),
-                &dev,
-            ),
-            _phantom: Default::default(),
-        };
         let matmul_library = compile_lib(&dev, include_str!("kernels/gemm.metal"));
         let matvec_library = compile_lib(&dev, include_str!("kernels/gemv.metal"));
         let quantized_matmul = QuantizedMatmul::<T>::new(dev.clone(), queue.clone());
@@ -806,8 +788,6 @@ impl<T: MetalFloat> Compiler for DeserializeQuantizedGraph<T> {
                 };
                 fused_op.compile(&dev);
                 graph.add_op(fused_op).finish()
-            } else if name == "MetalSoftmax" {
-                graph.add_op(softmax.clone()).finish()
             } else if name == "Matmul" {
                 let matmul_kernel =
                     serde_json::from_value::<String>(op["data"]["matmul_kernel"].take()).unwrap();

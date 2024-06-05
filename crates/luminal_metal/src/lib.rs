@@ -52,7 +52,6 @@ pub type SpecialOpsCompiler<T> = (
     unary::MetalCosCompiler<T>,
     unary::MeanReduceCompiler<T>,
     unary::StdNormCompiler<T>,
-    unary::SoftmaxCompiler<T>,
     matmul::MetalMatMulCompiler<T>,
 );
 
