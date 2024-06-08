@@ -18,6 +18,7 @@ pub mod quantized;
 pub mod storage_buffer;
 pub mod unary;
 
+pub use metal_rs::{Device, MTLResourceOptions};
 pub use objc::rc::autoreleasepool;
 
 use itertools::Itertools;

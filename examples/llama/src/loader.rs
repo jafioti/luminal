@@ -12,9 +12,8 @@ use crate::gguf::*;
 
 #[cfg(feature = "metal")]
 use {
-    luminal_metal::MetalBuffer,
+    luminal_metal::{Device, MTLResourceOptions, MetalBuffer},
     memmap2::Mmap,
-    metal_rs::{Device, MTLResourceOptions},
 };
 
 #[cfg(feature = "metal")]

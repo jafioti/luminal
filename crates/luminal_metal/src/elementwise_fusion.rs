@@ -323,7 +323,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
             let op = graph.get_op_mut::<FusedElementwiseOp<T>>(fused_op);
             // Stack index expressions and replace them in the subexpressions
             // Track all shapes used, will pull dyn dims from these
-            op.pre_compile(inputs, &mut input_regexes, &intermediate_match, fused_op);
+            op.pre_compile(inputs, &mut input_regexes, &intermediate_match);
             op.compile(&device);
         }
     }
@@ -349,7 +349,6 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
         input_shapes: Vec<ShapeTracker>,
         input_regexes: &mut FxHashMap<usize, Regex>,
         intermediate_match: &Regex,
-        node: NodeIndex,
     ) {
         let mut subexpressions = self.subexpressions.clone();
         let shapes_used = subexpressions
