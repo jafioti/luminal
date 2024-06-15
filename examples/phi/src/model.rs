@@ -25,14 +25,12 @@ pub struct Mlp<const I: usize, const H: usize> {
     pub up_proj: PermutedLinear<H, I>,
 }
 
-impl<Sh: Shape, Im: Shape, const I: usize, const H: usize> Module<GraphTensor<Sh>> for Mlp<I, H>
-where
-    GraphTensor<Sh>: Matmul<R2<H, I>, Output = GraphTensor<Im>>,
-    GraphTensor<Im>: Matmul<R2<I, H>, Output = GraphTensor<Sh>>,
+impl<const I: usize, const H: usize, Batch: Dimension, Batch1: Dimension>
+    Module<GraphTensor<(Batch, Batch1, Const<H>)>> for Mlp<I, H>
 {
-    type Output = GraphTensor<Sh>;
+    type Output = GraphTensor<(Batch, Batch1, Const<H>)>;
 
-    fn forward(&self, input: GraphTensor<Sh>) -> Self::Output {
+    fn forward(&self, input: GraphTensor<(Batch, Batch1, Const<H>)>) -> Self::Output {
         let gate = self.gate_proj.forward(input).swish();
         let up = self.up_proj.forward(input) * gate;
         self.down_proj.forward(up)
@@ -42,15 +40,9 @@ where
 impl<const I: usize, const H: usize> InitModule for Mlp<I, H> {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
-            gate_proj: PermutedLinear {
-                weight: cx.named_tensor("Gate"),
-            },
-            up_proj: PermutedLinear {
-                weight: cx.named_tensor("Up"),
-            },
-            down_proj: PermutedLinear {
-                weight: cx.named_tensor("Down"),
-            },
+            gate_proj: PermutedLinear::named("Gate", false, cx),
+            up_proj: PermutedLinear::named("Up", false, cx),
+            down_proj: PermutedLinear::named("Down", false, cx),
         }
     }
 }
@@ -65,12 +57,12 @@ impl<const I: usize, const H: usize> SerializeModule for Mlp<I, H> {
 
 fn apply_rotary_embeddings_ggml<const N_HEADS: usize, Batch: Dimension, Seq: Dimension>(
     input: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)>,
-    prev_seq: BigExpression,
+    prev_seq: impl Into<BigExpression>,
 ) -> GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)> {
     // Get freqs
     let freqs = (input.graph().arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
-    let freqs = 500000_f32.pow(freqs);
-    let pos = input.graph().arange::<Seq>() + prev_seq;
+    let freqs = 10_000f32.pow(freqs);
+    let pos = input.graph().arange::<Seq>() + prev_seq.into();
     let emb = pos.expand::<(_, Const<1>), _>().matmul(freqs.expand());
 
     // Split input into evens and odds
@@ -93,10 +85,10 @@ fn apply_rotary_embeddings_ggml<const N_HEADS: usize, Batch: Dimension, Seq: Dim
 }
 
 pub struct SelfAttention {
-    pub q_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
-    pub k_proj: GraphTensor<R2<ATTN_PROJ_DIM, HIDDEN_DIM>>,
-    pub v_proj: GraphTensor<R2<ATTN_PROJ_DIM, HIDDEN_DIM>>,
-    pub o_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
+    pub q_proj: PermutedLinear<HIDDEN_DIM, HIDDEN_DIM>,
+    pub k_proj: PermutedLinear<HIDDEN_DIM, ATTN_PROJ_DIM>,
+    pub v_proj: PermutedLinear<HIDDEN_DIM, ATTN_PROJ_DIM>,
+    pub o_proj: PermutedLinear<HIDDEN_DIM, HIDDEN_DIM>,
 }
 
 impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
@@ -119,33 +111,38 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         ),
     ) -> Self::Output {
         // Apply the Projections
-        let queries = x
-            .matmul(self.q_proj.permute())
+        let queries = self
+            .q_proj
+            .forward(x)
             .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        let keys = x
-            .matmul(self.k_proj.permute())
+        let keys = self
+            .k_proj
+            .forward(x)
             .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
-        let values = x
-            .matmul(self.v_proj.permute())
+        let values = self
+            .v_proj
+            .forward(x)
             .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         // Rotary embed queries and keys
-        let queries = apply_rotary_embeddings_ggml(queries, PrevSeq::size().into());
-        let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::size().into());
+        let queries = apply_rotary_embeddings_ggml(queries, PrevSeq::size());
+        let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::size());
 
         // Add KV cache
         let keys = k_cache.concat_along::<_, Axis<2>, _>(keys);
         let values = v_cache.concat_along::<_, Axis<2>, _>(values);
 
         // Calculate attention weights
-        let mut attention_weights = queries.matmul(keys.permute()) / (HEAD_DIM as f32).sqrt();
+        let mut attention_weights = queries.matmul(keys.permute());
+        attention_weights = attention_weights / (HEAD_DIM as f32).sqrt();
 
-        let attention_mask = self.k_proj.graph().triu::<CurSeq>(1) * f16::MIN.to_f32();
+        // Causal mask
+        let attention_mask = attention_weights.graph().triu::<CurSeq>(1) * f32::NEG_INFINITY;
         attention_weights += attention_mask
             .pad::<(CurSeq, TotSeq)>(((0, 0), (TotSeq::size() - CurSeq::size(), 0)))
             .expand();
@@ -158,9 +155,8 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             // Merge heads
             .permute::<_, Axes4<0, 2, 1, 3>>()
             .reshape::<(Batch, CurSeq, Const<HIDDEN_DIM>)>();
-        let output = output
-            // Apply output projection
-            .matmul(self.o_proj.permute());
+        // Apply output projection
+        let output = self.o_proj.forward(output);
         (output, (keys.contiguous(), values.contiguous())) // Cache needs to be contiguous for transferring to another graph
     }
 }
@@ -168,20 +164,20 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
 impl InitModule for SelfAttention {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
-            q_proj: cx.named_tensor("Q Proj"),
-            k_proj: cx.named_tensor("K Proj"),
-            v_proj: cx.named_tensor("V Proj"),
-            o_proj: cx.named_tensor("O Proj"),
+            q_proj: PermutedLinear::new(false, cx),
+            k_proj: PermutedLinear::new(false, cx),
+            v_proj: PermutedLinear::new(false, cx),
+            o_proj: PermutedLinear::new(false, cx),
         }
     }
 }
 
 impl SerializeModule for SelfAttention {
     fn serialize(&self, s: &mut Serializer) {
-        s.tensor("attn_q/weight", self.q_proj);
-        s.tensor("attn_v/weight", self.v_proj);
-        s.tensor("attn_k/weight", self.k_proj);
-        s.tensor("attn_output/weight", self.o_proj);
+        s.module("attn_q", &self.q_proj);
+        s.module("attn_v", &self.v_proj);
+        s.module("attn_k", &self.k_proj);
+        s.module("attn_output", &self.o_proj);
     }
 }
 
@@ -302,7 +298,7 @@ impl InitModule for Phi {
                 weight: cx.named_tensor("Embedding Weight"),
             },
             norm: LayerNorm::new(true, false, false, 1e-5, cx),
-            lm_head: InitModule::initialize(cx),
+            lm_head: PermutedLinear::new(false, cx),
             layers: (0..NUM_LAYERS)
                 .map(|_| InitModule::initialize(cx))
                 .collect(),

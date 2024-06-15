@@ -6,7 +6,6 @@ edition = "2021"
 [features]
 metal = ["dep:luminal_metal"]
 cuda = ["dep:luminal_cuda"]
-default = ["metal"]
 
 [dependencies]
 luminal = { path = "../.." }

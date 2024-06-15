@@ -104,12 +104,13 @@ fn main() {
     delete_inputs(&downstream(model_weights, &cx), &mut cx);
 
     // Run prompt processing pass
-    let mut input_ids = tokenizer
-        .encode(&cli_args.prompt as &str, false)
-        .unwrap()
-        .get_ids()
-        .to_vec();
-    input_ids.insert(0, 1);
+    let input_ids = [1_u32];
+    // let mut input_ids = tokenizer
+    //     .encode(&cli_args.prompt as &str, false)
+    //     .unwrap()
+    //     .get_ids()
+    //     .to_vec();
+    // input_ids.insert(0, 1);
     input.set_dyn(
         input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
         &[1, input_ids.len()],

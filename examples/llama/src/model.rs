@@ -27,14 +27,12 @@ pub struct Mlp<const I: usize, const H: usize> {
     pub up_proj: PermutedLinear<H, I>,
 }
 
-impl<Sh: Shape, Im: Shape, const I: usize, const H: usize> Module<GraphTensor<Sh>> for Mlp<I, H>
-where
-    GraphTensor<Sh>: Matmul<R2<H, I>, Output = GraphTensor<Im>>,
-    GraphTensor<Im>: Matmul<R2<I, H>, Output = GraphTensor<Sh>>,
+impl<const I: usize, const H: usize, Batch: Dimension, Batch1: Dimension>
+    Module<GraphTensor<(Batch, Batch1, Const<H>)>> for Mlp<I, H>
 {
-    type Output = GraphTensor<Sh>;
+    type Output = GraphTensor<(Batch, Batch1, Const<H>)>;
 
-    fn forward(&self, input: GraphTensor<Sh>) -> Self::Output {
+    fn forward(&self, input: GraphTensor<(Batch, Batch1, Const<H>)>) -> Self::Output {
         let gate = self.gate_proj.forward(input).swish();
         let up = self.up_proj.forward(input) * gate;
         self.down_proj.forward(up)
@@ -44,15 +42,9 @@ where
 impl<const I: usize, const H: usize> InitModule for Mlp<I, H> {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
-            gate_proj: PermutedLinear {
-                weight: cx.named_tensor("Gate"),
-            },
-            up_proj: PermutedLinear {
-                weight: cx.named_tensor("Up"),
-            },
-            down_proj: PermutedLinear {
-                weight: cx.named_tensor("Down"),
-            },
+            gate_proj: PermutedLinear::named("Gate", false, cx),
+            up_proj: PermutedLinear::named("Up", false, cx),
+            down_proj: PermutedLinear::named("Down", false, cx),
         }
     }
 }
@@ -313,6 +305,7 @@ impl InitModule for Llama {
                 LayerNorm::new(true, false, false, 1e-5, cx),
                 PermutedLinear {
                     weight: cx.tensor(),
+                    bias: None,
                 },
             ),
             layers: (0..NUM_LAYERS)

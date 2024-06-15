@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::PathBuf;
 
 use colored::Colorize;
 use itertools::Itertools;
@@ -167,13 +167,15 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Check the tensor value against a binary file
-    pub fn diff<T: AsRef<Path>>(&self, file: T, threshold: f32) -> Self {
-        let path = file.as_ref().to_owned();
+    pub fn diff(&self, file: impl Fn() -> Option<PathBuf> + 'static, threshold: f32) -> Self {
         let id = self
             .graph()
             .add_op(op::Function(
                 "Diff".to_string(),
                 Box::new(move |mut inp| {
+                    let Some(path) = file() else {
+                        return vec![];
+                    };
                     // Get tensor data and file data
                     let (tensor, shape) = inp.pop().unwrap();
                     let d = tensor.borrowed().downcast_ref::<Vec<f32>>().unwrap();

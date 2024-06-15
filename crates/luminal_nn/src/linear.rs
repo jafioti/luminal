@@ -41,6 +41,7 @@ where
 /// A simple unbiased linear layer with a permuted weight matrix
 pub struct PermutedLinear<const A: usize, const B: usize> {
     pub weight: GraphTensor<R2<B, A>>,
+    pub bias: Option<GraphTensor<R1<B>>>,
 }
 
 impl<const A: usize, const B: usize> InitModule for PermutedLinear<A, B> {
@@ -53,6 +54,24 @@ impl<const A: usize, const B: usize> InitModule for PermutedLinear<A, B> {
                     .map(|_| rng.gen_range(-1_f32..1_f32))
                     .collect::<Vec<_>>(),
             ),
+            bias: None,
+        }
+    }
+}
+
+impl<const A: usize, const B: usize> PermutedLinear<A, B> {
+    pub fn new(bias: bool, cx: &mut Graph) -> Self {
+        Self::named("", bias, cx)
+    }
+
+    pub fn named(name: &str, bias: bool, cx: &mut Graph) -> Self {
+        Self {
+            weight: cx.named_tensor(&format!("{name} Weight")),
+            bias: if bias {
+                Some(cx.named_tensor(&format!("{name} Bias")))
+            } else {
+                None
+            },
         }
     }
 }
@@ -60,17 +79,39 @@ impl<const A: usize, const B: usize> InitModule for PermutedLinear<A, B> {
 impl<const A: usize, const B: usize> SerializeModule for PermutedLinear<A, B> {
     fn serialize(&self, s: &mut luminal::module::Serializer) {
         s.tensor("weight", self.weight);
+        if let Some(b) = self.bias {
+            s.tensor("bias", b);
+        }
     }
 }
 
-impl<const A: usize, const B: usize, S: Shape> Module<GraphTensor<S>> for PermutedLinear<A, B>
-where
-    GraphTensor<S>: Matmul<R2<A, B>>,
+impl<const A: usize, const B: usize, Batch: Dimension> Module<GraphTensor<(Batch, Const<A>)>>
+    for PermutedLinear<A, B>
 {
-    type Output = <GraphTensor<S> as Matmul<R2<A, B>>>::Output;
+    type Output = GraphTensor<(Batch, Const<B>)>;
 
-    fn forward(&self, input: GraphTensor<S>) -> Self::Output {
-        input.matmul(self.weight.permute())
+    fn forward(&self, input: GraphTensor<(Batch, Const<A>)>) -> Self::Output {
+        let o = input.matmul(self.weight.permute());
+        if let Some(b) = self.bias {
+            o + b.expand()
+        } else {
+            o
+        }
+    }
+}
+
+impl<const A: usize, const B: usize, Batch: Dimension, Batch1: Dimension>
+    Module<GraphTensor<(Batch, Batch1, Const<A>)>> for PermutedLinear<A, B>
+{
+    type Output = GraphTensor<(Batch, Batch1, Const<B>)>;
+
+    fn forward(&self, input: GraphTensor<(Batch, Batch1, Const<A>)>) -> Self::Output {
+        let o = input.matmul(self.weight.permute());
+        if let Some(b) = self.bias {
+            o + b.expand()
+        } else {
+            o
+        }
     }
 }
 

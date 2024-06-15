@@ -104,18 +104,6 @@ fn main() {
     delete_inputs(&cache_src, &mut cx);
     delete_inputs(&downstream(model_weights, &cx), &mut cx);
 
-    println!(
-        "Allocated {:.2}gb",
-        cx.tensors
-            .values()
-            .map(|v| v
-                .downcast_ref::<luminal_metal::MetalBuffer>()
-                .unwrap()
-                .0
-                .length())
-            .sum::<u64>() as f64
-            / 1_000_000_000_f64
-    );
     // Run prompt processing pass
     let mut input_ids = tokenizer
         .encode(&cli_args.prompt as &str, false)

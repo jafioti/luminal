@@ -266,7 +266,7 @@ fn select_function_from_lib(
 }
 
 fn compile_function(name: &str, code: &str, device: &Device) -> ComputePipelineState {
-    let library = compile_lib(device, code);
+    let library = compile_lib(device, &code.replace("inf", "INFINITY"));
     select_function_from_lib(&library, name, device)
 }
 

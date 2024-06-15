@@ -1,3 +1,5 @@
+<|system|>
+You are a helpful AI assistant.<|end|>
 <|user|>
-Please write me a python implementation of merge sort<|end|>
+Please write a python implementation of merge sort.<|end|>
 <|assistant|>
