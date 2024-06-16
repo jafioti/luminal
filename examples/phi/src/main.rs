@@ -89,33 +89,27 @@ fn main() {
     let cache_dest = cache_dest.to_ids();
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
-    // // Initial forward pass to load weights
-    // print!("Loading model");
-    // io::stdout().flush().unwrap();
-    // let now = Instant::now();
-    // input.set_dyn(vec![1.], &[1, 1]);
-    // cx.set_dyn_dim('t', 1);
-    // cx.execute();
-    // logits.drop();
-    // cx.drop_tensors(&cache_dest);
-    // println!("\t\t - {}ms", now.elapsed().as_millis());
+    // Initial forward pass to load weights
+    print!("Loading model");
+    io::stdout().flush().unwrap();
+    let now = Instant::now();
+    input.set_dyn(vec![1.], &[1, 1]);
+    cx.set_dyn_dim('t', 1);
+    cx.execute();
+    logits.drop();
+    cx.drop_tensors(&cache_dest);
+    println!("\t\t - {}ms", now.elapsed().as_millis());
 
-    // // Now that weights are loaded, delete the loading nodes so they don't run again
-    // delete_inputs(&downstream(model_weights, &cx), &mut cx);
+    // Now that weights are loaded, delete the loading nodes so they don't run again
+    delete_inputs(&downstream(model_weights, &cx), &mut cx);
 
     // Run prompt processing pass
-    // let input_ids = [1_u32];
-    // let mut input_ids = tokenizer
-    //     .encode(&cli_args.prompt as &str, true)
-    //     .unwrap()
-    //     .get_ids()
-    //     .to_vec();
-    let input_ids: Vec<u32> = vec![
-        1, 32006, 13, 3492, 526, 263, 8444, 319, 29902, 20255, 29889, 32007, 13, 32010, 13, 12148,
-        2436, 263, 3017, 5314, 310, 10366, 2656, 29889, 32007, 13, 32001,
-    ];
-    // input_ids.insert(0, 1);
-    println!("Input tokens: {:?}", input_ids);
+    let mut input_ids = tokenizer
+        .encode(&cli_args.prompt as &str, true)
+        .unwrap()
+        .get_ids()
+        .to_vec();
+    input_ids.insert(0, 1);
     input.set_dyn(
         input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
         &[1, input_ids.len()],
@@ -134,11 +128,6 @@ fn main() {
     delete_inputs(&cache_src, &mut cx);
     let mut output_ids = vec![argmax(&logits.data())];
     logits.drop();
-
-    println!(
-        "DECODED: {:?}",
-        tokenizer.decode(&input_ids, false).unwrap()
-    );
     // Decode token
     print!("{}", cli_args.prompt.white().bold());
     let out_str = tokenizer.decode(&output_ids, false).unwrap().bright_green();
@@ -146,45 +135,45 @@ fn main() {
     print!("{out_str}");
     io::stdout().flush().unwrap();
 
-    // // Swap caches
-    // transfer_data_same_graph(&cache_dest, &cache_src, &mut cx);
+    // Swap caches
+    transfer_data_same_graph(&cache_dest, &cache_src, &mut cx);
 
-    // // Decode loop
-    // let start_decode = std::time::Instant::now();
-    // for _ in 0..cli_args.gen_tokens {
-    //     input.set_dyn(vec![*output_ids.last().unwrap() as f32], &[1, 1]);
-    //     cx.set_dyn_dim('p', input_ids.len() + output_ids.len() - 1);
-    //     cx.set_dyn_dim('t', input_ids.len() + output_ids.len());
-    //     cx.execute();
+    // Decode loop
+    let start_decode = std::time::Instant::now();
+    for _ in 0..cli_args.gen_tokens {
+        input.set_dyn(vec![*output_ids.last().unwrap() as f32], &[1, 1]);
+        cx.set_dyn_dim('p', input_ids.len() + output_ids.len() - 1);
+        cx.set_dyn_dim('t', input_ids.len() + output_ids.len());
+        cx.execute();
 
-    //     // Sample tokens
-    //     let output_id = argmax(&logits.data());
-    //     logits.drop();
-    //     output_ids.push(output_id);
+        // Sample tokens
+        let output_id = argmax(&logits.data());
+        logits.drop();
+        output_ids.push(output_id);
 
-    //     // Get the current decoded output
-    //     let current_output = tokenizer.decode(&output_ids, false).unwrap();
+        // Get the current decoded output
+        let current_output = tokenizer.decode(&output_ids, false).unwrap();
 
-    //     // Print the new substring added to the decoded output
-    //     print!("{}", current_output[prev_output_len..].bright_green());
-    //     io::stdout().flush().unwrap();
+        // Print the new substring added to the decoded output
+        print!("{}", current_output[prev_output_len..].bright_green());
+        io::stdout().flush().unwrap();
 
-    //     // Update the previous output
-    //     prev_output_len = current_output.len();
+        // Update the previous output
+        prev_output_len = current_output.len();
 
-    //     // Swap caches
-    //     transfer_data_same_graph(&cache_dest, &cache_src, &mut cx);
-    // }
+        // Swap caches
+        transfer_data_same_graph(&cache_dest, &cache_src, &mut cx);
+    }
 
-    // println!();
-    // let avg_token_time = (std::time::Instant::now() - start_decode).as_micros() as f32
-    //     / (output_ids.len() - 1) as f32
-    //     / 1000.0;
-    // println!(
-    //     "\nAverage token generated in {:.2}ms\t - ({:.2} tok/s)",
-    //     avg_token_time,
-    //     1000.0 / avg_token_time
-    // );
+    println!();
+    let avg_token_time = (std::time::Instant::now() - start_decode).as_micros() as f32
+        / (output_ids.len() - 1) as f32
+        / 1000.0;
+    println!(
+        "\nAverage token generated in {:.2}ms\t - ({:.2} tok/s)",
+        avg_token_time,
+        1000.0 / avg_token_time
+    );
 }
 
 fn argmax(dist: &[f32]) -> u32 {

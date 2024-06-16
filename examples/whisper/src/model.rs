@@ -258,9 +258,13 @@ impl InitModule for EncoderTransformerBlock {
         Self {
             attention: InitModule::initialize(cx),
             attention_norm: LayerNorm::new(true, true, true, 1e-5, cx),
-            ff1: PermutedLinear::new(false, cx),
+            ff1: PermutedLinear {
+                weight: cx.tensor(),
+            },
             ff1_bias: cx.tensor(),
-            ff2: PermutedLinear::new(false, cx),
+            ff2: PermutedLinear {
+                weight: cx.tensor(),
+            },
             ff2_bias: cx.tensor(),
             feed_forward_norm: LayerNorm::new(true, true, true, 1e-5, cx),
         }
@@ -440,9 +444,13 @@ impl InitModule for DecoderTransformerBlock {
             attention_norm: LayerNorm::new(true, true, true, 1e-5, cx),
             cross_attention: InitModule::initialize(cx),
             cross_attention_norm: LayerNorm::new(true, true, true, 1e-5, cx),
-            ff1: PermutedLinear::new(false, cx),
+            ff1: PermutedLinear {
+                weight: cx.tensor(),
+            },
             ff1_bias: cx.tensor(),
-            ff2: PermutedLinear::new(false, cx),
+            ff2: PermutedLinear {
+                weight: cx.tensor(),
+            },
             ff2_bias: cx.tensor(),
             feed_forward_norm: LayerNorm::new(true, true, true, 1e-5, cx),
         }

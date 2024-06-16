@@ -42,9 +42,15 @@ impl<const I: usize, const H: usize, Batch: Dimension, Batch1: Dimension>
 impl<const I: usize, const H: usize> InitModule for Mlp<I, H> {
     fn initialize(cx: &mut Graph) -> Self {
         Self {
-            gate_proj: PermutedLinear::named("Gate", false, cx),
-            up_proj: PermutedLinear::named("Up", false, cx),
-            down_proj: PermutedLinear::named("Down", false, cx),
+            gate_proj: PermutedLinear {
+                weight: cx.named_tensor("Gate"),
+            },
+            up_proj: PermutedLinear {
+                weight: cx.named_tensor("Up"),
+            },
+            down_proj: PermutedLinear {
+                weight: cx.named_tensor("Down"),
+            },
         }
     }
 }
@@ -63,7 +69,7 @@ fn apply_rotary_embeddings_ggml<const N_HEADS: usize, Batch: Dimension, Seq: Dim
 ) -> GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)> {
     // Get freqs
     let freqs = (input.graph().arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
-    let freqs = 500000_f32.pow(freqs);
+    let freqs = 500_000_f32.pow(freqs);
     let pos = input.graph().arange::<Seq>() + prev_seq;
     let emb = pos.expand::<(_, Const<1>), _>().matmul(freqs.expand());
 
