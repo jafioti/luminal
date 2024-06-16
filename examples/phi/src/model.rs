@@ -57,20 +57,22 @@ impl<const I: usize, const H: usize> SerializeModule for Mlp<I, H> {
 
 fn apply_rotary_embeddings_ggml<const N_HEADS: usize, Batch: Dimension, Seq: Dimension>(
     input: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)>,
-    prev_seq: impl Into<BigExpression>,
+    prev_seq: BigExpression,
 ) -> GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)> {
     // Get freqs
     let freqs = (input.graph().arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
-    let freqs = 10_000f32.pow(freqs);
-    let pos = input.graph().arange::<Seq>() + prev_seq.into();
+    let freqs = 10_000_f32.pow(freqs);
+    let pos = input.graph().arange::<Seq>() + prev_seq;
     let emb = pos.expand::<(_, Const<1>), _>().matmul(freqs.expand());
 
     // Split input into evens and odds
     let split = input.reshape::<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<2>)>();
-    let x0: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<1>)> =
-        split.slice((.., .., .., .., ..1)).realize();
-    let x1: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<1>)> =
-        split.slice((.., .., .., .., 1..)).realize();
+    let x0: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<1>)> = split
+        .slice((.., .., .., .., ..Expression::from(1)))
+        .realize();
+    let x1: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<1>)> = split
+        .slice((.., .., .., .., Expression::from(1)..))
+        .realize();
 
     // Apply sin and cos embeddings
     let x0_out = x0 * emb.cos().expand() - x1 * emb.sin().expand();
@@ -96,6 +98,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
         KVCache<Batch, PrevSeq>,
         PhantomData<TotSeq>,
+        usize,
     )> for SelfAttention
 {
     type Output = (
@@ -104,16 +107,22 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     );
     fn forward(
         &self,
-        (x, (k_cache, v_cache), _): (
+        (x, (k_cache, v_cache), _, index): (
             GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
             KVCache<Batch, PrevSeq>,
             PhantomData<TotSeq>,
+            usize,
         ),
     ) -> Self::Output {
         // Apply the Projections
-        let queries = self
-            .q_proj
-            .forward(x)
+        let queries = self.q_proj.forward(x);
+        if index == 0 {
+            queries.diff(
+                || Some("/Users/jafioti/Desktop/saves/queries.bin".into()),
+                1e-8,
+            );
+        }
+        let queries = queries
             .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
@@ -130,8 +139,14 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
             .permute::<_, Axes4<0, 2, 1, 3>>();
 
         // Rotary embed queries and keys
-        let queries = apply_rotary_embeddings_ggml(queries, PrevSeq::size());
-        let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::size());
+        let queries = apply_rotary_embeddings_ggml(queries, PrevSeq::size().into());
+        if index == 0 {
+            queries.diff(
+                || Some("/Users/jafioti/Desktop/saves/query_rope.bin".into()),
+                1e-8,
+            );
+        }
+        let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::size().into());
 
         // Add KV cache
         let keys = k_cache.concat_along::<_, Axis<2>, _>(keys);
@@ -193,6 +208,7 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
         GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
         KVCache<Batch, PrevSeq>,
         PhantomData<TotSeq>,
+        usize,
     )> for TransformerBlock
 {
     type Output = (
@@ -201,17 +217,18 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     );
     fn forward(
         &self,
-        (mut x, cache, _): (
+        (mut x, cache, _, index): (
             GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
             KVCache<Batch, PrevSeq>,
             PhantomData<TotSeq>,
+            usize,
         ),
     ) -> Self::Output {
         // Attention
         let normed = self.attention_norm.forward(x);
         let (y, cache) = self
             .attention
-            .forward((normed, cache, PhantomData::<TotSeq>));
+            .forward((normed, cache, PhantomData::<TotSeq>, index));
 
         // Residual Addition
         x += y;
@@ -276,12 +293,16 @@ impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
     ) -> Self::Output {
         // Embed tokens
         let mut x = self.embedding.forward(input);
+        x.diff(
+            || Some("/Users/jafioti/Desktop/saves/embed.bin".into()),
+            1e-8,
+        );
 
         // Run through layers and collect new caches
         let mut new_caches = vec![];
         let mut new_cache;
         for (i, layer) in self.layers.iter().enumerate() {
-            (x, new_cache) = layer.forward((x, cache[i], PhantomData::<TotSeq>));
+            (x, new_cache) = layer.forward((x, cache[i], PhantomData::<TotSeq>, i));
             new_caches.push(new_cache);
         }
         // Run through last norm and output projection
