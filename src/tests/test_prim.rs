@@ -267,9 +267,15 @@ fn test_sum_reduce() {
     let a = cx
         .tensor::<R3<2, 2, 3>>()
         .set([[[1., 2., 3.], [1., 2., 3.]], [[1., 2., 3.], [1., 2., 3.]]]);
-    let b = a.sum_reduce::<_, crate::prelude::Axis<1>>().retrieve();
-    let c = a.sum_reduce::<_, crate::prelude::Axis<0>>().retrieve();
-    let d = a.sum_reduce::<_, crate::prelude::Axis<2>>().retrieve();
+    let b = a
+        .sum_reduce::<R2<2, 3>, crate::prelude::Axis<1>>()
+        .retrieve();
+    let c = a
+        .sum_reduce::<R2<2, 3>, crate::prelude::Axis<0>>()
+        .retrieve();
+    let d = a
+        .sum_reduce::<R2<2, 2>, crate::prelude::Axis<2>>()
+        .retrieve();
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -290,7 +296,9 @@ fn test_sum_reduce2() {
         [[34.4, -96.0, 144.0], [43.0, 560.0, 180.0]],
         [[39.6, -120.0, 180.0], [49.5, 700.0, 225.0]],
     ]]);
-    let b = a.sum_reduce::<_, crate::prelude::Axis<3>>().retrieve();
+    let b = a
+        .sum_reduce::<R3<1, 2, 2>, crate::prelude::Axis<3>>()
+        .retrieve();
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -309,9 +317,15 @@ fn test_max_reduce() {
     let a = cx
         .tensor::<R3<2, 2, 3>>()
         .set([[[1., 2., 3.], [1., 2., 3.]], [[1., 2., 3.], [1., 2., 3.]]]);
-    let b = a.max_reduce::<_, crate::prelude::Axis<1>>().retrieve();
-    let c = a.max_reduce::<_, crate::prelude::Axis<0>>().retrieve();
-    let d = a.max_reduce::<_, crate::prelude::Axis<2>>().retrieve();
+    let b = a
+        .max_reduce::<R2<2, 3>, crate::prelude::Axis<1>>()
+        .retrieve();
+    let c = a
+        .max_reduce::<R2<2, 3>, crate::prelude::Axis<0>>()
+        .retrieve();
+    let d = a
+        .max_reduce::<R2<2, 2>, crate::prelude::Axis<2>>()
+        .retrieve();
     cx.execute();
 
     let d_dev = Cpu::default();
