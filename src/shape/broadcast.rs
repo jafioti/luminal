@@ -12,7 +12,7 @@ pub trait ReduceShape<Ax>: Sized + HasAxes<Ax> + ReduceShapeTo<Self::Reduced, Ax
     type Reduced: Shape + BroadcastShapeTo<Self, Ax>;
 }
 
-impl<S: Shape + HasAxes<AnyAxis>, AnyAxis> ReduceShapeTo<S, AnyAxis> for S {}
+impl<S: Shape + HasAxes<AnyAxes>, AnyAxes> ReduceShapeTo<S, AnyAxes> for S {}
 impl ReduceShape<Axis<0>> for () {
     type Reduced = ();
 }

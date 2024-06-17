@@ -2,9 +2,12 @@ use luminal::prelude::*;
 use luminal_nn::Linear;
 use luminal_training::Autograd;
 
+const I: usize = 5;
+const O: usize = 2;
+
 pub struct LinearBiased {
-    pub linear: Linear<1, 2>,
-    pub bias: GraphTensor<R1<2>>,
+    pub linear: Linear<I, O>,
+    pub bias: GraphTensor<R1<O>>,
 }
 
 impl SerializeModule for LinearBiased {
@@ -21,7 +24,7 @@ impl InitModule for LinearBiased {
         Self {
             linear: Linear::initialize(cx),
             bias: cx.named_tensor("Bias").set(
-                (0..2)
+                (0..O)
                     .map(|_| rng.gen_range(-1_f32..1_f32))
                     .collect::<Vec<_>>(),
             ),
@@ -29,12 +32,12 @@ impl InitModule for LinearBiased {
     }
 }
 
-impl Module<GraphTensor<R1<1>>> for LinearBiased {
-    type Output = GraphTensor<R1<2>>;
-    fn forward(&self, x: GraphTensor<R1<1>>) -> Self::Output {
-        let x: GraphTensor<R1<2>> = self.linear.forward(x);
-        let bias: GraphTensor<R1<2>> = self.bias.expand::<R1<2>, Axis<0>>();
-        // let bias: GraphTensor<R1<2>> = self.bias.clone();
+impl Module<GraphTensor<R1<I>>> for LinearBiased {
+    type Output = GraphTensor<R1<O>>;
+    fn forward(&self, x: GraphTensor<R1<I>>) -> Self::Output {
+        let x: GraphTensor<R1<O>> = self.linear.forward(x);
+        let bias: GraphTensor<R1<O>> = self.bias.expand::<R1<O>, Axis<0>>();
+        // let bias: GraphTensor<R1<O>> = self.bias.clone();
         x + bias
     }
 }
@@ -42,8 +45,8 @@ impl Module<GraphTensor<R1<1>>> for LinearBiased {
 fn main() {
     let mut cx = Graph::new();
     let model = LinearBiased::initialize(&mut cx);
-    let input = cx.tensor::<R1<1>>();
-    let output = model.forward(input).retrieve();
+    let input: GraphTensor<R1<I>> = cx.tensor();
+    let output: GraphTensor<R1<O>> = model.forward(input).retrieve();
     let loss = output.sum_reduce().retrieve();
 
     let weights = params(&model);
