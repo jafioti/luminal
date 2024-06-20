@@ -581,7 +581,7 @@ mod tests {
         assert_eq!(&a.shape.fake[..], &[false, true, true]); // has multiple fake dimensions
         assert_eq!(&a.shape.indexes[..], &[0, 2, 1]); // not strictly increasing
 
-        // note: this tests the case when the rev indexes may decrease (2 -> 0) after increasing (1 -> 2)
+        // note: this tests the case when the rev indexes may decrease (0 <- 2) after increasing (2 <- 1)
 
         let loss: GraphTensor<R0> = a.sum_reduce();
         let _grads = cx.compile(Autograd::new(vec![a.id], loss), ());
@@ -597,7 +597,7 @@ mod tests {
         assert_eq!(&a.shape.indexes[..], &[1, 2, 0, 4, 3]); // not strictly increasing
 
         // note: the difference in this test to test_add_grad_decreasing_idx_r1
-        // is that the rev indexes may increase (0 -> 2) after it has decreased (4 -> 0) after it has increased (3 -> 4)
+        // is that the rev indexes may increase (2 <- 0) after it has decreased (0 <- 4) after it has increased (4 <- 3)
 
         let loss: GraphTensor<R0> = a.sum_reduce();
         let _grads = cx.compile(Autograd::new(vec![a.id], loss), ());
