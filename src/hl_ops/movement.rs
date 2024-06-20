@@ -32,10 +32,8 @@ impl<S: Shape> GraphTensor<S> {
                 break 'expand;
             }
 
-            if !new_dims.is_empty() && new_dims != src_dims {
-                for (i, dim) in Ax::as_array().into_iter().map(|i| (i, new_dims[i])) {
-                    self.shape.expand(i, dim);
-                }
+            for (i, dim) in Ax::as_array().into_iter().map(|i| (i, new_dims[i])) {
+                self.shape.expand(i, dim);
             }
         };
 
