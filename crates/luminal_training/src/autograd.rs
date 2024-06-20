@@ -199,14 +199,33 @@ fn add_grad(
     grad.shape.indexes = new_indexes;
 
     // Undo expands (sum reduce)
+    let mut min_idx_removed: Option<usize> = None;
+    let mut min_idx_removed_amount: Option<usize> = None;
+    // TODO: the rev() may no longer be required
     for i in fwd.shape.indexes.into_iter().rev() {
         if fwd.shape.fake[i] {
+            min_idx_removed = if let Some(prev) = min_idx_removed {
+                Some(prev.min(i))
+            } else {
+                Some(i)
+            };
+            let min_idx_removed = min_idx_removed.unwrap_or_default();
+            let i_diff = if i > min_idx_removed {
+                min_idx_removed_amount.unwrap_or_default()
+            } else {
+                0
+            };
             grad.id = graph
-                .add_op(SumReduce(i))
+                .add_op(SumReduce(i - i_diff))
                 .input(grad.id, 0, grad.shape)
                 .finish();
-            grad.shape.remove_dim(i);
+            grad.shape.remove_dim(i - i_diff);
             grad.shape = grad.shape.contiguous();
+            min_idx_removed_amount = if let Some(prev) = min_idx_removed_amount {
+                Some(prev + 1)
+            } else {
+                Some(1)
+            };
         }
     }
 
