@@ -552,4 +552,20 @@ mod tests {
                 .as_vec(),
         );
     }
+
+    #[test]
+    fn test_add_grad_decreasing_idx() {
+        let mut cx = Graph::new();
+        let a: GraphTensor<R1<2>> = cx.tensor();
+        let a: GraphTensor<R3<1, 1, 2>> = a.expand::<_, LAxes2<0, 1>>();
+        let a: GraphTensor<R3<2, 1, 1>> = a.permute::<_, LAxes3<2, 1, 0>>();
+        // a.shape.fake = [false, true, true]
+        // a.shape.indexes = [0, 2, 1] // note that the idx isn't necessarily increasing (0,1,2)
+        let b: GraphTensor<R3<2, 1, 1>> = cx.tensor();
+        let weights = vec![a.id, b.id];
+
+        let m: GraphTensor<R3<2, 1, 1>> = a * b;
+        let loss: GraphTensor<R0> = m.sum_reduce();
+        let _grads = cx.compile(Autograd::new(weights, loss), ());
+    }
 }
