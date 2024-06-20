@@ -554,18 +554,33 @@ mod tests {
     }
 
     #[test]
-    fn test_add_grad_decreasing_idx() {
+    fn test_add_grad_decreasing_idx_r1() {
         let mut cx = Graph::new();
         let a: GraphTensor<R1<2>> = cx.tensor();
         let a: GraphTensor<R3<1, 1, 2>> = a.expand::<_, LAxes2<0, 1>>();
         let a: GraphTensor<R3<2, 1, 1>> = a.permute::<_, LAxes3<2, 1, 0>>();
-        // a.shape.fake = [false, true, true]
-        // a.shape.indexes = [0, 2, 1] // note that the idx isn't necessarily increasing (0,1,2)
-        let b: GraphTensor<R3<2, 1, 1>> = cx.tensor();
-        let weights = vec![a.id, b.id];
+        assert_eq!(&a.shape.fake[..], &[false, true, true]); // has multiple fake dimensions
+        assert_eq!(&a.shape.indexes[..], &[0, 2, 1]); // not strictly increasing
 
-        let m: GraphTensor<R3<2, 1, 1>> = a * b;
-        let loss: GraphTensor<R0> = m.sum_reduce();
-        let _grads = cx.compile(Autograd::new(weights, loss), ());
+        // note: this tests the case when the rev indexes may decrease (2 -> 0) after increasing (1 -> 2)
+
+        let loss: GraphTensor<R0> = a.sum_reduce();
+        let _grads = cx.compile(Autograd::new(vec![a.id], loss), ());
+    }
+
+    #[test]
+    fn test_add_grad_decreasing_idx_r2() {
+        let mut cx = Graph::new();
+        let a: GraphTensor<R2<2, 3>> = cx.tensor();
+        let a: GraphTensor<R5<2, 1, 1, 1, 3>> = a.expand::<_, LAxes3<1, 2, 3>>();
+        let a: GraphTensor<R5<3, 1, 2, 1, 1>> = a.permute::<_, LAxes5<4, 1, 0, 3, 2>>();
+        assert_eq!(&a.shape.fake[..], &[false, false, true, true, true]); // has multiple fake dimensions
+        assert_eq!(&a.shape.indexes[..], &[1, 2, 0, 4, 3]); // not strictly increasing
+
+        // note: the difference in this test to test_add_grad_decreasing_idx_r1
+        // is that the rev indexes may increase (0 -> 2) after it has decreased (4 -> 0) after it has increased (3 -> 4)
+
+        let loss: GraphTensor<R0> = a.sum_reduce();
+        let _grads = cx.compile(Autograd::new(vec![a.id], loss), ());
     }
 }
