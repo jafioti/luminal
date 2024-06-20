@@ -16,12 +16,28 @@ impl<S: Shape> GraphTensor<S> {
     where
         S: BroadcastShapeTo<Dst, Ax>,
     {
-        let new_dims = Dst::realized_shape();
-        if !new_dims.is_empty() {
-            for (i, dim) in Ax::as_array().into_iter().map(|i| (i, new_dims[i])) {
-                self.shape.expand(i, dim);
+        'expand: {
+            let new_dims = Dst::realized_shape();
+            if new_dims.is_empty() {
+                break 'expand;
+            };
+
+            let src_dims = S::realized_shape();
+            if src_dims.len() == new_dims.len()
+                && src_dims
+                    .iter()
+                    .zip(new_dims.iter())
+                    .all(|(src_dim, new_dim)| src_dim.as_num() == new_dim.as_num())
+            {
+                break 'expand;
             }
-        }
+
+            if !new_dims.is_empty() && new_dims != src_dims {
+                for (i, dim) in Ax::as_array().into_iter().map(|i| (i, new_dims[i])) {
+                    self.shape.expand(i, dim);
+                }
+            }
+        };
 
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
