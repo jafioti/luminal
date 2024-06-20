@@ -514,4 +514,14 @@ mod tests {
 
         assert_close(&c.data(), &d_c.as_vec());
     }
+
+    #[test]
+    fn test_noop_expand() {
+        type S = R1<1>;
+        type Tensor = GraphTensor<S>;
+        let mut cx = Graph::new();
+        let a: Tensor = cx.tensor();
+        let noop_expanded: Tensor = a.expand::<S, LAxis<0>>();
+        assert_eq!(a.shape, noop_expanded.shape);
+    }
 }
