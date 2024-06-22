@@ -69,7 +69,7 @@ fn apply_rotary_embeddings_ggml<const N_HEADS: usize, Batch: Dimension, Seq: Dim
 ) -> GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)> {
     // Get freqs
     let freqs = (input.graph().arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
-    let freqs = 500000_f32.pow(freqs);
+    let freqs = 10_000_f32.pow(freqs);
     let pos = input.graph().arange::<Seq>() + prev_seq;
     let emb = pos.expand::<(_, Const<1>), _>().matmul(freqs.expand());
 
@@ -302,7 +302,9 @@ impl InitModule for Phi {
                 weight: cx.named_tensor("Embedding Weight"),
             },
             norm: LayerNorm::new(true, false, false, 1e-5, cx),
-            lm_head: InitModule::initialize(cx),
+            lm_head: PermutedLinear {
+                weight: cx.tensor(),
+            },
             layers: (0..NUM_LAYERS)
                 .map(|_| InitModule::initialize(cx))
                 .collect(),

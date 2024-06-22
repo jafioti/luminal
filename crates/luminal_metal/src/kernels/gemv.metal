@@ -3,9 +3,9 @@
 #include <metal_stdlib>
 #include <metal_simdgroup>
 
-#include "KERNEL_PATH/bf16.h"
-#include "KERNEL_PATH/defines.h"
-#include "KERNEL_PATH/utils.h"
+BF16.H
+DEFINES.H
+UTILS.H
 
 using namespace metal;
 

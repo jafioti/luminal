@@ -105,7 +105,7 @@ fn main() {
 
     // Run prompt processing pass
     let mut input_ids = tokenizer
-        .encode(&cli_args.prompt as &str, false)
+        .encode(&cli_args.prompt as &str, true)
         .unwrap()
         .get_ids()
         .to_vec();
@@ -128,7 +128,6 @@ fn main() {
     delete_inputs(&cache_src, &mut cx);
     let mut output_ids = vec![argmax(&logits.data())];
     logits.drop();
-
     // Decode token
     print!("{}", cli_args.prompt.white().bold());
     let out_str = tokenizer.decode(&output_ids, false).unwrap().bright_green();

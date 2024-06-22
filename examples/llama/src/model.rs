@@ -27,14 +27,12 @@ pub struct Mlp<const I: usize, const H: usize> {
     pub up_proj: PermutedLinear<H, I>,
 }
 
-impl<Sh: Shape, Im: Shape, const I: usize, const H: usize> Module<GraphTensor<Sh>> for Mlp<I, H>
-where
-    GraphTensor<Sh>: Matmul<R2<H, I>, Output = GraphTensor<Im>>,
-    GraphTensor<Im>: Matmul<R2<I, H>, Output = GraphTensor<Sh>>,
+impl<const I: usize, const H: usize, Batch: Dimension, Batch1: Dimension>
+    Module<GraphTensor<(Batch, Batch1, Const<H>)>> for Mlp<I, H>
 {
-    type Output = GraphTensor<Sh>;
+    type Output = GraphTensor<(Batch, Batch1, Const<H>)>;
 
-    fn forward(&self, input: GraphTensor<Sh>) -> Self::Output {
+    fn forward(&self, input: GraphTensor<(Batch, Batch1, Const<H>)>) -> Self::Output {
         let gate = self.gate_proj.forward(input).swish();
         let up = self.up_proj.forward(input) * gate;
         self.down_proj.forward(up)
@@ -71,7 +69,7 @@ fn apply_rotary_embeddings_ggml<const N_HEADS: usize, Batch: Dimension, Seq: Dim
 ) -> GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)> {
     // Get freqs
     let freqs = (input.graph().arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
-    let freqs = 500000_f32.pow(freqs);
+    let freqs = 500_000_f32.pow(freqs);
     let pos = input.graph().arange::<Seq>() + prev_seq;
     let emb = pos.expand::<(_, Const<1>), _>().matmul(freqs.expand());
 

@@ -229,7 +229,10 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                             .sorted_by_key(|(i, _, _)| *i)
                             .map(|(_, _, s)| s)
                             .collect::<Vec<_>>(),
-                    );
+                    )
+                    .into_iter()
+                    .map(|s| s.simplify())
+                    .collect();
                 let new_op = graph
                     .add_op(FusedElementwiseOp::<T> {
                         kernel_str: "".to_string(),
@@ -283,7 +286,10 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 let output_buffer_sizes = graph
                     .node_custom::<MetalKernelWrapper, _>(op, "metal", ())
                     .unwrap()
-                    .output_buffer_sizes(&input_shapes);
+                    .output_buffer_sizes(&input_shapes)
+                    .into_iter()
+                    .map(|s| s.simplify())
+                    .collect();
                 let new_op = graph
                     .add_op(FusedElementwiseOp::<T> {
                         kernel_str: "".to_string(),

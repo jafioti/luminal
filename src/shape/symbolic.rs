@@ -931,6 +931,8 @@ fn make_rules() -> Vec<Rewrite> {
         rewrite!("cancel-div"; "(/ ?a ?a)" => "1" if is_not_zero("?a")),
         // Other
         rewrite!("distribute"; "(* ?a (+ ?b ?c))"        => "(+ (* ?a ?b) (* ?a ?c))"),
+        rewrite!("distribute-max"; "(* ?a (max ?b ?c))"        => "(max (* ?a ?b) (* ?a ?c))"),
+        rewrite!("distribute-min"; "(* ?a (min ?b ?c))"        => "(min (* ?a ?b) (* ?a ?c))"),
         rewrite!("factor"    ; "(+ (* ?a ?b) (* ?a ?c))" => "(* ?a (+ ?b ?c))"),
         rewrite!("group-terms"; "(+ ?a ?a)" => "(* 2 ?a)"),
         rewrite!("distribute-mod"; "(* (% ?b ?c) ?a)" => "(% (* ?b ?a) (* ?c ?a))"),
