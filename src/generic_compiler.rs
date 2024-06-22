@@ -425,6 +425,65 @@ impl Compiler for ArithmeticElimination {
             graph.remove_node(out);
             graph.safe_remove_node(intermediate, 0);
         }
+
+        // exp2(log2(x))
+        let inp = node();
+        let intermediate = unary::<Exp2>(inp.clone());
+        let out = unary::<Log2>(intermediate.clone());
+        let mut s = out.clone().search(graph);
+        while s.next_match() {
+            let (inp, intermediate, out) = (s.get(&inp), s.get(&intermediate), s.get(&out));
+            if graph.no_delete.contains(&intermediate) {
+                continue;
+            }
+            // Carry over outgoing edges
+            let input_shape = graph
+                .graph
+                .edges_connecting(inp, intermediate)
+                .find_map(|e| e.weight().as_data())
+                .unwrap()
+                .2;
+            if input_shape.is_reshaped() {
+                // If any output shape is non-contiguous, we need to keep the op for it's contiguous functionality TODO: replace with explicit contiguous op here
+                if graph
+                    .graph
+                    .edges_connecting(inp, intermediate)
+                    .filter_map(|e| e.weight().as_data())
+                    .any(|(_, _, sh)| sh.is_reshaped())
+                    || graph
+                        .graph
+                        .edges_connecting(intermediate, out)
+                        .filter_map(|e| e.weight().as_data())
+                        .any(|(_, _, sh)| sh.is_reshaped())
+                {
+                    continue;
+                }
+                for (weight, target) in graph
+                    .graph
+                    .edges_directed(intermediate, petgraph::Direction::Outgoing)
+                    .map(|e| (*e.weight(), e.target()))
+                    .collect::<Vec<_>>()
+                {
+                    if let Some(weight) = weight.as_data() {
+                        graph.graph.add_edge(
+                            inp,
+                            target,
+                            Dependency::Data {
+                                input_order: weight.0,
+                                output_order: weight.1,
+                                shape: input_shape,
+                            },
+                        );
+                    }
+                }
+            } else {
+                move_outgoing_edge(out, inp, &mut graph.graph);
+            }
+            remap(intermediate, inp, &mut ids, graph);
+            remap(out, inp, &mut ids, graph);
+            graph.remove_node(out);
+            graph.safe_remove_node(intermediate, 0);
+        }
     }
 }
 

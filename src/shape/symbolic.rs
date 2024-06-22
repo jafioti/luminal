@@ -932,6 +932,12 @@ fn make_rules() -> Vec<Rewrite> {
         // Other
         rewrite!("distribute"; "(* ?a (+ ?b ?c))"        => "(+ (* ?a ?b) (* ?a ?c))"),
         rewrite!("factor"    ; "(+ (* ?a ?b) (* ?a ?c))" => "(* ?a (+ ?b ?c))"),
+        rewrite!("group-terms"; "(+ ?a ?a)" => "(* 2 ?a)"),
+        rewrite!("distribute-mod"; "(* (% ?b ?c) ?a)" => "(% (* ?b ?a) (* ?c ?a))"),
+        rewrite!("explicit-truncate"; "(* (/ ?a ?b) ?b)" => "(- ?a (% ?a ?b))"),
+        rewrite!("mul-mod"; "(% (* ?a ?b) ?b)" => "0"),
+        // rewrite!("mul-distribute"; "(* ?a (% (/ ?b ?c) ?d))" => "(% (/ ?b (* ?c ?a)) (* ?d ?a))"),
+        // rewrite!("div-mod-mul"; "(% (/ ?a ?b) ?c)" => "(% ?a (* ?b ?c))"),
     ]
 }
 
@@ -941,7 +947,7 @@ fn egg_simplify<S: ExpressionStorage>(expr: GenericExpression<S>) -> GenericExpr
     // Simplify
     let runner = Runner::default()
         .with_expr(&expr)
-        .with_iter_limit(10)
+        .with_iter_limit(100)
         .run(&make_rules());
     let extractor = Extractor::new(&runner.egraph, AstSize);
     let (_, best) = extractor.find_best(runner.roots[0]);
