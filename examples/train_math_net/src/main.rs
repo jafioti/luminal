@@ -13,6 +13,9 @@ fn main() {
     let model = <(Linear<8, 16>, Swish, Linear<16, 16>, Swish, Linear<16, 5>)>::initialize(&mut cx);
     let mut input = cx.tensor::<R1<8>>();
     let mut target = cx.tensor::<R1<5>>();
+    model.0.weight.retrieve();
+    model.2.weight.retrieve();
+    model.4.weight.retrieve();
     let mut output = model.forward(input).retrieve();
     let mut loss = mse_loss(output, target).retrieve();
 
