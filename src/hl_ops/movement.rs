@@ -17,7 +17,14 @@ impl<S: Shape> GraphTensor<S> {
         S: BroadcastShapeTo<Dst, Ax>,
     {
         let new_dims = Dst::realized_shape();
-        if !new_dims.is_empty() {
+        let src_dims = S::realized_shape();
+        let is_noop = src_dims.len() == new_dims.len()
+            && src_dims
+                .iter()
+                .zip(new_dims.iter())
+                .all(|(src_dim, new_dim)| src_dim.as_num() == new_dim.as_num());
+
+        if !new_dims.is_empty() && !is_noop {
             for (i, dim) in Ax::as_array().into_iter().map(|i| (i, new_dims[i])) {
                 self.shape.expand(i, dim);
             }
@@ -513,5 +520,15 @@ mod tests {
             .realize::<Rank2<3, 2>>();
 
         assert_close(&c.data(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_noop_expand() {
+        type S = R1<1>;
+        type Tensor = GraphTensor<S>;
+        let mut cx = Graph::new();
+        let a: Tensor = cx.tensor();
+        let noop_expanded: Tensor = a.expand::<S, LAxis<0>>();
+        assert_eq!(a.shape, noop_expanded.shape);
     }
 }
