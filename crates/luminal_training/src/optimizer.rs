@@ -50,7 +50,7 @@ pub fn sgd_on_graph(
 
         // SGD
         let new_weight = old_weight - (gradient * lr.expand_to(grad_shape));
-        new_weight.keep();
+        new_weight.retrieve();
 
         new_weights.push(new_weight.id);
     }
