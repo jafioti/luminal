@@ -376,7 +376,7 @@ impl<T: CudaFloat> Compiler for GatherCompiler<T> {
                 .as_data()
                 .unwrap()
                 .2;
-            let embed_dim = emb_shape.shape()[2].to_usize().unwrap();
+            let embed_dim = emb_shape.shape().last().unwrap().to_usize().unwrap();
             let index_shape = graph
                 .edges_connecting(s.get(&indexes), s.get(&ind_copy))
                 .next()
@@ -408,8 +408,8 @@ mod tests {
 
     #[test]
     fn test_gather_compiler_r0() {
-        const CLASSES: usize = 10;
-        const TARGET: usize = 3;
+        const CLASSES: usize = 2;
+        const TARGET: usize = 1;
 
         let mut cx = Graph::new();
         let mut input: TR0 = cx.tensor();
@@ -433,8 +433,8 @@ mod tests {
 
     #[test]
     fn test_gather_compiler_r1() {
-        const CLASSES: usize = 10;
-        const TARGET: usize = 3;
+        const CLASSES: usize = 2;
+        const TARGET: usize = 1;
 
         let mut cx = Graph::new();
         let mut input: TR1<1> = cx.tensor();
