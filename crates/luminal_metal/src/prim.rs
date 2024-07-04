@@ -40,13 +40,11 @@ impl<T: MetalFloat> Operator for MetalCopyToDevice<T> {
         if data.is_empty() {
             data.push(T::from_f32(0.0));
         }
-        let buffer = self.0.new_buffer_with_bytes_no_copy(
+        let buffer = self.0.new_buffer_with_data(
             data.as_ptr() as *mut _,
             (data.len() * std::mem::size_of::<T>()) as u64,
             MTLResourceOptions::StorageModeShared,
-            None,
         );
-        data.leak();
         vec![Tensor::new(MetalBuffer(buffer))]
     }
 }

@@ -190,8 +190,7 @@ pub struct Looped<C: Compiler + Debug>(C);
 impl<C: Compiler + Debug> Compiler for Looped<C> {
     type Output = ();
     fn compile<T: ToIdsMut>(&self, graph: &mut Graph, mut remap: T) {
-        graph.toposort();
-        let mut linearized = graph.linearized_graph.clone();
+        let mut linearized = None;
         loop {
             self.0.compile(graph, &mut remap);
             graph.toposort();

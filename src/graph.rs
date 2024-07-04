@@ -1,5 +1,3 @@
-#![allow(clippy::needless_range_loop)]
-
 use crate::prelude::*;
 use std::{
     io::Write,
@@ -31,7 +29,7 @@ pub struct Graph {
     pub no_delete: FxHashSet<NodeIndex>,
     /// Tensors marked in this set need to be retrieved later (mostly for optimizers to insert copy back calls, the graph itself doesn't treat these differently)
     pub to_retrieve: FxHashMap<NodeIndex, (u8, ShapeTracker)>,
-    /// A list of current node to run, source nodes, and view nodes to delete after execution.
+    /// A cached list of nodes to run, source nodes, and view nodes to delete after execution.
     #[allow(clippy::type_complexity)]
     pub(crate) linearized_graph: Option<Vec<(NodeIndex, Vec<(NodeIndex, u8, ShapeTracker)>)>>,
     /// Cached consumers (for execution only)

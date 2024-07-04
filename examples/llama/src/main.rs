@@ -105,12 +105,11 @@ fn main() {
     delete_inputs(&downstream(model_weights, &cx), &mut cx);
 
     // Run prompt processing pass
-    let mut input_ids = tokenizer
+    let input_ids = tokenizer
         .encode(&cli_args.prompt as &str, false)
         .unwrap()
         .get_ids()
         .to_vec();
-    input_ids.insert(0, 1);
     input.set_dyn(
         input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
         &[1, input_ids.len()],
@@ -126,7 +125,7 @@ fn main() {
         1000.0 * (input_ids.len() as f64) / (elapsed_ms as f64),
         input_ids.len()
     );
-    let mut output_ids = vec![sample_index(&logits.data())];
+    let mut output_ids = vec![argmax(&logits.data())];
     logits.drop();
 
     // Decode token
@@ -150,7 +149,7 @@ fn main() {
         cx.execute();
 
         // Sample tokens
-        let output_id = sample_index(&logits.data());
+        let output_id = argmax(&logits.data());
         logits.drop();
         output_ids.push(output_id);
 
@@ -179,7 +178,7 @@ fn main() {
 }
 
 // Currently just an argmax, do actual sampling here
-fn sample_index(dist: &[f32]) -> u32 {
+fn argmax(dist: &[f32]) -> u32 {
     dist.iter()
         .position_max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .unwrap() as u32
