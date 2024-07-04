@@ -128,7 +128,7 @@ impl CudaFloat for u8 {
 
 fn expr_to_cuda_string(expr: &BigExpression) -> String {
     let mut symbols = vec![];
-    for term in expr.terms.clone() {
+    for term in expr.clone().simplify().terms {
         let new_symbol = match term {
             Term::Num(n) => n.to_string(),
             Term::Var(c) => {

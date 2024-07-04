@@ -1,6 +1,7 @@
 //! Support for the GGUF file format.
 //!
 //! Spec: https://github.com/philpax/ggml/blob/gguf-spec/docs/gguf.md
+#![allow(unused)]
 
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::collections::HashMap;
