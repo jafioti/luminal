@@ -1,17 +1,17 @@
 use crate::{op, prelude::*};
 use std::ops::{Add, Mul, Neg};
 
-impl<S: Shape> Neg for GraphTensor<S> {
-    type Output = GraphTensor<S>;
+impl Neg for GraphTensor {
+    type Output = GraphTensor;
 
     fn neg(self) -> Self::Output {
         self * -1.0
     }
 }
 
-impl<S: Shape> GraphTensor<S> {
+impl GraphTensor {
     /// Base 2 log
-    pub fn log2(self) -> GraphTensor<S> {
+    pub fn log2(self) -> GraphTensor {
         let new_id = self
             .graph()
             .add_op(op::Log2)
@@ -21,7 +21,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Base 2 exp
-    pub fn exp2(self) -> GraphTensor<S> {
+    pub fn exp2(self) -> GraphTensor {
         let new_id = self
             .graph()
             .add_op(op::Exp2)
@@ -31,17 +31,17 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Natural exp
-    pub fn exp(self) -> GraphTensor<S> {
+    pub fn exp(self) -> GraphTensor {
         (self * (1.0 / f32::ln(2.))).exp2()
     }
 
     /// Natural log
-    pub fn ln(self) -> GraphTensor<S> {
+    pub fn ln(self) -> GraphTensor {
         self.log2() * f32::ln(2.)
     }
 
     /// Take the reciprocal of each element
-    pub fn recip(self) -> GraphTensor<S> {
+    pub fn recip(self) -> GraphTensor {
         let new_id = self
             .graph()
             .add_op(op::Recip)
@@ -51,7 +51,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// The sin(x) function
-    pub fn sin(self) -> GraphTensor<S> {
+    pub fn sin(self) -> GraphTensor {
         let new_id = self
             .graph()
             .add_op(op::Sin)
@@ -61,17 +61,17 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// The cos(x) function
-    pub fn cos(self) -> GraphTensor<S> {
+    pub fn cos(self) -> GraphTensor {
         ((std::f32::consts::PI / 2.) - self).sin()
     }
 
     /// Square every element in the tensor
-    pub fn square(self) -> GraphTensor<S> {
+    pub fn square(self) -> GraphTensor {
         self * self
     }
 
     /// The square root function
-    pub fn sqrt(self) -> GraphTensor<S> {
+    pub fn sqrt(self) -> GraphTensor {
         let new_id = self
             .graph()
             .add_op(op::Sqrt)
@@ -81,15 +81,12 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Scale so std is 1.0
-    pub fn std_norm<Ax: Axes, T>(self, epsilon: T) -> GraphTensor<S>
+    pub fn std_norm<T>(self, axes: impl ToAxes, epsilon: T) -> GraphTensor
     where
-        <S as ReduceShape<Ax>>::Reduced: Shape,
-        GraphTensor<<S as ReduceShape<Ax>>::Reduced>:
-            Add<T, Output = GraphTensor<<S as ReduceShape<Ax>>::Reduced>>,
-        S: ReduceShape<Ax>,
+        GraphTensor: Add<T, Output = GraphTensor>,
     {
         (self * self)
-            .mean_reduce::<<S as ReduceShape<Ax>>::Reduced, _>()
+            .mean_reduce(axes)
             .add(epsilon)
             .sqrt()
             .recip()
@@ -98,69 +95,40 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Center so mean is 0.0
-    pub fn mean_norm<Ax: Axes>(self) -> GraphTensor<S>
-    where
-        <S as ReduceShape<Ax>>::Reduced: Shape,
-        S: ReduceShape<Ax>,
-    {
-        self - self
-            .mean_reduce::<<S as ReduceShape<Ax>>::Reduced, _>()
-            .expand_to(self.shape)
+    pub fn mean_norm(self, axes: impl ToAxes) -> GraphTensor {
+        self - self.mean_reduce(axes).expand_to(self.shape)
     }
 
     /// Applies a layer norm along an axis
-    pub fn layer_norm<Ax: Axes, T>(self, epsilon: T) -> GraphTensor<S>
+    pub fn layer_norm<T>(self, axes: impl ToAxes, epsilon: T) -> GraphTensor
     where
-        <S as ReduceShape<Ax>>::Reduced: Shape,
-        GraphTensor<<S as ReduceShape<Ax>>::Reduced>:
-            Add<T, Output = GraphTensor<<S as ReduceShape<Ax>>::Reduced>>,
-        S: ReduceShape<Ax>,
+        GraphTensor: Add<T, Output = GraphTensor>,
     {
-        self.mean_norm::<Ax>().std_norm::<Ax, T>(epsilon)
+        self.mean_norm(axes.to_axes()).std_norm(axes, epsilon)
     }
 
     /// Applies a softmax function along an axis
-    pub fn softmax<Ax: Axes>(self) -> GraphTensor<S>
-    where
-        <S as ReduceShape<Ax>>::Reduced: Shape,
-        S: ReduceShape<Ax>,
-    {
-        let m = self
-            - self
-                .max_reduce::<<S as ReduceShape<Ax>>::Reduced, _>()
-                .expand_to(self.shape);
+    pub fn softmax(self, axes: impl ToAxes) -> GraphTensor {
+        let m = self - self.max_reduce(axes.to_axes()).expand_to(self.shape);
         let exp = m.exp();
-        exp / exp
-            .sum_reduce::<<S as ReduceShape<Ax>>::Reduced, _>()
-            .expand()
+        exp / exp.sum_reduce(axes).expand_to(exp.shape)
     }
 
     /// Applies a log softmax function along an axis
-    pub fn log_softmax<Ax: Axes>(self) -> GraphTensor<S>
-    where
-        <S as ReduceShape<Ax>>::Reduced: Shape,
-        S: ReduceShape<Ax>,
-    {
-        let m = self
-            - self
-                .max_reduce::<<S as ReduceShape<Ax>>::Reduced, _>()
-                .expand_to(self.shape);
-        m - m
-            .exp()
-            .sum_reduce::<<S as ReduceShape<Ax>>::Reduced, _>()
-            .ln()
-            .expand()
+    pub fn log_softmax(self, axes: impl ToAxes) -> GraphTensor {
+        let m = self - self.max_reduce(axes.to_axes()).expand_to(self.shape);
+        m - m.exp().sum_reduce(axes.to_axes()).ln().expand_to(m.shape)
     }
 
     /// Get the indicies of the max elements along the last axis
-    pub fn argmax(self) -> GraphTensor<<S as ReduceShape<<S as Shape>::LastAxis>>::Reduced> {
+    pub fn argmax(self) -> GraphTensor {
         // Get one-hot along last dimension
-        let x_equal = self.equals(self.max_reduce::<_, S::LastAxis>().expand_to(self.shape));
+        let x_equal = self.equals(self.max_reduce(self.shape.len() - 1).expand_to(self.shape));
         // Create index arange for last dimension
         let r = self
             .graph()
             .constant(1.)
-            .expand_to::<(Dyn<'-'>,)>(ShapeTracker::new(&[self
+            .expand_to(ShapeTracker::new(&[self
                 .shape
                 .shape()
                 .last()
@@ -169,48 +137,48 @@ impl<S: Shape> GraphTensor<S> {
             .cumsum_last_dim()
             - 1.;
         // Multiply one-hot by expanded index arange
-        (x_equal * r.expand_to(self.shape)).max_reduce()
+        (x_equal * r.expand_to(self.shape)).max_reduce(self.shape.len() - 1)
     }
 
     /// Take the absolute value
-    pub fn abs(self) -> GraphTensor<S> {
+    pub fn abs(self) -> GraphTensor {
         self.relu() + (-self).relu()
     }
 
     /// Get the sign of each element, '1' for positive and '-1' for negative
-    pub fn sign(self) -> GraphTensor<S> {
+    pub fn sign(self) -> GraphTensor {
         self / (self.abs() + 1e-10)
     }
 
     /// The Rectified Linear Unit activation function
-    pub fn relu(self) -> GraphTensor<S> {
+    pub fn relu(self) -> GraphTensor {
         self.max_f32(0.)
     }
 
     /// The sigmoid activation function
-    pub fn sigmoid(self) -> GraphTensor<S> {
+    pub fn sigmoid(self) -> GraphTensor {
         // Based on https://github.com/tinygrad/tinygrad/blob/9d142430cbe61121c864c0015f1de83c94a7d2c0/tinygrad/mlops.py#L70
         1. / (1. + (-self).exp())
     }
 
     /// The swish activation function
-    pub fn swish(self) -> GraphTensor<S> {
+    pub fn swish(self) -> GraphTensor {
         self * self.sigmoid()
     }
 
     /// The tanh activation function
-    pub fn tanh(self) -> GraphTensor<S> {
+    pub fn tanh(self) -> GraphTensor {
         (self * 2.0).sigmoid() * 2.0 - 1.0
     }
 
     /// The leaky relu activation function
-    pub fn leaky_relu(self, neg_slope: f32) -> GraphTensor<S> {
+    pub fn leaky_relu(self, neg_slope: f32) -> GraphTensor {
         self.relu() - (self * -neg_slope).relu()
     }
 
     /// The Gaussian Error Linear Unit activation function
     #[allow(clippy::excessive_precision)]
-    pub fn gelu(self) -> GraphTensor<S> {
+    pub fn gelu(self) -> GraphTensor {
         // Based on https://github.com/tinygrad/tinygrad/blob/9fc4465557831b614b56dd645eebc940ca0fa1bb/tinygrad/tensor.py#L1162C26-L1162C104
         0.5 * self * (1. + (0.7978845608 * self * (1. + 0.044715 * self * self)).tanh())
     }
@@ -224,7 +192,7 @@ mod tests {
     fn test_exp() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.tensor::<R2<2, 3>>().set(a_data.clone());
+        let a = cx.tensor((2, 3)).set(a_data.clone());
         let b = a.exp().retrieve();
         cx.execute();
 
@@ -239,9 +207,9 @@ mod tests {
     fn test_layer_norm() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.tensor::<R2<2, 3>>().set(a_data.clone());
-        let b = a.layer_norm::<LAxis<0>, _>(1e-5).retrieve();
-        let c = a.layer_norm::<LAxis<1>, _>(1e-5).retrieve();
+        let a = cx.tensor((2, 3)).set(a_data.clone());
+        let b = a.layer_norm(0, 1e-5).retrieve();
+        let c = a.layer_norm(1, 1e-5).retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -257,8 +225,8 @@ mod tests {
     fn test_softmax() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.tensor::<R2<2, 3>>().set(a_data.clone());
-        let b = a.softmax::<LAxis<1>>().retrieve();
+        let a = cx.tensor((2, 3)).set(a_data.clone());
+        let b = a.softmax(1).retrieve();
 
         cx.execute();
 
@@ -274,7 +242,7 @@ mod tests {
     fn test_sin() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.tensor::<R2<2, 3>>().set(a_data.clone());
+        let a = cx.tensor((2, 3)).set(a_data.clone());
         let b = a.sin().retrieve();
 
         cx.execute();
@@ -291,7 +259,7 @@ mod tests {
     fn test_cos() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.tensor::<R2<2, 3>>().set(a_data.clone());
+        let a = cx.tensor((2, 3)).set(a_data.clone());
         let b = a.cos().retrieve();
 
         cx.execute();
@@ -306,9 +274,7 @@ mod tests {
     fn test_relu() {
         let mut cx = Graph::new();
         let a_data = random_vec(4);
-        let a = cx
-            .tensor::<(Dyn<'a'>, Dyn<'b'>)>()
-            .set_dyn(a_data.clone(), &[2, 2]);
+        let a = cx.tensor(('a', 'b')).set_dyn(a_data.clone(), (2, 2));
         let b = a.relu().retrieve();
 
         cx.execute();
@@ -323,9 +289,7 @@ mod tests {
     fn test_gelu() {
         let mut cx = Graph::new();
         let a_data = random_vec(4);
-        let a = cx
-            .tensor::<(Dyn<'a'>, Dyn<'b'>)>()
-            .set_dyn(a_data.clone(), &[2, 2]);
+        let a = cx.tensor(('a', 'b')).set_dyn(a_data.clone(), (2, 2));
         let b = a.gelu().retrieve();
 
         cx.execute();
@@ -340,9 +304,7 @@ mod tests {
     fn test_sigmoid() {
         let mut cx = Graph::new();
         let a_data = random_vec(4);
-        let a = cx
-            .tensor::<(Dyn<'a'>, Dyn<'b'>)>()
-            .set_dyn(a_data.clone(), &[2, 2]);
+        let a = cx.tensor(('a', 'b')).set_dyn(a_data.clone(), (2, 2));
         let b = a.sigmoid().retrieve();
 
         cx.execute();
@@ -357,9 +319,7 @@ mod tests {
     fn test_swish() {
         let mut cx = Graph::new();
         let a_data = random_vec(4);
-        let a = cx
-            .tensor::<(Dyn<'a'>, Dyn<'b'>)>()
-            .set_dyn(a_data.clone(), &[2, 2]);
+        let a = cx.tensor(('a', 'b')).set_dyn(a_data.clone(), (2, 2));
         let b = a.swish().retrieve();
         cx.execute();
 
@@ -373,9 +333,7 @@ mod tests {
     fn test_tanh() {
         let mut cx = Graph::new();
         let a_data = random_vec(4);
-        let a = cx
-            .tensor::<(Dyn<'a'>, Dyn<'b'>)>()
-            .set_dyn(a_data.clone(), &[2, 2]);
+        let a = cx.tensor(('a', 'b')).set_dyn(a_data.clone(), (2, 2));
         let b = a.tanh().retrieve();
 
         cx.execute();

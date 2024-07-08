@@ -1,113 +1,98 @@
 use crate::prelude::*;
 
-#[diagnostic::on_unimplemented(
-    message = "`{Self}` and `GraphTensor<{S}>` cannot be matrix multiplied! The last dimension of the left hand tensor and the second to last dimension of the right hand tensor must match.",
-    label = "Left hand tensor: `{Self}`"
-)]
-pub trait Matmul<S: Shape> {
-    type Output;
-    fn matmul(self, rhs: GraphTensor<S>) -> Self::Output;
-}
+impl GraphTensor {
+    pub fn matmul(mut self, rhs: GraphTensor) -> Self {
+        if (self.shape.len() == 1 || self.shape.len() == 2) && rhs.shape.len() == 2 {
+            let vec = self.shape.len() == 1;
+            if vec {
+                self = self.expand(0, 1);
+            }
+            let m = self.shape()[0].small();
+            let n = rhs.shape()[1].small();
+            // Broadcasted Multiply
+            let mul = self.expand(1, n) * rhs.permute((1, 0)).expand(0, m);
 
-// ABxBC -> AC
-impl<A: Dimension, B: Dimension, C: Dimension> Matmul<(B, C)> for GraphTensor<(A, B)> {
-    type Output = GraphTensor<(A, C)>;
-    fn matmul(self, rhs: GraphTensor<(B, C)>) -> Self::Output {
-        // Broadcasted Multiply
-        let mul = self.expand::<(A, C, B), _>()
-            * rhs.permute::<_, Axes2<1, 0>>().expand::<(A, C, B), _>();
+            // Sum Reduce
+            let mut ret = mul.sum_reduce(2);
+            if vec {
+                ret = ret.reshape(ret.shape().last().unwrap());
+            }
+            ret
+        } else if self.shape.len() == 3 {
+            let d = rhs.shape().last().unwrap().small();
+            let a = self.shape()[0].small();
+            let b = self.shape()[1].small();
+            if rhs.shape.len() == 2 {
+                // ABCxCD -> ABD
+                // Reshape
+                let w = rhs.permute((1, 0));
 
-        // Sum Reduce
-        mul.sum_reduce::<_, Axis<2>>()
+                // Broadcasted Multiply
+                let mul = self.expand(2, d) * w.expand(0, a).expand(1, b);
+
+                // Sum Reduce
+                mul.sum_reduce(3)
+            } else if rhs.shape.len() == 3 {
+                // Reshape
+                let w = rhs.permute((0, 2, 1));
+
+                // Broadcasted Multiply
+                let mul = self.expand(2, d) * w.expand(1, b);
+
+                // Sum Reduce
+                mul.sum_reduce(3)
+            } else {
+                panic!(
+                    "Can't matmul lhs {:?} and rhs {:?}",
+                    self.shape(),
+                    rhs.shape()
+                )
+            }
+        } else if self.shape.len() == 4 && rhs.shape.len() == 4 {
+            // ABCDxABDE -> ABCE
+            let a = rhs.shape()[0].small();
+            let b = rhs.shape()[1].small();
+            let d = rhs.shape()[2].small();
+            let e = rhs.shape()[3].small();
+            let c = self.shape()[2].small();
+            // Reshape
+            let s = self.reshape((a * b, c, d));
+            let w = rhs.reshape((a * b, d, e)).permute((0, 2, 1));
+
+            // Broadcasted Multiply
+            let mul = s.expand(2, e) * w.expand(1, c);
+
+            // Sum Reduce
+            mul.sum_reduce(3).reshape((a, b, c, e))
+        } else if self.shape.len() == 5 && rhs.shape.len() == 5 {
+            // ABCDExABCEF -> ABCDF
+            let a = rhs.shape()[0].small();
+            let b = rhs.shape()[1].small();
+            let c = rhs.shape()[2].small();
+            let e = rhs.shape()[3].small();
+            let f = rhs.shape()[4].small();
+            let d = self.shape()[3].small();
+            // Reshape
+            let w = rhs.reshape((a * b * c, e, f)).permute((0, 2, 1));
+            let s = self.reshape((a * b * c, d, e));
+
+            // Broadcasted Multiply
+            let mul = s.expand(2, f) * w.expand(1, d);
+
+            // Sum Reduce
+            mul.sum_reduce(3).reshape((a, b, c, d, f))
+        } else {
+            panic!(
+                "Can't matmul lhs {:?} and rhs {:?}",
+                self.shape(),
+                rhs.shape()
+            )
+        }
     }
-}
 
-// AxAB -> B
-impl<A: Dimension, B: Dimension> Matmul<(A, B)> for GraphTensor<(A,)> {
-    type Output = GraphTensor<(B,)>;
-    fn matmul(self, rhs: GraphTensor<(A, B)>) -> Self::Output {
-        let s: GraphTensor<(Const<1>, A)> = self.expand();
-
-        // Run normal matmul
-        let r = s.matmul(rhs);
-
-        // Sum Reduce
-        r.reshape()
-    }
-}
-
-// ABCxCD -> ABD
-impl<A: Dimension, B: Dimension, C: Dimension, D: Dimension> Matmul<(C, D)>
-    for GraphTensor<(A, B, C)>
-{
-    type Output = GraphTensor<(A, B, D)>;
-    fn matmul(self, rhs: GraphTensor<(C, D)>) -> Self::Output {
-        // Reshape
-        let w: GraphTensor<(D, C)> = rhs.permute::<_, Axes2<1, 0>>();
-
-        // Broadcasted Multiply
-        let mul = self.expand::<(A, B, D, C), _>() * w.expand::<(A, B, D, C), _>();
-
-        // Sum Reduce
-        mul.sum_reduce::<_, Axis<3>>()
-    }
-}
-
-// ABCxACD -> ABD
-impl<A: Dimension, B: Dimension, C: Dimension, D: Dimension> Matmul<(A, C, D)>
-    for GraphTensor<(A, B, C)>
-{
-    type Output = GraphTensor<(A, B, D)>;
-    fn matmul(self, rhs: GraphTensor<(A, C, D)>) -> Self::Output {
-        // Reshape
-        let w: GraphTensor<(A, D, C)> = rhs.permute::<_, Axes3<0, 2, 1>>();
-
-        // Broadcasted Multiply
-        let mul = self.expand::<(A, B, D, C), _>() * w.expand::<(A, B, D, C), _>();
-
-        // Sum Reduce
-        mul.sum_reduce::<_, Axis<3>>()
-    }
-}
-
-// ABCDxABDE -> ABCE
-impl<A: Dimension, B: Dimension, C: Dimension, D: Dimension, E: Dimension> Matmul<(A, B, D, E)>
-    for GraphTensor<(A, B, C, D)>
-{
-    type Output = GraphTensor<(A, B, C, E)>;
-    fn matmul(self, rhs: GraphTensor<(A, B, D, E)>) -> Self::Output {
-        // Reshape
-        let w: GraphTensor<(A, B, E, D)> = rhs.permute::<_, Axes4<0, 1, 3, 2>>();
-
-        // Broadcasted Multiply
-        let mul = self.expand::<(A, B, C, E, D), _>() * w.expand::<(A, B, C, E, D), _>();
-
-        // Sum Reduce
-        mul.sum_reduce::<_, Axis<4>>()
-    }
-}
-
-// ABCDExABCEF -> ABCDF
-impl<A: Dimension, B: Dimension, C: Dimension, D: Dimension, E: Dimension, F: Dimension>
-    Matmul<(A, B, C, E, F)> for GraphTensor<(A, B, C, D, E)>
-{
-    type Output = GraphTensor<(A, B, C, D, F)>;
-    fn matmul(self, rhs: GraphTensor<(A, B, C, E, F)>) -> Self::Output {
-        // Reshape
-        let w: GraphTensor<(A, B, C, F, E)> = rhs.permute::<_, Axes5<0, 1, 2, 4, 3>>();
-
-        // Broadcasted Multiply
-        let mul = self.expand::<(A, B, C, D, F, E), _>() * w.expand::<(A, B, C, D, F, E), _>();
-
-        // Sum Reduce
-        mul.sum_reduce::<_, Axis<5>>()
-    }
-}
-
-impl<A: Dimension> GraphTensor<(A,)> {
     /// Simple dot product of two vectors
-    pub fn dot(self, rhs: GraphTensor<(A,)>) -> GraphTensor<R0> {
-        (self * rhs).sum_reduce()
+    pub fn dot(self, rhs: GraphTensor) -> GraphTensor {
+        (self * rhs).sum_reduce(0)
     }
 }
 
@@ -119,8 +104,8 @@ mod tests {
     fn test_matrix_vector() {
         let mut cx = Graph::new();
         let (a_vec, b_vec) = (random_vec(3), random_vec(6));
-        let a = cx.tensor::<R1<3>>().set(a_vec.clone());
-        let b = cx.tensor::<R2<3, 2>>().set(b_vec.clone());
+        let a = cx.tensor(3).set(a_vec.clone());
+        let b = cx.tensor((3, 2)).set(b_vec.clone());
         let mut c = a.matmul(b).retrieve();
 
         cx.compile(GenericCompiler::default(), &mut c);
@@ -138,9 +123,9 @@ mod tests {
     fn test_matmul() {
         let mut cx = Graph::new();
         let (a_data, b_data) = (random_vec(6), random_vec(9));
-        let a = cx.tensor::<R2<2, 3>>();
+        let a = cx.tensor((2, 3));
         a.set(a_data.clone());
-        let b = cx.tensor::<R2<3, 3>>();
+        let b = cx.tensor((3, 3));
         b.set(b_data.clone());
         let c = a.matmul(b);
         c.retrieve();
@@ -159,9 +144,9 @@ mod tests {
     fn test_batch_matmul() {
         let mut cx = Graph::new();
         let (a_data, b_data) = (random_vec(12), random_vec(8));
-        let a = cx.tensor::<R3<2, 3, 2>>();
+        let a = cx.tensor((2, 3, 2));
         a.set(a_data.clone());
-        let b = cx.tensor::<R2<2, 4>>();
+        let b = cx.tensor((2, 4));
         b.set(b_data.clone());
         let c = a.matmul(b);
         c.retrieve();
@@ -180,11 +165,11 @@ mod tests {
     fn test_batch_batch_matmul() {
         let mut cx = Graph::new();
         let (a_data, b_data) = (random_vec(6), random_vec(6));
-        let a = cx.tensor::<R3<1, 2, 3>>();
+        let a = cx.tensor((1, 2, 3));
         a.set(a_data.clone());
-        let b = cx.tensor::<R3<1, 2, 3>>();
+        let b = cx.tensor((1, 2, 3));
         b.set(b_data.clone());
-        let c: GraphTensor<R3<1, 2, 2>> = a.matmul(b.permute::<R3<1, 3, 2>, _>());
+        let c = a.matmul(b.permute((0, 2, 1)));
         c.retrieve();
 
         cx.execute();
@@ -201,11 +186,11 @@ mod tests {
     fn test_batch_batch_matmul2() {
         let mut cx = Graph::new();
         let (a_data, b_data) = (random_vec(4), random_vec(6));
-        let a = cx.tensor::<(Dyn<'a'>, Dyn<'b'>)>();
-        a.set_dyn(a_data.clone(), &[2, 2]);
-        let a = a.expand::<(LConst<1>, Dyn<'a'>, Dyn<'b'>), _>();
-        let b = cx.tensor::<(LConst<1>, Dyn<'b'>, LConst<3>)>();
-        b.set_dyn(b_data.clone(), &[1, 2, 3]);
+        let a = cx.tensor(('a', 'b'));
+        a.set_dyn(a_data.clone(), (2, 2));
+        let a = a.expand(0, 1);
+        let b = cx.tensor((1, 'b', 3));
+        b.set_dyn(b_data.clone(), (1, 2, 3));
         let c = a.matmul(b);
         c.retrieve();
 

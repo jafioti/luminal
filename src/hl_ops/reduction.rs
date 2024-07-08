@@ -1,19 +1,14 @@
-use itertools::Itertools;
-
 use crate::{
     op::{self},
     prelude::*,
 };
 
-impl<S: Shape> GraphTensor<S> {
-    pub fn sum_reduce<Dst: Shape, Ax: Axes>(self) -> GraphTensor<Dst>
-    where
-        S: HasAxes<Ax> + ReduceShapeTo<Dst, Ax>,
-    {
+impl GraphTensor {
+    pub fn sum_reduce(self, axes: impl ToAxes) -> GraphTensor {
         let mut shape = self.shape;
 
         let mut new_id = self.id;
-        for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
+        for dim in axes.to_axes().into_iter().rev() {
             new_id = self
                 .graph()
                 .add_op(op::SumReduce(dim))
@@ -25,14 +20,11 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(new_id, shape, self.graph_ref)
     }
 
-    pub fn max_reduce<Dst: Shape, Ax: Axes>(self) -> GraphTensor<Dst>
-    where
-        S: HasAxes<Ax> + ReduceShapeTo<Dst, Ax>,
-    {
+    pub fn max_reduce(self, axes: impl ToAxes) -> GraphTensor {
         let mut shape = self.shape;
 
         let mut new_id = self.id;
-        for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
+        for dim in axes.to_axes().into_iter().rev() {
             new_id = self
                 .graph()
                 .add_op(op::MaxReduce(dim))
@@ -44,13 +36,10 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(new_id, shape, self.graph_ref)
     }
 
-    pub fn mean_reduce<Dst: Shape, Ax: Axes>(self) -> GraphTensor<Dst>
-    where
-        S: HasAxes<Ax> + ReduceShapeTo<Dst, Ax>,
-    {
+    pub fn mean_reduce(self, axes: impl ToAxes) -> GraphTensor {
         let mut shape = self.shape;
         let mut node_id = self.id;
-        for dim in Ax::as_array().into_iter().collect_vec().into_iter().rev() {
+        for dim in axes.to_axes().into_iter().rev() {
             // Sum reduce
             node_id = self
                 .graph()
@@ -63,7 +52,7 @@ impl<S: Shape> GraphTensor<S> {
             let mul_tensor = self
                 .graph()
                 .add_op(op::Recip)
-                .input(div_tensor, 0, ShapeTracker::new(&[]))
+                .input(div_tensor, 0, ShapeTracker::default())
                 .finish();
             node_id = self
                 .graph()
@@ -94,9 +83,9 @@ mod tests {
     fn test_sum_reduce() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.tensor::<R2<2, 3>>();
+        let a = cx.tensor((2, 3));
         a.set(a_data.clone());
-        let b = a.sum_reduce::<_, LAxis<1>>();
+        let b = a.sum_reduce(1);
         b.retrieve();
 
         cx.execute();
@@ -112,9 +101,9 @@ mod tests {
     fn test_max_reduce() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.tensor::<R2<2, 3>>();
+        let a = cx.tensor((2, 3));
         a.set(a_data.clone());
-        let b = a.max_reduce::<_, LAxis<1>>();
+        let b = a.max_reduce(1);
         b.retrieve();
 
         cx.execute();
@@ -130,9 +119,9 @@ mod tests {
     fn test_mean_reduce() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
-        let a = cx.tensor::<R2<2, 3>>();
+        let a = cx.tensor((2, 3));
         a.set(a_data.clone());
-        let b = a.mean_reduce::<_, LAxis<1>>();
+        let b = a.mean_reduce(1);
         b.retrieve();
 
         cx.execute();

@@ -10,9 +10,15 @@ use rand::{rngs::ThreadRng, thread_rng, Rng};
 fn main() {
     // Setup gradient graph
     let mut cx = Graph::new();
-    let model = <(Linear<8, 16>, Swish, Linear<16, 16>, Swish, Linear<16, 5>)>::initialize(&mut cx);
-    let mut input = cx.tensor::<R1<8>>();
-    let mut target = cx.tensor::<R1<5>>();
+    let model = (
+        Linear::new(8, 16, false, &mut cx).initialize(),
+        Swish,
+        Linear::new(16, 16, false, &mut cx).initialize(),
+        Swish,
+        Linear::new(16, 5, false, &mut cx).initialize(),
+    );
+    let mut input = cx.tensor(8);
+    let mut target = cx.tensor(5);
     let mut output = model.forward(input).retrieve();
     let mut loss = mse_loss(output, target).retrieve();
 
@@ -38,7 +44,10 @@ fn main() {
 
     #[cfg(feature = "metal")]
     cx.compile(
-        luminal_metal::MetalCompiler::<f32>::default(),
+        (
+            GenericCompiler::default(),
+            luminal_metal::MetalCompiler::<f32>::default(),
+        ),
         (
             &mut input,
             &mut target,

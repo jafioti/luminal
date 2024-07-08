@@ -4,7 +4,7 @@ use std::{io::Write, marker::PhantomData};
 use itertools::Itertools;
 // WIP
 use luminal::prelude::*;
-use model::KVCache;
+use model::{KVCache, D_MODEL, HEADS, HEAD_DIM, N_MEL_BINS};
 use tokenizers::Tokenizer;
 
 mod audio;
@@ -20,33 +20,30 @@ fn main() {
 
     // Construct encoder graph
     let mut enc_cx = Graph::new();
-    let encoder = model::AudioEncoder::initialize(&mut enc_cx);
+    let encoder = model::AudioEncoder::new(&mut enc_cx);
     let mut encoder_params = params(&encoder);
     enc_cx.keep_tensors(&encoder_params);
-    let mut audio_input = enc_cx.tensor::<(Const<1>, Const<{ model::N_MEL_BINS }>, Dyn<'s'>)>();
-    let mut encoded: GraphTensor<(Const<1>, Dyn<'d'>, Const<384>)> = encoder
-        .forward((audio_input, PhantomData::<Dyn<'d'>>))
-        .keep();
+    let mut audio_input = enc_cx.tensor((1, N_MEL_BINS, 's'));
+    let mut encoded = encoder.forward(audio_input).keep();
     loader::load("setup/whisper-tiny.safetensors", &encoder, &mut enc_cx);
 
     // Construct decoder graph
     let mut dec_cx = Graph::new();
-    let decoder = model::TextDecoder::initialize(&mut dec_cx);
+    let decoder = model::TextDecoder::new(&mut dec_cx);
     let mut decoder_params = params(&decoder);
     dec_cx.keep_tensors(&decoder_params);
-    let mut text_input = dec_cx.tensor::<(Const<1>, Dyn<'s'>)>();
-    let mut encoder_output =
-        dec_cx.named_tensor::<(Const<1>, Dyn<'e'>, Const<{ model::D_MODEL }>)>("Enc Output");
-    let mut cache_src: Vec<KVCache<Const<1>, Dyn<'p'>>> = (0..model::DEC_LAYERS)
-        .map(|_| (dec_cx.named_tensor("Keys"), dec_cx.named_tensor("Values")))
-        .collect();
-    cache_src.set_dyn(vec![], &[1, 6, 64, 0]);
-    let (logits, _, mut cache_dest) = decoder.forward((
-        encoder_output,
-        text_input,
-        &cache_src,
-        PhantomData::<Dyn<'t'>>,
-    ));
+    let mut text_input = dec_cx.tensor((1, 's'));
+    let mut encoder_output = dec_cx.named_tensor("Enc Output", (1, 'e', D_MODEL));
+    let mut cache_src = (0..model::DEC_LAYERS)
+        .map(|_| {
+            (
+                dec_cx.named_tensor("Keys", (1, HEADS, HEAD_DIM, 'p')),
+                dec_cx.named_tensor("Values", (1, HEADS, 'p', HEAD_DIM)),
+            )
+        })
+        .collect::<Vec<_>>();
+    cache_src.set_dyn(vec![], (1, 6, 64, 0));
+    let (logits, _, mut cache_dest) = decoder.forward((encoder_output, text_input, &cache_src));
     let mut logits = logits
         .slice((.., Expression::from('s') - 1.., ..))
         .retrieve();
@@ -103,11 +100,11 @@ fn main() {
     print!("Loading weights");
     std::io::stdout().flush().unwrap();
     let now = std::time::Instant::now();
-    audio_input.set_dyn(vec![0.; 160], &[1, 80, 2]);
+    audio_input.set_dyn(vec![0.; 160], (1, 80, 2));
     enc_cx.set_dyn_dim('d', 1);
     enc_cx.execute();
     delete_inputs(downstream(encoder_params, &enc_cx), &mut enc_cx);
-    text_input.set_dyn(vec![0.], &[1, 1]);
+    text_input.set_dyn(vec![0.], (1, 1));
     dec_cx.set_dyn_dim('e', 1);
     dec_cx.set_dyn_dim('p', 0);
     dec_cx.set_dyn_dim('t', 1);
@@ -132,7 +129,7 @@ fn main() {
     std::io::stdout().flush().unwrap();
     let start_encoding = std::time::Instant::now();
 
-    audio_input.set_dyn(mel, &[1, 80, mel_len / 80]);
+    audio_input.set_dyn(mel, (1, 80, mel_len / 80));
     enc_cx.set_dyn_dim('d', (mel_len / 80) / 2);
     enc_cx.execute();
     transfer_data(encoded, &mut enc_cx, encoder_output, &mut dec_cx);
@@ -144,7 +141,7 @@ fn main() {
     dec_cx.set_dyn_dim('p', 0);
     dec_cx.set_dyn_dim('t', 3);
     let mut output_ids = vec![];
-    text_input.set_dyn(vec![50257., 50358., 50362.], &[1, 3]);
+    text_input.set_dyn(vec![50257., 50358., 50362.], (1, 3));
     dec_cx.execute();
     let mut output_token = argmax(&logits.data());
     logits.drop();
@@ -156,7 +153,7 @@ fn main() {
 
     for i in 0..100 {
         transfer_data_same_graph(&cache_dest, &cache_src, &mut dec_cx);
-        text_input.set_dyn(vec![output_token as f32], &[1, 1]);
+        text_input.set_dyn(vec![output_token as f32], (1, 1));
         dec_cx.set_dyn_dim('p', i + 3);
         dec_cx.set_dyn_dim('t', i + 4);
         dec_cx.execute();

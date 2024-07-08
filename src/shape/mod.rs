@@ -1,306 +1,8 @@
-mod axes;
-mod broadcast;
-mod padding;
-mod permute;
-mod realize;
-mod slice;
 mod symbolic;
 mod tracker;
 
-pub use axes::*;
-pub use broadcast::*;
-pub use padding::*;
-pub use permute::*;
-pub use realize::*;
-pub use slice::*;
 pub use symbolic::*;
 pub use tracker::*;
-
-// This currently is a lot more complicated than it needs to be. Can it be simplified?
-
-/// Represents a single dimension of a multi dimensional [Shape]
-pub trait Dimension:
-    'static + Copy + Clone + std::fmt::Debug + Send + Sync + Eq + PartialEq
-{
-    fn size() -> Expression;
-}
-
-/// Represents a single dimension where all
-/// instances are guaranteed to be the same size at compile time.
-pub trait ConstDim: Default + Dimension {
-    const SIZE: usize;
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct Dyn<const C: char>;
-
-impl<const C: char> Dimension for Dyn<C> {
-    fn size() -> Expression {
-        C.into()
-    }
-}
-
-/// Represents a [Dim] with size known at compile time
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct Const<const M: usize>;
-impl<const M: usize> Dimension for Const<M> {
-    fn size() -> Expression {
-        M.into()
-    }
-}
-
-impl<const M: usize> ConstDim for Const<M> {
-    const SIZE: usize = M;
-}
-
-impl<const N: usize, const C: char> core::ops::Add<Const<N>> for Dyn<C> {
-    type Output = Dyn<C>;
-    fn add(self, _: Const<N>) -> Self::Output {
-        todo!();
-    }
-}
-impl<const N: usize, const C: char> core::ops::Add<Dyn<C>> for Const<N> {
-    type Output = Dyn<C>;
-    fn add(self, _: Dyn<C>) -> Self::Output {
-        todo!();
-    }
-}
-
-impl<const N: usize, const C: char> core::ops::Mul<Const<N>> for Dyn<C> {
-    type Output = Dyn<C>;
-    fn mul(self, _: Const<N>) -> Self::Output {
-        todo!();
-    }
-}
-impl<const N: usize, const C: char> core::ops::Mul<Dyn<C>> for Const<N> {
-    type Output = Dyn<C>;
-    fn mul(self, _: Dyn<C>) -> Self::Output {
-        todo!();
-    }
-}
-
-impl<const N: usize, const C: char> core::ops::Div<Const<N>> for Dyn<C> {
-    type Output = Dyn<C>;
-    fn div(self, _: Const<N>) -> Self::Output {
-        todo!();
-    }
-}
-impl<const N: usize, const C: char> core::ops::Div<Dyn<C>> for Const<N> {
-    type Output = Dyn<C>;
-    fn div(self, _: Dyn<C>) -> Self::Output {
-        todo!();
-    }
-}
-
-impl<const A: char, const C: char> core::ops::Add<Dyn<A>> for Dyn<C> {
-    type Output = Dyn<'-'>;
-    fn add(self, _: Dyn<A>) -> Self::Output {
-        todo!();
-    }
-}
-
-impl<const A: char, const C: char> core::ops::Mul<Dyn<A>> for Dyn<C> {
-    type Output = Dyn<'-'>;
-    fn mul(self, _: Dyn<A>) -> Self::Output {
-        todo!();
-    }
-}
-
-impl<const A: char, const C: char> core::ops::Div<Dyn<A>> for Dyn<C> {
-    type Output = Dyn<'-'>;
-    fn div(self, _: Dyn<A>) -> Self::Output {
-        todo!();
-    }
-}
-
-/// Represents either `[T; N]` or `Vec<T>`
-pub trait Array<T>: IntoIterator<Item = T> {
-    type Dim: Dimension;
-    fn dim(&self) -> Self::Dim;
-}
-impl<T, const N: usize> Array<T> for [T; N] {
-    type Dim = Const<N>;
-    fn dim(&self) -> Self::Dim {
-        Const
-    }
-}
-impl<T> Array<T> for std::vec::Vec<T> {
-    type Dim = Dyn<'-'>;
-    fn dim(&self) -> Self::Dim {
-        Dyn::<'-'>
-    }
-}
-
-/// A collection of dimensions ([Dim]) that change how a multi-dimensional
-/// array is interacted with.
-pub trait Shape:
-    'static
-    + std::fmt::Debug
-    + Clone
-    + Copy
-    + Send
-    + Sync
-    + Eq
-    + PartialEq
-    + HasAxes<Self::AllAxes>
-    + HasAxes<Self::LastAxis>
-    + ReduceShapeTo<(), Self::AllAxes>
-    + ReduceShape<Self::LastAxis>
-{
-    /// The number of dimensions the shape has
-    const NUM_DIMS: usize;
-
-    /// Is `[usize; Self::NUM_DIMS]`, but that is not usable yet.
-    type Concrete: std::fmt::Debug
-        + Clone
-        + Copy
-        + Default
-        + Eq
-        + PartialEq
-        + std::ops::Index<usize, Output = usize>
-        + std::ops::IndexMut<usize>
-        + Send
-        + Sync
-        + IntoIterator<Item = usize>
-        + Into<std::vec::Vec<usize>>
-        + AsRef<[usize]>;
-
-    /// All the axes of this shape
-    type AllAxes: Axes;
-
-    /// The last axis of this shape
-    type LastAxis: Axes;
-
-    /// All axes but the last axis
-    type AllButLast: Axes;
-
-    fn realized_shape() -> Vec<Expression>;
-    fn to_tracker() -> crate::shape::tracker::ShapeTracker;
-}
-
-/// Represents a [Shape] that has all [ConstDim]s
-pub trait ConstShape: Default + Shape {
-    const NUMEL: usize;
-    fn realized_shape() -> Vec<usize>;
-}
-
-/// Represents something that has a [Shape].
-pub trait HasShape {
-    type WithShape<New: Shape>: HasShape<Shape = New>;
-    type Shape: Shape;
-    fn shape(&self) -> &Self::Shape;
-}
-
-impl<S: Shape> HasShape for S {
-    type WithShape<New: Shape> = New;
-    type Shape = Self;
-    fn shape(&self) -> &Self::Shape {
-        self
-    }
-}
-
-/// Compile time known shape with 0 dimensions (scalar)
-pub type R0 = ();
-/// Compile time known shape with 1 dimensions
-pub type R1<const M: usize> = (Const<M>,);
-/// Compile time known shape with 2 dimensions
-pub type R2<const M: usize, const N: usize> = (Const<M>, Const<N>);
-/// Compile time known shape with 3 dimensions
-pub type R3<const M: usize, const N: usize, const O: usize> = (Const<M>, Const<N>, Const<O>);
-/// Compile time known shape with 4 dimensions
-pub type R4<const M: usize, const N: usize, const O: usize, const P: usize> =
-    (Const<M>, Const<N>, Const<O>, Const<P>);
-/// Compile time known shape with 5 dimensions
-pub type R5<const M: usize, const N: usize, const O: usize, const P: usize, const Q: usize> =
-    (Const<M>, Const<N>, Const<O>, Const<P>, Const<Q>);
-#[rustfmt::skip]
-/// Compile time known shape with 6 dimensions
-pub type R6<const M: usize, const N: usize, const O: usize, const P: usize, const Q: usize, const R: usize> =
-    (Const<M>, Const<N>, Const<O>, Const<P>, Const<Q>, Const<R>);
-
-macro_rules! shape {
-    (($($D:tt $Idx:tt),*), rank=$Num:expr, all=$All:tt, all_but_last=$AllButLast:ty) => {
-        impl<$($D: Dimension, )*> Shape for ($($D, )*) {
-            const NUM_DIMS: usize = $Num;
-            type Concrete = [usize; $Num];
-            type AllAxes = $All<$($Idx,)*>;
-            type AllButLast = $AllButLast;
-            type LastAxis = Axis<{$Num - 1}>;
-
-            fn realized_shape() -> Vec<crate::prelude::Expression> {
-                vec![$($D::size(), )*]
-            }
-            fn to_tracker() -> ShapeTracker {
-                ShapeTracker::new(&Self::realized_shape())
-            }
-        }
-        impl<$($D: ConstDim, )*> ConstShape for ($($D, )*) {
-            const NUMEL: usize = $($D::SIZE * )* 1;
-
-            fn realized_shape() -> Vec<usize> {
-                vec![$($D::SIZE , )*]
-            }
-         }
-
-        impl Shape for [usize; $Num] {
-            const NUM_DIMS: usize = $Num;
-            type Concrete = Self;
-            type AllAxes = $All<$($Idx,)*>;
-            type AllButLast = $AllButLast;
-            type LastAxis = Axis<{$Num - 1}>;
-
-            fn realized_shape() -> Vec<crate::prelude::Expression> {
-                vec!['-'.into(); $Num]
-            }
-
-            fn to_tracker() -> ShapeTracker {
-                let st = ShapeTracker::new(&Self::realized_shape());
-                st
-            }
-        }
-    };
-}
-
-impl Shape for () {
-    const NUM_DIMS: usize = 0;
-    type Concrete = [usize; 0];
-    type AllAxes = Axis<0>;
-    type LastAxis = Axis<0>;
-    type AllButLast = Axis<0>; // Not technically correct
-    fn realized_shape() -> Vec<Expression> {
-        vec![]
-    }
-    fn to_tracker() -> ShapeTracker {
-        ShapeTracker::new(&[])
-    }
-}
-impl ConstShape for () {
-    const NUMEL: usize = 1;
-
-    fn realized_shape() -> Vec<usize> {
-        vec![]
-    }
-}
-
-shape!((D1 0), rank=1, all=Axis, all_but_last=Axis<0>);
-shape!((D1 0, D2 1), rank=2, all=Axes2, all_but_last=Axis<0>);
-shape!((D1 0, D2 1, D3 2), rank=3, all=Axes3, all_but_last=Axes2<0, 1>);
-shape!((D1 0, D2 1, D3 2, D4 3), rank=4, all=Axes4, all_but_last=Axes3<0, 1, 2>);
-shape!((D1 0, D2 1, D3 2, D4 3, D5 4), rank=5, all=Axes5, all_but_last=Axes4<0, 1, 2, 3>);
-shape!((D1 0, D2 1, D3 2, D4 3, D5 4, D6 5), rank=6, all=Axes6, all_but_last=Axes5<0, 1, 2, 3, 4>);
-
-/// Marker for shapes that have the same number of elements as `Dst`
-pub trait AssertSameNumel<Dst: ConstShape>: ConstShape {
-    const TYPE_CHECK: ();
-    fn assert_same_numel() {
-        #[allow(clippy::let_unit_value)]
-        let _ = <Self as AssertSameNumel<Dst>>::TYPE_CHECK;
-    }
-}
-
-impl<Src: ConstShape, Dst: ConstShape> AssertSameNumel<Dst> for Src {
-    const TYPE_CHECK: () = assert!(Src::NUMEL == Dst::NUMEL);
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReshapeDim {
@@ -308,4 +10,460 @@ pub enum ReshapeDim {
     Const(usize),
     /// A reference to the size of a dim of the previous shape
     PrevDim(usize),
+}
+
+use std::ops::{Bound, Range, RangeBounds, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
+
+fn get_start_bound<D: Into<Expression> + Copy>(bound: Bound<D>) -> Expression {
+    match bound {
+        Bound::Included(x) => x.into(),
+        Bound::Excluded(x) => x.into() + Expression::from(1),
+        Bound::Unbounded => 0.into(),
+    }
+}
+
+fn get_end_bound<D: Into<Expression> + Copy>(bound: Bound<D>) -> Expression {
+    match bound {
+        Bound::Excluded(x) => x.into(),
+        Bound::Included(x) => x.into() + Expression::from(1),
+        Bound::Unbounded => Expression::from(i32::MAX),
+    }
+}
+
+pub trait SliceRange {
+    fn bounds(&self) -> (Expression, Expression);
+}
+
+impl SliceRange for RangeFrom<usize> {
+    fn bounds(&self) -> (Expression, Expression) {
+        (
+            get_start_bound(self.start_bound()),
+            get_end_bound(self.end_bound()),
+        )
+    }
+}
+impl SliceRange for RangeTo<usize> {
+    fn bounds(&self) -> (Expression, Expression) {
+        (
+            get_start_bound(self.start_bound()),
+            get_end_bound(self.end_bound()),
+        )
+    }
+}
+impl SliceRange for RangeToInclusive<usize> {
+    fn bounds(&self) -> (Expression, Expression) {
+        (
+            get_start_bound(self.start_bound()),
+            get_end_bound(self.end_bound()),
+        )
+    }
+}
+impl SliceRange for Range<usize> {
+    fn bounds(&self) -> (Expression, Expression) {
+        (
+            get_start_bound(self.start_bound()),
+            get_end_bound(self.end_bound()),
+        )
+    }
+}
+impl SliceRange for RangeFrom<Expression> {
+    fn bounds(&self) -> (Expression, Expression) {
+        (
+            get_start_bound(self.start_bound()),
+            get_end_bound(self.end_bound()),
+        )
+    }
+}
+impl SliceRange for RangeTo<Expression> {
+    fn bounds(&self) -> (Expression, Expression) {
+        (
+            get_start_bound(self.start_bound()),
+            get_end_bound(self.end_bound()),
+        )
+    }
+}
+impl SliceRange for RangeToInclusive<Expression> {
+    fn bounds(&self) -> (Expression, Expression) {
+        (
+            get_start_bound(self.start_bound()),
+            get_end_bound(self.end_bound()),
+        )
+    }
+}
+impl SliceRange for Range<Expression> {
+    fn bounds(&self) -> (Expression, Expression) {
+        (
+            get_start_bound(self.start_bound()),
+            get_end_bound(self.end_bound()),
+        )
+    }
+}
+impl SliceRange for RangeFull {
+    fn bounds(&self) -> (Expression, Expression) {
+        (0.into(), Expression::from(i32::MAX))
+    }
+}
+impl<R: SliceRange> SliceRange for (R,) {
+    fn bounds(&self) -> (Expression, Expression) {
+        self.0.bounds()
+    }
+}
+
+pub trait ToSlice {
+    fn to_range_vec(&self) -> Vec<(Expression, Expression)>;
+}
+
+impl<R: SliceRange> ToSlice for R {
+    fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
+        vec![self.bounds()]
+    }
+}
+
+impl<R1: SliceRange, R2: SliceRange> ToSlice for (R1, R2) {
+    fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
+        vec![self.0.bounds(), self.1.bounds()]
+    }
+}
+
+impl<R1: SliceRange, R2: SliceRange, R3: SliceRange> ToSlice for (R1, R2, R3) {
+    fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
+        vec![self.0.bounds(), self.1.bounds(), self.2.bounds()]
+    }
+}
+
+impl<R1: SliceRange, R2: SliceRange, R3: SliceRange, R4: SliceRange> ToSlice for (R1, R2, R3, R4) {
+    fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
+        vec![
+            self.0.bounds(),
+            self.1.bounds(),
+            self.2.bounds(),
+            self.3.bounds(),
+        ]
+    }
+}
+
+impl<R1: SliceRange, R2: SliceRange, R3: SliceRange, R4: SliceRange, R5: SliceRange> ToSlice
+    for (R1, R2, R3, R4, R5)
+{
+    fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
+        vec![
+            self.0.bounds(),
+            self.1.bounds(),
+            self.2.bounds(),
+            self.3.bounds(),
+            self.4.bounds(),
+        ]
+    }
+}
+
+pub trait ToPad {
+    fn to_pad_vec(self) -> Vec<(Expression, Expression)>;
+}
+
+impl ToPad for () {
+    fn to_pad_vec(self) -> Vec<(Expression, Expression)> {
+        vec![]
+    }
+}
+
+impl<S: Into<Expression>, E: Into<Expression>> ToPad for (S, E) {
+    fn to_pad_vec(self) -> Vec<(Expression, Expression)> {
+        vec![(self.0.into(), self.1.into())]
+    }
+}
+
+impl<S: Into<Expression>, E: Into<Expression>> ToPad for ((S, E),) {
+    fn to_pad_vec(self) -> Vec<(Expression, Expression)> {
+        vec![(self.0 .0.into(), self.0 .1.into())]
+    }
+}
+
+impl<S1: Into<Expression>, E1: Into<Expression>, S2: Into<Expression>, E2: Into<Expression>> ToPad
+    for ((S1, E1), (S2, E2))
+{
+    fn to_pad_vec(self) -> Vec<(Expression, Expression)> {
+        vec![
+            (self.0 .0.into(), self.0 .1.into()),
+            (self.1 .0.into(), self.1 .1.into()),
+        ]
+    }
+}
+
+impl<
+        S1: Into<Expression>,
+        E1: Into<Expression>,
+        S2: Into<Expression>,
+        E2: Into<Expression>,
+        S3: Into<Expression>,
+        E3: Into<Expression>,
+    > ToPad for ((S1, E1), (S2, E2), (S3, E3))
+{
+    fn to_pad_vec(self) -> Vec<(Expression, Expression)> {
+        vec![
+            (self.0 .0.into(), self.0 .1.into()),
+            (self.1 .0.into(), self.1 .1.into()),
+            (self.2 .0.into(), self.2 .1.into()),
+        ]
+    }
+}
+
+impl<
+        S1: Into<Expression>,
+        E1: Into<Expression>,
+        S2: Into<Expression>,
+        E2: Into<Expression>,
+        S3: Into<Expression>,
+        E3: Into<Expression>,
+        S4: Into<Expression>,
+        E4: Into<Expression>,
+    > ToPad for ((S1, E1), (S2, E2), (S3, E3), (S4, E4))
+{
+    fn to_pad_vec(self) -> Vec<(Expression, Expression)> {
+        vec![
+            (self.0 .0.into(), self.0 .1.into()),
+            (self.1 .0.into(), self.1 .1.into()),
+            (self.2 .0.into(), self.2 .1.into()),
+            (self.3 .0.into(), self.3 .1.into()),
+        ]
+    }
+}
+
+impl<
+        S1: Into<Expression>,
+        E1: Into<Expression>,
+        S2: Into<Expression>,
+        E2: Into<Expression>,
+        S3: Into<Expression>,
+        E3: Into<Expression>,
+        S4: Into<Expression>,
+        E4: Into<Expression>,
+        S5: Into<Expression>,
+        E5: Into<Expression>,
+    > ToPad for ((S1, E1), (S2, E2), (S3, E3), (S4, E4), (S5, E5))
+{
+    fn to_pad_vec(self) -> Vec<(Expression, Expression)> {
+        vec![
+            (self.0 .0.into(), self.0 .1.into()),
+            (self.1 .0.into(), self.1 .1.into()),
+            (self.2 .0.into(), self.2 .1.into()),
+            (self.3 .0.into(), self.3 .1.into()),
+            (self.4 .0.into(), self.4 .1.into()),
+        ]
+    }
+}
+
+impl<
+        S1: Into<Expression>,
+        E1: Into<Expression>,
+        S2: Into<Expression>,
+        E2: Into<Expression>,
+        S3: Into<Expression>,
+        E3: Into<Expression>,
+        S4: Into<Expression>,
+        E4: Into<Expression>,
+        S5: Into<Expression>,
+        E5: Into<Expression>,
+        S6: Into<Expression>,
+        E6: Into<Expression>,
+    > ToPad for ((S1, E1), (S2, E2), (S3, E3), (S4, E4), (S5, E5), (S6, E6))
+{
+    fn to_pad_vec(self) -> Vec<(Expression, Expression)> {
+        vec![
+            (self.0 .0.into(), self.0 .1.into()),
+            (self.1 .0.into(), self.1 .1.into()),
+            (self.2 .0.into(), self.2 .1.into()),
+            (self.3 .0.into(), self.3 .1.into()),
+            (self.4 .0.into(), self.4 .1.into()),
+            (self.5 .0.into(), self.5 .1.into()),
+        ]
+    }
+}
+
+impl<S: Into<Expression> + Copy, E: Into<Expression> + Copy> ToPad for &[(S, E)] {
+    fn to_pad_vec(self) -> Vec<(Expression, Expression)> {
+        self.iter()
+            .map(|(s, e)| ((*s).into(), (*e).into()))
+            .collect()
+    }
+}
+
+impl<const N: usize, S: Into<Expression> + Copy, E: Into<Expression> + Copy> ToPad
+    for &[(S, E); N]
+{
+    fn to_pad_vec(self) -> Vec<(Expression, Expression)> {
+        self.iter()
+            .map(|(s, e)| ((*s).into(), (*e).into()))
+            .collect()
+    }
+}
+
+impl<S: Into<Expression> + Copy, E: Into<Expression> + Copy> ToPad for &Vec<(S, E)> {
+    fn to_pad_vec(self) -> Vec<(Expression, Expression)> {
+        self.iter()
+            .map(|(s, e)| ((*s).into(), (*e).into()))
+            .collect()
+    }
+}
+
+impl<S: Into<Expression>, E: Into<Expression>> ToPad for Vec<(S, E)> {
+    fn to_pad_vec(self) -> Vec<(Expression, Expression)> {
+        self.into_iter()
+            .map(|(s, e)| (s.into(), e.into()))
+            .collect()
+    }
+}
+
+pub trait ToAxes {
+    fn to_axes(&self) -> Vec<usize>;
+}
+
+impl ToAxes for () {
+    fn to_axes(&self) -> Vec<usize> {
+        vec![]
+    }
+}
+
+impl ToAxes for (usize, usize) {
+    fn to_axes(&self) -> Vec<usize> {
+        vec![self.0, self.1]
+    }
+}
+
+impl ToAxes for (usize, usize, usize) {
+    fn to_axes(&self) -> Vec<usize> {
+        vec![self.0, self.1, self.2]
+    }
+}
+
+impl ToAxes for (usize, usize, usize, usize) {
+    fn to_axes(&self) -> Vec<usize> {
+        vec![self.0, self.1, self.2, self.3]
+    }
+}
+
+impl ToAxes for (usize, usize, usize, usize, usize) {
+    fn to_axes(&self) -> Vec<usize> {
+        vec![self.0, self.1, self.2, self.3, self.4]
+    }
+}
+
+impl ToAxes for (usize, usize, usize, usize, usize, usize) {
+    fn to_axes(&self) -> Vec<usize> {
+        vec![self.0, self.1, self.2, self.3, self.4, self.5]
+    }
+}
+
+impl ToAxes for usize {
+    fn to_axes(&self) -> Vec<usize> {
+        vec![*self]
+    }
+}
+
+impl ToAxes for Vec<usize> {
+    fn to_axes(&self) -> Vec<usize> {
+        self.clone()
+    }
+}
+
+impl ToAxes for &[usize] {
+    fn to_axes(&self) -> Vec<usize> {
+        self.to_vec()
+    }
+}
+
+impl<const N: usize> ToAxes for &[usize; N] {
+    fn to_axes(&self) -> Vec<usize> {
+        self.to_vec()
+    }
+}
+
+pub trait ToShape {
+    fn to_shape(self) -> Vec<Expression>;
+}
+
+impl ToShape for () {
+    fn to_shape(self) -> Vec<Expression> {
+        vec![]
+    }
+}
+
+impl<A: Into<Expression>> ToShape for (A,) {
+    fn to_shape(self) -> Vec<Expression> {
+        vec![self.0.into()]
+    }
+}
+
+impl<A: Into<Expression>, B: Into<Expression>> ToShape for (A, B) {
+    fn to_shape(self) -> Vec<Expression> {
+        vec![self.0.into(), self.1.into()]
+    }
+}
+
+impl<A: Into<Expression>, B: Into<Expression>, C: Into<Expression>> ToShape for (A, B, C) {
+    fn to_shape(self) -> Vec<Expression> {
+        vec![self.0.into(), self.1.into(), self.2.into()]
+    }
+}
+
+impl<A: Into<Expression>, B: Into<Expression>, C: Into<Expression>, D: Into<Expression>> ToShape
+    for (A, B, C, D)
+{
+    fn to_shape(self) -> Vec<Expression> {
+        vec![self.0.into(), self.1.into(), self.2.into(), self.3.into()]
+    }
+}
+
+impl<
+        A: Into<Expression>,
+        B: Into<Expression>,
+        C: Into<Expression>,
+        D: Into<Expression>,
+        E: Into<Expression>,
+    > ToShape for (A, B, C, D, E)
+{
+    fn to_shape(self) -> Vec<Expression> {
+        vec![
+            self.0.into(),
+            self.1.into(),
+            self.2.into(),
+            self.3.into(),
+            self.4.into(),
+        ]
+    }
+}
+
+impl<A: Into<Expression> + Copy> ToShape for &[A] {
+    fn to_shape(self) -> Vec<Expression> {
+        self.iter().map(|i| (*i).into()).collect()
+    }
+}
+
+impl<const E: usize, A: Into<Expression> + Copy> ToShape for &[A; E] {
+    fn to_shape(self) -> Vec<Expression> {
+        self.iter().map(|i| (*i).into()).collect()
+    }
+}
+
+impl<const E: usize, A: Into<Expression>> ToShape for [A; E] {
+    fn to_shape(self) -> Vec<Expression> {
+        self.into_iter().map(|i| i.into()).collect()
+    }
+}
+
+impl<A: Into<Expression>> ToShape for Vec<A> {
+    fn to_shape(self) -> Vec<Expression> {
+        self.into_iter().map(|i| i.into()).collect()
+    }
+}
+
+impl<A: Into<Expression>> ToShape for A {
+    fn to_shape(self) -> Vec<Expression> {
+        vec![self.into()]
+    }
+}
+
+impl ToShape for ShapeTracker {
+    fn to_shape(self) -> Vec<Expression> {
+        self.shape().to_shape()
+    }
 }

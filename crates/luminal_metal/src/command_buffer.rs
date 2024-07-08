@@ -306,9 +306,9 @@ fn test_common_buffer() {
 
     use crate::MetalCompiler;
     let mut cx = Graph::new();
-    let a = cx.tensor::<R1<5>>().set(random_vec(5)).keep();
-    let b = cx.tensor::<R1<5>>().set(random_vec(5)).keep();
-    let c = cx.tensor::<R1<5>>().set(random_vec(5)).keep();
+    let a = cx.tensor(5).set(random_vec(5)).keep();
+    let b = cx.tensor(5).set(random_vec(5)).keep();
+    let c = cx.tensor(5).set(random_vec(5)).keep();
     let mut d = ((a + b) * c).retrieve();
 
     cx.execute();

@@ -3,74 +3,71 @@ use rand::{thread_rng, Rng};
 use luminal::prelude::*;
 
 /// A simple unbiased linear layer
-pub struct Linear<const A: usize, const B: usize> {
-    pub weight: GraphTensor<R2<A, B>>,
+pub struct Linear {
+    pub weight: GraphTensor,
+    pub bias: Option<GraphTensor>,
+    permute: bool,
 }
 
-impl<const A: usize, const B: usize> InitModule for Linear<A, B> {
-    fn initialize(cx: &mut Graph) -> Self {
+impl Linear {
+    pub fn new(inp: usize, out: usize, bias: bool, cx: &mut Graph) -> Self {
+        Self {
+            weight: cx.named_tensor("Weight", (inp, out)),
+            bias: if bias {
+                Some(cx.named_tensor("Bias", out))
+            } else {
+                None
+            },
+            permute: false,
+        }
+    }
+
+    pub fn new_permuted(inp: usize, out: usize, bias: bool, cx: &mut Graph) -> Self {
+        Self {
+            weight: cx.named_tensor("Weight", (out, inp)),
+            bias: if bias {
+                Some(cx.named_tensor("Bias", out))
+            } else {
+                None
+            },
+            permute: true,
+        }
+    }
+
+    pub fn initialize(self) -> Self {
         // Init weight as uniform(-1, 1)
         let mut rng = thread_rng();
-        Self {
-            weight: cx.named_tensor("Weight").set(
-                (0..(A * B))
-                    .map(|_| rng.gen_range(-1_f32..1_f32))
-                    .collect::<Vec<_>>(),
-            ),
+        self.weight.set(
+            (0..self.weight.shape.n_elements().to_usize().unwrap())
+                .map(|_| rng.gen_range(-1_f32..1_f32))
+                .collect::<Vec<_>>(),
+        );
+        self
+    }
+}
+
+impl SerializeModule for Linear {
+    fn serialize(&self, s: &mut luminal::module::Serializer) {
+        s.tensor("weight", self.weight);
+        if let Some(bias) = self.bias {
+            s.tensor("bias", bias);
         }
     }
 }
 
-impl<const A: usize, const B: usize> SerializeModule for Linear<A, B> {
-    fn serialize(&self, s: &mut luminal::module::Serializer) {
-        s.tensor("weight", self.weight);
-    }
-}
+impl Module<GraphTensor> for Linear {
+    type Output = GraphTensor;
 
-impl<const A: usize, const B: usize, S: Shape> Module<GraphTensor<S>> for Linear<A, B>
-where
-    GraphTensor<S>: Matmul<R2<A, B>>,
-{
-    type Output = <GraphTensor<S> as Matmul<R2<A, B>>>::Output;
-
-    fn forward(&self, input: GraphTensor<S>) -> Self::Output {
-        input.matmul(self.weight)
-    }
-}
-
-/// A simple unbiased linear layer with a permuted weight matrix
-pub struct PermutedLinear<const A: usize, const B: usize> {
-    pub weight: GraphTensor<R2<B, A>>,
-}
-
-impl<const A: usize, const B: usize> InitModule for PermutedLinear<A, B> {
-    fn initialize(cx: &mut Graph) -> Self {
-        // Init weight as uniform(-1, 1)
-        let mut rng = thread_rng();
-        Self {
-            weight: cx.named_tensor("Weight").set(
-                (0..(A * B))
-                    .map(|_| rng.gen_range(-1_f32..1_f32))
-                    .collect::<Vec<_>>(),
-            ),
+    fn forward(&self, input: GraphTensor) -> Self::Output {
+        let mut output = input.matmul(if self.permute {
+            self.weight.permute((1, 0))
+        } else {
+            self.weight
+        });
+        if let Some(bias) = self.bias {
+            output += bias.expand_to(output.shape);
         }
-    }
-}
-
-impl<const A: usize, const B: usize> SerializeModule for PermutedLinear<A, B> {
-    fn serialize(&self, s: &mut luminal::module::Serializer) {
-        s.tensor("weight", self.weight);
-    }
-}
-
-impl<const A: usize, const B: usize, S: Shape> Module<GraphTensor<S>> for PermutedLinear<A, B>
-where
-    GraphTensor<S>: Matmul<R2<A, B>>,
-{
-    type Output = <GraphTensor<S> as Matmul<R2<A, B>>>::Output;
-
-    fn forward(&self, input: GraphTensor<S>) -> Self::Output {
-        input.matmul(self.weight.permute())
+        output
     }
 }
 
@@ -81,12 +78,10 @@ mod tests {
     #[test]
     fn test_linear() {
         let mut cx = Graph::new();
-        let batch = cx
-            .tensor::<R2<2, 3>>()
-            .set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
-        let a = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
+        let batch = cx.tensor((2, 3)).set([1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+        let a = cx.tensor(3).set([1.0, 2.0, 3.0]);
 
-        let model: Linear<3, 4> = Linear::initialize(&mut cx);
+        let model = Linear::new(3, 4, false, &mut cx).initialize();
         let mut b = model.forward(a).retrieve();
         let mut batch_out = model.forward(batch).retrieve();
 

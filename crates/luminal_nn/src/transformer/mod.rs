@@ -7,44 +7,29 @@ pub use decoder::*;
 mod encoder;
 pub use encoder::*;
 
-pub struct Transformer<
-    const DIM: usize,
-    const FF: usize,
-    const ENC_HEADS: usize,
-    const DEC_HEADS: usize,
-    const ENC_LAYERS: usize,
-    const DEC_LAYERS: usize,
-> {
-    pub encoder: encoder::TransformerEncoder<DIM, FF, ENC_HEADS, ENC_LAYERS>,
-    pub decoder: decoder::TransformerDecoder<DIM, FF, DEC_HEADS, DEC_LAYERS>,
+pub struct Transformer {
+    pub encoder: encoder::TransformerEncoder,
+    pub decoder: decoder::TransformerDecoder,
 }
 
-impl<
-        const DIM: usize,
-        const FF: usize,
-        const ENC_HEADS: usize,
-        const DEC_HEADS: usize,
-        const ENC_LAYERS: usize,
-        const DEC_LAYERS: usize,
-    > InitModule for Transformer<DIM, FF, ENC_HEADS, DEC_HEADS, ENC_LAYERS, DEC_LAYERS>
-{
-    fn initialize(cx: &mut Graph) -> Self {
+impl Transformer {
+    pub fn new(
+        dim: usize,
+        ff: usize,
+        enc_heads: usize,
+        dec_heads: usize,
+        enc_layers: usize,
+        dec_layers: usize,
+        cx: &mut Graph,
+    ) -> Self {
         Self {
-            encoder: InitModule::initialize(cx),
-            decoder: InitModule::initialize(cx),
+            encoder: TransformerEncoder::new(dim, ff, enc_heads, enc_layers, cx),
+            decoder: TransformerDecoder::new(dim, ff, dec_heads, dec_layers, cx),
         }
     }
 }
 
-impl<
-        const DIM: usize,
-        const FF: usize,
-        const ENC_HEADS: usize,
-        const DEC_HEADS: usize,
-        const ENC_LAYERS: usize,
-        const DEC_LAYERS: usize,
-    > SerializeModule for Transformer<DIM, FF, ENC_HEADS, DEC_HEADS, ENC_LAYERS, DEC_LAYERS>
-{
+impl SerializeModule for Transformer {
     fn serialize(&self, s: &mut Serializer) {
         s.module("encoder", &self.encoder);
         s.module("decoder", &self.decoder);
@@ -52,24 +37,10 @@ impl<
 }
 
 // Single Sequence
-impl<
-        const DIM: usize,
-        const FF: usize,
-        const ENC_HEADS: usize,
-        const DEC_HEADS: usize,
-        const ENC_LAYERS: usize,
-        const DEC_LAYERS: usize,
-        S1: Dimension,
-        S2: Dimension,
-    > Module<(GraphTensor<(S1, Const<DIM>)>, GraphTensor<(S2, Const<DIM>)>)>
-    for Transformer<DIM, FF, ENC_HEADS, DEC_HEADS, ENC_LAYERS, DEC_LAYERS>
-{
-    type Output = GraphTensor<(S2, Const<DIM>)>;
+impl Module<(GraphTensor, GraphTensor)> for Transformer {
+    type Output = GraphTensor;
 
-    fn forward(
-        &self,
-        (input, target): (GraphTensor<(S1, Const<DIM>)>, GraphTensor<(S2, Const<DIM>)>),
-    ) -> Self::Output {
+    fn forward(&self, (input, target): (GraphTensor, GraphTensor)) -> Self::Output {
         let encoded = self.encoder.forward(input);
         self.decoder.forward((target, encoded))
     }
@@ -92,7 +63,7 @@ mod tests {
     #[test]
     fn test_transformer_full() {
         let mut cx = Graph::new();
-        let model: Transformer<3, 4, 1, 1, 1, 1> = InitModule::initialize(&mut cx);
+        let model = Transformer::new(3, 4, 1, 1, 1, 1, &mut cx);
         model.decoder.layers[0]
             .self_attention
             .w_k
@@ -143,43 +114,43 @@ mod tests {
             .2
             .weight
             .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
-        model.encoder.modules[0]
+        model.encoder.layers[0]
             .attention
             .w_k
             .weight
             .set(vec![1., 22., 3., 1., 2., 3., 1., 2., 3.]);
-        model.encoder.modules[0]
+        model.encoder.layers[0]
             .attention
             .w_q
             .weight
             .set(vec![3., 2., 3., 1.3, 2., 3., 3., 2., 3.]);
-        model.encoder.modules[0]
+        model.encoder.layers[0]
             .attention
             .w_v
             .weight
             .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3.]);
-        model.encoder.modules[0]
+        model.encoder.layers[0]
             .attention
             .w_o
             .weight
             .set(vec![1., 22., 3., 1., 2., 3., 1., 2., 3.]);
-        model.encoder.modules[0]
+        model.encoder.layers[0]
             .ff
             .0
             .weight
             .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 11., 2., 3.]);
-        model.encoder.modules[0]
+        model.encoder.layers[0]
             .ff
             .2
             .weight
             .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
-        let a = cx.tensor::<(Dyn<'d'>, luminal::shape::Const<3>)>();
-        let e = cx.tensor::<(Dyn<'e'>, luminal::shape::Const<3>)>();
+        let a = cx.tensor(('d', 3));
+        let e = cx.tensor(('e', 3));
         let b = model.forward((a, e));
 
-        a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], &[2, 3]);
-        e.set_dyn(vec![-1., 2., 3., 3., 3., -1., -1., 2., 3.], &[3, 3]);
+        a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], (2, 3));
+        e.set_dyn(vec![-1., 2., 3., 3., 3., -1., -1., 2., 3.], (3, 3));
         b.retrieve();
 
         cx.execute();

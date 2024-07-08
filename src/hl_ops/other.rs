@@ -8,7 +8,7 @@ use crate::{
     prelude::*,
 };
 
-impl<S: Shape> GraphTensor<S> {
+impl GraphTensor {
     /// Cumulative sum last dimension
     pub fn cumsum_last_dim(mut self) -> Self {
         let axis = self.shape.len() - 1;
@@ -21,7 +21,7 @@ impl<S: Shape> GraphTensor<S> {
         self = self.contiguous();
 
         // Pool
-        let mut pooled = self.pool_last_dim::<()>(orig_length, 1, 0);
+        let mut pooled = self.pool_last_dim(orig_length, 1, 1);
         // Sum Reduce along new dimension
         let final_id = self
             .graph()
@@ -71,43 +71,44 @@ impl From<&Expression> for ConstantValue {
 
 impl Graph {
     /// A scalar constant
-    pub fn constant(&mut self, i: impl Into<ConstantValue>) -> GraphTensor<R0> {
+    pub fn constant(&mut self, i: impl Into<ConstantValue>) -> GraphTensor {
         GraphTensor::from_id(
             self.add_op(Constant(i.into(), &self.dyn_map)).finish(),
-            ShapeTracker::new(&[]),
+            ShapeTracker::default(),
             self,
         )
     }
 
     /// A scalar constant evaluated from an expression at runtime
-    pub fn constant_expr<E: Into<BigExpression>>(&mut self, expr: E) -> GraphTensor<R0> {
+    pub fn constant_expr<E: Into<BigExpression>>(&mut self, expr: E) -> GraphTensor {
         GraphTensor::from_id(
             self.add_op(Constant(
                 ConstantValue::Expression(expr.into().simplify()),
                 &self.dyn_map,
             ))
             .finish(),
-            ShapeTracker::new(&[]),
+            ShapeTracker::default(),
             self,
         )
     }
 
     /// ARange from 0 to N
-    pub fn arange<N: Dimension>(&mut self) -> GraphTensor<(N,)> {
-        if N::size().to_usize().map(|i| i == 1).unwrap_or_default() {
+    pub fn arange(&mut self, to: impl Into<Expression> + Copy) -> GraphTensor {
+        let to = to.into();
+        if to.to_usize().map(|i| i == 1).unwrap_or_default() {
             // Single number ARange is just 0
-            self.constant(0.).expand()
+            self.constant(0.).expand(0, to)
         } else {
-            self.constant(1.).expand().cumsum_last_dim() - 1.
+            self.constant(1.).expand(0, to).cumsum_last_dim() - 1.
         }
     }
 
     /// Lower left-hand triangle of 1s. Currently required to be square
     ///
     /// Same API as https://pytorch.org/docs/stable/generated/torch.tril
-    pub fn tril<S: Dimension>(&mut self, diagonal: i32) -> GraphTensor<(S, S)> {
-        let horizontal = self.arange::<S>().expand::<(S, S), Axis<0>>();
-        let vertical = self.arange::<S>().expand::<(S, S), Axis<1>>();
+    pub fn tril(&mut self, size: impl Into<Expression> + Copy, diagonal: i32) -> GraphTensor {
+        let horizontal = self.arange(size).expand(0, size);
+        let vertical = self.arange(size).expand(1, size);
 
         (horizontal - (diagonal as f32 + 1.)).less_than(vertical)
     }
@@ -115,27 +116,28 @@ impl Graph {
     /// Upper right-hand triangle of 1s
     ///
     /// Same API as https://pytorch.org/docs/stable/generated/torch.triu
-    pub fn triu<S: Dimension>(&mut self, diagonal: i32) -> GraphTensor<(S, S)> {
-        let horizontal = self.arange::<S>().expand::<(S, S), Axis<0>>();
-        let vertical = self.arange::<S>().expand::<(S, S), Axis<1>>();
+    pub fn triu(&mut self, size: impl Into<Expression> + Copy, diagonal: i32) -> GraphTensor {
+        let horizontal = self.arange(size).expand(0, size);
+        let vertical = self.arange(size).expand(1, size);
 
         (horizontal - (diagonal as f32 - 1.)).greater_than(vertical)
     }
 }
 
-impl<S: Dimension, const DIM: usize> GraphTensor<(S, Const<DIM>)> {
+impl GraphTensor {
     /// Gather a batch of vectors from a matrix
-    pub fn gather<B: Dimension>(self, indexes: GraphTensor<(B,)>) -> GraphTensor<(B, Const<DIM>)> {
+    pub fn gather(self, indexes: GraphTensor) -> GraphTensor {
+        let s = self.shape()[0].small();
+        let dim = self.shape()[1].small();
+        let b = indexes.shape()[0].small();
         let one_hot = indexes
             .graph()
-            .arange::<S>()
-            .expand::<(B, S), _>()
-            .equals(indexes.expand());
-        (one_hot.expand::<(B, S, Const<DIM>), _>() * self.expand()).sum_reduce::<_, Axis<1>>()
+            .arange(s)
+            .expand(0, b)
+            .equals(indexes.expand(1, s));
+        (one_hot.expand(2, dim) * self.expand(0, b)).sum_reduce(1)
     }
-}
 
-impl<S: Shape> GraphTensor<S> {
     /// Print the value of this tensor when the graph is ran
     pub fn print<T: ToString>(&self, message: T) -> Self {
         let message = message.to_string();
@@ -345,7 +347,7 @@ mod tests {
     fn test_arange() {
         let mut cx = Graph::new();
 
-        let arange = cx.arange::<LConst<10>>().retrieve();
+        let arange = cx.arange(10).retrieve();
         cx.execute();
 
         assert_exact(&arange.data(), &[0., 1., 2., 3., 4., 5., 6., 7., 8., 9.]);
@@ -355,7 +357,7 @@ mod tests {
     fn test_cumprod() {
         let mut cx = Graph::new();
 
-        let a = cx.tensor::<R1<3>>().set(vec![3., 2., 5.]);
+        let a = cx.tensor(3).set(vec![3., 2., 5.]);
         let b = a.cumprod_last_dim().retrieve();
         cx.execute();
 
@@ -366,7 +368,7 @@ mod tests {
     fn test_dyn_arange() {
         let mut cx = Graph::new();
 
-        let arange = cx.arange::<Dyn<'a'>>().retrieve();
+        let arange = cx.arange('a').retrieve();
         cx.set_dyn_dim('a', 6);
 
         cx.execute();
@@ -378,7 +380,7 @@ mod tests {
     fn test_tril() {
         let mut cx = Graph::new();
 
-        let triangle = cx.tril::<LConst<5>>(1).retrieve();
+        let triangle = cx.tril(5, 1).retrieve();
 
         cx.execute();
 
@@ -401,9 +403,9 @@ mod tests {
     fn test_triu() {
         let mut cx = Graph::new();
 
-        let a = cx.triu::<LConst<3>>(-1).retrieve();
-        let b = cx.triu::<LConst<3>>(0).retrieve();
-        let c = cx.triu::<LConst<3>>(1).retrieve();
+        let a = cx.triu(3, -1).retrieve();
+        let b = cx.triu(3, 0).retrieve();
+        let c = cx.triu(3, 1).retrieve();
 
         cx.execute();
 

@@ -1,87 +1,56 @@
 use luminal::{prelude::*, tests::random_vec};
 
-pub struct Embedding<const N: usize, const DIM: usize> {
-    pub weight: GraphTensor<R2<N, DIM>>,
+pub struct Embedding {
+    permute: bool,
+    pub weight: GraphTensor, // n embeddings x embedding dim
 }
 
-impl<const A: usize, const B: usize> InitModule for Embedding<A, B> {
-    fn initialize(cx: &mut Graph) -> Self {
+impl Embedding {
+    pub fn new(n_embeddings: usize, embedding_dim: usize, cx: &mut Graph) -> Self {
         Self {
-            weight: cx.named_tensor("Embedding Weight").set(random_vec(A * B)),
+            weight: cx.named_tensor("Embedding Weight", (n_embeddings, embedding_dim)),
+            permute: false,
         }
+    }
+
+    pub fn new_permuted(n_embeddings: usize, embedding_dim: usize, cx: &mut Graph) -> Self {
+        Self {
+            weight: cx.named_tensor("Embedding Weight", (n_embeddings, embedding_dim)),
+            permute: true,
+        }
+    }
+
+    pub fn initialize(self) -> Self {
+        self.weight.set(random_vec(
+            self.weight.shape.n_elements().to_usize().unwrap(),
+        ));
+        self
     }
 }
 
-impl<const A: usize, const B: usize> SerializeModule for Embedding<A, B> {
+impl SerializeModule for Embedding {
     fn serialize(&self, s: &mut luminal::module::Serializer) {
         s.tensor("weight", self.weight);
     }
 }
 
-// Single
-impl<S: Dimension, const N: usize, const DIM: usize> Module<GraphTensor<(S,)>>
-    for Embedding<N, DIM>
-{
-    type Output = GraphTensor<(S, Const<DIM>)>;
+impl Module<GraphTensor> for Embedding {
+    type Output = GraphTensor;
 
-    fn forward(&self, input: GraphTensor<(S,)>) -> Self::Output {
-        self.weight.gather(input)
-    }
-}
-
-// Batch
-impl<B: Dimension, S: Dimension, const N: usize, const DIM: usize> Module<GraphTensor<(B, S)>>
-    for Embedding<N, DIM>
-{
-    type Output = GraphTensor<(B, S, Const<DIM>)>;
-
-    fn forward(&self, input: GraphTensor<(B, S)>) -> Self::Output {
-        self.weight
-            .gather(input.dyn_reshape::<(Dyn<'-'>,), _>(&[B::size() * S::size()]))
-            .reshape()
-    }
-}
-
-pub struct PermutedEmbedding<const N: usize, const DIM: usize> {
-    pub weight: GraphTensor<R2<DIM, N>>,
-}
-
-impl<const A: usize, const B: usize> InitModule for PermutedEmbedding<A, B> {
-    fn initialize(cx: &mut Graph) -> Self {
-        Self {
-            weight: cx.named_tensor("Embedding Weight").set(random_vec(A * B)),
+    fn forward(&self, input: GraphTensor) -> Self::Output {
+        // Flatten batches
+        let batch_size = input.shape.n_elements();
+        let inp = input.reshape(batch_size);
+        let out = if self.permute {
+            self.weight.permute((1, 0))
+        } else {
+            self.weight
         }
-    }
-}
-
-impl<const A: usize, const B: usize> SerializeModule for PermutedEmbedding<A, B> {
-    fn serialize(&self, s: &mut luminal::module::Serializer) {
-        s.tensor("weight", self.weight);
-    }
-}
-
-// Single
-impl<S: Dimension, const N: usize, const DIM: usize> Module<GraphTensor<(S,)>>
-    for PermutedEmbedding<N, DIM>
-{
-    type Output = GraphTensor<(S, Const<DIM>)>;
-
-    fn forward(&self, input: GraphTensor<(S,)>) -> Self::Output {
-        self.weight.permute().gather(input)
-    }
-}
-
-// Batch
-impl<B: Dimension, S: Dimension, const N: usize, const DIM: usize> Module<GraphTensor<(B, S)>>
-    for PermutedEmbedding<N, DIM>
-{
-    type Output = GraphTensor<(B, S, Const<DIM>)>;
-
-    fn forward(&self, input: GraphTensor<(B, S)>) -> Self::Output {
-        self.weight
-            .permute()
-            .gather(input.dyn_reshape::<(Dyn<'-'>,), _>(&[B::size() * S::size()]))
-            .reshape()
+        .gather(inp);
+        // Unflatten
+        let mut new_shape = input.shape();
+        new_shape.push(self.weight.shape()[1].clone());
+        out.reshape(new_shape)
     }
 }
 
@@ -101,12 +70,10 @@ mod tests {
     #[test]
     fn test_embedding() {
         let mut cx = Graph::new();
-        let batch = cx
-            .tensor::<R2<2, 3>>()
-            .set(vec![1.0, 0.0, 2.0, 1.0, 0.0, 1.0]);
-        let a = cx.tensor::<R1<3>>().set(vec![1.0, 0.0, 1.0]).retrieve();
+        let batch = cx.tensor((2, 3)).set(vec![1.0, 0.0, 2.0, 1.0, 0.0, 1.0]);
+        let a = cx.tensor(3).set(vec![1.0, 0.0, 1.0]).retrieve();
 
-        let model: Embedding<3, 4> = InitModule::initialize(&mut cx);
+        let model = Embedding::new(3, 4, &mut cx).initialize();
         model
             .weight
             .set(vec![1.1, 2., 3., 1., 2., 3., 14., 2., 33., 1., 2., 3.]);

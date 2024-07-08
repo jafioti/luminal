@@ -19,10 +19,10 @@ use crate::prelude::*;
 #[test]
 fn main() {
     let mut cx = Graph::new();
-    let b = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
-    let c = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
-    let g = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
-    let e = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
+    let b = cx.tensor(3).set(vec![1.0, 2.0, 3.0]);
+    let c = cx.tensor(3).set(vec![1.0, 2.0, 3.0]);
+    let g = cx.tensor(3).set(vec![1.0, 2.0, 3.0]);
+    let e = cx.tensor(3).set(vec![1.0, 2.0, 3.0]);
 
     let mut a = (b * c + g).retrieve();
     let mut d = (b * c / e).exp2().log2().retrieve();
@@ -42,8 +42,8 @@ fn main() {
 #[test]
 fn test_matmul() {
     let mut cx = Graph::new();
-    let b = cx.tensor::<R2<3, 1>>().set(vec![1.0, 2.0, 3.0]);
-    let c = cx.tensor::<R2<1, 4>>().set(vec![1.0, 2.0, 3.0, 3.0]);
+    let b = cx.tensor((3, 1)).set(vec![1.0, 2.0, 3.0]);
+    let c = cx.tensor((1, 4)).set(vec![1.0, 2.0, 3.0, 3.0]);
 
     let mut a = b.matmul(c).retrieve();
 
@@ -60,11 +60,8 @@ fn test_matmul() {
 #[test]
 fn test_shapes() {
     let mut cx = Graph::new();
-    let a = cx.tensor::<R1<4>>().set(vec![1., 2., 3., 4.]);
-    let b: GraphTensor<R2<2, 2>> = a
-        .reshape::<R2<2, 2>>()
-        .permute::<_, Axes2<1, 0>>()
-        .retrieve();
+    let a = cx.tensor(4).set(vec![1., 2., 3., 4.]);
+    let b = a.reshape((2, 2)).permute((1, 0)).retrieve();
     cx.execute();
 
     assert_exact(&b.data(), &[1., 3., 2., 4.]);
@@ -135,10 +132,7 @@ macro_rules! test_imports {
         };
         #[allow(unused_imports)]
         use $crate::{
-            prelude::{
-                Axes as LAxes, Axes2 as LAxes2, Axes3 as LAxes3, Axes4 as LAxes4, Axes5 as LAxes5,
-                Axis as LAxis, Const as LConst, *,
-            },
+            prelude::*,
             tests::{
                 assert_close, assert_close_precision, assert_exact, random_array, random_array_rng,
                 random_vec, random_vec_rng, test_graphs,

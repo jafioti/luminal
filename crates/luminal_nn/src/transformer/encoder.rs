@@ -1,66 +1,88 @@
-use crate::{Linear, ReLU, Repeated};
+use crate::{Linear, ReLU};
 use luminal::prelude::*;
 
 use super::attention::MultiHeadSelfAttention;
 
 /// A transformer encoder as layed out in [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762).
-pub type TransformerEncoder<
-    const DIM: usize,
-    const FF: usize,
-    const HEADS: usize,
-    const LAYERS: usize,
-> = Repeated<TransformerEncoderBlock<DIM, FF, HEADS>, LAYERS>;
-
-/// A single transformer encoder block
-pub struct TransformerEncoderBlock<const DIM: usize, const FF: usize, const HEADS: usize> {
-    pub attention: MultiHeadSelfAttention<DIM, DIM, DIM, HEADS>,
-    pub ff: (Linear<DIM, FF>, ReLU, Linear<FF, DIM>),
+pub struct TransformerEncoder {
+    pub layers: Vec<TransformerEncoderBlock>,
 }
 
-impl<const DIM: usize, const FF: usize, const HEADS: usize> InitModule
-    for TransformerEncoderBlock<DIM, FF, HEADS>
-{
-    fn initialize(cx: &mut Graph) -> Self {
+impl TransformerEncoder {
+    pub fn new(dim: usize, ff: usize, heads: usize, layers: usize, cx: &mut Graph) -> Self {
         Self {
-            attention: InitModule::initialize(cx),
-            ff: InitModule::initialize(cx),
+            layers: (0..layers)
+                .map(|_| TransformerEncoderBlock::new(dim, ff, heads, cx))
+                .collect(),
         }
     }
 }
 
-impl<const DIM: usize, const FF: usize, const HEADS: usize> SerializeModule
-    for TransformerEncoderBlock<DIM, FF, HEADS>
-{
+impl SerializeModule for TransformerEncoder {
+    fn serialize(&self, s: &mut Serializer) {
+        for (i, l) in self.layers.iter().enumerate() {
+            s.module(&format!("layer{i}"), l);
+        }
+    }
+}
+
+impl Module<GraphTensor> for TransformerEncoder {
+    type Output = GraphTensor;
+
+    fn forward(&self, mut input: GraphTensor) -> Self::Output {
+        for layer in &self.layers {
+            input = layer.forward(input);
+        }
+        input
+    }
+}
+
+/// A single transformer encoder block
+pub struct TransformerEncoderBlock {
+    pub attention: MultiHeadSelfAttention,
+    pub ff: (Linear, ReLU, Linear),
+}
+
+impl TransformerEncoderBlock {
+    pub fn new(dim: usize, ff: usize, heads: usize, cx: &mut Graph) -> Self {
+        Self {
+            attention: MultiHeadSelfAttention::new(dim, dim, dim, heads, cx),
+            ff: (
+                Linear::new(dim, ff, false, cx),
+                ReLU,
+                Linear::new(ff, dim, false, cx),
+            ),
+        }
+    }
+}
+
+impl SerializeModule for TransformerEncoderBlock {
     fn serialize(&self, s: &mut Serializer) {
         s.module("self_attn", &self.attention);
         s.module("ff", &self.ff);
     }
 }
 
-// Single
-impl<const DIM: usize, const FF: usize, const HEADS: usize, S: Dimension>
-    Module<GraphTensor<(S, Const<DIM>)>> for TransformerEncoderBlock<DIM, FF, HEADS>
-{
-    type Output = GraphTensor<(S, Const<DIM>)>;
-
-    fn forward(&self, input: GraphTensor<(S, Const<DIM>)>) -> Self::Output {
-        // Pass to batched forward
-        <Self as Module<GraphTensor<(Const<1>, S, Const<DIM>)>>>::forward(self, input.expand())
-            .reshape()
-    }
-}
-
 // Batched
-impl<const DIM: usize, const FF: usize, const HEADS: usize, S: Dimension, B: Dimension>
-    Module<GraphTensor<(B, S, Const<DIM>)>> for TransformerEncoderBlock<DIM, FF, HEADS>
-{
-    type Output = GraphTensor<(B, S, Const<DIM>)>;
+impl Module<GraphTensor> for TransformerEncoderBlock {
+    type Output = GraphTensor;
 
-    fn forward(&self, x: GraphTensor<(B, S, Const<DIM>)>) -> Self::Output {
+    fn forward(&self, input: GraphTensor) -> Self::Output {
+        // Input: batch_dims, sequence, dim
+        // Reshape to 1 batch dim, sequence, dim
+        let n_batches = input
+            .shape()
+            .into_iter()
+            .take(input.shape.len() - 2)
+            .product::<BigExpression>()
+            .max(1);
+        let sequence = input.shape()[input.shape.len() - 2].small();
+        let dim = input.shape()[input.shape.len() - 1].small();
+        let x = input.reshape((n_batches, sequence, dim));
         let x = x + self.attention.forward(x);
-        let x = x.layer_norm::<Axis<2>, _>(1e-5);
+        let x = x.layer_norm(2, 1e-5);
         let x = x + self.ff.forward(x);
-        x.layer_norm::<Axis<2>, _>(1e-5)
+        x.layer_norm(2, 1e-5).reshape(input.shape())
     }
 }
 
@@ -81,7 +103,7 @@ mod tests {
     #[test]
     fn test_transformer_encoder_block() {
         let mut cx = Graph::new();
-        let model: TransformerEncoderBlock<3, 4, 1> = InitModule::initialize(&mut cx);
+        let model = TransformerEncoderBlock::new(3, 4, 1, &mut cx);
         model
             .attention
             .w_k
@@ -114,8 +136,8 @@ mod tests {
             .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
         let a = cx
-            .tensor::<(Dyn<'s'>, luminal::shape::Const<3>)>()
-            .set_dyn(vec![-1., 2., 3., 3., 3., -1.], &[2, 3]);
+            .tensor(('s', 3))
+            .set_dyn(vec![-1., 2., 3., 3., 3., -1.], (2, 3));
         let b = model.forward(a).retrieve();
 
         cx.execute();

@@ -1054,7 +1054,7 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                 // Copy outputs to device
                 let copy_node = graph
                     .add_op(MetalCopyToDevice::<T>::new(dev.clone()))
-                    .input(function_node, 0, ShapeTracker::new(&[]))
+                    .input(function_node, 0, ShapeTracker::default())
                     .finish();
 
                 // Switch outgoing edges from input to copy_node

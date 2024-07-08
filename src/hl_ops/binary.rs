@@ -7,10 +7,10 @@ use std::ops::RemAssign;
 use std::ops::SubAssign;
 use std::ops::{Add, Div, Mul, Rem, Sub};
 
-impl<S: Shape> Add for GraphTensor<S> {
-    type Output = GraphTensor<S>;
+impl Add for GraphTensor {
+    type Output = GraphTensor;
 
-    fn add(mut self, mut rhs: GraphTensor<S>) -> Self::Output {
+    fn add(mut self, mut rhs: GraphTensor) -> Self::Output {
         resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
         let new_id = self
             .graph()
@@ -22,46 +22,46 @@ impl<S: Shape> Add for GraphTensor<S> {
     }
 }
 
-impl<S: Shape> Add<GraphTensor<S>> for f32 {
-    type Output = GraphTensor<S>;
+impl Add<GraphTensor> for f32 {
+    type Output = GraphTensor;
 
-    fn add(self, rhs: GraphTensor<S>) -> Self::Output {
+    fn add(self, rhs: GraphTensor) -> Self::Output {
         rhs + self
     }
 }
 
-impl<S: Shape> AddAssign for GraphTensor<S> {
+impl AddAssign for GraphTensor {
     fn add_assign(&mut self, rhs: Self) {
         *self = *self + rhs;
     }
 }
 
-impl<S: Shape> Sub for GraphTensor<S> {
-    type Output = GraphTensor<S>;
+impl Sub for GraphTensor {
+    type Output = GraphTensor;
 
-    fn sub(self, rhs: GraphTensor<S>) -> Self::Output {
+    fn sub(self, rhs: GraphTensor) -> Self::Output {
         self + -rhs
     }
 }
 
-impl<S: Shape> Sub<GraphTensor<S>> for f32 {
-    type Output = GraphTensor<S>;
+impl Sub<GraphTensor> for f32 {
+    type Output = GraphTensor;
 
-    fn sub(self, rhs: GraphTensor<S>) -> Self::Output {
+    fn sub(self, rhs: GraphTensor) -> Self::Output {
         self + -rhs
     }
 }
 
-impl<S: Shape> SubAssign for GraphTensor<S> {
+impl SubAssign for GraphTensor {
     fn sub_assign(&mut self, rhs: Self) {
         *self = *self - rhs;
     }
 }
 
-impl<S: Shape> Mul for GraphTensor<S> {
-    type Output = GraphTensor<S>;
+impl Mul for GraphTensor {
+    type Output = GraphTensor;
 
-    fn mul(mut self, mut rhs: GraphTensor<S>) -> Self::Output {
+    fn mul(mut self, mut rhs: GraphTensor) -> Self::Output {
         resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
         let new_id = self
             .graph()
@@ -73,48 +73,48 @@ impl<S: Shape> Mul for GraphTensor<S> {
     }
 }
 
-impl<S: Shape> Mul<GraphTensor<S>> for f32 {
-    type Output = GraphTensor<S>;
+impl Mul<GraphTensor> for f32 {
+    type Output = GraphTensor;
 
-    fn mul(self, rhs: GraphTensor<S>) -> Self::Output {
+    fn mul(self, rhs: GraphTensor) -> Self::Output {
         rhs * self
     }
 }
 
-impl<S: Shape> MulAssign for GraphTensor<S> {
+impl MulAssign for GraphTensor {
     fn mul_assign(&mut self, rhs: Self) {
         *self = *self * rhs;
     }
 }
 
 #[allow(clippy::suspicious_arithmetic_impl)]
-impl<S: Shape> Div<GraphTensor<S>> for GraphTensor<S> {
-    type Output = GraphTensor<S>;
+impl Div<GraphTensor> for GraphTensor {
+    type Output = GraphTensor;
 
-    fn div(self, rhs: GraphTensor<S>) -> Self::Output {
+    fn div(self, rhs: GraphTensor) -> Self::Output {
         self * rhs.recip()
     }
 }
 
 #[allow(clippy::suspicious_arithmetic_impl)]
-impl<S: Shape> Div<GraphTensor<S>> for f32 {
-    type Output = GraphTensor<S>;
+impl Div<GraphTensor> for f32 {
+    type Output = GraphTensor;
 
-    fn div(self, rhs: GraphTensor<S>) -> Self::Output {
+    fn div(self, rhs: GraphTensor) -> Self::Output {
         self * rhs.recip()
     }
 }
 
-impl<S: Shape> DivAssign for GraphTensor<S> {
+impl DivAssign for GraphTensor {
     fn div_assign(&mut self, rhs: Self) {
         *self = *self / rhs;
     }
 }
 
-impl<S: Shape> Rem<GraphTensor<S>> for GraphTensor<S> {
-    type Output = GraphTensor<S>;
+impl Rem<GraphTensor> for GraphTensor {
+    type Output = GraphTensor;
 
-    fn rem(mut self, mut rhs: GraphTensor<S>) -> Self::Output {
+    fn rem(mut self, mut rhs: GraphTensor) -> Self::Output {
         resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
         let new_id = self
             .graph()
@@ -126,63 +126,63 @@ impl<S: Shape> Rem<GraphTensor<S>> for GraphTensor<S> {
     }
 }
 
-impl<S: Shape> RemAssign for GraphTensor<S> {
+impl RemAssign for GraphTensor {
     fn rem_assign(&mut self, rhs: Self) {
         *self = *self % rhs;
     }
 }
 
-impl<S: Shape> Add<f32> for GraphTensor<S> {
-    type Output = GraphTensor<S>;
+impl Add<f32> for GraphTensor {
+    type Output = GraphTensor;
 
     fn add(self, rhs: f32) -> Self::Output {
         self + self.graph().constant(rhs).expand_to(self.shape)
     }
 }
 
-impl<S: Shape, St: ExpressionStorage> Add<GenericExpression<St>> for GraphTensor<S>
+impl<St: ExpressionStorage> Add<GenericExpression<St>> for GraphTensor
 where
     GenericExpression<Vec<Term>>: From<GenericExpression<St>>,
 {
-    type Output = GraphTensor<S>;
+    type Output = GraphTensor;
 
     fn add(self, rhs: GenericExpression<St>) -> Self::Output {
         self + self.graph().constant_expr(rhs).expand_to(self.shape)
     }
 }
 
-impl<S: Shape> Sub<f32> for GraphTensor<S> {
-    type Output = GraphTensor<S>;
+impl Sub<f32> for GraphTensor {
+    type Output = GraphTensor;
 
     fn sub(self, rhs: f32) -> Self::Output {
         self - self.graph().constant(rhs).expand_to(self.shape)
     }
 }
 
-impl<S: Shape, St: ExpressionStorage> Sub<GenericExpression<St>> for GraphTensor<S>
+impl<St: ExpressionStorage> Sub<GenericExpression<St>> for GraphTensor
 where
     GenericExpression<Vec<Term>>: From<GenericExpression<St>>,
 {
-    type Output = GraphTensor<S>;
+    type Output = GraphTensor;
 
     fn sub(self, rhs: GenericExpression<St>) -> Self::Output {
         self - self.graph().constant_expr(rhs).expand_to(self.shape)
     }
 }
 
-impl<S: Shape> Mul<f32> for GraphTensor<S> {
-    type Output = GraphTensor<S>;
+impl Mul<f32> for GraphTensor {
+    type Output = GraphTensor;
 
     fn mul(self, rhs: f32) -> Self::Output {
         self * self.graph().constant(rhs).expand_to(self.shape)
     }
 }
 
-impl<S: Shape, St: ExpressionStorage> Mul<GenericExpression<St>> for GraphTensor<S>
+impl<St: ExpressionStorage> Mul<GenericExpression<St>> for GraphTensor
 where
     GenericExpression<Vec<Term>>: From<GenericExpression<St>>,
 {
-    type Output = GraphTensor<S>;
+    type Output = GraphTensor;
 
     fn mul(self, rhs: GenericExpression<St>) -> Self::Output {
         self * self.graph().constant_expr(rhs).expand_to(self.shape)
@@ -190,38 +190,38 @@ where
 }
 
 #[allow(clippy::suspicious_arithmetic_impl)]
-impl<S: Shape> Div<f32> for GraphTensor<S> {
-    type Output = GraphTensor<S>;
+impl Div<f32> for GraphTensor {
+    type Output = GraphTensor;
 
     fn div(self, rhs: f32) -> Self::Output {
         self * self.graph().constant(rhs.recip()).expand_to(self.shape)
     }
 }
 
-impl<S: Shape, St: ExpressionStorage> Div<GenericExpression<St>> for GraphTensor<S>
+impl<St: ExpressionStorage> Div<GenericExpression<St>> for GraphTensor
 where
     GenericExpression<Vec<Term>>: From<GenericExpression<St>>,
 {
-    type Output = GraphTensor<S>;
+    type Output = GraphTensor;
 
     fn div(self, rhs: GenericExpression<St>) -> Self::Output {
         self / self.graph().constant_expr(rhs).expand_to(self.shape)
     }
 }
 
-impl<S: Shape> Rem<f32> for GraphTensor<S> {
-    type Output = GraphTensor<S>;
+impl Rem<f32> for GraphTensor {
+    type Output = GraphTensor;
 
     fn rem(self, rhs: f32) -> Self::Output {
         self % self.graph().constant(rhs).expand_to(self.shape)
     }
 }
 
-impl<S: Shape, St: ExpressionStorage> Rem<GenericExpression<St>> for GraphTensor<S>
+impl<St: ExpressionStorage> Rem<GenericExpression<St>> for GraphTensor
 where
     GenericExpression<Vec<Term>>: From<GenericExpression<St>>,
 {
-    type Output = GraphTensor<S>;
+    type Output = GraphTensor;
 
     fn rem(self, rhs: GenericExpression<St>) -> Self::Output {
         self % self.graph().constant_expr(rhs).expand_to(self.shape)
@@ -229,8 +229,8 @@ where
 }
 
 // Comparisons (based on https://github.com/tinygrad/tinygrad/blob/3e0c2d256fe9f4f5f85cd3e4d8733a51d7b4a984/tinygrad/tensor.py#L653)
-impl<S: Shape> GraphTensor<S> {
-    pub fn less_than(mut self, mut rhs: GraphTensor<S>) -> GraphTensor<S> {
+impl GraphTensor {
+    pub fn less_than(mut self, mut rhs: GraphTensor) -> GraphTensor {
         resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
         let new_id = self
             .graph()
@@ -241,28 +241,28 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 
-    pub fn greater_than(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
+    pub fn greater_than(self, rhs: GraphTensor) -> GraphTensor {
         rhs.less_than(self)
     }
 
-    pub fn less_than_equal(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
+    pub fn less_than_equal(self, rhs: GraphTensor) -> GraphTensor {
         -self.greater_than(rhs) + 1.0
     }
 
-    pub fn greater_than_equal(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
+    pub fn greater_than_equal(self, rhs: GraphTensor) -> GraphTensor {
         -self.less_than(rhs) + 1.0
     }
 
-    pub fn not_equals(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
+    pub fn not_equals(self, rhs: GraphTensor) -> GraphTensor {
         self.less_than(rhs) + self.greater_than(rhs)
     }
 
-    pub fn equals(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
+    pub fn equals(self, rhs: GraphTensor) -> GraphTensor {
         -self.not_equals(rhs) + 1.0
     }
 
     /// Raise the tensor to a power
-    pub fn pow<T>(self, e: T) -> GraphTensor<S>
+    pub fn pow<T>(self, e: T) -> GraphTensor
     where
         Self: Mul<T, Output = Self>,
     {
@@ -272,39 +272,39 @@ impl<S: Shape> GraphTensor<S> {
 }
 
 // Clipping ops (min, max, clip)
-impl<S: Shape> GraphTensor<S> {
+impl GraphTensor {
     /// Take the elementwise maximum of two tensors
-    pub fn max(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
+    pub fn max(self, rhs: GraphTensor) -> GraphTensor {
         (self.less_than(rhs) * rhs) + (rhs.less_than_equal(self) * self)
     }
 
     /// Take the elementwise maximum of a tensor and a float
-    pub fn max_f32(self, rhs: f32) -> GraphTensor<S> {
+    pub fn max_f32(self, rhs: f32) -> GraphTensor {
         self.max(self.graph().constant(rhs).expand_to(self.shape))
     }
 
     /// Take the elementwise minimum of two tensors
-    pub fn min(self, rhs: GraphTensor<S>) -> GraphTensor<S> {
+    pub fn min(self, rhs: GraphTensor) -> GraphTensor {
         -(-self).max(-rhs)
     }
 
     /// Take the elementwise minimum of a tensor and a float
-    pub fn min_f32(self, rhs: f32) -> GraphTensor<S> {
+    pub fn min_f32(self, rhs: f32) -> GraphTensor {
         -(-self).max_f32(-rhs)
     }
 
     /// Clip a tensor in a range
-    pub fn clip(self, min: f32, max: f32) -> GraphTensor<S> {
+    pub fn clip(self, min: f32, max: f32) -> GraphTensor {
         self.min_f32(min).max_f32(max)
     }
 }
 
 pub trait F32Pow {
-    fn pow<S: Shape>(self, e: GraphTensor<S>) -> GraphTensor<S>;
+    fn pow(self, e: GraphTensor) -> GraphTensor;
 }
 
 impl F32Pow for f32 {
-    fn pow<S: Shape>(self, e: GraphTensor<S>) -> GraphTensor<S> {
+    fn pow(self, e: GraphTensor) -> GraphTensor {
         e.mul(self.abs().ln()).exp().recip()
     }
 }

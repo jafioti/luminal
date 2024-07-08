@@ -429,9 +429,9 @@ mod tests {
         const N: usize = 256;
         let mut cx = Graph::new();
         let (a_vec, b_mat) = (random_vec(M), random_vec(M * N));
-        let mut a = cx.named_tensor::<R2<1, M>>("Vec").set(a_vec.clone());
-        let mut b = cx.named_tensor::<R2<N, M>>("Mat").set(b_mat.clone());
-        let mut c = a.matmul(b.permute()).retrieve();
+        let mut a = cx.named_tensor("Vec", (1, M)).set(a_vec.clone());
+        let mut b = cx.named_tensor("Mat", (N, M)).set(b_mat.clone());
+        let mut c = a.matmul(b.permute((1, 0))).retrieve();
 
         cx.compile(
             <(GenericCompiler, MetalCompiler<f16>)>::default(),
@@ -454,8 +454,8 @@ mod tests {
         const N: usize = 256;
         let mut cx = Graph::new();
         let (a_vec, b_mat) = (random_vec(M), random_vec(M * N));
-        let mut a = cx.named_tensor::<R3<1, 1, M>>("Vec").set(a_vec.clone());
-        let mut b = cx.named_tensor::<R2<M, N>>("Mat").set(b_mat.clone());
+        let mut a = cx.named_tensor("Vec", (1, 1, M)).set(a_vec.clone());
+        let mut b = cx.named_tensor("Mat", (M, N)).set(b_mat.clone());
         let mut c = a.matmul(b).retrieve();
 
         cx.compile(

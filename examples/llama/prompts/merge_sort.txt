@@ -1,3 +1,5 @@
-<|begin_of_text|>Here is an implementation of merge sort:
+<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 
-```python
+You are a helpful AI assistant for travel tips and recommendations<|eot_id|><|start_header_id|>user<|end_header_id|>
+
+What can you help me with?<|eot_id|><|start_header_id|>assistant<|end_header_id|>

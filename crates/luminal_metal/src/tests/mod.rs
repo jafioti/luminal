@@ -12,8 +12,8 @@ macro_rules! single_unary_test {
                 let mut rng = StdRng::seed_from_u64(1);
                 let data = random_vec_rng($size, &mut rng);
                 let mut cx = Graph::new();
-                let a = cx.tensor::<R1<$size>>().set(data.clone());
-                let f: fn(GraphTensor<R1<$size>>) -> GraphTensor<R1<$size>> = $luminal_func;
+                let a = cx.tensor($size).set(data.clone());
+                let f: fn(GraphTensor) -> GraphTensor = $luminal_func;
                 let mut b = f(a).retrieve();
                 cx.compile(MetalCompiler::<$type>::default(), &mut b);
                 cx.execute();
@@ -53,9 +53,9 @@ macro_rules! single_binary_test {
                 let a_data = random_vec_rng($size, &mut rng);
                 let b_data = random_vec_rng($size, &mut rng);
                 let mut cx = Graph::new();
-                let a = cx.tensor::<R1<$size>>().set(a_data.clone());
-                let b = cx.tensor::<R1<$size>>().set(b_data.clone());
-                let f: fn(GraphTensor<R1<$size>>, GraphTensor<R1<$size>>) -> GraphTensor<R1<$size>> =
+                let a = cx.tensor($size).set(a_data.clone());
+                let b = cx.tensor($size).set(b_data.clone());
+                let f: fn(GraphTensor, GraphTensor) -> GraphTensor =
                     $luminal_func;
                 let mut c = f(a, b).retrieve();
                 cx.compile(MetalCompiler::<$type>::default(), &mut c);

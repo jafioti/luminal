@@ -772,8 +772,8 @@ mod tests {
     #[test]
     fn test_norms() {
         let mut cx = Graph::new();
-        let a = cx.tensor().set([0.; 32]);
-        let mut b = a.layer_norm::<Axis<0>, _>(1e-5).retrieve();
+        let a = cx.tensor(32).set([0.; 32]);
+        let mut b = a.layer_norm(0, 1e-5).retrieve();
 
         cx.compile(
             <(

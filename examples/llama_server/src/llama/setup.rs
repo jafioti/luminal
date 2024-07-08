@@ -1,6 +1,5 @@
 use std::{
     io::{self, Write},
-    marker::PhantomData,
     path::Path,
     time::Instant,
 };
@@ -11,18 +10,16 @@ use tokenizers::Tokenizer;
 
 use crate::llama::{
     loader,
-    model::{KVCache, MistralLM, HEAD_DIM, NUM_LAYERS, N_KV_HEADS},
+    model::{KVCache, Llama, HEAD_DIM, NUM_LAYERS, N_KV_HEADS},
 };
-
-use super::model::VOCAB_SIZE;
 
 /// Define the model
 pub struct Model {
     pub graph: Box<Graph>,
-    pub input: GraphTensor<(Const<1>, Dyn<'s'>)>,
+    pub input: GraphTensor,
     kv_cache_src_set: Vec<NodeIndex>,
     kv_cache_dest_set: Vec<NodeIndex>,
-    logits: GraphTensor<R3<1, 1, { VOCAB_SIZE }>>,
+    logits: GraphTensor,
     pub tokenizer: Tokenizer,
     pub last_generated_token: Option<u32>,
 }
@@ -50,19 +47,23 @@ impl Model {
         // Set up graph
         let mut cx = Box::new(Graph::new());
 
-        let mut input = cx.named_tensor::<(Const<1>, Dyn<'s'>)>("Input");
-        let mut cache_src: Vec<KVCache<Const<1>, Dyn<'p'>>> = (0..NUM_LAYERS)
-            .map(|_| (cx.named_tensor("Key Cache"), cx.named_tensor("Value Cache")))
+        let mut input = cx.named_tensor("Input", (1, 's'));
+        let mut cache_src: Vec<KVCache> = (0..NUM_LAYERS)
+            .map(|_| {
+                (
+                    cx.named_tensor("Key Cache", (1, N_KV_HEADS, 'p', HEAD_DIM)),
+                    cx.named_tensor("Value Cache", (1, N_KV_HEADS, 'p', HEAD_DIM)),
+                )
+            })
             .collect();
-        cache_src.set_dyn(vec![], &[1, N_KV_HEADS, 0, HEAD_DIM]);
-        let model = MistralLM::initialize(&mut cx);
+        cache_src.set_dyn(vec![], (1, N_KV_HEADS, 0, HEAD_DIM));
+        let model = Llama::new(&mut cx);
         let mut model_weights = params(&model);
         cx.keep_tensors(&model_weights);
-        let (logits, mut cache_dest) = model.forward((input, &cache_src, PhantomData::<Dyn<'t'>>));
+        let (logits, mut cache_dest) = model.forward((input, &cache_src));
         let mut logits = logits
             .slice((.., (Expression::from('s') - 1).., ..))
-            .retrieve()
-            .realize();
+            .retrieve();
         cache_dest.keep();
 
         // Set up model loading
@@ -105,7 +106,7 @@ impl Model {
         print!("Loading model");
         io::stdout().flush().unwrap();
         let now = Instant::now();
-        input.set_dyn(vec![1.], &[1, 1]);
+        input.set_dyn(vec![1.], (1, 1));
         cx.set_dyn_dim('t', 1);
         cx.execute();
         logits.drop();
@@ -159,7 +160,7 @@ impl Model {
         self.graph.set_dyn_dim('t', seq_len);
         self.input.set_dyn(
             input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
-            &[1, input_ids.len()],
+            (1, input_ids.len()),
         );
 
         // First token output (from prompt processing)
@@ -183,7 +184,7 @@ impl Model {
             // Set the data
             self.graph.set_dyn_dim('p', seq_len - 1);
             self.graph.set_dyn_dim('t', seq_len);
-            self.input.set_dyn(vec![output_id as f32], &[1, 1]);
+            self.input.set_dyn(vec![output_id as f32], (1, 1));
 
             // Execute the graph
             self.graph.execute();

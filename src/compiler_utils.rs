@@ -28,7 +28,7 @@ pub trait ToId {
     fn to_id(&self) -> NodeIndex;
 }
 
-impl<S: Shape> ToId for GraphTensor<S> {
+impl ToId for GraphTensor {
     fn to_id(&self) -> NodeIndex {
         self.id
     }
@@ -40,12 +40,12 @@ impl ToId for NodeIndex {
     }
 }
 
-impl<S: Shape> ToIdsMut for GraphTensor<S> {
+impl ToIdsMut for GraphTensor {
     fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex> {
         vec![&mut self.id]
     }
 }
-impl<S: Shape> ToIds for GraphTensor<S> {
+impl ToIds for GraphTensor {
     fn to_ids(&self) -> Vec<NodeIndex> {
         vec![self.id]
     }
@@ -322,12 +322,12 @@ impl Graph {
     /// ```rust
     /// use luminal::prelude::*;
     /// let mut cx = Graph::new();
-    /// let a = cx.tensor::<R1<3>>();
+    /// let a = cx.tensor(3);
     /// let b_id = cx
     ///     .add_op(luminal::op::Mul)
     ///     .input(a.id, 0, a.shape)
     ///     .finish();
-    /// let b = GraphTensor::<R1<3>>::from_id(b_id, a.shape, a.graph());
+    /// let b = GraphTensor::from_id(b_id, a.shape, a.graph());
     /// ```
     pub fn add_op<O: Operator + 'static>(&mut self, op: O) -> NewOp {
         self.linearized_graph = None;

@@ -145,8 +145,8 @@ mod tests {
     #[test]
     fn test_matmul() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<(Dyn<'M'>, Dyn<'K'>)>();
-        let b = cx.tensor::<(Dyn<'K'>, Dyn<'N'>)>();
+        let a = cx.tensor(('M', 'K'));
+        let b = cx.tensor(('K', 'N'));
         let mut c = a.matmul(b).retrieve();
 
         cx.compile(CPUCompiler::default(), &mut c);
@@ -158,8 +158,8 @@ mod tests {
                     let mut rng = StdRng::seed_from_u64(0);
                     let a_data = random_vec_rng(m * k, &mut rng);
                     let b_data = random_vec_rng(k * n, &mut rng);
-                    a.set_dyn(a_data.clone(), &[m, k]);
-                    b.set_dyn(b_data.clone(), &[k, n]);
+                    a.set_dyn(a_data.clone(), (m, k));
+                    b.set_dyn(b_data.clone(), (k, n));
 
                     cx.execute();
 
@@ -177,9 +177,9 @@ mod tests {
     #[test]
     fn test_cpu_matmul_2d_2() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R2<2, 3>>();
+        let a = cx.tensor((2, 3));
         a.set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
-        let b = cx.tensor::<R2<3, 4>>();
+        let b = cx.tensor((3, 4));
         b.set(vec![1., 2., 3., 1., 2., 3., 1., 2., 3., 1., 2., 3.]);
         let mut c = a.matmul(b).retrieve();
 

@@ -1,85 +1,65 @@
 use luminal::prelude::*;
 
 /// Rectified Linear Unit activation function
+#[derive(Default)]
 pub struct ReLU;
-
-impl InitModule for ReLU {
-    fn initialize(_: &mut Graph) -> Self {
-        Self
-    }
-}
 
 impl SerializeModule for ReLU {
     fn serialize(&self, _: &mut Serializer) {}
 }
 
-impl<S: Shape> Module<GraphTensor<S>> for ReLU {
-    type Output = GraphTensor<S>;
+impl Module<GraphTensor> for ReLU {
+    type Output = GraphTensor;
 
-    fn forward(&self, input: GraphTensor<S>) -> Self::Output {
+    fn forward(&self, input: GraphTensor) -> Self::Output {
         input.relu()
     }
 }
 
 /// Sigmoid activation function
+#[derive(Default)]
 pub struct Sigmoid;
-
-impl InitModule for Sigmoid {
-    fn initialize(_: &mut Graph) -> Self {
-        Self
-    }
-}
 
 impl SerializeModule for Sigmoid {
     fn serialize(&self, _: &mut Serializer) {}
 }
 
-impl<S: ConstShape> Module<GraphTensor<S>> for Sigmoid {
-    type Output = GraphTensor<S>;
+impl Module<GraphTensor> for Sigmoid {
+    type Output = GraphTensor;
 
-    fn forward(&self, input: GraphTensor<S>) -> Self::Output {
+    fn forward(&self, input: GraphTensor) -> Self::Output {
         input.sigmoid()
     }
 }
 
 /// Swish activation function
+#[derive(Default)]
 pub struct Swish;
-
-impl InitModule for Swish {
-    fn initialize(_: &mut Graph) -> Self {
-        Self
-    }
-}
 
 impl SerializeModule for Swish {
     fn serialize(&self, _: &mut Serializer) {}
 }
 
-impl<S: ConstShape> Module<GraphTensor<S>> for Swish {
-    type Output = GraphTensor<S>;
+impl Module<GraphTensor> for Swish {
+    type Output = GraphTensor;
 
-    fn forward(&self, input: GraphTensor<S>) -> Self::Output {
+    fn forward(&self, input: GraphTensor) -> Self::Output {
         input.swish()
     }
 }
 
 /// Tanh activation function
+#[derive(Default)]
 pub struct Tanh;
-
-impl InitModule for Tanh {
-    fn initialize(_: &mut Graph) -> Self {
-        Self
-    }
-}
 
 impl SerializeModule for Tanh {
     fn serialize(&self, _: &mut Serializer) {}
 }
 
-impl<S: ConstShape> Module<GraphTensor<S>> for Tanh {
-    type Output = GraphTensor<S>;
+impl Module<GraphTensor> for Tanh {
+    type Output = GraphTensor;
 
-    fn forward(&self, input: GraphTensor<S>) -> Self::Output {
+    fn forward(&self, input: GraphTensor) -> Self::Output {
         input.tanh()
     }
 }
@@ -98,12 +78,14 @@ mod tests {
     fn test_relu_and_linear() {
         // Test single and batch, unoptimized and optimized
         let mut cx = Graph::new();
-        let batch = cx
-            .tensor::<R2<2, 3>>()
-            .set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
-        let a = cx.tensor::<R1<3>>().set(vec![1.0, 2.0, 3.0]);
+        let batch = cx.tensor((2, 3)).set(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+        let a = cx.tensor(3).set(vec![1.0, 2.0, 3.0]);
 
-        let model: (Linear<3, 4>, ReLU, Linear<4, 2>) = InitModule::initialize(&mut cx);
+        let model = (
+            Linear::new(3, 4, false, &mut cx),
+            ReLU,
+            Linear::new(4, 2, false, &mut cx),
+        );
         model
             .0
             .weight

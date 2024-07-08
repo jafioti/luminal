@@ -1,34 +1,21 @@
 use crate::{op, prelude::*};
 
-impl<S: Shape> GraphTensor<S> {
+impl GraphTensor {
     /// Swap dimensions of the tensor
-    pub fn permute<Dst: Shape, Ax: Axes>(mut self) -> GraphTensor<Dst>
-    where
-        S: PermuteShapeTo<Dst, Ax>,
-    {
-        self.shape
-            .permute(&Ax::as_array().into_iter().collect::<Vec<_>>());
+    pub fn permute(mut self, axes: impl ToAxes) -> GraphTensor {
+        self.shape.permute(&axes.to_axes());
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
     /// Broadcast tensor along new dimensions
-    pub fn expand<Dst: Shape, Ax: Axes>(mut self) -> GraphTensor<Dst>
-    where
-        S: BroadcastShapeTo<Dst, Ax>,
-    {
-        let new_dims = Dst::realized_shape();
-        if !new_dims.is_empty() {
-            for (i, dim) in Ax::as_array().into_iter().map(|i| (i, new_dims[i])) {
-                self.shape.expand(i, dim);
-            }
-        }
-
+    pub fn expand(mut self, axis: usize, size: impl Into<Expression>) -> GraphTensor {
+        self.shape.expand(axis, size);
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
     /// Broadcast tensor along new dimensions (with explicitly given dest shape)
-    pub fn expand_to<Dst: Shape>(mut self, shape: ShapeTracker) -> GraphTensor<Dst> {
-        for (i, s) in shape.indexes.iter().map(|i| shape.dims[*i]).enumerate() {
+    pub fn expand_to(mut self, shape: impl ToShape) -> GraphTensor {
+        for (i, s) in shape.to_shape().into_iter().enumerate() {
             if self.shape.len() <= i || self.shape.dims[self.shape.indexes[i]] != s {
                 self.shape.expand(i, s);
             }
@@ -38,51 +25,17 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Convert tensor to a new shape with an equivalent number of elements
-    pub fn reshape<N: Shape>(mut self) -> GraphTensor<N> {
+    pub fn reshape(mut self, new_shape: impl ToShape) -> GraphTensor {
         // Insert contiguous call
         self = self.contiguous();
         GraphTensor::from_id(
             self.id,
-            ShapeTracker::new(&N::realized_shape()),
+            ShapeTracker::new(&new_shape.to_shape()),
             self.graph_ref,
         )
     }
 
-    /// Dynamically reshape with annotations for the shape tracker
-    pub fn dyn_reshape<N: Shape, T>(mut self, shape: &[T]) -> GraphTensor<N>
-    where
-        for<'a> Expression: From<&'a T>,
-    {
-        if !self.shape.indexes.iter().enumerate().all(|(a, b)| a == *b) {
-            // Insert contiguous call
-            self = self.contiguous();
-        }
-
-        GraphTensor::from_id(
-            self.id,
-            ShapeTracker::new(&shape.iter().map(Expression::from).collect::<Vec<_>>()),
-            self.graph_ref,
-        )
-    }
-
-    pub fn realize<Dst: Shape<Concrete = <<S as HasShape>::Shape as Shape>::Concrete>>(
-        self,
-    ) -> GraphTensor<Dst>
-    where
-        S: RealizeShapeTo<Dst>,
-    {
-        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
-    }
-
-    pub fn sync_shape(self) -> Self {
-        GraphTensor::from_id(
-            self.id,
-            ShapeTracker::new(&S::realized_shape()),
-            self.graph_ref,
-        )
-    }
-
-    pub fn contiguous(self) -> GraphTensor<S> {
+    pub fn contiguous(self) -> GraphTensor {
         if !self.shape.is_reshaped() {
             return self;
         }
@@ -95,10 +48,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Take a slice of the original tensor. Any dimension with bounds becomes a dynamic dimension
-    pub fn slice<Slice: SliceOfShape<S>>(
-        mut self,
-        slice: Slice,
-    ) -> GraphTensor<Slice::OutputShape> {
+    pub fn slice(mut self, slice: impl ToSlice) -> GraphTensor {
         let ranges = slice.to_range_vec();
         // This exists because currently padding and slicing on the same dimension (even on opposite sides) is unsupported
         if ranges.iter().zip(self.shape.indexes).any(|(range, ind)| {
@@ -113,7 +63,7 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Cut out 'size' elements every 'spacing' elements in the last dimension. 'size' must be smaller than the last dimension
-    pub fn excise<Dst: Shape>(mut self, spacing: usize, size: usize) -> GraphTensor<Dst> {
+    pub fn excise(mut self, spacing: usize, size: usize) -> GraphTensor {
         let n_dims = self.shape.len();
         // Pad out to a multiple of spacing + size
         let total_size = (self.shape.dims[self.shape.indexes[n_dims - 1]] + ((spacing + size) - 1))
@@ -140,15 +90,15 @@ impl<S: Shape> GraphTensor<S> {
     }
 
     /// Pool elements along the last dimension, pools are exposed as a new dimension
-    pub fn pool_last_dim<Dst: Shape>(
+    pub fn pool_last_dim(
         mut self,
         kernel: impl Into<BigExpression>,
         stride: impl Into<BigExpression>,
         dilation: usize,
-    ) -> GraphTensor<Dst> {
+    ) -> GraphTensor {
         let (kernel, stride) = (kernel.into(), stride.into());
         let n_dims = self.shape.len();
-        let full_kernel = kernel.clone() + (kernel.clone() - 1) * dilation;
+        let full_kernel = kernel.clone() + (kernel.clone() - 1) * (dilation - 1);
         let dim_size = self.shape.shape().pop().unwrap().simplify().small();
         let number_of_windows = (((dim_size.big() - full_kernel.clone()) / stride.clone()) + 1)
             .simplify()
@@ -177,15 +127,15 @@ impl<S: Shape> GraphTensor<S> {
         self.shape.mask[self.shape.indexes[n_dims - 1]].1 = number_of_windows;
         self = self.contiguous();
 
-        if dilation > 0 {
+        if dilation > 1 {
             // Remove dilations
-            self.excise(1, dilation)
+            self.excise(1, dilation - 1)
         } else {
             GraphTensor::from_id(self.id, self.shape, self.graph_ref)
         }
     }
 
-    pub fn pad<Dst: Shape>(mut self, padding: impl PadOfShape<S>) -> GraphTensor<Dst> {
+    pub fn pad(mut self, padding: impl ToPad) -> GraphTensor {
         let padding = padding.to_pad_vec();
         // This exists because currently padding and slicing on the same dimension (even on opposite sides) is unsupported
         if padding.iter().zip(self.shape.indexes).any(|(range, ind)| {
@@ -199,18 +149,14 @@ impl<S: Shape> GraphTensor<S> {
         GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
-    pub fn concat_along<Dst: Shape, Ax: Axes<Array = [usize; 1]>, Rhs: Shape>(
-        self,
-        rhs: GraphTensor<Rhs>,
-    ) -> GraphTensor<Dst> {
-        let dim = Ax::as_array()[0];
+    pub fn concat_along(self, rhs: GraphTensor, axis: usize) -> GraphTensor {
         // Create padding
         let mut a_padding = vec![(Expression::default(), Expression::default()); self.shape.len()];
-        a_padding[dim].1 = rhs.shape.shape()[dim].small();
+        a_padding[axis].1 = rhs.shape.shape()[axis].small();
         let mut b_padding = vec![(Expression::default(), Expression::default()); rhs.shape.len()];
-        b_padding[dim].0 = self.shape.shape()[dim].small();
+        b_padding[axis].0 = self.shape.shape()[axis].small();
         // Pad and add
-        (self.pad(a_padding) + rhs.pad(b_padding)).sync_shape()
+        self.pad(a_padding) + rhs.pad(b_padding)
     }
 }
 
@@ -227,11 +173,11 @@ mod tests {
     #[test]
     fn test_concat_1d() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R1<4>>();
+        let a = cx.tensor(4);
         a.set(vec![1.4325, 2.492428, 3.127365, 3.54865]);
-        let b = cx.tensor::<R1<3>>();
+        let b = cx.tensor(3);
         b.set(vec![2.30434, 2.2343113, 1.4393]);
-        let c = a.concat_along::<R1<7>, LAxis<0>, _>(b);
+        let c = a.concat_along(b, 0);
         c.retrieve();
         cx.execute();
 
@@ -246,10 +192,8 @@ mod tests {
     #[test]
     fn test_concat_self() {
         let mut cx = Graph::new();
-        let a = cx
-            .tensor::<(LConst<4>,)>()
-            .set(vec![1.4325, 2.492428, 3.127365, 3.54865]);
-        let b = a.concat_along::<(LConst<8>,), LAxis<0>, _>(a).retrieve();
+        let a = cx.tensor(4).set(vec![1.4325, 2.492428, 3.127365, 3.54865]);
+        let b = a.concat_along(a, 0).retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -263,12 +207,12 @@ mod tests {
     #[test]
     fn test_concat_2d() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R2<3, 2>>();
+        let a = cx.tensor((3, 2));
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
-        let b = cx.tensor::<R2<3, 2>>();
+        let b = cx.tensor((3, 2));
         b.set(vec![2.30434, 2.2343113, 1.4393, 482.4312, 8.1234, 54.2054]);
-        let c = a.concat_along::<R2<3, 4>, LAxis<1>, _>(b);
-        let d = a.concat_along::<R2<6, 2>, LAxis<0>, _>(b);
+        let c = a.concat_along(b, 1);
+        let d = a.concat_along(b, 0);
         c.retrieve();
         d.retrieve();
         cx.execute();
@@ -301,9 +245,9 @@ mod tests {
     fn test_pad_2d() {
         let mut cx = Graph::new();
         let a = cx
-            .tensor::<R2<3, 2>>()
+            .tensor((3, 2))
             .set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
-        let b = a.pad::<R2<3, 4>>(((0, 0), (0, 2))).retrieve();
+        let b = a.pad(((0, 0), (0, 2))).retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -328,10 +272,10 @@ mod tests {
     #[test]
     fn test_slice_2d() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R2<3, 2>>();
-        a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
-        let b = a.slice((.., ..Expression::from(1))).realize::<R2<3, 1>>();
-        b.retrieve();
+        let a = cx
+            .tensor((3, 2))
+            .set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
+        let b = a.slice((.., ..Expression::from(1))).retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -347,13 +291,13 @@ mod tests {
     #[test]
     fn test_cumsum() {
         let mut cx = Graph::new();
-        let a = cx.constant(1.).expand::<R1<3>, _>();
+        let a = cx.constant(1.).expand(0, 3);
         let b = a.cumsum_last_dim().retrieve();
         let c = a
-            .expand::<R2<3, 3>, LAxis<1>>()
-            .permute::<_, LAxes2<1, 0>>()
+            .expand(1, 3)
+            .permute((1, 0))
             .cumsum_last_dim()
-            .permute::<_, LAxes2<1, 0>>()
+            .permute((1, 0))
             .retrieve();
         cx.execute();
 
@@ -365,34 +309,28 @@ mod tests {
     fn test_pool_1d() {
         let mut cx = Graph::new();
 
-        let inp1 = cx.tensor::<R1<5>>().set([1., 2., 3., 4., 5.]);
+        let inp1 = cx.tensor(5).set([1., 2., 3., 4., 5.]);
         let inp2 = cx
-            .tensor::<R2<2, 5>>()
+            .tensor((2, 5))
             .set([[15., 14., 13., 12., 11.], [1., 2., 3., 4., 5.]]);
         // Stride 1
-        let out1 = inp1.pool_last_dim::<R2<3, 3>>(3, 1, 0).retrieve();
+        let out1 = inp1.pool_last_dim(3, 1, 1).retrieve();
         // Stride 2
-        let out2 = inp1.pool_last_dim::<R2<2, 3>>(3, 2, 0).retrieve();
+        let out2 = inp1.pool_last_dim(3, 2, 1).retrieve();
         // Stride 3
-        let out3 = inp1.pool_last_dim::<R2<1, 3>>(3, 3, 0).retrieve();
-        // Dilation 1
-        let out4 = inp1.pool_last_dim::<R2<1, 3>>(3, 1, 1).retrieve();
-        // Dilation 1 Padding 1
-        let out5 = inp1
-            .pad::<R1<7>>(((1, 1),))
-            .pool_last_dim::<R2<3, 3>>(3, 1, 1)
-            .retrieve();
+        let out3 = inp1.pool_last_dim(3, 3, 1).retrieve();
+        // Dilation 2
+        let out4 = inp1.pool_last_dim(3, 1, 2).retrieve();
+        // Dilation 2 Padding 1
+        let out5 = inp1.pad(((1, 1),)).pool_last_dim(3, 1, 2).retrieve();
         // Stride 1 Batch 2
-        let out6 = inp2.pool_last_dim::<R3<2, 3, 3>>(3, 1, 0).retrieve();
+        let out6 = inp2.pool_last_dim(3, 1, 1).retrieve();
         // Stride 3
-        let out7 = inp2.pool_last_dim::<R3<2, 1, 3>>(3, 3, 0).retrieve();
-        // Dilation 1
-        let out8 = inp2.pool_last_dim::<R3<2, 1, 3>>(3, 1, 1).retrieve();
-        // Dilation 1 Padding 1
-        let out9 = inp2
-            .pad::<R2<2, 7>>(((0, 0), (1, 1)))
-            .pool_last_dim::<R3<2, 3, 3>>(3, 1, 1)
-            .retrieve();
+        let out7 = inp2.pool_last_dim(3, 3, 1).retrieve();
+        // Dilation 2
+        let out8 = inp2.pool_last_dim(3, 1, 2).retrieve();
+        // Dilation 2 Padding 1
+        let out9 = inp2.pad(((0, 0), (1, 1))).pool_last_dim(3, 1, 2).retrieve();
 
         cx.execute();
 
@@ -421,11 +359,11 @@ mod tests {
     fn test_pool_1d_dims() {
         let mut cx = Graph::new();
 
-        let inp1 = cx.tensor::<R2<4, 4>>().set(vec![
+        let inp1 = cx.tensor((4, 4)).set(vec![
             1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
         ]);
         // Stride 1
-        let out1 = inp1.pool_last_dim::<R3<4, 2, 3>>(3, 1, 0).retrieve();
+        let out1 = inp1.pool_last_dim(3, 1, 1).retrieve();
 
         cx.execute();
 
@@ -442,21 +380,21 @@ mod tests {
     fn test_pool_2d() {
         let mut cx = Graph::new();
 
-        let inp1 = cx.tensor::<R2<4, 4>>().set(vec![
+        let inp1 = cx.tensor((4, 4)).set(vec![
             1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
         ]);
         // 3x3 kernel
         let out1 = inp1
             // Pool first dim first by moving it to end
-            .permute::<_, LAxes2<1, 0>>()
-            .pool_last_dim::<R3<4, 2, 3>>(3, 1, 0)
+            .permute((1, 0))
+            .pool_last_dim(3, 1, 1)
             // Now move other dim to end
-            .permute::<_, LAxes3<1, 2, 0>>()
-            .pool_last_dim::<R4<2, 3, 2, 3>>(3, 1, 0)
+            .permute((1, 2, 0))
+            .pool_last_dim(3, 1, 1)
             // Now swap middle two dims
-            .permute::<_, LAxes4<0, 2, 1, 3>>()
+            .permute((0, 2, 1, 3))
             // Now merge both pooled dimensions
-            .reshape::<R3<4, 3, 3>>()
+            .reshape((4, 3, 3))
             .retrieve();
 
         cx.execute();
@@ -475,13 +413,13 @@ mod tests {
     fn test_pool_1d_dilation() {
         let mut cx = Graph::new();
 
-        let inp1 = cx.tensor::<R1<5>>().set(vec![1., 2., 3., 4., 5.]);
+        let inp1 = cx.tensor(5).set(vec![1., 2., 3., 4., 5.]);
         // Stride 1
-        let out1 = inp1.pool_last_dim::<R2<3, 2>>(2, 1, 1).retrieve();
+        let out1 = inp1.pool_last_dim(2, 1, 2).retrieve();
         // Stride 2
-        let out2 = inp1.pool_last_dim::<R2<2, 2>>(2, 2, 1).retrieve();
+        let out2 = inp1.pool_last_dim(2, 2, 2).retrieve();
         // Stride 3
-        let out3 = inp1.pool_last_dim::<R2<1, 2>>(2, 3, 1).retrieve();
+        let out3 = inp1.pool_last_dim(2, 3, 2).retrieve();
 
         cx.execute();
 
@@ -493,11 +431,11 @@ mod tests {
     #[test]
     fn test_rotate_half() {
         let mut cx = Graph::new();
-        let a = cx.tensor::<R2<3, 2>>();
+        let a = cx.tensor((3, 2));
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
         let x1 = a.slice((.., ..Expression::from(1))).contiguous();
         let x2 = a.slice((.., Expression::from(1)..)).contiguous();
-        let c = (-x2).concat_along::<R2<3, 2>, LAxis<1>, _>(x1);
+        let c = (-x2).concat_along(x1, 1);
         c.retrieve();
         cx.execute();
 

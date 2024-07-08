@@ -390,7 +390,7 @@ fn test_shared_buffers() {
     use luminal::prelude::*;
     use luminal::tests::{assert_close_precision, random_vec};
     let mut cx = Graph::new();
-    let a = cx.tensor::<R1<5>>().set(random_vec(5)).keep();
+    let a = cx.tensor(5).set(random_vec(5)).keep();
     let b = a.exp2();
     let c = a.log2() * b;
     let d = b.recip();

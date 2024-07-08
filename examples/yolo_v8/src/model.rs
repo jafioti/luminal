@@ -4,25 +4,19 @@ use luminal_nn::Conv2D;
 struct Bottleneck<const CH_IN: usize, const CH_OUT: usize> {
     cv1: Conv2D<CH_IN, CH_OUT, 3, 3, 1, 1>,
     cv2: Conv2D<CH_OUT, CH_OUT, 3, 3, 1, 1>,
-    residual: bool,
 }
 
-impl<
-        const CH_IN: usize,
-        const CH_OUT: usize,
-        Batch: Dimension,
-        Width: Dimension,
-        Height: Dimension,
-    > Module<GraphTensor<(Batch, Const<CH_IN>, Height, Width)>> for Bottleneck<CH_IN, CH_OUT>
+impl<const CH_IN: usize, const CH_OUT: usize, Width: Dimension, Height: Dimension>
+    Module<GraphTensor<(Const<CH_IN>, Height, Width)>> for Bottleneck<CH_IN, CH_OUT>
 {
-    type Output = GraphTensor<(Batch, Const<CH_OUT>, Height, Width)>;
-    fn forward(&self, input: GraphTensor<(Batch, Const<CH_IN>, Height, Width)>) -> Self::Output {
-        let out = self.cv2.forward(self.cv1.forward(input));
-        if self.residual {
-            out + input
-        } else {
-            out
-        }
+    type Output = GraphTensor<(Const<CH_OUT>, Height, Width)>;
+    fn forward(&self, input: GraphTensor<(Const<CH_IN>, Height, Width)>) -> Self::Output {
+        self.cv2
+            .forward(
+                self.cv1
+                    .forward::<Width, Height, Width, Height>(input.permute()),
+            )
+            .permute()
     }
 }
 

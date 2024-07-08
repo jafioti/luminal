@@ -4,28 +4,21 @@ use luminal::prelude::*;
 use super::attention::MultiHeadSelfAttention;
 
 /// A transformer decoder as layed out in [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762).
-pub struct TransformerDecoder<
-    const DIM: usize,
-    const FF: usize,
-    const HEADS: usize,
-    const LAYERS: usize,
-> {
-    pub layers: Vec<TransformerDecoderBlock<DIM, FF, HEADS>>,
+pub struct TransformerDecoder {
+    pub layers: Vec<TransformerDecoderBlock>,
 }
 
-impl<const DIM: usize, const FF: usize, const HEADS: usize, const LAYERS: usize> InitModule
-    for TransformerDecoder<DIM, FF, HEADS, LAYERS>
-{
-    fn initialize(cx: &mut Graph) -> Self {
+impl TransformerDecoder {
+    pub fn new(dim: usize, ff: usize, heads: usize, layers: usize, cx: &mut Graph) -> Self {
         Self {
-            layers: (0..LAYERS).map(|_| InitModule::initialize(cx)).collect(),
+            layers: (0..layers)
+                .map(|_| TransformerDecoderBlock::new(dim, ff, heads, cx))
+                .collect(),
         }
     }
 }
 
-impl<const DIM: usize, const FF: usize, const HEADS: usize, const LAYERS: usize> SerializeModule
-    for TransformerDecoder<DIM, FF, HEADS, LAYERS>
-{
+impl SerializeModule for TransformerDecoder {
     fn serialize(&self, s: &mut Serializer) {
         for (i, l) in self.layers.iter().enumerate() {
             s.module(&format!("layer{i}"), l);
@@ -33,55 +26,10 @@ impl<const DIM: usize, const FF: usize, const HEADS: usize, const LAYERS: usize>
     }
 }
 
-// Single
-impl<
-        const DIM: usize,
-        const FF: usize,
-        const HEADS: usize,
-        const LAYERS: usize,
-        S1: Dimension,
-        S2: Dimension,
-    > Module<(GraphTensor<(S1, Const<DIM>)>, GraphTensor<(S2, Const<DIM>)>)>
-    for TransformerDecoder<DIM, FF, HEADS, LAYERS>
-{
-    type Output = GraphTensor<(S1, Const<DIM>)>;
+impl Module<(GraphTensor, GraphTensor)> for TransformerDecoder {
+    type Output = GraphTensor;
 
-    fn forward(
-        &self,
-        (input, from_enc): (GraphTensor<(S1, Const<DIM>)>, GraphTensor<(S2, Const<DIM>)>),
-    ) -> Self::Output {
-        <Self as Module<(
-            GraphTensor<(Const<1>, S1, Const<DIM>)>,
-            GraphTensor<(Const<1>, S2, Const<DIM>)>,
-        )>>::forward(self, (input.expand(), from_enc.expand()))
-        .reshape()
-    }
-}
-
-// Batched
-impl<
-        const DIM: usize,
-        const FF: usize,
-        const HEADS: usize,
-        const LAYERS: usize,
-        B: Dimension,
-        S1: Dimension,
-        S2: Dimension,
-    >
-    Module<(
-        GraphTensor<(B, S1, Const<DIM>)>,
-        GraphTensor<(B, S2, Const<DIM>)>,
-    )> for TransformerDecoder<DIM, FF, HEADS, LAYERS>
-{
-    type Output = GraphTensor<(B, S1, Const<DIM>)>;
-
-    fn forward(
-        &self,
-        (mut input, from_enc): (
-            GraphTensor<(B, S1, Const<DIM>)>,
-            GraphTensor<(B, S2, Const<DIM>)>,
-        ),
-    ) -> Self::Output {
+    fn forward(&self, (mut input, from_enc): (GraphTensor, GraphTensor)) -> Self::Output {
         for layer in &self.layers {
             input = layer.forward((input, from_enc));
         }
@@ -90,27 +38,27 @@ impl<
 }
 
 /// A single transformer decoder block
-pub struct TransformerDecoderBlock<const DIM: usize, const FF: usize, const HEADS: usize> {
-    pub self_attention: MultiHeadSelfAttention<DIM, DIM, DIM, HEADS>,
-    pub cross_attention: MultiHeadSelfAttention<DIM, DIM, DIM, HEADS>,
-    pub ff: (Linear<DIM, FF>, ReLU, Linear<FF, DIM>),
+pub struct TransformerDecoderBlock {
+    pub self_attention: MultiHeadSelfAttention,
+    pub cross_attention: MultiHeadSelfAttention,
+    pub ff: (Linear, ReLU, Linear),
 }
 
-impl<const DIM: usize, const FF: usize, const HEADS: usize> InitModule
-    for TransformerDecoderBlock<DIM, FF, HEADS>
-{
-    fn initialize(cx: &mut Graph) -> Self {
+impl TransformerDecoderBlock {
+    pub fn new(dim: usize, ff: usize, heads: usize, cx: &mut Graph) -> Self {
         Self {
-            cross_attention: InitModule::initialize(cx),
-            self_attention: InitModule::initialize(cx),
-            ff: InitModule::initialize(cx),
+            cross_attention: MultiHeadSelfAttention::new(dim, dim, dim, heads, cx),
+            self_attention: MultiHeadSelfAttention::new(dim, dim, dim, heads, cx),
+            ff: (
+                Linear::new(dim, ff, false, cx),
+                ReLU,
+                Linear::new(ff, dim, false, cx),
+            ),
         }
     }
 }
 
-impl<const DIM: usize, const FF: usize, const HEADS: usize> SerializeModule
-    for TransformerDecoderBlock<DIM, FF, HEADS>
-{
+impl SerializeModule for TransformerDecoderBlock {
     fn serialize(&self, s: &mut Serializer) {
         s.module("self_attn", &self.self_attention);
         s.module("cross_attn", &self.cross_attention);
@@ -118,55 +66,32 @@ impl<const DIM: usize, const FF: usize, const HEADS: usize> SerializeModule
     }
 }
 
-// Single
-impl<const DIM: usize, const FF: usize, const HEADS: usize, S1: Dimension, S2: Dimension>
-    Module<(GraphTensor<(S1, Const<DIM>)>, GraphTensor<(S2, Const<DIM>)>)>
-    for TransformerDecoderBlock<DIM, FF, HEADS>
-{
-    type Output = GraphTensor<(S1, Const<DIM>)>;
+impl Module<(GraphTensor, GraphTensor)> for TransformerDecoderBlock {
+    type Output = GraphTensor;
 
-    fn forward(
-        &self,
-        (input, from_enc): (GraphTensor<(S1, Const<DIM>)>, GraphTensor<(S2, Const<DIM>)>),
-    ) -> Self::Output {
-        // Pass to batched forward
-        <Self as Module<(
-            GraphTensor<(Const<1>, S1, Const<DIM>)>,
-            GraphTensor<(Const<1>, S2, Const<DIM>)>,
-        )>>::forward(self, (input.expand(), from_enc.expand()))
-        .reshape()
-    }
-}
-
-// Batched
-impl<
-        const DIM: usize,
-        const FF: usize,
-        const HEADS: usize,
-        S1: Dimension,
-        S2: Dimension,
-        B: Dimension,
-    >
-    Module<(
-        GraphTensor<(B, S1, Const<DIM>)>,
-        GraphTensor<(B, S2, Const<DIM>)>,
-    )> for TransformerDecoderBlock<DIM, FF, HEADS>
-{
-    type Output = GraphTensor<(B, S1, Const<DIM>)>;
-
-    fn forward(
-        &self,
-        (x, from_enc): (
-            GraphTensor<(B, S1, Const<DIM>)>,
-            GraphTensor<(B, S2, Const<DIM>)>,
-        ),
-    ) -> Self::Output {
-        let y = self.self_attention.forward(x);
-        let x = (y + x).layer_norm::<Axis<2>, _>(1e-5);
-        let y = self.cross_attention.forward((from_enc, x, from_enc));
-        let x = (y + x).layer_norm::<Axis<2>, _>(1e-5);
+    fn forward(&self, (input, from_enc): (GraphTensor, GraphTensor)) -> Self::Output {
+        // Input: batch_dims, seq1, dim
+        // From_enc: batch_dims, seq2, dim
+        // Flatten to single batch dim
+        let seq1 = input.shape()[input.shape.len() - 2].small();
+        let seq2 = from_enc.shape()[from_enc.shape.len() - 2].small();
+        let dim = input.shape().last().unwrap().small();
+        let n_batches = input
+            .shape()
+            .into_iter()
+            .take(input.shape.len() - 2)
+            .product::<BigExpression>()
+            .max(1)
+            .small();
+        let inp = input.reshape((n_batches, seq1, dim));
+        let fe = from_enc.reshape((n_batches, seq2, dim));
+        // Batched forward pass
+        let y = self.self_attention.forward(inp);
+        let x = (y + inp).layer_norm(2, 1e-5);
+        let y = self.cross_attention.forward((fe, x, fe));
+        let x = (y + x).layer_norm(2, 1e-5);
         let y = self.ff.forward(x);
-        (y + x).layer_norm::<Axis<2>, _>(1e-5)
+        (y + x).layer_norm(2, 1e-5).reshape(input.shape)
     }
 }
 
@@ -187,7 +112,7 @@ mod tests {
     #[test]
     fn test_transformer_decoder_block() {
         let mut cx = Graph::new();
-        let model: TransformerDecoderBlock<3, 4, 1> = InitModule::initialize(&mut cx);
+        let model = TransformerDecoderBlock::new(3, 4, 1, &mut cx);
         model
             .self_attention
             .w_k
@@ -239,12 +164,12 @@ mod tests {
             .weight
             .set(vec![-1., 12., 3., -1., 2., -3., 11., 2., 3., 3., -1., 2.]);
 
-        let a = cx.tensor::<(Dyn<'d'>, Const<3>)>();
-        let e = cx.tensor::<(Dyn<'e'>, Const<3>)>();
+        let a = cx.tensor(('d', 3));
+        let e = cx.tensor(('e', 3));
         let b = model.forward((a, e));
 
-        a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], &[2, 3]);
-        e.set_dyn(vec![-1., 2., 3., 3., 3., -1., -1., 2., 3.], &[3, 3]);
+        a.set_dyn(vec![-1., 2., 3., 3., 3., -1.], (2, 3));
+        e.set_dyn(vec![-1., 2., 3., 3., 3., -1., -1., 2., 3.], (3, 3));
         b.retrieve();
 
         cx.execute();

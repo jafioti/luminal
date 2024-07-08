@@ -530,11 +530,11 @@ mod tests {
     fn test_subtraction() {
         let mut cx = Graph::new();
         let a = cx
-            .tensor::<R1<10>>()
+            .tensor(10)
             .set(vec![1., 2., 3., 4., 5., 6., 7., 8., 9., 10.]);
-        let b = cx.tensor::<R0>().set(vec![1.]);
-        let mut c = (a - b.expand()).retrieve();
-        let mut d = (-a + b.expand()).retrieve();
+        let b = cx.tensor(()).set(vec![1.]);
+        let mut c = (a - b.expand_to(a.shape)).retrieve();
+        let mut d = (-a + b.expand_to(a.shape)).retrieve();
 
         cx.execute();
 

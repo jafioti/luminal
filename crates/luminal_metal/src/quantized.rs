@@ -900,9 +900,9 @@ mod tests {
         let mat_data: Vec<i8> = (0..(1024 * 512)).map(|_| rng.gen_range(0..5)).collect();
         let vec_data = random_vec_rng(1024, &mut rng);
         let mut cx = Graph::new();
-        let weights = cx.tensor::<R2<512, 1024>>().keep();
-        let vec = cx.tensor::<R1<1024>>().set(vec_data.clone());
-        let mut out = vec.matmul(weights.permute()).retrieve();
+        let weights = cx.tensor((512, 1024)).keep();
+        let vec = cx.tensor(1024).set(vec_data.clone());
+        let mut out = vec.matmul(weights.permute((1, 0))).retrieve();
 
         // "Load" weights in 8bit
         let blocks = mat_data
@@ -933,11 +933,11 @@ mod tests {
 
         let mut cx1 = Graph::new();
         let weights = cx1
-            .tensor::<R2<512, 1024>>()
+            .tensor((512, 1024))
             .set(mat_data.into_iter().map(|i| i as f32).collect::<Vec<_>>())
             .keep();
-        let vec = cx1.tensor::<R1<1024>>().set(vec_data);
-        let out_32 = vec.matmul(weights.permute()).retrieve();
+        let vec = cx1.tensor(1024).set(vec_data);
+        let out_32 = vec.matmul(weights.permute((1, 0))).retrieve();
         cx1.execute();
 
         assert_close(&out.data(), &out_32.data());
@@ -949,9 +949,9 @@ mod tests {
         let mat_data: Vec<i8> = (0..(1024 * 512)).map(|_| rng.gen_range(0..5)).collect();
         let inp_mat_data = random_vec_rng(1024 * 16, &mut rng);
         let mut cx = Graph::new();
-        let weights = cx.tensor::<R2<512, 1024>>().keep();
-        let inp_mat = cx.tensor::<R2<16, 1024>>().set(inp_mat_data.clone());
-        let mut out = inp_mat.matmul(weights.permute()).retrieve();
+        let weights = cx.tensor((512, 1024)).keep();
+        let inp_mat = cx.tensor((16, 1024)).set(inp_mat_data.clone());
+        let mut out = inp_mat.matmul(weights.permute((1, 0))).retrieve();
 
         // "Load" weights in 8bit
         let blocks = mat_data
@@ -1000,9 +1000,9 @@ mod tests {
         let mat_data: Vec<i8> = (0..(1024 * 512)).map(|_| rng.gen_range(0..5)).collect();
         let inp_mat_data = random_vec_rng(1024 * 16, &mut rng);
         let mut cx = Graph::new();
-        let weights = cx.tensor::<R2<512, 1024>>().keep();
-        let inp_mat = cx.tensor::<R2<16, 1024>>().set(inp_mat_data.clone());
-        let mut out = inp_mat.matmul(weights.permute()).retrieve();
+        let weights = cx.tensor((512, 1024)).keep();
+        let inp_mat = cx.tensor((16, 1024)).set(inp_mat_data.clone());
+        let mut out = inp_mat.matmul(weights.permute((1, 0))).retrieve();
 
         // "Load" weights in 8bit
         let blocks = mat_data

@@ -3,7 +3,9 @@ use tinyvec::ArrayVec;
 
 use crate::prelude::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct ShapeTracker {
     pub dims: ArrayVec<[Expression; 6]>,
     pub indexes: ArrayVec<[usize; 6]>,
@@ -13,7 +15,7 @@ pub struct ShapeTracker {
 }
 
 impl ShapeTracker {
-    pub fn new(dims: &[Expression]) -> Self {
+    pub fn new(dims: &[impl Into<Expression> + Copy]) -> Self {
         let mut s = Self {
             dims: Default::default(),
             indexes: Default::default(),
@@ -22,7 +24,7 @@ impl ShapeTracker {
             padding: Default::default(),
         };
         for (i, d) in dims.iter().enumerate() {
-            s.dims.push(*d);
+            s.dims.push((*d).into());
             s.indexes.push(i);
             s.fake.push(false);
             s.mask.push((0.into(), i32::MAX.into())); // Unset upper bound mask are i32::MAX
@@ -69,6 +71,12 @@ impl ShapeTracker {
 
     /// Permute the dimensions
     pub fn permute(&mut self, axes: &[usize]) {
+        assert!(
+            axes.len() == self.len(),
+            "Permute axes ({}) doesn't match shape axes ({})",
+            axes.len(),
+            self.len()
+        );
         let new_indexes = axes.iter().map(|i| self.indexes[*i]).collect::<Vec<_>>();
         self.indexes.copy_from_slice(&new_indexes);
     }
@@ -194,6 +202,14 @@ impl ShapeTracker {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    pub fn all_axes(&self) -> Vec<usize> {
+        (0..self.len()).collect()
+    }
+
+    pub fn last_axis(&self) -> usize {
+        self.len() - 1
     }
 
     pub fn realize(mut self, dims: &[Expression]) -> Self {
@@ -363,15 +379,14 @@ mod tests {
     #[test]
     fn test_symbolic_idx() {
         let mut cx = Graph::new();
-        const SEQ: usize = 2;
-        const HEAD_DIM: usize = 4;
-        const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
-        let a = cx.named_tensor::<R2<SEQ, HEAD_DIM>>("a").keep();
-        let _b = cx.tensor::<R3<SEQ, HEAD_DIM_OVER_2, 1>>().keep();
+        let seq = 2;
+        let head_dim = 4;
+        let a = cx.named_tensor("a", (seq, head_dim)).keep();
+        let _b = cx.tensor((seq, head_dim / 2, 1)).keep();
         // Split input into evens and odds
-        let split = a.reshape::<R3<SEQ, HEAD_DIM_OVER_2, 2>>();
-        let x0: GraphTensor<R3<SEQ, HEAD_DIM_OVER_2, 1>> = split.slice((.., .., ..1)).realize();
-        let _x1: GraphTensor<R3<SEQ, HEAD_DIM_OVER_2, 1>> = split.slice((.., .., 1..)).realize();
+        let split = a.reshape((seq, head_dim / 2, 2));
+        let x0 = split.slice((.., .., ..1));
+        let _x = split.slice((.., .., 1..));
 
         println!("x0: {:?}", x0.shape.index_expression());
     }

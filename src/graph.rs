@@ -112,12 +112,12 @@ impl Graph {
     }
 
     /// Create a new tensor with shape S
-    pub fn tensor<S: Shape>(&mut self) -> GraphTensor<S> {
-        self.named_tensor("Tensor")
+    pub fn tensor(&mut self, shape: impl ToShape) -> GraphTensor {
+        self.named_tensor("Tensor", shape)
     }
 
     /// Create a new tensor with shape S and a name. This name will show up on the graph when displayed
-    pub fn named_tensor<S: Shape>(&mut self, name: &str) -> GraphTensor<S> {
+    pub fn named_tensor(&mut self, name: &str, shape: impl ToShape) -> GraphTensor {
         let name = name.to_string();
         GraphTensor {
             id: self.graph.add_node(Box::new(Function(
@@ -125,8 +125,7 @@ impl Graph {
                 Box::new(move |_| panic!("You must set a value for this tensor! ({name})")),
             ))),
             graph_ref: self,
-            shape: S::to_tracker(),
-            _phantom: Default::default(),
+            shape: ShapeTracker::new(&shape.to_shape()),
         }
     }
 
@@ -166,7 +165,7 @@ impl Graph {
     }
 
     /// Swap the tensors with these ids
-    pub fn swap_tensors<A: Shape, B: Shape>(&mut self, a: GraphTensor<A>, b: GraphTensor<B>) {
+    pub fn swap_tensors(&mut self, a: GraphTensor, b: GraphTensor) {
         // Swap tensors
         for i in 0.. {
             let a_t = self.tensors.remove(&(a.id, i));

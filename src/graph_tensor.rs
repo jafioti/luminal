@@ -1,6 +1,5 @@
 use crate::prelude::*;
 use std::fmt::Debug;
-use std::marker::PhantomData;
 
 use petgraph::graph::NodeIndex;
 
@@ -10,27 +9,25 @@ use petgraph::graph::NodeIndex;
 /// ```rust
 /// use luminal::prelude::*;
 /// let mut cx = Graph::new();
-/// let a: GraphTensor<R1<3>> = cx.tensor();
-/// let b: GraphTensor<R1<3>> = cx.tensor();
-/// let c: GraphTensor<R1<3>> = a + b;
+/// let a = cx.tensor(3);
+/// let b = cx.tensor(3);
+/// let c = a + b;
 /// // The graph `cx` now has `a` and `b` loading nodes, and an add node resulting in `c`
 /// ```
 #[derive(Clone, Copy)]
-pub struct GraphTensor<S: Shape> {
+pub struct GraphTensor {
     pub id: NodeIndex,
     pub graph_ref: *mut Graph,
-    pub(crate) _phantom: PhantomData<S>,
     pub shape: ShapeTracker,
 }
 
-impl<S: Shape> GraphTensor<S> {
+impl GraphTensor {
     /// Create a GraphTensor from a NodeIndex
     pub fn from_id(id: NodeIndex, shape: ShapeTracker, graph_ref: *mut Graph) -> Self {
         Self {
             id,
             graph_ref,
             shape,
-            _phantom: Default::default(),
         }
     }
 
@@ -62,20 +59,15 @@ impl<S: Shape> GraphTensor<S> {
     /// ```rust
     /// use luminal::prelude::*;
     /// let mut cx = Graph::new();
-    /// let a: GraphTensor<(Const<2>, Dyn<'s'>)> = cx
-    ///     .tensor()
+    /// let a = cx
+    ///     .tensor((2, 's'))
     ///     .set_dyn(vec![1., 2., 3., 4.], &[2, 2]);
     /// ```
-    pub fn set_dyn<T: Data + Clone>(self, data: T, shape: &[usize]) -> Self {
+    pub fn set_dyn(self, data: impl Data + Clone, shape: impl ToShape) -> Self {
         // Report dyn dim values to graph dyn map
-        assert_eq!(
-            S::NUM_DIMS,
-            shape.len(),
-            "Number of dimensions do not match!"
-        );
-        for (d, s) in S::realized_shape().iter().zip(shape.iter()) {
+        for (d, s) in self.shape.shape().iter().zip(shape.to_shape().into_iter()) {
             if let Some(c) = d.to_symbols().pop() {
-                self.graph().dyn_map.insert(c, *s);
+                self.graph().dyn_map.insert(c, s.to_usize().unwrap());
             }
         }
         self.graph().get_op_mut::<Function>(self.id).1 =
@@ -86,11 +78,6 @@ impl<S: Shape> GraphTensor<S> {
     /// Set the name of a tensor
     pub fn set_name(&self, name: &str) {
         self.graph().get_op_mut::<Function>(self.id).0 = name.to_string();
-    }
-
-    /// Convert tensor to a shapeless tensor
-    pub fn no_shape(self) -> GraphTensor<()> {
-        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
     }
 
     /// Get the contiguous data of the tensor
@@ -115,12 +102,45 @@ impl<S: Shape> GraphTensor<S> {
         }
         data
     }
-}
 
-impl<S: ConstShape> GraphTensor<S> {
+    pub fn shape(&self) -> Vec<BigExpression> {
+        self.shape.shape()
+    }
+
+    pub fn dims1(&self) -> Expression {
+        self.shape.shape()[0].small()
+    }
+    pub fn dims2(&self) -> (Expression, Expression) {
+        (self.shape.shape()[0].small(), self.shape.shape()[1].small())
+    }
+    pub fn dims3(&self) -> (Expression, Expression, Expression) {
+        (
+            self.shape.shape()[0].small(),
+            self.shape.shape()[1].small(),
+            self.shape.shape()[2].small(),
+        )
+    }
+    pub fn dims4(&self) -> (Expression, Expression, Expression, Expression) {
+        (
+            self.shape.shape()[0].small(),
+            self.shape.shape()[1].small(),
+            self.shape.shape()[2].small(),
+            self.shape.shape()[3].small(),
+        )
+    }
+    pub fn dims5(&self) -> (Expression, Expression, Expression, Expression, Expression) {
+        (
+            self.shape.shape()[0].small(),
+            self.shape.shape()[1].small(),
+            self.shape.shape()[2].small(),
+            self.shape.shape()[3].small(),
+            self.shape.shape()[4].small(),
+        )
+    }
+
     /// Set the value of the tensor matching the constant shape
-    pub fn set<T: Data + Clone, D: ToData<S, T>>(self, data: D) -> Self {
-        let data = data.to_data_vec();
+    pub fn set<T: Data + Clone, D: ToData<T>>(self, data: D) -> Self {
+        let (data, _) = data.to_data_vec();
         self.graph().get_op_mut::<Function>(self.id).1 =
             Box::new(move |_| vec![Tensor::new(data.to_owned())]);
         self
@@ -215,7 +235,7 @@ fn pretty_print_tensor_recursive(
     Ok(())
 }
 
-impl<S: Shape> Debug for GraphTensor<S> {
+impl Debug for GraphTensor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Print the shape
         let mut shape = self.shape;
@@ -236,10 +256,10 @@ pub trait MarkTensors {
     /// Drop all tensors in this collection
     fn drop(&self);
     /// Set data
-    fn set_dyn<T: Data + Clone>(&self, data: T, shape: &[usize]);
+    fn set_dyn(&self, data: impl Data + Clone, shape: impl ToShape + Copy);
 }
 
-impl<S: Shape> MarkTensors for GraphTensor<S> {
+impl MarkTensors for GraphTensor {
     fn keep(&self) {
         GraphTensor::keep(*self);
     }
@@ -250,7 +270,7 @@ impl<S: Shape> MarkTensors for GraphTensor<S> {
     fn drop(&self) {
         GraphTensor::drop(self);
     }
-    fn set_dyn<T: Data + Clone>(&self, data: T, shape: &[usize]) {
+    fn set_dyn(&self, data: impl Data + Clone, shape: impl ToShape + Copy) {
         GraphTensor::set_dyn(*self, data, shape);
     }
 }
@@ -273,7 +293,7 @@ impl<S: MarkTensors> MarkTensors for Vec<S> {
             t.drop();
         }
     }
-    fn set_dyn<T: Data + Clone>(&self, data: T, shape: &[usize]) {
+    fn set_dyn(&self, data: impl Data + Clone, shape: impl ToShape + Copy) {
         for t in self {
             t.set_dyn(data.clone(), shape);
         }
@@ -297,7 +317,7 @@ impl<S: MarkTensors> MarkTensors for &[S] {
             t.drop();
         }
     }
-    fn set_dyn<T: Data + Clone>(&self, data: T, shape: &[usize]) {
+    fn set_dyn(&self, data: impl Data + Clone, shape: impl ToShape + Copy) {
         for t in *self {
             t.set_dyn(data.clone(), shape);
         }
@@ -319,7 +339,7 @@ macro_rules! tuple_impls {
             fn drop(&self) {
                 $(self.$idx.drop();)+
             }
-            fn set_dyn<T: Data + Clone>(&self, data: T, shape: &[usize]) {
+            fn set_dyn(&self, data: impl Data + Clone, shape: impl ToShape + Copy) {
                 $(self.$idx.set_dyn(data.clone(), shape);)+
             }
         }
@@ -343,62 +363,73 @@ tuple_impls!(
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 );
 
-pub trait ToData<S: Shape, T> {
-    fn to_data_vec(self) -> T;
+pub trait ToData<T> {
+    fn to_data_vec(self) -> (T, Vec<usize>);
 }
 
-impl<S: Shape> ToData<S, Vec<f32>> for Vec<f32> {
-    fn to_data_vec(self) -> Vec<f32> {
-        self
+impl ToData<Vec<f32>> for Vec<f32> {
+    fn to_data_vec(self) -> (Vec<f32>, Vec<usize>) {
+        let l = self.len();
+        (self, vec![l])
     }
 }
-impl ToData<R0, Vec<f32>> for f32 {
-    fn to_data_vec(self) -> Vec<f32> {
-        vec![self]
+impl ToData<Vec<f32>> for f32 {
+    fn to_data_vec(self) -> (Vec<f32>, Vec<usize>) {
+        (vec![self], vec![1])
     }
 }
-impl<const A: usize> ToData<(Const<A>,), Vec<f32>> for [f32; A] {
-    fn to_data_vec(self) -> Vec<f32> {
-        self.to_vec()
+impl<const A: usize> ToData<Vec<f32>> for [f32; A] {
+    fn to_data_vec(self) -> (Vec<f32>, Vec<usize>) {
+        (self.to_vec(), vec![A])
     }
 }
-impl<const A: usize, const B: usize> ToData<(Const<A>, Const<B>), Vec<f32>> for [[f32; B]; A] {
-    fn to_data_vec(self) -> Vec<f32> {
-        self.into_iter().flat_map(|i| i.to_vec()).collect()
+impl<const A: usize, const B: usize> ToData<Vec<f32>> for [[f32; B]; A] {
+    fn to_data_vec(self) -> (Vec<f32>, Vec<usize>) {
+        (
+            self.into_iter().flat_map(|i| i.to_vec()).collect(),
+            vec![A, B],
+        )
     }
 }
-impl<const A: usize, const B: usize, const C: usize>
-    ToData<(Const<A>, Const<B>, Const<C>), Vec<f32>> for [[[f32; C]; B]; A]
+impl<const A: usize, const B: usize, const C: usize> ToData<Vec<f32>> for [[[f32; C]; B]; A] {
+    fn to_data_vec(self) -> (Vec<f32>, Vec<usize>) {
+        (
+            self.into_iter()
+                .flat_map(|i| i.into_iter().flat_map(|i| i.to_vec()))
+                .collect(),
+            vec![A, B, C],
+        )
+    }
+}
+impl<const A: usize, const B: usize, const C: usize, const D: usize> ToData<Vec<f32>>
+    for [[[[f32; D]; C]; B]; A]
 {
-    fn to_data_vec(self) -> Vec<f32> {
-        self.into_iter()
-            .flat_map(|i| i.into_iter().flat_map(|i| i.to_vec()))
-            .collect()
-    }
-}
-impl<const A: usize, const B: usize, const C: usize, const D: usize>
-    ToData<(Const<A>, Const<B>, Const<C>, Const<D>), Vec<f32>> for [[[[f32; D]; C]; B]; A]
-{
-    fn to_data_vec(self) -> Vec<f32> {
-        self.into_iter()
-            .flat_map(|i| {
-                i.into_iter()
-                    .flat_map(|i| i.into_iter().flat_map(|i| i.to_vec()))
-            })
-            .collect()
-    }
-}
-impl<const A: usize, const B: usize, const C: usize, const D: usize, const E: usize>
-    ToData<(Const<A>, Const<B>, Const<C>, Const<D>), Vec<f32>> for [[[[[f32; E]; D]; C]; B]; A]
-{
-    fn to_data_vec(self) -> Vec<f32> {
-        self.into_iter()
-            .flat_map(|i| {
-                i.into_iter().flat_map(|i| {
+    fn to_data_vec(self) -> (Vec<f32>, Vec<usize>) {
+        (
+            self.into_iter()
+                .flat_map(|i| {
                     i.into_iter()
                         .flat_map(|i| i.into_iter().flat_map(|i| i.to_vec()))
                 })
-            })
-            .collect()
+                .collect(),
+            vec![A, B, C, D],
+        )
+    }
+}
+impl<const A: usize, const B: usize, const C: usize, const D: usize, const E: usize>
+    ToData<Vec<f32>> for [[[[[f32; E]; D]; C]; B]; A]
+{
+    fn to_data_vec(self) -> (Vec<f32>, Vec<usize>) {
+        (
+            self.into_iter()
+                .flat_map(|i| {
+                    i.into_iter().flat_map(|i| {
+                        i.into_iter()
+                            .flat_map(|i| i.into_iter().flat_map(|i| i.to_vec()))
+                    })
+                })
+                .collect(),
+            vec![A, B, C, D, E],
+        )
     }
 }

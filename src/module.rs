@@ -5,11 +5,6 @@ use petgraph::{stable_graph::NodeIndex, visit::EdgeRef, Direction};
 
 use crate::prelude::*;
 
-/// A module that can initialize it's variables on the graph
-pub trait InitModule {
-    fn initialize(cx: &mut Graph) -> Self;
-}
-
 /// A module with a forward pass
 pub trait Module<I> {
     type Output;
@@ -197,14 +192,6 @@ macro_rules! tuple_impls {
             }
         }
 
-        impl<$($name: InitModule,)+> InitModule for ($($name,)+) {
-            fn initialize(cx: &mut Graph) -> Self {
-                (
-                $($name::initialize(cx),)+
-                )
-            }
-        }
-
         impl<$($name: SerializeModule,)+> SerializeModule for ($($name,)+) {
             fn serialize(&self, s: &mut Serializer) {
                 $(s.module(&format!("layer{}", $idx), &self.$idx);)+
@@ -243,7 +230,7 @@ pub struct Serializer {
 }
 
 impl Serializer {
-    pub fn tensor<S: Shape>(&mut self, name: &str, tensor: GraphTensor<S>) {
+    pub fn tensor(&mut self, name: &str, tensor: GraphTensor) {
         if !name.is_empty() {
             // Add new path component
             self.current_path.push(name.to_string());
