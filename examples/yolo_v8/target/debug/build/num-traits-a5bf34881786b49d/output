@@ -1,2 +1,0 @@
-cargo:rustc-cfg=has_total_cmp
-cargo:rerun-if-changed=build.rs
