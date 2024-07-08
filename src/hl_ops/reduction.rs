@@ -96,7 +96,7 @@ mod tests {
         let a_data = random_vec(6);
         let a = cx.tensor::<R2<2, 3>>();
         a.set(a_data.clone());
-        let b = a.sum_reduce::<_, LAxis<1>>();
+        let b = a.sum_reduce::<R1<2>, LAxis<1>>();
         b.retrieve();
 
         cx.execute();
@@ -114,7 +114,7 @@ mod tests {
         let a_data = random_vec(6);
         let a = cx.tensor::<R2<2, 3>>();
         a.set(a_data.clone());
-        let b = a.max_reduce::<_, LAxis<1>>();
+        let b = a.max_reduce::<R1<2>, LAxis<1>>();
         b.retrieve();
 
         cx.execute();
@@ -132,7 +132,7 @@ mod tests {
         let a_data = random_vec(6);
         let a = cx.tensor::<R2<2, 3>>();
         a.set(a_data.clone());
-        let b = a.mean_reduce::<_, LAxis<1>>();
+        let b = a.mean_reduce::<R1<2>, LAxis<1>>();
         b.retrieve();
 
         cx.execute();
