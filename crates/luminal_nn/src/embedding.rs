@@ -3,6 +3,7 @@ use luminal::{prelude::*, tests::random_vec};
 pub struct Embedding {
     permute: bool,
     pub weight: GraphTensor, // n embeddings x embedding dim
+    embedding_dim: usize,
 }
 
 impl Embedding {
@@ -10,13 +11,15 @@ impl Embedding {
         Self {
             weight: cx.named_tensor("Embedding Weight", (n_embeddings, embedding_dim)),
             permute: false,
+            embedding_dim,
         }
     }
 
     pub fn new_permuted(n_embeddings: usize, embedding_dim: usize, cx: &mut Graph) -> Self {
         Self {
-            weight: cx.named_tensor("Embedding Weight", (n_embeddings, embedding_dim)),
+            weight: cx.named_tensor("Embedding Weight", (embedding_dim, n_embeddings)),
             permute: true,
+            embedding_dim,
         }
     }
 
@@ -41,15 +44,15 @@ impl Module<GraphTensor> for Embedding {
         // Flatten batches
         let batch_size = input.shape.n_elements();
         let inp = input.reshape(batch_size);
+        // Gather
         let out = if self.permute {
-            self.weight.permute((1, 0))
+            self.weight.permute((1, 0)).gather(inp)
         } else {
-            self.weight
-        }
-        .gather(inp);
+            self.weight.gather(inp)
+        };
         // Unflatten
         let mut new_shape = input.shape();
-        new_shape.push(self.weight.shape()[1].clone());
+        new_shape.push(self.embedding_dim.into());
         out.reshape(new_shape)
     }
 }

@@ -1,5 +1,5 @@
 use luminal::prelude::{binary::F32Pow, *};
-use luminal_nn::{Conv1D, Embedding, LayerNorm, Linear};
+use luminal_nn::{Conv1D, Embedding, GeLU, LayerNorm, Linear};
 use std::marker::PhantomData;
 use std::ops::{Add, Mul};
 
@@ -44,13 +44,10 @@ pub const NO_SPEECH_TOKENS: [&str; 2] = ["<|nocaptions|>", "<|nospeech|>"];
 pub type KVCache = (GraphTensor, GraphTensor);
 
 pub struct SelfAttention {
-    pub q_proj: GraphTensor,      // hidden x hidden
-    pub q_proj_bias: GraphTensor, // hidden
-    pub k_proj: GraphTensor,      // hidden x hidden
-    pub v_proj: GraphTensor,      // hidden x hidden
-    pub v_proj_bias: GraphTensor, // hidden
-    pub o_proj: GraphTensor,      // hidden x hidden
-    pub o_proj_bias: GraphTensor, // hidden
+    pub q_proj: Linear,
+    pub k_proj: Linear,
+    pub v_proj: Linear,
+    pub o_proj: Linear,
 }
 
 impl Module<(GraphTensor, Option<KVCache>, bool)> for SelfAttention {
@@ -60,43 +57,40 @@ impl Module<(GraphTensor, Option<KVCache>, bool)> for SelfAttention {
         let (batch, seq, hidden) = x.dims3();
         let scale = ((hidden.to_usize().unwrap() as f32 / HEADS as f32) as f64).powf(-0.25) as f32;
         // Apply the Projections
-        let queries = x
-            .matmul(self.q_proj.permute((1, 0)))
-            .add(self.q_proj_bias.expand(0, batch).expand(1, seq))
+        let queries = self
+            .q_proj
+            .forward(x)
             .mul(scale)
             .reshape((batch, seq, HEADS, HEAD_DIM))
             .permute((0, 2, 1, 3));
 
-        let keys = x
-            .matmul(self.k_proj.permute((1, 0)))
+        let mut keys = self
+            .k_proj
+            .forward(x)
             .mul(scale)
             .reshape((batch, seq, HEADS, HEAD_DIM))
             .permute((0, 2, 3, 1))
             .contiguous();
 
-        let values = x
-            .matmul(self.v_proj.permute((1, 0)))
-            .add(self.v_proj_bias.expand(0, batch).expand(1, seq))
+        let mut values = self
+            .v_proj
+            .forward(x)
             .reshape((batch, seq, HEADS, HEAD_DIM))
             .permute((0, 2, 1, 3));
 
         // Add KV cache
-        let (keys, values) = if let Some((k_cache, v_cache)) = cache {
-            (
-                k_cache.concat_along(keys, 3),
-                v_cache.concat_along(values, 2),
-            )
-        } else {
-            (keys, values)
-        };
+        if let Some((k_cache, v_cache)) = cache {
+            keys = k_cache.concat_along(keys, 3);
+            values = v_cache.concat_along(values, 2);
+        }
 
         // Calculate attention weights
         let mut attention_weights = queries.matmul(keys);
 
         if mask {
-            let mut attention_mask = self.k_proj.graph().triu(seq, 1) * f16::MIN.to_f32();
+            let mut attention_mask = queries.graph().triu(seq, 1) * f16::MIN.to_f32();
             if let Some((c, _)) = cache {
-                let (_, _, prev_seq, _) = c.dims4();
+                let (_, _, _, prev_seq) = c.dims4();
                 attention_mask = attention_mask.pad(((0, 0), (prev_seq, 0)));
             }
             attention_weights += attention_mask.expand(0, batch).expand(1, HEADS);
@@ -110,11 +104,11 @@ impl Module<(GraphTensor, Option<KVCache>, bool)> for SelfAttention {
             // Merge heads
             .permute((0, 2, 1, 3))
             .reshape((batch, seq, hidden));
-        let output = output
-            // Apply output projection
-            .matmul(self.o_proj.permute((1, 0)))
-            .add(self.o_proj_bias.expand(0, batch).expand(1, seq));
-        (output, (keys.contiguous(), values.contiguous())) // Cache needs to be contiguous
+        // Apply output projection
+        (
+            self.o_proj.forward(output),
+            (keys.contiguous(), values.contiguous()), // Cache needs to be contiguous
+        )
     }
 }
 
@@ -129,24 +123,25 @@ impl SelfAttention {
         KVCache,
     ) {
         let (batch, enc_seq, hidden) = keys.dims3();
-        let (_, dec_seq, hidden) = queries.dims3();
+        let (_, dec_seq, _) = queries.dims3();
         let scale = ((hidden.to_usize().unwrap() as f32 / HEADS as f32) as f64).powf(-0.25) as f32;
         // Apply the projections
-        let queries = queries
-            .matmul(self.q_proj.permute((1, 0)))
-            .add(self.q_proj_bias.expand(0, batch).expand(1, dec_seq))
+        let queries = self
+            .q_proj
+            .forward(queries)
             .mul(scale)
             .reshape((batch, dec_seq, HEADS, HEAD_DIM))
             .permute((0, 2, 1, 3));
-        let keys = keys
-            .matmul(self.k_proj.permute((1, 0)))
+        let keys = self
+            .k_proj
+            .forward(keys)
             .mul(scale)
             .reshape((batch, enc_seq, HEADS, HEAD_DIM))
             .permute((0, 2, 3, 1))
             .contiguous();
-        let values = values
-            .matmul(self.v_proj.permute((1, 0)))
-            .add(self.v_proj_bias.expand(0, batch).expand(1, enc_seq))
+        let values = self
+            .v_proj
+            .forward(values)
             .reshape((batch, enc_seq, HEADS, HEAD_DIM))
             .permute((0, 2, 1, 3));
 
@@ -161,46 +156,36 @@ impl SelfAttention {
             // Merge heads
             .permute((0, 2, 1, 3))
             .reshape((batch, dec_seq, hidden));
-        let output = output
-            // Apply output projection
-            .matmul(self.o_proj.permute((1, 0)))
-            .add(self.o_proj_bias.expand(0, batch).expand(1, dec_seq));
 
-        (output, (keys, values))
+        // Apply output projection
+        (self.o_proj.forward(output), (keys, values))
     }
 }
 
 impl SelfAttention {
     fn new(hidden: usize, cx: &mut Graph) -> Self {
         Self {
-            q_proj: cx.named_tensor("Q Proj", (hidden, hidden)),
-            q_proj_bias: cx.named_tensor("Q Proj Bias", hidden),
-            k_proj: cx.named_tensor("K Proj", (hidden, hidden)),
-            v_proj: cx.named_tensor("V Proj", (hidden, hidden)),
-            v_proj_bias: cx.named_tensor("V Proj Bias", hidden),
-            o_proj: cx.named_tensor("O Proj", (hidden, hidden)),
-            o_proj_bias: cx.named_tensor("O Proj Bias", hidden),
+            q_proj: Linear::new_permuted(hidden, hidden, true, cx),
+            k_proj: Linear::new_permuted(hidden, hidden, false, cx),
+            v_proj: Linear::new_permuted(hidden, hidden, true, cx),
+            o_proj: Linear::new_permuted(hidden, hidden, true, cx),
         }
     }
 }
 
 impl SerializeModule for SelfAttention {
     fn serialize(&self, s: &mut Serializer) {
-        s.tensor("q_proj/weight", self.q_proj);
-        s.tensor("q_proj/bias", self.q_proj_bias);
-        s.tensor("v_proj/weight", self.v_proj);
-        s.tensor("v_proj/bias", self.v_proj_bias);
-        s.tensor("k_proj/weight", self.k_proj);
-        s.tensor("out_proj/weight", self.o_proj);
-        s.tensor("out_proj/bias", self.o_proj_bias);
+        s.module("q_proj", &self.q_proj);
+        s.module("k_proj", &self.k_proj);
+        s.module("v_proj", &self.v_proj);
+        s.module("out_proj", &self.o_proj);
     }
 }
 
 pub struct EncoderTransformerBlock {
-    pub attention: SelfAttention,
-    pub attention_norm: LayerNorm,
-    pub ff1: Linear, // hidden -> enc_ffn_dim
-    pub ff2: Linear, // enc_ffn_dim -> hidden
+    pub attn: SelfAttention,
+    pub attn_norm: LayerNorm,
+    pub ff: (Linear, GeLU, Linear),
     pub feed_forward_norm: LayerNorm,
 }
 
@@ -209,16 +194,13 @@ impl Module<GraphTensor> for EncoderTransformerBlock {
     fn forward(&self, mut x: GraphTensor) -> Self::Output {
         let (batch, seq, _) = x.dims3();
         // Attention
-        let (y, _) = self
-            .attention
-            .forward((self.attention_norm.forward(x), None, false));
+        let (y, _) = self.attn.forward((self.attn_norm.forward(x), None, false));
 
         // Residual Addition
         x += y;
 
         // Feed Forward
-        let y = self.ff1.forward(self.feed_forward_norm.forward(x));
-        let y = self.ff2.forward(y.gelu());
+        let y = self.ff.forward(self.feed_forward_norm.forward(x));
 
         // Residual Addition
         x + y
@@ -228,10 +210,13 @@ impl Module<GraphTensor> for EncoderTransformerBlock {
 impl EncoderTransformerBlock {
     fn new(hidden: usize, ff: usize, cx: &mut Graph) -> Self {
         Self {
-            attention: SelfAttention::new(hidden, cx),
-            attention_norm: LayerNorm::new(hidden, true, true, true, 1e-5, cx),
-            ff1: Linear::new_permuted(hidden, ff, true, cx),
-            ff2: Linear::new_permuted(ff, hidden, true, cx),
+            attn: SelfAttention::new(hidden, cx),
+            attn_norm: LayerNorm::new(hidden, true, true, true, 1e-5, cx),
+            ff: (
+                Linear::new_permuted(hidden, ff, true, cx),
+                GeLU,
+                Linear::new_permuted(ff, hidden, true, cx),
+            ),
             feed_forward_norm: LayerNorm::new(hidden, true, true, true, 1e-5, cx),
         }
     }
@@ -239,11 +224,11 @@ impl EncoderTransformerBlock {
 
 impl SerializeModule for EncoderTransformerBlock {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("self_attn", &self.attention);
-        s.module("self_attn_layer_norm", &self.attention_norm);
+        s.module("self_attn", &self.attn);
+        s.module("self_attn_layer_norm", &self.attn_norm);
         s.module("final_layer_norm", &self.feed_forward_norm);
-        s.module("fc1", &self.ff1);
-        s.module("fc2", &self.ff2);
+        s.module("fc1", &self.ff.0);
+        s.module("fc2", &self.ff.2);
     }
 }
 
@@ -258,34 +243,32 @@ pub struct AudioEncoder {
 }
 
 fn sinusoids(channels: usize, length: Expression, cx: &mut Graph) -> GraphTensor {
-    let max_timescale = 10000f32;
+    let max_timescale = 10_000_f32;
     let log_timescale_increment = max_timescale.ln() / (channels / 2 - 1) as f32;
     let inv_timescales = (0..channels / 2)
         .map(|i| (i as f32 * (-log_timescale_increment)).exp())
         .collect::<Vec<_>>();
-    let mut inv_timescales = cx
-        .tensor(channels / 2)
-        .set_dyn(inv_timescales, (channels / 2));
-    let arange = cx.arange(length);
-    let mut mul_shape = arange.shape;
-    mul_shape.add_dim(1, channels / 2);
-    let scaled_time = arange.expand_to(mul_shape) * inv_timescales.expand_to(mul_shape);
+    let mut inv_timescales = cx.tensor(channels / 2).set(inv_timescales);
+    let scaled_time = cx.arange(length).expand(1, channels / 2) * inv_timescales.expand(0, length);
     scaled_time.sin().concat_along(scaled_time.cos(), 1)
 }
 
 impl Module<GraphTensor> for AudioEncoder {
     type Output = GraphTensor;
     fn forward(&self, x: GraphTensor) -> Self::Output {
-        let (_, seq, _) = x.dims3();
+        let (_, _, seq) = x.dims3();
+
         // Conv layers
         let x = self.conv1.forward(x).gelu();
         let x = self.conv2.forward(x).gelu();
         let mut x = x.permute((0, 2, 1));
+
         // Sinusoidal positional embedding
         x += sinusoids(D_MODEL, seq / 2, x.graph()).expand_to(x.shape);
 
         // Transformer layers
         let out = self.layers.forward(x);
+
         // Final norm
         self.post_ln.forward(out)
     }
@@ -320,8 +303,7 @@ pub struct DecoderTransformerBlock {
     pub attention_norm: LayerNorm,
     pub cross_attention: SelfAttention,
     pub cross_attention_norm: LayerNorm,
-    pub ff1: Linear,
-    pub ff2: Linear,
+    pub ff: (Linear, GeLU, Linear),
     pub feed_forward_norm: LayerNorm,
 }
 
@@ -336,7 +318,7 @@ impl Module<(GraphTensor, GraphTensor, KVCache)> for DecoderTransformerBlock {
             self.attention
                 .forward((self.attention_norm.forward(x), Some(cache), true));
 
-        // Residual Addition
+        // Residual
         x += y;
 
         // Cross Attention
@@ -346,14 +328,13 @@ impl Module<(GraphTensor, GraphTensor, KVCache)> for DecoderTransformerBlock {
             encoded,
         );
 
-        // Residual Addition
+        // Residual
         x += y;
 
         // Feed Forward
-        let y = self.ff1.forward(self.feed_forward_norm.forward(x));
-        let y = self.ff2.forward(y.gelu());
+        let y = self.ff.forward(self.feed_forward_norm.forward(x));
 
-        // Residual Addition
+        // Residual
         (x + y, enc_states, cache)
     }
 }
@@ -365,8 +346,11 @@ impl DecoderTransformerBlock {
             attention_norm: LayerNorm::new(D_MODEL, true, true, true, 1e-5, cx),
             cross_attention: SelfAttention::new(D_MODEL, cx),
             cross_attention_norm: LayerNorm::new(D_MODEL, true, true, true, 1e-5, cx),
-            ff1: Linear::new_permuted(D_MODEL, DEC_FFN_DIM, true, cx),
-            ff2: Linear::new_permuted(DEC_FFN_DIM, D_MODEL, true, cx),
+            ff: (
+                Linear::new_permuted(D_MODEL, DEC_FFN_DIM, true, cx),
+                GeLU,
+                Linear::new_permuted(DEC_FFN_DIM, D_MODEL, true, cx),
+            ),
             feed_forward_norm: LayerNorm::new(D_MODEL, true, true, true, 1e-5, cx),
         }
     }
@@ -378,8 +362,8 @@ impl SerializeModule for DecoderTransformerBlock {
         s.module("self_attn_layer_norm", &self.attention_norm);
         s.module("encoder_attn", &self.cross_attention);
         s.module("encoder_attn_layer_norm", &self.cross_attention_norm);
-        s.module("fc1", &self.ff1);
-        s.module("fc2", &self.ff2);
+        s.module("fc1", &self.ff.0);
+        s.module("fc2", &self.ff.2);
         s.module("final_layer_norm", &self.feed_forward_norm);
     }
 }
@@ -405,7 +389,8 @@ impl Module<(GraphTensor, GraphTensor, &[KVCache])> for TextDecoder {
         (enc_output, input, cache): (GraphTensor, GraphTensor, &[KVCache]),
     ) -> Self::Output {
         let (_, cur_dec_seq) = input.dims2();
-        let (_, _, prev_dec_seq, _) = cache[0].0.dims4();
+        let (_, _, _, prev_dec_seq) = cache[0].0.dims4();
+
         // Embed text
         let mut x = self.embedding.forward(input);
         x += self
@@ -413,6 +398,7 @@ impl Module<(GraphTensor, GraphTensor, &[KVCache])> for TextDecoder {
             .slice((prev_dec_seq..cur_dec_seq + prev_dec_seq, ..))
             .contiguous()
             .expand_to(x.shape);
+
         // Run through layers and collect new caches
         let (mut new_caches, mut enc_states) = (vec![], vec![]);
         let (mut new_cache, mut enc_state);
@@ -421,14 +407,16 @@ impl Module<(GraphTensor, GraphTensor, &[KVCache])> for TextDecoder {
             new_caches.push(new_cache);
             enc_states.push(enc_state);
         }
+
         // Run through last norm and output projection
-        (
-            self.layer_norm
-                .forward(x)
-                .matmul(self.embedding.weight.permute((1, 0))),
-            enc_states,
-            new_caches,
-        )
+        let output = self.layer_norm.forward(x).matmul(
+            self.embedding
+                .weight
+                .reshape((VOCAB_SIZE, D_MODEL))
+                .permute((1, 0)),
+        );
+
+        (output, enc_states, new_caches)
     }
 }
 

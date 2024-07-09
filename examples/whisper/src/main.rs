@@ -101,13 +101,11 @@ fn main() {
     std::io::stdout().flush().unwrap();
     let now = std::time::Instant::now();
     audio_input.set_dyn(vec![0.; 160], (1, 80, 2));
-    enc_cx.set_dyn_dim('d', 1);
     enc_cx.execute();
     delete_inputs(downstream(encoder_params, &enc_cx), &mut enc_cx);
     text_input.set_dyn(vec![0.], (1, 1));
     dec_cx.set_dyn_dim('e', 1);
     dec_cx.set_dyn_dim('p', 0);
-    dec_cx.set_dyn_dim('t', 1);
     transfer_data(encoded, &mut enc_cx, &encoder_output, &mut dec_cx);
     dec_cx.execute();
     logits.drop();
@@ -130,7 +128,6 @@ fn main() {
     let start_encoding = std::time::Instant::now();
 
     audio_input.set_dyn(mel, (1, 80, mel_len / 80));
-    enc_cx.set_dyn_dim('d', (mel_len / 80) / 2);
     enc_cx.execute();
     transfer_data(encoded, &mut enc_cx, encoder_output, &mut dec_cx);
     println!("\t\t - {}ms", start_encoding.elapsed().as_millis());
@@ -139,7 +136,6 @@ fn main() {
     let start_decode = std::time::Instant::now();
     dec_cx.set_dyn_dim('e', mel_len / 80 / 2);
     dec_cx.set_dyn_dim('p', 0);
-    dec_cx.set_dyn_dim('t', 3);
     let mut output_ids = vec![];
     text_input.set_dyn(vec![50257., 50358., 50362.], (1, 3));
     dec_cx.execute();
@@ -151,11 +147,10 @@ fn main() {
     std::io::stdout().flush().unwrap();
     let mut prev_output_len = output_str.len();
 
-    for i in 0..100 {
+    for i in 3..100 {
         transfer_data_same_graph(&cache_dest, &cache_src, &mut dec_cx);
         text_input.set_dyn(vec![output_token as f32], (1, 1));
-        dec_cx.set_dyn_dim('p', i + 3);
-        dec_cx.set_dyn_dim('t', i + 4);
+        dec_cx.set_dyn_dim('p', i);
         dec_cx.execute();
         output_token = argmax(&logits.data());
         if output_token == 50256 {

@@ -2,6 +2,7 @@ use egg::*;
 use rustc_hash::FxHashMap;
 use std::{
     fmt::Debug,
+    hash::Hash,
     ops::{
         Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, Div, DivAssign, IndexMut, Mul,
         MulAssign, Rem, RemAssign, Sub, SubAssign,
@@ -81,7 +82,14 @@ impl Term {
 /// Trait implemented on the 2 main symbolic expression storage types, Vec<Term> and ArrayVec<Term>
 #[allow(clippy::len_without_is_empty)]
 pub trait ExpressionStorage:
-    Clone + IndexMut<usize, Output = Term> + std::iter::Extend<Term> + Default + PartialEq + Debug
+    Clone
+    + IndexMut<usize, Output = Term>
+    + std::iter::Extend<Term>
+    + Default
+    + PartialEq
+    + Debug
+    + Hash
+    + Eq
 {
     fn len(&self) -> usize;
     fn push(&mut self, term: Term);
@@ -202,6 +210,17 @@ impl<S: ExpressionStorage> GenericExpression<S> {
             return self;
         }
         egg_simplify(self)
+    }
+
+    /// Simplify the expression to its minimal terms, using a cache to retrieve / store the simplification
+    pub fn simplify_cache(self, cache: &mut FxHashMap<Self, Self>) -> Self {
+        if let Some(s) = cache.get(&self) {
+            s.clone()
+        } else {
+            let simplified = self.clone().simplify();
+            cache.insert(self, simplified.clone());
+            simplified
+        }
     }
 
     pub fn as_num(&self) -> Option<i32> {
@@ -934,10 +953,10 @@ fn make_rules() -> Vec<Rewrite> {
         rewrite!("distribute-max"; "(* ?a (max ?b ?c))"        => "(max (* ?a ?b) (* ?a ?c))"),
         rewrite!("distribute-min"; "(* ?a (min ?b ?c))"        => "(min (* ?a ?b) (* ?a ?c))"),
         rewrite!("factor"    ; "(+ (* ?a ?b) (* ?a ?c))" => "(* ?a (+ ?b ?c))"),
-        rewrite!("group-terms"; "(+ ?a ?a)" => "(* 2 ?a)"),
-        rewrite!("distribute-mod"; "(* (% ?b ?c) ?a)" => "(% (* ?b ?a) (* ?c ?a))"),
-        rewrite!("explicit-truncate"; "(* (/ ?a ?b) ?b)" => "(- ?a (% ?a ?b))"),
-        rewrite!("mul-mod"; "(% (* ?a ?b) ?b)" => "0"),
+        // rewrite!("group-terms"; "(+ ?a ?a)" => "(* 2 ?a)"),
+        // rewrite!("distribute-mod"; "(* (% ?b ?c) ?a)" => "(% (* ?b ?a) (* ?c ?a))"),
+        // rewrite!("explicit-truncate"; "(* (/ ?a ?b) ?b)" => "(- ?a (% ?a ?b))"),
+        // rewrite!("mul-mod"; "(% (* ?a ?b) ?b)" => "0"),
         // rewrite!("mul-distribute"; "(* ?a (% (/ ?b ?c) ?d))" => "(% (/ ?b (* ?c ?a)) (* ?d ?a))"),
         // rewrite!("div-mod-mul"; "(% (/ ?a ?b) ?c)" => "(% ?a (* ?b ?c))"),
     ]

@@ -1,14 +1,14 @@
 use crate::prelude::*;
 
 impl GraphTensor {
-    pub fn matmul(mut self, rhs: GraphTensor) -> Self {
+    pub fn matmul(mut self, mut rhs: GraphTensor) -> Self {
         if (self.shape.len() == 1 || self.shape.len() == 2) && rhs.shape.len() == 2 {
             let vec = self.shape.len() == 1;
             if vec {
                 self = self.expand(0, 1);
             }
-            let m = self.shape()[0].small();
-            let n = rhs.shape()[1].small();
+            let (m, _) = self.dims2();
+            let (_, n) = rhs.dims2();
             // Broadcasted Multiply
             let mul = self.expand(1, n) * rhs.permute((1, 0)).expand(0, m);
 
@@ -20,8 +20,7 @@ impl GraphTensor {
             ret
         } else if self.shape.len() == 3 {
             let d = rhs.shape().last().unwrap().small();
-            let a = self.shape()[0].small();
-            let b = self.shape()[1].small();
+            let (a, b, _) = self.dims3();
             if rhs.shape.len() == 2 {
                 // ABCxCD -> ABD
                 // Reshape
@@ -48,30 +47,41 @@ impl GraphTensor {
                     rhs.shape()
                 )
             }
-        } else if self.shape.len() == 4 && rhs.shape.len() == 4 {
-            // ABCDxABDE -> ABCE
-            let a = rhs.shape()[0].small();
-            let b = rhs.shape()[1].small();
-            let d = rhs.shape()[2].small();
-            let e = rhs.shape()[3].small();
-            let c = self.shape()[2].small();
-            // Reshape
-            let s = self.reshape((a * b, c, d));
-            let w = rhs.reshape((a * b, d, e)).permute((0, 2, 1));
+        } else if self.shape.len() == 4 {
+            let (a, b, c, _) = self.dims4();
+            if rhs.shape.len() == 2 {
+                // ABCDxDE -> ABCE
+                let (_, e) = rhs.dims2();
+                // Reshape
+                rhs = rhs.permute((1, 0));
+                // Broadcasted Multiply
+                let mul = self.expand(3, e) * rhs.expand(0, a).expand(1, b).expand(2, c);
 
-            // Broadcasted Multiply
-            let mul = s.expand(2, e) * w.expand(1, c);
+                // Sum Reduce
+                mul.sum_reduce(4)
+            } else if rhs.shape.len() == 4 {
+                // ABCDxABDE -> ABCE
+                let (_, _, _, e) = rhs.dims4();
+                // Reshape
+                rhs = rhs.permute((0, 1, 3, 2));
 
-            // Sum Reduce
-            mul.sum_reduce(3).reshape((a, b, c, e))
+                // Broadcasted Multiply
+                let mul = self.expand(3, e) * rhs.expand(2, c);
+
+                // Sum Reduce
+                mul.sum_reduce(4)
+            } else {
+                panic!(
+                    "Can't matmul lhs {:?} and rhs {:?}",
+                    self.shape(),
+                    rhs.shape()
+                )
+            }
         } else if self.shape.len() == 5 && rhs.shape.len() == 5 {
+            println!("5x5");
             // ABCDExABCEF -> ABCDF
-            let a = rhs.shape()[0].small();
-            let b = rhs.shape()[1].small();
-            let c = rhs.shape()[2].small();
-            let e = rhs.shape()[3].small();
-            let f = rhs.shape()[4].small();
-            let d = self.shape()[3].small();
+            let (a, b, c, e, f) = rhs.dims5();
+            let (_, _, _, d, _) = self.dims5();
             // Reshape
             let w = rhs.reshape((a * b * c, e, f)).permute((0, 2, 1));
             let s = self.reshape((a * b * c, d, e));

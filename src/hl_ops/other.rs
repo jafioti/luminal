@@ -127,15 +127,14 @@ impl Graph {
 impl GraphTensor {
     /// Gather a batch of vectors from a matrix
     pub fn gather(self, indexes: GraphTensor) -> GraphTensor {
-        let s = self.shape()[0].small();
-        let dim = self.shape()[1].small();
-        let b = indexes.shape()[0].small();
+        let (vocab, dim) = self.dims2();
+        let batch = indexes.dims1();
         let one_hot = indexes
             .graph()
-            .arange(s)
-            .expand(0, b)
-            .equals(indexes.expand(1, s));
-        (one_hot.expand(2, dim) * self.expand(0, b)).sum_reduce(1)
+            .arange(vocab)
+            .expand(0, batch)
+            .equals(indexes.expand(1, vocab));
+        (one_hot.expand(2, dim) * self.expand(0, batch)).sum_reduce(1)
     }
 
     /// Print the value of this tensor when the graph is ran

@@ -16,6 +16,22 @@ impl Module<GraphTensor> for ReLU {
     }
 }
 
+/// Gaussian Error Linear Unit activation function
+#[derive(Default)]
+pub struct GeLU;
+
+impl SerializeModule for GeLU {
+    fn serialize(&self, _: &mut Serializer) {}
+}
+
+impl Module<GraphTensor> for GeLU {
+    type Output = GraphTensor;
+
+    fn forward(&self, input: GraphTensor) -> Self::Output {
+        input.gelu()
+    }
+}
+
 /// Sigmoid activation function
 #[derive(Default)]
 pub struct Sigmoid;

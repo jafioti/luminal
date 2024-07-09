@@ -68,6 +68,7 @@ impl Module<GraphTensor> for Conv1D {
             / self.stride)
             + 1)
         .simplify();
+        let w = self.weight.permute((1, 0));
         let mut out = inp
             // Add padding
             .pad(((0, 0), (0, 0), (0, 0), (self.padding, 0)))
@@ -78,13 +79,7 @@ impl Module<GraphTensor> for Conv1D {
             // Combine channel_in and kernel
             .permute((0, 1, 3, 2, 4))
             .reshape((batch1, batch2, dim_out, self.ch_in * self.kernel))
-            .matmul(
-                self.weight
-                    .permute((1, 0))
-                    // Broadcast along batch dims
-                    .expand(0, batch1)
-                    .expand(1, batch2),
-            )
+            .matmul(w)
             .permute((0, 1, 3, 2));
         if let Some(b) = self.bias {
             out += b.expand_to(out.shape);

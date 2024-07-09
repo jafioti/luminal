@@ -74,6 +74,9 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
         // Track fused ops to compile later
         let mut fused_ops = FxHashSet::default();
 
+        // Simplification cache
+        let mut simplification_cache = FxHashMap::default();
+
         let mut matched = true;
         let mut elementwise_ops = FxHashMap::default();
         for op in graph.node_indices().collect::<Vec<_>>() {
@@ -231,7 +234,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                             .collect::<Vec<_>>(),
                     )
                     .into_iter()
-                    .map(|s| s.simplify())
+                    .map(|s| s.simplify_cache(&mut simplification_cache))
                     .collect();
                 let new_op = graph
                     .add_op(FusedElementwiseOp::<T> {
@@ -288,7 +291,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     .unwrap()
                     .output_buffer_sizes(&input_shapes)
                     .into_iter()
-                    .map(|s| s.simplify())
+                    .map(|s| s.simplify_cache(&mut simplification_cache))
                     .collect();
                 let new_op = graph
                     .add_op(FusedElementwiseOp::<T> {
@@ -323,7 +326,12 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
             let op = graph.get_op_mut::<FusedElementwiseOp<T>>(fused_op);
             // Stack index expressions and replace them in the subexpressions
             // Track all shapes used, will pull dyn dims from these
-            op.pre_compile(inputs, &mut input_regexes, &intermediate_match);
+            op.pre_compile(
+                inputs,
+                &mut input_regexes,
+                &intermediate_match,
+                &mut simplification_cache,
+            );
             op.compile(&device);
         }
     }
@@ -349,6 +357,7 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
         input_shapes: Vec<ShapeTracker>,
         input_regexes: &mut FxHashMap<usize, Regex>,
         intermediate_match: &Regex,
+        simplification_cache: &mut FxHashMap<BigExpression, BigExpression>,
     ) {
         let mut subexpressions = self.subexpressions.clone();
         let shapes_used = subexpressions
@@ -441,7 +450,10 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
                     input_regexes.insert(i, Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap());
                     input_regexes.get(&i).unwrap()
                 };
-                let (ind, val) = (ind_exp.clone().simplify(), val_exp.clone().simplify());
+                let (ind, val) = (
+                    ind_exp.clone().simplify_cache(simplification_cache),
+                    val_exp.clone().simplify_cache(simplification_cache),
+                );
                 *subexp = re
                     .replace_all(
                         subexp,
@@ -472,7 +484,7 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
                         },
                     )
                     .0
-                    .simplify();
+                    .simplify_cache(simplification_cache);
                 if val_exp != true {
                     *subexp = format!(
                         "(({} != 0) ? {subexp} : 0.0)",

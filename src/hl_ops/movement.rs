@@ -4,13 +4,13 @@ impl GraphTensor {
     /// Swap dimensions of the tensor
     pub fn permute(mut self, axes: impl ToAxes) -> GraphTensor {
         self.shape.permute(&axes.to_axes());
-        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
+        self
     }
 
     /// Broadcast tensor along new dimensions
     pub fn expand(mut self, axis: usize, size: impl Into<Expression>) -> GraphTensor {
         self.shape.expand(axis, size);
-        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
+        self
     }
 
     /// Broadcast tensor along new dimensions (with explicitly given dest shape)
@@ -21,30 +21,28 @@ impl GraphTensor {
             }
         }
 
-        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
+        self
     }
 
     /// Convert tensor to a new shape with an equivalent number of elements
     pub fn reshape(mut self, new_shape: impl ToShape) -> GraphTensor {
         // Insert contiguous call
         self = self.contiguous();
-        GraphTensor::from_id(
-            self.id,
-            ShapeTracker::new(&new_shape.to_shape()),
-            self.graph_ref,
-        )
+        self.shape = ShapeTracker::new(&new_shape.to_shape());
+        self
     }
 
-    pub fn contiguous(self) -> GraphTensor {
+    pub fn contiguous(mut self) -> GraphTensor {
         if !self.shape.is_reshaped() {
             return self;
         }
-        let new_id = self
+        self.id = self
             .graph()
             .add_op(op::Contiguous)
             .input(self.id, 0, self.shape)
             .finish();
-        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
+        self.shape = self.shape.contiguous();
+        self
     }
 
     /// Take a slice of the original tensor. Any dimension with bounds becomes a dynamic dimension
@@ -59,7 +57,7 @@ impl GraphTensor {
             self = self.contiguous();
         }
         self.shape.slice(&ranges);
-        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
+        self
     }
 
     /// Cut out 'size' elements every 'spacing' elements in the last dimension. 'size' must be smaller than the last dimension
@@ -86,7 +84,7 @@ impl GraphTensor {
         self = self.contiguous();
 
         self.shape.remove_dim(n_dims);
-        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
+        self
     }
 
     /// Pool elements along the last dimension, pools are exposed as a new dimension
@@ -131,7 +129,7 @@ impl GraphTensor {
             // Remove dilations
             self.excise(1, dilation - 1)
         } else {
-            GraphTensor::from_id(self.id, self.shape, self.graph_ref)
+            self
         }
     }
 
@@ -146,7 +144,7 @@ impl GraphTensor {
             self = self.contiguous();
         }
         self.shape.pad(&padding);
-        GraphTensor::from_id(self.id, self.shape, self.graph_ref)
+        self
     }
 
     pub fn concat_along(self, rhs: GraphTensor, axis: usize) -> GraphTensor {
