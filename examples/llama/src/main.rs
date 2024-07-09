@@ -21,7 +21,7 @@ use luminal::prelude::*;
 #[command(author, version, about, long_about = None)]
 pub struct CLIArgs {
     /// Number of tokens to generate
-    #[clap(short = 't', long = "gen_tokens", default_value = "128")]
+    #[clap(short = 't', long = "gen_tokens", default_value = "256")]
     gen_tokens: i32,
 
     /// Prompt for the model

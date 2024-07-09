@@ -78,7 +78,6 @@ impl GraphTensor {
                 )
             }
         } else if self.shape.len() == 5 && rhs.shape.len() == 5 {
-            println!("5x5");
             // ABCDExABCEF -> ABCDF
             let (a, b, c, e, f) = rhs.dims5();
             let (_, _, _, d, _) = self.dims5();
