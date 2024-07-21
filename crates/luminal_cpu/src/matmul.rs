@@ -63,7 +63,7 @@ pub struct MatMul2D;
 
 impl Operator for MatMul2D {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
+        let (a_shape, b_shape) = (inp[0].1.dims(), inp[1].1.dims());
         let (a_strides, b_strides) = (inp[0].1.strides(), inp[1].1.strides());
         let a_data = inp[0].0.borrowed().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = inp[1].0.borrowed().downcast_ref::<Vec<f32>>().unwrap();
@@ -151,7 +151,7 @@ pub struct BatchedMatMul2D;
 // ABCxCD -> ABD
 impl Operator for BatchedMatMul2D {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
+        let (a_shape, b_shape) = (inp[0].1.dims(), inp[1].1.dims());
         let (a_strides, b_strides) = (inp[0].1.strides(), inp[1].1.strides());
         let a_data = inp[0].0.borrowed().downcast_ref::<Vec<f32>>().unwrap();
         let b_data = inp[1].0.borrowed().downcast_ref::<Vec<f32>>().unwrap();

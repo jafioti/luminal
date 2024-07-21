@@ -71,18 +71,18 @@ impl Module<GraphTensor> for TransformerEncoderBlock {
         // Input: batch_dims, sequence, dim
         // Reshape to 1 batch dim, sequence, dim
         let n_batches = input
-            .shape()
+            .dims()
             .into_iter()
             .take(input.shape.len() - 2)
-            .product::<BigExpression>()
+            .product::<Expression>()
             .max(1);
-        let sequence = input.shape()[input.shape.len() - 2].small();
-        let dim = input.shape()[input.shape.len() - 1].small();
+        let sequence = input.dims()[input.shape.len() - 2];
+        let dim = input.dims()[input.shape.len() - 1];
         let x = input.reshape((n_batches, sequence, dim));
         let x = x + self.attention.forward(x);
         let x = x.layer_norm(2, 1e-5);
         let x = x + self.ff.forward(x);
-        x.layer_norm(2, 1e-5).reshape(input.shape())
+        x.layer_norm(2, 1e-5).reshape(input.dims())
     }
 }
 

@@ -33,15 +33,15 @@ impl<T> Debug for Matmul<T> {
 const BM: u64 = 8;
 const BN: u64 = 32;
 impl<T> MetalKernel for Matmul<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
-        let m = input_shapes[0].shape()[input_shapes[0].len() - 2].clone();
-        let n = input_shapes[1].shape()[input_shapes[1].len() - 1].clone();
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
+        let m = input_shapes[0].dims()[input_shapes[0].len() - 2];
+        let n = input_shapes[1].dims()[input_shapes[1].len() - 1];
         let batch_size = input_shapes[0]
-            .shape()
+            .dims()
             .into_iter()
             .take(input_shapes[0].len() - 2)
-            .product::<BigExpression>()
-            .max(BigExpression::from(1));
+            .product::<Expression>()
+            .max(1);
         vec![batch_size * m * n * size_of::<T>()]
     }
     fn metal_forward(
@@ -54,13 +54,13 @@ impl<T> MetalKernel for Matmul<T> {
         let (a_shape, b_shape) = (
             inputs[0]
                 .1
-                .shape()
+                .dims()
                 .into_iter()
                 .map(|i| i.to_usize().unwrap())
                 .collect::<Vec<_>>(),
             inputs[1]
                 .1
-                .shape()
+                .dims()
                 .into_iter()
                 .map(|i| i.to_usize().unwrap())
                 .collect::<Vec<_>>(),
@@ -158,7 +158,7 @@ impl<T: MetalFloat> Operator for Matmul<T> {
             // Setup command queue / command buffer / encoder
             let command_buffer = self.queue.new_command_buffer();
 
-            let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
+            let (a_shape, b_shape) = (inp[0].1.dims(), inp[1].1.dims());
             let n = b_shape.last().unwrap().to_usize().unwrap();
             let batch_size = a_shape
                 .iter()

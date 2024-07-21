@@ -410,7 +410,7 @@ impl Graph {
                     && edge
                         .weight()
                         .as_data()
-                        .map(|d| !d.2.shape().is_empty())
+                        .map(|d| !d.2.is_empty())
                         .unwrap_or_default()
                 {
                     new_graph
@@ -418,7 +418,7 @@ impl Graph {
                         .unwrap()
                         .push_str(&format!(
                             " | {:?}",
-                            edge.weight().as_data().unwrap().2.shape()
+                            edge.weight().as_data().unwrap().2.dims()
                         ));
                 }
             }
@@ -686,7 +686,7 @@ fn backtrack_match(
     pattern_root: NodeIndex,
     pattern_graph: &StableGraph<(Uuid, SelectOp), Option<u8>>,
     main_root: NodeIndex,
-    main_graph: &mut MainGraph,
+    main_graph: &mut StorageGraph,
 ) -> Option<FxHashMap<NodeIndex, NodeIndex>> {
     fn get_parents<N, E>(
         graph: &petgraph::stable_graph::StableGraph<N, E>,
@@ -736,7 +736,7 @@ fn test_node(
         shape,
         fake,
     }: &SelectOp,
-    graph: &mut MainGraph,
+    graph: &mut StorageGraph,
     graph_node: NodeIndex,
 ) -> bool {
     let input_shapes = graph
@@ -763,7 +763,7 @@ fn test_node(
             if a_sh.len() != b_sh.dims.len() {
                 return false;
             }
-            for (a, b) in a_sh.iter().zip(b_sh.shape().iter()) {
+            for (a, b) in a_sh.iter().zip(b_sh.dims().into_iter()) {
                 match a.to_usize() {
                     Some(n) => {
                         if b.to_usize().map(|i| i != n).unwrap_or(true) {
@@ -776,11 +776,11 @@ fn test_node(
                             .pop()
                             .expect("Selector dimension must be either a symbol or number");
                         if let Some(expected) = shape_map.get(&c) {
-                            if b != expected {
+                            if b != *expected {
                                 return false;
                             }
                         } else {
-                            shape_map.insert(c, b.clone());
+                            shape_map.insert(c, b);
                         }
                     }
                 }

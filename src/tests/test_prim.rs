@@ -50,7 +50,7 @@ fn test_expand() {
 fn test_slice() {
     let mut cx = Graph::new();
     let a = cx.tensor((2, 3)).set([[1., 2., 3.], [1., 2., 3.]]);
-    let b = a.slice((Expression::from(1).., ..)).retrieve();
+    let b = a.slice((1.., ..)).retrieve();
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -322,4 +322,19 @@ fn test_max_reduce() {
     assert_close(&b.data(), &d_b.as_vec());
     assert_close(&c.data(), &d_c.as_vec());
     assert_close(&d.data(), &d_d.as_vec());
+}
+
+#[test]
+fn test_dot() {
+    let mut cx = Graph::new();
+    let a = cx.tensor(5).set([34.4, -96.0, 144.0, 43.0, 560.0]);
+    let b = cx.tensor(5).set([43.0, 560.0, 180.0, 700.0, 225.0]);
+    let c = a.dot(b).retrieve();
+    cx.execute();
+
+    let d_dev = Cpu::default();
+    let d_a = d_dev.tensor([34.4, -96.0, 144.0, 43.0, 560.0]);
+    let d_b = d_dev.tensor([43.0, 560.0, 180.0, 700.0, 225.0]);
+    let d_c = (d_a * d_b).sum();
+    assert_close(&c.data(), &d_c.as_vec());
 }

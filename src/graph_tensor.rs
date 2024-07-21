@@ -65,7 +65,7 @@ impl GraphTensor {
     /// ```
     pub fn set_dyn(self, data: impl Data + Clone, shape: impl ToShape) -> Self {
         // Report dyn dim values to graph dyn map
-        for (d, s) in self.shape.shape().iter().zip(shape.to_shape().into_iter()) {
+        for (d, s) in self.shape.dims().iter().zip(shape.to_shape().into_iter()) {
             if let Some(c) = d.to_symbols().pop() {
                 self.graph().dyn_map.insert(c, s.to_usize().unwrap());
             }
@@ -103,39 +103,58 @@ impl GraphTensor {
         data
     }
 
-    pub fn shape(&self) -> Vec<BigExpression> {
-        self.shape.shape()
+    pub fn dims(&self) -> Vec<Expression> {
+        self.shape.dims()
     }
 
     pub fn dims1(&self) -> Expression {
-        self.shape.shape()[0].small()
+        assert_eq!(
+            self.shape.len(),
+            1,
+            "Shape has {} dimensions, tried to get 1",
+            self.shape.len()
+        );
+        self.dims()[0]
     }
     pub fn dims2(&self) -> (Expression, Expression) {
-        (self.shape.shape()[0].small(), self.shape.shape()[1].small())
+        assert_eq!(
+            self.shape.len(),
+            2,
+            "Shape has {} dimensions, tried to get 2",
+            self.shape.len()
+        );
+        let dims = self.dims();
+        (dims[0], dims[1])
     }
     pub fn dims3(&self) -> (Expression, Expression, Expression) {
-        (
-            self.shape.shape()[0].small(),
-            self.shape.shape()[1].small(),
-            self.shape.shape()[2].small(),
-        )
+        assert_eq!(
+            self.shape.len(),
+            3,
+            "Shape has {} dimensions, tried to get 3",
+            self.shape.len()
+        );
+        let dims = self.dims();
+        (dims[0], dims[1], dims[2])
     }
     pub fn dims4(&self) -> (Expression, Expression, Expression, Expression) {
-        (
-            self.shape.shape()[0].small(),
-            self.shape.shape()[1].small(),
-            self.shape.shape()[2].small(),
-            self.shape.shape()[3].small(),
-        )
+        assert_eq!(
+            self.shape.len(),
+            4,
+            "Shape has {} dimensions, tried to get 4",
+            self.shape.len()
+        );
+        let dims = self.dims();
+        (dims[0], dims[1], dims[2], dims[3])
     }
     pub fn dims5(&self) -> (Expression, Expression, Expression, Expression, Expression) {
-        (
-            self.shape.shape()[0].small(),
-            self.shape.shape()[1].small(),
-            self.shape.shape()[2].small(),
-            self.shape.shape()[3].small(),
-            self.shape.shape()[4].small(),
-        )
+        assert_eq!(
+            self.shape.len(),
+            5,
+            "Shape has {} dimensions, tried to get 5",
+            self.shape.len()
+        );
+        let dims = self.dims();
+        (dims[0], dims[1], dims[2], dims[3], dims[4])
     }
 
     /// Set the value of the tensor matching the constant shape

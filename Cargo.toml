@@ -25,6 +25,8 @@ as-any = "0.3.1"
 egg = "0.9.5"
 symbolic_expressions = "5.0.3"
 serde = {version="1.0.202", features=["derive"]}
+thread_local = "1.1.8"
+generational-box = "0.5.6"
 
 [dev-dependencies]
 dfdx = { version = "0.13", features = ["f16"] }

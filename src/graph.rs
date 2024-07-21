@@ -11,7 +11,7 @@ use itertools::Itertools;
 use petgraph::{stable_graph::StableGraph, visit::EdgeRef, Direction};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-pub type MainGraph = StableGraph<Box<dyn Operator>, Dependency>;
+pub type StorageGraph = StableGraph<Box<dyn Operator>, Dependency>;
 
 /// A Luminal compute graph.
 ///
@@ -24,7 +24,7 @@ pub struct Graph {
     /// A map of dynamic dimensions to concrete dimension sizes
     pub dyn_map: FxHashMap<char, usize>,
     /// Edge weights: (Input index, Output index, Input shape)
-    pub graph: MainGraph,
+    pub graph: StorageGraph,
     /// Tensors marked in this set will not get deleted when the graph is ran
     pub no_delete: FxHashSet<NodeIndex>,
     /// Tensors marked in this set need to be retrieved later (mostly for optimizers to insert copy back calls, the graph itself doesn't treat these differently)
@@ -37,7 +37,7 @@ pub struct Graph {
 }
 
 /// A dependency between two nodes
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy)]
 #[allow(clippy::large_enum_variant)]
 pub enum Dependency {
     /// A data dependency (transferring a tensor from one node to the next)
@@ -125,7 +125,7 @@ impl Graph {
                 Box::new(move |_| panic!("You must set a value for this tensor! ({name})")),
             ))),
             graph_ref: self,
-            shape: ShapeTracker::new(&shape.to_shape()),
+            shape: ShapeTracker::new(shape),
         }
     }
 
@@ -305,7 +305,7 @@ impl Graph {
                 .map(|(_, s)| {
                     format!(
                         "{:?}",
-                        s.shape()
+                        s.dims()
                             .into_iter()
                             .map(|i| i.to_usize().unwrap())
                             .collect::<Vec<_>>()
@@ -366,7 +366,7 @@ impl Graph {
 }
 
 impl Deref for Graph {
-    type Target = MainGraph;
+    type Target = StorageGraph;
     fn deref(&self) -> &Self::Target {
         &self.graph
     }
@@ -375,6 +375,12 @@ impl Deref for Graph {
 impl DerefMut for Graph {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.graph
+    }
+}
+
+impl Drop for Graph {
+    fn drop(&mut self) {
+        expression_cleanup();
     }
 }
 

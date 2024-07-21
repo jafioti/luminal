@@ -8,7 +8,7 @@ use super::binary::Sub;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ARange {
-    pub size: BigExpression,
+    pub size: Expression,
     dyn_map: *const FxHashMap<char, usize>,
 }
 
@@ -61,7 +61,7 @@ impl Compiler for ARangeCompiler {
             };
             let arange_op = graph
                 .add_op(ARange {
-                    size: arange_amount.into(),
+                    size: arange_amount,
                     dyn_map: &graph.dyn_map,
                 })
                 .finish();

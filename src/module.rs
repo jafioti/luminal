@@ -194,7 +194,7 @@ macro_rules! tuple_impls {
 
         impl<$($name: SerializeModule,)+> SerializeModule for ($($name,)+) {
             fn serialize(&self, s: &mut Serializer) {
-                $(s.module(&format!("layer{}", $idx), &self.$idx);)+
+                $(s.module(&format!("{}", $idx), &self.$idx);)+
             }
         }
     };

@@ -49,7 +49,7 @@ impl SerializeModule for Mlp {
     }
 }
 
-fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: BigExpression) -> GraphTensor {
+fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> GraphTensor {
     assert_eq!(input.shape.len(), 4); // batch, n_heads, seq, head_dim
     let (batch, n_heads, seq, head_dim) = input.dims4();
     // Get freqs
@@ -102,8 +102,8 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
             .permute((0, 2, 1, 3));
 
         // Rotary embed queries and keys
-        let queries = apply_rotary_embeddings_ggml(queries, prev_seq.big());
-        let keys = apply_rotary_embeddings_ggml(keys, prev_seq.big());
+        let queries = apply_rotary_embeddings_ggml(queries, prev_seq);
+        let keys = apply_rotary_embeddings_ggml(keys, prev_seq);
 
         // Add KV cache
         let keys = k_cache.concat_along(keys, 2);

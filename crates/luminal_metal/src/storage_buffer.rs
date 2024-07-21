@@ -299,7 +299,7 @@ fn btreeset_intersection<T: Ord>(mut a: BTreeSet<T>, b: &BTreeSet<T>) -> BTreeSe
 struct AllocateMetalBuffers {
     dev: Device,
     dyn_map: *const FxHashMap<char, usize>,
-    buffer_sizes: Vec<BigExpression>,
+    buffer_sizes: Vec<Expression>,
     buffers: Arc<UnsafeCell<Vec<Buffer>>>,
 }
 impl Debug for AllocateMetalBuffers {

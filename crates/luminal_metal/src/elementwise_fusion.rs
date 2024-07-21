@@ -121,7 +121,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 let mut subexpressions_b = graph
                     .try_get_op::<FusedElementwiseOp<T>>(b)
                     .map(|o| o.subexpressions.clone())
-                    .unwrap_or_else(|| vec![(expression_b.clone(), ShapeTracker::default())]);
+                    .unwrap_or_else(|| vec![(expression_b.clone(), ShapeTracker::new(()))]);
                 let a_to_b_indexes = graph
                     .edges_connecting(a, b)
                     .map(|e| e.weight().as_data().unwrap().0 as usize)
@@ -141,7 +141,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 let mut subexpressions_a = graph
                     .try_get_op::<FusedElementwiseOp<T>>(a)
                     .map(|o| o.subexpressions.clone())
-                    .unwrap_or_else(|| vec![(expression_a.clone(), ShapeTracker::default())]);
+                    .unwrap_or_else(|| vec![(expression_a.clone(), ShapeTracker::new(()))]);
                 subexpressions_a.last_mut().unwrap().1 = connecting_shape;
                 // Re-reference b intermediates
                 for i in (0..subexpressions_b.len()).rev() {
@@ -236,6 +236,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     .into_iter()
                     .map(|s| s.simplify_cache(&mut simplification_cache))
                     .collect();
+                let g: *mut Graph = graph;
                 let new_op = graph
                     .add_op(FusedElementwiseOp::<T> {
                         kernel_str: "".to_string(),
@@ -247,6 +248,7 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                         device: device.clone(),
                         output_buffer_sizes,
                         _phantom: Default::default(),
+                        graph: g,
                     })
                     .finish();
                 // Add edges to new op
@@ -293,17 +295,20 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     .into_iter()
                     .map(|s| s.simplify_cache(&mut simplification_cache))
                     .collect();
+                let sh = ShapeTracker::new(());
+                let g: *mut Graph = graph;
                 let new_op = graph
                     .add_op(FusedElementwiseOp::<T> {
                         kernel_str: "".to_string(),
                         kernel: None,
                         dyn_map: &graph.dyn_map,
                         dyn_chars: vec![],
-                        subexpressions: vec![(op_string, ShapeTracker::default())],
+                        subexpressions: vec![(op_string, sh)],
                         queue: queue.clone(),
                         device: device.clone(),
                         output_buffer_sizes,
                         _phantom: Default::default(),
+                        graph: g,
                     })
                     .finish();
                 // Add edges to new op
@@ -346,8 +351,9 @@ pub struct FusedElementwiseOp<T> {
     pub subexpressions: Vec<(String, ShapeTracker)>,
     pub queue: CommandQueue,
     pub device: Device,
-    pub output_buffer_sizes: Vec<BigExpression>,
+    pub output_buffer_sizes: Vec<Expression>,
     pub _phantom: PhantomData<T>,
+    pub graph: *mut Graph,
 }
 crate::debug_type!(FusedElementwiseOp);
 
@@ -357,7 +363,7 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
         input_shapes: Vec<ShapeTracker>,
         input_regexes: &mut FxHashMap<usize, Regex>,
         intermediate_match: &Regex,
-        simplification_cache: &mut FxHashMap<BigExpression, BigExpression>,
+        simplification_cache: &mut FxHashMap<Expression, Expression>,
     ) {
         let mut subexpressions = self.subexpressions.clone();
         let shapes_used = subexpressions
@@ -415,7 +421,7 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
                 s.iter()
                     .rev()
                     .take(s.len() - 1)
-                    .fold(BigExpression::from('z'), |acc, inp| {
+                    .fold(Expression::from('z'), |acc, inp| {
                         inp.index_expression().substitute('z', acc)
                     })
             })
@@ -451,8 +457,8 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
                     input_regexes.get(&i).unwrap()
                 };
                 let (ind, val) = (
-                    ind_exp.clone().simplify_cache(simplification_cache),
-                    val_exp.clone().simplify_cache(simplification_cache),
+                    ind_exp.simplify_cache(simplification_cache),
+                    val_exp.simplify_cache(simplification_cache),
                 );
                 *subexp = re
                     .replace_all(
@@ -475,10 +481,10 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
                     .iter()
                     .rev()
                     .fold(
-                        (BigExpression::from(true), BigExpression::from('z')),
+                        (Expression::from(true), Expression::from('z')),
                         |(_, ind_acc), inp| {
                             (
-                                inp.valid_expression().substitute('z', ind_acc.clone()),
+                                inp.valid_expression().substitute('z', ind_acc),
                                 inp.index_expression().substitute('z', ind_acc),
                             )
                         },
@@ -526,7 +532,7 @@ out[idx] = ({type_name})({});
 }
 
 impl<T> MetalKernel for FusedElementwiseOp<T> {
-    fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<Expression> {
         self.output_buffer_sizes.clone()
     }
     fn metal_forward(
@@ -669,7 +675,7 @@ mod tests {
         let inp = random_vec_rng(10, &mut rng);
         let a = cx.named_tensor("a", (2, 5)).set(inp);
         let mut padded = a
-            .slice((..Expression::from(1), ..))
+            .slice((..1, ..))
             .cos()
             .pad(((0, 1), (0, 0)))
             .exp2()
@@ -711,7 +717,7 @@ mod tests {
         const HEAD_DIM: usize = 4;
         let freqs = (cx.arange(HEAD_DIM / 2) * 2.0) / (HEAD_DIM as f32);
         let freqs = 1000000_f32.pow(freqs);
-        let pos = cx.arange(SEQ) + BigExpression::from(0);
+        let pos = cx.arange(SEQ) + 0;
         let mut emb = pos.expand(1, 1).matmul(freqs.expand(0, SEQ)).retrieve();
 
         cx.execute();
@@ -775,16 +781,12 @@ mod tests {
             .keep();
         let freqs = (cx.arange(HEAD_DIM / 2) * 2.0) / (HEAD_DIM as f32);
         let freqs = 1000000_f32.pow(freqs);
-        let pos = cx.arange(SEQ) + BigExpression::from(0);
+        let pos = cx.arange(SEQ) + 0;
         let emb = pos.expand(1, 1).matmul(freqs.expand(0, SEQ));
         // Split input into evens and odds
         let split = a.reshape((BATCH, N_HEADS, SEQ, HEAD_DIM / 2, 2));
-        let x0 = split
-            .slice((.., .., .., .., ..Expression::from(1)))
-            .contiguous();
-        let x1 = split
-            .slice((.., .., .., .., Expression::from(1)..))
-            .contiguous();
+        let x0 = split.slice((.., .., .., .., ..1)).contiguous();
+        let x1 = split.slice((.., .., .., .., 1..)).contiguous();
 
         // Apply sin and cos embeddings
         let x0_out = x0 * emb.cos().expand_to(x0.shape) - x1 * emb.sin().expand_to(x1.shape);
@@ -852,15 +854,9 @@ mod tests {
             }
         }
 
-        fn apply_rotary_embeddings_ggml(
-            input: GraphTensor,
-            prev_seq: BigExpression,
-        ) -> GraphTensor {
+        fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> GraphTensor {
             assert_eq!(input.shape.len(), 4); // batch, n_heads, seq, head_dim
-            let batch = input.shape()[0].small();
-            let n_heads = input.shape()[1].small();
-            let seq = input.shape()[2].small();
-            let head_dim = input.shape()[3].small();
+            let (batch, n_heads, seq, head_dim) = input.dims4();
             // Get freqs
             let freqs =
                 (input.graph().arange(head_dim / 2) * 2.0) / (head_dim.to_usize().unwrap() as f32);
@@ -892,9 +888,8 @@ mod tests {
             type Output = (GraphTensor, KVCache);
             fn forward(&self, (x, (k_cache, v_cache)): (GraphTensor, KVCache)) -> Self::Output {
                 // x: batch, seq, hidden
-                let batch = x.shape()[0].small();
-                let seq = x.shape()[1].small();
-                let prev_seq = k_cache.shape()[2].small();
+                let (batch, seq, _) = x.dims3();
+                let (_, _, prev_seq, _) = k_cache.dims4();
                 // Apply the Projections
                 let queries = x
                     .matmul(self.q_proj.permute((1, 0)))
@@ -912,8 +907,8 @@ mod tests {
                     .permute((0, 2, 1, 3));
 
                 // Rotary embed queries and keys
-                let queries = apply_rotary_embeddings_ggml(queries, prev_seq.big());
-                let keys = apply_rotary_embeddings_ggml(keys, prev_seq.big());
+                let queries = apply_rotary_embeddings_ggml(queries, prev_seq);
+                let keys = apply_rotary_embeddings_ggml(keys, prev_seq);
 
                 // Add KV cache
                 let keys = k_cache.concat_along(keys, 2);

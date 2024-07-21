@@ -51,7 +51,7 @@ impl Module<GraphTensor> for Embedding {
             self.weight.gather(inp)
         };
         // Unflatten
-        let mut new_shape = input.shape();
+        let mut new_shape = input.dims();
         new_shape.push(self.embedding_dim.into());
         out.reshape(new_shape)
     }

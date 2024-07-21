@@ -28,7 +28,7 @@ impl GraphTensor {
     pub fn reshape(mut self, new_shape: impl ToShape) -> GraphTensor {
         // Insert contiguous call
         self = self.contiguous();
-        self.shape = ShapeTracker::new(&new_shape.to_shape());
+        self.shape = ShapeTracker::new(new_shape);
         self
     }
 
@@ -58,6 +58,12 @@ impl GraphTensor {
         }
         self.shape.slice(&ranges);
         self
+    }
+
+    pub fn slice_along(self, slice: impl SliceRange, axis: usize) -> GraphTensor {
+        let mut s = vec![(Expression::from(0), Expression::from(i32::MAX)); axis + 1];
+        s[axis] = slice.bounds();
+        self.slice(s)
     }
 
     /// Cut out 'size' elements every 'spacing' elements in the last dimension. 'size' must be smaller than the last dimension
@@ -90,38 +96,36 @@ impl GraphTensor {
     /// Pool elements along the last dimension, pools are exposed as a new dimension
     pub fn pool_last_dim(
         mut self,
-        kernel: impl Into<BigExpression>,
-        stride: impl Into<BigExpression>,
+        kernel: impl Into<Expression>,
+        stride: impl Into<Expression>,
         dilation: usize,
     ) -> GraphTensor {
         let (kernel, stride) = (kernel.into(), stride.into());
         let n_dims = self.shape.len();
-        let full_kernel = kernel.clone() + (kernel.clone() - 1) * (dilation - 1);
-        let dim_size = self.shape.shape().pop().unwrap().simplify().small();
-        let number_of_windows = (((dim_size.big() - full_kernel.clone()) / stride.clone()) + 1)
-            .simplify()
-            .small();
+        let full_kernel = kernel + (kernel - 1) * (dilation - 1);
+        let dim_size = self.dims().pop().unwrap().simplify();
+        let number_of_windows = (((dim_size - full_kernel) / stride) + 1).simplify();
         // Expand new dimension
         self.shape.expand(n_dims - 1, number_of_windows);
         self = self.contiguous();
         if n_dims > 1 {
             // View as single dimension of matrix with wider width
-            let mat_size = (dim_size.big() + stride.clone()) * number_of_windows;
-            let actual_size = (dim_size.big() * number_of_windows).simplify().small();
+            let mat_size = (dim_size + stride) * number_of_windows;
+            let actual_size = (dim_size * number_of_windows).simplify();
             // Reshape into single dimension to pad
             self.shape.remove_dim(n_dims);
             self.shape.dims[self.shape.indexes[n_dims - 1]] = actual_size;
             self.shape.padding[self.shape.indexes[n_dims - 1]].1 =
-                (mat_size - actual_size).simplify().small();
+                (mat_size - actual_size).simplify();
             self = self.contiguous();
             // Reshape back (mats should be full now)
-            self.shape.add_dim(n_dims, dim_size + stride.clone());
+            self.shape.add_dim(n_dims, dim_size + stride);
             self.shape.dims[self.shape.indexes[n_dims - 1]] = number_of_windows;
         } else {
             self.shape.dims[self.shape.indexes[n_dims]] = dim_size + stride;
         }
         // Slice down to kernel size
-        self.shape.mask[self.shape.indexes[n_dims]].1 = full_kernel.simplify().small();
+        self.shape.mask[self.shape.indexes[n_dims]].1 = full_kernel.simplify();
         self.shape.mask[self.shape.indexes[n_dims - 1]].1 = number_of_windows;
         self = self.contiguous();
 
@@ -147,14 +151,21 @@ impl GraphTensor {
         self
     }
 
+    pub fn pad_along(
+        self,
+        left: impl Into<Expression>,
+        right: impl Into<Expression>,
+        axis: usize,
+    ) -> GraphTensor {
+        let mut p = vec![(Expression::from(0), Expression::from(0)); axis + 1];
+        p[axis] = (left.into(), right.into());
+        self.pad(p)
+    }
+
     pub fn concat_along(self, rhs: GraphTensor, axis: usize) -> GraphTensor {
-        // Create padding
-        let mut a_padding = vec![(Expression::default(), Expression::default()); self.shape.len()];
-        a_padding[axis].1 = rhs.shape.shape()[axis].small();
-        let mut b_padding = vec![(Expression::default(), Expression::default()); rhs.shape.len()];
-        b_padding[axis].0 = self.shape.shape()[axis].small();
         // Pad and add
-        self.pad(a_padding) + rhs.pad(b_padding)
+        self.pad_along(0, rhs.shape.dims()[axis], axis)
+            + rhs.pad_along(self.shape.dims()[axis], 0, axis)
     }
 }
 
@@ -273,7 +284,7 @@ mod tests {
         let a = cx
             .tensor((3, 2))
             .set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
-        let b = a.slice((.., ..Expression::from(1))).retrieve();
+        let b = a.slice((.., ..1)).retrieve();
         cx.execute();
 
         let d_dev = Cpu::default();
@@ -431,8 +442,8 @@ mod tests {
         let mut cx = Graph::new();
         let a = cx.tensor((3, 2));
         a.set(vec![1.4325, 2.492428, 3.127365, 33.2834, 4.18734, 23.854]);
-        let x1 = a.slice((.., ..Expression::from(1))).contiguous();
-        let x2 = a.slice((.., Expression::from(1)..)).contiguous();
+        let x1 = a.slice((.., ..1)).contiguous();
+        let x2 = a.slice((.., 1..)).contiguous();
         let c = (-x2).concat_along(x1, 1);
         c.retrieve();
         cx.execute();

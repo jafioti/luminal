@@ -17,7 +17,7 @@ use std::ops::{Bound, Range, RangeBounds, RangeFrom, RangeFull, RangeTo, RangeTo
 fn get_start_bound<D: Into<Expression> + Copy>(bound: Bound<D>) -> Expression {
     match bound {
         Bound::Included(x) => x.into(),
-        Bound::Excluded(x) => x.into() + Expression::from(1),
+        Bound::Excluded(x) => x.into() + 1,
         Bound::Unbounded => 0.into(),
     }
 }
@@ -25,7 +25,7 @@ fn get_start_bound<D: Into<Expression> + Copy>(bound: Bound<D>) -> Expression {
 fn get_end_bound<D: Into<Expression> + Copy>(bound: Bound<D>) -> Expression {
     match bound {
         Bound::Excluded(x) => x.into(),
-        Bound::Included(x) => x.into() + Expression::from(1),
+        Bound::Included(x) => x.into() + 1,
         Bound::Unbounded => Expression::from(i32::MAX),
     }
 }
@@ -110,29 +110,29 @@ impl<R: SliceRange> SliceRange for (R,) {
 }
 
 pub trait ToSlice {
-    fn to_range_vec(&self) -> Vec<(Expression, Expression)>;
+    fn to_range_vec(self) -> Vec<(Expression, Expression)>;
 }
 
 impl<R: SliceRange> ToSlice for R {
-    fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
+    fn to_range_vec(self) -> Vec<(Expression, Expression)> {
         vec![self.bounds()]
     }
 }
 
 impl<R1: SliceRange, R2: SliceRange> ToSlice for (R1, R2) {
-    fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
+    fn to_range_vec(self) -> Vec<(Expression, Expression)> {
         vec![self.0.bounds(), self.1.bounds()]
     }
 }
 
 impl<R1: SliceRange, R2: SliceRange, R3: SliceRange> ToSlice for (R1, R2, R3) {
-    fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
+    fn to_range_vec(self) -> Vec<(Expression, Expression)> {
         vec![self.0.bounds(), self.1.bounds(), self.2.bounds()]
     }
 }
 
 impl<R1: SliceRange, R2: SliceRange, R3: SliceRange, R4: SliceRange> ToSlice for (R1, R2, R3, R4) {
-    fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
+    fn to_range_vec(self) -> Vec<(Expression, Expression)> {
         vec![
             self.0.bounds(),
             self.1.bounds(),
@@ -145,7 +145,7 @@ impl<R1: SliceRange, R2: SliceRange, R3: SliceRange, R4: SliceRange> ToSlice for
 impl<R1: SliceRange, R2: SliceRange, R3: SliceRange, R4: SliceRange, R5: SliceRange> ToSlice
     for (R1, R2, R3, R4, R5)
 {
-    fn to_range_vec(&self) -> Vec<(Expression, Expression)> {
+    fn to_range_vec(self) -> Vec<(Expression, Expression)> {
         vec![
             self.0.bounds(),
             self.1.bounds(),
@@ -153,6 +153,32 @@ impl<R1: SliceRange, R2: SliceRange, R3: SliceRange, R4: SliceRange, R5: SliceRa
             self.3.bounds(),
             self.4.bounds(),
         ]
+    }
+}
+
+impl<A: Into<Expression>, B: Into<Expression>> ToSlice for Vec<(A, B)> {
+    fn to_range_vec(self) -> Vec<(Expression, Expression)> {
+        self.into_iter().map(|i| (i.0.into(), i.1.into())).collect()
+    }
+}
+
+impl<A: Into<Expression> + Copy, B: Into<Expression> + Copy> ToSlice for &Vec<(A, B)> {
+    fn to_range_vec(self) -> Vec<(Expression, Expression)> {
+        self.iter().map(|i| (i.0.into(), i.1.into())).collect()
+    }
+}
+
+impl<A: Into<Expression> + Copy, B: Into<Expression> + Copy> ToSlice for &[(A, B)] {
+    fn to_range_vec(self) -> Vec<(Expression, Expression)> {
+        self.iter().map(|i| (i.0.into(), i.1.into())).collect()
+    }
+}
+
+impl<const N: usize, A: Into<Expression> + Copy, B: Into<Expression> + Copy> ToSlice
+    for &[(A, B); N]
+{
+    fn to_range_vec(self) -> Vec<(Expression, Expression)> {
+        self.iter().map(|i| (i.0.into(), i.1.into())).collect()
     }
 }
 
@@ -464,6 +490,6 @@ impl<A: Into<Expression>> ToShape for A {
 
 impl ToShape for ShapeTracker {
     fn to_shape(self) -> Vec<Expression> {
-        self.shape().to_shape()
+        self.dims().to_shape()
     }
 }

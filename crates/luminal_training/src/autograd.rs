@@ -24,7 +24,7 @@ impl Autograd {
 // Run dfs with a starting stack and record all encountered nodes in a set
 fn build_dfs_set(
     stack: &mut Vec<NodeIndex>,
-    graph: &MainGraph,
+    graph: &StorageGraph,
     direction: Direction,
 ) -> FxHashSet<NodeIndex> {
     let mut set = FxHashSet::default();
@@ -61,7 +61,7 @@ impl Compiler for Autograd {
             *loss,
             (
                 graph.constant(1.0).id,
-                ShapeTracker::default(), // Assume scalar loss for now
+                ShapeTracker::new(()), // Assume scalar loss for now
             ),
         );
         let weight_set = params.iter().copied().collect::<FxHashSet<_>>();
@@ -217,7 +217,7 @@ fn add_grad(
         } else if let Some(MaxReduce(dim)) = graph.try_get_op(fwd.id) {
             pre_fwd_shape.remove_dim(*dim);
         }
-        if grad.shape.shape() != pre_fwd_shape.shape() {
+        if grad.shape.dims() != pre_fwd_shape.dims() {
             if !grad.shape.is_contiguous() {
                 grad = grad.contiguous();
             }

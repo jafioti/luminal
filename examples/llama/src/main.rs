@@ -54,7 +54,7 @@ fn main() {
     cx.keep_tensors(&model_weights);
     let (logits, mut cache_dest) = model.forward((input, &cache_src));
     let mut logits = logits
-        .slice((.., (Expression::from('s') - 1).., ..))
+        .slice((.., Expression::from('s') - 1.., ..))
         .retrieve();
     cache_dest.keep();
     println!("\t\t - {}ms", now.elapsed().as_millis());

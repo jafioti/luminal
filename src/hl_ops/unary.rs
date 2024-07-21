@@ -128,12 +128,7 @@ impl GraphTensor {
         let r = self
             .graph()
             .constant(1.)
-            .expand_to(ShapeTracker::new(&[self
-                .shape
-                .shape()
-                .last()
-                .unwrap()
-                .small()]))
+            .expand_to(ShapeTracker::new(self.shape.dims().last().unwrap()))
             .cumsum_last_dim()
             - 1.;
         // Multiply one-hot by expanded index arange

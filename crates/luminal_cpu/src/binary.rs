@@ -231,7 +231,7 @@ impl Compiler for GatherCompiler {
                 .as_data()
                 .unwrap()
                 .2
-                .shape()[2]
+                .dims()[2]
                 .to_usize()
                 .unwrap();
 

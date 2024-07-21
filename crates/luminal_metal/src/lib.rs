@@ -140,11 +140,11 @@ impl MetalFloat for f16 {
 
 pub trait MetalKernel: Debug {
     /// Annotate the buffer sizes of the intermediate buffers
-    fn intermediate_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn intermediate_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<Expression> {
         vec![]
     }
     /// Annotate the buffer sizes of the output buffers
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression>;
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression>;
     /// Set up the kernel on the buffer
     fn metal_forward(
         &self,
@@ -227,7 +227,7 @@ impl Deref for MetalKernelWrapper {
 }
 
 impl MetalKernel for () {
-    fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<Expression> {
         vec![]
     }
     fn metal_forward(
@@ -365,14 +365,10 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> (Vec<char>, 
     let symbols: Vec<char> = shapes
         .iter()
         .flat_map(|st| {
-            st.shape()
+            st.dims()
                 .into_iter()
-                .chain(
-                    st.padding
-                        .into_iter()
-                        .flat_map(|i| [i.0.into(), i.1.into()]),
-                )
-                .chain(st.mask.into_iter().flat_map(|i| [i.0.into(), i.1.into()]))
+                .chain(st.padding.into_iter().flat_map(|i| [i.0, i.1]))
+                .chain(st.mask.into_iter().flat_map(|i| [i.0, i.1]))
         })
         .flat_map(|d| d.to_symbols())
         .unique()
@@ -389,9 +385,9 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker], offset: usize) -> (Vec<char>, 
     )
 }
 
-fn expr_to_metal_string(expr: &BigExpression) -> String {
+fn expr_to_metal_string(expr: &Expression) -> String {
     let mut symbols = vec![];
-    for term in expr.terms.clone() {
+    for term in expr.terms.read().clone() {
         let new_symbol = match term {
             Term::Num(n) => n.to_string(),
             Term::Var(c) => {

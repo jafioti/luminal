@@ -71,7 +71,7 @@ pub struct MetalARange<T: MetalFloat> {
     pipeline: ComputePipelineState,
     queue: CommandQueue,
     device: Device,
-    pub size: BigExpression,
+    pub size: Expression,
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
@@ -86,7 +86,7 @@ impl<T: MetalFloat> MetalARange<T> {
     pub fn new(
         device: Device,
         queue: CommandQueue,
-        size: BigExpression,
+        size: Expression,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let type_name = T::type_name();
@@ -109,8 +109,8 @@ kernel void metal_arange(device {type_name} *out [[buffer(0)]], device int& n_el
 }
 
 impl<T: MetalFloat> MetalKernel for MetalARange<T> {
-    fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<BigExpression> {
-        vec![self.size.clone() * std::mem::size_of::<f16>()]
+    fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<Expression> {
+        vec![self.size * std::mem::size_of::<f16>()]
     }
     fn metal_forward(
         &self,
@@ -213,7 +213,7 @@ impl<T: MetalFloat> Compiler for ARangeCompiler<T> {
                 .add_op(MetalARange::<T>::new(
                     dev.clone(),
                     queue.clone(),
-                    arange_amount.into(),
+                    arange_amount,
                     &graph.dyn_map,
                 ))
                 .finish();

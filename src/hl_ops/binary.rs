@@ -140,13 +140,10 @@ impl Add<f32> for GraphTensor {
     }
 }
 
-impl<St: ExpressionStorage> Add<GenericExpression<St>> for GraphTensor
-where
-    GenericExpression<Vec<Term>>: From<GenericExpression<St>>,
-{
+impl<S: Into<Expression>> Add<S> for GraphTensor {
     type Output = GraphTensor;
 
-    fn add(self, rhs: GenericExpression<St>) -> Self::Output {
+    fn add(self, rhs: S) -> Self::Output {
         self + self.graph().constant_expr(rhs).expand_to(self.shape)
     }
 }
@@ -159,13 +156,10 @@ impl Sub<f32> for GraphTensor {
     }
 }
 
-impl<St: ExpressionStorage> Sub<GenericExpression<St>> for GraphTensor
-where
-    GenericExpression<Vec<Term>>: From<GenericExpression<St>>,
-{
+impl<S: Into<Expression>> Sub<S> for GraphTensor {
     type Output = GraphTensor;
 
-    fn sub(self, rhs: GenericExpression<St>) -> Self::Output {
+    fn sub(self, rhs: S) -> Self::Output {
         self - self.graph().constant_expr(rhs).expand_to(self.shape)
     }
 }
@@ -178,13 +172,10 @@ impl Mul<f32> for GraphTensor {
     }
 }
 
-impl<St: ExpressionStorage> Mul<GenericExpression<St>> for GraphTensor
-where
-    GenericExpression<Vec<Term>>: From<GenericExpression<St>>,
-{
+impl<S: Into<Expression>> Mul<S> for GraphTensor {
     type Output = GraphTensor;
 
-    fn mul(self, rhs: GenericExpression<St>) -> Self::Output {
+    fn mul(self, rhs: S) -> Self::Output {
         self * self.graph().constant_expr(rhs).expand_to(self.shape)
     }
 }
@@ -198,13 +189,10 @@ impl Div<f32> for GraphTensor {
     }
 }
 
-impl<St: ExpressionStorage> Div<GenericExpression<St>> for GraphTensor
-where
-    GenericExpression<Vec<Term>>: From<GenericExpression<St>>,
-{
+impl<S: Into<Expression>> Div<S> for GraphTensor {
     type Output = GraphTensor;
 
-    fn div(self, rhs: GenericExpression<St>) -> Self::Output {
+    fn div(self, rhs: S) -> Self::Output {
         self / self.graph().constant_expr(rhs).expand_to(self.shape)
     }
 }
@@ -217,13 +205,10 @@ impl Rem<f32> for GraphTensor {
     }
 }
 
-impl<St: ExpressionStorage> Rem<GenericExpression<St>> for GraphTensor
-where
-    GenericExpression<Vec<Term>>: From<GenericExpression<St>>,
-{
+impl<S: Into<Expression>> Rem<S> for GraphTensor {
     type Output = GraphTensor;
 
-    fn rem(self, rhs: GenericExpression<St>) -> Self::Output {
+    fn rem(self, rhs: S) -> Self::Output {
         self % self.graph().constant_expr(rhs).expand_to(self.shape)
     }
 }

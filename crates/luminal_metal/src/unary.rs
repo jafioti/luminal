@@ -83,7 +83,7 @@ kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *o
 }
 
 impl<T> MetalKernel for MetalMeanReduce<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
         let mut sh = input_shapes[0];
         sh.remove_dim(self.3);
         vec![sh.n_elements() * size_of::<T>()]
@@ -101,19 +101,19 @@ impl<T> MetalKernel for MetalMeanReduce<T> {
 
         let front_size: usize = inputs[0]
             .1
-            .shape()
+            .dims()
             .iter()
             .take(self.3)
             .map(|i| i.to_usize().unwrap())
             .product();
         let back_size: usize = inputs[0]
             .1
-            .shape()
+            .dims()
             .iter()
             .skip(self.3 + 1)
             .map(|i| i.to_usize().unwrap())
             .product();
-        let dim_size = inputs[0].1.shape()[self.3].to_usize().unwrap();
+        let dim_size = inputs[0].1.dims()[self.3].to_usize().unwrap();
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
@@ -306,7 +306,7 @@ kernel void kernel_std_norm(
 }
 
 impl<T> MetalKernel for MetalStdNorm<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
         vec![input_shapes[0].n_elements() * size_of::<T>()]
     }
 
@@ -320,7 +320,7 @@ impl<T> MetalKernel for MetalStdNorm<T> {
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
         encoder.set_compute_pipeline_state(&self.pipeline);
-        let row_size = inputs[0].1.shape().last().unwrap().to_usize().unwrap();
+        let row_size = inputs[0].1.dims().last().unwrap().to_usize().unwrap();
 
         // Set inputs
         encoder.set_buffer(0, Some(inputs[0].0), 0);
@@ -329,7 +329,7 @@ impl<T> MetalKernel for MetalStdNorm<T> {
         encoder.set_f32(3, self.epsilon);
         let batch_size = inputs[0]
             .1
-            .shape()
+            .dims()
             .into_iter()
             .take(inputs[0].1.len() - 1)
             .map(|i| i.to_usize().unwrap())
@@ -432,7 +432,7 @@ impl<T: MetalFloat> Compiler for StdNormCompiler<T> {
                 }
             }
             if sh
-                .shape()
+                .dims()
                 .last()
                 .unwrap()
                 .to_usize()
@@ -515,7 +515,7 @@ kernel void kernel_metal_exp(device {type_name} *inp [[buffer(0)]], device {type
 }
 
 impl<T: MetalFloat> MetalKernel for MetalExp<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
         vec![input_shapes[0].n_elements() * std::mem::size_of::<T>()]
     }
     fn metal_forward(
@@ -653,7 +653,7 @@ kernel void kernel_metal_cos(device {type_name} *inp [[buffer(0)]], device {type
 }
 
 impl<T: MetalFloat> MetalKernel for MetalCos<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
         vec![input_shapes[0].n_elements() * std::mem::size_of::<T>()]
     }
     fn metal_forward(

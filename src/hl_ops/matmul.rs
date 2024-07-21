@@ -15,11 +15,11 @@ impl GraphTensor {
             // Sum Reduce
             let mut ret = mul.sum_reduce(2);
             if vec {
-                ret = ret.reshape(ret.shape().last().unwrap());
+                ret = ret.reshape(ret.dims().last().unwrap());
             }
             ret
         } else if self.shape.len() == 3 {
-            let d = rhs.shape().last().unwrap().small();
+            let d = *rhs.dims().last().unwrap();
             let (a, b, _) = self.dims3();
             if rhs.shape.len() == 2 {
                 // ABCxCD -> ABD
@@ -43,8 +43,8 @@ impl GraphTensor {
             } else {
                 panic!(
                     "Can't matmul lhs {:?} and rhs {:?}",
-                    self.shape(),
-                    rhs.shape()
+                    self.dims(),
+                    rhs.dims()
                 )
             }
         } else if self.shape.len() == 4 {
@@ -73,8 +73,8 @@ impl GraphTensor {
             } else {
                 panic!(
                     "Can't matmul lhs {:?} and rhs {:?}",
-                    self.shape(),
-                    rhs.shape()
+                    self.dims(),
+                    rhs.dims()
                 )
             }
         } else if self.shape.len() == 5 && rhs.shape.len() == 5 {
@@ -93,8 +93,8 @@ impl GraphTensor {
         } else {
             panic!(
                 "Can't matmul lhs {:?} and rhs {:?}",
-                self.shape(),
-                rhs.shape()
+                self.dims(),
+                rhs.dims()
             )
         }
     }

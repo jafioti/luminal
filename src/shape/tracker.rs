@@ -3,9 +3,7 @@ use tinyvec::ArrayVec;
 
 use crate::prelude::*;
 
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ShapeTracker {
     pub dims: ArrayVec<[Expression; 6]>,
     pub indexes: ArrayVec<[usize; 6]>,
@@ -15,7 +13,8 @@ pub struct ShapeTracker {
 }
 
 impl ShapeTracker {
-    pub fn new(dims: &[impl Into<Expression> + Copy]) -> Self {
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    pub fn new(dims: impl ToShape) -> Self {
         let mut s = Self {
             dims: Default::default(),
             indexes: Default::default(),
@@ -23,8 +22,8 @@ impl ShapeTracker {
             mask: Default::default(),
             padding: Default::default(),
         };
-        for (i, d) in dims.iter().enumerate() {
-            s.dims.push((*d).into());
+        for (i, d) in dims.to_shape().into_iter().enumerate() {
+            s.dims.push(d);
             s.indexes.push(i);
             s.fake.push(false);
             s.mask.push((0.into(), i32::MAX.into())); // Unset upper bound mask are i32::MAX
@@ -34,7 +33,7 @@ impl ShapeTracker {
     }
 
     /// Create a shape tracker where all dims are fake
-    pub fn fake(dims: &[Expression]) -> Self {
+    pub fn fake(dims: impl ToShape) -> Self {
         let mut s = Self::new(dims);
         s.fake.iter_mut().for_each(|i| *i = true);
         s
@@ -82,13 +81,13 @@ impl ShapeTracker {
     }
 
     /// Strides without permute applied
-    fn unordered_strides(&self) -> Vec<BigExpression> {
+    fn unordered_strides(&self) -> Vec<Expression> {
         let mut strides = (0..self.len())
             .rev()
-            .scan(BigExpression::from(1), |state, i| {
-                let ret = state.clone();
+            .scan(Expression::from(1), |state, i| {
+                let ret = *state;
                 if !self.fake[i] {
-                    *state = state.clone() * self.dims[i];
+                    *state *= self.dims[i];
                 }
                 Some(ret)
             })
@@ -98,22 +97,19 @@ impl ShapeTracker {
     }
 
     /// Compute strides
-    pub fn strides(&self) -> Vec<BigExpression> {
+    pub fn strides(&self) -> Vec<Expression> {
         let strides = self.unordered_strides();
-        self.indexes
-            .into_iter()
-            .map(|i| strides[i].clone())
-            .collect()
+        self.indexes.into_iter().map(|i| strides[i]).collect()
     }
 
     /// Create an expression to translate logical indexes into physical indexes, without expression simplification
-    pub fn index_expression_no_simplify(&self) -> BigExpression {
+    pub fn index_expression_no_simplify(&self) -> Expression {
         if !self.is_reshaped() {
             return 'z'.into();
         }
         let strides = self.unordered_strides(); // Dimension strides in original order
-        let mut ind_expr = BigExpression::from(0); // The final index expression
-        let mut current_elem_size = BigExpression::from(1); // Keep track of the size of each element of the current dim (last dim elem size: 1)
+        let mut ind_expr = 0.into(); // The final index expression
+        let mut current_elem_size = Expression::from(1); // Keep track of the size of each element of the current dim (last dim elem size: 1)
 
         // Loop through all dims in reverse order
         for i in self.indexes.into_iter().rev() {
@@ -121,15 +117,15 @@ impl ShapeTracker {
             let current_size = pad_mask_dim(self.dims[i], self.padding[i], self.mask[i]);
             // Don't include fake dimensions in the index expression
             if !self.fake[i] {
-                let mut dim_ind = BigExpression::from('z');
+                let mut dim_ind = Expression::from('z');
                 // Remove other dim components
-                dim_ind /= current_elem_size.clone();
+                dim_ind /= current_elem_size;
                 // Get position in current dim
-                dim_ind %= current_size.clone();
+                dim_ind %= current_size;
                 // Add offset
                 dim_ind += self.mask[i].0 - self.padding[i].0;
                 // Multiply by stride
-                dim_ind *= strides[i].clone();
+                dim_ind *= strides[i];
                 // Add to index expression
                 ind_expr += dim_ind;
             }
@@ -140,28 +136,28 @@ impl ShapeTracker {
     }
 
     /// Create an expression to translate logical indexes into physical indexes
-    pub fn index_expression(&self) -> BigExpression {
+    pub fn index_expression(&self) -> Expression {
         self.index_expression_no_simplify().simplify()
     }
 
     /// If this expression evaluates to 0, the logical index is invalid. Otherwise it is valid. No simplification
-    pub fn valid_expression_no_simplify(&self) -> BigExpression {
+    pub fn valid_expression_no_simplify(&self) -> Expression {
         if !self.is_reshaped() {
             return true.into();
         }
-        let mut ret = BigExpression::from(1);
-        let mut acc = BigExpression::from(1);
-        let logical = BigExpression::from('z');
+        let mut ret = Expression::from(1);
+        let mut acc = Expression::from(1);
+        let logical = Expression::from('z');
         for i in self.indexes.into_iter().rev() {
             let (bottom_slice, top_slice) = self.mask[i];
             let logical_sh = pad_mask_dim(self.dims[i], self.padding[i], self.mask[i]);
             if !self.fake[i] {
-                let dim_ind = (logical.clone() / acc.clone()) % logical_sh.clone();
-                let greater_than = self.padding[i].0.big() - bottom_slice;
+                let dim_ind = (logical / acc) % logical_sh;
+                let greater_than = self.padding[i].0 - bottom_slice;
                 if greater_than != 0 {
-                    ret &= dim_ind.clone().gte(greater_than);
+                    ret &= dim_ind.gte(greater_than);
                 }
-                ret &= dim_ind.lt(self.dims[i].big() + self.padding[i].0);
+                ret &= dim_ind.lt(self.dims[i] + self.padding[i].0);
                 if top_slice
                     .to_usize()
                     .map(|s| self.dims[i].to_usize().map(|dim| s < dim).unwrap_or(true))
@@ -176,22 +172,22 @@ impl ShapeTracker {
     }
 
     /// If this expression evaluates to 0, the logical index is invalid. Otherwise it is valid
-    pub fn valid_expression(&self) -> BigExpression {
+    pub fn valid_expression(&self) -> Expression {
         self.valid_expression_no_simplify().simplify()
     }
 
     /// The number of elements in this tensor, including padding and mask
-    pub fn n_elements(&self) -> BigExpression {
-        self.shape().into_iter().product::<BigExpression>().max(1)
+    pub fn n_elements(&self) -> Expression {
+        self.dims().into_iter().product::<Expression>().max(1)
     }
 
     /// The number of elements in this tensor, not including pads and mask
-    pub fn n_physical_elements(&self) -> BigExpression {
+    pub fn n_physical_elements(&self) -> Expression {
         self.indexes
             .into_iter()
             .filter(|i| !self.fake[*i])
-            .map(|i| self.dims[i].big())
-            .product::<BigExpression>()
+            .map(|i| self.dims[i])
+            .product::<Expression>()
             .max(1)
     }
 
@@ -222,10 +218,9 @@ impl ShapeTracker {
     /// Create a contiguous version
     pub fn contiguous(self) -> Self {
         Self::new(
-            &self
-                .shape()
+            self.dims()
                 .into_iter()
-                .map(|i| i.simplify().small())
+                .map(|i| i.simplify())
                 .collect::<Vec<_>>(),
         )
     }
@@ -241,7 +236,7 @@ impl ShapeTracker {
     }
 
     /// Realize the true shape
-    pub fn shape(&self) -> Vec<BigExpression> {
+    pub fn dims(&self) -> Vec<Expression> {
         self.indexes
             .into_iter()
             .map(|i| pad_mask_dim(self.dims[i], self.padding[i], self.mask[i]))
@@ -250,7 +245,7 @@ impl ShapeTracker {
 
     /// Realize the true shape and convert it to usizes. All dyn dims must be replaced already
     pub fn shape_usize(&self) -> Vec<usize> {
-        self.shape().iter().map(|e| e.to_usize().unwrap()).collect()
+        self.dims().iter().map(|e| e.to_usize().unwrap()).collect()
     }
 
     /// Take a slice
@@ -284,8 +279,9 @@ impl ShapeTracker {
             {
                 panic!("Adding padding to a masked shape isn't supported")
             }
-            self.padding[ind].0 += s.max(0);
-            self.padding[ind].1 += e.max(0);
+            let (s, e) = (s.max(0), e.max(0));
+            self.padding[ind].0 += s;
+            self.padding[ind].1 += e;
         }
     }
 
@@ -329,11 +325,11 @@ impl ShapeTracker {
 }
 
 fn pad_mask_dim(
-    dim: impl Into<BigExpression>,
+    dim: impl Into<Expression>,
     padding: (Expression, Expression),
     mask: (Expression, Expression),
-) -> BigExpression {
-    (dim.into() + padding.0 + padding.1).min(mask.1) - mask.0
+) -> Expression {
+    (padding.0 + padding.1 + dim).min(mask.1) - mask.0
 }
 
 /// Resolve shapes between the two trackers to the best of our ability
@@ -364,7 +360,7 @@ mod tests {
     use crate::prelude::*;
     #[test]
     fn test_idx_expr() {
-        let mut tracker = ShapeTracker::new(&[
+        let mut tracker = ShapeTracker::new([
             Expression::from(10),
             Expression::from(5),
             Expression::from(3),

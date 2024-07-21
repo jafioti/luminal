@@ -132,9 +132,9 @@ impl Debug for Function {
 }
 
 /// A constant value placed on the graph at runtime. Can either be an expression evaluated at runtime, or a constant float
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ConstantValue {
-    Expression(BigExpression),
+    Expression(Expression),
     Float(f32),
 }
 
@@ -383,7 +383,7 @@ fn get_vec<'a>(tensor: &'a InputTensor<'a>) -> &'a Vec<f32> {
 
 fn get_index(
     data: &[f32],
-    (ind, val): &(BigExpression, BigExpression),
+    (ind, val): &(Expression, Expression),
     stack: &mut Vec<i64>,
     index: usize,
 ) -> f32 {

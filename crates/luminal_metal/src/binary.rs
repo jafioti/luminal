@@ -71,7 +71,7 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
 }
 
 impl<T> MetalKernel for MetalSub<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
         vec![input_shapes[0].n_elements() * size_of::<T>()]
     }
     fn metal_forward(
@@ -252,7 +252,7 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
 }
 
 impl<T> MetalKernel for MetalEqual<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
         vec![input_shapes[0].n_elements() * size_of::<T>()]
     }
     fn metal_forward(
@@ -419,7 +419,7 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
             // Setup buffers
             let indexes = tensors[0].0.borrowed().downcast_ref::<Vec<f32>>().unwrap();
             let index_buffer = self.device.new_buffer_with_data(
-                unsafe { std::mem::transmute(indexes.as_ptr()) },
+                indexes.as_ptr() as *const _,
                 (indexes.len() * std::mem::size_of::<f32>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
@@ -498,7 +498,7 @@ impl<T: MetalFloat> Compiler for MetalGatherCompiler<T> {
                 .as_data()
                 .unwrap()
                 .2;
-            let embed_dim = emb_shape.shape()[2].to_usize().unwrap();
+            let embed_dim = emb_shape.dims()[2].to_usize().unwrap();
             let index_shape = graph
                 .edges_connecting(s.get(&indexes), s.get(&ind_copy))
                 .next()

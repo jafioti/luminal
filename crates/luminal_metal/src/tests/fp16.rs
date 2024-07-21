@@ -80,8 +80,8 @@ fn test_rotate() {
     const D: usize = 4;
     let data = random_vec(D * B * F);
     let a = cx.tensor((F, B, D)).set(data.clone()).permute((1, 0, 2));
-    let x1 = a.slice((.., .., ..Expression::from(D / 2)));
-    let x2 = a.slice((.., .., Expression::from(D / 2)..));
+    let x1 = a.slice((.., .., ..D / 2));
+    let x2 = a.slice((.., .., D / 2..));
     let mut rotated_a = (-x2).concat_along(x1, 1).retrieve();
     cx.execute();
     let unopt = rotated_a.data();
@@ -709,7 +709,7 @@ fn test_slice() {
     let data = random_vec(256);
     let mut cx = Graph::new();
     let a = cx.tensor(256).set(data.clone());
-    let mut c = a.slice(..Expression::from(20)).contiguous().retrieve();
+    let mut c = a.slice(..20).contiguous().retrieve();
 
     cx.compile(MetalCompiler::<f16>::default(), &mut c);
     cx.execute();
@@ -752,10 +752,10 @@ fn test_pad_contig() {
     let a_data = random_vec_rng(m * k, &mut rng);
     let mut a = cx.tensor(('M', 'K')).set_dyn(a_data, (m, k)).retrieve();
     let mut b = a
-        .pad(&[(0, 0.into()), (0, Expression::from(24) - 'K')])
+        .pad(((0, 0), (0, Expression::from(24) - 'K')))
         .contiguous()
         .retrieve();
-    let mut c = (a.slice((.., ..Expression::from(k))) / 1.0).retrieve();
+    let mut c = (a.slice((.., ..k)) / 1.0).retrieve();
 
     cx.compile(MetalCompiler::<f16>::default(), (&mut a, &mut b, &mut c));
     cx.execute();
@@ -771,7 +771,7 @@ fn test_movement() {
     let mut cx = Graph::new();
     let a = cx.tensor(32).set(data.clone());
     let b = a.pad((0, 10)).contiguous().retrieve();
-    let mut c = b.slice((..Expression::from(25),)).contiguous().retrieve();
+    let mut c = b.slice((..25,)).contiguous().retrieve();
 
     cx.compile(MetalCompiler::<f16>::default(), &mut c);
     cx.execute();

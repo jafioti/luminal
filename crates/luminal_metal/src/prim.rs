@@ -161,7 +161,7 @@ macro_rules! metal_unary_op {
         }
 
         impl<T> MetalKernel for $op_name<T> {
-            fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+            fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
                 vec![input_shapes[0].contiguous().n_elements() * size_of::<T>()]
             }
             fn metal_forward(
@@ -288,7 +288,7 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
 }
 
 impl<T> MetalKernel for MetalAdd<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
         vec![input_shapes[0].n_elements() * size_of::<T>()]
     }
     fn metal_forward(
@@ -405,7 +405,7 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
     }
 }
 impl<T> MetalKernel for MetalMul<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
         vec![input_shapes[0].n_elements() * size_of::<T>()]
     }
     fn metal_forward(
@@ -532,7 +532,7 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
 }
 
 impl<T> MetalKernel for MetalLessThan<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
         vec![input_shapes[0].n_elements() * size_of::<T>()]
     }
     fn metal_forward(
@@ -650,7 +650,7 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
     }
 }
 impl<T> MetalKernel for MetalMod<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
         vec![input_shapes[0].n_elements() * size_of::<T>()]
     }
     fn metal_forward(
@@ -785,7 +785,7 @@ kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *o
 }
 
 impl<T> MetalKernel for MetalSumReduce<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
         let mut sh = input_shapes[0];
         sh.remove_dim(self.dim);
         vec![sh.n_elements() * size_of::<T>()]
@@ -802,19 +802,19 @@ impl<T> MetalKernel for MetalSumReduce<T> {
         let inp_size = sh.n_elements().to_usize().unwrap();
         let front_size: usize = inputs[0]
             .1
-            .shape()
+            .dims()
             .iter()
             .take(self.dim)
             .map(|i| i.to_usize().unwrap())
             .product();
         let back_size: usize = inputs[0]
             .1
-            .shape()
+            .dims()
             .iter()
             .skip(self.dim + 1)
             .map(|i| i.to_usize().unwrap())
             .product();
-        let dim_size = inputs[0].1.shape()[self.dim].to_usize().unwrap();
+        let dim_size = inputs[0].1.dims()[self.dim].to_usize().unwrap();
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
@@ -938,7 +938,7 @@ kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *o
     }
 }
 impl<T> MetalKernel for MetalMaxReduce<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
         let mut sh = input_shapes[0];
         sh.remove_dim(self.dim);
         vec![sh.n_elements() * size_of::<T>()]
@@ -955,19 +955,19 @@ impl<T> MetalKernel for MetalMaxReduce<T> {
         let inp_size = sh.contiguous().n_elements().to_usize().unwrap();
         let front_size: usize = inputs[0]
             .1
-            .shape()
+            .dims()
             .iter()
             .take(self.dim)
             .map(|i| i.to_usize().unwrap())
             .product();
         let back_size: usize = inputs[0]
             .1
-            .shape()
+            .dims()
             .iter()
             .skip(self.dim + 1)
             .map(|i| i.to_usize().unwrap())
             .product();
-        let dim_size = inputs[0].1.shape()[self.dim].to_usize().unwrap();
+        let dim_size = inputs[0].1.dims()[self.dim].to_usize().unwrap();
 
         let encoder =
             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
@@ -1052,9 +1052,10 @@ impl<T: MetalFloat + 'static> Compiler for PrimitiveCompiler<T> {
                 > 0
             {
                 // Copy outputs to device
+                let sh = ShapeTracker::new(());
                 let copy_node = graph
                     .add_op(MetalCopyToDevice::<T>::new(dev.clone()))
-                    .input(function_node, 0, ShapeTracker::default())
+                    .input(function_node, 0, sh)
                     .finish();
 
                 // Switch outgoing edges from input to copy_node

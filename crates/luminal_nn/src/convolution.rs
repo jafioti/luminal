@@ -48,11 +48,10 @@ impl SerializeModule for Conv1D {
     }
 }
 
-// Single
 impl Module<GraphTensor> for Conv1D {
     type Output = GraphTensor;
     fn forward(&self, input: GraphTensor) -> Self::Output {
-        assert_eq!(input.shape()[input.shape.len() - 2], self.ch_in);
+        assert_eq!(input.dims()[input.shape.len() - 2], self.ch_in);
         // Input: batch_dims, ch_in, dim_in
         // Reshape to 2 batch dims
         let n_expands = 4 - input.shape.len();
@@ -61,9 +60,9 @@ impl Module<GraphTensor> for Conv1D {
             inp = inp.expand(0, 1);
         }
 
-        let batch1 = inp.shape()[0].small();
-        let batch2 = inp.shape()[1].small();
-        let dim_in = input.shape().last().unwrap().small();
+        let batch1 = inp.dims()[0];
+        let batch2 = inp.dims()[1];
+        let dim_in = *input.dims().last().unwrap();
         let dim_out = (((dim_in + 2 * self.padding - self.dilation * (self.kernel - 1) - 1)
             / self.stride)
             + 1)
@@ -86,7 +85,7 @@ impl Module<GraphTensor> for Conv1D {
         }
 
         // Reshape back to original shape
-        let mut final_shape = out.shape();
+        let mut final_shape = out.dims();
         for _ in 0..n_expands {
             final_shape.remove(0);
         }
@@ -95,7 +94,8 @@ impl Module<GraphTensor> for Conv1D {
 }
 
 pub struct Conv2D {
-    pub weight: GraphTensor, // ch_out, ch_in * kernel_x * kernel_y
+    pub weight: GraphTensor,       // ch_out, ch_in * kernel_x * kernel_y
+    pub bias: Option<GraphTensor>, // ch_out
     kernel: (usize, usize),
     stride: (usize, usize),
     dilation: (usize, usize),
@@ -110,10 +110,16 @@ impl Conv2D {
         kernel: (usize, usize),
         stride: (usize, usize),
         dilation: (usize, usize),
+        bias: bool,
         cx: &mut Graph,
     ) -> Self {
         Self {
             weight: cx.named_tensor("Weight", (ch_out, ch_in * kernel.0 * kernel.1)),
+            bias: if bias {
+                Some(cx.named_tensor("Bias", ch_out))
+            } else {
+                None
+            },
             kernel,
             stride,
             dilation,
@@ -126,15 +132,22 @@ impl Conv2D {
 impl SerializeModule for Conv2D {
     fn serialize(&self, s: &mut luminal::module::Serializer) {
         s.tensor("weight", self.weight);
+        if let Some(bias) = self.bias {
+            s.tensor("bias", bias);
+        }
     }
 }
 
-// Single
 impl Conv2D {
-    pub fn forward(&self, input: GraphTensor) -> GraphTensor {
-        // Input: (ch_in, dimx_in, dimy_in)
-        let dimx_in = input.shape()[1].small();
-        let dimy_in = input.shape()[2].small();
+    pub fn forward(&self, mut input: GraphTensor) -> GraphTensor {
+        // Input: (batch (optional), ch_in, dimx_in, dimy_in)
+        let mut expanded = false;
+        if input.shape.len() == 3 {
+            // Expand batch
+            input = input.expand(0, 1);
+            expanded = true;
+        }
+        let (batch, _, dimx_in, dimy_in) = input.dims4();
         let dimx_out = (((dimx_in - self.dilation.0 * (self.kernel.0 - 1) - 1) / self.stride.0)
             + 1)
         .simplify();
@@ -143,21 +156,34 @@ impl Conv2D {
         .simplify();
         let input_pooled = input
             .pool_last_dim(self.kernel.1, self.stride.1, self.dilation.1)
-            .permute((0, 2, 3, 1))
+            .permute((0, 1, 3, 4, 2))
             .pool_last_dim(self.kernel.0, self.stride.0, self.dilation.0)
-            .permute((0, 4, 2, 3, 1))
+            .permute((0, 1, 5, 3, 4, 2))
             .reshape((
+                batch,
                 self.ch_in * self.kernel.0 * self.kernel.1,
                 dimx_out * dimy_out,
             ));
 
-        self.weight
-            .matmul(input_pooled)
-            .reshape((self.ch_out, dimx_out, dimy_out))
+        let mut o = self.weight.expand(0, batch).matmul(input_pooled).reshape((
+            batch,
+            self.ch_out,
+            dimx_out,
+            dimy_out,
+        ));
+        if let Some(b) = self.bias {
+            o += b.expand_to(o.shape);
+        }
+        if expanded {
+            o.reshape((self.ch_out, dimx_out, dimy_out))
+        } else {
+            o
+        }
     }
 }
 pub struct Conv3D {
     pub weight: GraphTensor, // ch_out, ch_in * kernel_x * kernel_y * kernel_z
+    pub bias: Option<GraphTensor>, // ch_out
     kernel: (usize, usize, usize),
     stride: (usize, usize, usize),
     dilation: (usize, usize, usize),
@@ -172,10 +198,16 @@ impl Conv3D {
         kernel: (usize, usize, usize),
         stride: (usize, usize, usize),
         dilation: (usize, usize, usize),
+        bias: bool,
         cx: &mut Graph,
     ) -> Self {
         Self {
             weight: cx.named_tensor("Weight", (ch_out, ch_in * kernel.0 * kernel.1 * kernel.2)),
+            bias: if bias {
+                Some(cx.named_tensor("Bias", ch_out))
+            } else {
+                None
+            },
             kernel,
             stride,
             dilation,
@@ -188,15 +220,18 @@ impl Conv3D {
 impl SerializeModule for Conv3D {
     fn serialize(&self, s: &mut luminal::module::Serializer) {
         s.tensor("weight", self.weight);
+        if let Some(bias) = self.bias {
+            s.tensor("bias", bias);
+        }
     }
 }
 
 impl Conv3D {
     pub fn forward(&self, input: GraphTensor) -> GraphTensor {
         // Input: ch_in, dimx_in, dimy_in, dimz_in
-        let dimx_in = input.shape()[1].small();
-        let dimy_in = input.shape()[2].small();
-        let dimz_in = input.shape()[3].small();
+        let dimx_in = input.dims()[1];
+        let dimy_in = input.dims()[2];
+        let dimz_in = input.dims()[3];
         let dimx_out = (((dimx_in - self.dilation.0 * (self.kernel.0 - 1) - 1) / self.stride.0)
             + 1)
         .simplify();
@@ -264,8 +299,8 @@ mod tests {
         cx.execute();
 
         assert_eq!(
-            out1.shape(),
-            vec![BigExpression::from(CH_OUT), BigExpression::from(DIM_OUT)]
+            out1.dims(),
+            vec![Expression::from(CH_OUT), Expression::from(DIM_OUT)]
         );
         assert_close(&out1.data(), &[0.0948, -0.9498, -1.2342]);
     }
@@ -421,6 +456,7 @@ mod tests {
             (KERNELX, KERNELY),
             (STRIDEX, STRIDEY),
             (DILATIONX, DILATIONY),
+            false,
             &mut cx,
         );
         model.weight.set(vec![
@@ -485,6 +521,7 @@ mod tests {
             (KERNELX, KERNELY, KERNELZ),
             (STRIDEX, STRIDEY, STRIDEZ),
             (DILATIONX, DILATIONY, DILATIONZ),
+            false,
             &mut cx,
         );
         let weights = vec![

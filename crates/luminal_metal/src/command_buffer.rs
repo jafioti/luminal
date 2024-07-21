@@ -236,10 +236,10 @@ impl std::fmt::Debug for CommandBufferWrapper {
 }
 
 impl MetalKernel for CommandBufferWrapper {
-    fn intermediate_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn intermediate_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
         self.wrapper.intermediate_buffer_sizes(input_shapes)
     }
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<BigExpression> {
+    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
         self.wrapper.output_buffer_sizes(input_shapes)
     }
     fn metal_forward(

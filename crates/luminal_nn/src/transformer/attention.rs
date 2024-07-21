@@ -62,17 +62,16 @@ impl Module<(GraphTensor, GraphTensor, GraphTensor)> for MultiHeadSelfAttention 
             GraphTensor, // batch, s1, dim
         ),
     ) -> Self::Output {
-        let orig_query_shape = queries.shape();
-        let s1 = keys.shape()[keys.shape.len() - 2].small();
-        let s2 = queries.shape()[queries.shape.len() - 2].small();
+        let orig_query_shape = queries.dims();
+        let s1 = keys.dims()[keys.shape.len() - 2];
+        let s2 = queries.dims()[queries.shape.len() - 2];
         let n_batches = queries
-            .shape()
+            .dims()
             .into_iter()
             .take(queries.shape.len() - 2)
-            .product::<BigExpression>()
-            .max(1)
-            .small();
-        let dim = queries.shape().last().unwrap().small();
+            .product::<Expression>()
+            .max(1);
+        let dim = *queries.dims().last().unwrap();
         let keys = keys.reshape((n_batches, s1, dim));
         let values = values.reshape((n_batches, s1, dim));
         let queries = queries.reshape((n_batches, s2, dim));

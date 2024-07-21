@@ -52,23 +52,13 @@ impl GraphTensor {
             let mul_tensor = self
                 .graph()
                 .add_op(op::Recip)
-                .input(div_tensor, 0, ShapeTracker::default())
+                .input(div_tensor, 0, ShapeTracker::new(()))
                 .finish();
             node_id = self
                 .graph()
                 .add_op(op::Mul)
                 .input(node_id, 0, shape)
-                .input(
-                    mul_tensor,
-                    0,
-                    ShapeTracker::fake(
-                        &shape
-                            .shape()
-                            .iter()
-                            .map(Expression::from)
-                            .collect::<Vec<_>>(),
-                    ),
-                )
+                .input(mul_tensor, 0, ShapeTracker::fake(shape))
                 .finish();
         }
         GraphTensor::from_id(node_id, shape, self.graph_ref)

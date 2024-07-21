@@ -48,24 +48,14 @@ impl From<f64> for ConstantValue {
         ConstantValue::Float(value as f32)
     }
 }
-impl From<BigExpression> for ConstantValue {
-    fn from(value: BigExpression) -> Self {
-        ConstantValue::Expression(value)
-    }
-}
 impl From<Expression> for ConstantValue {
     fn from(value: Expression) -> Self {
-        ConstantValue::Expression((&value).into())
-    }
-}
-impl From<&BigExpression> for ConstantValue {
-    fn from(value: &BigExpression) -> Self {
-        ConstantValue::Expression(value.clone())
+        ConstantValue::Expression(value)
     }
 }
 impl From<&Expression> for ConstantValue {
     fn from(value: &Expression) -> Self {
-        ConstantValue::Expression(value.into())
+        ConstantValue::Expression(*value)
     }
 }
 
@@ -74,26 +64,26 @@ impl Graph {
     pub fn constant(&mut self, i: impl Into<ConstantValue>) -> GraphTensor {
         GraphTensor::from_id(
             self.add_op(Constant(i.into(), &self.dyn_map)).finish(),
-            ShapeTracker::default(),
+            ShapeTracker::new(()),
             self,
         )
     }
 
     /// A scalar constant evaluated from an expression at runtime
-    pub fn constant_expr<E: Into<BigExpression>>(&mut self, expr: E) -> GraphTensor {
+    pub fn constant_expr<E: Into<Expression>>(&mut self, expr: E) -> GraphTensor {
         GraphTensor::from_id(
             self.add_op(Constant(
                 ConstantValue::Expression(expr.into().simplify()),
                 &self.dyn_map,
             ))
             .finish(),
-            ShapeTracker::default(),
+            ShapeTracker::new(()),
             self,
         )
     }
 
     /// ARange from 0 to N
-    pub fn arange(&mut self, to: impl Into<Expression> + Copy) -> GraphTensor {
+    pub fn arange(&mut self, to: impl Into<Expression>) -> GraphTensor {
         let to = to.into();
         if to.to_usize().map(|i| i == 1).unwrap_or_default() {
             // Single number ARange is just 0
@@ -106,7 +96,8 @@ impl Graph {
     /// Lower left-hand triangle of 1s. Currently required to be square
     ///
     /// Same API as https://pytorch.org/docs/stable/generated/torch.tril
-    pub fn tril(&mut self, size: impl Into<Expression> + Copy, diagonal: i32) -> GraphTensor {
+    pub fn tril(&mut self, size: impl Into<Expression>, diagonal: i32) -> GraphTensor {
+        let size = size.into();
         let horizontal = self.arange(size).expand(0, size);
         let vertical = self.arange(size).expand(1, size);
 
@@ -116,7 +107,8 @@ impl Graph {
     /// Upper right-hand triangle of 1s
     ///
     /// Same API as https://pytorch.org/docs/stable/generated/torch.triu
-    pub fn triu(&mut self, size: impl Into<Expression> + Copy, diagonal: i32) -> GraphTensor {
+    pub fn triu(&mut self, size: impl Into<Expression>, diagonal: i32) -> GraphTensor {
+        let size = size.into();
         let horizontal = self.arange(size).expand(0, size);
         let vertical = self.arange(size).expand(1, size);
 
