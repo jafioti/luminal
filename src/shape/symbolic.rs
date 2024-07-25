@@ -176,6 +176,7 @@ impl Expression {
     }
 
     /// Simplify the expression to its minimal terms, using a cache to retrieve / store the simplification
+    #[allow(clippy::mutable_key_type)]
     pub fn simplify_cache(self, cache: &mut FxHashMap<Expression, Expression>) -> Self {
         if let Some(s) = cache.get(&self) {
             *s

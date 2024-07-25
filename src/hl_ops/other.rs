@@ -32,6 +32,29 @@ impl GraphTensor {
         GraphTensor::from_id(final_id, pooled.shape, self.graph_ref)
     }
 
+    /// Cumulative max last dimension
+    pub fn cummax_last_dim(mut self) -> Self {
+        let axis = self.shape.len() - 1;
+        if !self.shape.is_contiguous() {
+            self = self.contiguous();
+        }
+        // Pad out length
+        let orig_length = self.shape.dims[self.shape.indexes[axis]];
+        self.shape.padding[self.shape.indexes[axis]].0 = orig_length - 1;
+        self = self.contiguous();
+
+        // Pool
+        let mut pooled = self.pool_last_dim(orig_length, 1, 1);
+        // Max Reduce along new dimension
+        let final_id = self
+            .graph()
+            .add_op(op::MaxReduce(axis))
+            .input(pooled.id, 0, pooled.shape)
+            .finish();
+        pooled.shape.remove_dim(axis + 1);
+        GraphTensor::from_id(final_id, pooled.shape, self.graph_ref)
+    }
+
     /// Cumulative product last dimension
     pub fn cumprod_last_dim(self) -> Self {
         self.ln().cumsum_last_dim().exp()

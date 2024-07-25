@@ -232,7 +232,7 @@ fn main() {
     // Setup graph
     let mut cx = Graph::new();
     let mut input = cx.tensor((1, 3, 'h', 'w'));
-    let model = model::Yolo::new(0.33, 0.25, 2.0, 80, &mut cx);
+    let model = model::Yolo::new(0.25, 2.0, 0.33, 80, &mut cx);
     let mut model_params = params(&model);
     let mut output = model.forward(input).retrieve();
     loader::load("yolov8n.safetensors", &model, &mut cx);

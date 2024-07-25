@@ -26,17 +26,75 @@ impl Module<GraphTensor> for Upsample {
     }
 }
 
+struct ConvBlock {
+    conv: Conv2D,
+    running_mean: GraphTensor,
+    running_var: GraphTensor,
+    weight: GraphTensor,
+    bias: GraphTensor,
+    original_weight: GraphTensor,
+}
+
+impl ConvBlock {
+    fn new(
+        ch_in: usize,
+        ch_out: usize,
+        kernel: (usize, usize),
+        stride: (usize, usize),
+        dilation: (usize, usize),
+        cx: &mut Graph,
+    ) -> Self {
+        let eps = 1e-3;
+        let mut conv = Conv2D::new(ch_in, ch_out, kernel, stride, dilation, false, cx);
+        let original_weight = conv.weight;
+        let running_mean = cx.named_tensor("mean", ch_in);
+        let running_var = cx.named_tensor("var", ch_in);
+        let o_weight = cx.named_tensor("o_weight", ch_in);
+        let o_bias = cx.named_tensor("o_bias", ch_in);
+        let std_ = o_weight / ((running_var + eps).sqrt());
+        let weight = conv.weight * (std_.reshape((conv.weight.dims2().0, 1, 1, 1)));
+        let bias = o_bias - (std_ * running_mean);
+        conv.weight = weight;
+        conv.bias = Some(bias);
+        Self {
+            conv,
+            running_var,
+            running_mean,
+            original_weight,
+            weight: o_weight,
+            bias: o_bias,
+        }
+    }
+}
+
+impl Module<GraphTensor> for ConvBlock {
+    type Output = GraphTensor;
+    fn forward(&self, input: GraphTensor) -> Self::Output {
+        self.conv.forward(input)
+    }
+}
+
+impl SerializeModule for ConvBlock {
+    fn serialize(&self, s: &mut Serializer) {
+        s.tensor("conv/weight", self.original_weight);
+        s.tensor("bn/weight", self.weight);
+        s.tensor("bn/bias", self.bias);
+        s.tensor("bn/running_mean", self.running_mean);
+        s.tensor("bn/running_var", self.running_var);
+    }
+}
+
 struct Bottleneck {
-    cv1: Conv2D,
-    cv2: Conv2D,
+    cv1: ConvBlock,
+    cv2: ConvBlock,
     residual: bool,
 }
 
 impl Bottleneck {
     pub fn new(ch_in: usize, ch_out: usize, shortcut: bool, cx: &mut Graph) -> Self {
         Self {
-            cv1: Conv2D::new(ch_in, ch_out, (3, 3), (3, 3), (1, 1), true, cx),
-            cv2: Conv2D::new(ch_out, ch_out, (3, 3), (3, 3), (1, 1), true, cx),
+            cv1: ConvBlock::new(ch_in, ch_out, (3, 3), (3, 3), (1, 1), cx),
+            cv2: ConvBlock::new(ch_out, ch_out, (3, 3), (3, 3), (1, 1), cx),
             residual: ch_in == ch_out && shortcut,
         }
     }
@@ -64,8 +122,8 @@ impl Module<GraphTensor> for Bottleneck {
 }
 
 struct C2f {
-    cv1: Conv2D,
-    cv2: Conv2D,
+    cv1: ConvBlock,
+    cv2: ConvBlock,
     bottleneck: Vec<Bottleneck>,
     c: usize,
 }
@@ -74,8 +132,8 @@ impl C2f {
     pub fn new(c1: usize, c2: usize, n: usize, shortcut: bool, cx: &mut Graph) -> Self {
         let c = (c2 as f64 / 2.) as usize;
         Self {
-            cv1: Conv2D::new(c1, 2 * c, (1, 1), (1, 1), (1, 1), true, cx),
-            cv2: Conv2D::new((2 + n) * c, c2, (1, 1), (1, 1), (1, 1), true, cx),
+            cv1: ConvBlock::new(c1, 2 * c, (1, 1), (1, 1), (1, 1), cx),
+            cv2: ConvBlock::new((2 + n) * c, c2, (1, 1), (1, 1), (1, 1), cx),
             bottleneck: (0..n)
                 .map(|_| Bottleneck::new(c, c, shortcut, cx))
                 .collect(),
@@ -89,7 +147,7 @@ impl SerializeModule for C2f {
         s.module("cv1", &self.cv1);
         s.module("cv2", &self.cv2);
         for (i, l) in self.bottleneck.iter().enumerate() {
-            s.module(&format!("bottleneck.{i}"), l);
+            s.module(&format!("bottleneck/{i}"), l);
         }
     }
 }
@@ -121,8 +179,8 @@ fn chunk(tensor: GraphTensor, chunks: usize, dim: usize) -> Vec<GraphTensor> {
 
 #[allow(clippy::upper_case_acronyms)]
 struct SPPF {
-    cv1: Conv2D,
-    cv2: Conv2D,
+    cv1: ConvBlock,
+    cv2: ConvBlock,
     k: usize,
 }
 
@@ -137,8 +195,8 @@ impl SPPF {
     pub fn new(c1: usize, c2: usize, k: usize, cx: &mut Graph) -> Self {
         let c_ = c1 / 2;
         Self {
-            cv1: Conv2D::new(c1, c_, (1, 1), (1, 1), (1, 1), true, cx),
-            cv2: Conv2D::new(c_ * 4, c2, (1, 1), (1, 1), (1, 1), true, cx),
+            cv1: ConvBlock::new(c1, c_, (1, 1), (1, 1), (1, 1), cx),
+            cv2: ConvBlock::new(c_ * 4, c2, (1, 1), (1, 1), (1, 1), cx),
             k,
         }
     }
@@ -216,43 +274,42 @@ impl Module<GraphTensor> for DFL {
 }
 
 struct DarkNet {
-    b1_0: Conv2D,
-    b1_1: Conv2D,
+    b1_0: ConvBlock,
+    b1_1: ConvBlock,
     b2_0: C2f,
-    b2_1: Conv2D,
+    b2_1: ConvBlock,
     b2_2: C2f,
-    b3_0: Conv2D,
+    b3_0: ConvBlock,
     b3_1: C2f,
-    b4_0: Conv2D,
+    b4_0: ConvBlock,
     b4_1: C2f,
     b5: SPPF,
 }
 
 impl SerializeModule for DarkNet {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("b1_0", &self.b1_0);
-        s.module("b1_1", &self.b1_1);
-        s.module("b2_0", &self.b2_0);
-        s.module("b2_1", &self.b2_1);
-        s.module("b3_0", &self.b3_0);
-        s.module("b3_1", &self.b3_1);
-        s.module("b4_0", &self.b4_0);
-        s.module("b4_1", &self.b4_1);
-        s.module("b5", &self.b5);
+        s.module("b1.0", &self.b1_0);
+        s.module("b1.1", &self.b1_1);
+        s.module("b2.0", &self.b2_0);
+        s.module("b2.1", &self.b2_1);
+        s.module("b3.0", &self.b3_0);
+        s.module("b3.1", &self.b3_1);
+        s.module("b4.0", &self.b4_0);
+        s.module("b4.1", &self.b4_1);
+        s.module("b5.0", &self.b5);
     }
 }
 
 impl DarkNet {
     pub fn new(w: f64, r: f64, d: f64, cx: &mut Graph) -> Self {
         Self {
-            b1_0: Conv2D::new(3, (64. * w) as usize, (3, 3), (2, 2), (1, 1), true, cx),
-            b1_1: Conv2D::new(
+            b1_0: ConvBlock::new(3, (64. * w) as usize, (3, 3), (2, 2), (1, 1), cx),
+            b1_1: ConvBlock::new(
                 (64. * w) as usize,
                 (128. * w) as usize,
                 (3, 3),
                 (2, 2),
                 (1, 1),
-                true,
                 cx,
             ),
             b2_0: C2f::new(
@@ -262,13 +319,12 @@ impl DarkNet {
                 true,
                 cx,
             ),
-            b2_1: Conv2D::new(
+            b2_1: ConvBlock::new(
                 (128. * w) as usize,
                 (256. * w) as usize,
                 (3, 3),
                 (2, 2),
                 (1, 1),
-                true,
                 cx,
             ),
             b2_2: C2f::new(
@@ -278,13 +334,12 @@ impl DarkNet {
                 true,
                 cx,
             ),
-            b3_0: Conv2D::new(
+            b3_0: ConvBlock::new(
                 (256. * w) as usize,
                 (512. * w) as usize,
                 (3, 3),
                 (2, 2),
                 (1, 1),
-                true,
                 cx,
             ),
             b3_1: C2f::new(
@@ -294,13 +349,12 @@ impl DarkNet {
                 true,
                 cx,
             ),
-            b4_0: Conv2D::new(
+            b4_0: ConvBlock::new(
                 (512. * w) as usize,
                 (512. * w * r) as usize,
                 (3, 3),
                 (2, 2),
                 (1, 1),
-                true,
                 cx,
             ),
             b4_1: C2f::new(
@@ -331,9 +385,9 @@ struct YoloNeck {
     up: Upsample,
     n1: C2f,
     n2: C2f,
-    n3: Conv2D,
+    n3: ConvBlock,
     n4: C2f,
-    n5: Conv2D,
+    n5: ConvBlock,
     n6: C2f,
 }
 
@@ -361,23 +415,21 @@ impl YoloNeck {
                 cx,
             ),
             n2: C2f::new((768. * w) as usize, (256. * w) as usize, n, false, cx),
-            n3: Conv2D::new(
+            n3: ConvBlock::new(
                 (256. * w) as usize,
                 (256. * w) as usize,
                 (3, 3),
                 (2, 2),
                 (1, 1),
-                true,
                 cx,
             ),
             n4: C2f::new((768. * w) as usize, (512. * w) as usize, n, false, cx),
-            n5: Conv2D::new(
+            n5: ConvBlock::new(
                 (512. * w) as usize,
                 (512. * w) as usize,
                 (3, 3),
                 (2, 2),
                 (1, 1),
-                true,
                 cx,
             ),
             n6: C2f::new(
@@ -404,8 +456,8 @@ impl Module<(GraphTensor, GraphTensor, GraphTensor)> for YoloNeck {
 
 struct DetectionHead {
     dfl: DFL,
-    cv2: [(Conv2D, Conv2D, Conv2D); 3],
-    cv3: [(Conv2D, Conv2D, Conv2D); 3],
+    cv2: [(ConvBlock, ConvBlock, Conv2D); 3],
+    cv3: [(ConvBlock, ConvBlock, Conv2D); 3],
     ch: usize,
     no: usize,
 }
@@ -444,18 +496,28 @@ impl DetectionHead {
         }
     }
 
-    fn new_cv3(c1: usize, nc: usize, filter: usize, cx: &mut Graph) -> (Conv2D, Conv2D, Conv2D) {
+    fn new_cv3(
+        c1: usize,
+        nc: usize,
+        filter: usize,
+        cx: &mut Graph,
+    ) -> (ConvBlock, ConvBlock, Conv2D) {
         (
-            Conv2D::new(filter, c1, (3, 3), (1, 1), (1, 1), true, cx),
-            Conv2D::new(c1, c1, (3, 3), (1, 1), (1, 1), true, cx),
+            ConvBlock::new(filter, c1, (3, 3), (1, 1), (1, 1), cx),
+            ConvBlock::new(c1, c1, (3, 3), (1, 1), (1, 1), cx),
             Conv2D::new(c1, nc, (1, 1), (1, 1), (1, 1), true, cx),
         )
     }
 
-    fn new_cv2(c2: usize, ch: usize, filter: usize, cx: &mut Graph) -> (Conv2D, Conv2D, Conv2D) {
+    fn new_cv2(
+        c2: usize,
+        ch: usize,
+        filter: usize,
+        cx: &mut Graph,
+    ) -> (ConvBlock, ConvBlock, Conv2D) {
         (
-            Conv2D::new(filter, c2, (3, 3), (1, 1), (1, 1), true, cx),
-            Conv2D::new(c2, c2, (3, 3), (1, 1), (1, 1), true, cx),
+            ConvBlock::new(filter, c2, (3, 3), (1, 1), (1, 1), cx),
+            ConvBlock::new(c2, c2, (3, 3), (1, 1), (1, 1), cx),
             Conv2D::new(c2, 4 * ch, (1, 1), (1, 1), (1, 1), true, cx),
         )
     }
