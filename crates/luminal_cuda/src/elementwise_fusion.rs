@@ -1,4 +1,5 @@
 use cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
+use indicatif::{ProgressBar, ProgressStyle};
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::{any::Any, fmt::Debug, iter::once, marker::PhantomData, mem::size_of, sync::Arc};
@@ -78,6 +79,7 @@ impl<T: CudaFloat> Compiler for ElementwiseFusionCompiler<T> {
         }
         let mut intermediate_regexes = FxHashMap::default();
         let mut input_regexes = FxHashMap::default();
+        let mut n_fused_ops = 0;
         while matched {
             matched = false;
             for edge in graph.edge_indices().collect::<Vec<_>>() {
@@ -113,7 +115,7 @@ impl<T: CudaFloat> Compiler for ElementwiseFusionCompiler<T> {
                 let mut subexpressions_b = graph
                     .try_get_op::<FusedElementwiseOp<T>>(b)
                     .map(|o| o.subexpressions.clone())
-                    .unwrap_or_else(|| vec![(expression_b.clone(), ShapeTracker::new(&[]))]);
+                    .unwrap_or_else(|| vec![(expression_b.clone(), ShapeTracker::new(()))]);
                 let a_to_b_indexes = graph
                     .edges_connecting(a, b)
                     .map(|e| e.weight().as_data().unwrap().0 as usize)
@@ -133,7 +135,7 @@ impl<T: CudaFloat> Compiler for ElementwiseFusionCompiler<T> {
                 let mut subexpressions_a = graph
                     .try_get_op::<FusedElementwiseOp<T>>(a)
                     .map(|o| o.subexpressions.clone())
-                    .unwrap_or_else(|| vec![(expression_a.clone(), ShapeTracker::new(&[]))]);
+                    .unwrap_or_else(|| vec![(expression_a.clone(), ShapeTracker::new(()))]);
                 subexpressions_a.last_mut().unwrap().1 = connecting_shape;
                 // Re-reference b intermediates
                 for i in (0..subexpressions_b.len()).rev() {
@@ -263,11 +265,25 @@ impl<T: CudaFloat> Compiler for ElementwiseFusionCompiler<T> {
                     remap(a, new_op, &mut ids, graph);
                 }
                 remap(b, new_op, &mut ids, graph);
+                n_fused_ops += 1;
             }
         }
         // Compile all the kernels we placed
         let type_name = T::type_name();
         let intermediate_match = Regex::new(r"intermediate(\d+)([^0-9]|$)").unwrap();
+        let mut bar = None;
+        if debug() {
+            println!("Fusing {n_fused_ops} ops into {} ops...", fused_ops.len());
+            let b = ProgressBar::new(fused_ops.len() as u64);
+            b.set_style(
+                ProgressStyle::with_template(
+                    "[{elapsed_precise}] [{bar:40.bright.blue/white}] {pos:>7}/{len:7}",
+                )
+                .unwrap()
+                .progress_chars("##-"),
+            );
+            bar = Some(b);
+        };
         for fused_op in fused_ops {
             let inputs = graph
                 .edges_directed(fused_op, Direction::Incoming)
@@ -337,7 +353,7 @@ impl<T: CudaFloat> Compiler for ElementwiseFusionCompiler<T> {
                     s.iter()
                         .rev()
                         .take(s.len() - 1)
-                        .fold(BigExpression::from('z'), |acc, inp| {
+                        .fold(Expression::from('z'), |acc, inp| {
                             inp.index_expression().substitute('z', acc)
                         })
                 })
@@ -394,7 +410,7 @@ impl<T: CudaFloat> Compiler for ElementwiseFusionCompiler<T> {
                         .iter()
                         .rev()
                         .fold(
-                            (BigExpression::from(true), BigExpression::from('z')),
+                            (Expression::from(true), Expression::from('z')),
                             |(_, ind_acc), inp| {
                                 (
                                     inp.valid_expression().substitute('z', ind_acc.clone()),
@@ -437,6 +453,13 @@ extern \"C\" __global__ void kernel({} {type_name}* out, const int n_elements{re
             );
             op.kernel = Some(compile_and_load_kernel(kernel, &device));
             op.dyn_chars = dyn_chars;
+
+            if let Some(bar) = &bar {
+                bar.inc(1);
+            }
+        }
+        if let Some(bar) = bar {
+            bar.finish();
         }
     }
 }
@@ -448,7 +471,7 @@ pub struct FusedElementwiseOp<T> {
     dyn_chars: Vec<char>,
     subexpressions: Vec<(String, ShapeTracker)>,
     device: Arc<CudaDevice>,
-    output_buffer_sizes: Vec<BigExpression>,
+    output_buffer_sizes: Vec<Expression>,
     _phantom: PhantomData<T>,
 }
 impl<T> Debug for FusedElementwiseOp<T> {
@@ -501,7 +524,6 @@ mod tests {
     };
     use luminal_nn::*;
     use rand::{rngs::StdRng, SeedableRng};
-    use std::{marker::PhantomData, ops::Div};
 
     use crate::CudaCompiler;
 
@@ -509,7 +531,7 @@ mod tests {
     fn test_fusion_simple() {
         let mut cx = Graph::new();
         let mut rng = StdRng::seed_from_u64(0);
-        let inp = cx.tensor::<R1<5>>().set(random_vec_rng(10, &mut rng));
+        let inp = cx.tensor(5).set(random_vec_rng(10, &mut rng));
         let mut out = inp.exp2().cos().sqrt().retrieve();
 
         cx.execute();
@@ -525,8 +547,8 @@ mod tests {
     fn test_fusion_binary() {
         let mut cx = Graph::new();
         let mut rng = StdRng::seed_from_u64(0);
-        let a = cx.tensor::<R1<5>>().set(random_vec_rng(10, &mut rng));
-        let b = cx.tensor::<R1<5>>().set(random_vec_rng(10, &mut rng));
+        let a = cx.tensor(5).set(random_vec_rng(10, &mut rng));
+        let b = cx.tensor(5).set(random_vec_rng(10, &mut rng));
         let mut out = (a.exp2() + b.cos()).retrieve();
 
         cx.execute();
@@ -542,9 +564,9 @@ mod tests {
     #[test]
     fn test_fusion_subexpression_complex() {
         let mut cx = Graph::new();
-        let a = cx.named_tensor::<R1<10>>("a").set(random_vec(10)).keep();
-        let b = cx.named_tensor::<R1<10>>("b").set(random_vec(10)).keep();
-        let d = cx.named_tensor::<R1<10>>("d").set(random_vec(10)).keep();
+        let a = cx.named_tensor("a", 10).set(random_vec(10)).keep();
+        let b = cx.named_tensor("b", 10).set(random_vec(10)).keep();
+        let d = cx.named_tensor("d", 10).set(random_vec(10)).keep();
         let mut out = ((a.exp2() - b.sin()).sin() * 3.4).less_than(d).retrieve();
 
         cx.execute();
@@ -562,12 +584,11 @@ mod tests {
         let mut cx = Graph::new();
         let mut rng = StdRng::seed_from_u64(0);
         let inp = random_vec_rng(10, &mut rng);
-        let a = cx.named_tensor::<R2<2, 5>>("a").set(inp);
+        let a = cx.named_tensor("a", (2, 5)).set(inp);
         let mut padded = a
             .slice((..Expression::from(1), ..))
-            .realize::<R2<1, 5>>()
             .cos()
-            .pad::<R2<2, 5>>(((0, 1), (0, 0)))
+            .pad(((0, 1), (0, 0)))
             .exp2()
             .retrieve();
         cx.execute();
@@ -588,7 +609,7 @@ mod tests {
         let mut cx = Graph::new();
         let mut rng = StdRng::seed_from_u64(0);
         let data = random_vec_rng(10, &mut rng);
-        let a = cx.tensor::<R2<2, 5>>().set(data);
+        let a = cx.tensor((2, 5)).set(data);
         let mut out = (a.sqrt().exp() + a.sqrt().sin()).retrieve();
         cx.execute();
         let unopt_out = out.data();
@@ -605,14 +626,10 @@ mod tests {
         let mut cx = Graph::new();
         const SEQ: usize = 2;
         const HEAD_DIM: usize = 4;
-        const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
-        let freqs = (cx.arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
+        let freqs = (cx.arange(HEAD_DIM / 2) * 2.0) / (HEAD_DIM as f32);
         let freqs = 1000000_f32.pow(freqs);
-        let pos = cx.arange::<Const<SEQ>>() + BigExpression::from(0);
-        let mut emb = pos
-            .expand::<(_, Const<1>), _>()
-            .matmul(freqs.expand())
-            .retrieve();
+        let pos = cx.arange(SEQ) + Expression::from(0);
+        let mut emb = pos.expand(1, 1).matmul(freqs.expand(0, 1)).retrieve();
 
         cx.execute();
         let unopt_out = emb.data();
@@ -631,27 +648,25 @@ mod tests {
         const HEAD_DIM: usize = 4;
         const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
         let a = cx
-            .tensor::<R2<SEQ, HEAD_DIM>>()
+            .tensor((SEQ, HEAD_DIM))
             .set(random_vec_rng(SEQ * HEAD_DIM, &mut rng))
             .keep();
         let b = cx
-            .tensor::<R3<SEQ, HEAD_DIM_OVER_2, 1>>()
-            .set(random_vec_rng(SEQ * HEAD_DIM_OVER_2, &mut rng))
+            .tensor((SEQ, HEAD_DIM_OVER_2, 1))
+            .set(random_vec_rng(SEQ * (HEAD_DIM) / 2, &mut rng))
             .keep();
         // Split input into evens and odds
-        let split = a.reshape::<R3<SEQ, HEAD_DIM_OVER_2, 2>>();
-        let x0: GraphTensor<R3<SEQ, HEAD_DIM_OVER_2, 1>> =
-            split.slice((.., .., ..Expression::from(1))).realize();
-        let x1: GraphTensor<R3<SEQ, HEAD_DIM_OVER_2, 1>> =
-            split.slice((.., .., Expression::from(1)..)).realize();
+        let split = a.reshape((SEQ, HEAD_DIM / 2, 2));
+        let x0 = split.slice((.., .., ..Expression::from(1)));
+        let x1 = split.slice((.., .., Expression::from(1)..));
 
         let x0_out = x0 * b - x1 * b.cos();
         let x1_out = x0 + x1;
 
         // Combine back into output
-        let mut out: GraphTensor<R2<SEQ, HEAD_DIM>> = x0_out
-            .concat_along::<R3<SEQ, HEAD_DIM_OVER_2, 2>, Axis<2>, _>(x1_out)
-            .reshape()
+        let mut out = x0_out
+            .concat_along(x1_out, 2)
+            .reshape((SEQ, HEAD_DIM))
             .retrieve();
         cx.execute();
 
@@ -671,34 +686,27 @@ mod tests {
         const N_HEADS: usize = 8;
         const SEQ: usize = 2;
         const HEAD_DIM: usize = 4;
-        const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
         let a = cx
-            .named_tensor::<R4<BATCH, N_HEADS, SEQ, HEAD_DIM>>("a")
+            .named_tensor("a", (BATCH, N_HEADS, SEQ, HEAD_DIM))
             .set(random_vec_rng(BATCH * N_HEADS * SEQ * HEAD_DIM, &mut rng))
             .keep();
-        let freqs = (cx.arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
+        let freqs = (cx.arange(HEAD_DIM / 2) * 2.0) / (HEAD_DIM as f32);
         let freqs = 1000000_f32.pow(freqs);
-        let pos = cx.arange::<Const<SEQ>>() + BigExpression::from(0);
-        let emb = pos.expand::<(_, Const<1>), _>().matmul(freqs.expand());
+        let pos = cx.arange(SEQ) + 0;
+        let emb = pos.expand(1, 1).matmul(freqs.expand(0, SEQ));
         // Split input into evens and odds
-        let split = a.reshape::<R5<BATCH, N_HEADS, SEQ, HEAD_DIM_OVER_2, 2>>();
-        let x0: GraphTensor<R5<BATCH, N_HEADS, SEQ, HEAD_DIM_OVER_2, 1>> = split
-            .slice((.., .., .., .., ..Expression::from(1)))
-            .contiguous()
-            .realize();
-        let x1: GraphTensor<R5<BATCH, N_HEADS, SEQ, HEAD_DIM_OVER_2, 1>> = split
-            .slice((.., .., .., .., Expression::from(1)..))
-            .contiguous()
-            .realize();
+        let split = a.reshape((BATCH, N_HEADS, SEQ, HEAD_DIM / 2, 2));
+        let x0 = split.slice((.., .., .., .., ..1)).contiguous();
+        let x1 = split.slice((.., .., .., .., 1..)).contiguous();
 
         // Apply sin and cos embeddings
-        let x0_out = x0 * emb.cos().expand() - x1 * emb.sin().expand();
-        let x1_out = x0 * emb.sin().expand() + x1 * emb.cos().expand();
+        let x0_out = x0 * emb.cos().expand_to(x0.shape) - x1 * emb.sin().expand_to(x1.shape);
+        let x1_out = x0 * emb.sin().expand_to(x0.shape) + x1 * emb.cos().expand_to(x1.shape);
 
         // Combine back into output
-        let mut out: GraphTensor<R4<BATCH, N_HEADS, SEQ, HEAD_DIM>> = x0_out
-            .concat_along::<R5<BATCH, N_HEADS, SEQ, HEAD_DIM_OVER_2, 2>, Axis<4>, _>(x1_out)
-            .reshape()
+        let mut out = x0_out
+            .concat_along(x1_out, 4)
+            .reshape((BATCH, N_HEADS, SEQ, HEAD_DIM))
             .retrieve();
         cx.execute();
         let unopt_out = out.data();
@@ -720,175 +728,159 @@ mod tests {
         pub const SEQ_LEN: usize = 65;
         pub const N_ATTENTION_GROUPS: usize = N_HEADS / N_KV_HEADS;
         pub const HEAD_DIM: usize = HIDDEN_DIM / N_HEADS;
-        pub const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
         pub const ATTN_PROJ_DIM: usize = HEAD_DIM * N_KV_HEADS;
-        pub struct Mlp<const I: usize, const H: usize> {
-            pub gate_proj: PermutedLinear<H, I>,
-            pub down_proj: PermutedLinear<I, H>,
-            pub up_proj: PermutedLinear<H, I>,
+        pub type KVCache = (GraphTensor, GraphTensor);
+
+        pub struct Mlp {
+            pub gate_proj: Linear, // hidden -> intermediate
+            pub down_proj: Linear, // intermediate -> hidden
+            pub up_proj: Linear,   // hidden -> intermediate
         }
 
-        pub type KVCache<Batch, Seq> = (
-            GraphTensor<(Batch, Const<N_KV_HEADS>, Seq, Const<HEAD_DIM>)>,
-            GraphTensor<(Batch, Const<N_KV_HEADS>, Seq, Const<HEAD_DIM>)>,
-        );
+        impl Module<GraphTensor> for Mlp {
+            type Output = GraphTensor;
 
-        impl<Sh: Shape, Im: Shape, const I: usize, const H: usize> Module<GraphTensor<Sh>> for Mlp<I, H>
-        where
-            GraphTensor<Sh>: Matmul<R2<H, I>, Output = GraphTensor<Im>>,
-            GraphTensor<Im>: Matmul<R2<I, H>, Output = GraphTensor<Sh>>,
-        {
-            type Output = GraphTensor<Sh>;
-
-            fn forward(&self, input: GraphTensor<Sh>) -> Self::Output {
+            fn forward(&self, input: GraphTensor) -> Self::Output {
                 let gate = self.gate_proj.forward(input).swish();
                 let up = self.up_proj.forward(input) * gate;
                 self.down_proj.forward(up)
             }
         }
-        impl<const I: usize, const H: usize> InitModule for Mlp<I, H> {
-            fn initialize(cx: &mut Graph) -> Self {
+
+        impl Mlp {
+            pub fn new(hidden: usize, intermediate: usize, cx: &mut Graph) -> Self {
                 Self {
-                    gate_proj: InitModule::initialize(cx),
-                    up_proj: InitModule::initialize(cx),
-                    down_proj: InitModule::initialize(cx),
+                    gate_proj: Linear::new_permuted(hidden, intermediate, false, cx),
+                    down_proj: Linear::new_permuted(intermediate, hidden, false, cx),
+                    up_proj: Linear::new_permuted(hidden, intermediate, false, cx),
                 }
             }
         }
-        fn apply_rotary_embeddings_ggml<const N_HEADS: usize, Batch: Dimension, Seq: Dimension>(
-            input: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)>,
-            prev_seq: BigExpression,
-        ) -> GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM>)> {
+
+        impl SerializeModule for Mlp {
+            fn serialize(&self, s: &mut Serializer) {
+                s.module("ffn_gate", &self.gate_proj);
+                s.module("ffn_up", &self.up_proj);
+                s.module("ffn_down", &self.down_proj);
+            }
+        }
+
+        fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> GraphTensor {
+            assert_eq!(input.shape.len(), 4); // batch, n_heads, seq, head_dim
+            let (batch, n_heads, seq, head_dim) = input.dims4();
             // Get freqs
             let freqs =
-                (input.graph().arange::<Const<HEAD_DIM_OVER_2>>() * 2.0) / (HEAD_DIM as f32);
-            let freqs = 1000000_f32.pow(freqs);
-            let pos = input.graph().arange::<Seq>() + prev_seq;
-            let emb = pos.expand::<(_, Const<1>), _>().matmul(freqs.expand());
+                (input.graph().arange(head_dim / 2) * 2.0) / (head_dim.to_usize().unwrap() as f32);
+            let freqs = 500_000_f32.pow(freqs);
+            let pos = input.graph().arange(seq) + prev_seq;
+            let emb = pos.expand(1, 1).matmul(freqs.expand(0, seq));
 
             // Split input into evens and odds
-            let split =
-                input.reshape::<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<2>)>();
-            let x0: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<1>)> =
-                split
-                    .slice((.., .., .., .., ..Expression::from(1)))
-                    .contiguous()
-                    .realize();
-            let x1: GraphTensor<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<1>)> =
-                split
-                    .slice((.., .., .., .., Expression::from(1)..))
-                    .contiguous()
-                    .realize();
+            let split = input.reshape((batch, n_heads, seq, head_dim / 2, 2));
+            let x0 = split.slice((.., .., .., .., ..1));
+            let x1 = split.slice((.., .., .., .., 1..));
 
             // Apply sin and cos embeddings
-            let x0_out = x0 * emb.cos().expand() - x1 * emb.sin().expand();
-            let x1_out = x0 * emb.sin().expand() + x1 * emb.cos().expand();
+            let x0_out = x0 * emb.cos().expand_to(x0.shape) - x1 * emb.sin().expand_to(x1.shape);
+            let x1_out = x0 * emb.sin().expand_to(x0.shape) + x1 * emb.cos().expand_to(x1.shape);
 
             // Combine back into output
-            x0_out
-                .concat_along::<(Batch, Const<N_HEADS>, Seq, Const<HEAD_DIM_OVER_2>, Const<2>), Axis<4>, _>(
-                    x1_out,
-                )
-                .reshape()
-        }
-        pub struct SelfAttention {
-            pub q_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
-            pub k_proj: GraphTensor<R2<ATTN_PROJ_DIM, HIDDEN_DIM>>,
-            pub v_proj: GraphTensor<R2<ATTN_PROJ_DIM, HIDDEN_DIM>>,
-            pub o_proj: GraphTensor<R2<HIDDEN_DIM, HIDDEN_DIM>>,
+            x0_out.concat_along(x1_out, 4).reshape(input.shape)
         }
 
-        impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
-            Module<(
-                GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
-                KVCache<Batch, PrevSeq>,
-                PhantomData<TotSeq>,
-            )> for SelfAttention
-        {
-            type Output = (
-                GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
-                KVCache<Batch, TotSeq>,
-            );
-            fn forward(
-                &self,
-                (x, (k_cache, v_cache), _): (
-                    GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
-                    KVCache<Batch, PrevSeq>,
-                    PhantomData<TotSeq>,
-                ),
-            ) -> Self::Output {
+        pub struct SelfAttention {
+            pub q_proj: GraphTensor, // Hidden -> hidden
+            pub k_proj: GraphTensor, // Proj dim -> hidden
+            pub v_proj: GraphTensor, // Proj dim -> hidden
+            pub o_proj: GraphTensor, // Hidden -> hidden
+        }
+
+        impl Module<(GraphTensor, KVCache)> for SelfAttention {
+            type Output = (GraphTensor, KVCache);
+            fn forward(&self, (x, (k_cache, v_cache)): (GraphTensor, KVCache)) -> Self::Output {
+                // x: batch, seq, hidden
+                let (batch, seq, _) = x.dims3();
+                let (_, _, prev_seq, _) = k_cache.dims4();
                 // Apply the Projections
                 let queries = x
-                    .matmul(self.q_proj.permute())
-                    .reshape::<(Batch, CurSeq, Const<N_HEADS>, Const<HEAD_DIM>)>()
-                    .permute::<_, Axes4<0, 2, 1, 3>>();
+                    .matmul(self.q_proj.permute((1, 0)))
+                    .reshape((batch, seq, N_HEADS, HEAD_DIM))
+                    .permute((0, 2, 1, 3));
 
                 let keys = x
-                    .matmul(self.k_proj.permute())
-                    .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
-                    .permute::<_, Axes4<0, 2, 1, 3>>();
+                    .matmul(self.k_proj.permute((1, 0)))
+                    .reshape((batch, seq, N_KV_HEADS, HEAD_DIM))
+                    .permute((0, 2, 1, 3));
 
                 let values = x
-                    .matmul(self.v_proj.permute())
-                    .reshape::<(Batch, CurSeq, Const<N_KV_HEADS>, Const<HEAD_DIM>)>()
-                    .permute::<_, Axes4<0, 2, 1, 3>>();
+                    .matmul(self.v_proj.permute((1, 0)))
+                    .reshape((batch, seq, N_KV_HEADS, HEAD_DIM))
+                    .permute((0, 2, 1, 3));
 
                 // Rotary embed queries and keys
-                let queries = apply_rotary_embeddings_ggml(queries, PrevSeq::size().big());
-                let keys = apply_rotary_embeddings_ggml(keys, PrevSeq::size().big());
+                let queries = apply_rotary_embeddings_ggml(queries, prev_seq);
+                let keys = apply_rotary_embeddings_ggml(keys, prev_seq);
 
                 // Add KV cache
-                let (keys, values) = (
-                    k_cache.concat_along::<_, Axis<2>, _>(keys),
-                    v_cache.concat_along::<_, Axis<2>, _>(values),
-                );
+                let keys = k_cache.concat_along(keys, 2);
+                let values = v_cache.concat_along(values, 2);
 
                 // Repeat the KV States for Grouped-Query Attention
-                let repeated_keys = keys.expand::<(_, _, Const<N_ATTENTION_GROUPS>, _, _), _>();
-                let repeated_values = values.expand::<(_, _, Const<N_ATTENTION_GROUPS>, _, _), _>();
+                let repeated_keys = keys.expand(2, N_ATTENTION_GROUPS);
+                let repeated_values = values.expand(2, N_ATTENTION_GROUPS);
 
                 // Calculate attention weights
                 let mut attention_weights = queries
-                    .reshape::<(_, Const<N_KV_HEADS>, Const<N_ATTENTION_GROUPS>, _, _)>() // Split query heads into groups
-                    .matmul(repeated_keys.permute())
-                    .div((HEAD_DIM as f32).sqrt());
+                    .reshape((batch, N_KV_HEADS, N_ATTENTION_GROUPS, seq, HEAD_DIM)) // Split query heads into groups
+                    .matmul(repeated_keys.permute((0, 1, 2, 4, 3)))
+                    / (HEAD_DIM as f32).sqrt();
 
-                let attention_mask = self.k_proj.graph().triu::<CurSeq>(1) * f16::MIN.to_f32();
+                let attention_mask = self.k_proj.graph().triu(seq, 1) * f16::MIN.to_f32();
                 attention_weights += attention_mask
-                    .pad::<(CurSeq, TotSeq)>(((0, 0), (TotSeq::size() - CurSeq::size(), 0)))
-                    .expand();
+                    .pad(((0, 0), (prev_seq, 0)))
+                    .expand(0, batch)
+                    .expand(1, N_KV_HEADS)
+                    .expand(2, N_ATTENTION_GROUPS);
 
                 // Calculate final outputs
                 let output = attention_weights
-                    .softmax::<Axis<4>>()
+                    .softmax(4)
                     // Apply distribution to values
                     .matmul(repeated_values)
                     // Merge heads
-                    .permute::<_, Axes5<0, 3, 1, 2, 4>>()
-                    .reshape::<(Batch, CurSeq, Const<HIDDEN_DIM>)>();
+                    .permute((0, 3, 1, 2, 4))
+                    .reshape((batch, seq, HIDDEN_DIM));
                 let output = output
                     // Apply output projection
-                    .matmul(self.o_proj.permute());
+                    .matmul(self.o_proj.permute((1, 0)));
                 (output, (keys.contiguous(), values.contiguous())) // Cache needs to be contiguous for transferring to another graph
             }
         }
 
-        impl InitModule for SelfAttention {
-            fn initialize(cx: &mut Graph) -> Self {
+        impl SelfAttention {
+            pub fn new(cx: &mut Graph) -> Self {
                 Self {
-                    q_proj: cx
-                        .named_tensor("Q Proj")
-                        .set(random_vec(HIDDEN_DIM * HIDDEN_DIM)),
-                    k_proj: cx
-                        .named_tensor("K Proj")
-                        .set(random_vec(ATTN_PROJ_DIM * HIDDEN_DIM)),
-                    v_proj: cx
-                        .named_tensor("V Proj")
-                        .set(random_vec(ATTN_PROJ_DIM * HIDDEN_DIM)),
-                    o_proj: cx
-                        .named_tensor("O Proj")
-                        .set(random_vec(HIDDEN_DIM * HIDDEN_DIM)),
+                    q_proj: cx.named_tensor("Q Proj", (HIDDEN_DIM, HIDDEN_DIM)),
+                    k_proj: cx.named_tensor("K Proj", (ATTN_PROJ_DIM, HIDDEN_DIM)),
+                    v_proj: cx.named_tensor("V Proj", (ATTN_PROJ_DIM, HIDDEN_DIM)),
+                    o_proj: cx.named_tensor("O Proj", (HIDDEN_DIM, HIDDEN_DIM)),
                 }
+            }
+
+            fn initialize(self) -> Self {
+                self.k_proj.set(random_vec(
+                    self.k_proj.shape.n_elements().to_usize().unwrap(),
+                ));
+                self.o_proj.set(random_vec(
+                    self.o_proj.shape.n_elements().to_usize().unwrap(),
+                ));
+                self.v_proj.set(random_vec(
+                    self.v_proj.shape.n_elements().to_usize().unwrap(),
+                ));
+                self.q_proj.set(random_vec(
+                    self.q_proj.shape.n_elements().to_usize().unwrap(),
+                ));
+                self
             }
         }
 
@@ -903,35 +895,18 @@ mod tests {
 
         pub struct TransformerBlock {
             pub attention: SelfAttention,
-            pub attention_norm: LayerNorm<HIDDEN_DIM>,
-            pub feed_forward: Mlp<MLP_DIM, HIDDEN_DIM>,
-            pub feed_forward_norm: LayerNorm<HIDDEN_DIM>,
+            pub attention_norm: LayerNorm,
+            pub feed_forward: Mlp,
+            pub feed_forward_norm: LayerNorm,
         }
 
-        impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
-            Module<(
-                GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
-                KVCache<Batch, PrevSeq>,
-                PhantomData<TotSeq>,
-            )> for TransformerBlock
-        {
-            type Output = (
-                GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
-                KVCache<Batch, TotSeq>,
-            );
-            fn forward(
-                &self,
-                (mut x, cache, _): (
-                    GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
-                    KVCache<Batch, PrevSeq>,
-                    PhantomData<TotSeq>,
-                ),
-            ) -> Self::Output {
+        impl Module<(GraphTensor, KVCache)> for TransformerBlock {
+            type Output = (GraphTensor, KVCache);
+            fn forward(&self, (mut x, cache): (GraphTensor, KVCache)) -> Self::Output {
                 // Attention
-                let normed = self.attention_norm.forward(x);
                 let (y, cache) = self
                     .attention
-                    .forward((normed, cache, PhantomData::<TotSeq>));
+                    .forward((self.attention_norm.forward(x), cache));
 
                 // Residual Addition
                 x += y;
@@ -944,94 +919,85 @@ mod tests {
             }
         }
 
-        impl InitModule for TransformerBlock {
-            fn initialize(cx: &mut Graph) -> Self {
+        impl TransformerBlock {
+            pub fn new(cx: &mut Graph) -> Self {
                 Self {
-                    attention: InitModule::initialize(cx),
-                    attention_norm: LayerNorm::init(true, false, false, 1e-5, cx),
-                    feed_forward: InitModule::initialize(cx),
-                    feed_forward_norm: LayerNorm::init(true, false, false, 1e-5, cx),
+                    attention: SelfAttention::new(cx),
+                    attention_norm: LayerNorm::new(HIDDEN_DIM, true, false, false, 1e-5, cx),
+                    feed_forward: Mlp::new(HIDDEN_DIM, MLP_DIM, cx),
+                    feed_forward_norm: LayerNorm::new(HIDDEN_DIM, true, false, false, 1e-5, cx),
                 }
+            }
+
+            fn initialize(mut self) -> Self {
+                self.attention_norm = self.attention_norm.initialize();
+                self.feed_forward_norm = self.feed_forward_norm.initialize();
+                self.attention = self.attention.initialize();
+                self.feed_forward.down_proj = self.feed_forward.down_proj.initialize();
+                self.feed_forward.up_proj = self.feed_forward.up_proj.initialize();
+                self.feed_forward.gate_proj = self.feed_forward.gate_proj.initialize();
+                self
             }
         }
 
-        pub struct MistralLM {
+        pub struct Llama {
             // Transformer layers
             pub layers: Vec<TransformerBlock>,
-            // Final Norm layer
-            pub norm: LayerNorm<HIDDEN_DIM>,
+            // Norm + LM head
+            pub head: LayerNorm,
         }
 
-        impl<Batch: Dimension, CurSeq: Dimension, PrevSeq: Dimension, TotSeq: Dimension>
-            Module<(
-                GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
-                Vec<KVCache<Batch, PrevSeq>>,
-                PhantomData<TotSeq>,
-            )> for MistralLM
-        {
-            type Output = (
-                GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
-                Vec<KVCache<Batch, TotSeq>>,
-            );
-            fn forward(
-                &self,
-                (input, cache, _): (
-                    GraphTensor<(Batch, CurSeq, Const<HIDDEN_DIM>)>,
-                    Vec<KVCache<Batch, PrevSeq>>,
-                    PhantomData<TotSeq>,
-                ),
-            ) -> Self::Output {
-                let mut x = input;
-
+        impl Module<(GraphTensor, &[KVCache])> for Llama {
+            type Output = (GraphTensor, Vec<KVCache>);
+            fn forward(&self, (mut x, cache): (GraphTensor, &[KVCache])) -> Self::Output {
                 // Run through layers and collect new caches
                 let mut new_caches = vec![];
                 let mut new_cache;
                 for (i, layer) in self.layers.iter().enumerate() {
-                    (x, new_cache) = layer.forward((x, cache[i], PhantomData::<TotSeq>));
+                    (x, new_cache) = layer.forward((x, cache[i]));
                     new_caches.push(new_cache);
                 }
                 // Run through last norm and output projection
-                let normed = self.norm.forward(x);
-                (normed, new_caches)
+                (self.head.forward(x), new_caches)
             }
         }
 
-        impl InitModule for MistralLM {
-            fn initialize(cx: &mut Graph) -> Self {
+        impl Llama {
+            pub fn new(cx: &mut Graph) -> Self {
                 Self {
-                    norm: LayerNorm::init(true, false, false, 1e-5, cx),
-                    layers: (0..NUM_LAYERS)
-                        .map(|_| InitModule::initialize(cx))
-                        .collect(),
+                    head: LayerNorm::new(HIDDEN_DIM, true, false, false, 1e-5, cx),
+                    layers: (0..NUM_LAYERS).map(|_| TransformerBlock::new(cx)).collect(),
                 }
+            }
+
+            fn initialize(mut self) -> Self {
+                self.head = self.head.initialize();
+                self.layers = self.layers.into_iter().map(|l| l.initialize()).collect();
+                self
             }
         }
 
         let mut cx = Graph::new();
-        let model = MistralLM::initialize(&mut cx);
+        let model = Llama::new(&mut cx).initialize();
         let caches = (0..NUM_LAYERS)
             .map(|_| {
                 (
-                    cx.tensor::<(Const<1>, Const<N_KV_HEADS>, Dyn<'p'>, Const<HEAD_DIM>)>()
-                        .set_dyn(
-                            random_vec(SEQ_LEN * N_KV_HEADS * HEAD_DIM),
-                            &[1, N_KV_HEADS, SEQ_LEN, HEAD_DIM],
-                        ),
-                    cx.tensor::<(Const<1>, Const<N_KV_HEADS>, Dyn<'p'>, Const<HEAD_DIM>)>()
-                        .set_dyn(
-                            random_vec(SEQ_LEN * N_KV_HEADS * HEAD_DIM),
-                            &[1, N_KV_HEADS, SEQ_LEN, HEAD_DIM],
-                        ),
+                    cx.tensor((1, N_KV_HEADS, 'p', HEAD_DIM)).set_dyn(
+                        random_vec(SEQ_LEN * N_KV_HEADS * HEAD_DIM),
+                        (1, N_KV_HEADS, SEQ_LEN, HEAD_DIM),
+                    ),
+                    cx.tensor((1, N_KV_HEADS, 'p', HEAD_DIM)).set_dyn(
+                        random_vec(SEQ_LEN * N_KV_HEADS * HEAD_DIM),
+                        (1, N_KV_HEADS, SEQ_LEN, HEAD_DIM),
+                    ),
                 )
             })
-            .collect();
+            .collect::<Vec<_>>();
         let input = cx
-            .tensor::<(Const<1>, Dyn<'s'>, luminal::shape::Const<HIDDEN_DIM>)>()
-            .set_dyn(random_vec(2 * HIDDEN_DIM), &[1, 2, HIDDEN_DIM]);
-        let (mut out, _) = model.forward((input, caches, PhantomData::<Dyn<'t'>>));
+            .tensor((1, 's', HIDDEN_DIM))
+            .set_dyn(random_vec(2 * HIDDEN_DIM), (1, 2, HIDDEN_DIM));
+        let (mut out, _) = model.forward((input, &caches));
         out.retrieve();
-
-        cx.set_dyn_dim('t', SEQ_LEN + 2);
         cx.execute();
 
         let unopt_out = out.data();
@@ -1040,6 +1006,6 @@ mod tests {
         cx.compile(<(GenericCompiler, CudaCompiler<f16>)>::default(), &mut out);
         cx.execute();
 
-        assert_close_precision(&out.data(), &unopt_out, 1e-1);
+        assert_close_precision(&out.data(), &unopt_out, 1e-2);
     }
 }

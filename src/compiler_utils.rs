@@ -949,3 +949,12 @@ pub fn unary<T: Operator + 'static>(node: SelectGraph) -> SelectGraph {
 pub fn binary<T: Operator + 'static>(a: SelectGraph, b: SelectGraph) -> SelectGraph {
     b.connect(a.connect(op::<T>()))
 }
+
+/// Whether or not to do debug prints (env var DEBUG=1)
+pub fn debug() -> bool {
+    std::env::var("DEBUG")
+        .unwrap_or_default()
+        .parse::<i32>()
+        .map(|i| i == 1)
+        .unwrap_or_default()
+}

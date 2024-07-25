@@ -82,8 +82,13 @@ impl GraphTensor {
 
     /// Get the contiguous data of the tensor
     pub fn data(&self) -> Vec<f32> {
-        let tensor = self.graph().get_tensor_ref(self.id, 0).unwrap();
-        let orig_data = tensor.downcast_ref::<Vec<f32>>().unwrap();
+        let tensor = self
+            .graph()
+            .get_tensor_ref(self.id, 0)
+            .expect("Tensor not found in the graph!");
+        let orig_data = tensor
+            .downcast_ref::<Vec<f32>>()
+            .expect("Data for tensor is not Vec<f32>!");
         let mut st = self.shape;
         if !st.is_reshaped() {
             return orig_data.clone();

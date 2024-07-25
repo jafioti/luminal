@@ -558,19 +558,19 @@ where
         let inp = get_buffer_from_tensor::<T>(&tensors[0].0);
         let front_size: usize = tensors[0]
             .1
-            .shape()
+            .dims()
             .iter()
             .take(self.dim)
             .map(|i| i.to_usize().unwrap())
             .product();
         let back_size: usize = tensors[0]
             .1
-            .shape()
+            .dims()
             .iter()
             .skip(self.dim + 1)
             .map(|i| i.to_usize().unwrap())
             .product();
-        let dim_size = tensors[0].1.shape()[self.dim].to_usize().unwrap();
+        let dim_size = tensors[0].1.dims()[self.dim].to_usize().unwrap();
 
         let out = self.device.alloc_zeros::<T>(inp_size).unwrap();
         let mut params = vec![
@@ -648,19 +648,19 @@ impl<T: CudaFloat> Operator for CudaMaxReduce<T> {
         let inp = get_buffer_from_tensor::<T>(&tensors[0].0);
         let front_size: usize = tensors[0]
             .1
-            .shape()
+            .dims()
             .iter()
             .take(self.dim)
             .map(|i| i.to_usize().unwrap())
             .product();
         let back_size: usize = tensors[0]
             .1
-            .shape()
+            .dims()
             .iter()
             .skip(self.dim + 1)
             .map(|i| i.to_usize().unwrap())
             .product();
-        let dim_size = tensors[0].1.shape()[self.dim].to_usize().unwrap();
+        let dim_size = tensors[0].1.dims()[self.dim].to_usize().unwrap();
 
         let out = self.device.alloc_zeros::<T>(inp_size).unwrap();
         let mut params = vec![
@@ -703,7 +703,7 @@ impl<T: CudaFloat> Compiler for PrimitiveCompiler<T> {
             // Create copy node
             let copy_node = graph
                 .add_op(CudaCopyToDevice::<T>::new(dev.clone()))
-                .input(function_node, 0, ShapeTracker::new(&[]))
+                .input(function_node, 0, ShapeTracker::new(()))
                 .finish();
 
             // Switch outgoing edges from input to copy_node
@@ -732,7 +732,7 @@ impl<T: CudaFloat> Compiler for PrimitiveCompiler<T> {
             {
                 let copy_from_node = graph
                     .add_op(CudaCopyFromDevice::<T>::new(dev.clone()))
-                    .input(source, 0, ShapeTracker::new(&[]))
+                    .input(source, 0, ShapeTracker::new(()))
                     .finish();
                 graph.add_edge(copy_from_node, function_node, edge_weight);
                 graph.remove_edge(edge);

@@ -9,6 +9,9 @@ mod unary;
 pub use quantized::*;
 
 pub use cudarc::driver::CudaDevice;
+pub use elementwise_fusion::ElementwiseFusionCompiler;
+pub use other::*;
+pub use prim::PrimitiveCompiler;
 
 #[cfg(test)]
 #[macro_use]
@@ -126,13 +129,13 @@ impl CudaFloat for u8 {
     }
 }
 
-fn expr_to_cuda_string(expr: &BigExpression) -> String {
+fn expr_to_cuda_string(expr: &Expression) -> String {
     let mut symbols = vec![];
-    for term in expr.clone().simplify().terms {
+    for term in expr.simplify().terms.read().iter() {
         let new_symbol = match term {
             Term::Num(n) => n.to_string(),
             Term::Var(c) => {
-                if c == 'z' {
+                if *c == 'z' {
                     "(int)idx".to_string()
                 } else {
                     c.to_string()
@@ -170,7 +173,7 @@ fn render_dyn_dim_inputs(shapes: &[ShapeTracker]) -> (Vec<char>, String) {
     let symbols: Vec<char> = shapes
         .iter()
         .flat_map(|st| {
-            st.shape()
+            st.dims()
                 .into_iter()
                 .chain(
                     st.padding

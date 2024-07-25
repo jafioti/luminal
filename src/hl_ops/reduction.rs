@@ -4,6 +4,7 @@ use crate::{
 };
 
 impl GraphTensor {
+    /// Reduce a dimension of the tensor by summing all elements along that axis.
     pub fn sum_reduce(self, axes: impl ToAxes) -> GraphTensor {
         let mut shape = self.shape;
 
@@ -20,6 +21,7 @@ impl GraphTensor {
         GraphTensor::from_id(new_id, shape, self.graph_ref)
     }
 
+    /// Reduce a dimension of the tensor by taking the maximum of all elements along that axis.
     pub fn max_reduce(self, axes: impl ToAxes) -> GraphTensor {
         let mut shape = self.shape;
 
@@ -36,6 +38,7 @@ impl GraphTensor {
         GraphTensor::from_id(new_id, shape, self.graph_ref)
     }
 
+    /// Reduce a dimension of the tensor by taking the mean of all elements along that axis.
     pub fn mean_reduce(self, axes: impl ToAxes) -> GraphTensor {
         let mut shape = self.shape;
         let mut node_id = self.id;
@@ -62,6 +65,11 @@ impl GraphTensor {
                 .finish();
         }
         GraphTensor::from_id(node_id, shape, self.graph_ref)
+    }
+
+    /// Reduce a dimension of the tensor by multiplying all elements along that axis.
+    pub fn prod_reduce(self, axes: impl ToAxes) -> GraphTensor {
+        self.ln().sum_reduce(axes).exp()
     }
 }
 

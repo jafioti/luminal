@@ -89,19 +89,19 @@ impl<T: CudaFloat> Operator for CudaMeanReduce<T> {
         let out = self.device.alloc_zeros::<T>(inp_size).unwrap();
         let front_size = tensors[0]
             .1
-            .shape()
+            .dims()
             .iter()
             .take(self.dim)
             .map(|i| i.to_usize().unwrap())
             .product::<usize>() as i32;
         let back_size = tensors[0]
             .1
-            .shape()
+            .dims()
             .iter()
             .skip(self.dim + 1)
             .map(|i| i.to_usize().unwrap())
             .product::<usize>() as i32;
-        let dim_size = tensors[0].1.shape()[self.dim].to_usize().unwrap() as i32;
+        let dim_size = tensors[0].1.dims()[self.dim].to_usize().unwrap() as i32;
         let mut params = vec![
             get_buffer_from_tensor::<T>(&tensors[0].0).as_kernel_param(),
             (&out).as_kernel_param(),
@@ -266,7 +266,7 @@ extern \"C\" __global__ void kernel(const  {type_name} * src0, {type_name} * dst
 
 impl<T: CudaFloat> Operator for CudaStdNorm<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let row_size = tensors[0].1.shape().last().unwrap().to_usize().unwrap();
+        let row_size = tensors[0].1.dims().last().unwrap().to_usize().unwrap();
         let row_size_int = row_size as i32;
         let out = self
             .device
@@ -280,7 +280,7 @@ impl<T: CudaFloat> Operator for CudaStdNorm<T> {
         ];
         let batch_size = tensors[0]
             .1
-            .shape()
+            .dims()
             .into_iter()
             .take(tensors[0].1.len() - 1)
             .map(|i| i.to_usize().unwrap())
@@ -354,7 +354,7 @@ impl<T: CudaFloat> Compiler for StdNormCompiler<T> {
                 }
             }
             if sh
-                .shape()
+                .dims()
                 .last()
                 .unwrap()
                 .to_usize()
@@ -569,13 +569,13 @@ impl<T: CudaFloat> Operator for CudaSoftmax<T> {
         let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
         let batch_size = tensors[0]
             .1
-            .shape()
+            .dims()
             .iter()
             .take(tensors[0].1.len() - 1)
             .map(|i| i.to_usize().unwrap())
             .product::<usize>()
             .max(1);
-        let axis_size = tensors[0].1.shape().last().unwrap().to_usize().unwrap();
+        let axis_size = tensors[0].1.dims().last().unwrap().to_usize().unwrap();
         let axis_size_int = axis_size as i32;
         let out = self.device.alloc_zeros::<T>(inp_size).unwrap();
 
@@ -655,8 +655,8 @@ mod tests {
     #[test]
     fn test_norms() {
         let mut cx = Graph::new();
-        let a = cx.tensor().set([0.; 32]);
-        let mut b = a.layer_norm::<Axis<0>, _>(1e-5).retrieve();
+        let a = cx.tensor(32).set([0.; 32]);
+        let mut b = a.layer_norm(0, 1e-5).retrieve();
 
         cx.compile(
             <(

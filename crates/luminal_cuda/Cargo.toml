@@ -9,17 +9,19 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 luminal = { path = "../.." }
-cudarc = { version="0.11.1", features = [
+cudarc = { version = "0.11.1", features = [
     "f16",
     "cuda-version-from-build-system",
-]}
+] }
 itertools = "0.12.1"
 rustc-hash = "1.1.0"
 num-traits = "0.2.18"
 regex = "1.10.4"
+indicatif = "0.17.8"
 
 [dev-dependencies]
 dfdx = { version = "0.13", features = ["f16"] }
 rand = "0.8.5"
 paste = "1.0.14"
-luminal_nn = {path="../../crates/luminal_nn"}
+luminal_nn = { path = "../../crates/luminal_nn" }
+candle-core = "0.5.0"

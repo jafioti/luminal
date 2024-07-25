@@ -951,6 +951,7 @@ mod tests {
                 .unwrap(),
             768
         );
+        expression_cleanup();
     }
 
     #[test]
@@ -958,6 +959,7 @@ mod tests {
         let expr = ((Expression::from('a') * 1) + 0) / 1 + (1 - 1);
         let reduced_expr = expr.simplify();
         assert_eq!(reduced_expr, 'a');
+        expression_cleanup();
     }
 
     #[test]
@@ -966,6 +968,7 @@ mod tests {
         let sub = Expression::from('x') / 2;
         let new = main.substitute('x', sub).simplify();
         assert_eq!(new, (Expression::from('x') / 2) + -255);
+        expression_cleanup();
     }
 
     #[test]
@@ -973,5 +976,6 @@ mod tests {
         let s = Expression::from('s');
         let expr = (s * ((s - 4) + 1)) + (((s + 1) * ((s - 4) + 1)) - (s * ((s - 4) + 1)));
         assert_eq!(expr.simplify().terms.read().len(), 7);
+        expression_cleanup();
     }
 }

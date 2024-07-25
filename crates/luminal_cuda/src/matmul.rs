@@ -21,7 +21,7 @@ crate::debug_type!(Matmul);
 
 impl<T: CudaFloat> Operator for Matmul<T> {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let (a_shape, b_shape) = (inp[0].1.shape(), inp[1].1.shape());
+        let (a_shape, b_shape) = (inp[0].1.dims(), inp[1].1.dims());
         let (batch_size, m, k, n) = (
             a_shape
                 .iter()

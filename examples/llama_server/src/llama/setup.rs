@@ -86,7 +86,10 @@ impl Model {
                     luminal_metal::BufferCompilers::default(),
                 ),
                 #[cfg(feature = "cuda")]
-                luminal_cuda::CudaQuantizedCompiler::<f32>::new(q_weights),
+                (
+                    luminal_cuda::CudaCompiler::<f16>::default(),
+                    luminal_cuda::CudaQuantizedCompiler::<f16>::new(q_weights),
+                ),
                 #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
                 luminal_cpu::CPUCompiler::default(),
             ),

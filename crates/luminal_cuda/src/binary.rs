@@ -376,7 +376,7 @@ impl<T: CudaFloat> Compiler for GatherCompiler<T> {
                 .as_data()
                 .unwrap()
                 .2;
-            let embed_dim = emb_shape.shape().last().unwrap().to_usize().unwrap();
+            let embed_dim = emb_shape.dims().last().unwrap().to_usize().unwrap();
             let index_shape = graph
                 .edges_connecting(s.get(&indexes), s.get(&ind_copy))
                 .next()
@@ -402,27 +402,21 @@ mod tests {
     use super::*;
     luminal::test_imports!();
 
-    type TR0 = GraphTensor<R0>;
-    type TR1<const A: usize> = GraphTensor<R1<A>>;
-    type TR2<const A: usize, const B: usize> = GraphTensor<R2<A, B>>;
-
     #[test]
     fn test_gather_compiler_r0() {
         const CLASSES: usize = 2;
         const TARGET: usize = 1;
 
         let mut cx = Graph::new();
-        let mut input: TR0 = cx.tensor();
-        let embedder: TR2<CLASSES, TARGET> = cx.tensor();
+        let mut input = cx.tensor(());
+        let embedder = cx.tensor((CLASSES, TARGET));
 
-        let input_one_hot: TR1<CLASSES> = input
+        let input_one_hot = input
             .graph()
-            .arange::<LConst<CLASSES>>()
-            .equals(input.expand());
-        let input_embedding: TR1<TARGET> = (input_one_hot.expand::<R2<CLASSES, TARGET>, _>()
-            * embedder)
-            .sum_reduce::<_, LAxis<0>>();
-        let mut loss: TR0 = input_embedding.sum_reduce();
+            .arange(CLASSES)
+            .equals(input.expand(0, CLASSES));
+        let input_embedding = (input_one_hot.expand(1, TARGET) * embedder).sum_reduce(0);
+        let mut loss = input_embedding.sum_reduce(0);
         let mut weights = vec![embedder.id];
 
         cx.compile(
@@ -437,18 +431,17 @@ mod tests {
         const TARGET: usize = 1;
 
         let mut cx = Graph::new();
-        let mut input: TR1<1> = cx.tensor();
-        let embedder: TR2<CLASSES, TARGET> = cx.tensor();
+        let mut input = cx.tensor(1);
+        let embedder = cx.tensor((CLASSES, TARGET));
 
-        let input_one_hot: TR2<1, CLASSES> = input
+        let input_one_hot = input
             .graph()
-            .arange::<LConst<CLASSES>>()
-            .expand::<R2<1, CLASSES>, _>()
-            .equals(input.expand());
-        let input_embedding: TR2<1, TARGET> = (input_one_hot.expand::<R3<1, CLASSES, TARGET>, _>()
-            * embedder.expand())
-        .sum_reduce::<_, LAxis<1>>();
-        let mut loss: TR0 = input_embedding.sum_reduce();
+            .arange(CLASSES)
+            .expand(0, 1)
+            .equals(input.expand(1, CLASSES));
+        let input_embedding =
+            (input_one_hot.expand(2, TARGET) * embedder.expand(0, 1)).sum_reduce(1);
+        let mut loss = input_embedding.sum_reduce(0);
         let mut weights = vec![embedder.id];
 
         cx.compile(

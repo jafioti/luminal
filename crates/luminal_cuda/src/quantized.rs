@@ -122,13 +122,13 @@ impl<T: 'static + CudaFloat> Operator for QuantizedMatmul<T> {
         let (a_shape, b_shape) = (
             inp[0]
                 .1
-                .shape()
+                .dims()
                 .into_iter()
                 .map(|i| i.to_usize().unwrap())
                 .collect::<Vec<_>>(),
             inp[1]
                 .1
-                .shape()
+                .dims()
                 .into_iter()
                 .map(|i| i.to_usize().unwrap())
                 .collect::<Vec<_>>(),
@@ -256,15 +256,9 @@ impl<T> CudaQuantizedCompiler<T> {
 
 impl<T: CudaFloat + Default> Compiler for CudaQuantizedCompiler<T> {
     type Output = ();
-    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut remap: To) {
+    fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
         let device = CudaDevice::new(0).unwrap();
-        let mut weight_ids = self.0.clone();
-        let mut local_remap = remap.to_ids_mut();
-        for w in &mut weight_ids {
-            local_remap.push(w);
-        }
-        // Normal compilation
-        graph.compile(crate::CudaCompiler::<T>::default(), &mut local_remap);
+        let weight_ids = self.0.clone();
         // Modify ops directly downstream of weights
         for weight in downstream(&weight_ids, graph) {
             for (target, (inp_ind, _, _)) in graph

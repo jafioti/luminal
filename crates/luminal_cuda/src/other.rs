@@ -16,7 +16,7 @@ use crate::{
 pub struct CudaARange<T> {
     function: CudaFunction,
     device: Arc<CudaDevice>,
-    pub size: BigExpression,
+    pub size: Expression,
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
@@ -25,7 +25,7 @@ crate::debug_type!(CudaARange);
 impl<T: CudaFloat> CudaARange<T> {
     pub fn new(
         device: Arc<CudaDevice>,
-        size: BigExpression,
+        size: Expression,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let type_name = T::type_name();
