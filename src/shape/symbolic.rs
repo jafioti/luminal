@@ -176,7 +176,7 @@ impl Expression {
     }
 
     /// Simplify the expression to its minimal terms, using a cache to retrieve / store the simplification
-    pub fn simplify_cache(self, cache: &mut FxHashMap<Self, Self>) -> Self {
+    pub fn simplify_cache(self, cache: &mut FxHashMap<Expression, Expression>) -> Self {
         if let Some(s) = cache.get(&self) {
             *s
         } else {
