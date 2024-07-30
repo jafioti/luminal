@@ -71,14 +71,9 @@ impl From<f64> for ConstantValue {
         ConstantValue::Float(value as f32)
     }
 }
-impl From<Expression> for ConstantValue {
-    fn from(value: Expression) -> Self {
-        ConstantValue::Expression(value)
-    }
-}
-impl From<&Expression> for ConstantValue {
-    fn from(value: &Expression) -> Self {
-        ConstantValue::Expression(*value)
+impl<T: Into<Expression>> From<T> for ConstantValue {
+    fn from(value: T) -> Self {
+        ConstantValue::Expression(value.into())
     }
 }
 
@@ -87,19 +82,6 @@ impl Graph {
     pub fn constant(&mut self, i: impl Into<ConstantValue>) -> GraphTensor {
         GraphTensor::from_id(
             self.add_op(Constant(i.into(), &self.dyn_map)).finish(),
-            ShapeTracker::new(()),
-            self,
-        )
-    }
-
-    /// A scalar constant evaluated from an expression at runtime
-    pub fn constant_expr<E: Into<Expression>>(&mut self, expr: E) -> GraphTensor {
-        GraphTensor::from_id(
-            self.add_op(Constant(
-                ConstantValue::Expression(expr.into().simplify()),
-                &self.dyn_map,
-            ))
-            .finish(),
             ShapeTracker::new(()),
             self,
         )

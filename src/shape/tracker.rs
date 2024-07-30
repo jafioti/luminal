@@ -332,29 +332,6 @@ fn pad_mask_dim(
     (padding.0 + padding.1 + dim).min(mask.1) - mask.0
 }
 
-/// Resolve shapes between the two trackers to the best of our ability
-pub fn resolve_local_dyn_dims(a: &mut ShapeTracker, b: &mut ShapeTracker, default_to_one: bool) {
-    // B to A
-    for i in 0..a.dims.len() {
-        if a.dims[a.indexes[i]].is_unknown() {
-            a.dims[a.indexes[i]] = b.dims[b.indexes[i]];
-            if a.dims[a.indexes[i]].is_unknown() && default_to_one {
-                a.dims[a.indexes[i]] = 1.into();
-            }
-        }
-    }
-
-    // A to B
-    for i in 0..a.dims.len() {
-        if b.dims[b.indexes[i]].is_unknown() {
-            b.dims[b.indexes[i]] = a.dims[a.indexes[i]];
-            if b.dims[b.indexes[i]].is_unknown() && default_to_one {
-                b.dims[b.indexes[i]] = 1.into();
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::prelude::*;

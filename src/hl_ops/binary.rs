@@ -10,8 +10,8 @@ use std::ops::{Add, Div, Mul, Rem, Sub};
 impl Add for GraphTensor {
     type Output = GraphTensor;
 
-    fn add(mut self, mut rhs: GraphTensor) -> Self::Output {
-        resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
+    fn add(self, rhs: GraphTensor) -> Self::Output {
+        assert_eq!(self.dims(), rhs.dims(), "Dims must match to add tensors.");
         let new_id = self
             .graph()
             .add_op(op::Add)
@@ -61,8 +61,12 @@ impl SubAssign for GraphTensor {
 impl Mul for GraphTensor {
     type Output = GraphTensor;
 
-    fn mul(mut self, mut rhs: GraphTensor) -> Self::Output {
-        resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
+    fn mul(self, rhs: GraphTensor) -> Self::Output {
+        assert_eq!(
+            self.dims(),
+            rhs.dims(),
+            "Dims must match to multiply tensors."
+        );
         let new_id = self
             .graph()
             .add_op(op::Mul)
@@ -114,8 +118,8 @@ impl DivAssign for GraphTensor {
 impl Rem<GraphTensor> for GraphTensor {
     type Output = GraphTensor;
 
-    fn rem(mut self, mut rhs: GraphTensor) -> Self::Output {
-        resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
+    fn rem(self, rhs: GraphTensor) -> Self::Output {
+        assert_eq!(self.dims(), rhs.dims(), "Dims must match to mod tensors.");
         let new_id = self
             .graph()
             .add_op(op::Mod)
@@ -144,7 +148,7 @@ impl<S: Into<Expression>> Add<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn add(self, rhs: S) -> Self::Output {
-        self + self.graph().constant_expr(rhs).expand_to(self.shape)
+        self + self.graph().constant(rhs).expand_to(self.shape)
     }
 }
 
@@ -160,7 +164,7 @@ impl<S: Into<Expression>> Sub<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn sub(self, rhs: S) -> Self::Output {
-        self - self.graph().constant_expr(rhs).expand_to(self.shape)
+        self - self.graph().constant(rhs).expand_to(self.shape)
     }
 }
 
@@ -176,7 +180,7 @@ impl<S: Into<Expression>> Mul<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn mul(self, rhs: S) -> Self::Output {
-        self * self.graph().constant_expr(rhs).expand_to(self.shape)
+        self * self.graph().constant(rhs).expand_to(self.shape)
     }
 }
 
@@ -193,7 +197,7 @@ impl<S: Into<Expression>> Div<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn div(self, rhs: S) -> Self::Output {
-        self / self.graph().constant_expr(rhs).expand_to(self.shape)
+        self / self.graph().constant(rhs).expand_to(self.shape)
     }
 }
 
@@ -209,14 +213,14 @@ impl<S: Into<Expression>> Rem<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn rem(self, rhs: S) -> Self::Output {
-        self % self.graph().constant_expr(rhs).expand_to(self.shape)
+        self % self.graph().constant(rhs).expand_to(self.shape)
     }
 }
 
 // Comparisons (based on https://github.com/tinygrad/tinygrad/blob/3e0c2d256fe9f4f5f85cd3e4d8733a51d7b4a984/tinygrad/tensor.py#L653)
 impl GraphTensor {
-    pub fn less_than(mut self, mut rhs: GraphTensor) -> GraphTensor {
-        resolve_local_dyn_dims(&mut self.shape, &mut rhs.shape, false);
+    pub fn less_than(self, rhs: GraphTensor) -> GraphTensor {
+        assert_eq!(self.dims(), rhs.dims(), "Dims must match to lt tensors.");
         let new_id = self
             .graph()
             .add_op(op::LessThan)

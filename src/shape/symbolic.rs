@@ -112,6 +112,22 @@ impl Term {
             _ => None,
         }
     }
+    pub fn as_float_op(self) -> Option<fn(f64, f64) -> f64> {
+        match self {
+            Term::Add => Some(|a, b| a + b),
+            Term::Sub => Some(|a, b| a - b),
+            Term::Mul => Some(|a, b| a * b),
+            Term::Div => Some(|a, b| a / b),
+            Term::Mod => Some(|a, b| a % b),
+            Term::Max => Some(|a, b| a.max(b)),
+            Term::Min => Some(|a, b| a.min(b)),
+            Term::And => Some(|a, b| (a.abs() > 1e-4 && b.abs() > 1e-4) as i32 as f64),
+            Term::Or => Some(|a, b| (a.abs() > 1e-4 || b.abs() > 1e-4) as i32 as f64),
+            Term::Gte => Some(|a, b| (a >= b) as i32 as f64),
+            Term::Lt => Some(|a, b| (a < b) as i32 as f64),
+            _ => None,
+        }
+    }
 }
 
 impl<T> PartialEq<T> for Expression
@@ -345,6 +361,37 @@ impl Expression {
         }
         stack.pop().map(|i| i as usize)
     }
+    /// Evaluate the expression given variables.
+    pub fn exec_float(&self, variables: &FxHashMap<char, usize>) -> Option<f64> {
+        self.exec_stack_float(variables, &mut Vec::new())
+    }
+    /// Evaluate the expression given variables. This function requires a stack to be given for use as storage
+    pub fn exec_stack_float(
+        &self,
+        variables: &FxHashMap<char, usize>,
+        stack: &mut Vec<f64>,
+    ) -> Option<f64> {
+        for term in self.terms.read().iter() {
+            match term {
+                Term::Num(n) => stack.push(*n as f64),
+                Term::Var(c) =>
+                {
+                    #[allow(clippy::needless_borrow)]
+                    if let Some(n) = variables.get(&c) {
+                        stack.push(*n as f64)
+                    } else {
+                        return None;
+                    }
+                }
+                _ => {
+                    let a = stack.pop().unwrap();
+                    let b = stack.pop().unwrap();
+                    stack.push(term.as_float_op().unwrap()(a, b));
+                }
+            }
+        }
+        stack.pop()
+    }
     /// Retrieve all symbols in the expression.
     pub fn to_symbols(&self) -> Vec<char> {
         self.terms
@@ -523,7 +570,11 @@ impl<E: Into<Expression>> Div<E> for Expression {
             return 0.into();
         }
         if let (Some(a), Some(b)) = (self.as_num(), rhs.as_num()) {
-            return (a / b).into();
+            if a % b == 0 {
+                if let Some(c) = a.checked_div(b) {
+                    return c.into();
+                }
+            }
         }
         let mut terms = rhs.terms.read().clone();
         terms.extend(self.terms.read().iter().copied());

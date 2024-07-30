@@ -156,7 +156,7 @@ impl Operator for Constant {
     fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         vec![Tensor::new(vec![match &self.0 {
             ConstantValue::Expression(e) => {
-                e.exec(unsafe { self.1.as_ref().unwrap() }).unwrap() as f32
+                e.exec_float(unsafe { self.1.as_ref().unwrap() }).unwrap() as f32
             }
             ConstantValue::Float(f) => *f,
         }])]
@@ -280,6 +280,7 @@ pub struct Mul;
 impl Operator for Mul {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let (lhs, rhs) = (get_vec(&inp[0].0), get_vec(&inp[1].0));
+        println!("EXPR: {:?}", inp[0].1.dims());
         let mut out_data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
         let lexpr = (inp[0].1.index_expression(), inp[0].1.valid_expression());
         let rexpr = (inp[1].1.index_expression(), inp[1].1.valid_expression());
