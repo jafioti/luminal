@@ -15,7 +15,7 @@ use luminal::prelude::*;
 // Setup graph and tensors
 let mut cx = Graph::new();
 let a = cx.tensor((3, 1)).set([[1.0], [2.0], [3.0]]);
-let b = cx.tensor((1, 4).set([[1.0, 2.0, 3.0, 4.0]]);
+let b = cx.tensor((1, 4)).set([[1.0, 2.0, 3.0, 4.0]]);
 
 // Do math...
 let mut c = a.matmul(b).retrieve();
