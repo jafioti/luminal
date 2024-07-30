@@ -6,45 +6,42 @@ use crate::{
 impl GraphTensor {
     /// Reduce a dimension of the tensor by summing all elements along that axis.
     pub fn sum_reduce(self, axes: impl ToAxes) -> GraphTensor {
-        let mut shape = self.shape;
-        let mut new_id = self.id;
+        let (mut shape, mut id) = (self.shape, self.id);
+        // Sum reduce each dimension
         for dim in axes.to_axes().into_iter().rev() {
-            new_id = self
+            id = self
                 .graph()
                 .add_op(op::SumReduce(dim))
-                .input(new_id, 0, shape)
+                .input(id, 0, shape)
                 .finish();
-            // Reduce shape
             shape.remove_dim(dim);
         }
-        GraphTensor::from_id(new_id, shape, self.graph_ref)
+        GraphTensor::from_id(id, shape, self.graph_ref)
     }
 
     /// Reduce a dimension of the tensor by taking the maximum of all elements along that axis.
     pub fn max_reduce(self, axes: impl ToAxes) -> GraphTensor {
-        let mut shape = self.shape;
-
-        let mut new_id = self.id;
+        let (mut shape, mut id) = (self.shape, self.id);
+        // Max reduce each dimension
         for dim in axes.to_axes().into_iter().rev() {
-            new_id = self
+            id = self
                 .graph()
                 .add_op(op::MaxReduce(dim))
-                .input(new_id, 0, shape)
+                .input(id, 0, shape)
                 .finish();
-            // Reduce shape
             shape.remove_dim(dim);
         }
-        GraphTensor::from_id(new_id, shape, self.graph_ref)
+        GraphTensor::from_id(id, shape, self.graph_ref)
     }
 
     /// Reduce a dimension of the tensor by taking the mean of all elements along that axis.
     pub fn mean_reduce(self, axes: impl ToAxes) -> GraphTensor {
-        let mul_factor = 1 / axes
+        let reduced_elements = axes
             .to_axes()
             .into_iter()
             .map(|i| self.dims()[i])
             .product::<Expression>();
-        (self * mul_factor).sum_reduce(axes)
+        (self / reduced_elements).sum_reduce(axes)
     }
 
     /// Reduce a dimension of the tensor by multiplying all elements along that axis.
