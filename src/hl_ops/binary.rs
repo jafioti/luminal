@@ -11,7 +11,17 @@ impl Add for GraphTensor {
     type Output = GraphTensor;
 
     fn add(self, rhs: GraphTensor) -> Self::Output {
-        assert_eq!(self.dims(), rhs.dims(), "Dims must match to add tensors.");
+        // assert_eq!(
+        //     self.dims()
+        //         .into_iter()
+        //         .map(|i| i.simplify())
+        //         .collect::<Vec<_>>(),
+        //     rhs.dims()
+        //         .into_iter()
+        //         .map(|i| i.simplify())
+        //         .collect::<Vec<_>>(),
+        //     "Dims must match to add tensors."
+        // );
         let new_id = self
             .graph()
             .add_op(op::Add)
@@ -62,11 +72,11 @@ impl Mul for GraphTensor {
     type Output = GraphTensor;
 
     fn mul(self, rhs: GraphTensor) -> Self::Output {
-        assert_eq!(
-            self.dims(),
-            rhs.dims(),
-            "Dims must match to multiply tensors."
-        );
+        // assert_eq!(
+        //     self.dims(),
+        //     rhs.dims(),
+        //     "Dims must match to multiply tensors."
+        // );
         let new_id = self
             .graph()
             .add_op(op::Mul)

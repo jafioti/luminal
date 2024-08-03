@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
+default=["metal"]
 metal = ["dep:luminal_metal"]
 cuda = ["dep:luminal_cuda"]
 

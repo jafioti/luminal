@@ -17,6 +17,7 @@ rustc-hash = "1.1.0"
 serde = "1.0.202"
 serde_json = "1.0.117"
 unzip3 = "1.0.0"
+indicatif = "0.17.8"
 
 [dev-dependencies]
 dfdx = { version = "0.13", features = ["f16"] }

@@ -114,9 +114,9 @@ impl Conv2D {
         cx: &mut Graph,
     ) -> Self {
         Self {
-            weight: cx.named_tensor("Weight", (ch_out, ch_in * kernel.0 * kernel.1)),
+            weight: cx.named_tensor("CWeight", (ch_out, ch_in * kernel.0 * kernel.1)),
             bias: if bias {
-                Some(cx.named_tensor("Bias", ch_out))
+                Some(cx.named_tensor("CBias", ch_out))
             } else {
                 None
             },

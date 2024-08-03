@@ -1,6 +1,9 @@
+use indicatif::{ProgressBar, ProgressStyle};
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::{any::Any, fmt::Debug, iter::once, marker::PhantomData, ops::Deref, sync::Arc};
+use std::{
+    any::Any, fmt::Debug, io::Write, iter::once, marker::PhantomData, ops::Deref, sync::Arc,
+};
 
 use itertools::Itertools;
 use metal_rs::{
@@ -86,6 +89,11 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
         }
         let mut intermediate_regexes = FxHashMap::default();
         let mut input_regexes = FxHashMap::default();
+        let mut n_matched = 0;
+        if debug() {
+            print!("Found 0 ops to fuse...");
+            std::io::stdout().flush().unwrap();
+        }
         while matched {
             matched = false;
             for edge in graph.edge_indices().collect::<Vec<_>>() {
@@ -277,48 +285,66 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                     remap(a, new_op, &mut ids, graph);
                 }
                 remap(b, new_op, &mut ids, graph);
+                if debug() {
+                    n_matched += 1;
+                    print!("\r\r\r\r\r\r\rFound {n_matched} ops to fuse...");
+                    std::io::stdout().flush().unwrap();
+                }
             }
         }
-        // Convert non-fused elementwise ops to fused elementwise ops
-        for (op, op_string) in elementwise_ops {
-            if !fused_ops.contains(&op) {
-                let input_shapes = graph
-                    .edges_directed(op, Direction::Incoming)
-                    .filter_map(|e| e.weight().as_data())
-                    .sorted_by_key(|(i, _, _)| *i)
-                    .map(|(_, _, s)| s)
-                    .collect::<Vec<_>>();
-                let output_buffer_sizes = graph
-                    .node_custom::<MetalKernelWrapper, _>(op, "metal", ())
-                    .unwrap()
-                    .output_buffer_sizes(&input_shapes)
-                    .into_iter()
-                    .map(|s| s.simplify_cache(&mut simplification_cache))
-                    .collect();
-                let sh = ShapeTracker::new(());
-                let g: *mut Graph = graph;
-                let new_op = graph
-                    .add_op(FusedElementwiseOp::<T> {
-                        kernel_str: "".to_string(),
-                        kernel: None,
-                        dyn_map: &graph.dyn_map,
-                        dyn_chars: vec![],
-                        subexpressions: vec![(op_string, sh)],
-                        queue: queue.clone(),
-                        device: device.clone(),
-                        output_buffer_sizes,
-                        _phantom: Default::default(),
-                        graph: g,
-                    })
-                    .finish();
-                // Add edges to new op
-                move_incoming_edge(op, new_op, graph);
-                move_outgoing_edge(op, new_op, graph);
-                graph.remove_node(op);
-                remap(op, new_op, &mut ids, graph);
-                fused_ops.insert(new_op);
-            }
-        }
+        let mut bar = None;
+        if debug() {
+            println!("\nFusing {n_matched} ops into {} ops...", fused_ops.len());
+            let b = ProgressBar::new(fused_ops.len() as u64);
+            b.set_style(
+                ProgressStyle::with_template(
+                    "[{elapsed_precise}] [{bar:40.bright.blue/white}] {pos:>7}/{len:7}",
+                )
+                .unwrap()
+                .progress_chars("##-"),
+            );
+            bar = Some(b);
+        };
+        // // Convert non-fused elementwise ops to fused elementwise ops
+        // for (op, op_string) in elementwise_ops {
+        //     if !fused_ops.contains(&op) {
+        //         let input_shapes = graph
+        //             .edges_directed(op, Direction::Incoming)
+        //             .filter_map(|e| e.weight().as_data())
+        //             .sorted_by_key(|(i, _, _)| *i)
+        //             .map(|(_, _, s)| s)
+        //             .collect::<Vec<_>>();
+        //         let output_buffer_sizes = graph
+        //             .node_custom::<MetalKernelWrapper, _>(op, "metal", ())
+        //             .unwrap()
+        //             .output_buffer_sizes(&input_shapes)
+        //             .into_iter()
+        //             .map(|s| s.simplify_cache(&mut simplification_cache))
+        //             .collect();
+        //         let sh = ShapeTracker::new(());
+        //         let g: *mut Graph = graph;
+        //         let new_op = graph
+        //             .add_op(FusedElementwiseOp::<T> {
+        //                 kernel_str: "".to_string(),
+        //                 kernel: None,
+        //                 dyn_map: &graph.dyn_map,
+        //                 dyn_chars: vec![],
+        //                 subexpressions: vec![(op_string, sh)],
+        //                 queue: queue.clone(),
+        //                 device: device.clone(),
+        //                 output_buffer_sizes,
+        //                 _phantom: Default::default(),
+        //                 graph: g,
+        //             })
+        //             .finish();
+        //         // Add edges to new op
+        //         move_incoming_edge(op, new_op, graph);
+        //         move_outgoing_edge(op, new_op, graph);
+        //         graph.remove_node(op);
+        //         remap(op, new_op, &mut ids, graph);
+        //         fused_ops.insert(new_op);
+        //     }
+        // }
         // Compile all the kernels we placed
         let intermediate_match = Regex::new(r"intermediate(\d+)([^0-9]|$)").unwrap();
         for fused_op in fused_ops {
@@ -338,6 +364,12 @@ impl<T: MetalFloat> Compiler for ElementwiseFusionCompiler<T> {
                 &mut simplification_cache,
             );
             op.compile(&device);
+            if let Some(bar) = &bar {
+                bar.inc(1);
+            }
+        }
+        if let Some(bar) = bar {
+            bar.finish();
         }
     }
 }
@@ -414,6 +446,7 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
                     .collect()
             })
             .collect();
+        println!("Stacked: {:?}", stacked_shapes);
         // Stack index expressions
         let stacked_index_expressions_partial = stacked_shapes
             .iter()
@@ -422,7 +455,10 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
                     .rev()
                     .take(s.len() - 1)
                     .fold(Expression::from('z'), |acc, inp| {
-                        inp.index_expression().substitute('z', acc)
+                        inp.index_expression()
+                            .simplify()
+                            .substitute('z', acc)
+                            .simplify()
                     })
             })
             .collect::<Vec<_>>();
@@ -430,20 +466,29 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
             .iter()
             .cloned()
             .zip(&stacked_shapes)
-            .map(|(partial, sh)| sh[0].index_expression().substitute('z', partial))
+            .map(|(partial, sh)| {
+                println!("Ind: {}", sh[0].index_expression());
+                sh[0]
+                    .index_expression()
+                    .simplify()
+                    .substitute('z', partial)
+                    .simplify()
+            })
             .collect::<Vec<_>>();
         let stacked_valid_expressions = stacked_index_expressions_partial
             .iter()
             .cloned()
             .zip(&stacked_shapes)
-            .map(|(partial, sh)| sh[0].valid_expression().substitute('z', partial))
+            .map(|(partial, sh)| sh[0].valid_expression().substitute('z', partial).simplify())
             .collect::<Vec<_>>();
+        println!("M");
 
         // Replace in subexpressions
         let n_subexpressions = subexpressions.len();
         for (i, ((subexp, _), stacked_shapes)) in
             subexpressions.iter_mut().zip(subexp_views).enumerate()
         {
+            println!("{i}");
             // Index
             for (i, (ind_exp, val_exp)) in stacked_index_expressions
                 .iter()
@@ -456,10 +501,13 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
                     input_regexes.insert(i, Regex::new(&format!(r"input{i}([^0-9]|$)")).unwrap());
                     input_regexes.get(&i).unwrap()
                 };
+                // println!("ORIG: {ind_exp}");
                 let (ind, val) = (
                     ind_exp.simplify_cache(simplification_cache),
                     val_exp.simplify_cache(simplification_cache),
                 );
+                // println!("\n\n\n\n\n\nSIMP: {ind}");
+                println!("S {} -> {}", ind_exp.len(), ind.len());
                 *subexp = re
                     .replace_all(
                         subexp,

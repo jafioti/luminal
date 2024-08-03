@@ -20,19 +20,6 @@ pub fn load<M: SerializeModule>(path: &str, model: &M, graph: &mut Graph) {
                 let mut file = File::open(&path).unwrap();
                 file.read_to_end(&mut bytes).unwrap();
                 let safetensors = SafeTensors::deserialize(&bytes).unwrap();
-                println!(
-                    "Names: {:?}",
-                    safetensors
-                        .names()
-                        .into_iter()
-                        .filter(|s| s.contains("bn")
-                            && safetensors.names().into_iter().all(|i| i
-                                != &format!(
-                                    "{}.bn.bias",
-                                    &s[..s.match_indices("bn").next().unwrap().0]
-                                )))
-                        .collect::<Vec<_>>()
-                );
 
                 if let Ok(tensor_view) = safetensors.tensor(&weight_name.replace('/', ".")) {
                     // Convert to fp32

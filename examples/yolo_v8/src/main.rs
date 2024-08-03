@@ -238,8 +238,12 @@ fn main() {
     loader::load("yolov8n.safetensors", &model, &mut cx);
 
     // Compile
+    println!("Nodes: {}", cx.node_count());
     cx.compile(
-        GenericCompiler::default(),
+        (
+            GenericCompiler::default(),
+            luminal_metal::MetalCompiler::<f32>::default(),
+        ),
         (&mut input, &mut model_params, &mut output),
     );
     let mut image_name = std::path::PathBuf::from("bike.jpg");

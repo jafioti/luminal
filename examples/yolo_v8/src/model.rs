@@ -47,12 +47,12 @@ impl ConvBlock {
         let eps = 1e-3;
         let mut conv = Conv2D::new(ch_in, ch_out, kernel, stride, dilation, false, cx);
         let original_weight = conv.weight;
-        let running_mean = cx.named_tensor("mean", ch_in);
-        let running_var = cx.named_tensor("var", ch_in);
-        let o_weight = cx.named_tensor("o_weight", ch_in);
-        let o_bias = cx.named_tensor("o_bias", ch_in);
+        let running_mean = cx.constant(0.).expand(0, ch_out);
+        let running_var = cx.constant(1.).expand(0, ch_out);
+        let o_weight = cx.constant(1.).expand(0, ch_out);
+        let o_bias = cx.constant(0.).expand(0, ch_out);
         let std_ = o_weight / ((running_var + eps).sqrt());
-        let weight = conv.weight * (std_.reshape((conv.weight.dims2().0, 1, 1, 1)));
+        let weight = conv.weight * std_.expand(1, conv.weight.dims2().1);
         let bias = o_bias - (std_ * running_mean);
         conv.weight = weight;
         conv.bias = Some(bias);
@@ -292,6 +292,7 @@ impl SerializeModule for DarkNet {
         s.module("b1.1", &self.b1_1);
         s.module("b2.0", &self.b2_0);
         s.module("b2.1", &self.b2_1);
+        s.module("b2.2", &self.b2_2);
         s.module("b3.0", &self.b3_0);
         s.module("b3.1", &self.b3_1);
         s.module("b4.0", &self.b4_0);
