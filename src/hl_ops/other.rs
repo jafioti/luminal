@@ -61,22 +61,6 @@ impl GraphTensor {
     }
 }
 
-impl From<f32> for ConstantValue {
-    fn from(value: f32) -> Self {
-        ConstantValue::Float(value)
-    }
-}
-impl From<f64> for ConstantValue {
-    fn from(value: f64) -> Self {
-        ConstantValue::Float(value as f32)
-    }
-}
-impl<T: Into<Expression>> From<T> for ConstantValue {
-    fn from(value: T) -> Self {
-        ConstantValue::Expression(value.into())
-    }
-}
-
 impl Graph {
     /// A scalar constant
     pub fn constant(&mut self, i: impl Into<ConstantValue>) -> GraphTensor {
