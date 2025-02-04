@@ -1,4 +1,6 @@
-#[derive(Debug, PartialEq, Eq)]
+#![allow(clippy::type_complexity)]
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Input {
     Inp(usize), // An input to this scope
     Ref(usize), // A reference to an earlier variable in the scope
@@ -96,28 +98,33 @@ fn create_stacks(ir: Vec<Body>) -> Vec<(Vec<Input>, String, Vec<(usize, Vec<usiz
 }
 
 fn create_code(
-    mut ir: Vec<(Vec<Input>, String, Vec<(usize, Vec<usize>, usize, bool)>)>,
+    ir: Vec<(Vec<Input>, String, Vec<(usize, Vec<usize>, usize, bool)>)>,
 ) -> Vec<Kernel> {
     // Merge the stacks as much as possible
+    let mut merged_ir = ir
+        .iter()
+        .cloned()
+        .map(|v| (v.clone(), vec![v]))
+        .collect::<Vec<_>>();
     let mut no_match = false;
     while !no_match {
         no_match = true;
-        for l in 0..(ir.len() - 1) {
+        for l in 0..(merged_ir.len() - 1) {
             // Try to match ir[l] and ir[l + 1]
-            if ir[l].2.iter().filter(|l| !l.3).zip(ir[l + 1].2.iter()).all(
-                |((a_size, _, a_out, _), (b_size, b_inp, _, _))| {
+            if merged_ir[l]
+                .0
+                 .2
+                .iter()
+                .filter(|l| !l.3)
+                .zip(merged_ir[l + 1].0 .2.iter())
+                .all(|((a_size, _, a_out, _), (b_size, b_inp, _, _))| {
                     *a_out == b_inp[0] && b_inp.len() == 1 && a_size == b_size
-                },
-            )
-            // Obviously incorrect check.
-            // There doesn't need to be a dependency here at all,
-            // but we need to possibly add inputs to l and remap inputs inside l + 1
-            && matches!(ir[l + 1].0[0], Input::Ref(_))
+                })
             {
                 // Merge l and l + 1
-                ir[l].1 = format!("{}-{}", ir[l].1, ir[l + 1].1); // Set op
-                for (b, a) in ir[l] // Set reduction dims and output strides
-                    .2
+                for (b, a) in merged_ir[l]
+                    .0 // Set reduction dims and output strides
+                     .2
                     .iter()
                     .enumerate()
                     .filter(|(_, l)| !l.3)
@@ -125,17 +132,22 @@ fn create_code(
                     .enumerate()
                     .collect::<Vec<_>>()
                 {
-                    ir[l].2[a].2 = ir[l + 1].2[b].2;
-                    ir[l].2[a].3 = ir[l + 1].2[b].3;
+                    merged_ir[l].0 .2[a].2 = merged_ir[l + 1].0 .2[b].2;
+                    merged_ir[l].0 .2[a].3 = merged_ir[l + 1].0 .2[b].3;
                 }
-                ir.remove(l + 1);
+                let mut t = merged_ir.remove(l + 1).1;
+                merged_ir[l].1.append(&mut t);
                 no_match = false;
                 break;
             }
         }
     }
-    for i in ir {
-        println!("{i:?}");
+    for (_, instructions) in &merged_ir {
+        println!("---");
+        for (inputs, op, stack) in instructions {
+            println!("{inputs:?} {op} -> ");
+        }
+        println!("---");
     }
     // println!("remaining: {:?}", ir);
     // Split into kernels
