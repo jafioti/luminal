@@ -6,3 +6,4 @@ edition = "2021"
 [workspace]
 
 [dependencies]
+itertools = "0.14.0"

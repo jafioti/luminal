@@ -1,5 +1,7 @@
 #![allow(clippy::type_complexity)]
 
+use std::collections::HashSet;
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Input {
     Inp(usize), // An input to this scope
@@ -29,24 +31,7 @@ enum Expr {
 }
 
 fn main() {
-    // let b = vec![
-    //     Body::Block(Block {
-    //         n: 5,
-    //         inputs: vec![(Input::Inp(0), 1)],
-    //         body: vec![Body::Expr(Expr::Sin(Input::Inp(0)))],
-    //     }),
-    //     Body::Expr(Expr::SumReduce(Input::Ref(0))),
-    //     Body::Block(Block {
-    //         n: 5,
-    //         inputs: vec![(Input::Ref(0), 1), (Input::Ref(1), 0)],
-    //         body: vec![
-    //             Body::Expr(Expr::Exp(Input::Inp(0))),
-    //             Body::Expr(Expr::Mul(Input::Ref(0), Input::Inp(1))),
-    //         ],
-    //     }),
-    // ];
-
-    create_code(vec![
+    let kernels = create_kernels(vec![
         (
             vec![Input::Inp(0), Input::Inp(1)],
             "mul".to_string(),
@@ -86,8 +71,11 @@ fn main() {
             ],
         ),
     ]);
+
+    println!("{:?}", kernels);
 }
 
+#[derive(Debug, Clone)]
 struct Kernel {
     code: String,
     grid: (usize, usize, usize),
@@ -100,7 +88,7 @@ fn create_stacks(ir: Vec<Body>) -> Vec<(Vec<Input>, String, Vec<(usize, Vec<usiz
     todo!()
 }
 
-fn create_code(
+fn create_kernels(
     ir: Vec<(Vec<Input>, String, Vec<(usize, Vec<usize>, usize, bool)>)>,
 ) -> Vec<Kernel> {
     // Merge the stacks as much as possible
@@ -202,6 +190,7 @@ fn create_code(
         }
     }
 
+    let mut kernels = vec![];
     for (stack, instructions) in merged_ir {
         // Compute grid and threadblock dim assignments
         let exec_dims = stack
@@ -224,6 +213,27 @@ fn create_code(
             .collect::<Vec<_>>();
 
         // TODO: detect when we can use shared mem
+
+        // Get input buffer indexes
+        let mut input_buffer_indexes = instructions
+            .iter()
+            .flat_map(|i| i.0.iter())
+            .filter_map(|i| {
+                if let Input::Inp(i) = i {
+                    Some(*i)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        input_buffer_indexes.sort();
+        input_buffer_indexes.dedup();
+        let output_buffer_size = stack
+            .2
+            .iter()
+            .filter(|i| !i.3)
+            .map(|i| i.0)
+            .product::<usize>();
 
         // Write kernels
         let mut kernel = "".to_string();
@@ -257,9 +267,17 @@ for (int loop_{loop_dim} = 0; loop_{loop_dim} < {reduce_size}; ++loop_{loop_dim}
         println!("---");
         println!("Grid: {:?} Threadblock: {:?}", grid, threadblock);
         println!("{kernel}");
+
+        kernels.push(Kernel {
+            code: kernel,
+            grid: (grid[0], grid[1], grid[2]),
+            threadblock: (threadblock[0], threadblock[1], threadblock[2]),
+            inputs: input_buffer_indexes,
+            outputs: vec![output_buffer_size],
+        });
     }
 
-    todo!()
+    kernels
 }
 
 fn get_inputs(
@@ -274,6 +292,15 @@ fn get_inputs(
             }
         }
     }
+
+    let index_to_dim = [
+        "blockIdx.x",
+        "blockIdx.y",
+        "blockIdx.z",
+        "threadIdx.x",
+        "threadIdx.y",
+        "threadIdx.z",
+    ];
     inputs
         .into_iter()
         .zip(indexes.into_iter())
@@ -291,22 +318,11 @@ fn get_inputs(
                     .map(|(i, (s, loop_ind))| if let Some(l) = loop_ind {
                         format!("loop_{l} * {s}")
                     } else {
-                        format!("{} * {s}", index_to_dim(i))
+                        format!("{} * {s}", index_to_dim[i])
                     })
                     .collect::<Vec<_>>()
                     .join(" + ")
             )
         })
         .collect()
-}
-
-fn index_to_dim(index: usize) -> &'static str {
-    [
-        "blockIdx.x",
-        "blockIdx.y",
-        "blockIdx.z",
-        "threadIdx.x",
-        "threadIdx.y",
-        "threadIdx.z",
-    ][index]
 }
