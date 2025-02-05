@@ -1,7 +1,5 @@
 #![allow(clippy::type_complexity)]
 
-use std::collections::HashSet;
-
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Input {
     Inp(usize), // An input to this scope
@@ -31,6 +29,8 @@ enum Expr {
 }
 
 fn main() {
+    // This is a tiled matmul. Currently we are just doing tiled loop structure but not loading a tile into smem.
+    // We need to detect when we can.
     let kernels = create_kernels(vec![
         (
             vec![Input::Inp(0), Input::Inp(1)],
@@ -72,7 +72,69 @@ fn main() {
         ),
     ]);
 
-    println!("{:?}", kernels);
+    println!("Tiled Matmul");
+    for Kernel {
+        code,
+        grid,
+        threadblock,
+        ..
+    } in kernels
+    {
+        println!("---");
+        println!("Grid: {grid:?} Threadblock: {threadblock:?}");
+        println!("{code}");
+    }
+    println!("---");
+
+    // This pulls in a batch of 3 vectors of 4, takes exp and sin of them, and then does an outer product of those vectors
+    // Currently it needs two kernels to do this. Should be possible to merge them into one and use shared mem to store the intermediates and a threadblock barrier
+    let kernels = create_kernels(vec![
+        (
+            vec![Input::Inp(0)],
+            "exp".to_string(),
+            vec![
+                (3, vec![4], 4, false),
+                (1, vec![0], 1, false), // Padding dims to push the vector dims to the threadblock
+                (1, vec![0], 1, false),
+                (4, vec![1], 1, false),
+            ],
+        ),
+        (
+            vec![Input::Inp(0)],
+            "sin".to_string(),
+            vec![
+                (3, vec![4], 4, false),
+                (1, vec![0], 1, false),
+                (1, vec![0], 1, false),
+                (4, vec![1], 1, false),
+            ],
+        ),
+        (
+            vec![Input::Ref(0), Input::Ref(1)],
+            "mul".to_string(),
+            vec![
+                (3, vec![4, 4], 16, false),
+                (1, vec![0], 1, false),
+                (1, vec![0], 1, false),
+                (4, vec![1, 0], 4, false),
+                (4, vec![1, 0], 4, false),
+            ],
+        ),
+    ]);
+
+    println!("Exp-Sin Outer Product");
+    for Kernel {
+        code,
+        grid,
+        threadblock,
+        ..
+    } in kernels
+    {
+        println!("---");
+        println!("Grid: {grid:?} Threadblock: {threadblock:?}");
+        println!("{code}");
+    }
+    println!("---");
 }
 
 #[derive(Debug, Clone)]
@@ -122,17 +184,26 @@ fn create_kernels(
     let mut loop_dim = 0;
     while !no_match {
         no_match = true;
+        let mut logical_index = 0;
         for l in 0..(merged_ir.len() - 1) {
             // Try to match ir[l] and ir[l + 1]
-            let check_match =
-                |a: &[(usize, Vec<usize>, usize, bool)], b: &[(usize, Vec<usize>, usize, bool)]| {
-                    a.iter().filter(|l| !l.3).zip(b.iter()).all(
-                        |((a_size, _, a_out, _), (b_size, b_inp, _, _))| {
-                            *a_out == b_inp[0] && b_inp.len() == 1 && a_size == b_size
-                        },
-                    )
-                };
-            let mut matched = check_match(&merged_ir[l].0 .2, &merged_ir[l + 1].0 .2);
+            let check_match = |a: &[(usize, Vec<usize>, usize, bool)],
+                               b: &[(usize, Vec<usize>, usize, bool)],
+                               is_dep: bool| {
+                a.iter().filter(|l| !l.3).zip(b.iter()).all(
+                    |((a_size, _, a_out, _), (b_size, b_inp, _, _))| {
+                        a_size == b_size && (!is_dep || *a_out == b_inp[0] && b_inp.len() == 1)
+                    },
+                )
+            };
+            let is_dep = merged_ir[l + 1].0 .0.iter().any(|i| {
+                if let Input::Ref(i) = i {
+                    *i < logical_index + merged_ir[l].1.len() && *i > logical_index
+                } else {
+                    false
+                }
+            });
+            let mut matched = check_match(&merged_ir[l].0 .2, &merged_ir[l + 1].0 .2, is_dep);
             if !matched {
                 if let Some(orig_dim) = merged_ir[l + 1].0 .2.iter().position(|i| i.3) {
                     // Try to slide the reduce until we get a match
@@ -140,7 +211,7 @@ fn create_kernels(
                     for i in 0..merged_ir[l + 1].0 .2.len() {
                         let e = merged_ir[l + 1].0 .2.remove(dim);
                         merged_ir[l + 1].0 .2.insert(i, e);
-                        if check_match(&merged_ir[l].0 .2, &merged_ir[l + 1].0 .2) {
+                        if check_match(&merged_ir[l].0 .2, &merged_ir[l + 1].0 .2, is_dep) {
                             // Found a match!
                             matched = true;
                             break;
@@ -187,6 +258,7 @@ fn create_kernels(
                 no_match = false;
                 break;
             }
+            logical_index += merged_ir[l].1.len();
         }
     }
 
@@ -203,13 +275,13 @@ fn create_kernels(
             .iter()
             .take(3)
             .cloned()
-            .chain((0..(3_usize.saturating_sub(exec_dims.len()))).map(|_| 0))
+            .chain((0..(3_usize.saturating_sub(exec_dims.len()))).map(|_| 1))
             .collect::<Vec<_>>();
         let threadblock = exec_dims
             .iter()
             .skip(3)
             .cloned()
-            .chain((0..(3_usize.saturating_sub(exec_dims.len().saturating_sub(3)))).map(|_| 0))
+            .chain((0..(3_usize.saturating_sub(exec_dims.len().saturating_sub(3)))).map(|_| 1))
             .collect::<Vec<_>>();
 
         // TODO: detect when we can use shared mem
@@ -264,9 +336,6 @@ for (int loop_{loop_dim} = 0; loop_{loop_dim} < {reduce_size}; ++loop_{loop_dim}
             }
             kernel = kernel.trim().to_string();
         }
-        println!("---");
-        println!("Grid: {:?} Threadblock: {:?}", grid, threadblock);
-        println!("{kernel}");
 
         kernels.push(Kernel {
             code: kernel,
