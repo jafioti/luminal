@@ -146,21 +146,52 @@ fn main() {
     // println!("---");
 
     let kernels = create_kernels(vec![
-        (
-            vec![Input::Inp(1)],
-            "exp".to_string(),
-            vec![(3, vec![1], 1, false)],
-        ),
-        (
-            vec![Input::Inp(0), Input::Ref(0)],
-            "mul".to_string(),
-            vec![(3, vec![4, 1], 4, false), (4, vec![1, 0], 1, false)],
-        ),
-        (
-            vec![Input::Ref(1)],
-            "sum".to_string(),
-            vec![(3, vec![4], 1, false), (4, vec![1], 0, true)],
-        ),
+        Stack {
+            inputs: vec![Input::Inp(1)],
+            instruction: "exp".to_string(),
+            frames: vec![StackFrame {
+                size: 3,
+                input_strides: vec![1],
+                output_stride: 1,
+                reduce: false,
+            }],
+        },
+        Stack {
+            inputs: vec![Input::Inp(0), Input::Ref(0)],
+            instruction: "mul".to_string(),
+            frames: vec![
+                StackFrame {
+                    size: 3,
+                    input_strides: vec![4, 1],
+                    output_stride: 4,
+                    reduce: false,
+                },
+                StackFrame {
+                    size: 4,
+                    input_strides: vec![1, 0],
+                    output_stride: 1,
+                    reduce: false,
+                },
+            ],
+        },
+        Stack {
+            inputs: vec![Input::Ref(1)],
+            instruction: "sum".to_string(),
+            frames: vec![
+                StackFrame {
+                    size: 3,
+                    input_strides: vec![4],
+                    output_stride: 1,
+                    reduce: false,
+                },
+                StackFrame {
+                    size: 4,
+                    input_strides: vec![1],
+                    output_stride: 0,
+                    reduce: true,
+                },
+            ],
+        },
     ]);
 
     println!("Shared exp vector mul");
@@ -178,6 +209,21 @@ fn main() {
     println!("---");
 }
 
+#[derive(Clone)]
+struct Stack {
+    inputs: Vec<Input>,
+    instruction: String,
+    frames: Vec<StackFrame>,
+}
+
+#[derive(Clone)]
+struct StackFrame {
+    size: usize,
+    input_strides: Vec<usize>,
+    output_stride: usize,
+    reduce: bool,
+}
+
 #[derive(Debug, Clone)]
 struct Kernel {
     code: String,
@@ -187,13 +233,7 @@ struct Kernel {
     outputs: Vec<usize>, // buffer sizes this kernel creates
 }
 
-fn create_stacks(ir: Vec<Body>) -> Vec<(Vec<Input>, String, Vec<(usize, Vec<usize>, usize)>)> {
-    todo!()
-}
-
-fn create_kernels(
-    ir: Vec<(Vec<Input>, String, Vec<(usize, Vec<usize>, usize, bool)>)>,
-) -> Vec<Kernel> {
+fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
     // Merge the stacks as much as possible
     let mut merged_ir = ir
         .iter()
@@ -202,17 +242,19 @@ fn create_kernels(
             (
                 v.clone(),
                 vec![(
-                    v.0,
-                    v.1,
-                    v.2.into_iter()
+                    v.inputs,
+                    v.instruction,
+                    v.frames
+                        .into_iter()
                         .map(|i| {
                             (
-                                i.0,
-                                i.1.into_iter()
+                                i.size,
+                                i.input_strides
+                                    .into_iter()
                                     .map(|i| (i, Option::<char>::None))
                                     .collect::<Vec<_>>(),
-                                i.2,
-                                i.3,
+                                i.output_stride,
+                                i.reduce,
                             )
                         })
                         .collect::<Vec<_>>(),
@@ -228,19 +270,18 @@ fn create_kernels(
         let mut logical_index = 0;
         for l in 0..(merged_ir.len() - 1) {
             // Try to match ir[l] and ir[l + 1]
-            let check_match = |a: &[(usize, Vec<usize>, usize, bool)],
-                               b: &[(usize, Vec<usize>, usize, bool)],
-                               is_dep: bool| {
-                a.iter().filter(|l| !l.3).count() == b.len()
-                    && a.iter().filter(|l| !l.3).zip(b.iter()).all(
-                        |((a_size, _, a_out, _), (b_size, b_inp, _, _))| {
-                            a_size == b_size && (!is_dep || *a_out == b_inp[0] && b_inp.len() == 1)
-                        },
-                    )
+            let check_match = |a: &[StackFrame], b: &[StackFrame], is_dep: bool| {
+                a.iter().filter(|l| !l.reduce).count() == b.len()
+                    && a.iter().filter(|l| !l.reduce).zip(b.iter()).all(|(a, b)| {
+                        a.size == b.size
+                            && (!is_dep
+                                || (a.output_stride == b.input_strides[0]
+                                    && b.input_strides.len() == 1))
+                    })
             };
             let dep_inputs = merged_ir[l + 1]
                 .0
-                 .0
+                .inputs
                 .iter()
                 .enumerate()
                 .filter(|(_, inp)| {
@@ -253,20 +294,20 @@ fn create_kernels(
                 .map(|(i, _)| i)
                 .collect::<Vec<_>>();
             let mut matched = check_match(
-                &merged_ir[l].0 .2,
-                &merged_ir[l + 1].0 .2,
+                &merged_ir[l].0.frames,
+                &merged_ir[l + 1].0.frames,
                 !dep_inputs.is_empty(),
             );
             if !matched {
-                if let Some(orig_dim) = merged_ir[l + 1].0 .2.iter().position(|i| i.3) {
+                if let Some(orig_dim) = merged_ir[l + 1].0.frames.iter().position(|i| i.reduce) {
                     // Try to slide the reduce until we get a match
                     let mut dim = orig_dim;
-                    for i in 0..merged_ir[l + 1].0 .2.len() {
-                        let e = merged_ir[l + 1].0 .2.remove(dim);
-                        merged_ir[l + 1].0 .2.insert(i, e);
+                    for i in 0..merged_ir[l + 1].0.frames.len() {
+                        let e = merged_ir[l + 1].0.frames.remove(dim);
+                        merged_ir[l + 1].0.frames.insert(i, e);
                         if check_match(
-                            &merged_ir[l].0 .2,
-                            &merged_ir[l + 1].0 .2,
+                            &merged_ir[l].0.frames,
+                            &merged_ir[l + 1].0.frames,
                             !dep_inputs.is_empty(),
                         ) {
                             // Found a match!
@@ -277,8 +318,8 @@ fn create_kernels(
                     }
                     if !matched {
                         // No match, restore to orig dim
-                        let e = merged_ir[l + 1].0 .2.remove(dim);
-                        merged_ir[l + 1].0 .2.insert(orig_dim, e);
+                        let e = merged_ir[l + 1].0.frames.remove(dim);
+                        merged_ir[l + 1].0.frames.insert(orig_dim, e);
                     }
                 }
             }
@@ -286,23 +327,24 @@ fn create_kernels(
                 // Merge l and l + 1
                 for (b, a) in merged_ir[l]
                     .0
-                     .2
+                    .frames
                     .iter()
                     .enumerate()
-                    .filter(|(_, l)| !l.3)
+                    .filter(|(_, l)| !l.reduce)
                     .map(|(i, _)| i)
                     .enumerate()
                     .collect::<Vec<_>>()
                 {
                     // Set output strides
-                    merged_ir[l].0 .2[a].2 = merged_ir[l + 1].0 .2[b].2;
+                    merged_ir[l].0.frames[a].output_stride =
+                        merged_ir[l + 1].0.frames[b].output_stride;
                     // Set reduction dims
-                    merged_ir[l].0 .2[a].3 = merged_ir[l + 1].0 .2[b].3;
+                    merged_ir[l].0.frames[a].reduce = merged_ir[l + 1].0.frames[b].reduce;
                 }
                 // Set input strides for incoming kernel
                 for dep_input in dep_inputs {
                     // Input dep_input from l + 1 is a dependency input. Let's set it's input stride to 0 for now. Note this is not always correct! Once we do more complex input sharing we need to index into local variables
-                    let input_ref = merged_ir[l + 1].0 .0[dep_input];
+                    let input_ref = merged_ir[l + 1].0.inputs[dep_input];
                     for (inputs, _, stack, _) in &mut merged_ir[l + 1].1 {
                         if let Some(dep_pos) = inputs.iter().position(|i| *i == input_ref) {
                             for (_, strides, _, _) in stack {
@@ -311,9 +353,14 @@ fn create_kernels(
                         }
                     }
                 }
-                if merged_ir[l + 1].0 .1 == "sum" {
+                if merged_ir[l + 1].0.instruction == "sum" {
                     // Need to set reduce dim iterator name
-                    let dim = merged_ir[l + 1].0 .2.iter().position(|s| s.3).unwrap();
+                    let dim = merged_ir[l + 1]
+                        .0
+                        .frames
+                        .iter()
+                        .position(|s| s.reduce)
+                        .unwrap();
                     for (_, _, m, _) in &mut merged_ir[l].1 {
                         assert!(m.len() > dim, "Are we sharing a dim?");
                         for k in &mut m.iter_mut().filter(|s| !s.3).nth(dim).unwrap().1 {
@@ -337,10 +384,10 @@ fn create_kernels(
     for (n_kernel, (stack, instructions)) in merged_ir.into_iter().enumerate() {
         // Compute grid and threadblock dim assignments
         let exec_dims = stack
-            .2
+            .frames
             .iter()
-            .filter(|i| !i.3)
-            .map(|d| d.0)
+            .filter(|i| !i.reduce)
+            .map(|d| d.size)
             .collect::<Vec<_>>();
         let grid = exec_dims
             .iter()
@@ -372,10 +419,10 @@ fn create_kernels(
         input_buffer_indexes.sort();
         input_buffer_indexes.dedup();
         let output_buffer_size = stack
-            .2
+            .frames
             .iter()
-            .filter(|i| !i.3)
-            .map(|i| i.0)
+            .filter(|i| !i.reduce)
+            .map(|i| i.size)
             .product::<usize>();
 
         // Write kernels
