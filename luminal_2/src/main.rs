@@ -430,6 +430,20 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
         for (inputs, instruction, strides, loop_dim) in instructions {
             let var_name = (b'a' + (var_names % 26) as u8) as char;
             var_names += 1;
+            let inputs = inputs
+                .iter()
+                .zip(get_inputs(&strides))
+                .map(|(inp, index)| {
+                    format!(
+                        "{}[{}]",
+                        match inp {
+                            Input::Inp(i) => (b'A' + (i % 26) as u8) as char,
+                            Input::Ref(i) => (b'a' + (i % 26) as u8) as char,
+                        },
+                        index
+                    )
+                })
+                .join(", ");
             if instruction == "sum" {
                 let (reduce_size, _, _, _) = strides.iter().find(|(_, _, _, b)| *b).unwrap();
                 let loop_dim = loop_dim.unwrap();
@@ -437,34 +451,42 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
                     "float {var_name} = 0.0;
 for (int loop_{loop_dim} = 0; loop_{loop_dim} < {reduce_size}; ++loop_{loop_dim}) {{
 {}
-	{var_name} += {};
+	{var_name} += {inputs};
 }}",
                     kernel
                         .split("\n")
                         .map(|s| format!("\t{s}"))
                         .collect::<Vec<_>>()
                         .join("\n"),
-                    get_inputs(&inputs, &strides)[0]
                 );
             } else {
                 kernel = format!(
                     "{kernel}
-{var_name} = {instruction}({});",
-                    get_inputs(&inputs, &strides).join(", ")
+float {var_name} = {instruction}({inputs});",
                 )
             }
             kernel = kernel.trim().to_string();
         }
 
-        kernel = format!(
-            "__global__ void kernel{n_kernel}({}) {{
-{}
-}}",
-            input_buffer_indexes
+        let output_index = get_inputs(
+            &stack
+                .frames
                 .iter()
-                .map(|i| format!("float* {}", (b'A' + (i % 26) as u8) as char))
-                .join(", "),
-            kernel.split("\n").map(|k| format!("\t{k}")).join("\n"),
+                .map(|f| (0, vec![(f.output_stride, None)], 0, false))
+                .collect::<Vec<_>>(),
+        )
+        .join(" + ");
+        let last_var_name = (b'a' + ((var_names - 1) % 26) as u8) as char;
+        let inputs = input_buffer_indexes
+            .iter()
+            .map(|i| format!("float* {}", (b'A' + (i % 26) as u8) as char))
+            .join(", ");
+        kernel = kernel.split("\n").map(|k| format!("\t{k}")).join("\n");
+        kernel = format!(
+            "__global__ void kernel{n_kernel}({inputs}, float* out) {{
+{kernel}
+	out[{output_index}] = {last_var_name};
+}}"
         );
 
         kernels.push(Kernel {
@@ -479,10 +501,8 @@ for (int loop_{loop_dim} = 0; loop_{loop_dim} < {reduce_size}; ++loop_{loop_dim}
     kernels
 }
 
-fn get_inputs(
-    inputs: &[Input],
-    strides: &[(usize, Vec<(usize, Option<char>)>, usize, bool)],
-) -> Vec<String> {
+fn get_inputs(strides: &[(usize, Vec<(usize, Option<char>)>, usize, bool)]) -> Vec<String> {
+    // Transpose from indexes[inputs[]] to inputs[indexes[]]
     let mut indexes = vec![vec![]; strides[0].1.len()];
     for (_, st, _, b) in strides {
         if !*b {
@@ -500,21 +520,15 @@ fn get_inputs(
         "threadIdx.y",
         "threadIdx.z",
     ];
-    inputs
+    indexes
         .iter()
-        .zip(indexes)
-        .map(|(inp, stride)| {
-            format!(
-                "{}[{}]",
-                match inp {
-                    Input::Inp(i) => (b'A' + (i % 26) as u8) as char,
-                    Input::Ref(i) => (b'a' + (i % 26) as u8) as char,
-                },
-                stride
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, (s, _))| *s != 0)
-                    .map(|(i, (s, loop_ind))| if let Some(l) = loop_ind {
+        .map(|stride| {
+            stride
+                .iter()
+                .enumerate()
+                .filter(|(_, (s, _))| *s != 0)
+                .map(|(i, (s, loop_ind))| {
+                    if let Some(l) = loop_ind {
                         format!(
                             "loop_{l}{}",
                             if *s == 1 {
@@ -533,10 +547,10 @@ fn get_inputs(
                                 format!(" * {s}")
                             }
                         )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" + ")
-            )
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" + ")
         })
         .collect()
 }
