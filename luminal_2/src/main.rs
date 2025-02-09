@@ -19,6 +19,15 @@ enum Input {
     Ref(usize), // A reference to an earlier variable in the scope
 }
 
+const PRELUDE: &str = "
+#include <metal_stdlib>
+using namespace metal;
+
+float mul(float a, float b) {
+	return a * b;
+}
+";
+
 fn main() {
     // // This is a tiled matmul. Currently we are just doing tiled loop structure but not loading a tile into smem.
     // // We need to detect when we can.
@@ -127,6 +136,7 @@ fn main() {
     // }
     // println!("---");
 
+    // This does Tensor(3, 4).mul(Tensor(3).exp().expand(4, dim=1)).sum_reduce(dim=1)
     let kernels = create_kernels(vec![
         Stack {
             inputs: vec![Input::Inp(1)],
@@ -215,31 +225,107 @@ fn main() {
     encoder.set_compute_pipeline_state(&pipeline);
 
     // Set inputs
-    let input_data: Vec<f32> = vec![1.0, 2.0, 3.0];
-    let inp_buffer = device.new_buffer_with_data(
-        input_data.as_ptr() as *mut _,
-        (input_data.len() * std::mem::size_of::<f32>()) as u64,
-        MTLResourceOptions::StorageModeShared,
-    );
-    let out_buffer = device.new_buffer(
-        (input_data.len() * std::mem::size_of::<f32>()) as u64,
-        MTLResourceOptions::StorageModeShared,
-    );
-    encoder.set_buffer(0, Some(&inp_buffer), 0);
-    encoder.set_buffer(1, Some(&out_buffer), 0);
+    let matrix = (0..12).map(|i| i as f32).collect::<Vec<_>>();
+    let vector = vec![1.0, 2.0, 3.0];
 
-    // Execute
-    encoder.dispatch_thread_groups(MTLSize::new(3, 1, 1), MTLSize::new(1, 1, 1));
-    encoder.end_encoding();
+    println!("Out: {:?}", run_graph(vec![matrix, vector], &kernels));
+}
+
+fn run_graph(inputs: Vec<Vec<f32>>, kernels: &[Kernel]) -> Vec<f32> {
+    let device = Device::system_default().unwrap();
+    let queue = device.new_command_queue();
+    let command_buffer = queue.new_command_buffer();
+
+    // Allocate input buffers
+    let mut buffers = inputs
+        .iter()
+        .map(|buf| {
+            device.new_buffer_with_data(
+                buf.as_ptr() as *mut _,
+                (buf.len() * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            )
+        })
+        .collect::<Vec<_>>();
+    let n_orig_buffers = buffers.len();
+    // Allocate output buffers
+    for kernel in kernels {
+        assert_eq!(
+            kernel.outputs.len(),
+            1,
+            "Can't handle more than one kernel output for now"
+        );
+        buffers.push(device.new_buffer(
+            (kernel.outputs[0] * std::mem::size_of::<f32>()) as u64,
+            MTLResourceOptions::StorageModeShared,
+        ));
+    }
+    // Queue up kernels
+    for (
+        n_kernel,
+        Kernel {
+            code,
+            grid,
+            threadblock,
+            inputs,
+            ..
+        },
+    ) in kernels.iter().enumerate()
+    {
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+
+        // Compile kernel
+        let options = CompileOptions::new();
+        options.set_fast_math_enabled(true);
+        let lib = device.new_library_with_source(code, &options).unwrap();
+        let pipeline_state_descriptor = ComputePipelineDescriptor::new();
+        pipeline_state_descriptor.set_compute_function(Some(
+            &lib.get_function(&format!("kernel{n_kernel}"), None)
+                .unwrap(),
+        ));
+        let pipeline = device
+            .new_compute_pipeline_state_with_function(
+                pipeline_state_descriptor.compute_function().unwrap(),
+            )
+            .unwrap();
+        encoder.set_compute_pipeline_state(&pipeline);
+
+        // Set inputs
+        for (i, input) in inputs.iter().enumerate() {
+            encoder.set_buffer(i as u64, Some(&buffers[*input]), 0);
+        }
+        // Set output
+        encoder.set_buffer(
+            inputs.len() as u64,
+            Some(&buffers[n_kernel + n_orig_buffers]),
+            0,
+        );
+
+        // Set dispatch
+        encoder.dispatch_thread_groups(
+            MTLSize::new(grid.0 as u64, grid.1 as u64, grid.2 as u64),
+            MTLSize::new(
+                threadblock.0 as u64,
+                threadblock.1 as u64,
+                threadblock.2 as u64,
+            ),
+        );
+        encoder.end_encoding();
+    }
+
+    // Run
     command_buffer.commit();
     command_buffer.wait_until_completed();
 
-    let mut data = vec![0.0; out_buffer.length() as usize / std::mem::size_of::<f32>()];
-    let ptr = out_buffer.contents() as *mut f32;
+    // Copy back last buffer
+    let buffer = buffers.last().unwrap();
+    let mut data = vec![0.0; buffer.length() as usize / std::mem::size_of::<f32>()];
+    let ptr = buffer.contents() as *mut f32;
     for (i, d) in data.iter_mut().enumerate() {
         *d = unsafe { *ptr.add(i) };
     }
-    println!("Out: {:?}", data);
+    data
 }
 
 #[derive(Clone)]
@@ -319,7 +405,7 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
                 .enumerate()
                 .filter(|(_, inp)| {
                     if let Input::Ref(i) = inp {
-                        *i < logical_index + merged_ir[l].1.len() && *i > logical_index
+                        *i < logical_index + merged_ir[l].1.len() && *i >= logical_index
                     } else {
                         false
                     }
@@ -376,7 +462,8 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
                 }
                 // Set input strides for incoming kernel
                 for dep_input in dep_inputs {
-                    // Input dep_input from l + 1 is a dependency input. Let's set it's input stride to 0 for now. Note this is not always correct! Once we do more complex input sharing we need to index into local variables
+                    // Input dep_input from l + 1 is a dependency input. Let's set it's input stride to 0 for now.
+                    // Note this is not always correct! Once we do more complex input sharing we need to index into local variables
                     let input_ref = merged_ir[l + 1].0.inputs[dep_input];
                     for (inputs, _, stack, _) in &mut merged_ir[l + 1].1 {
                         if let Some(dep_pos) = inputs.iter().position(|i| *i == input_ref) {
@@ -413,8 +500,30 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
     }
 
     let mut kernels = vec![];
-    let mut var_names = 0;
-    for (n_kernel, (stack, instructions)) in merged_ir.into_iter().enumerate() {
+    let mut logical_index_start_kernel = 0;
+    let start_internal_buffer_index = merged_ir
+        .iter()
+        .map(|(_, inst)| {
+            inst.iter()
+                .flat_map(|i| i.0.iter())
+                .filter_map(|i| {
+                    if let Input::Inp(i) = i {
+                        Some(*i + 1)
+                    } else {
+                        None
+                    }
+                })
+                .max()
+                .unwrap_or_default()
+        })
+        .max()
+        .unwrap_or_default();
+    let logical_indexes_to_kernel_indexes = merged_ir
+        .iter()
+        .enumerate()
+        .flat_map(|(i, inner)| inner.1.iter().map(move |_| i))
+        .collect::<Vec<_>>();
+    for (n_kernel, (stack, mut instructions)) in merged_ir.into_iter().enumerate() {
         // Compute grid and threadblock dim assignments
         let exec_dims = stack
             .frames
@@ -437,6 +546,20 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
 
         // TODO: detect when we can use shared mem
 
+        // Change inputs if they reference anything outside this kernel
+        for (inps, _, _, _) in &mut instructions {
+            for inp in inps {
+                if let Input::Ref(i) = *inp {
+                    if i < logical_index_start_kernel {
+                        *inp = Input::Inp(
+                            logical_indexes_to_kernel_indexes[i] + start_internal_buffer_index,
+                        );
+                    } else {
+                        *inp = Input::Ref(i - logical_index_start_kernel);
+                    }
+                }
+            }
+        }
         // Get input buffer indexes
         let mut input_buffer_indexes = instructions
             .iter()
@@ -460,20 +583,25 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
 
         // Write kernels
         let mut kernel = "".to_string();
-        for (inputs, instruction, strides, loop_dim) in instructions {
+        let mut var_names = 0;
+        for (inputs, instruction, strides, loop_dim) in &instructions {
             let var_name = (b'a' + (var_names % 26) as u8) as char;
             var_names += 1;
             let inputs = inputs
                 .iter()
-                .zip(get_inputs(&strides))
+                .zip(get_inputs(strides))
                 .map(|(inp, index)| {
                     format!(
-                        "{}[{}]",
+                        "{}{}",
                         match inp {
                             Input::Inp(i) => (b'A' + (i % 26) as u8) as char,
                             Input::Ref(i) => (b'a' + (i % 26) as u8) as char,
                         },
-                        index
+                        if index.is_empty() {
+                            "".to_string()
+                        } else {
+                            format!("[{index}]")
+                        }
                     )
                 })
                 .join(", ");
@@ -515,17 +643,16 @@ float {var_name} = {instruction}({inputs});",
             .enumerate()
             .map(|(index, i)| {
                 format!(
-                    "device float* {} [[buffer({index})]]",
+                    "\tdevice float* {} [[buffer({index})]]",
                     (b'A' + (i % 26) as u8) as char
                 )
             })
             .join(",\n");
         kernel = kernel.split("\n").map(|k| format!("\t{k}")).join("\n");
         kernel = format!(
-            "#include <metal_stdlib>
-using namespace metal;
+            "{PRELUDE}
 kernel void kernel{n_kernel}(
-	{inputs},
+{inputs},
 	device float* out [[buffer({})]],
 	uint3 blockIdx [[threadgroup_position_in_grid]],
 	uint3 threadIdx [[thread_position_in_threadgroup]]
@@ -543,6 +670,7 @@ kernel void kernel{n_kernel}(
             inputs: input_buffer_indexes,
             outputs: vec![output_buffer_size],
         });
+        logical_index_start_kernel += instructions.len();
     }
 
     kernels
