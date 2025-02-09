@@ -8,33 +8,15 @@
 // If flattened IR doesn't go into egglog, put nested IR into egglog and write flattening function
 
 use itertools::Itertools;
+use metal_rs::{
+    CompileOptions, ComputePassDescriptor, ComputePipelineDescriptor, Device, MTLResourceOptions,
+    MTLSize,
+};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Input {
     Inp(usize), // An input to this scope
     Ref(usize), // A reference to an earlier variable in the scope
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct Block {
-    n: usize,                    // The size of the block
-    inputs: Vec<(Input, usize)>, // Inputs and strides
-    body: Vec<Body>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum Body {
-    Block(Block),
-    Expr(Expr),
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum Expr {
-    Add(Input, Input),
-    Mul(Input, Input),
-    Exp(Input),
-    Sin(Input),
-    SumReduce(Input),
 }
 
 fn main() {
@@ -199,14 +181,65 @@ fn main() {
         code,
         grid,
         threadblock,
-        ..
-    } in kernels
+        inputs,
+        outputs,
+    } in &kernels
     {
         println!("---");
         println!("Grid: {grid:?} Threadblock: {threadblock:?}");
         println!("{code}");
+        println!("inputs: {:?}", inputs);
+        println!("outputs: {:?}", outputs);
     }
     println!("---");
+
+    // try to run kernel
+    let device = Device::system_default().unwrap();
+    let queue = device.new_command_queue();
+    let command_buffer = queue.new_command_buffer();
+    let encoder =
+        command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+    let options = CompileOptions::new();
+    options.set_fast_math_enabled(true);
+    let lib = device
+        .new_library_with_source(&kernels[0].code, &options)
+        .unwrap();
+    let pipeline_state_descriptor = ComputePipelineDescriptor::new();
+    pipeline_state_descriptor
+        .set_compute_function(Some(&lib.get_function("kernel0", None).unwrap()));
+    let pipeline = device
+        .new_compute_pipeline_state_with_function(
+            pipeline_state_descriptor.compute_function().unwrap(),
+        )
+        .unwrap();
+    encoder.set_compute_pipeline_state(&pipeline);
+
+    // Set inputs
+    let input_data: Vec<f32> = vec![1.0, 2.0, 3.0];
+    let inp_buffer = device.new_buffer_with_data(
+        input_data.as_ptr() as *mut _,
+        (input_data.len() * std::mem::size_of::<f32>()) as u64,
+        MTLResourceOptions::StorageModeShared,
+    );
+    let out_buffer = device.new_buffer(
+        (input_data.len() * std::mem::size_of::<f32>()) as u64,
+        MTLResourceOptions::StorageModeShared,
+    );
+    encoder.set_buffer(0, Some(&inp_buffer), 0);
+    encoder.set_buffer(1, Some(&out_buffer), 0);
+
+    // Execute
+    encoder.dispatch_thread_groups(MTLSize::new(3, 1, 1), MTLSize::new(1, 1, 1));
+    encoder.end_encoding();
+    command_buffer.commit();
+    command_buffer.wait_until_completed();
+
+    let mut data = vec![0.0; out_buffer.length() as usize / std::mem::size_of::<f32>()];
+    let ptr = out_buffer.contents() as *mut f32;
+    for (i, d) in data.iter_mut().enumerate() {
+        *d = unsafe { *ptr.add(i) };
+    }
+    println!("Out: {:?}", data);
 }
 
 #[derive(Clone)]
@@ -479,14 +512,28 @@ float {var_name} = {instruction}({inputs});",
         let last_var_name = (b'a' + ((var_names - 1) % 26) as u8) as char;
         let inputs = input_buffer_indexes
             .iter()
-            .map(|i| format!("float* {}", (b'A' + (i % 26) as u8) as char))
-            .join(", ");
+            .enumerate()
+            .map(|(index, i)| {
+                format!(
+                    "device float* {} [[buffer({index})]]",
+                    (b'A' + (i % 26) as u8) as char
+                )
+            })
+            .join(",\n");
         kernel = kernel.split("\n").map(|k| format!("\t{k}")).join("\n");
         kernel = format!(
-            "__global__ void kernel{n_kernel}({inputs}, float* out) {{
+            "#include <metal_stdlib>
+using namespace metal;
+kernel void kernel{n_kernel}(
+	{inputs},
+	device float* out [[buffer({})]],
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]]
+) {{
 {kernel}
 	out[{output_index}] = {last_var_name};
-}}"
+}}",
+            input_buffer_indexes.len()
         );
 
         kernels.push(Kernel {

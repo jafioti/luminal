@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 itertools = "0.14.0"
+metal-rs = { version = "0.28.0", package = "metal", features = ["mps"] }
