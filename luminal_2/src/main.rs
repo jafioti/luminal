@@ -259,13 +259,13 @@ fn main() {
                 StackFrame {
                     size: 1,
                     input_strides: vec![0],
-                    output_stride: 1,
+                    output_stride: 0,
                     ..Default::default()
                 },
                 StackFrame {
                     size: 1,
                     input_strides: vec![0],
-                    output_stride: 1,
+                    output_stride: 0,
                     ..Default::default()
                 },
                 StackFrame {
@@ -290,13 +290,13 @@ fn main() {
                 StackFrame {
                     size: 1,
                     input_strides: vec![0],
-                    output_stride: 1,
+                    output_stride: 0,
                     ..Default::default()
                 },
                 StackFrame {
                     size: 1,
                     input_strides: vec![0],
-                    output_stride: 1,
+                    output_stride: 0,
                     ..Default::default()
                 },
                 StackFrame {
@@ -320,26 +320,26 @@ fn main() {
                 },
                 StackFrame {
                     size: 1,
-                    input_strides: vec![0],
-                    output_stride: 1,
+                    input_strides: vec![0, 0],
+                    output_stride: 0,
                     ..Default::default()
                 },
                 StackFrame {
                     size: 1,
-                    input_strides: vec![0],
+                    input_strides: vec![0, 0],
+                    output_stride: 0,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 4,
+                    input_strides: vec![1, 0],
+                    output_stride: 4,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 4,
+                    input_strides: vec![0, 1],
                     output_stride: 1,
-                    ..Default::default()
-                },
-                StackFrame {
-                    size: 4,
-                    input_strides: vec![1, 0],
-                    output_stride: 4,
-                    ..Default::default()
-                },
-                StackFrame {
-                    size: 4,
-                    input_strides: vec![1, 0],
-                    output_stride: 4,
                     ..Default::default()
                 },
             ],
@@ -437,14 +437,10 @@ fn main() {
     //     .flat_map(|i| (0..8).map(move |j| if j == i { 1.0 } else { 0.0 }))
     //     .collect::<Vec<_>>();
 
-    println!("Out: {:?}", run_graph(vec![a], &kernels));
+    println!("Out: {:?}", run_graph(vec![a], &kernels).last().unwrap());
 }
 
-// fn run_graph(inputs: Vec<Vec<f32>>, kernels: &[Kernel]) -> Vec<f32> {
-//     todo!()
-// }
-
-fn run_graph(inputs: Vec<Vec<f32>>, kernels: &[Kernel]) -> Vec<f32> {
+fn run_graph(inputs: Vec<Vec<f32>>, kernels: &[Kernel]) -> Vec<Vec<f32>> {
     let device = Device::system_default().unwrap();
     let queue = device.new_command_queue();
     let command_buffer = queue.new_command_buffer();
@@ -532,12 +528,15 @@ fn run_graph(inputs: Vec<Vec<f32>>, kernels: &[Kernel]) -> Vec<f32> {
     command_buffer.commit();
     command_buffer.wait_until_completed();
 
-    // Copy back last buffer
-    let buffer = buffers.last().unwrap();
-    let mut data = vec![0.0; buffer.length() as usize / std::mem::size_of::<f32>()];
-    let ptr = buffer.contents() as *mut f32;
-    for (i, d) in data.iter_mut().enumerate() {
-        *d = unsafe { *ptr.add(i) };
+    // Copy back intermediate and output buffers
+    let mut data = vec![];
+    for buffer in &buffers[inputs.len()..] {
+        let mut curr_data = vec![0.0; buffer.length() as usize / std::mem::size_of::<f32>()];
+        let ptr = buffer.contents() as *mut f32;
+        for (i, d) in curr_data.iter_mut().enumerate() {
+            *d = unsafe { *ptr.add(i) };
+        }
+        data.push(curr_data)
     }
     data
 }
@@ -968,6 +967,7 @@ fn get_inputs(frames: &[StackFrame], output_strides: bool) -> Vec<String> {
         "threadIdx.y",
         "threadIdx.z",
     ];
+
     indexes
         .iter()
         .map(|stride| {
