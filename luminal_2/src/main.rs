@@ -277,21 +277,27 @@ fn main() {
             instruction: "exp".to_string(),
             frames: vec![
                 StackFrame {
+                    size: 1,
+                    input_strides: vec![0],
+                    output_stride: 0,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 1,
+                    input_strides: vec![0],
+                    output_stride: 0,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 1,
+                    input_strides: vec![0],
+                    output_stride: 0,
+                    ..Default::default()
+                },
+                StackFrame {
                     size: 3,
                     input_strides: vec![4],
                     output_stride: 4,
-                    ..Default::default()
-                },
-                StackFrame {
-                    size: 1,
-                    input_strides: vec![0],
-                    output_stride: 0,
-                    ..Default::default()
-                },
-                StackFrame {
-                    size: 1,
-                    input_strides: vec![0],
-                    output_stride: 0,
                     ..Default::default()
                 },
                 StackFrame {
@@ -308,21 +314,27 @@ fn main() {
             instruction: "sin".to_string(),
             frames: vec![
                 StackFrame {
+                    size: 1,
+                    input_strides: vec![0],
+                    output_stride: 0,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 1,
+                    input_strides: vec![0],
+                    output_stride: 0,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 1,
+                    input_strides: vec![0],
+                    output_stride: 0,
+                    ..Default::default()
+                },
+                StackFrame {
                     size: 3,
                     input_strides: vec![4],
                     output_stride: 4,
-                    ..Default::default()
-                },
-                StackFrame {
-                    size: 1,
-                    input_strides: vec![0],
-                    output_stride: 0,
-                    ..Default::default()
-                },
-                StackFrame {
-                    size: 1,
-                    input_strides: vec![0],
-                    output_stride: 0,
                     ..Default::default()
                 },
                 StackFrame {
@@ -339,21 +351,27 @@ fn main() {
             instruction: "mul".to_string(),
             frames: vec![
                 StackFrame {
+                    size: 1,
+                    input_strides: vec![0, 0],
+                    output_stride: 0,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 1,
+                    input_strides: vec![0, 0],
+                    output_stride: 0,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 1,
+                    input_strides: vec![0, 0],
+                    output_stride: 0,
+                    ..Default::default()
+                },
+                StackFrame {
                     size: 3,
                     input_strides: vec![4, 4],
                     output_stride: 16,
-                    ..Default::default()
-                },
-                StackFrame {
-                    size: 1,
-                    input_strides: vec![0, 0],
-                    output_stride: 0,
-                    ..Default::default()
-                },
-                StackFrame {
-                    size: 1,
-                    input_strides: vec![0, 0],
-                    output_stride: 0,
                     ..Default::default()
                 },
                 StackFrame {
