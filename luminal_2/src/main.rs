@@ -7,8 +7,6 @@
 // Put flattened IR into egglog
 // If flattened IR doesn't go into egglog, put nested IR into egglog and write flattening function
 
-use std::f32::consts::PI;
-
 use itertools::Itertools;
 use metal_rs::{
     CompileOptions, ComputePassDescriptor, ComputePipelineDescriptor, Device, MTLResourceOptions,
@@ -33,168 +31,49 @@ float mul(float a, float b) {
 fn main() {
     // This is a 8x8x8 tiled matmul. Currently we are just doing tiled loop structure but not loading a tile into smem.
     // We need to detect when we can.
-    // let kernels = create_kernels(vec![
-    //     Stack {
-    //         inputs: vec![Input::Inp(0), Input::Inp(1)],
-    //         instruction: "mul".to_string(),
-    //         frames: vec![
-    //             StackFrame {
-    //                 size: 4,
-    //                 input_strides: vec![16, 0],
-    //                 output_stride: 16,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 4,
-    //                 input_strides: vec![0, 2],
-    //                 output_stride: 2,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 1,
-    //                 input_strides: vec![0, 0],
-    //                 output_stride: 0,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 4,
-    //                 input_strides: vec![2, 16],
-    //                 output_stride: 4,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 2,
-    //                 input_strides: vec![8, 0],
-    //                 output_stride: 2,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 2,
-    //                 input_strides: vec![0, 1],
-    //                 output_stride: 1,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 2,
-    //                 input_strides: vec![1, 8],
-    //                 output_stride: 1,
-    //                 ..Default::default()
-    //             },
-    //         ],
-    //     },
-    //     Stack {
-    //         inputs: vec![Input::Ref(0)],
-    //         instruction: "sum".to_string(),
-    //         frames: vec![
-    //             StackFrame {
-    //                 size: 4,
-    //                 input_strides: vec![16],
-    //                 output_stride: 16,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 4,
-    //                 input_strides: vec![2],
-    //                 output_stride: 2,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 1,
-    //                 input_strides: vec![0],
-    //                 output_stride: 0,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 4,
-    //                 input_strides: vec![4],
-    //                 output_stride: 4,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 2,
-    //                 input_strides: vec![2],
-    //                 output_stride: 2,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 2,
-    //                 input_strides: vec![1],
-    //                 output_stride: 1,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 2,
-    //                 input_strides: vec![1],
-    //                 output_stride: 1,
-    //                 reduce: true,
-    //                 ..Default::default()
-    //             },
-    //         ],
-    //     },
-    //     Stack {
-    //         inputs: vec![Input::Ref(1)],
-    //         instruction: "sum".to_string(),
-    //         frames: vec![
-    //             StackFrame {
-    //                 size: 4,
-    //                 input_strides: vec![16],
-    //                 output_stride: 16,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 4,
-    //                 input_strides: vec![2],
-    //                 output_stride: 2,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 1,
-    //                 input_strides: vec![0],
-    //                 output_stride: 0,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 2,
-    //                 input_strides: vec![2],
-    //                 output_stride: 8,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 2,
-    //                 input_strides: vec![1],
-    //                 output_stride: 1,
-    //                 ..Default::default()
-    //             },
-    //             StackFrame {
-    //                 size: 4,
-    //                 input_strides: vec![4],
-    //                 output_stride: 4,
-    //                 reduce: true,
-    //                 ..Default::default()
-    //             },
-    //         ],
-    //     },
-    // ]);
-
     let kernels = create_kernels(vec![
         Stack {
             inputs: vec![Input::Inp(0), Input::Inp(1)],
             instruction: "mul".to_string(),
             frames: vec![
                 StackFrame {
-                    size: 8,
-                    input_strides: vec![8, 0],
-                    output_stride: 8,
+                    size: 4,
+                    input_strides: vec![16, 0],
+                    output_stride: 16,
                     ..Default::default()
                 },
                 StackFrame {
-                    size: 8,
+                    size: 4,
+                    input_strides: vec![0, 2],
+                    output_stride: 2,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 1,
+                    input_strides: vec![0, 0],
+                    output_stride: 0,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 4,
+                    input_strides: vec![2, 16],
+                    output_stride: 4,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 2,
+                    input_strides: vec![8, 0],
+                    output_stride: 2,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 2,
                     input_strides: vec![0, 1],
                     output_stride: 1,
                     ..Default::default()
                 },
                 StackFrame {
-                    size: 8,
+                    size: 2,
                     input_strides: vec![1, 8],
                     output_stride: 1,
                     ..Default::default()
@@ -206,27 +85,146 @@ fn main() {
             instruction: "sum".to_string(),
             frames: vec![
                 StackFrame {
-                    size: 8,
-                    input_strides: vec![8],
-                    output_stride: 8,
+                    size: 4,
+                    input_strides: vec![16],
+                    output_stride: 16,
                     ..Default::default()
                 },
                 StackFrame {
-                    size: 8,
+                    size: 4,
+                    input_strides: vec![2],
+                    output_stride: 2,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 1,
+                    input_strides: vec![0],
+                    output_stride: 0,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 4,
+                    input_strides: vec![4],
+                    output_stride: 4,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 2,
+                    input_strides: vec![2],
+                    output_stride: 2,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 2,
                     input_strides: vec![1],
                     output_stride: 1,
                     ..Default::default()
                 },
                 StackFrame {
-                    size: 8,
+                    size: 2,
                     input_strides: vec![1],
+                    output_stride: 1,
+                    reduce: true,
+                    ..Default::default()
+                },
+            ],
+        },
+        Stack {
+            inputs: vec![Input::Ref(1)],
+            instruction: "sum".to_string(),
+            frames: vec![
+                StackFrame {
+                    size: 4,
+                    input_strides: vec![16],
+                    output_stride: 16,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 4,
+                    input_strides: vec![2],
+                    output_stride: 2,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 1,
+                    input_strides: vec![0],
                     output_stride: 0,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 2,
+                    input_strides: vec![2],
+                    output_stride: 8,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 2,
+                    input_strides: vec![1],
+                    output_stride: 1,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 4,
+                    input_strides: vec![4],
+                    output_stride: 4,
                     reduce: true,
                     ..Default::default()
                 },
             ],
         },
     ]);
+
+    // let kernels = create_kernels(vec![
+    //     Stack {
+    //         inputs: vec![Input::Inp(0), Input::Inp(1)],
+    //         instruction: "mul".to_string(),
+    //         frames: vec![
+    //             StackFrame {
+    //                 size: 8,
+    //                 input_strides: vec![8, 0],
+    //                 output_stride: 8,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 8,
+    //                 input_strides: vec![0, 1],
+    //                 output_stride: 1,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 8,
+    //                 input_strides: vec![1, 8],
+    //                 output_stride: 1,
+    //                 ..Default::default()
+    //             },
+    //         ],
+    //     },
+    //     Stack {
+    //         inputs: vec![Input::Ref(0)],
+    //         instruction: "sum".to_string(),
+    //         frames: vec![
+    //             StackFrame {
+    //                 size: 8,
+    //                 input_strides: vec![8],
+    //                 output_stride: 8,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 8,
+    //                 input_strides: vec![1],
+    //                 output_stride: 1,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 8,
+    //                 input_strides: vec![1],
+    //                 output_stride: 0,
+    //                 reduce: true,
+    //                 ..Default::default()
+    //             },
+    //         ],
+    //     },
+    // ]);
 
     println!("Tiled Matmul");
     for Kernel {
@@ -605,19 +603,19 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
                 }
                 if merged_ir[l + 1].0.instruction == "sum" {
                     // Need to set reduce dim iterator name
-                    let dim = merged_ir[l + 1]
+                    let reduce_dim = merged_ir[l + 1]
                         .0
                         .frames
                         .iter()
                         .position(|s| s.reduce)
                         .unwrap();
-                    let loop_char = merged_ir[l + 1].1[0].frames[dim].loop_char;
+                    let loop_char = merged_ir[l + 1].1[0].frames[reduce_dim].loop_char;
                     for Stack { frames, .. } in &mut merged_ir[l].1 {
-                        assert!(frames.len() > dim, "Are we sharing a dim?");
+                        assert!(frames.len() > reduce_dim, "Are we sharing a dim?");
                         frames
                             .iter_mut()
                             .filter(|s| !s.reduce)
-                            .nth(dim)
+                            .nth(reduce_dim)
                             .unwrap()
                             .loop_char = loop_char;
                     }
@@ -635,18 +633,13 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
     let mut logical_index_start_kernel = 0;
     let start_internal_buffer_index = merged_ir
         .iter()
-        .map(|(_, inst)| {
-            inst.iter()
-                .flat_map(|i| i.inputs.iter())
-                .filter_map(|i| {
-                    if let Input::Inp(i) = i {
-                        Some(i + 1)
-                    } else {
-                        None
-                    }
-                })
-                .max()
-                .unwrap_or_default()
+        .flat_map(|(_, inst)| inst.iter().flat_map(|i| i.inputs.iter()))
+        .filter_map(|i| {
+            if let Input::Inp(i) = i {
+                Some(i + 1)
+            } else {
+                None
+            }
         })
         .max()
         .unwrap_or_default();
@@ -680,12 +673,7 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
         // TODO: detect when we can use shared mem
 
         // Change inputs if they reference anything outside this kernel
-        for Stack {
-            inputs,
-            instruction,
-            frames,
-        } in &mut instructions
-        {
+        for Stack { inputs, .. } in &mut instructions {
             for inp in inputs {
                 if let Input::Ref(i) = *inp {
                     if i < logical_index_start_kernel {
@@ -734,18 +722,16 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
                 .iter()
                 .zip(get_inputs(frames))
                 .map(|(inp, index)| {
-                    format!(
-                        "{}{}",
-                        match inp {
-                            Input::Inp(i) => (b'A' + (i % 26) as u8) as char,
-                            Input::Ref(i) => (b'a' + (i % 26) as u8) as char,
-                        },
-                        if index.is_empty() {
-                            "".to_string()
-                        } else {
-                            format!("[{index}]")
-                        }
-                    )
+                    let var = match inp {
+                        Input::Inp(i) => (b'A' + (i % 26) as u8) as char,
+                        Input::Ref(i) => (b'a' + (i % 26) as u8) as char,
+                    };
+                    let ind = if index.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!("[{index}]")
+                    };
+                    format!("{var}{ind}")
                 })
                 .join(", ");
             if instruction == "sum" {
@@ -818,11 +804,9 @@ fn get_inputs(frames: &[StackFrame]) -> Vec<String> {
     // Transpose from indexes[inputs[]] to inputs[indexes[]]
     let mut indexes = vec![vec![]; frames[0].input_strides.len()];
     for StackFrame {
-        size,
         input_strides,
-        loop_char,
-        output_stride,
         reduce,
+        ..
     } in frames
     {
         if !*reduce {
