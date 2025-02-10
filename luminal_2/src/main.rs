@@ -7,10 +7,10 @@
 // If flattened IR doesn't go into egglog, put nested IR into egglog and write flattening function
 
 use itertools::Itertools;
-use metal_rs::{
-    CompileOptions, ComputePassDescriptor, ComputePipelineDescriptor, Device, MTLResourceOptions,
-    MTLSize,
-};
+// use metal_rs::{
+//     CompileOptions, ComputePassDescriptor, ComputePipelineDescriptor, Device, MTLResourceOptions,
+//     MTLSize,
+// };
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Input {
@@ -275,6 +275,7 @@ fn main() {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         },
         Stack {
             inputs: vec![Input::Inp(0)],
@@ -305,6 +306,7 @@ fn main() {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         },
         Stack {
             inputs: vec![Input::Ref(0), Input::Ref(1)],
@@ -341,6 +343,7 @@ fn main() {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         },
     ]);
 
@@ -438,107 +441,112 @@ fn main() {
 }
 
 fn run_graph(inputs: Vec<Vec<f32>>, kernels: &[Kernel]) -> Vec<f32> {
-    let device = Device::system_default().unwrap();
-    let queue = device.new_command_queue();
-    let command_buffer = queue.new_command_buffer();
-
-    // Allocate input buffers
-    let mut buffers = inputs
-        .iter()
-        .map(|buf| {
-            device.new_buffer_with_data(
-                buf.as_ptr() as *mut _,
-                (buf.len() * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::StorageModeShared,
-            )
-        })
-        .collect::<Vec<_>>();
-    let n_orig_buffers = buffers.len();
-    // Allocate output buffers
-    for kernel in kernels {
-        assert_eq!(
-            kernel.outputs.len(),
-            1,
-            "Can't handle more than one kernel output for now"
-        );
-        buffers.push(device.new_buffer(
-            (kernel.outputs[0] * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::StorageModeShared,
-        ));
-    }
-    // Queue up kernels
-    for (
-        n_kernel,
-        Kernel {
-            code,
-            grid,
-            threadblock,
-            inputs,
-            ..
-        },
-    ) in kernels.iter().enumerate()
-    {
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-
-        // Compile kernel
-        let options = CompileOptions::new();
-        options.set_fast_math_enabled(true);
-        let lib = device.new_library_with_source(code, &options).unwrap();
-        let pipeline_state_descriptor = ComputePipelineDescriptor::new();
-        pipeline_state_descriptor.set_compute_function(Some(
-            &lib.get_function(&format!("kernel{n_kernel}"), None)
-                .unwrap(),
-        ));
-        let pipeline = device
-            .new_compute_pipeline_state_with_function(
-                pipeline_state_descriptor.compute_function().unwrap(),
-            )
-            .unwrap();
-        encoder.set_compute_pipeline_state(&pipeline);
-
-        // Set inputs
-        for (i, input) in inputs.iter().enumerate() {
-            encoder.set_buffer(i as u64, Some(&buffers[*input]), 0);
-        }
-        // Set output
-        encoder.set_buffer(
-            inputs.len() as u64,
-            Some(&buffers[n_kernel + n_orig_buffers]),
-            0,
-        );
-
-        // Set dispatch
-        encoder.dispatch_thread_groups(
-            MTLSize::new(grid.0 as u64, grid.1 as u64, grid.2 as u64),
-            MTLSize::new(
-                threadblock.0 as u64,
-                threadblock.1 as u64,
-                threadblock.2 as u64,
-            ),
-        );
-        encoder.end_encoding();
-    }
-
-    // Run
-    command_buffer.commit();
-    command_buffer.wait_until_completed();
-
-    // Copy back last buffer
-    let buffer = buffers.last().unwrap();
-    let mut data = vec![0.0; buffer.length() as usize / std::mem::size_of::<f32>()];
-    let ptr = buffer.contents() as *mut f32;
-    for (i, d) in data.iter_mut().enumerate() {
-        *d = unsafe { *ptr.add(i) };
-    }
-    data
+    todo!()
 }
 
-#[derive(Clone, Debug)]
+// fn run_graph(inputs: Vec<Vec<f32>>, kernels: &[Kernel]) -> Vec<f32> {
+//     let device = Device::system_default().unwrap();
+//     let queue = device.new_command_queue();
+//     let command_buffer = queue.new_command_buffer();
+
+//     // Allocate input buffers
+//     let mut buffers = inputs
+//         .iter()
+//         .map(|buf| {
+//             device.new_buffer_with_data(
+//                 buf.as_ptr() as *mut _,
+//                 (buf.len() * std::mem::size_of::<f32>()) as u64,
+//                 MTLResourceOptions::StorageModeShared,
+//             )
+//         })
+//         .collect::<Vec<_>>();
+//     let n_orig_buffers = buffers.len();
+//     // Allocate output buffers
+//     for kernel in kernels {
+//         assert_eq!(
+//             kernel.outputs.len(),
+//             1,
+//             "Can't handle more than one kernel output for now"
+//         );
+//         buffers.push(device.new_buffer(
+//             (kernel.outputs[0] * std::mem::size_of::<f32>()) as u64,
+//             MTLResourceOptions::StorageModeShared,
+//         ));
+//     }
+//     // Queue up kernels
+//     for (
+//         n_kernel,
+//         Kernel {
+//             code,
+//             grid,
+//             threadblock,
+//             inputs,
+//             ..
+//         },
+//     ) in kernels.iter().enumerate()
+//     {
+//         let encoder =
+//             command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+
+//         // Compile kernel
+//         let options = CompileOptions::new();
+//         options.set_fast_math_enabled(true);
+//         let lib = device.new_library_with_source(code, &options).unwrap();
+//         let pipeline_state_descriptor = ComputePipelineDescriptor::new();
+//         pipeline_state_descriptor.set_compute_function(Some(
+//             &lib.get_function(&format!("kernel{n_kernel}"), None)
+//                 .unwrap(),
+//         ));
+//         let pipeline = device
+//             .new_compute_pipeline_state_with_function(
+//                 pipeline_state_descriptor.compute_function().unwrap(),
+//             )
+//             .unwrap();
+//         encoder.set_compute_pipeline_state(&pipeline);
+
+//         // Set inputs
+//         for (i, input) in inputs.iter().enumerate() {
+//             encoder.set_buffer(i as u64, Some(&buffers[*input]), 0);
+//         }
+//         // Set output
+//         encoder.set_buffer(
+//             inputs.len() as u64,
+//             Some(&buffers[n_kernel + n_orig_buffers]),
+//             0,
+//         );
+
+//         // Set dispatch
+//         encoder.dispatch_thread_groups(
+//             MTLSize::new(grid.0 as u64, grid.1 as u64, grid.2 as u64),
+//             MTLSize::new(
+//                 threadblock.0 as u64,
+//                 threadblock.1 as u64,
+//                 threadblock.2 as u64,
+//             ),
+//         );
+//         encoder.end_encoding();
+//     }
+
+//     // Run
+//     command_buffer.commit();
+//     command_buffer.wait_until_completed();
+
+//     // Copy back last buffer
+//     let buffer = buffers.last().unwrap();
+//     let mut data = vec![0.0; buffer.length() as usize / std::mem::size_of::<f32>()];
+//     let ptr = buffer.contents() as *mut f32;
+//     for (i, d) in data.iter_mut().enumerate() {
+//         *d = unsafe { *ptr.add(i) };
+//     }
+//     data
+// }
+
+#[derive(Clone, Debug, Default)]
 struct Stack {
     inputs: Vec<Input>,
     instruction: String,
     frames: Vec<StackFrame>,
+    kernel_output: bool, // Do we need this output for another kernel?
 }
 
 #[derive(Clone, Debug, Default)]
@@ -698,7 +706,6 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
     }
 
     let mut kernels = vec![];
-    let mut logical_index_start_kernel = 0;
     let start_internal_buffer_index = merged_ir
         .iter()
         .flat_map(|(_, inst)| inst.iter().flat_map(|i| i.inputs.iter()))
@@ -714,10 +721,59 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
     let logical_indexes_to_kernel_indexes = merged_ir
         .iter()
         .enumerate()
-        .flat_map(|(i, inner)| inner.1.iter().map(move |_| i))
+        .flat_map(|(i, inner)| inner.1.iter().enumerate().map(move |(j, _)| (i, j)))
         .collect::<Vec<_>>();
+    // Mark cross kernel buffers as outputs
+    let mut logical_index_start_kernel = 0;
+    for (_, instructions) in merged_ir.clone() {
+        // Change inputs if they reference anything outside this kernel
+        for Stack { inputs, .. } in &instructions {
+            for inp in inputs {
+                if let Input::Ref(i) = inp {
+                    if *i < logical_index_start_kernel {
+                        // Mark that stack as an output
+                        let (kernel, stack) = logical_indexes_to_kernel_indexes[*i];
+                        merged_ir[kernel].1[stack].kernel_output = true;
+                    }
+                }
+            }
+        }
+        logical_index_start_kernel += instructions.len();
+    }
+    let mut internal_buffer = 0;
+    let logical_indexes_to_buffer_indexes = merged_ir
+        .iter()
+        .flat_map(|(_, s)| {
+            s.iter().map(move |s| {
+                let b = internal_buffer;
+                if s.kernel_output {
+                    internal_buffer += 1;
+                }
+                b
+            })
+        })
+        .collect::<Vec<_>>();
+    // Remap inputs
+    logical_index_start_kernel = 0;
+    for (_, instructions) in &mut merged_ir {
+        // Change inputs if they reference anything outside this kernel
+        for Stack { inputs, .. } in &mut *instructions {
+            for inp in inputs {
+                if let Input::Ref(i) = *inp {
+                    if i < logical_index_start_kernel {
+                        *inp = Input::Inp(
+                            logical_indexes_to_buffer_indexes[i] + start_internal_buffer_index,
+                        );
+                    } else {
+                        *inp = Input::Ref(i - logical_index_start_kernel);
+                    }
+                }
+            }
+        }
+        logical_index_start_kernel += instructions.len();
+    }
     println!("{:?}", merged_ir);
-    for (n_kernel, (stack, mut instructions)) in merged_ir.into_iter().enumerate() {
+    for (n_kernel, (stack, instructions)) in merged_ir.into_iter().enumerate() {
         // Compute grid and threadblock dim assignments
         let exec_dims = stack
             .frames
@@ -740,20 +796,6 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
 
         // TODO: detect when we can use shared mem
 
-        // Change inputs if they reference anything outside this kernel
-        for Stack { inputs, .. } in &mut instructions {
-            for inp in inputs {
-                if let Input::Ref(i) = *inp {
-                    if i < logical_index_start_kernel {
-                        *inp = Input::Inp(
-                            logical_indexes_to_kernel_indexes[i] + start_internal_buffer_index,
-                        );
-                    } else {
-                        *inp = Input::Ref(i - logical_index_start_kernel);
-                    }
-                }
-            }
-        }
         // Get input buffer indexes
         let mut input_buffer_indexes = instructions
             .iter()
@@ -778,17 +820,19 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
         // Write kernels
         let mut kernel = "".to_string();
         let mut var_names = 0;
+        let mut kernel_output_num = 0;
         for Stack {
             inputs,
             instruction,
             frames,
+            kernel_output,
         } in &instructions
         {
             let var_name = (b'a' + (var_names % 26) as u8) as char;
             var_names += 1;
             let inputs = inputs
                 .iter()
-                .zip(get_inputs(frames))
+                .zip(get_inputs(frames, false))
                 .map(|(inp, index)| {
                     let var = match inp {
                         Input::Inp(i) => (b'A' + (i % 26) as u8) as char,
@@ -825,11 +869,17 @@ for (int loop_{loop_char} = 0; loop_{loop_char} < {size}; ++loop_{loop_char}) {{
 float {var_name} = {instruction}({inputs});",
                 )
             }
+            if *kernel_output {
+                kernel = format!(
+                    "{kernel}
+out{kernel_output_num}[{}] = {var_name};",
+                    get_inputs(&frames, true)[0]
+                );
+                kernel_output_num += 1;
+            }
             kernel = kernel.trim().to_string();
         }
 
-        let output_index = get_inputs(&stack.frames).join(" + ");
-        let last_var_name = (b'a' + ((var_names - 1) % 26) as u8) as char;
         let inputs = input_buffer_indexes
             .iter()
             .enumerate()
@@ -850,7 +900,6 @@ kernel void kernel{n_kernel}(
 	uint3 threadIdx [[thread_position_in_threadgroup]]
 ) {{
 {kernel}
-	out[{output_index}] = {last_var_name};
 }}",
             input_buffer_indexes.len()
         );
@@ -862,24 +911,35 @@ kernel void kernel{n_kernel}(
             inputs: input_buffer_indexes,
             outputs: vec![output_buffer_size],
         });
-        logical_index_start_kernel += instructions.len();
     }
 
     kernels
 }
 
-fn get_inputs(frames: &[StackFrame]) -> Vec<String> {
+fn get_inputs(frames: &[StackFrame], output_strides: bool) -> Vec<String> {
     // Transpose from indexes[inputs[]] to inputs[indexes[]]
-    let mut indexes = vec![vec![]; frames[0].input_strides.len()];
+    let mut indexes = vec![
+        vec![];
+        if output_strides {
+            1
+        } else {
+            frames[0].input_strides.len()
+        }
+    ];
     for StackFrame {
         input_strides,
+        output_stride,
         reduce,
         ..
     } in frames
     {
         if !*reduce {
-            for (i, s) in input_strides.iter().enumerate() {
-                indexes[i].push(*s);
+            if output_strides {
+                indexes[0].push(*output_stride);
+            } else {
+                for (i, s) in input_strides.iter().enumerate() {
+                    indexes[i].push(*s);
+                }
             }
         }
     }
@@ -892,7 +952,6 @@ fn get_inputs(frames: &[StackFrame]) -> Vec<String> {
         "threadIdx.y",
         "threadIdx.z",
     ];
-    println!("Strides: {:?}", indexes);
     indexes
         .iter()
         .map(|stride| {
