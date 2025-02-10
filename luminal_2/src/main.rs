@@ -7,6 +7,8 @@
 // Put flattened IR into egglog
 // If flattened IR doesn't go into egglog, put nested IR into egglog and write flattening function
 
+use std::f32::consts::PI;
+
 use itertools::Itertools;
 use metal_rs::{
     CompileOptions, ComputePassDescriptor, ComputePipelineDescriptor, Device, MTLResourceOptions,
@@ -29,62 +31,219 @@ float mul(float a, float b) {
 ";
 
 fn main() {
-    // // This is a tiled matmul. Currently we are just doing tiled loop structure but not loading a tile into smem.
-    // // We need to detect when we can.
+    // This is a 8x8x8 tiled matmul. Currently we are just doing tiled loop structure but not loading a tile into smem.
+    // We need to detect when we can.
     // let kernels = create_kernels(vec![
-    //     (
-    //         vec![Input::Inp(0), Input::Inp(1)],
-    //         "mul".to_string(),
-    //         vec![
-    //             (4, vec![16, 0], 16, false), // Grid x
-    //             (4, vec![0, 2], 2, false),   // Grid y
-    //             (1, vec![0, 0], 0, false),   // Grid z (padding)
-    //             (4, vec![2, 16], 4, false),  // Reduced
-    //             (2, vec![8, 0], 2, false),   // Block x
-    //             (2, vec![0, 1], 1, false),   // Block y
-    //             (2, vec![1, 8], 1, false),   // Reduced
+    //     Stack {
+    //         inputs: vec![Input::Inp(0), Input::Inp(1)],
+    //         instruction: "mul".to_string(),
+    //         frames: vec![
+    //             StackFrame {
+    //                 size: 4,
+    //                 input_strides: vec![16, 0],
+    //                 output_stride: 16,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 4,
+    //                 input_strides: vec![0, 2],
+    //                 output_stride: 2,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 1,
+    //                 input_strides: vec![0, 0],
+    //                 output_stride: 0,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 4,
+    //                 input_strides: vec![2, 16],
+    //                 output_stride: 4,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 2,
+    //                 input_strides: vec![8, 0],
+    //                 output_stride: 2,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 2,
+    //                 input_strides: vec![0, 1],
+    //                 output_stride: 1,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 2,
+    //                 input_strides: vec![1, 8],
+    //                 output_stride: 1,
+    //                 ..Default::default()
+    //             },
     //         ],
-    //     ),
-    //     (
-    //         vec![Input::Ref(0)],
-    //         "sum".to_string(),
-    //         vec![
-    //             (4, vec![16], 16, false), // Grid x
-    //             (4, vec![2], 2, false),   // Grid y
-    //             (1, vec![0], 0, false),   // Grid z (padding)
-    //             (4, vec![4], 4, false),   // Reduced
-    //             (2, vec![2], 2, false),   // Block x
-    //             (2, vec![1], 1, false),   // Block y
-    //             (2, vec![1], 1, true),    // Reduced
+    //     },
+    //     Stack {
+    //         inputs: vec![Input::Ref(0)],
+    //         instruction: "sum".to_string(),
+    //         frames: vec![
+    //             StackFrame {
+    //                 size: 4,
+    //                 input_strides: vec![16],
+    //                 output_stride: 16,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 4,
+    //                 input_strides: vec![2],
+    //                 output_stride: 2,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 1,
+    //                 input_strides: vec![0],
+    //                 output_stride: 0,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 4,
+    //                 input_strides: vec![4],
+    //                 output_stride: 4,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 2,
+    //                 input_strides: vec![2],
+    //                 output_stride: 2,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 2,
+    //                 input_strides: vec![1],
+    //                 output_stride: 1,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 2,
+    //                 input_strides: vec![1],
+    //                 output_stride: 1,
+    //                 reduce: true,
+    //                 ..Default::default()
+    //             },
     //         ],
-    //     ),
-    //     (
-    //         vec![Input::Ref(1)],
-    //         "sum".to_string(),
-    //         vec![
-    //             (4, vec![16], 16, false), // Grid x
-    //             (4, vec![2], 2, false),   // Grid y
-    //             (1, vec![0], 0, false),   // Grid z (padding)
-    //             (2, vec![2], 8, false),   // Block x
-    //             (2, vec![1], 1, false),   // Block y
-    //             (4, vec![4], 4, true),    // Reduced
+    //     },
+    //     Stack {
+    //         inputs: vec![Input::Ref(1)],
+    //         instruction: "sum".to_string(),
+    //         frames: vec![
+    //             StackFrame {
+    //                 size: 4,
+    //                 input_strides: vec![16],
+    //                 output_stride: 16,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 4,
+    //                 input_strides: vec![2],
+    //                 output_stride: 2,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 1,
+    //                 input_strides: vec![0],
+    //                 output_stride: 0,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 2,
+    //                 input_strides: vec![2],
+    //                 output_stride: 8,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 2,
+    //                 input_strides: vec![1],
+    //                 output_stride: 1,
+    //                 ..Default::default()
+    //             },
+    //             StackFrame {
+    //                 size: 4,
+    //                 input_strides: vec![4],
+    //                 output_stride: 4,
+    //                 reduce: true,
+    //                 ..Default::default()
+    //             },
     //         ],
-    //     ),
+    //     },
     // ]);
 
-    // println!("Tiled Matmul");
-    // for Kernel {
-    //     code,
-    //     grid,
-    //     threadblock,
-    //     ..
-    // } in kernels
-    // {
-    //     println!("---");
-    //     println!("Grid: {grid:?} Threadblock: {threadblock:?}");
-    //     println!("{code}");
-    // }
-    // println!("---");
+    let kernels = create_kernels(vec![
+        Stack {
+            inputs: vec![Input::Inp(0), Input::Inp(1)],
+            instruction: "mul".to_string(),
+            frames: vec![
+                StackFrame {
+                    size: 8,
+                    input_strides: vec![8, 0],
+                    output_stride: 8,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 8,
+                    input_strides: vec![0, 1],
+                    output_stride: 1,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 8,
+                    input_strides: vec![1, 8],
+                    output_stride: 1,
+                    ..Default::default()
+                },
+            ],
+        },
+        Stack {
+            inputs: vec![Input::Ref(0)],
+            instruction: "sum".to_string(),
+            frames: vec![
+                StackFrame {
+                    size: 8,
+                    input_strides: vec![8],
+                    output_stride: 8,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 8,
+                    input_strides: vec![1],
+                    output_stride: 1,
+                    ..Default::default()
+                },
+                StackFrame {
+                    size: 8,
+                    input_strides: vec![1],
+                    output_stride: 0,
+                    reduce: true,
+                    ..Default::default()
+                },
+            ],
+        },
+    ]);
+
+    println!("Tiled Matmul");
+    for Kernel {
+        code,
+        grid,
+        threadblock,
+        inputs,
+        outputs,
+    } in &kernels
+    {
+        println!("---");
+        println!("Grid: {grid:?} Threadblock: {threadblock:?}");
+        println!("{code}");
+        println!("inputs: {:?}", inputs);
+        println!("outputs: {:?}", outputs);
+    }
+    println!("---");
 
     // // This pulls in a batch of 3 vectors of 4, takes exp and sin of them, and then does an outer product of those vectors
     // // Currently it needs two kernels to do this. Should be possible to merge them into one and use shared mem to store the intermediates and a threadblock barrier
@@ -137,98 +296,79 @@ fn main() {
     // println!("---");
 
     // This does Tensor(3, 4).mul(Tensor(3).exp().expand(4, dim=1)).sum_reduce(dim=1)
-    let kernels = create_kernels(vec![
-        Stack {
-            inputs: vec![Input::Inp(1)],
-            instruction: "exp".to_string(),
-            frames: vec![StackFrame {
-                size: 3,
-                input_strides: vec![1],
-                output_stride: 1,
-                reduce: false,
-            }],
-        },
-        Stack {
-            inputs: vec![Input::Inp(0), Input::Ref(0)],
-            instruction: "mul".to_string(),
-            frames: vec![
-                StackFrame {
-                    size: 3,
-                    input_strides: vec![4, 1],
-                    output_stride: 4,
-                    reduce: false,
-                },
-                StackFrame {
-                    size: 4,
-                    input_strides: vec![1, 0],
-                    output_stride: 1,
-                    reduce: false,
-                },
-            ],
-        },
-        Stack {
-            inputs: vec![Input::Ref(1)],
-            instruction: "sum".to_string(),
-            frames: vec![
-                StackFrame {
-                    size: 3,
-                    input_strides: vec![4],
-                    output_stride: 1,
-                    reduce: false,
-                },
-                StackFrame {
-                    size: 4,
-                    input_strides: vec![1],
-                    output_stride: 0,
-                    reduce: true,
-                },
-            ],
-        },
-    ]);
+    // let kernels = create_kernels(vec![
+    //     Stack {
+    //         inputs: vec![Input::Inp(1)],
+    //         instruction: "exp".to_string(),
+    //         frames: vec![StackFrame {
+    //             size: 3,
+    //             input_strides: vec![1],
+    //             output_stride: 1,
+    //              ..Default::default(),
+    //         }],
+    //     },
+    //     Stack {
+    //         inputs: vec![Input::Inp(0), Input::Ref(0)],
+    //         instruction: "mul".to_string(),
+    //         frames: vec![
+    //             StackFrame {
+    //                 size: 3,
+    //                 input_strides: vec![4, 1],
+    //                 output_stride: 4,
+    //                  ..Default::default(),
+    //             },
+    //             StackFrame {
+    //                 size: 4,
+    //                 input_strides: vec![1, 0],
+    //                 output_stride: 1,
+    //                  ..Default::default(),
+    //             },
+    //         ],
+    //     },
+    //     Stack {
+    //         inputs: vec![Input::Ref(1)],
+    //         instruction: "sum".to_string(),
+    //         frames: vec![
+    //             StackFrame {
+    //                 size: 3,
+    //                 input_strides: vec![4],
+    //                 output_stride: 1,
+    //                  ..Default::default(),
+    //             },
+    //             StackFrame {
+    //                 size: 4,
+    //                 input_strides: vec![1],
+    //                 output_stride: 0,
+    //                 reduce: true,
+    //             },
+    //         ],
+    //     },
+    // ]);
 
-    println!("Shared exp vector mul");
-    for Kernel {
-        code,
-        grid,
-        threadblock,
-        inputs,
-        outputs,
-    } in &kernels
-    {
-        println!("---");
-        println!("Grid: {grid:?} Threadblock: {threadblock:?}");
-        println!("{code}");
-        println!("inputs: {:?}", inputs);
-        println!("outputs: {:?}", outputs);
-    }
-    println!("---");
-
-    // try to run kernel
-    let device = Device::system_default().unwrap();
-    let queue = device.new_command_queue();
-    let command_buffer = queue.new_command_buffer();
-    let encoder =
-        command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-    let options = CompileOptions::new();
-    options.set_fast_math_enabled(true);
-    let lib = device
-        .new_library_with_source(&kernels[0].code, &options)
-        .unwrap();
-    let pipeline_state_descriptor = ComputePipelineDescriptor::new();
-    pipeline_state_descriptor
-        .set_compute_function(Some(&lib.get_function("kernel0", None).unwrap()));
-    let pipeline = device
-        .new_compute_pipeline_state_with_function(
-            pipeline_state_descriptor.compute_function().unwrap(),
-        )
-        .unwrap();
-    encoder.set_compute_pipeline_state(&pipeline);
+    // println!("Shared exp vector mul");
+    // for Kernel {
+    //     code,
+    //     grid,
+    //     threadblock,
+    //     inputs,
+    //     outputs,
+    // } in &kernels
+    // {
+    //     println!("---");
+    //     println!("Grid: {grid:?} Threadblock: {threadblock:?}");
+    //     println!("{code}");
+    //     println!("inputs: {:?}", inputs);
+    //     println!("outputs: {:?}", outputs);
+    // }
+    // println!("---");
 
     // Set inputs
-    let matrix = (0..12).map(|i| i as f32).collect::<Vec<_>>();
-    let vector = vec![1.0, 2.0, 3.0];
+    let a = (0..64).map(|i| i as f32).collect::<Vec<_>>();
+    let b = (0..8)
+        .flat_map(|i| (0..8).map(move |j| if j == i { 1.0 } else { 0.0 }))
+        .collect::<Vec<_>>();
 
-    println!("Out: {:?}", run_graph(vec![matrix, vector], &kernels));
+    println!("Out: {:?}", run_graph(vec![a, b], &kernels));
 }
 
 fn run_graph(inputs: Vec<Vec<f32>>, kernels: &[Kernel]) -> Vec<f32> {
@@ -328,17 +468,18 @@ fn run_graph(inputs: Vec<Vec<f32>>, kernels: &[Kernel]) -> Vec<f32> {
     data
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Stack {
     inputs: Vec<Input>,
     instruction: String,
     frames: Vec<StackFrame>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Default)]
 struct StackFrame {
     size: usize,
     input_strides: Vec<usize>,
+    loop_char: Option<char>,
     output_stride: usize,
     reduce: bool,
 }
@@ -354,36 +495,25 @@ struct Kernel {
 
 fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
     // Merge the stacks as much as possible
+    let mut loop_dim = 0;
     let mut merged_ir = ir
         .iter()
         .cloned()
-        .map(|v| {
-            (
-                v.clone(),
-                vec![(
-                    v.inputs,
-                    v.instruction,
-                    v.frames
-                        .into_iter()
-                        .map(|i| {
-                            (
-                                i.size,
-                                i.input_strides
-                                    .into_iter()
-                                    .map(|i| (i, Option::<char>::None))
-                                    .collect::<Vec<_>>(),
-                                i.output_stride,
-                                i.reduce,
-                            )
-                        })
-                        .collect::<Vec<_>>(),
-                    None,
-                )],
-            )
+        .map(|mut v| {
+            if v.instruction == "sum" {
+                loop_dim += 1;
+            }
+            for frame in &mut v.frames {
+                frame.loop_char = if v.instruction == "sum" {
+                    Some((b'a' + ((loop_dim - 1) % 26) as u8) as char)
+                } else {
+                    None
+                };
+            }
+            (v.clone(), vec![v])
         })
         .collect::<Vec<_>>();
     let mut no_match = false;
-    let mut loop_dim = 0;
     while !no_match {
         no_match = true;
         let mut logical_index = 0;
@@ -465,10 +595,10 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
                     // Input dep_input from l + 1 is a dependency input. Let's set it's input stride to 0 for now.
                     // Note this is not always correct! Once we do more complex input sharing we need to index into local variables
                     let input_ref = merged_ir[l + 1].0.inputs[dep_input];
-                    for (inputs, _, stack, _) in &mut merged_ir[l + 1].1 {
+                    for Stack { inputs, frames, .. } in &mut merged_ir[l + 1].1 {
                         if let Some(dep_pos) = inputs.iter().position(|i| *i == input_ref) {
-                            for (_, strides, _, _) in stack {
-                                strides[dep_pos].0 = 0;
+                            for StackFrame { input_strides, .. } in frames {
+                                input_strides[dep_pos] = 0;
                             }
                         }
                     }
@@ -481,14 +611,16 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
                         .iter()
                         .position(|s| s.reduce)
                         .unwrap();
-                    for (_, _, m, _) in &mut merged_ir[l].1 {
-                        assert!(m.len() > dim, "Are we sharing a dim?");
-                        for k in &mut m.iter_mut().filter(|s| !s.3).nth(dim).unwrap().1 {
-                            k.1 = Some((b'a' + (loop_dim % 26) as u8) as char);
-                        }
+                    let loop_char = merged_ir[l + 1].1[0].frames[dim].loop_char;
+                    for Stack { frames, .. } in &mut merged_ir[l].1 {
+                        assert!(frames.len() > dim, "Are we sharing a dim?");
+                        frames
+                            .iter_mut()
+                            .filter(|s| !s.reduce)
+                            .nth(dim)
+                            .unwrap()
+                            .loop_char = loop_char;
                     }
-                    merged_ir[l + 1].1[0].3 = Some((b'a' + (loop_dim % 26) as u8) as char);
-                    loop_dim += 1;
                 }
                 let mut t = merged_ir.remove(l + 1).1;
                 merged_ir[l].1.append(&mut t);
@@ -505,10 +637,10 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
         .iter()
         .map(|(_, inst)| {
             inst.iter()
-                .flat_map(|i| i.0.iter())
+                .flat_map(|i| i.inputs.iter())
                 .filter_map(|i| {
                     if let Input::Inp(i) = i {
-                        Some(*i + 1)
+                        Some(i + 1)
                     } else {
                         None
                     }
@@ -523,6 +655,7 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
         .enumerate()
         .flat_map(|(i, inner)| inner.1.iter().map(move |_| i))
         .collect::<Vec<_>>();
+    println!("{:?}", merged_ir);
     for (n_kernel, (stack, mut instructions)) in merged_ir.into_iter().enumerate() {
         // Compute grid and threadblock dim assignments
         let exec_dims = stack
@@ -547,8 +680,13 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
         // TODO: detect when we can use shared mem
 
         // Change inputs if they reference anything outside this kernel
-        for (inps, _, _, _) in &mut instructions {
-            for inp in inps {
+        for Stack {
+            inputs,
+            instruction,
+            frames,
+        } in &mut instructions
+        {
+            for inp in inputs {
                 if let Input::Ref(i) = *inp {
                     if i < logical_index_start_kernel {
                         *inp = Input::Inp(
@@ -563,7 +701,7 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
         // Get input buffer indexes
         let mut input_buffer_indexes = instructions
             .iter()
-            .flat_map(|i| i.0.iter())
+            .flat_map(|i| i.inputs.iter())
             .filter_map(|i| {
                 if let Input::Inp(i) = i {
                     Some(*i)
@@ -584,12 +722,17 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
         // Write kernels
         let mut kernel = "".to_string();
         let mut var_names = 0;
-        for (inputs, instruction, strides, loop_dim) in &instructions {
+        for Stack {
+            inputs,
+            instruction,
+            frames,
+        } in &instructions
+        {
             let var_name = (b'a' + (var_names % 26) as u8) as char;
             var_names += 1;
             let inputs = inputs
                 .iter()
-                .zip(get_inputs(strides))
+                .zip(get_inputs(frames))
                 .map(|(inp, index)| {
                     format!(
                         "{}{}",
@@ -606,11 +749,13 @@ fn create_kernels(ir: Vec<Stack>) -> Vec<Kernel> {
                 })
                 .join(", ");
             if instruction == "sum" {
-                let (reduce_size, _, _, _) = strides.iter().find(|(_, _, _, b)| *b).unwrap();
-                let loop_dim = loop_dim.unwrap();
+                let StackFrame {
+                    size, loop_char, ..
+                } = frames.iter().find(|f| f.reduce).unwrap();
+                let loop_char = loop_char.unwrap();
                 kernel = format!(
                     "float {var_name} = 0.0;
-for (int loop_{loop_dim} = 0; loop_{loop_dim} < {reduce_size}; ++loop_{loop_dim}) {{
+for (int loop_{loop_char} = 0; loop_{loop_char} < {size}; ++loop_{loop_char}) {{
 {}
 	{var_name} += {inputs};
 }}",
@@ -629,14 +774,7 @@ float {var_name} = {instruction}({inputs});",
             kernel = kernel.trim().to_string();
         }
 
-        let output_index = get_inputs(
-            &stack
-                .frames
-                .iter()
-                .map(|f| (0, vec![(f.output_stride, None)], 0, false))
-                .collect::<Vec<_>>(),
-        )
-        .join(" + ");
+        let output_index = get_inputs(&stack.frames).join(" + ");
         let last_var_name = (b'a' + ((var_names - 1) % 26) as u8) as char;
         let inputs = input_buffer_indexes
             .iter()
@@ -676,12 +814,19 @@ kernel void kernel{n_kernel}(
     kernels
 }
 
-fn get_inputs(strides: &[(usize, Vec<(usize, Option<char>)>, usize, bool)]) -> Vec<String> {
+fn get_inputs(frames: &[StackFrame]) -> Vec<String> {
     // Transpose from indexes[inputs[]] to inputs[indexes[]]
-    let mut indexes = vec![vec![]; strides[0].1.len()];
-    for (_, st, _, b) in strides {
-        if !*b {
-            for (i, s) in st.iter().enumerate() {
+    let mut indexes = vec![vec![]; frames[0].input_strides.len()];
+    for StackFrame {
+        size,
+        input_strides,
+        loop_char,
+        output_stride,
+        reduce,
+    } in frames
+    {
+        if !*reduce {
+            for (i, s) in input_strides.iter().enumerate() {
                 indexes[i].push(*s);
             }
         }
@@ -695,33 +840,41 @@ fn get_inputs(strides: &[(usize, Vec<(usize, Option<char>)>, usize, bool)]) -> V
         "threadIdx.y",
         "threadIdx.z",
     ];
+    println!("Strides: {:?}", indexes);
     indexes
         .iter()
         .map(|stride| {
+            let mut dim_index = 0;
             stride
                 .iter()
                 .enumerate()
-                .filter(|(_, (s, _))| *s != 0)
-                .map(|(i, (s, loop_ind))| {
-                    if let Some(l) = loop_ind {
-                        format!(
+                .flat_map(|(i, s)| {
+                    if *s == 0 {
+                        if frames[i].loop_char.is_none() {
+                            dim_index += 1;
+                        }
+                        return None;
+                    }
+                    if let Some(l) = frames[i].loop_char {
+                        Some(format!(
                             "loop_{l}{}",
                             if *s == 1 {
                                 "".to_string()
                             } else {
                                 format!(" * {s}")
                             }
-                        )
+                        ))
                     } else {
-                        format!(
+                        dim_index += 1;
+                        Some(format!(
                             "{}{}",
-                            index_to_dim[i],
+                            index_to_dim[dim_index - 1],
                             if *s == 1 {
                                 "".to_string()
                             } else {
                                 format!(" * {s}")
                             }
-                        )
+                        ))
                     }
                 })
                 .collect::<Vec<_>>()
