@@ -18,6 +18,32 @@ enum Input {
     Ref(usize), // A reference to an earlier variable in the scope
 }
 
+#[derive(Clone, Debug, Default)]
+struct Stack {
+    inputs: Vec<Input>,
+    instruction: String,
+    frames: Vec<StackFrame>,
+    kernel_output: bool, // Do we need this output for another kernel?
+}
+
+#[derive(Clone, Debug, Default)]
+struct StackFrame {
+    size: usize,
+    input_strides: Vec<usize>,
+    loop_char: Option<char>,
+    output_stride: usize,
+    reduce: bool,
+}
+
+#[derive(Debug, Clone)]
+struct Kernel {
+    code: String,
+    grid: (usize, usize, usize),
+    threadblock: (usize, usize, usize),
+    inputs: Vec<usize>,  // global buffer indexes this kernel uses
+    outputs: Vec<usize>, // buffer sizes this kernel creates
+}
+
 const PRELUDE: &str = "
 #include <metal_stdlib>
 using namespace metal;
@@ -440,6 +466,41 @@ fn main() {
     println!("Out: {:?}", run_graph(vec![a], &kernels).last().unwrap());
 }
 
+// Validate some properties about the graph
+fn validate_graph(graph: &[Stack]) {
+    let mut used_inputs = vec![];
+    for (n_stack, stack) in graph.iter().enumerate() {
+        for input in &stack.inputs {
+            match input {
+                Input::Inp(i) => {
+                    if *i >= used_inputs.len() {
+                        used_inputs.extend((0..(i - used_inputs.len() + 1)).map(|_| false));
+                        used_inputs[*i] = true;
+                    }
+                }
+                Input::Ref(i) => {
+                    assert!(
+                        *i < n_stack,
+                        "Stack trying to use an input from a stack that hasn't been ran yet!"
+                    );
+                }
+            }
+        }
+        for frame in &stack.frames {
+            assert_eq!(
+                stack.inputs.len(),
+                frame.input_strides.len(),
+                "Number of frame input strides don't match number of stack inputs!"
+            );
+        }
+    }
+
+    assert!(
+        used_inputs.iter().all(|i| *i),
+        "Not all input buffers are used!"
+    );
+}
+
 fn run_graph(inputs: Vec<Vec<f32>>, kernels: &[Kernel]) -> Vec<Vec<f32>> {
     let device = Device::system_default().unwrap();
     let queue = device.new_command_queue();
@@ -541,33 +602,8 @@ fn run_graph(inputs: Vec<Vec<f32>>, kernels: &[Kernel]) -> Vec<Vec<f32>> {
     data
 }
 
-#[derive(Clone, Debug, Default)]
-struct Stack {
-    inputs: Vec<Input>,
-    instruction: String,
-    frames: Vec<StackFrame>,
-    kernel_output: bool, // Do we need this output for another kernel?
-}
-
-#[derive(Clone, Debug, Default)]
-struct StackFrame {
-    size: usize,
-    input_strides: Vec<usize>,
-    loop_char: Option<char>,
-    output_stride: usize,
-    reduce: bool,
-}
-
-#[derive(Debug, Clone)]
-struct Kernel {
-    code: String,
-    grid: (usize, usize, usize),
-    threadblock: (usize, usize, usize),
-    inputs: Vec<usize>,  // global buffer indexes this kernel uses
-    outputs: Vec<usize>, // buffer sizes this kernel creates
-}
-
 fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
+    validate_graph(&ir);
     ir.last_mut().unwrap().kernel_output = true;
     // Merge the stacks as much as possible
     let mut loop_dim = 0;
