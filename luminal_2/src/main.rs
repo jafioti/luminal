@@ -7,10 +7,10 @@
 // If flattened IR doesn't go into egglog, put nested IR into egglog and write flattening function
 
 use itertools::Itertools;
-// use metal_rs::{
-//     CompileOptions, ComputePassDescriptor, ComputePipelineDescriptor, Device, MTLResourceOptions,
-//     MTLSize,
-// };
+use metal_rs::{
+    CompileOptions, ComputePassDescriptor, ComputePipelineDescriptor, Device, MTLResourceOptions,
+    MTLSize,
+};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Input {
@@ -432,12 +432,12 @@ fn main() {
     // println!("---");
 
     // Set inputs
-    // let a = (0..12).map(|i| i as f32).collect::<Vec<_>>();
+    let a = (0..12).map(|i| i as f32).collect::<Vec<_>>();
     // let b = (0..8)
     //     .flat_map(|i| (0..8).map(move |j| if j == i { 1.0 } else { 0.0 }))
     //     .collect::<Vec<_>>();
 
-    // println!("Out: {:?}", run_graph(vec![a], &kernels));
+    println!("Out: {:?}", run_graph(vec![a], &kernels));
 }
 
 // fn run_graph(inputs: Vec<Vec<f32>>, kernels: &[Kernel]) -> Vec<f32> {
@@ -463,7 +463,7 @@ fn run_graph(inputs: Vec<Vec<f32>>, kernels: &[Kernel]) -> Vec<f32> {
     let n_orig_buffers = buffers.len();
     // Allocate output buffers
     for kernel in kernels {
-        for output in kernel.outputs {
+        for output in &kernel.outputs {
             buffers.push(device.new_buffer(
                 (output * std::mem::size_of::<f32>()) as u64,
                 MTLResourceOptions::StorageModeShared,
@@ -826,17 +826,18 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
 
         // Write kernels
         let mut kernel = "".to_string();
-        let mut var_names = 0;
         let mut kernel_output_num = 0;
-        for Stack {
-            inputs,
-            instruction,
-            frames,
-            kernel_output,
-        } in &instructions
+        for (
+            var_names,
+            Stack {
+                inputs,
+                instruction,
+                frames,
+                kernel_output,
+            },
+        ) in instructions.iter().enumerate()
         {
             let var_name = (b'a' + (var_names % 26) as u8) as char;
-            var_names += 1;
             let inputs = inputs
                 .iter()
                 .zip(get_inputs(frames, false))
@@ -880,7 +881,7 @@ float {var_name} = {instruction}({inputs});",
                 kernel = format!(
                     "{kernel}
 out{kernel_output_num}[{}] = {var_name};",
-                    get_inputs(&frames, true)[0]
+                    get_inputs(frames, true)[0]
                 );
                 kernel_output_num += 1;
             }
@@ -897,18 +898,26 @@ out{kernel_output_num}[{}] = {var_name};",
                 )
             })
             .join(",\n");
+        let outputs = (0..output_buffer_sizes.len())
+            .map(|index| {
+                format!(
+                    "\tdevice float* out{index} [[buffer({})]]",
+                    index + input_buffer_indexes.len()
+                )
+            })
+            .join(",\n");
+
         kernel = kernel.split("\n").map(|k| format!("\t{k}")).join("\n");
         kernel = format!(
             "{PRELUDE}
 kernel void kernel{n_kernel}(
 {inputs},
-	device float* out [[buffer({})]],
+{outputs},
 	uint3 blockIdx [[threadgroup_position_in_grid]],
 	uint3 threadIdx [[thread_position_in_threadgroup]]
 ) {{
 {kernel}
 }}",
-            input_buffer_indexes.len()
         );
 
         kernels.push(Kernel {
