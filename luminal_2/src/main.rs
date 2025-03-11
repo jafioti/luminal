@@ -1270,6 +1270,10 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                 .join(", ");
 
             // Write instruction
+            #[cfg(target_os = "linux")]
+            const BARRIER: &str = "__syncthreads();";
+            #[cfg(target_os = "macos")]
+            const BARRIER: &str = "threadgroup_barrier(mem_flags::mem_threadgroup);";
             if instruction == "sum" {
                 let StackFrame {
                     size, loop_char, ..
@@ -1297,16 +1301,13 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                     .collect();
                 if kernel_lines
                     .last()
-                    .map(|(l, _)| l == "threadgroup_barrier(mem_flags::mem_threadgroup);")
+                    .map(|(l, _)| l == BARRIER)
                     .unwrap_or_default()
                 {
                     // If we already have a barrier as the previous instruction, get rid of both.
                     kernel_lines.pop();
                 } else {
-                    kernel_lines.push((
-                        "threadgroup_barrier(mem_flags::mem_threadgroup);".to_string(),
-                        loop_chars.clone(),
-                    ));
+                    kernel_lines.push((BARRIER.to_string(), loop_chars.clone()));
                 }
                 kernel_lines.push((
                     format!(
@@ -1321,10 +1322,7 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                     ),
                     loop_chars.clone(),
                 ));
-                kernel_lines.push((
-                    "threadgroup_barrier(mem_flags::mem_threadgroup);".to_string(),
-                    loop_chars,
-                ));
+                kernel_lines.push((BARRIER.to_string(), loop_chars));
             } else {
                 kernel_lines.push((
                     format!("float {var_name} = {instruction}({inputs});"),
