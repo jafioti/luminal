@@ -8,10 +8,6 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use metal_rs::{
-    CompileOptions, ComputePassDescriptor, ComputePipelineDescriptor, Device, MTLResourceOptions,
-    MTLSize,
-};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 enum Input {
@@ -75,11 +71,20 @@ struct Kernel {
     shared_buffers: Vec<usize>, // sizes of required shared memory buffers
 }
 
+#[cfg(target_os = "macos")]
 const PRELUDE: &str = "
 #include <metal_stdlib>
 using namespace metal;
 
 float mul(float a, float b) {
+	return a * b;
+}
+";
+
+#[cfg(target_os = "linux")]
+const PRELUDE: &str = "
+#include \"cuda_fp16.h\"
+__device__ float mul(float a, float b) {
 	return a * b;
 }
 ";
@@ -630,7 +635,7 @@ fn shared_exp() {
 }
 
 fn main() {
-    tiled_matmul();
+    naive_matmul();
 }
 
 // Validate some properties about the graph
@@ -668,7 +673,96 @@ fn validate_graph(graph: &[Stack]) {
     );
 }
 
+#[cfg(target_os = "linux")]
 fn run_graph(inputs: Vec<Vec<f32>>, kernels: &[Kernel]) -> Vec<Vec<f32>> {
+    use cudarc::{
+        driver::{CudaContext, LaunchConfig, PushKernelArg},
+        nvrtc::compile_ptx,
+    };
+    let ctx = CudaContext::new(0).unwrap();
+    let stream = ctx.default_stream();
+
+    // Allocate input buffers
+    let mut buffers = inputs
+        .iter()
+        .map(|buf| {
+            let mut a = stream.alloc_zeros::<f32>(buf.len()).unwrap();
+            stream.memcpy_htod(buf, &mut a).unwrap();
+            a
+        })
+        .collect_vec();
+    let n_orig_buffers = buffers.len();
+    // Allocate output buffers
+    for kernel in kernels {
+        for output in &kernel.outputs {
+            buffers.push(stream.alloc_zeros::<f32>(*output).unwrap());
+        }
+    }
+    // Queue up kernels
+    let mut output_kernel_index = 0;
+    for (
+        n_kernel,
+        Kernel {
+            code,
+            grid,
+            threadblock,
+            inputs,
+            outputs,
+            shared_buffers,
+        },
+    ) in kernels.iter().enumerate()
+    {
+        // Compile kernel
+        let ptx = compile_ptx(code).unwrap();
+        let module = ctx.load_module(ptx).unwrap();
+        let f = module.load_function(&format!("kernel{n_kernel}")).unwrap();
+        let mut launch_args = stream.launch_builder(&f);
+        let (input_buffers, output_buffers) =
+            buffers.split_at_mut(output_kernel_index + n_orig_buffers);
+        // Set inputs
+        for input in inputs {
+            launch_args.arg(&input_buffers[*input]);
+        }
+        // Set outputs
+        for n in output_buffers.iter_mut().take(outputs.len()) {
+            launch_args.arg(n);
+        }
+        output_kernel_index += outputs.len();
+        // // Set shared buffers
+        // for (i, buf) in shared_buffers.iter().enumerate() {
+        //     encoder
+        //         .set_threadgroup_memory_length(i as u64, (buf * std::mem::size_of::<f32>()) as u64);
+        // }
+
+        // Set dispatch
+        let cfg = LaunchConfig {
+            grid_dim: (grid.0 as u32, grid.1 as u32, grid.2 as u32),
+            block_dim: (
+                threadblock.0 as u32,
+                threadblock.1 as u32,
+                threadblock.2 as u32,
+            ),
+            shared_mem_bytes: shared_buffers.iter().sum::<usize>() as u32,
+        };
+
+        // Run
+        unsafe { launch_args.launch(cfg) }.unwrap();
+    }
+
+    // Copy back intermediate and output buffers
+    let mut data = vec![];
+    for buffer in &buffers[inputs.len()..] {
+        data.push(stream.memcpy_dtov(buffer).unwrap());
+    }
+    data
+}
+
+#[cfg(target_os = "macos")]
+fn run_graph(inputs: Vec<Vec<f32>>, kernels: &[Kernel]) -> Vec<Vec<f32>> {
+    use metal_rs::{
+        CompileOptions, ComputePassDescriptor, ComputePipelineDescriptor, Device,
+        MTLResourceOptions, MTLSize,
+    };
     let device = Device::system_default().unwrap();
     let queue = device.new_command_queue();
     let command_buffer = queue.new_command_buffer();
@@ -1263,14 +1357,22 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
             })
             .join("\n");
 
+        #[allow(unused)]
         let inputs = input_buffer_indexes
             .iter()
             .enumerate()
             .map(|(index, i)| {
-                format!(
-                    "\tdevice float* {} [[buffer({index})]]",
-                    (b'A' + (i % 26) as u8) as char
-                )
+                #[cfg(target_os = "macos")]
+                {
+                    format!(
+                        "\tdevice float* {} [[buffer({index})]]",
+                        (b'A' + (i % 26) as u8) as char
+                    )
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    format!("\tconst float* {}", (b'A' + (i % 26) as u8) as char)
+                }
             })
             .chain(
                 instructions
@@ -1288,16 +1390,25 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
             .join(",\n");
         let outputs = (0..output_buffer_sizes.len())
             .map(|index| {
-                format!(
-                    "\tdevice float* out{index} [[buffer({})]]",
-                    index + input_buffer_indexes.len()
-                )
+                #[cfg(target_os = "macos")]
+                {
+                    format!(
+                        "\tdevice float* out{index} [[buffer({})]]",
+                        index + input_buffer_indexes.len()
+                    )
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    format!("\tfloat* out{index}")
+                }
             })
             .join(",\n");
 
         kernel = kernel.split("\n").map(|k| format!("\t{k}")).join("\n");
-        kernel = format!(
-            "{PRELUDE}
+        #[cfg(target_os = "macos")]
+        {
+            kernel = format!(
+                "{PRELUDE}
 kernel void kernel{n_kernel}(
 {inputs},
 {outputs},
@@ -1306,7 +1417,20 @@ kernel void kernel{n_kernel}(
 ) {{
 {kernel}
 }}",
-        );
+            );
+        }
+        #[cfg(target_os = "linux")]
+        {
+            kernel = format!(
+                "{PRELUDE}
+extern \"C\" __global__ void kernel{n_kernel}(
+{inputs},
+{outputs}
+) {{
+{kernel}
+}}",
+            );
+        }
 
         kernels.push(Kernel {
             code: kernel,

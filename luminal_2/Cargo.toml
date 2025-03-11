@@ -1,10 +1,18 @@
 [package]
 name = "luminal_2"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [workspace]
 
 [dependencies]
 itertools = "0.14.0"
-metal-rs = { version = "0.28.0", package = "metal", features = ["mps"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+metal-rs = { version = "0.28.0", package = "metal" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+cudarc = { git = "https://github.com/coreylowman/cudarc", features = [
+	"cuda-version-from-build-system",
+	"f16",
+] }
