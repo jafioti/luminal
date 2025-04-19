@@ -516,6 +516,7 @@ fn test_conv2d() {
         (KERNELX, KERNELY),
         (STRIDEX, STRIDEY),
         (DILATIONX, DILATIONY),
+        false,
         &mut cx,
     );
     model.weight.set(vec![
