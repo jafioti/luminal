@@ -8,6 +8,8 @@ dag.png)
 
 Luminal is a deep learning library that uses **composable compilers** to achieve high performance.
 
+Recently signifigant work is happening to focus much more on a search-first compiler with the goal of discovering advanced kernels like FlashAttention automatically. See progress on the `next` branch.
+
 ```rust
 use luminal::prelude::*;
 
