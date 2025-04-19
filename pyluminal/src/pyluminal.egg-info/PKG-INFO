@@ -1,0 +1,19 @@
+Metadata-Version: 2.2
+Name: pyluminal
+Version: 0.1.0
+Summary: Deep Learning at the speed of light.
+Home-page: https://github.com/jafioti/luminal
+Author: Joe Fioti
+Author-email: jafioti@gmail.com
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.6
+Description-Content-Type: text/markdown
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: requires-python
+Dynamic: summary

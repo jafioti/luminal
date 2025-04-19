@@ -110,7 +110,7 @@ fn main() {
 
     // Now that weights are loaded, delete the loading nodes so they don't run again
     delete_inputs(&cache_src, &mut cx);
-    delete_inputs(&downstream(model_weights, &cx), &mut cx);
+    delete_inputs(downstream(model_weights, &cx), &mut cx);
 
     // Run prompt processing pass
     let input_ids = tokenizer

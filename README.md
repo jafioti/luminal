@@ -1,5 +1,4 @@
-# [luminal](https://luminalai.com)
-![image](https://github.com/jafioti/luminal/blob/main/docs/images/dag.jpeg)
+dag.png)
 [![Website](https://img.shields.io/badge/Docs-Website-blue?style=for-the-badge&color=0D9373)](https://luminalai.com)
 [![CI Status](https://img.shields.io/github/actions/workflow/status/jafioti/luminal/test.yml?style=for-the-badge&logo=github-actions&logoColor=white&branch=main)](https://github.com/Sidekick-AI/dataflow/actions)
 [![Current Crates.io Version](https://img.shields.io/crates/v/luminal.svg?style=for-the-badge&logo=rust)](https://crates.io/crates/luminal)
