@@ -34,6 +34,12 @@ pub trait SliceRange {
     fn bounds(&self) -> (Expression, Expression);
 }
 
+impl SliceRange for usize {
+    fn bounds(&self) -> (Expression, Expression) {
+        (Expression::from(self), Expression::from(self))
+    }
+}
+
 impl SliceRange for RangeFrom<usize> {
     fn bounds(&self) -> (Expression, Expression) {
         (
@@ -454,6 +460,27 @@ impl<
             self.2.into(),
             self.3.into(),
             self.4.into(),
+        ]
+    }
+}
+
+impl<
+        A: Into<Expression>,
+        B: Into<Expression>,
+        C: Into<Expression>,
+        D: Into<Expression>,
+        E: Into<Expression>,
+        F: Into<Expression>,
+    > ToShape for (A, B, C, D, E, F)
+{
+    fn to_shape(self) -> Vec<Expression> {
+        vec![
+            self.0.into(),
+            self.1.into(),
+            self.2.into(),
+            self.3.into(),
+            self.4.into(),
+            self.5.into(),
         ]
     }
 }

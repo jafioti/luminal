@@ -41,7 +41,7 @@ impl Expression {
 
 impl Hash for Expression {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.terms.read().hash(state);
+        self.simplify().terms.read().hash(state);
     }
 }
 
@@ -135,7 +135,7 @@ where
     for<'a> &'a T: Into<Expression>,
 {
     fn eq(&self, other: &T) -> bool {
-        *self.terms.read() == *other.into().terms.read()
+        self.equivalent(&other.into())
     }
 }
 
@@ -311,9 +311,7 @@ impl Expression {
         }
         Expression::new(new_terms)
     }
-}
 
-impl Expression {
     /// Evaluate the expression with no variables. Returns Some(value) if no variables are required, otherwise returns None.
     pub fn to_usize(&self) -> Option<usize> {
         self.exec(&FxHashMap::default())
@@ -418,6 +416,31 @@ impl Expression {
             .read()
             .iter()
             .any(|t| matches!(t, Term::Var('-')))
+    }
+
+    /// `true` if the two expressions are provably equivalent under `make_rules()`.
+    pub fn equivalent(&self, other: &Self) -> bool {
+        // short‑cuts that cost ~0
+        if std::ptr::eq(self, other) {
+            return true;
+        }
+        if *self.terms.read() == *other.terms.read() {
+            return true;
+        }
+
+        // 1. create an e‑graph and add both expressions
+        let mut egraph: EGraph = Default::default();
+        let id_a = egraph.add_expr(&luminal_to_egg(self));
+        let id_b = egraph.add_expr(&luminal_to_egg(other));
+
+        // 2. saturate with your rewrite rules (reuse the same limit you like)
+        let runner = Runner::default()
+            .with_egraph(egraph)
+            .with_iter_limit(5)
+            .run(&make_rules());
+
+        // 3. equivalent ⇔ their classes are identical
+        runner.egraph.find(id_a) == runner.egraph.find(id_b)
     }
 }
 

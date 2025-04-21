@@ -81,7 +81,7 @@ mod tests {
         let batch = cx.tensor((2, 3)).set([1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
         let a = cx.tensor(3).set([1.0, 2.0, 3.0]);
 
-        let model = Linear::new(3, 4, false, &mut cx).initialize();
+        let model = Linear::new(3, 4, false, &mut cx).init_rand();
         let mut b = model.forward(a).retrieve();
         let mut batch_out = model.forward(batch).retrieve();
 
