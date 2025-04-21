@@ -5,7 +5,7 @@ fn main() {
     // Create a new graph
     let mut cx = Graph::new();
     // Randomly initialize a linear layer with an input size of 4 and an output size of 5
-    let model = Linear::new(4, 5, false, &mut cx).initialize();
+    let model = Linear::new(4, 5, false, &mut cx).init_rand();
     // Make an input tensor
     let a = cx.tensor(4).set(vec![1., 2., 3., 4.]);
     // Feed tensor through model

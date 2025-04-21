@@ -34,7 +34,7 @@ impl Linear {
         }
     }
 
-    pub fn initialize(self) -> Self {
+    pub fn init_rand(self) -> Self {
         // Init weight as uniform(-1, 1)
         let mut rng = thread_rng();
         self.weight.set(

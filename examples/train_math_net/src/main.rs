@@ -11,11 +11,11 @@ fn main() {
     // Setup gradient graph
     let mut cx = Graph::new();
     let model = (
-        Linear::new(8, 16, false, &mut cx).initialize(),
+        Linear::new(8, 16, false, &mut cx).init_rand(),
         Swish,
-        Linear::new(16, 16, false, &mut cx).initialize(),
+        Linear::new(16, 16, false, &mut cx).init_rand(),
         Swish,
-        Linear::new(16, 5, false, &mut cx).initialize(),
+        Linear::new(16, 5, false, &mut cx).init_rand(),
     );
     let mut input = cx.tensor(8);
     let mut target = cx.tensor(5);
