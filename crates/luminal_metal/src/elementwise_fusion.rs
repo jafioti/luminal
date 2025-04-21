@@ -466,7 +466,6 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
             .cloned()
             .zip(&stacked_shapes)
             .map(|(partial, sh)| {
-                println!("Ind: {}", sh[0].index_expression());
                 sh[0]
                     .index_expression()
                     .simplify()

@@ -1060,9 +1060,7 @@ fn egg_simplify(e: Expression) -> Expression {
     let expr = luminal_to_egg(&e);
     // Simplify
     let runner = Runner::default()
-        // .with_iter_limit(1_000)
-        // .with_time_limit(std::time::Duration::from_secs(30))
-        // .with_node_limit(100_000_000)
+        .with_iter_limit(5)
         .with_expr(&expr)
         .run(&make_rules());
     // runner.print_report();

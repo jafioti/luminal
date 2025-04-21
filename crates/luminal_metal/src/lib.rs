@@ -29,14 +29,14 @@ use rustc_hash::FxHashMap;
 use luminal::{op::InputTensor, prelude::*};
 
 /// Compile graphs to run on Metal-supported macOS devices in supported data formats
-pub type MetalCompiler<T> = (Timed<MetalCompilerPreBuffer<T>>, Timed<BufferCompilers>);
+pub type MetalCompiler<T> = (MetalCompilerPreBuffer<T>, BufferCompilers);
 
 /// All metal compilers coming before buffer compilers
 pub type MetalCompilerPreBuffer<T> = (
-    Timed<prim::PrimitiveCompiler<T>>,
-    Timed<SpecialOpsCompiler<T>>,
-    Timed<other::CopyCompiler<T>>,
-    Timed<elementwise_fusion::ElementwiseFusionCompiler<T>>,
+    prim::PrimitiveCompiler<T>,
+    SpecialOpsCompiler<T>,
+    other::CopyCompiler<T>,
+    elementwise_fusion::ElementwiseFusionCompiler<T>,
 );
 
 /// Compilers to share command and storage buffers
