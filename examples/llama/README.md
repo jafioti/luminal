@@ -11,9 +11,9 @@
         bash setup.sh
         ```
     - The weights and tokenizer should be saved into the setup directory. This should be the default case, but if they aren't there, make sure to move them here
-    - NOTE: This will likely take some time depending on the speed of your internet connection
+    - NOTE: Downloading these files will likely take some time
 2. Execute a Sample Llama Prompt
-    - Our command is slightly different based off what hardware you're running off
+    - Our command is slightly different based off what hardware you're running
         - if you are on a macbook:
             -  ```bash
                 cargo run --release --features metal
@@ -26,10 +26,8 @@
             -  ```bash
                 cargo run --release
                 ```
-    - This line executes the code found within `src/main.rs` of the Llama example folder 
-        - by default we are asking it to generate 256 tokens in response to the merge sort prompt found at `prompts/merge_sort.txt`
-    - You should expect the merge sort prompt to be generated in roughly X seconds with a rate of roughly Y tokens per second
-        - {INCOMPELTE}
+    - by default we are asking it to generate 256 tokens in response to the merge sort prompt found at `prompts/merge_sort.txt`
+        - to better understand the code, check out the section below
 3. Pass through a custom prompt
     - To pass through a custom prompt, we are going to append onto our hardware prompt this flag: `-- --prompt <your_prompt>`
         - the first `--` separates our program arguments from cargo's arguments
@@ -39,15 +37,15 @@
             You are a helpful AI assistant<|eot_id|><|start_header_id|>user<|end_header_id|> \
             Tell me a story about an AI and a human who work together to save the world<|eot_id|><|start_header_id|>assistant<|end_header_id|>'
             ```
-        - {INCOMPELTE}
 
 # Getting An Understanding of the Code
-- we start off by parsing our arguments 
+- We're going to focus on the main() function in the code
+- we begin by parsing our arguments 
     - `let cli_args = CLIArgs::parse();`
 - and then loading the tokenizer into memory
     - `let tokenizer = Tokenizer::from_file("setup/tokenizer.json").unwrap();`
     - note this comes from an external dependency on the `tokenizer` package
-- Now we start to hit the interesting parts, we need to setup our model as a graph within Luminal. Note, the entire section here is not actually inferencing anything but rather telling luminal what to expect at each stage so we can optimize our run
+- Now we start to hit the interesting parts, we need to setup our model as a graph within Luminal. Note, the entire section here is not actually inferencing but rather telling luminal what to expect at each stage so we can setup a compute graph to optimize our run
     - we begin by initializing our graph as cx and create an input tensor at the very beginning
     ```rs
         let mut cx = Graph::new();
@@ -65,13 +63,13 @@
             .collect();
         cache_src.set_dyn(vec![], (1, model::N_KV_HEADS, 0, model::HEAD_DIM));
     ```
-    - With those setup, we tell it to expect the Llama model shape along with the dimensions of our model weights
+    - With those setup, we tell it to expect the Llama model shape along with the dimensions of our model weights ( you can see the full definition of Llama in Luminal in `src/model.rs`)
     ```rs
         let model = model::Llama::new(&mut cx);
         let mut model_weights = params(&model);
         cx.keep_tensors(&model_weights);
     ```
-    - We then say that when we do a forward pass on the model, we expect it to output the logits and a cache_dest variable
+    - We then say that for each forward pass, we expect to output the logits and a cache_dest variable
     ```rs
         let (logits, mut cache_dest) = model.forward((input, &cache_src));
         let mut logits = logits
@@ -169,7 +167,7 @@
     print!("{initial}",);
     io::stdout().flush().unwrap();
     ```
-    - importantly, we end the run by maintaining our cache within the same graph. As we have run attention on new tokens, we want to update our key value cache to account for this new information. Note we are copying data between the tensors here, not changing the pointers
+    - importantly, we end the run by maintaining our cache within the same graph. As we have run attention on new tokens, we want to update our key value cache to account for this new information. To do so, we run the below function and swap the pointer to use the new cache
     ```rs
         transfer_data_same_graph(&cache_dest, &cache_src, &mut cx);
     ```
