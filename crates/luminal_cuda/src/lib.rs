@@ -18,14 +18,14 @@ pub use prim::PrimitiveCompiler;
 mod tests;
 
 use cudarc::{
-    driver::{CudaFunction, CudaSlice, DeviceRepr, LaunchArgs, LaunchConfig, PushKernelArg as _},
+    driver::{CudaFunction, CudaSlice, DeviceRepr, LaunchArgs, PushKernelArg as _},
     nvrtc::{compile_ptx_with_opts, CompileOptions},
 };
 use itertools::Itertools;
 use prim::CudaConstant;
 use rustc_hash::FxHashMap;
 
-use std::{collections::hash_map::DefaultHasher, ffi::c_void, fmt::Write, hash::Hasher, sync::Arc};
+use std::{collections::hash_map::DefaultHasher, fmt::Write, hash::Hasher, sync::Arc};
 
 use luminal::{op::InputTensor, prelude::*};
 

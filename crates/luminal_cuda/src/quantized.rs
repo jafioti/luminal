@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use cudarc::driver::{CudaContext, CudaFunction, DeviceRepr, LaunchConfig, PushKernelArg};
+use cudarc::driver::{CudaContext, CudaFunction, LaunchConfig, PushKernelArg};
 use petgraph::visit::EdgeRef;
 
 use luminal::{

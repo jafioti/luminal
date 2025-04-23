@@ -1,4 +1,4 @@
-use cudarc::driver::{CudaContext, CudaFunction, DeviceRepr, LaunchConfig, PushKernelArg};
+use cudarc::driver::{CudaContext, CudaFunction, LaunchConfig, PushKernelArg};
 use indicatif::{ProgressBar, ProgressStyle};
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};

@@ -2,7 +2,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use cudarc::{
     cublas::{sys::cublasOperation_t::*, CudaBlas},
-    driver::{CudaContext, DevicePtr, DevicePtrMut},
+    driver::{CudaContext, DevicePtr},
 };
 
 use crate::{
@@ -35,7 +35,7 @@ impl<T: CudaFloat> Operator for Matmul<T> {
         );
         let a = get_buffer_from_tensor::<T>(&inp[0].0);
         let b = get_buffer_from_tensor::<T>(&inp[1].0);
-        let mut out = self
+        let out = self
             .1
             .default_stream()
             .alloc_zeros::<T>((m * n * batch_size) as usize)

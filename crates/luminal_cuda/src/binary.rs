@@ -1,6 +1,6 @@
 use std::{any::Any, marker::PhantomData, sync::Arc};
 
-use cudarc::driver::{CudaContext, CudaFunction, DeviceRepr, LaunchConfig, PushKernelArg as _};
+use cudarc::driver::{CudaContext, CudaFunction, LaunchConfig, PushKernelArg};
 
 use luminal::{
     op::*,

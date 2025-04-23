@@ -1,4 +1,4 @@
-use cudarc::driver::{CudaContext, CudaFunction, DeviceRepr, LaunchConfig, PushKernelArg};
+use cudarc::driver::{CudaContext, CudaFunction, LaunchConfig, PushKernelArg};
 use num_traits::float::FloatConst;
 use rustc_hash::FxHashMap;
 use std::{any::Any, marker::PhantomData, mem::size_of, sync::Arc};

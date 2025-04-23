@@ -10,7 +10,7 @@ use std::{
     sync::Arc,
 };
 
-use cudarc::driver::{CudaContext, CudaFunction, DeviceRepr, LaunchConfig, PushKernelArg};
+use cudarc::driver::{CudaContext, CudaFunction, LaunchConfig, PushKernelArg};
 
 use luminal::{
     op::{Function as LFunction, *},
