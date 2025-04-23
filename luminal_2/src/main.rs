@@ -71,6 +71,7 @@ struct StackFrame {
     loop_char: Option<char>,
     output_stride: usize,
     reduce: bool,
+    thread_loop: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -429,6 +430,93 @@ fn tiled_matmul_simdgroup() {
     }
 }
 
+fn tiled_matmul_simdgroup_vector() {
+    // This is a 8x8x8 tiled matmul. Uses simgroup
+    let kernels = create_kernels(vec![
+        stack(
+            &[Input::Inp(0)],
+            "simdgroup_load",
+            None,
+            &[
+                (128, &[131072], 131072),
+                (128, &[0], 32),
+                (1, &[0], 0),
+                (8, &[0], 4096),
+                (4, &[0], 2),
+                (1, &[0], 0),
+                (4, &[32768], 32768),
+                (4, &[0], 1),
+                (512, &[8], 8),
+            ],
+        ),
+        stack(
+            &[Input::Inp(1)],
+            "simdgroup_load",
+            None,
+            &[
+                (128, &[0], 131072),
+                (128, &[32], 32),
+                (1, &[0], 0),
+                (8, &[0], 4096),
+                (4, &[0], 2),
+                (1, &[0], 0),
+                (4, &[0], 1),
+                (4, &[8], 32768),
+                (512, &[32768], 8),
+            ],
+        ),
+        stack(
+            &[Input::Ref(0), Input::Ref(1)],
+            "simdgroup_multiply_accumulate",
+            Some(8),
+            &[
+                (128, &[131072, 131072], 131072),
+                (128, &[32, 32], 32),
+                (1, &[0, 0], 0),
+                (8, &[4096, 4096], 0),
+                (4, &[2, 2], 0),
+                (1, &[0, 0], 0),
+                (4, &[32768, 1], 0),
+                (4, &[1, 32768], 1),
+                (512, &[8, 8], 1),
+            ],
+        ),
+    ]);
+
+    println!("Tiled Simdgroup Matmul 4x1");
+    for Kernel {
+        code,
+        grid,
+        threadblock,
+        inputs,
+        outputs,
+        shared_buffers,
+    } in &kernels
+    {
+        println!("---");
+        println!("Grid: {grid:?} Threadblock: {threadblock:?}");
+        println!("{code}");
+        println!("inputs: {:?}", inputs);
+        println!("outputs: {:?}", outputs);
+        println!("shared: {:?}", shared_buffers);
+    }
+    println!("---");
+
+    // Run
+    let a = (0..4096).map(|i| i as f32).collect_vec();
+    let b = (0..4096)
+        .flat_map(|i| (0..4096).map(move |j| if j == i { 1.0 } else { 0.0 }))
+        .collect_vec();
+    let c = run_graph(vec![a.clone(), b.clone()], &kernels)
+        .pop()
+        .unwrap();
+    for (ind, (i, j)) in a.into_iter().zip(c).enumerate() {
+        if (i - j).abs() > 1e-3 {
+            panic!("Mismatch at index {ind}: {i} | {j}");
+        }
+    }
+}
+
 fn exp_sin_outer_product() {
     // This pulls in a batch of 3 vectors of 4, takes exp and sin of them, and then does an outer product of those vectors
     // Currently it needs two kernels to do this. Should be possible to merge them into one and use shared mem to store the intermediates and a threadblock barrier
@@ -647,17 +735,19 @@ fn shared_exp() {
     println!("---");
 
     // Run
-    let a = (0..64).map(|i| i as f32).collect_vec();
-    let b = (0..8)
-        .flat_map(|i| (0..8).map(move |j| if j == i { 1.0 } else { 0.0 }))
-        .collect_vec();
-    let c = run_graph(vec![a.clone(), b], &kernels).pop().unwrap();
-    println!("Out: {c:?}");
-    assert_eq!(a, c)
+    let matrix = (0..12).map(|i| i as f32).collect::<Vec<_>>();
+    let vector = vec![1.0, 2.0, 3.0];
+    let c = run_graph(vec![vector, matrix], &kernels).pop().unwrap();
+    for (a, b) in [16.30969, 162.55922, 763.2503].iter().zip(c) {
+        if (a - b).abs() > 1e-3 {
+            panic!("{a} != {b}");
+        }
+    }
 }
 
 fn main() {
-    tiled_matmul_simdgroup();
+    // shared_exp();
+    tiled_matmul_simdgroup_vector();
 }
 
 // Validate some properties about the graph
@@ -669,6 +759,8 @@ fn validate_graph(graph: &[Stack]) {
                 Input::Inp(i) => {
                     if *i >= used_inputs.len() {
                         used_inputs.extend((0..(i - used_inputs.len() + 1)).map(|_| false));
+                        used_inputs[*i] = true;
+                    } else {
                         used_inputs[*i] = true;
                     }
                 }
@@ -934,49 +1026,78 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                     .join("\n---\n")
             );
             // Try to match ir[l] and ir[l + 1]
-            let check_match =
-                |a: &[StackFrame], b: &[StackFrame], dep_inputs: &Vec<usize>, a_inst: &str| {
-                    if dep_inputs.is_empty() {
-                        a.iter().filter(|l| !l.reduce).count() == b.len()
-                    } else {
-                        // Check strides for each input
-                        dep_inputs.iter().all(|inp| {
-                            // Filter for non-reduced frames
-                            let a_frames = a.iter().filter(|l| !l.reduce).collect_vec();
-                            // Filter for only input frames that matter (they don't if the stride is zero on a non-filler frame)
-                            let b_frames = b
+            let check_match = |a: &[StackFrame],
+                               b: &[StackFrame],
+                               real_a: &[Stack],
+                               dep_inputs: &Vec<(usize, usize)>,
+                               a_inst: &str| {
+                if dep_inputs.is_empty() {
+                    a.iter().filter(|l| !l.reduce).count() == b.len()
+                } else {
+                    // Check strides for each input
+                    dep_inputs.iter().all(|(inp, reference)| {
+                        println!("Inp : {inp} | {:?}", real_a);
+                        // Filter for non-reduced frames
+                        let a_frames = a
+                            .iter()
+                            .cloned()
+                            .zip(&real_a[*reference].frames)
+                            .map(|(mut l, real)| {
+                                l.output_stride = real.output_stride;
+                                l
+                            })
+                            .filter(|l| !l.reduce)
+                            .collect_vec();
+                        // Filter for only input frames that matter (they don't if the stride is zero on a non-filler frame)
+                        let b_frames = b
+                            .iter()
+                            .filter(|l| l.size == 0 || l.size == 1 || l.input_strides[*inp] != 0)
+                            .collect_vec();
+                        println!("A: {:?}", a_frames);
+                        println!("B: {:?}", b_frames);
+                        a_frames.len() == b_frames.len()
+                            && a_frames
                                 .iter()
-                                .filter(|l| {
-                                    l.size == 0 || l.size == 1 || l.input_strides[*inp] != 0
-                                })
-                                .collect_vec();
-                            a_frames.len() == b_frames.len()
-                                && a_frames.iter().zip(b_frames).enumerate().all(
-                                    |(n_frame, (a, b))| {
-                                        a.size == b.size
-                                            && (a.output_stride == b.input_strides[*inp]
+                                .zip(b_frames)
+                                .enumerate()
+                                .all(|(n_frame, (a, b))| {
+                                    println!(
+                                        "{} | {} and {} | {} ({})",
+                                        a.size,
+                                        b.size,
+                                        a.output_stride,
+                                        b.input_strides[*inp],
+                                        a.input_strides[0]
+                                    );
+                                    a.size == b.size
+                                        && (a.output_stride == b.input_strides[*inp]
                                             	// It is ok if we have mismatched output - input strides if this is going through shared memory in a threadblock
                                                 || n_frame >= 3 && a_inst == "smem_load")
-                                    },
-                                )
-                        })
-                    }
-                };
+                                })
+                    })
+                }
+            };
             let dep_inputs = merged_ir[l + 1]
                 .0
                 .inputs
                 .iter()
-                .positions(|inp| {
+                .enumerate()
+                .filter_map(|(ind, inp)| {
                     if let Input::Ref(i) = inp {
-                        logical_to_physical_stack_map[i].0 == l
+                        if logical_to_physical_stack_map[i].0 == l {
+                            Some((ind, i - l))
+                        } else {
+                            None
+                        }
                     } else {
-                        false
+                        None
                     }
                 })
                 .collect_vec();
             let mut matched = check_match(
                 &merged_ir[l].0.frames,
                 &merged_ir[l + 1].0.frames,
+                &merged_ir[l].1,
                 &dep_inputs,
                 &merged_ir[l].0.instruction,
             );
@@ -991,6 +1112,7 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                         if check_match(
                             &merged_ir[l].0.frames,
                             &merged_ir[l + 1].0.frames,
+                            &merged_ir[l].1,
                             &dep_inputs,
                             &merged_ir[l].0.instruction,
                         ) {
@@ -1037,24 +1159,25 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                         .iter()
                         .position(|s| s.reduce)
                         .unwrap();
+                    println!("reduce: {reduce_dim}");
                     let loop_char = if let Some(s) = orig_reduce_dim {
                         // Need to correct for the sliding done during matching
                         merged_ir[l + 1].1[0].frames[s].loop_char
                     } else {
                         merged_ir[l + 1].1[0].frames[reduce_dim].loop_char
                     };
-                    for Stack { frames, .. } in &mut merged_ir[l].1 {
-                        if frames.len() > reduce_dim {
-                            // assert!(frames.len() > reduce_dim, "Are we sharing a dim?");
-                            println!("Setting {reduce_dim}");
-                            frames
-                                .iter_mut()
-                                .filter(|s| !s.reduce)
-                                .nth(reduce_dim)
-                                .unwrap()
-                                .loop_char = loop_char;
-                            println!("{:?}", frames);
+                    for Stack { frames, .. } in merged_ir[l].1.iter_mut().rev() {
+                        if frames.len() <= reduce_dim {
+                            break;
                         }
+                        println!("Setting {reduce_dim}");
+                        frames
+                            .iter_mut()
+                            .filter(|s| !s.reduce)
+                            .nth(reduce_dim)
+                            .unwrap()
+                            .loop_char = loop_char;
+                        println!("{:?}", frames);
                     }
                 }
                 // Merge inputs
@@ -1131,6 +1254,23 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
             }
         }
     }
+
+    // Fix up thread-level looping
+    // (look for frames outside the grid heirarchy and mark them as a loop dim)
+    for (_, stacks) in &mut merged_ir {
+        for stack in stacks {
+            for (i, frame) in stack
+                .frames
+                .iter_mut()
+                .filter(|f| f.loop_char.is_none())
+                .skip(6)
+                .enumerate()
+            {
+                frame.loop_char = Some((b'a' + ((loop_dim + i) % 26) as u8) as char);
+                frame.thread_loop = true;
+            }
+        }
+    }
     println!(
         "-------------------\n{}",
         merged_ir
@@ -1155,6 +1295,8 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
             }
         }
     }
+
+    // Write kernels
     for (n_kernel, (stack, instructions)) in merged_ir.into_iter().enumerate() {
         // Compute grid and threadblock dim assignments
         let exec_dims = stack
@@ -1212,7 +1354,7 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
             })
             .collect_vec();
 
-        // Write kernels
+        // Write kernel
         let threadgroup_buffers = instructions
             .iter()
             .enumerate()
@@ -1232,6 +1374,7 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
             .collect_vec();
         let mut kernel_lines: Vec<(String, Vec<char>)> = vec![];
         let mut kernel_output_num = 0;
+        let mut thread_level_loops = 0;
         for (
             var_names,
             Stack {
@@ -1306,6 +1449,32 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
             const BARRIER: &str = "__syncthreads();";
             #[cfg(target_os = "macos")]
             const BARRIER: &str = "threadgroup_barrier(mem_flags::mem_threadgroup);";
+
+            // Write thread-level loops
+            let n_thread_loops = frames.iter().filter(|f| f.thread_loop).count();
+            let loop_chars: Vec<char> = frames
+                .iter()
+                .filter_map(|f| if f.reduce { None } else { f.loop_char })
+                .collect();
+            for i in thread_level_loops..n_thread_loops {
+                // Create loop
+                let StackFrame {
+                    size, loop_char, ..
+                } = frames.iter().filter(|f| f.thread_loop).nth(i).unwrap();
+                let loop_char = loop_char.unwrap();
+
+                if *size <= 8 {
+                    // Only unroll loops <= 8
+                    kernel_lines.push((format!("#pragma unroll({size})"), loop_chars.clone()));
+                }
+                kernel_lines.push((format!("for (int loop_{loop_char} = 0; loop_{loop_char} < {size}; ++loop_{loop_char}) {{"), loop_chars.clone()));
+            }
+            for _ in n_thread_loops..thread_level_loops {
+                // End loop
+                kernel_lines.push(("}".to_string(), loop_chars.clone()));
+            }
+            thread_level_loops = n_thread_loops;
+
             if instruction == "sum" {
                 let StackFrame {
                     size, loop_char, ..
@@ -1450,6 +1619,10 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                 }
                 kernel_output_num += 1;
             }
+        }
+        for i in (0..thread_level_loops).rev() {
+            // End loop
+            kernel_lines.push(("}".to_string(), vec!['a'; i]));
         }
         let mut kernel = kernel_lines
             .into_iter()
@@ -1611,7 +1784,7 @@ fn get_inputs(
                             return None;
                         }
                     }
-                    if *s == 0 {
+                    if *s == 0 || dim_index > 6 {
                         return None;
                     }
                     Some(match frames[i].loop_char {
