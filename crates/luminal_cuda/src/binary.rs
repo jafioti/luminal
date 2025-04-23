@@ -1,6 +1,6 @@
 use std::{any::Any, marker::PhantomData, sync::Arc};
 
-use cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaFunction, DeviceRepr, LaunchConfig, PushKernelArg as _};
 
 use luminal::{
     op::*,
@@ -18,7 +18,7 @@ use crate::{
 #[derive(Clone)]
 pub struct CudaSub<T> {
     function: CudaFunction,
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
@@ -29,7 +29,7 @@ impl<T: CudaFloat> CudaSub<T> {
     pub fn new(
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
-        device: Arc<CudaDevice>,
+        device: Arc<CudaContext>,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (a_idx, a_valid) = get_idx_valid_exps(a_shape);
@@ -62,19 +62,18 @@ impl<T: CudaFloat> Operator for CudaSub<T> {
         let a = get_buffer_from_tensor::<T>(&tensors[0].0);
         let b = get_buffer_from_tensor::<T>(&tensors[1].0);
         let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
+        let stream = self.device.default_stream();
 
-        let out = self.device.alloc_zeros::<T>(inp_size).unwrap();
-        let mut params = vec![
-            (&out).as_kernel_param(),
-            a.as_kernel_param(),
-            b.as_kernel_param(),
-            inp_size.as_kernel_param(),
-        ];
-        input_dyn_dims(&mut params, &self.dyn_symbols, self.dyn_map);
+        let mut out = stream.alloc_zeros::<T>(inp_size).unwrap();
+        let mut launch_args = stream.launch_builder(&self.function);
+        launch_args.arg(&mut out);
+        launch_args.arg(a);
+        launch_args.arg(b);
+        launch_args.arg(&inp_size);
+        input_dyn_dims(&mut launch_args, &self.dyn_symbols, self.dyn_map);
         unsafe {
-            self.function
-                .clone()
-                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+            launch_args
+                .launch(LaunchConfig::for_num_elems(inp_size as u32))
                 .unwrap();
         }
 
@@ -95,7 +94,7 @@ pub struct SubtractionCompiler<T: CudaFloat>(PhantomData<T>);
 impl<T: CudaFloat> Compiler for SubtractionCompiler<T> {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
-        let dev = CudaDevice::new(0).unwrap();
+        let dev = CudaContext::new(0).unwrap();
         let (lhs, rhs) = (node(), node());
         let mul = binary::<CudaMul<T>>(rhs.clone(), constant::<T>(-1.));
         let add = binary::<CudaAdd<T>>(lhs.clone(), mul.clone());
@@ -150,7 +149,7 @@ impl<T: CudaFloat> Compiler for SubtractionCompiler<T> {
 #[derive(Clone)]
 pub struct CudaEqual<T> {
     function: CudaFunction,
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
@@ -161,7 +160,7 @@ impl<T: CudaFloat> CudaEqual<T> {
     pub fn new(
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
-        device: Arc<CudaDevice>,
+        device: Arc<CudaContext>,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (a_idx, a_valid) = get_idx_valid_exps(a_shape);
@@ -194,19 +193,18 @@ impl<T: CudaFloat> Operator for CudaEqual<T> {
         let a = get_buffer_from_tensor::<T>(&tensors[0].0);
         let b = get_buffer_from_tensor::<T>(&tensors[1].0);
         let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
+        let stream = self.device.default_stream();
 
-        let out = self.device.alloc_zeros::<T>(inp_size).unwrap();
-        let mut params = vec![
-            (&out).as_kernel_param(),
-            a.as_kernel_param(),
-            b.as_kernel_param(),
-            inp_size.as_kernel_param(),
-        ];
-        input_dyn_dims(&mut params, &self.dyn_symbols, self.dyn_map);
+        let mut out = stream.alloc_zeros::<T>(inp_size).unwrap();
+        let mut launch_args = stream.launch_builder(&self.function);
+        launch_args.arg(&mut out);
+        launch_args.arg(a);
+        launch_args.arg(b);
+        launch_args.arg(&inp_size);
+        input_dyn_dims(&mut launch_args, &self.dyn_symbols, self.dyn_map);
         unsafe {
-            self.function
-                .clone()
-                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+            launch_args
+                .launch(LaunchConfig::for_num_elems(inp_size as u32))
                 .unwrap();
         }
 
@@ -227,7 +225,7 @@ pub struct EqualCompiler<T: CudaFloat>(PhantomData<T>);
 impl<T: CudaFloat> Compiler for EqualCompiler<T> {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
-        let dev = CudaDevice::new(0).unwrap();
+        let dev = CudaContext::new(0).unwrap();
         let one = constant::<T>(1.);
         let (lhs, rhs) = (node(), node());
         let lt1 = binary::<CudaLessThan<T>>(lhs.clone(), rhs.clone());
@@ -281,14 +279,14 @@ impl<T: CudaFloat> Compiler for EqualCompiler<T> {
 #[derive(Clone)]
 pub struct CudaGather<T> {
     function: CudaFunction,
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     pub embed_dim: usize,
     _phantom: PhantomData<T>,
 }
 crate::debug_type!(CudaGather);
 
 impl<T: CudaFloat> CudaGather<T> {
-    pub fn new(device: Arc<CudaDevice>, embed_dim: usize) -> Self {
+    pub fn new(device: Arc<CudaContext>, embed_dim: usize) -> Self {
         let type_name = T::type_name();
         let code = format!("
 #include \"cuda_fp16.h\"
@@ -313,36 +311,31 @@ impl<T: CudaFloat> Operator for CudaGather<T> {
         // Inp 1 should be Vec<f32> and inp 2 should be a CudaSlice<T>
         let indexes = inputs[0].0.borrowed().downcast_ref::<Vec<f32>>().unwrap();
         let weights = get_buffer_from_tensor::<T>(&inputs[1].0);
+        let stream = self.device.default_stream();
 
-        let mut indexes_buffer = unsafe { self.device.alloc::<f32>(indexes.len()).unwrap() };
-        self.device
-            .htod_copy_into(indexes.clone(), &mut indexes_buffer)
-            .unwrap();
-        let mut out = self
-            .device
+        let mut indexes_buffer = unsafe { stream.alloc::<f32>(indexes.len()).unwrap() };
+        stream.memcpy_htod(indexes, &mut indexes_buffer).unwrap();
+        let mut out = stream
             .alloc_zeros::<T>(indexes.len() * self.embed_dim)
             .unwrap();
+        let indexes_len = indexes.len();
+        let mut launch_args = stream.launch_builder(&self.function);
+        launch_args.arg(&mut out);
+        launch_args.arg(weights);
+        launch_args.arg(&indexes_buffer);
+        launch_args.arg(&indexes_len);
+        launch_args.arg(&self.embed_dim);
         unsafe {
-            self.function
-                .clone()
-                .launch(
-                    LaunchConfig {
-                        grid_dim: (
-                            indexes.len().div_ceil(16) as u32,
-                            self.embed_dim.div_ceil(16) as u32,
-                            1,
-                        ),
-                        block_dim: (16, 16, 1),
-                        shared_mem_bytes: 0,
-                    },
-                    (
-                        &mut out,
-                        weights,
-                        &indexes_buffer,
-                        indexes.len(),
-                        self.embed_dim,
+            launch_args
+                .launch(LaunchConfig {
+                    grid_dim: (
+                        indexes.len().div_ceil(16) as u32,
+                        self.embed_dim.div_ceil(16) as u32,
+                        1,
                     ),
-                )
+                    block_dim: (16, 16, 1),
+                    shared_mem_bytes: 0,
+                })
                 .unwrap();
         }
 
@@ -356,7 +349,7 @@ pub struct GatherCompiler<T: CudaFloat>(PhantomData<T>);
 impl<T: CudaFloat> Compiler for GatherCompiler<T> {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
-        let dev = CudaDevice::new(0).unwrap();
+        let dev = CudaContext::new(0).unwrap();
         let indexes = node();
         let ind_copy = unary::<CudaCopyToDevice<T>>(indexes.clone());
         let equal = binary::<CudaEqual<T>>(op::<CudaARange<T>>(), ind_copy.clone());

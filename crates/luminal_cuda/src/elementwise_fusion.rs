@@ -1,4 +1,4 @@
-use cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaFunction, DeviceRepr, LaunchConfig, PushKernelArg};
 use indicatif::{ProgressBar, ProgressStyle};
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -66,7 +66,7 @@ fn is_more_than_one_view(
 impl<T: CudaFloat> Compiler for ElementwiseFusionCompiler<T> {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
-        let device = CudaDevice::new(0).unwrap();
+        let device = CudaContext::new(0).unwrap();
         // Track fused ops to compile later
         let mut fused_ops = FxHashSet::default();
 
@@ -470,7 +470,7 @@ pub struct FusedElementwiseOp<T> {
     dyn_map: *const FxHashMap<char, usize>,
     dyn_chars: Vec<char>,
     subexpressions: Vec<(String, ShapeTracker)>,
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     output_buffer_sizes: Vec<Expression>,
     _phantom: PhantomData<T>,
 }
@@ -486,22 +486,21 @@ impl<T: CudaFloat> Operator for FusedElementwiseOp<T> {
         let out_size =
             self.output_buffer_sizes[0].exec(dyn_map).unwrap() / std::mem::size_of::<T>();
         let out_size_int = out_size as i32;
-        let out = self.device.alloc_zeros::<T>(out_size).unwrap();
+        let stream = self.device.default_stream();
+        let mut out = stream.alloc_zeros::<T>(out_size).unwrap();
 
-        let mut params = vec![];
+        let mut launch_args = stream.launch_builder(self.kernel.as_ref().unwrap());
+
         for (buf, _) in &tensors {
-            params.push(get_buffer_from_tensor::<T>(buf).as_kernel_param());
+            launch_args.arg(get_buffer_from_tensor::<T>(buf));
         }
-        params.push((&out).as_kernel_param());
-        params.push(out_size_int.as_kernel_param());
-
-        input_dyn_dims(&mut params, &self.dyn_chars, self.dyn_map);
+        launch_args.arg(&mut out);
+        launch_args.arg(&out_size_int);
+        input_dyn_dims(&mut launch_args, &self.dyn_chars, self.dyn_map);
 
         unsafe {
-            self.kernel
-                .clone()
-                .unwrap()
-                .launch(LaunchConfig::for_num_elems(out_size as u32), &mut params)
+            launch_args
+                .launch(LaunchConfig::for_num_elems(out_size as u32))
                 .unwrap();
         }
 
@@ -933,9 +932,9 @@ mod tests {
                 self.attention_norm = self.attention_norm.initialize();
                 self.feed_forward_norm = self.feed_forward_norm.initialize();
                 self.attention = self.attention.initialize();
-                self.feed_forward.down_proj = self.feed_forward.down_proj.initialize();
-                self.feed_forward.up_proj = self.feed_forward.up_proj.initialize();
-                self.feed_forward.gate_proj = self.feed_forward.gate_proj.initialize();
+                self.feed_forward.down_proj = self.feed_forward.down_proj.init_rand();
+                self.feed_forward.up_proj = self.feed_forward.up_proj.init_rand();
+                self.feed_forward.gate_proj = self.feed_forward.gate_proj.init_rand();
                 self
             }
         }

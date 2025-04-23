@@ -2,7 +2,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use cudarc::{
     cublas::{sys::cublasOperation_t::*, CudaBlas},
-    driver::{CudaDevice, DevicePtr, DevicePtrMut},
+    driver::{CudaContext, DevicePtr, DevicePtrMut},
 };
 
 use crate::{
@@ -16,11 +16,12 @@ use luminal::{
 };
 
 #[derive(Clone)]
-pub struct Matmul<T>(Arc<CudaBlas>, Arc<CudaDevice>, PhantomData<T>);
+pub struct Matmul<T>(Arc<CudaBlas>, Arc<CudaContext>, PhantomData<T>);
 crate::debug_type!(Matmul);
 
 impl<T: CudaFloat> Operator for Matmul<T> {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let stream = self.1.default_stream();
         let (a_shape, b_shape) = (inp[0].1.dims(), inp[1].1.dims());
         let (batch_size, m, k, n) = (
             a_shape
@@ -36,6 +37,7 @@ impl<T: CudaFloat> Operator for Matmul<T> {
         let b = get_buffer_from_tensor::<T>(&inp[1].0);
         let mut out = self
             .1
+            .default_stream()
             .alloc_zeros::<T>((m * n * batch_size) as usize)
             .unwrap();
         let (a_row_major, b_row_major) = (
@@ -51,6 +53,9 @@ impl<T: CudaFloat> Operator for Matmul<T> {
 
         let a_dims = inp[0].1.fake.iter().filter(|f| !**f).count();
         let b_dims = inp[1].1.fake.iter().filter(|f| !**f).count();
+        let (a_ptr, _a) = a.device_ptr(&stream);
+        let (b_ptr, _b) = b.device_ptr(&stream);
+        let (out_ptr, _out) = out.device_ptr(&stream);
         if T::is_f32() {
             unsafe {
                 cudarc::cublas::result::sgemm_strided_batched(
@@ -61,14 +66,14 @@ impl<T: CudaFloat> Operator for Matmul<T> {
                     m,
                     k,
                     &1.0_f32 as *const f32,
-                    *b.device_ptr() as *const f32,
+                    b_ptr as *const f32,
                     if b_row_major { n } else { k },
                     if b_dims == 2 { 0 } else { (n * k) as i64 },
-                    *a.device_ptr() as *const f32,
+                    a_ptr as *const f32,
                     if a_row_major { k } else { m },
                     if a_dims == 2 { 0 } else { (m * k) as i64 },
                     &0.0_f32 as *const f32,
-                    *out.device_ptr_mut() as *mut f32,
+                    out_ptr as *mut f32,
                     n,
                     (m * n) as i64,
                     batch_size,
@@ -85,14 +90,14 @@ impl<T: CudaFloat> Operator for Matmul<T> {
                     m,
                     k,
                     &f16::from_f32(1.0) as *const f16,
-                    *b.device_ptr() as *const f16,
+                    b_ptr as *const f16,
                     if b_row_major { n } else { k },
                     if b_dims == 2 { 0 } else { (n * k) as i64 },
-                    *a.device_ptr() as *const f16,
+                    a_ptr as *const f16,
                     if a_row_major { k } else { m },
                     if a_dims == 2 { 0 } else { (m * k) as i64 },
                     &f16::from_f32(0.0) as *const f16,
-                    *out.device_ptr_mut() as *mut f16,
+                    out_ptr as *mut f16,
                     n,
                     (m * n) as i64,
                     batch_size,
@@ -100,7 +105,7 @@ impl<T: CudaFloat> Operator for Matmul<T> {
                 .unwrap();
             }
         }
-
+        drop(_out);
         vec![Tensor::new(CudaData(out))]
     }
 }
@@ -114,7 +119,7 @@ where
 {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
-        let dev = CudaDevice::new(0).unwrap();
+        let dev = CudaContext::new(0).unwrap();
         // Look for the matmul pattern
         // Mul ([A, C(fake), B] | [A(fake), C, B]) -> SumReduce(2) -> [A, C]
         // Actually starts at [A,B] | [B, C]
@@ -220,7 +225,7 @@ where
             src2_shape.permute(&dims);
             let new_op = graph
                 .add_op(Matmul::<T>(
-                    Arc::new(CudaBlas::new(dev.clone()).unwrap()),
+                    Arc::new(CudaBlas::new(dev.default_stream()).unwrap()),
                     dev.clone(),
                     Default::default(),
                 ))

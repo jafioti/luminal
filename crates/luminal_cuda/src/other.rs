@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use cudarc::driver::{CudaDevice, CudaFunction, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaFunction, LaunchConfig, PushKernelArg};
 use itertools::Itertools;
 use luminal::prelude::{petgraph::visit::EdgeRef, *};
 use rustc_hash::FxHashMap;
@@ -15,7 +15,7 @@ use crate::{
 #[derive(Clone)]
 pub struct CudaARange<T> {
     function: CudaFunction,
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     pub size: Expression,
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
@@ -24,7 +24,7 @@ crate::debug_type!(CudaARange);
 
 impl<T: CudaFloat> CudaARange<T> {
     pub fn new(
-        device: Arc<CudaDevice>,
+        device: Arc<CudaContext>,
         size: Expression,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
@@ -55,14 +55,15 @@ impl<T: CudaFloat> Operator for CudaARange<T> {
             .size
             .exec(unsafe { self.dyn_map.as_ref().unwrap() })
             .unwrap();
-        let mut out = self.device.alloc_zeros::<T>(n_elements).unwrap();
+        let stream = self.device.default_stream();
+        let mut out = stream.alloc_zeros::<T>(n_elements).unwrap();
+        let mut launch_args = stream.launch_builder(&self.function);
+        let n_elements_int = n_elements as i32;
+        launch_args.arg(&mut out);
+        launch_args.arg(&n_elements_int);
         unsafe {
-            self.function
-                .clone()
-                .launch(
-                    LaunchConfig::for_num_elems(n_elements as u32),
-                    (&mut out, n_elements as i32),
-                )
+            launch_args
+                .launch(LaunchConfig::for_num_elems(n_elements as u32))
                 .unwrap();
         }
 
@@ -76,7 +77,7 @@ pub struct ARangeCompiler<T: CudaFloat>(PhantomData<T>);
 impl<T: CudaFloat> Compiler for ARangeCompiler<T> {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
-        let dev = CudaDevice::new(0).unwrap();
+        let dev = CudaContext::new(0).unwrap();
         // TODO: Make sure this actually checks the shape transformations to ensure pooling happens
         let contig_one = constant::<T>(1.);
         let contig1 = unary::<CudaContiguous<T>>(contig_one.clone());
