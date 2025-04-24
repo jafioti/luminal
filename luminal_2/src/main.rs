@@ -441,11 +441,11 @@ fn tiled_matmul_simdgroup_vector() {
                 (128, &[131072], 131072),
                 (128, &[0], 32),
                 (1, &[0], 0),
-                (8, &[0], 4096),
-                (4, &[0], 2),
+                (32, &[0], 4096),
+                (1, &[0], 2),
                 (1, &[0], 0),
-                (4, &[32768], 32768),
-                (4, &[0], 1),
+                (4, &[0], 32768),
+                (4, &[32768], 1),
                 (512, &[8], 8),
             ],
         ),
@@ -457,11 +457,11 @@ fn tiled_matmul_simdgroup_vector() {
                 (128, &[0], 131072),
                 (128, &[32], 32),
                 (1, &[0], 0),
-                (8, &[0], 4096),
-                (4, &[0], 2),
+                (32, &[0], 4096),
+                (1, &[0], 2),
                 (1, &[0], 0),
-                (4, &[0], 1),
-                (4, &[8], 32768),
+                (4, &[8], 1),
+                (4, &[0], 32768),
                 (512, &[32768], 8),
             ],
         ),
@@ -472,13 +472,28 @@ fn tiled_matmul_simdgroup_vector() {
             &[
                 (128, &[131072, 131072], 131072),
                 (128, &[32, 32], 32),
-                (1, &[0, 0], 0),
-                (8, &[4096, 4096], 0),
-                (4, &[2, 2], 0),
-                (1, &[0, 0], 0),
-                (4, &[32768, 1], 0),
+                (1, &[0, 0], 1),
+                (32, &[4096, 4096], 1),
+                (1, &[2, 2], 1),
+                (1, &[0, 0], 1),
+                (4, &[32768, 1], 1),
                 (4, &[1, 32768], 1),
                 (512, &[8, 8], 1),
+            ],
+        ),
+        stack(
+            &[Input::Ref(2)],
+            "simdgroup_store",
+            None,
+            &[
+                (128, &[131072], 131072),
+                (128, &[32], 32),
+                (1, &[1], 0),
+                (32, &[1], 0),
+                (1, &[1], 0),
+                (1, &[1], 0),
+                (4, &[1], 8),
+                (4, &[1], 32768),
             ],
         ),
     ]);
@@ -967,8 +982,10 @@ fn run_graph(inputs: Vec<Vec<f32>>, kernels: &[Kernel]) -> Vec<Vec<f32>> {
     }
 
     // Run
+    let start = std::time::Instant::now();
     command_buffer.commit();
     command_buffer.wait_until_completed();
+    println!("Ran in {}ms", start.elapsed().as_millis());
 
     // Copy back intermediate and output buffers
     let mut data = vec![];
@@ -1036,7 +1053,7 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                 } else {
                     // Check strides for each input
                     dep_inputs.iter().all(|(inp, reference)| {
-                        println!("Inp : {inp} | {:?}", real_a);
+                        println!("Inp : {inp}");
                         // Filter for non-reduced frames
                         let a_frames = a
                             .iter()
@@ -1053,8 +1070,9 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                             .iter()
                             .filter(|l| l.size == 0 || l.size == 1 || l.input_strides[*inp] != 0)
                             .collect_vec();
+                        println!("A: {}", a_frames.len());
                         println!("A: {:?}", a_frames);
-                        println!("B: {:?}", b_frames);
+                        println!("B: {}", b_frames.len());
                         a_frames.len() == b_frames.len()
                             && a_frames
                                 .iter()
@@ -1297,6 +1315,7 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
     }
 
     // Write kernels
+    let mut loop_levels: Vec<char> = vec![];
     for (n_kernel, (stack, instructions)) in merged_ir.into_iter().enumerate() {
         // Compute grid and threadblock dim assignments
         let exec_dims = stack
@@ -1374,7 +1393,6 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
             .collect_vec();
         let mut kernel_lines: Vec<(String, Vec<char>)> = vec![];
         let mut kernel_output_num = 0;
-        let mut thread_level_loops = 0;
         for (
             var_names,
             Stack {
@@ -1451,29 +1469,61 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
             const BARRIER: &str = "threadgroup_barrier(mem_flags::mem_threadgroup);";
 
             // Write thread-level loops
-            let n_thread_loops = frames.iter().filter(|f| f.thread_loop).count();
-            let loop_chars: Vec<char> = frames
-                .iter()
-                .filter_map(|f| if f.reduce { None } else { f.loop_char })
-                .collect();
-            for i in thread_level_loops..n_thread_loops {
-                // Create loop
-                let StackFrame {
-                    size, loop_char, ..
-                } = frames.iter().filter(|f| f.thread_loop).nth(i).unwrap();
-                let loop_char = loop_char.unwrap();
+            let loop_chars: Vec<char> = frames.iter().filter_map(|f| f.loop_char).collect();
 
-                if *size <= 8 {
-                    // Only unroll loops <= 8
-                    kernel_lines.push((format!("#pragma unroll({size})"), loop_chars.clone()));
+            // End loops
+            if let Some((i, _)) = loop_levels
+                .iter()
+                .enumerate()
+                .find(|(i, c)| *i >= loop_chars.len() || loop_chars[*i] != **c)
+            {
+                println!("ENDING :{i}");
+                for (i, loop_char) in loop_levels
+                    .iter()
+                    .cloned()
+                    .enumerate()
+                    .skip(i)
+                    .collect_vec()
+                    .into_iter()
+                    .rev()
+                {
+                    kernel_lines.push(("}".to_string(), loop_levels[..i].to_vec()));
+                    loop_levels.pop();
                 }
-                kernel_lines.push((format!("for (int loop_{loop_char} = 0; loop_{loop_char} < {size}; ++loop_{loop_char}) {{"), loop_chars.clone()));
             }
-            for _ in n_thread_loops..thread_level_loops {
-                // End loop
-                kernel_lines.push(("}".to_string(), loop_chars.clone()));
+
+            // Create loops
+            if let Some((i, _)) = frames
+                .iter()
+                .filter_map(|f| f.loop_char)
+                .enumerate()
+                .find(|(i, c)| *i >= loop_levels.len() || loop_levels[*i] != *c)
+            {
+                for (
+                    i,
+                    StackFrame {
+                        size, loop_char, ..
+                    },
+                ) in frames
+                    .iter()
+                    .filter(|f| f.loop_char.is_some())
+                    .enumerate()
+                    .skip(i)
+                    .collect_vec()
+                {
+                    let loop_char = loop_char.unwrap();
+
+                    if *size <= 8 {
+                        // Only unroll loops <= 8
+                        kernel_lines.push((
+                            format!("#pragma unroll({size})"),
+                            loop_chars[..i + 1].to_vec(),
+                        ));
+                    }
+                    kernel_lines.push((format!("for (int loop_{loop_char} = 0; loop_{loop_char} < {size}; ++loop_{loop_char}) {{"), loop_chars[..i + 1].to_vec()));
+                    loop_levels.push(loop_char);
+                }
             }
-            thread_level_loops = n_thread_loops;
 
             if instruction == "sum" {
                 let StackFrame {
@@ -1504,44 +1554,40 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                 kernel_lines.push((format!("\t{var_name} += {inputs};"), loop_chars.clone()));
                 kernel_lines.push(("}".to_string(), loop_chars));
             } else if instruction == "simdgroup_multiply_accumulate" {
-                let StackFrame {
-                    size, loop_char, ..
-                } = frames.iter().find(|f| f.reduce).unwrap();
+                let StackFrame { loop_char, .. } = frames.iter().find(|f| f.reduce).unwrap();
                 let loop_char = loop_char.unwrap();
-                let loop_chars: Vec<char> = frames
-                    .iter()
-                    .filter_map(|f| if f.reduce { None } else { f.loop_char })
-                    .collect();
-                let mut start_loop_ind = kernel_lines
+                let loop_chars: Vec<char> = frames.iter().filter_map(|f| f.loop_char).collect();
+                println!("loop char: {loop_char}");
+                let start_loop_ind = kernel_lines
                     .iter()
                     .position(|f| f.1.contains(&loop_char))
                     .unwrap();
+                println!("pos: {:?}", start_loop_ind);
                 kernel_lines.insert(
                     start_loop_ind,
                     (
                         format!("simdgroup_float8x8 {var_name} = simdgroup_float8x8(0);"),
-                        loop_chars.clone(),
+                        frames
+                            .iter()
+                            .filter(|f| !f.reduce)
+                            .filter_map(|f| f.loop_char)
+                            .collect(),
                     ),
                 );
-                if *size <= 8 {
-                    // Only unroll loops <= 8
-                    kernel_lines.insert(
-                        start_loop_ind + 1,
-                        (format!("#pragma unroll({size})"), loop_chars.clone()),
-                    );
-                    start_loop_ind += 1;
-                }
-                kernel_lines.insert(start_loop_ind + 1, (format!("for (int loop_{loop_char} = 0; loop_{loop_char} < {size}; ++loop_{loop_char}) {{"), loop_chars.clone()));
                 kernel_lines.push((
-                    format!("\tsimdgroup_multiply_accumulate({var_name}, {inputs}, {var_name});"),
+                    format!("simdgroup_multiply_accumulate({var_name}, {inputs}, {var_name});"),
                     loop_chars.clone(),
                 ));
-                kernel_lines.push(("}".to_string(), loop_chars));
+            } else if instruction == "simdgroup_store" {
+                kernel_lines.push((
+                    format!(
+                        "simdgroup_store({inputs}, out{kernel_output_num} + {}, 4096);",
+                        get_inputs(frames, true, &[], 0)[0]
+                    ),
+                    frames.iter().filter_map(|f| f.loop_char).collect(),
+                ));
             } else if instruction == "smem_load" {
-                let loop_chars: Vec<char> = frames
-                    .iter()
-                    .filter_map(|f| if f.reduce { None } else { f.loop_char })
-                    .collect();
+                let loop_chars: Vec<char> = frames.iter().filter_map(|f| f.loop_char).collect();
                 if kernel_lines
                     .last()
                     .map(|(l, _)| l == BARRIER)
@@ -1593,42 +1639,34 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                         .collect(),
                 ));
             }
-            if *kernel_output {
-                if instruction.contains("simdgroup") {
-                    kernel_lines.push((
-                        format!(
-                            "simdgroup_store({var_name}, out{kernel_output_num} + {}, 4096);",
-                            get_inputs(frames, true, &[], 0)[0]
-                        ),
-                        frames
-                            .iter()
-                            .filter_map(|f| if f.reduce { None } else { f.loop_char })
-                            .collect(),
-                    ));
-                } else {
-                    kernel_lines.push((
-                        format!(
-                            "out{kernel_output_num}[{}] = {var_name};",
-                            get_inputs(frames, true, &[], 0)[0]
-                        ),
-                        frames
-                            .iter()
-                            .filter_map(|f| if f.reduce { None } else { f.loop_char })
-                            .collect(),
-                    ));
-                }
+            if *kernel_output && !instruction.contains("simdgroup") {
+                kernel_lines.push((
+                    format!(
+                        "out{kernel_output_num}[{}] = {var_name};",
+                        get_inputs(frames, true, &[], 0)[0]
+                    ),
+                    frames
+                        .iter()
+                        .filter_map(|f| if f.reduce { None } else { f.loop_char })
+                        .collect(),
+                ));
                 kernel_output_num += 1;
             }
         }
-        for i in (0..thread_level_loops).rev() {
+        for i in (0..loop_levels.len()).rev() {
             // End loop
-            kernel_lines.push(("}".to_string(), vec!['a'; i]));
+            kernel_lines.push(("}".to_string(), loop_levels[..i].to_vec()));
         }
         let mut kernel = kernel_lines
             .into_iter()
             .map(|(s, c)| {
+                let n_loops = if s.contains("for (") || s.contains("#pragma") {
+                    c.len() - 1
+                } else {
+                    c.len()
+                };
                 s.split("\n")
-                    .map(|s| format!("{}{s}", (0..c.len()).map(|_| "\t").join("")))
+                    .map(|s| format!("{}{s}", (0..n_loops).map(|_| "\t").join("")))
                     .join("\n")
             })
             .join("\n");
