@@ -444,9 +444,9 @@ fn tiled_matmul_simdgroup_vector() {
                 (32, &[0], 4096),
                 (1, &[0], 2),
                 (1, &[0], 0),
+                (512, &[8], 8),
                 (4, &[0], 32768),
                 (4, &[32768], 1),
-                (512, &[8], 8),
             ],
         ),
         stack(
@@ -460,15 +460,15 @@ fn tiled_matmul_simdgroup_vector() {
                 (32, &[0], 4096),
                 (1, &[0], 2),
                 (1, &[0], 0),
+                (512, &[32768], 8),
                 (4, &[8], 1),
                 (4, &[0], 32768),
-                (512, &[32768], 8),
             ],
         ),
         stack(
             &[Input::Ref(0), Input::Ref(1)],
             "simdgroup_multiply_accumulate",
-            Some(8),
+            Some(6),
             &[
                 (128, &[131072, 131072], 131072),
                 (128, &[32, 32], 32),
@@ -476,9 +476,9 @@ fn tiled_matmul_simdgroup_vector() {
                 (32, &[4096, 4096], 1),
                 (1, &[2, 2], 1),
                 (1, &[0, 0], 1),
-                (4, &[32768, 1], 1),
-                (4, &[1, 32768], 1),
                 (512, &[8, 8], 1),
+                (4, &[32768, 1], 4),
+                (4, &[1, 32768], 1),
             ],
         ),
         stack(
@@ -492,7 +492,7 @@ fn tiled_matmul_simdgroup_vector() {
                 (32, &[1], 0),
                 (1, &[1], 0),
                 (1, &[1], 0),
-                (4, &[1], 8),
+                (4, &[4], 8),
                 (4, &[1], 32768),
             ],
         ),
@@ -1425,7 +1425,8 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                         .collect_vec(),
                     0,
                 ))
-                .map(|(inp, index)| match inp {
+                .enumerate()
+                .map(|(n_input, (inp, index))| match inp {
                     Input::Inp(i) => format!(
                         "{}[{}]",
                         (b'A' + (i % 26) as u8) as char,
@@ -1454,6 +1455,23 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                                 "[0]".to_string()
                             } else {
                                 format!("[{index}]")
+                            }
+                        } else if instruction.contains("simdgroup_store") {
+                            let accum_indexes = frames
+                                .iter()
+                                .filter(|f| f.thread_loop)
+                                .map(|f| {
+                                    format!(
+                                        "loop_{} * {}",
+                                        f.loop_char.unwrap(),
+                                        f.input_strides[n_input]
+                                    )
+                                })
+                                .join(" + ");
+                            if accum_indexes.is_empty() {
+                                "0".to_string()
+                            } else {
+                                format!("[{accum_indexes}]")
                             }
                         } else {
                             "".to_string()
@@ -1533,19 +1551,32 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                 );
                 kernel_lines.push((format!("\t{var_name} += {inputs};"), loop_chars.clone()));
             } else if instruction == "simdgroup_multiply_accumulate" {
-                let StackFrame { loop_char, .. } = frames.iter().find(|f| f.reduce).unwrap();
+                let (n_frame_reduced, StackFrame { loop_char, .. }) =
+                    frames.iter().enumerate().find(|(_, f)| f.reduce).unwrap();
+                let accumulations_needed = frames
+                    .iter()
+                    .skip(n_frame_reduced + 1)
+                    .map(|f| f.size)
+                    .product::<usize>()
+                    .max(1);
+                let mut accum_indexes = frames
+                    .iter()
+                    .skip(n_frame_reduced + 1)
+                    .map(|f| format!("loop_{} * {}", f.loop_char.unwrap(), f.output_stride))
+                    .join(" + ");
+                if accum_indexes.is_empty() {
+                    accum_indexes = "0".to_string();
+                }
                 let loop_char = loop_char.unwrap();
                 let loop_chars: Vec<char> = frames.iter().filter_map(|f| f.loop_char).collect();
-                println!("loop char: {loop_char}");
                 let start_loop_ind = kernel_lines
                     .iter()
                     .position(|f| f.1.contains(&loop_char))
                     .unwrap();
-                println!("pos: {:?}", start_loop_ind);
                 kernel_lines.insert(
                     start_loop_ind,
                     (
-                        format!("simdgroup_float8x8 {var_name} = simdgroup_float8x8(0);"),
+                        format!("simdgroup_float8x8 {var_name}[{accumulations_needed}] = {{simdgroup_float8x8(0)}};"),
                         frames
                             .iter()
                             .filter(|f| !f.reduce)
@@ -1554,7 +1585,7 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                     ),
                 );
                 kernel_lines.push((
-                    format!("simdgroup_multiply_accumulate({var_name}, {inputs}, {var_name});"),
+                    format!("simdgroup_multiply_accumulate({var_name}[{accum_indexes}], {inputs}, {var_name}[{accum_indexes}]);"),
                     loop_chars.clone(),
                 ));
             } else if instruction == "simdgroup_store" {
