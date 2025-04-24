@@ -1477,16 +1477,7 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                 .enumerate()
                 .find(|(i, c)| *i >= loop_chars.len() || loop_chars[*i] != **c)
             {
-                println!("ENDING :{i}");
-                for (i, loop_char) in loop_levels
-                    .iter()
-                    .cloned()
-                    .enumerate()
-                    .skip(i)
-                    .collect_vec()
-                    .into_iter()
-                    .rev()
-                {
+                for i in (i..loop_levels.len()).rev() {
                     kernel_lines.push(("}".to_string(), loop_levels[..i].to_vec()));
                     loop_levels.pop();
                 }
@@ -1526,15 +1517,13 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
             }
 
             if instruction == "sum" {
-                let StackFrame {
-                    size, loop_char, ..
-                } = frames.iter().find(|f| f.reduce).unwrap();
+                let StackFrame { loop_char, .. } = frames.iter().find(|f| f.reduce).unwrap();
                 let loop_char = loop_char.unwrap();
                 let loop_chars: Vec<char> = frames
                     .iter()
                     .filter_map(|f| if f.reduce { None } else { f.loop_char })
                     .collect();
-                let mut start_loop_ind = kernel_lines
+                let start_loop_ind = kernel_lines
                     .iter()
                     .position(|f| f.1.contains(&loop_char))
                     .unwrap();
@@ -1542,17 +1531,7 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                     start_loop_ind,
                     (format!("float {var_name} = 0.0;"), loop_chars.clone()),
                 );
-                if *size <= 8 {
-                    // Only unroll loops <= 8
-                    kernel_lines.insert(
-                        start_loop_ind + 1,
-                        (format!("#pragma unroll({size})"), loop_chars.clone()),
-                    );
-                    start_loop_ind += 1;
-                }
-                kernel_lines.insert(start_loop_ind + 1, (format!("for (int loop_{loop_char} = 0; loop_{loop_char} < {size}; ++loop_{loop_char}) {{"), loop_chars.clone()));
                 kernel_lines.push((format!("\t{var_name} += {inputs};"), loop_chars.clone()));
-                kernel_lines.push(("}".to_string(), loop_chars));
             } else if instruction == "simdgroup_multiply_accumulate" {
                 let StackFrame { loop_char, .. } = frames.iter().find(|f| f.reduce).unwrap();
                 let loop_char = loop_char.unwrap();
