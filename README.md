@@ -32,6 +32,8 @@ println!("Result: {:?}", c);
 
 ## Getting Started
 **Llama 3 8B**
+- the below is a quick example of how you can run Llama 3 8B locally using Luminal
+    - to go indepth on this example check out [the documentation here](https://github.com/jafioti/luminal/tree/main/examples/llama/README.md)
 ```bash
 cd ./examples/llama
 # Download the model
