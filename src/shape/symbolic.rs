@@ -135,7 +135,8 @@ where
     for<'a> &'a T: Into<Expression>,
 {
     fn eq(&self, other: &T) -> bool {
-        self.equivalent(&other.into())
+        *self.terms.read() == *other.into().terms.read()
+        // self.equivalent(&other.into()) // For some reason this makes compilation (maybe understandable) and graphs (what?) very slow!
     }
 }
 
