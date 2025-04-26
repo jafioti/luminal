@@ -1,9 +1,6 @@
 #![allow(clippy::type_complexity)]
 
 // TODO
-// Write simdgroup matmul (validated)
-// handle thread-level looping (multiple results per thread)
-// write optimal simdgroup matmul (4x1)
 // write rewrite trajectory for optimal simdgroup matmul
 // write flash attention in ir
 // write rewrite trajector for flash attention
@@ -358,11 +355,11 @@ fn tiled_matmul_simdgroup() {
             None,
             &[
                 (512, &[32768], 32768),
-                (512, &[0], 8),
+                (64, &[0], 64),
                 (1, &[0], 0),
                 (8, &[0], 4096),
                 (4, &[0], 2),
-                (1, &[0], 0),
+                (8, &[0], 8),
                 (512, &[8], 8),
             ],
         ),
@@ -372,11 +369,11 @@ fn tiled_matmul_simdgroup() {
             None,
             &[
                 (512, &[0], 32768),
-                (512, &[8], 8),
+                (64, &[64], 64),
                 (1, &[0], 0),
                 (8, &[0], 4096),
                 (4, &[0], 2),
-                (1, &[0], 0),
+                (8, &[8], 8),
                 (512, &[32768], 8),
             ],
         ),
@@ -386,12 +383,25 @@ fn tiled_matmul_simdgroup() {
             Some(6),
             &[
                 (512, &[32768, 32768], 32768),
-                (512, &[8, 8], 8),
+                (64, &[64, 64], 64),
                 (1, &[0, 0], 0),
-                (8, &[4096, 4096], 0),
-                (4, &[2, 2], 0),
-                (1, &[0, 0], 0),
+                (8, &[4096, 4096], 4096),
+                (4, &[2, 2], 2),
+                (8, &[8, 8], 8),
                 (512, &[8, 8], 1),
+            ],
+        ),
+        stack(
+            &[Input::Ref(2)],
+            "simdgroup_store",
+            Some(6),
+            &[
+                (512, &[32768], 32768),
+                (64, &[64], 64),
+                (1, &[0], 0),
+                (8, &[4096], 0),
+                (4, &[2], 0),
+                (8, &[8], 8),
             ],
         ),
     ]);
@@ -431,7 +441,7 @@ fn tiled_matmul_simdgroup() {
 }
 
 fn tiled_matmul_simdgroup_vector() {
-    // This is a 8x8x8 tiled matmul. Uses simgroup
+    // This is a 8x8x8 tiled matmul. Uses simdgroup and 4x1 input tiles, 4x4 output tiles
     let kernels = create_kernels(vec![
         stack(
             &[Input::Inp(0)],
@@ -439,14 +449,14 @@ fn tiled_matmul_simdgroup_vector() {
             None,
             &[
                 (128, &[131072], 131072),
-                (128, &[0], 32),
+                (16, &[0], 256),
                 (1, &[0], 0),
-                (32, &[0], 4096),
-                (1, &[0], 2),
-                (1, &[0], 0),
+                (8, &[0], 4096),
+                (4, &[0], 2),
+                (8, &[0], 8),
                 (512, &[8], 8),
-                (4, &[0], 32768),
-                (4, &[32768], 1),
+                (4, &[32768], 32768),
+                (4, &[0], 64),
             ],
         ),
         stack(
@@ -455,14 +465,14 @@ fn tiled_matmul_simdgroup_vector() {
             None,
             &[
                 (128, &[0], 131072),
-                (128, &[32], 32),
+                (16, &[256], 256),
                 (1, &[0], 0),
-                (32, &[0], 4096),
-                (1, &[0], 2),
-                (1, &[0], 0),
+                (8, &[0], 4096),
+                (4, &[0], 2),
+                (8, &[8], 8),
                 (512, &[32768], 8),
-                (4, &[8], 1),
                 (4, &[0], 32768),
+                (4, &[64], 64),
             ],
         ),
         stack(
@@ -471,14 +481,14 @@ fn tiled_matmul_simdgroup_vector() {
             Some(6),
             &[
                 (128, &[131072, 131072], 131072),
-                (128, &[32, 32], 32),
-                (1, &[0, 0], 1),
-                (32, &[4096, 4096], 1),
-                (1, &[2, 2], 1),
-                (1, &[0, 0], 1),
+                (16, &[256, 256], 256),
+                (1, &[0, 0], 0),
+                (8, &[4096, 4096], 4096),
+                (4, &[2, 2], 2),
+                (8, &[8, 8], 8),
                 (512, &[8, 8], 1),
-                (4, &[32768, 1], 4),
-                (4, &[1, 32768], 1),
+                (4, &[32768, 32768], 32768),
+                (4, &[64, 64], 64),
             ],
         ),
         stack(
@@ -487,13 +497,13 @@ fn tiled_matmul_simdgroup_vector() {
             None,
             &[
                 (128, &[131072], 131072),
-                (128, &[32], 32),
-                (1, &[1], 0),
-                (32, &[1], 0),
-                (1, &[1], 0),
-                (1, &[1], 0),
-                (4, &[4], 8),
-                (4, &[1], 32768),
+                (16, &[256], 256),
+                (1, &[0], 0),
+                (8, &[4096], 0),
+                (4, &[2], 0),
+                (8, &[8], 8),
+                (4, &[32768], 32768),
+                (4, &[64], 64),
             ],
         ),
     ]);
@@ -679,56 +689,19 @@ fn exp_sin_outer_product() {
 fn shared_exp() {
     // This does Tensor(3, 4).mul(Tensor(3).exp().expand(4, dim=1)).sum_reduce(dim=1)
     let kernels = create_kernels(vec![
-        Stack {
-            inputs: vec![Input::Inp(1)],
-            instruction: "exp".to_string(),
-            frames: vec![StackFrame {
-                size: 3,
-                input_strides: vec![1],
-                output_stride: 1,
-                ..Default::default()
-            }],
-            ..Default::default()
-        },
-        Stack {
-            inputs: vec![Input::Inp(0), Input::Ref(0)],
-            instruction: "mul".to_string(),
-            frames: vec![
-                StackFrame {
-                    size: 3,
-                    input_strides: vec![4, 1],
-                    output_stride: 4,
-                    ..Default::default()
-                },
-                StackFrame {
-                    size: 4,
-                    input_strides: vec![1, 0],
-                    output_stride: 1,
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        },
-        Stack {
-            inputs: vec![Input::Ref(1)],
-            instruction: "sum".to_string(),
-            frames: vec![
-                StackFrame {
-                    size: 3,
-                    input_strides: vec![4],
-                    output_stride: 1,
-                    ..Default::default()
-                },
-                StackFrame {
-                    size: 4,
-                    input_strides: vec![1],
-                    output_stride: 0,
-                    reduce: true,
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        },
+        stack(&[Input::Inp(1)], "exp", None, &[(3, &[1], 1)]),
+        stack(
+            &[Input::Inp(0), Input::Ref(0)],
+            "mul",
+            None,
+            &[(3, &[4, 1], 4), (4, &[1, 0], 1)],
+        ),
+        stack(
+            &[Input::Ref(1)],
+            "sum",
+            Some(1),
+            &[(3, &[4], 1), (4, &[1], 0)],
+        ),
     ]);
 
     println!("Shared exp vector mul");
@@ -761,7 +734,8 @@ fn shared_exp() {
 }
 
 fn main() {
-    // shared_exp();
+    shared_exp();
+    tiled_matmul_simdgroup();
     tiled_matmul_simdgroup_vector();
 }
 
@@ -1053,7 +1027,7 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                 } else {
                     // Check strides for each input
                     dep_inputs.iter().all(|(inp, reference)| {
-                        println!("Inp : {inp}");
+                        // println!("Inp : {inp}");
                         // Filter for non-reduced frames
                         let a_frames = a
                             .iter()
@@ -1070,23 +1044,23 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                             .iter()
                             .filter(|l| l.size == 0 || l.size == 1 || l.input_strides[*inp] != 0)
                             .collect_vec();
-                        println!("A: {}", a_frames.len());
-                        println!("A: {:?}", a_frames);
-                        println!("B: {}", b_frames.len());
+                        // println!("A: {}", a_frames.len());
+                        // println!("A: {:?}", a_frames);
+                        // println!("B: {}", b_frames.len());
                         a_frames.len() == b_frames.len()
                             && a_frames
                                 .iter()
                                 .zip(b_frames)
                                 .enumerate()
                                 .all(|(n_frame, (a, b))| {
-                                    println!(
-                                        "{} | {} and {} | {} ({})",
-                                        a.size,
-                                        b.size,
-                                        a.output_stride,
-                                        b.input_strides[*inp],
-                                        a.input_strides[0]
-                                    );
+                                    // println!(
+                                    //     "{} | {} and {} | {} ({})",
+                                    //     a.size,
+                                    //     b.size,
+                                    //     a.output_stride,
+                                    //     b.input_strides[*inp],
+                                    //     a.input_strides[0]
+                                    // );
                                     a.size == b.size
                                         && (a.output_stride == b.input_strides[*inp]
                                             	// It is ok if we have mismatched output - input strides if this is going through shared memory in a threadblock
@@ -1177,7 +1151,6 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                         .iter()
                         .position(|s| s.reduce)
                         .unwrap();
-                    println!("reduce: {reduce_dim}");
                     let loop_char = if let Some(s) = orig_reduce_dim {
                         // Need to correct for the sliding done during matching
                         merged_ir[l + 1].1[0].frames[s].loop_char
@@ -1188,14 +1161,12 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                         if frames.len() <= reduce_dim {
                             break;
                         }
-                        println!("Setting {reduce_dim}");
                         frames
                             .iter_mut()
                             .filter(|s| !s.reduce)
                             .nth(reduce_dim)
                             .unwrap()
                             .loop_char = loop_char;
-                        println!("{:?}", frames);
                     }
                 }
                 // Merge inputs
@@ -1315,8 +1286,8 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
     }
 
     // Write kernels
-    let mut loop_levels: Vec<char> = vec![];
     for (n_kernel, (stack, instructions)) in merged_ir.into_iter().enumerate() {
+        let mut loop_levels: Vec<char> = vec![];
         // Compute grid and threadblock dim assignments
         let exec_dims = stack
             .frames
@@ -1403,7 +1374,6 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
             },
         ) in instructions.iter().enumerate()
         {
-            println!("{instruction}: {:?}", frames);
             let var_name = (b'a' + (var_names % 26) as u8) as char;
             let inputs = inputs
                 .iter()
@@ -1425,8 +1395,7 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                         .collect_vec(),
                     0,
                 ))
-                .enumerate()
-                .map(|(n_input, (inp, index))| match inp {
+                .map(|(inp, index)| match inp {
                     Input::Inp(i) => format!(
                         "{}[{}]",
                         (b'A' + (i % 26) as u8) as char,
@@ -1457,19 +1426,27 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                                 format!("[{index}]")
                             }
                         } else if instruction.contains("simdgroup_store") {
+                            let mut accum_strides = frames
+                                .iter()
+                                .filter(|f| f.thread_loop)
+                                .rev()
+                                .scan(1, |st, f| {
+                                    let init = *st;
+                                    *st *= f.size;
+                                    Some(init)
+                                })
+                                .collect_vec();
+                            accum_strides.reverse();
                             let accum_indexes = frames
                                 .iter()
                                 .filter(|f| f.thread_loop)
-                                .map(|f| {
-                                    format!(
-                                        "loop_{} * {}",
-                                        f.loop_char.unwrap(),
-                                        f.input_strides[n_input]
-                                    )
+                                .enumerate()
+                                .map(|(i, f)| {
+                                    format!("loop_{} * {}", f.loop_char.unwrap(), accum_strides[i])
                                 })
                                 .join(" + ");
                             if accum_indexes.is_empty() {
-                                "0".to_string()
+                                "[0]".to_string()
                             } else {
                                 format!("[{accum_indexes}]")
                             }
@@ -1530,6 +1507,13 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                         ));
                     }
                     kernel_lines.push((format!("for (int loop_{loop_char} = 0; loop_{loop_char} < {size}; ++loop_{loop_char}) {{"), loop_chars[..i + 1].to_vec()));
+                    if *size == 512 {
+                        // there is a better way to do this
+                        kernel_lines.push((
+                            "threadgroup_barrier(mem_flags::mem_threadgroup);".to_string(),
+                            loop_chars[..i + 1].to_vec(),
+                        ));
+                    }
                     loop_levels.push(loop_char);
                 }
             }
@@ -1559,10 +1543,22 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                     .map(|f| f.size)
                     .product::<usize>()
                     .max(1);
+                let mut accum_strides = frames
+                    .iter()
+                    .filter(|f| f.thread_loop)
+                    .rev()
+                    .scan(1, |st, f| {
+                        let init = *st;
+                        *st *= f.size;
+                        Some(init)
+                    })
+                    .collect_vec();
+                accum_strides.reverse();
                 let mut accum_indexes = frames
                     .iter()
                     .skip(n_frame_reduced + 1)
-                    .map(|f| format!("loop_{} * {}", f.loop_char.unwrap(), f.output_stride))
+                    .enumerate()
+                    .map(|(i, f)| format!("loop_{} * {}", f.loop_char.unwrap(), accum_strides[i]))
                     .join(" + ");
                 if accum_indexes.is_empty() {
                     accum_indexes = "0".to_string();
@@ -1577,11 +1573,11 @@ fn create_kernels(mut ir: Vec<Stack>) -> Vec<Kernel> {
                     start_loop_ind,
                     (
                         format!("simdgroup_float8x8 {var_name}[{accumulations_needed}] = {{simdgroup_float8x8(0)}};"),
-                        frames
-                            .iter()
-                            .filter(|f| !f.reduce)
-                            .filter_map(|f| f.loop_char)
-                            .collect(),
+                        if start_loop_ind == 0 {
+                        	vec![]
+                        } else {
+                       	kernel_lines[start_loop_ind - 1].1.clone()
+                        }
                     ),
                 );
                 kernel_lines.push((
