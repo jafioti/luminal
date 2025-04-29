@@ -1,3 +1,5 @@
+use std::f32;
+
 use luminal::prelude::{binary::F32Pow, *};
 use luminal_nn::{Embedding, LayerNorm, Linear};
 
@@ -49,25 +51,25 @@ impl SerializeModule for Mlp {
 }
 
 fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> GraphTensor {
-    assert_eq!(input.shape.len(), 4); // batch, n_heads, seq, head_dim
-    let (batch, n_heads, seq, head_dim) = input.dims4();
-    // Get freqs
-    let freqs = (input.graph().arange(head_dim / 2) * 2.0) / (head_dim.to_usize().unwrap() as f32);
-    let freqs = ROPE_THETA.pow(freqs);
-    let pos = input.graph().arange(seq) + prev_seq;
-    let emb = pos.expand(1, 1).matmul(freqs.expand(0, 1));
+    assert_eq!(input.shape.len(), 4);
+    let (_, h, s, d) = input.dims4();
 
-    // Split input into evens and odds
-    let split = input.reshape((batch, n_heads, seq, head_dim / 2, 2));
-    let x0 = split.slice((.., .., .., .., ..1));
-    let x1 = split.slice((.., .., .., .., 1..));
+    // 1. Inverse frequencies 1 / θ^(2k/D)  (θ == ROPE_THETA)
+    let inv_freq =
+        ROPE_THETA.pow((input.graph().arange(d / 2) * 2.) / d.to_usize().unwrap() as f32); // [half]
 
-    // Apply sin and cos embeddings
-    let x0_out = x0 * emb.cos().expand_to(x0.shape) - x1 * emb.sin().expand_to(x1.shape);
-    let x1_out = x0 * emb.sin().expand_to(x0.shape) + x1 * emb.cos().expand_to(x1.shape);
+    // 2. Positions = arange(s) + prev_seq  ➜ [S]
+    let pos = input.graph().arange(s) + prev_seq;
 
-    // Combine back into output
-    x0_out.concat_along(x1_out, 4).reshape(input.shape)
+    // 3. Compute angles, then cos & sin
+    let freqs = pos.expand(1, 1).matmul(inv_freq.expand(0, 1)); // [S,half]
+
+    // Rotate hidden dimension
+    let x0 = input.slice((.., .., .., ..h / 2));
+    let x1 = input.slice((.., .., .., h / 2..));
+    let rotated = (-x1).concat_along(x0, 3);
+
+    input * freqs.cos().expand_to(input.shape) + rotated * freqs.sin().expand_to(input.shape)
 }
 
 pub struct SelfAttention {
@@ -90,7 +92,7 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         let queries = self
             .q_norm
             .forward(
-                x.matmul(self.q_proj.permute((1, 0)))
+                x.matmul(self.q_proj)
                     .reshape((batch, seq, N_HEADS, HEAD_DIM)), // .diff("../../../../Desktop/q.bin", 1e-2),
             )
             .permute((0, 2, 1, 3));
@@ -98,24 +100,24 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         let keys = self
             .k_norm
             .forward(
-                x.matmul(self.k_proj.permute((1, 0)))
+                x.matmul(self.k_proj)
                     .reshape((batch, seq, N_KV_HEADS, HEAD_DIM)), // .diff("../../../../Desktop/k.bin", 1e-2),
             )
             .permute((0, 2, 1, 3));
 
         let values = x
-            .matmul(self.v_proj.permute((1, 0)))
+            .matmul(self.v_proj)
             .reshape((batch, seq, N_KV_HEADS, HEAD_DIM))
             .permute((0, 2, 1, 3));
-        // queries.diff("../../../../Desktop/q_normed.bin", 1e-1);
-        // keys.diff("../../../../Desktop/k_normed.bin", 1e-1);
+        // queries.diff("../../../../Desktop/q_normed.bin", 1e-2);
+        // keys.diff("../../../../Desktop/k_normed.bin", 1e-2);
         // values.diff("../../../../Desktop/v.bin", 1e-2);
 
         // Rotary embed queries and keys
-        let queries = apply_rotary_embeddings_ggml(queries, prev_seq);
-        let keys = apply_rotary_embeddings_ggml(keys, prev_seq);
-        // queries.diff("../../../../Desktop/q_rot.bin", 1e-1);
-        // keys.diff("../../../../Desktop/k_rot.bin", 1e-1);
+        let queries = apply_rotary_embeddings_ggml(queries.contiguous(), prev_seq);
+        let keys = apply_rotary_embeddings_ggml(keys.contiguous(), prev_seq);
+        // queries.diff("../../../../Desktop/q_rot.bin", 1e-2);
+        // keys.diff("../../../../Desktop/k_rot.bin", 1e-2);
 
         // Add KV cache
         let keys = k_cache.concat_along(keys, 2);
@@ -124,6 +126,12 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         // Repeat the KV States for Grouped-Query Attention
         let repeated_keys = keys.expand(2, N_ATTENTION_GROUPS);
         let repeated_values = values.expand(2, N_ATTENTION_GROUPS);
+        // repeated_keys
+        //     .contiguous()
+        //     .diff("../../../../Desktop/k_repeat.bin", 1e-1);
+        // repeated_values
+        //     .contiguous()
+        //     .diff("../../../../Desktop/v_repeat.bin", 1e-1);
 
         // Calculate attention weights
         let mut attention_weights = queries
@@ -131,7 +139,7 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
             .matmul(repeated_keys.permute((0, 1, 2, 4, 3)))
             / (HEAD_DIM as f32).sqrt();
 
-        let attention_mask = self.k_proj.graph().triu(seq, 1) * f16::MIN.to_f32();
+        let attention_mask = self.k_proj.graph().triu(seq, 1) * f32::MIN;
         attention_weights += attention_mask
             .pad(((0, 0), (prev_seq, 0)))
             .expand(0, batch)
@@ -156,9 +164,9 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
 impl SelfAttention {
     pub fn new(cx: &mut Graph) -> Self {
         Self {
-            q_proj: cx.named_tensor("Q Proj", (HEAD_DIM * N_HEADS, HIDDEN_DIM)),
-            k_proj: cx.named_tensor("K Proj", (HEAD_DIM * N_KV_HEADS, HIDDEN_DIM)),
-            v_proj: cx.named_tensor("V Proj", (HEAD_DIM * N_KV_HEADS, HIDDEN_DIM)),
+            q_proj: cx.named_tensor("Q Proj", (HIDDEN_DIM, HEAD_DIM * N_HEADS)),
+            k_proj: cx.named_tensor("K Proj", (HIDDEN_DIM, HEAD_DIM * N_KV_HEADS)),
+            v_proj: cx.named_tensor("V Proj", (HIDDEN_DIM, HEAD_DIM * N_KV_HEADS)),
             o_proj: cx.named_tensor("O Proj", (HIDDEN_DIM, HEAD_DIM * N_HEADS)),
             q_norm: LayerNorm::new(HEAD_DIM, true, false, false, 1e-6, cx),
             k_norm: LayerNorm::new(HEAD_DIM, true, false, false, 1e-6, cx),
@@ -190,12 +198,13 @@ impl Module<(GraphTensor, KVCache)> for TransformerBlock {
         // Attention
         let normed = self.attention_norm.forward(x);
         let (y, cache) = self.attention.forward((normed, cache));
-
+        // y.diff("../../../../Desktop/attn.bin", 1e-1);
         // Residual
         x += y;
-
+        // x.diff("../../../../Desktop/res.bin", 1e-1);
         // Feed Forward
         let y = self.feed_forward.forward(self.feed_forward_norm.forward(x));
+        // y.diff("../../../../Desktop/mlp.bin", 1e-1);
 
         // Residual
         (x + y, cache)
@@ -244,6 +253,7 @@ impl Module<(GraphTensor, &[KVCache])> for Qwen {
             (x, new_cache) = layer.forward((x, cache[i]));
             new_caches.push(new_cache);
         }
+
         // Run through last norm and output projection
         (self.head.forward(x), new_caches)
     }

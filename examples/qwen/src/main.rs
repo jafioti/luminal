@@ -114,7 +114,7 @@ fn main() {
 
     // Run prompt processing pass
     let input_ids = tokenizer
-        .encode(cli_args.prompt.trim(), false)
+        .encode(&cli_args.prompt as &str, false)
         .unwrap()
         .get_ids()
         .to_vec();
