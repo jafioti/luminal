@@ -55,8 +55,7 @@ fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> Gra
     let (_, h, s, d) = input.dims4();
 
     // 1. Inverse frequencies 1 / θ^(2k/D)  (θ == ROPE_THETA)
-    let inv_freq =
-        ROPE_THETA.pow((input.graph().arange(d / 2) * 2.) / d.to_usize().unwrap() as f32); // [half]
+    let inv_freq = ROPE_THETA.pow((input.graph().arange(d / 2) * 2) / d); // [half]
 
     // 2. Positions = arange(s) + prev_seq  ➜ [S]
     let pos = input.graph().arange(s) + prev_seq;
