@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaFunction, LaunchConfig, PushKernelArg};
 use petgraph::visit::EdgeRef;
 
 use luminal::{
@@ -16,13 +16,13 @@ use crate::{
 #[derive(Clone)]
 pub struct QuantizedMatmul<T> {
     matvec_function: CudaFunction,
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     _phantom: PhantomData<T>,
 }
 crate::debug_type!(QuantizedMatmul);
 
 impl<T: CudaFloat> QuantizedMatmul<T> {
-    fn new(device: Arc<CudaDevice>) -> Self {
+    fn new(device: Arc<CudaContext>) -> Self {
         let type_name = T::type_name();
         Self {
             matvec_function: compile_and_load_kernel(format!("
@@ -139,30 +139,27 @@ impl<T: 'static + CudaFloat> Operator for QuantizedMatmul<T> {
         let m = a_shape[a_dims - 2];
         let k = b_shape[b_dims - 2];
         let n = b_shape[b_dims - 1];
+        let stream = self.device.default_stream();
 
-        let out = unsafe { self.device.alloc::<T>(batch_size * m * n).unwrap() };
+        let mut out = unsafe { stream.alloc::<T>(batch_size * m * n).unwrap() };
 
         // Matvec
-        let mut params = vec![
-            get_buffer_from_tensor::<u8>(&inp[1].0).as_kernel_param(), // Matrix
-            get_buffer_from_tensor::<T>(&inp[0].0).as_kernel_param(),  // Vector
-            (&out).as_kernel_param(),                                  // Dest vector
-            k.as_kernel_param(),                                       // Src vec size
-            n.as_kernel_param(),                                       // Dest vec size
-            0.as_kernel_param(),                                       // Matrix batch stride
-            k.as_kernel_param(),                                       // Vector batch stride
-        ];
+        let mut launch_args = stream.launch_builder(&self.matvec_function);
+        launch_args.arg(get_buffer_from_tensor::<u8>(&inp[1].0)); // Matrix
+        launch_args.arg(get_buffer_from_tensor::<T>(&inp[0].0)); // Vector
+        launch_args.arg(&mut out); // Dest vector
+        launch_args.arg(&k); // Src vec size
+        launch_args.arg(&n); // Dest vec size
+        launch_args.arg(&0); // Matrix batch stride
+        launch_args.arg(&k); // Vector batch stride
+
         unsafe {
-            self.matvec_function
-                .clone()
-                .launch(
-                    LaunchConfig {
-                        grid_dim: (n.div_ceil(8) as u32, 1, (m * batch_size) as u32),
-                        block_dim: (8, 8, 1),
-                        shared_mem_bytes: 0,
-                    },
-                    &mut params,
-                )
+            launch_args
+                .launch(LaunchConfig {
+                    grid_dim: (n.div_ceil(8) as u32, 1, (m * batch_size) as u32),
+                    block_dim: (8, 8, 1),
+                    shared_mem_bytes: 0,
+                })
                 .unwrap();
         }
 
@@ -173,14 +170,14 @@ impl<T: 'static + CudaFloat> Operator for QuantizedMatmul<T> {
 #[derive(Clone)]
 pub struct QuantizedGather<T> {
     pipeline: CudaFunction,
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     embed_dim: usize,
     _phantom: PhantomData<T>,
 }
 crate::debug_type!(QuantizedGather);
 
 impl<T: CudaFloat> QuantizedGather<T> {
-    fn new(device: Arc<CudaDevice>, embed_dim: usize) -> Self {
+    fn new(device: Arc<CudaContext>, embed_dim: usize) -> Self {
         let type_name = T::type_name();
         Self {pipeline: compile_and_load_kernel(format!(
             "
@@ -206,38 +203,28 @@ impl<T: CudaFloat> Operator for QuantizedGather<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         // Setup buffers
         let indexes = tensors[0].0.borrowed().downcast_ref::<Vec<f32>>().unwrap();
-        let mut index_buffer = unsafe { self.device.alloc::<f32>(indexes.len()).unwrap() };
-        self.device
-            .htod_copy_into(indexes.clone(), &mut index_buffer)
-            .unwrap();
+        let stream = self.device.default_stream();
+        let mut index_buffer = unsafe { stream.alloc::<f32>(indexes.len()).unwrap() };
+        stream.memcpy_htod(indexes, &mut index_buffer).unwrap();
 
-        let out = unsafe {
-            self.device
-                .alloc::<T>(indexes.len() * self.embed_dim)
-                .unwrap()
-        };
+        let mut out = unsafe { stream.alloc::<T>(indexes.len() * self.embed_dim).unwrap() };
 
         // Set inputs
         let indexes_len = indexes.len() as i32;
-        let mut params = vec![
-            (&index_buffer).as_kernel_param(),
-            get_buffer_from_tensor::<u8>(&tensors[1].0).as_kernel_param(),
-            (&out).as_kernel_param(),
-            indexes_len.as_kernel_param(),
-            self.embed_dim.as_kernel_param(),
-        ];
+        let mut launch_args = stream.launch_builder(&self.pipeline);
+        launch_args.arg(&index_buffer);
+        launch_args.arg(get_buffer_from_tensor::<u8>(&tensors[1].0));
+        launch_args.arg(&mut out);
+        launch_args.arg(&indexes_len);
+        launch_args.arg(&self.embed_dim);
 
         unsafe {
-            self.pipeline
-                .clone()
-                .launch(
-                    LaunchConfig {
-                        grid_dim: (indexes.len() as u32, self.embed_dim as u32, 1),
-                        block_dim: (16, 16, 1),
-                        shared_mem_bytes: 0,
-                    },
-                    &mut params,
-                )
+            launch_args
+                .launch(LaunchConfig {
+                    grid_dim: (indexes.len() as u32, self.embed_dim as u32, 1),
+                    block_dim: (16, 16, 1),
+                    shared_mem_bytes: 0,
+                })
                 .unwrap();
         }
 
@@ -257,7 +244,7 @@ impl<T> CudaQuantizedCompiler<T> {
 impl<T: CudaFloat + Default> Compiler for CudaQuantizedCompiler<T> {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, _: To) {
-        let device = CudaDevice::new(0).unwrap();
+        let device = CudaContext::new(0).unwrap();
         let weight_ids = self.0.clone();
         // Modify ops directly downstream of weights
         for weight in downstream(&weight_ids, graph) {
@@ -288,7 +275,7 @@ impl<T: CudaFloat + Default> Compiler for CudaQuantizedCompiler<T> {
 // mod tests {
 //     use std::sync::Arc;
 
-//     use cudarc::driver::CudaDevice;
+//     use cudarc::driver::CudaContext;
 //     use dfdx::{
 //         tensor::TensorFromVec,
 //         tensor_ops::{PermuteTo, TryMatMul},
@@ -307,7 +294,7 @@ impl<T: CudaFloat + Default> Compiler for CudaQuantizedCompiler<T> {
 //         _qs: [i8; 32],
 //     }
 
-//     fn quantized_buffer(weights: &[BlockQ8_0], dev: &Arc<CudaDevice>) -> Tensor {
+//     fn quantized_buffer(weights: &[BlockQ8_0], dev: &Arc<CudaContext>) -> Tensor {
 //         let n_bytes = std::mem::size_of_val(weights);
 //         let buffer = dev
 //             .htod_copy(unsafe {
@@ -343,7 +330,7 @@ impl<T: CudaFloat + Default> Compiler for CudaQuantizedCompiler<T> {
 //             .collect::<Vec<_>>();
 //         cx.tensors.insert(
 //             (weights.id, 0),
-//             quantized_buffer(&blocks, &CudaDevice::new(0).unwrap()),
+//             quantized_buffer(&blocks, &CudaContext::new(0).unwrap()),
 //         );
 
 //         cx.compile(
@@ -389,7 +376,7 @@ impl<T: CudaFloat + Default> Compiler for CudaQuantizedCompiler<T> {
 //                 }
 //             })
 //             .collect::<Vec<_>>();
-//         let dev = CudaDevice::new(0).unwrap();
+//         let dev = CudaContext::new(0).unwrap();
 //         cx.tensors
 //             .insert((weights.id, 0), quantized_buffer(&blocks, &dev));
 
@@ -437,7 +424,7 @@ impl<T: CudaFloat + Default> Compiler for CudaQuantizedCompiler<T> {
 //                 }
 //             })
 //             .collect::<Vec<_>>();
-//         let dev = CudaDevice::new(0).unwrap();
+//         let dev = CudaContext::new(0).unwrap();
 //         cx.tensors
 //             .insert((weights.id, 0), quantized_buffer(&blocks, &dev));
 

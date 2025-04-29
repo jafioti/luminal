@@ -6,7 +6,7 @@ use std::path::Path;
 use luminal::{op::Function, prelude::*};
 
 #[cfg(feature = "cuda")]
-use luminal_cuda::{CudaData, CudaDevice};
+use luminal_cuda::{CudaContext, CudaData};
 
 use crate::gguf::*;
 
@@ -139,7 +139,8 @@ pub fn q8_load<P: AsRef<Path>, M: SerializeModule>(
                 .unwrap();
                 file.read_exact(&mut bytes).unwrap();
                 // Copy buffer over to cuda slice
-                let device = CudaDevice::new(0).unwrap();
+                let device = CudaContext::new(0).unwrap();
+                let stream = device.default_stream();
                 match data_type {
                     GgmlDType::F32 => vec![Tensor::new(
                         bytes
@@ -152,9 +153,9 @@ pub fn q8_load<P: AsRef<Path>, M: SerializeModule>(
                             })
                             .collect::<Vec<_>>(),
                     )],
-                    GgmlDType::Q8_0 => vec![Tensor::new(CudaData(
-                        device.htod_sync_copy::<u8>(&bytes).unwrap(),
-                    ))],
+                    GgmlDType::Q8_0 => {
+                        vec![Tensor::new(CudaData(stream.memcpy_stod(&bytes).unwrap()))]
+                    }
                     _ => unimplemented!(),
                 }
             });

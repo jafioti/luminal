@@ -9,9 +9,9 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 luminal = { path = "../.." }
-cudarc = { version = "0.11.1", features = [
-    "f16",
-    "cuda-version-from-build-system",
+cudarc = { version = "0.16.1", features = [
+	"f16",
+	"cuda-version-from-build-system",
 ] }
 itertools = "0.12.1"
 rustc-hash = "1.1.0"

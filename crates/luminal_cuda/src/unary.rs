@@ -1,4 +1,4 @@
-use cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaFunction, LaunchConfig, PushKernelArg};
 use num_traits::float::FloatConst;
 use rustc_hash::FxHashMap;
 use std::{any::Any, marker::PhantomData, mem::size_of, sync::Arc};
@@ -25,7 +25,7 @@ use crate::{
 #[derive(Clone)]
 pub struct CudaMeanReduce<T> {
     function: CudaFunction,
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     pub dim: usize,
     pub dyn_symbols: Vec<char>,
     pub dyn_map: *const FxHashMap<char, usize>,
@@ -41,7 +41,7 @@ impl<T> PartialEq for CudaMeanReduce<T> {
 
 impl<T: CudaFloat> CudaMeanReduce<T> {
     fn new(
-        dev: Arc<CudaDevice>,
+        dev: Arc<CudaContext>,
         dim: usize,
         shape: ShapeTracker,
         dyn_map: *const FxHashMap<char, usize>,
@@ -86,7 +86,6 @@ impl<T: CudaFloat> Operator for CudaMeanReduce<T> {
         sh.remove_dim(self.dim);
         let inp_size = sh.n_elements().to_usize().unwrap();
         let inp_size_int = inp_size as i32;
-        let out = self.device.alloc_zeros::<T>(inp_size).unwrap();
         let front_size = tensors[0]
             .1
             .dims()
@@ -102,19 +101,19 @@ impl<T: CudaFloat> Operator for CudaMeanReduce<T> {
             .map(|i| i.to_usize().unwrap())
             .product::<usize>() as i32;
         let dim_size = tensors[0].1.dims()[self.dim].to_usize().unwrap() as i32;
-        let mut params = vec![
-            get_buffer_from_tensor::<T>(&tensors[0].0).as_kernel_param(),
-            (&out).as_kernel_param(),
-            inp_size_int.as_kernel_param(),
-            front_size.as_kernel_param(),
-            back_size.as_kernel_param(),
-            dim_size.as_kernel_param(),
-        ];
-        input_dyn_dims(&mut params, &self.dyn_symbols, self.dyn_map);
+        let stream = self.device.default_stream();
+        let mut out = stream.alloc_zeros::<T>(inp_size).unwrap();
+        let mut launch_args = stream.launch_builder(&self.function);
+        launch_args.arg(&mut out);
+        launch_args.arg(get_buffer_from_tensor::<T>(&tensors[0].0));
+        launch_args.arg(&front_size);
+        launch_args.arg(&back_size);
+        launch_args.arg(&dim_size);
+        launch_args.arg(&inp_size_int);
+        input_dyn_dims(&mut launch_args, &self.dyn_symbols, self.dyn_map);
         unsafe {
-            self.function
-                .clone()
-                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+            launch_args
+                .launch(LaunchConfig::for_num_elems(inp_size as u32))
                 .unwrap();
         }
         vec![Tensor::new(CudaData(out))]
@@ -128,7 +127,7 @@ pub struct MeanReduceCompiler<T>(PhantomData<T>);
 impl<T: CudaFloat> Compiler for MeanReduceCompiler<T> {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
-        let dev = CudaDevice::new(0).unwrap();
+        let dev = CudaContext::new(0).unwrap();
         // Look for the mean-reduce pattern
         // mul(recip(fake_sum_reduce(const_ones)), sum_reduce(x))
         let fake_sum_reduce = op::<CudaConstant<T>>();
@@ -172,7 +171,7 @@ impl<T: CudaFloat> Compiler for MeanReduceCompiler<T> {
 #[derive(Clone)]
 pub struct CudaStdNorm<T> {
     function: CudaFunction,
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     epsilon: f32, // Epsilon
     _phantom: PhantomData<T>,
 }
@@ -185,7 +184,7 @@ impl<T> PartialEq for CudaStdNorm<T> {
 }
 
 impl<T: CudaFloat> CudaStdNorm<T> {
-    fn new(epsilon: f32, device: Arc<CudaDevice>) -> Self {
+    fn new(epsilon: f32, device: Arc<CudaContext>) -> Self {
         let type_name = T::type_name();
         let kernel_code = format!("
 #include \"cuda_fp16.h\"
@@ -268,16 +267,15 @@ impl<T: CudaFloat> Operator for CudaStdNorm<T> {
     fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let row_size = tensors[0].1.dims().last().unwrap().to_usize().unwrap();
         let row_size_int = row_size as i32;
-        let out = self
-            .device
+        let stream = self.device.default_stream();
+        let mut out = stream
             .alloc_zeros::<T>(tensors[0].1.n_elements().to_usize().unwrap())
             .unwrap();
-        let mut params = vec![
-            get_buffer_from_tensor::<T>(&tensors[0].0).as_kernel_param(),
-            (&out).as_kernel_param(),
-            row_size_int.as_kernel_param(),
-            self.epsilon.as_kernel_param(),
-        ];
+        let mut launch_args = stream.launch_builder(&self.function);
+        launch_args.arg(get_buffer_from_tensor::<T>(&tensors[0].0));
+        launch_args.arg(&mut out);
+        launch_args.arg(&row_size_int);
+        launch_args.arg(&self.epsilon);
         let batch_size = tensors[0]
             .1
             .dims()
@@ -290,16 +288,12 @@ impl<T: CudaFloat> Operator for CudaStdNorm<T> {
             nth *= 2;
         }
         unsafe {
-            self.function
-                .clone()
-                .launch(
-                    LaunchConfig {
-                        grid_dim: (batch_size as u32, 1, 1),
-                        block_dim: (nth as u32, 1, 1),
-                        shared_mem_bytes: 32 * size_of::<f32>() as u32,
-                    },
-                    &mut params,
-                )
+            launch_args
+                .launch(LaunchConfig {
+                    grid_dim: (batch_size as u32, 1, 1),
+                    block_dim: (nth as u32, 1, 1),
+                    shared_mem_bytes: 32 * size_of::<f32>() as u32,
+                })
                 .unwrap();
         }
 
@@ -314,7 +308,7 @@ pub struct StdNormCompiler<T>(PhantomData<T>);
 impl<T: CudaFloat> Compiler for StdNormCompiler<T> {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
-        let dev = CudaDevice::new(0).unwrap();
+        let dev = CudaContext::new(0).unwrap();
         // Look for the RMSNorm pattern
         // mul(recip(sqrt(add(mean_reduce(mul(x, x)), 1e-6))), x)
 
@@ -406,7 +400,7 @@ pub struct CudaExpCompiler<T: CudaFloat>(PhantomData<T>);
 impl<T: CudaFloat> Compiler for CudaExpCompiler<T> {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
-        let dev = CudaDevice::new(0).unwrap();
+        let dev = CudaContext::new(0).unwrap();
         // Look for the exp pattern
         // exp2(mul(x, const))
 
@@ -454,7 +448,7 @@ pub struct CudaCosCompiler<T>(PhantomData<T>);
 impl<T: CudaFloat> Compiler for CudaCosCompiler<T> {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
-        let dev = CudaDevice::new(0).unwrap();
+        let dev = CudaContext::new(0).unwrap();
         // Look for the cos pattern
         // sin(add(mul(const_neg_one, x), const_pi_over_2))
 
@@ -500,13 +494,13 @@ impl<T: CudaFloat> Compiler for CudaCosCompiler<T> {
 #[derive(Clone)]
 pub struct CudaSoftmax<T> {
     function: CudaFunction,
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     _phantom: PhantomData<T>,
 }
 crate::debug_type!(CudaSoftmax);
 
 impl<T: CudaFloat> CudaSoftmax<T> {
-    fn new(device: Arc<CudaDevice>) -> Self {
+    fn new(device: Arc<CudaContext>) -> Self {
         let type_name = T::type_name();
         Self {
             function: compile_and_load_kernel(
@@ -577,24 +571,20 @@ impl<T: CudaFloat> Operator for CudaSoftmax<T> {
             .max(1);
         let axis_size = tensors[0].1.dims().last().unwrap().to_usize().unwrap();
         let axis_size_int = axis_size as i32;
-        let out = self.device.alloc_zeros::<T>(inp_size).unwrap();
+        let stream = self.device.default_stream();
+        let mut out = stream.alloc_zeros::<T>(inp_size).unwrap();
 
-        let mut params = vec![
-            get_buffer_from_tensor::<T>(&tensors[0].0).as_kernel_param(),
-            (&out).as_kernel_param(),
-            axis_size_int.as_kernel_param(),
-        ];
+        let mut launch_args = stream.launch_builder(&self.function);
+        launch_args.arg(get_buffer_from_tensor::<T>(&tensors[0].0));
+        launch_args.arg(&mut out);
+        launch_args.arg(&axis_size_int);
         unsafe {
-            self.function
-                .clone()
-                .launch(
-                    LaunchConfig {
-                        grid_dim: (batch_size as u32, 1, 1),
-                        block_dim: (1, 32, 1),
-                        shared_mem_bytes: 0,
-                    },
-                    &mut params,
-                )
+            launch_args
+                .launch(LaunchConfig {
+                    grid_dim: (batch_size as u32, 1, 1),
+                    block_dim: (1, 32, 1),
+                    shared_mem_bytes: 0,
+                })
                 .unwrap();
         }
 
@@ -609,7 +599,7 @@ pub struct SoftmaxCompiler<T>(PhantomData<T>);
 impl<T: CudaFloat> Compiler for SoftmaxCompiler<T> {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
-        let dev = CudaDevice::new(0).unwrap();
+        let dev = CudaContext::new(0).unwrap();
         // Look for the mean-reduce pattern
         // mul(recip(fake_sum_reduce(const_ones)), sum_reduce(x))
 

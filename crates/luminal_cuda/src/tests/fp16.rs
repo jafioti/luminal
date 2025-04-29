@@ -94,7 +94,7 @@ fn test_rotate() {
 #[test]
 fn test_constant() {
     let mut cx = Graph::new();
-    let a = cx.constant_expr('a');
+    let a = cx.constant('a');
     let mut a = (a * a).retrieve();
     cx.compile(CudaCompiler::<f16>::default(), &mut a);
 

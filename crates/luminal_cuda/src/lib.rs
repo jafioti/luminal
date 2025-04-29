@@ -8,7 +8,7 @@ mod quantized;
 mod unary;
 pub use quantized::*;
 
-pub use cudarc::driver::CudaDevice;
+pub use cudarc::driver::CudaContext;
 pub use elementwise_fusion::ElementwiseFusionCompiler;
 pub use other::*;
 pub use prim::PrimitiveCompiler;
@@ -18,14 +18,14 @@ pub use prim::PrimitiveCompiler;
 mod tests;
 
 use cudarc::{
-    driver::{CudaFunction, CudaSlice, DeviceRepr},
+    driver::{CudaFunction, CudaSlice, DeviceRepr, LaunchArgs, PushKernelArg as _},
     nvrtc::{compile_ptx_with_opts, CompileOptions},
 };
 use itertools::Itertools;
 use prim::CudaConstant;
 use rustc_hash::FxHashMap;
 
-use std::{collections::hash_map::DefaultHasher, ffi::c_void, fmt::Write, hash::Hasher, sync::Arc};
+use std::{collections::hash_map::DefaultHasher, fmt::Write, hash::Hasher, sync::Arc};
 
 use luminal::{op::InputTensor, prelude::*};
 
@@ -224,37 +224,35 @@ fn get_buffer_from_tensor<'a, T: CudaFloat>(tensor: &'a InputTensor) -> &'a Cuda
 }
 
 fn input_dyn_dims(
-    params: &mut Vec<*mut c_void>,
+    args: &mut LaunchArgs,
     dyn_symbols: &[char],
     dyn_map: *const FxHashMap<char, usize>,
 ) {
     let dyn_map = unsafe { dyn_map.as_ref().unwrap() };
     for d in dyn_symbols {
-        params.push(dyn_map[d].as_kernel_param());
+        args.arg(&dyn_map[d]);
     }
 }
 
-fn compile_and_load_kernel(mut code: String, device: &Arc<CudaDevice>) -> CudaFunction {
+fn compile_and_load_kernel(mut code: String, device: &Arc<CudaContext>) -> CudaFunction {
     let name = format!("kernel_{}", hash(&code));
     code = code.replace("kernel", &name);
-    if !device.has_func(&name, &name) {
-        device
-            .load_ptx(
-                compile_ptx_with_opts(
-                    code,
-                    CompileOptions {
-                        arch: Some("sm_75"),
-                        include_paths: vec!["/usr/local/cuda/include".to_string()],
-                        ..Default::default()
-                    },
-                )
-                .unwrap(),
-                &name,
-                &[name.clone().leak()],
+    // if !device.default_stream().has_func(&name, &name) {
+    let module = device
+        .load_module(
+            compile_ptx_with_opts(
+                code,
+                CompileOptions {
+                    arch: Some("sm_75"),
+                    include_paths: vec!["/usr/local/cuda/include".to_string()],
+                    ..Default::default()
+                },
             )
-            .unwrap();
-    }
-    device.get_func(&name, &name).unwrap()
+            .unwrap(),
+        )
+        .unwrap();
+    // }
+    module.load_function(&name).unwrap()
 }
 
 #[macro_export]
