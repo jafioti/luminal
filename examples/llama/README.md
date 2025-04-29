@@ -1,8 +1,5 @@
-# So you want to run Llama-3 8B via Luminal?
-- Awesome! Below are the pre-requisites and step-by-step instructions to get this working on your local machine!
-
 ## pre-requisites
-- you will need Rust installed on your computer. 
+- you will need Rust installed on your computer.
     - If you do not have this yet, [go to the rustup website](https://rustup.rs/) to download this
 
 ## step-by-step instructions:
@@ -10,27 +7,24 @@
     -  ```bash
         bash setup.sh
         ```
-    - The weights and tokenizer should be saved into the setup directory. This should be the default case, but if they aren't there, make sure to move them here
-    - NOTE: Downloading these files will likely take some time
 2. Execute a Sample Llama Prompt
-    - Our command is slightly different based off what hardware you're running
-        - if you are on a macbook:
-            -  ```bash
-                cargo run --release --features metal
-                ```
-        - if you have an NVIDIA GPU
-            -  ```bash
-                cargo run --release --features cuda
-                ```
-        - if you have neither (you just want this to run on CPU)
-            -  ```bash
-                cargo run --release
-                ```
+    - if you are on a macbook:
+        -  ```bash
+            cargo run --release --features metal
+            ```
+    - if you have an NVIDIA GPU
+        -  ```bash
+            cargo run --release --features cuda
+            ```
+    - if you have neither (you just want this to run on CPU)
+        -  ```bash
+            cargo run --release
+            ```
     - by default we are asking it to generate 256 tokens in response to the merge sort prompt found at `prompts/merge_sort.txt`
         - to better understand the code, check out the section below
 3. Pass through a custom prompt
-    - To pass through a custom prompt, we are going to append onto our hardware prompt this flag: `-- --prompt <your_prompt>`
-        - the first `--` separates our program arguments from cargo's arguments
+    - To pass through a custom prompt, use this flag: `-- --prompt <your_prompt>`
+        - the first `--` separates the program arguments from cargo's arguments
     - for example (on Mac):
         -  ```bash
             cargo run --release --features metal -- --prompt '<|begin_of_text|><|start_header_id|>system<|end_header_id|> \
@@ -40,7 +34,7 @@
 
 # Getting An Understanding of the Code
 - We're going to focus on the main() function in the code
-- we begin by parsing our arguments 
+- we begin by parsing our arguments
     - `let cli_args = CLIArgs::parse();`
 - and then loading the tokenizer into memory
     - `let tokenizer = Tokenizer::from_file("setup/tokenizer.json").unwrap();`
