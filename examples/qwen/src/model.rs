@@ -12,7 +12,6 @@ pub const N_KV_HEADS: usize = 8;
 pub const MLP_DIM: usize = 9728;
 pub const ROPE_THETA: f32 = 1_000_000.;
 pub const HEAD_DIM: usize = 128;
-pub const N_ATTENTION_GROUPS: usize = N_HEADS / N_KV_HEADS;
 
 pub type KVCache = (GraphTensor, GraphTensor);
 
@@ -49,33 +48,25 @@ impl SerializeModule for Mlp {
         s.module("ffn_down", &self.down_proj);
     }
 }
-fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> GraphTensor {
+
+fn apply_rotary_embeddings(input: GraphTensor, prev_seq: Expression) -> GraphTensor {
     assert_eq!(input.shape.len(), 4);
     let (b, h, s, d) = input.dims4();
 
-    // 1. Inverse frequencies 1 / θ^(2k/D)  (θ == ROPE_THETA)
-    let k = input.graph().arange(d / 2);
+    // Get freqs
+    let freq = ROPE_THETA.pow(input.graph().arange(d / 2) * 2 / d); // [d / 2]
+    let pos = input.graph().arange(s) + prev_seq; // [s]
+    let freqs = pos.expand(1, 1).matmul(freq.expand(0, 1)); // [s, d / 2]
+    let freqs = freqs
+        .concat_along(freqs, freqs.shape.last_axis())
+        .expand_to((b, h, s, d))
+        .contiguous(); // [b, h, s, d]
 
-    /*  desired formula:   inv_freq[k] = θ^(-2k / d)
-     *  – use a negative exponent (or 1/θ and a positive exponent)
-     *  – make sure 2k/d is done in floating-point, not integer math          */
-    let inv_freq = ROPE_THETA.pow(2.0 * k / d.to_usize().unwrap() as f32); // [half]
+    // Rotate input
+    let rotated = (-input.slice((.., .., .., d / 2..)))
+        .concat_along(input.slice((.., .., .., ..d / 2)), input.shape.last_axis());
 
-    // 2. Positions = arange(s) + prev_seq  ➜ [S]
-    let pos = input.graph().arange(s) + prev_seq;
-
-    // 3. Compute angles, then cos & sin
-    let freqs = pos.expand(1, 1).matmul(inv_freq.expand(0, 1)); // [S,half]
-
-    // Split input into evens and odds
-    let left = input.slice((.., .., .., ..64));
-    let right = input.slice((.., .., .., 64..));
-    let rotated = (-right)
-        .concat_along(left, left.shape.last_axis())
-        .reshape((b, h, s, d));
-
-    let freqs = freqs.concat_along(freqs, freqs.shape.last_axis());
-    let freqs = freqs.expand(0, b).expand(1, h).contiguous();
+    // Combine
     input * freqs.cos() + rotated * freqs.sin()
 }
 
@@ -119,20 +110,20 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
             .permute((0, 2, 1, 3));
 
         // Rotary embed queries and keys
-        let queries = apply_rotary_embeddings_ggml(queries.contiguous(), prev_seq);
-        let keys = apply_rotary_embeddings_ggml(keys.contiguous(), prev_seq);
+        let queries = apply_rotary_embeddings(queries, prev_seq);
+        let keys = apply_rotary_embeddings(keys, prev_seq);
 
         // Add KV cache
         let keys = k_cache.concat_along(keys, 2);
         let values = v_cache.concat_along(values, 2);
 
         // Repeat the KV States for Grouped-Query Attention
-        let repeated_keys = keys.expand(2, N_ATTENTION_GROUPS);
-        let repeated_values = values.expand(2, N_ATTENTION_GROUPS);
+        let repeated_keys = keys.expand(2, N_HEADS / N_KV_HEADS);
+        let repeated_values = values.expand(2, N_HEADS / N_KV_HEADS);
 
         // Calculate attention weights
         let mut attention_weights = queries
-            .reshape((batch, N_KV_HEADS, N_ATTENTION_GROUPS, seq, HEAD_DIM)) // Split query heads into groups
+            .reshape((batch, N_KV_HEADS, N_HEADS / N_KV_HEADS, seq, HEAD_DIM)) // Split query heads into groups
             .matmul(repeated_keys.permute((0, 1, 2, 4, 3)))
             / (HEAD_DIM as f32).sqrt();
 
@@ -141,7 +132,7 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
             .pad(((0, 0), (prev_seq, 0)))
             .expand(0, batch)
             .expand(1, N_KV_HEADS)
-            .expand(2, N_ATTENTION_GROUPS);
+            .expand(2, N_HEADS / N_KV_HEADS);
 
         // Calculate final outputs
         let output = attention_weights
@@ -151,10 +142,9 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
             // Merge heads
             .permute((0, 3, 1, 2, 4))
             .reshape((batch, seq, HEAD_DIM * N_HEADS));
-        let output = output
-            // Apply output projection
-            .matmul(self.o_proj.permute((1, 0)));
-        (output, (keys.contiguous(), values.contiguous())) // Cache needs to be contiguous for transferring to another graph
+        // Apply output projection
+        let output = output.matmul(self.o_proj.permute((1, 0)));
+        (output, (keys, values))
     }
 }
 
@@ -183,28 +173,19 @@ impl SerializeModule for SelfAttention {
 }
 
 pub struct TransformerBlock {
-    pub attention: SelfAttention,
-    pub attention_norm: LayerNorm,
-    pub feed_forward: Mlp,
-    pub feed_forward_norm: LayerNorm,
+    pub attn: SelfAttention,
+    pub attn_norm: LayerNorm,
+    pub ff: Mlp,
+    pub ff_norm: LayerNorm,
 }
 
 impl Module<(GraphTensor, KVCache)> for TransformerBlock {
     type Output = (GraphTensor, KVCache);
     fn forward(&self, (mut x, cache): (GraphTensor, KVCache)) -> Self::Output {
-        // Attention
-        let normed = self.attention_norm.forward(x);
-        // normed.diff("../../../../Desktop/normed.bin", 1e-4);
-        let (y, cache) = self.attention.forward((normed, cache));
-        // y.diff("../../../../Desktop/attn.bin", 1e-4);
-        // Residual
+        let normed = self.attn_norm.forward(x);
+        let (y, cache) = self.attn.forward((normed, cache));
         x += y;
-        // x.diff("../../../../Desktop/res.bin", 1e-4);
-        // Feed Forward
-        let y = self.feed_forward.forward(self.feed_forward_norm.forward(x));
-        // y.diff("../../../../Desktop/mlp.bin", 1e-4);
-
-        // Residual
+        let y = self.ff.forward(self.ff_norm.forward(x));
         (x + y, cache)
     }
 }
@@ -212,30 +193,27 @@ impl Module<(GraphTensor, KVCache)> for TransformerBlock {
 impl TransformerBlock {
     pub fn new(cx: &mut Graph) -> Self {
         Self {
-            attention: SelfAttention::new(cx),
-            attention_norm: LayerNorm::new(HIDDEN_DIM, true, false, false, 1e-6, cx),
-            feed_forward: Mlp::new(HIDDEN_DIM, MLP_DIM, cx),
-            feed_forward_norm: LayerNorm::new(HIDDEN_DIM, true, false, false, 1e-6, cx),
+            attn: SelfAttention::new(cx),
+            attn_norm: LayerNorm::new(HIDDEN_DIM, true, false, false, 1e-6, cx),
+            ff: Mlp::new(HIDDEN_DIM, MLP_DIM, cx),
+            ff_norm: LayerNorm::new(HIDDEN_DIM, true, false, false, 1e-6, cx),
         }
     }
 }
 
 impl SerializeModule for TransformerBlock {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("", &self.attention);
-        s.module("attn_norm", &self.attention_norm);
-        s.module("ffn_norm", &self.feed_forward_norm);
-        s.module("", &self.feed_forward);
+        s.module("", &self.attn);
+        s.module("attn_norm", &self.attn_norm);
+        s.module("ffn_norm", &self.ff_norm);
+        s.module("", &self.ff);
     }
 }
 
 pub struct Qwen {
-    // Token embeddings
     pub embedding: Embedding,
-    // Transformer layers
     pub layers: Vec<TransformerBlock>,
-    // Norm + LM head
-    pub head: (LayerNorm, Linear),
+    pub norm: LayerNorm,
 }
 
 impl Module<(GraphTensor, &[KVCache])> for Qwen {
@@ -253,7 +231,7 @@ impl Module<(GraphTensor, &[KVCache])> for Qwen {
         }
 
         // Run through last norm and output projection
-        (self.head.forward(x), new_caches)
+        (self.embedding.reverse(self.norm.forward(x)), new_caches)
     }
 }
 
@@ -261,10 +239,7 @@ impl Qwen {
     pub fn new(cx: &mut Graph) -> Self {
         Self {
             embedding: Embedding::new(VOCAB_SIZE, HIDDEN_DIM, cx),
-            head: (
-                LayerNorm::new(HIDDEN_DIM, true, false, false, 1e-6, cx),
-                Linear::new_permuted(HIDDEN_DIM, VOCAB_SIZE, false, cx),
-            ),
+            norm: LayerNorm::new(HIDDEN_DIM, true, false, false, 1e-6, cx),
             layers: (0..NUM_LAYERS).map(|_| TransformerBlock::new(cx)).collect(),
         }
     }
@@ -273,8 +248,7 @@ impl Qwen {
 impl SerializeModule for Qwen {
     fn serialize(&self, s: &mut Serializer) {
         s.module("token_embd", &self.embedding);
-        s.module("output_norm", &self.head.0);
-        s.module("output", &self.head.1);
+        s.module("output_norm", &self.norm);
         for (i, layer) in self.layers.iter().enumerate() {
             s.module(&format!("blk/{i}"), layer);
         }

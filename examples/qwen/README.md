@@ -1,1 +1,0 @@
-this example still has a precision issue. if you can find it, please submit a PR!

@@ -30,6 +30,9 @@ pub struct CLIArgs {
 }
 
 fn main() {
+    #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
+    println!("Either metal or cuda feature must be used for this example!");
+
     let cli_args = CLIArgs::parse();
     let tokenizer = Tokenizer::from_file("setup/tokenizer.json").unwrap();
 
@@ -83,8 +86,6 @@ fn main() {
                 luminal_cuda::CudaCompiler::<f16>::default(),
                 luminal_cuda::CudaQuantizedCompiler::<f16>::new(q_weights),
             ),
-            #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
-            luminal_cpu::CPUCompiler::default(),
         ),
         (
             &mut input,
