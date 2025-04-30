@@ -83,8 +83,8 @@ fn main() {
             ),
             #[cfg(feature = "cuda")]
             (
-                luminal_cuda::CudaCompiler::<f16>::default(),
-                luminal_cuda::CudaQuantizedCompiler::<f16>::new(q_weights),
+                luminal_cuda::CudaCompiler::<f32>::default(),
+                luminal_cuda::CudaQuantizedCompiler::<f32>::new(q_weights),
             ),
         ),
         (
