@@ -65,9 +65,9 @@ fn main() {
 
     // Set up model loading
     #[cfg(any(feature = "metal", feature = "cuda"))]
-    let q_weights = loader::q8_load("setup/qwen3-4b.gguf", &model, &mut cx);
+    let q_weights = loader::load_from_huggingface("Qwen/Qwen3-4B", &model, &mut cx, None);
     #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
-    loader::q8_load("setup/qwen3-4b.gguf", &model, &mut cx);
+    loader::q8_load("setup/qwen3-4b-bf16.gguf", &model, &mut cx);
 
     cx.compile(
         (
@@ -75,7 +75,7 @@ fn main() {
             #[cfg(feature = "metal")]
             (
                 luminal_metal::MetalCompilerPreBuffer::<f32>::default(),
-                luminal_metal::quantized::MetalQuantizedCompiler::<f32>::new(q_weights),
+                // luminal_metal::quantized::MetalQuantizedCompiler::<f32>::new(q_weights),
                 luminal_metal::BufferCompilers::default(),
             ),
             #[cfg(feature = "cuda")]

@@ -44,18 +44,49 @@ impl Mlp {
 
 impl SerializeModule for Mlp {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("ffn_gate", &self.gate_proj);
-        s.module("ffn_up", &self.up_proj);
-        s.module("ffn_down", &self.down_proj);
+        s.module("gate_proj", &self.gate_proj);
+        s.module("up_proj", &self.up_proj);
+        s.module("down_proj", &self.down_proj);
     }
 }
 
-fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> GraphTensor {
+// fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> GraphTensor {
+//     assert_eq!(input.shape.len(), 4); // batch, n_heads, seq, head_dim
+//     let (batch, n_heads, seq, head_dim) = input.dims4();
+//     // Get freqs
+//     let freqs = (input.graph().arange(head_dim / 2) * 2.0) / (head_dim.to_usize().unwrap() as f32);
+//     let freqs = 1_000_000_f32.pow(freqs);
+//     let pos = input.graph().arange(seq) + prev_seq;
+//     let emb = pos.expand(1, 1).matmul(freqs.expand(0, 1));
+
+// // Split input into evens and odds
+// let split = input.reshape((batch, n_heads, seq, head_dim / 2, 2));
+// let x0 = split.slice((.., .., .., .., ..1));
+// let x1 = split.slice((.., .., .., .., 1..));
+
+// // Apply sin and cos embeddings
+// let x0_out = x0 * emb.cos().expand_to(x0.shape) - x1 * emb.sin().expand_to(x1.shape);
+// let x1_out = x0 * emb.sin().expand_to(x0.shape) + x1 * emb.cos().expand_to(x1.shape);
+
+// // Combine back into output
+// x0_out.concat_along(x1_out, 4).reshape(input.shape)
+// }
+
+fn apply_rotary_embeddings_ggml(
+    input: GraphTensor,
+    prev_seq: Expression,
+    record: bool,
+) -> GraphTensor {
     assert_eq!(input.shape.len(), 4);
-    let (_, h, s, d) = input.dims4();
+    let (b, h, s, d) = input.dims4();
 
     // 1. Inverse frequencies 1 / θ^(2k/D)  (θ == ROPE_THETA)
-    let inv_freq = ROPE_THETA.pow((input.graph().arange(d / 2) * 2) / d); // [half]
+    let k = input.graph().arange(d / 2);
+
+    /*  desired formula:   inv_freq[k] = θ^(-2k / d)
+     *  – use a negative exponent (or 1/θ and a positive exponent)
+     *  – make sure 2k/d is done in floating-point, not integer math          */
+    let inv_freq = ROPE_THETA.pow(2.0 * k / d.to_usize().unwrap() as f32); // [half]
 
     // 2. Positions = arange(s) + prev_seq  ➜ [S]
     let pos = input.graph().arange(s) + prev_seq;
@@ -63,12 +94,24 @@ fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> Gra
     // 3. Compute angles, then cos & sin
     let freqs = pos.expand(1, 1).matmul(inv_freq.expand(0, 1)); // [S,half]
 
-    // Rotate hidden dimension
-    let x0 = input.slice((.., .., .., ..h / 2));
-    let x1 = input.slice((.., .., .., h / 2..));
-    let rotated = (-x1).concat_along(x0, 3);
+    // Split input into evens and odds
+    let left = input.slice((.., .., .., ..64));
+    let right = input.slice((.., .., .., 64..));
+    let rotated = (-right)
+        .concat_along(left, left.shape.last_axis())
+        .reshape((b, h, s, d));
 
-    input * freqs.cos().expand_to(input.shape) + rotated * freqs.sin().expand_to(input.shape)
+    // if record {
+    //     input.diff("../../../../Desktop/pre_rotate.bin", 1e-4);
+    //     rotated.diff("../../../../Desktop/rotated.bin", 1e-4);
+    //     println!("FREQS: {:?} INP: {:?}", freqs.dims(), input.dims());
+    // }
+    // freqs.cos().diff("../../../../Desktop/cos.bin", 1e-4);
+    // freqs.sin().diff("../../../../Desktop/sin.bin", 1e-4);
+
+    let freqs = freqs.concat_along(freqs, freqs.shape.last_axis());
+    let freqs = freqs.expand(0, b).expand(1, h).contiguous();
+    input * freqs.cos() + rotated * freqs.sin()
 }
 
 pub struct SelfAttention {
@@ -88,24 +131,26 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         let (batch, seq, _) = x.dims3();
         let (_, _, prev_seq, _) = k_cache.dims4();
         // Apply the Projections
+        // self.q_proj.diff("../../../../Desktop/q_proj.bin", 1e-4);
         let queries = self
             .q_norm
             .forward(
-                x.matmul(self.q_proj)
-                    .reshape((batch, seq, N_HEADS, HEAD_DIM)), // .diff("../../../../Desktop/q.bin", 1e-2),
+                x.matmul(self.q_proj.permute((1, 0)))
+                    .reshape((batch, seq, N_HEADS, HEAD_DIM))
+                    .contiguous(), // .diff("../../../../Desktop/q.bin", 1e-4),
             )
             .permute((0, 2, 1, 3));
 
         let keys = self
             .k_norm
             .forward(
-                x.matmul(self.k_proj)
-                    .reshape((batch, seq, N_KV_HEADS, HEAD_DIM)), // .diff("../../../../Desktop/k.bin", 1e-2),
+                x.matmul(self.k_proj.permute((1, 0)))
+                    .reshape((batch, seq, N_KV_HEADS, HEAD_DIM)), // .diff("../../../../Desktop/k.bin", 1e-4),
             )
             .permute((0, 2, 1, 3));
 
         let values = x
-            .matmul(self.v_proj)
+            .matmul(self.v_proj.permute((1, 0)))
             .reshape((batch, seq, N_KV_HEADS, HEAD_DIM))
             .permute((0, 2, 1, 3));
         // queries.diff("../../../../Desktop/q_normed.bin", 1e-2);
@@ -113,8 +158,8 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         // values.diff("../../../../Desktop/v.bin", 1e-2);
 
         // Rotary embed queries and keys
-        let queries = apply_rotary_embeddings_ggml(queries.contiguous(), prev_seq);
-        let keys = apply_rotary_embeddings_ggml(keys.contiguous(), prev_seq);
+        let queries = apply_rotary_embeddings_ggml(queries.contiguous(), prev_seq, true);
+        let keys = apply_rotary_embeddings_ggml(keys.contiguous(), prev_seq, false);
         // queries.diff("../../../../Desktop/q_rot.bin", 1e-2);
         // keys.diff("../../../../Desktop/k_rot.bin", 1e-2);
 
@@ -163,9 +208,9 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
 impl SelfAttention {
     pub fn new(cx: &mut Graph) -> Self {
         Self {
-            q_proj: cx.named_tensor("Q Proj", (HIDDEN_DIM, HEAD_DIM * N_HEADS)),
-            k_proj: cx.named_tensor("K Proj", (HIDDEN_DIM, HEAD_DIM * N_KV_HEADS)),
-            v_proj: cx.named_tensor("V Proj", (HIDDEN_DIM, HEAD_DIM * N_KV_HEADS)),
+            q_proj: cx.named_tensor("Q Proj", (HEAD_DIM * N_HEADS, HIDDEN_DIM)),
+            k_proj: cx.named_tensor("K Proj", (HEAD_DIM * N_KV_HEADS, HIDDEN_DIM)),
+            v_proj: cx.named_tensor("V Proj", (HEAD_DIM * N_KV_HEADS, HIDDEN_DIM)),
             o_proj: cx.named_tensor("O Proj", (HIDDEN_DIM, HEAD_DIM * N_HEADS)),
             q_norm: LayerNorm::new(HEAD_DIM, true, false, false, 1e-6, cx),
             k_norm: LayerNorm::new(HEAD_DIM, true, false, false, 1e-6, cx),
@@ -175,12 +220,12 @@ impl SelfAttention {
 
 impl SerializeModule for SelfAttention {
     fn serialize(&self, s: &mut Serializer) {
-        s.tensor("attn_q/weight", self.q_proj);
-        s.tensor("attn_v/weight", self.v_proj);
-        s.tensor("attn_k/weight", self.k_proj);
-        s.tensor("attn_output/weight", self.o_proj);
-        s.module("attn_q_norm", &self.q_norm);
-        s.module("attn_k_norm", &self.k_norm);
+        s.tensor("q_proj/weight", self.q_proj);
+        s.tensor("v_proj/weight", self.v_proj);
+        s.tensor("k_proj/weight", self.k_proj);
+        s.tensor("o_proj/weight", self.o_proj);
+        s.module("q_norm", &self.q_norm);
+        s.module("k_norm", &self.k_norm);
     }
 }
 
@@ -196,14 +241,15 @@ impl Module<(GraphTensor, KVCache)> for TransformerBlock {
     fn forward(&self, (mut x, cache): (GraphTensor, KVCache)) -> Self::Output {
         // Attention
         let normed = self.attention_norm.forward(x);
+        // normed.diff("../../../../Desktop/normed.bin", 1e-4);
         let (y, cache) = self.attention.forward((normed, cache));
-        // y.diff("../../../../Desktop/attn.bin", 1e-1);
+        // y.diff("../../../../Desktop/attn.bin", 1e-4);
         // Residual
         x += y;
-        // x.diff("../../../../Desktop/res.bin", 1e-1);
+        // x.diff("../../../../Desktop/res.bin", 1e-4);
         // Feed Forward
         let y = self.feed_forward.forward(self.feed_forward_norm.forward(x));
-        // y.diff("../../../../Desktop/mlp.bin", 1e-1);
+        // y.diff("../../../../Desktop/mlp.bin", 1e-4);
 
         // Residual
         (x + y, cache)
@@ -223,10 +269,10 @@ impl TransformerBlock {
 
 impl SerializeModule for TransformerBlock {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("", &self.attention);
-        s.module("attn_norm", &self.attention_norm);
-        s.module("ffn_norm", &self.feed_forward_norm);
-        s.module("", &self.feed_forward);
+        s.module("self_attn", &self.attention);
+        s.module("input_layernorm", &self.attention_norm);
+        s.module("post_attention_layernorm", &self.feed_forward_norm);
+        s.module("mlp", &self.feed_forward);
     }
 }
 
@@ -236,7 +282,7 @@ pub struct Qwen {
     // Transformer layers
     pub layers: Vec<TransformerBlock>,
     // Norm + LM head
-    pub head: (LayerNorm, Linear),
+    pub head: LayerNorm,
 }
 
 impl Module<(GraphTensor, &[KVCache])> for Qwen {
@@ -244,6 +290,7 @@ impl Module<(GraphTensor, &[KVCache])> for Qwen {
     fn forward(&self, (input, cache): (GraphTensor, &[KVCache])) -> Self::Output {
         // Embed tokens
         let mut x = self.embedding.forward(input);
+        // x.diff("../../../../Desktop/embed.bin", 1e-5);
 
         // Run through layers and collect new caches
         let mut new_caches = vec![];
@@ -254,7 +301,7 @@ impl Module<(GraphTensor, &[KVCache])> for Qwen {
         }
 
         // Run through last norm and output projection
-        (self.head.forward(x), new_caches)
+        (self.embedding.reverse(self.head.forward(x)), new_caches)
     }
 }
 
@@ -262,10 +309,7 @@ impl Qwen {
     pub fn new(cx: &mut Graph) -> Self {
         Self {
             embedding: Embedding::new(VOCAB_SIZE, HIDDEN_DIM, cx),
-            head: (
-                LayerNorm::new(HIDDEN_DIM, true, false, false, 1e-6, cx),
-                Linear::new_permuted(HIDDEN_DIM, VOCAB_SIZE, false, cx),
-            ),
+            head: LayerNorm::new(HIDDEN_DIM, true, false, false, 1e-6, cx),
             layers: (0..NUM_LAYERS).map(|_| TransformerBlock::new(cx)).collect(),
         }
     }
@@ -273,11 +317,11 @@ impl Qwen {
 
 impl SerializeModule for Qwen {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("token_embd", &self.embedding);
-        s.module("output_norm", &self.head.0);
-        s.module("output", &self.head.1);
+        s.module("model/embed_tokens", &self.embedding);
+        s.module("model/norm", &self.head);
+        // s.module("model/output", &self.head.1);
         for (i, layer) in self.layers.iter().enumerate() {
-            s.module(&format!("blk/{i}"), layer);
+            s.module(&format!("model/layers/{i}"), layer);
         }
     }
 }
