@@ -1063,9 +1063,9 @@ mod tests {
                 self.attention_norm = self.attention_norm.initialize();
                 self.feed_forward_norm = self.feed_forward_norm.initialize();
                 self.attention = self.attention.initialize();
-                self.feed_forward.down_proj = self.feed_forward.down_proj.initialize();
-                self.feed_forward.up_proj = self.feed_forward.up_proj.initialize();
-                self.feed_forward.gate_proj = self.feed_forward.gate_proj.initialize();
+                self.feed_forward.down_proj = self.feed_forward.down_proj.init_rand();
+                self.feed_forward.up_proj = self.feed_forward.up_proj.init_rand();
+                self.feed_forward.gate_proj = self.feed_forward.gate_proj.init_rand();
                 self
             }
         }
