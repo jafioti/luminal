@@ -52,7 +52,7 @@ Luminal can run Q8 Llama 3 8B on M-series Macbooks at 15-25 tokens per second. T
 The core of luminal is and always will be minimal. It should be possible to understand the entire core library in an afternoon.
 
 ### RISC-style architecture
-Everything in luminal boils down to 11 primitive ops:
+Everything in luminal boils down to 12 primitive ops:
 - Unary - `Log2, Exp2, Sin, Sqrt, Recip`
 - Binary - `Add, Mul, Mod, LessThan`
 - Other - `SumReduce, MaxReduce, Contiguous`
