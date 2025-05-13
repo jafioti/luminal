@@ -59,6 +59,9 @@ Everything in luminal boils down to 12 primitive ops:
 
 These ops are enough to support transformers, convnets, etc.
 
+### Speed
+We compile these ops into complex GPU kernels, so even though our ops are simple, we get high performance through the power of compilers! This is how we overcome the typical RISC disadvantages, btw. 
+
 ### Native
 The current ML ecosystem is too fragmented, and the solution isn't another layer of abstraction. Luminal is written in rust, and interacts directly with the CUDA / Metal APIs. No indirections or abstractions, docker containers, or virtual environments. Just a statically-linked rust crate.
 
