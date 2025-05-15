@@ -304,12 +304,14 @@ pub trait F32Pow {
 
 impl F32Pow for f32 {
     fn pow(self, e: GraphTensor) -> GraphTensor {
-        e.mul(self.abs().ln()).exp().recip()
+        e.mul(self.abs().ln()).exp()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::F32Pow;
+
     crate::test_imports!();
 
     #[test]
@@ -323,6 +325,25 @@ mod tests {
             .tensor((3, 2))
             .set([[[-1.0], [-1.5], [3.0]], [[-1.5], [0.0], [3.4]]])
             .retrieve();
+        cx.execute();
+
+        assert_close(&result.data(), &expected_result.data());
+    }
+
+    #[test]
+    fn test_pow() {
+        let base = 2_f32;
+        let mut cx = Graph::new();
+        let a = cx
+            .tensor((3, 2))
+            .set([[[-1.0], [-2.0], [3.0]], [[1.0], [0.0], [5.0]]]);
+
+        let expected_result = cx
+            .tensor((3, 2))
+            .set([[[0.5], [0.25], [8.0]], [[2.0], [1.0], [32.0]]])
+            .retrieve();
+
+        let result = base.pow(a).retrieve();
         cx.execute();
 
         assert_close(&result.data(), &expected_result.data());
