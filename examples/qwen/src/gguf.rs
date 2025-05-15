@@ -103,6 +103,8 @@ pub enum ValueType {
     //
     // Arrays can be nested, and the length of the array is the number of elements in the array, not the number of bytes.
     Array,
+    // The value is a 16-bit brain floating point number.
+    BF16,
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +122,7 @@ pub enum Value {
     Bool(bool),
     String(String),
     Array(Vec<Value>),
+    BF16(u16), // BF16 stored as raw u16 bits
 }
 
 impl Value {
@@ -139,6 +142,7 @@ impl Value {
             ValueType::I64 => Self::I64(reader.read_i64::<LittleEndian>().unwrap()),
             ValueType::F32 => Self::F32(reader.read_f32::<LittleEndian>().unwrap()),
             ValueType::F64 => Self::F64(reader.read_f64::<LittleEndian>().unwrap()),
+            ValueType::BF16 => Self::BF16(reader.read_u16::<LittleEndian>().unwrap()),
             ValueType::Bool => match reader.read_u8().unwrap() {
                 0 => Self::Bool(false),
                 1 => Self::Bool(true),
@@ -181,6 +185,7 @@ impl ValueType {
             10 => Self::U64,
             11 => Self::I64,
             12 => Self::F64,
+            13 => Self::BF16,
             v => panic!("unrecognized value-type {v:#08x}"),
         };
         Ok(v)
@@ -278,6 +283,7 @@ pub enum GgmlDType {
     Q5K,
     Q6K,
     Q8K,
+    BF16,
 }
 
 impl GgmlDType {
@@ -297,6 +303,7 @@ impl GgmlDType {
             13 => Self::Q5K,
             14 => Self::Q6K,
             15 => Self::Q8K,
+            30 => Self::BF16,
             _ => panic!("unknown dtype for tensor {u}"),
         }
     }

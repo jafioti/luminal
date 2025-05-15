@@ -39,14 +39,9 @@ pub fn q8_load<P: AsRef<Path>, M: SerializeModule>(
             .and_then(|op| op.as_any_mut().downcast_mut::<Function>())
         {
             let file_path = path.as_ref().to_owned();
-            let (n_elements, buffer_offset, data_type) =
-                if weight_name == "output/weight" || weight_name == "token_embd/weight" {
-                    tensor_infos["token_embd.weight"].clone()
-                } else {
-                    tensor_infos
-                        .remove(&weight_name.replace('/', "."))
-                        .expect(&format!("Couldn't find weight {weight_name}"))
-                };
+            let (n_elements, buffer_offset, data_type) = tensor_infos
+                .remove(&weight_name.replace('/', "."))
+                .unwrap_or_else(|| panic!("Couldn't find weight {weight_name}"));
             let n_bytes = match data_type {
                 GgmlDType::F32 => n_elements * 4,
                 GgmlDType::Q8_0 => {
@@ -201,13 +196,7 @@ pub fn q8_load<P: AsRef<Path>, M: SerializeModule>(
         {
             let file_path = path.as_ref().to_owned();
             let (n_elements, buffer_offset, data_type) =
-                if weight_name == "output/weight" || weight_name == "token_embd/weight" {
-                    tensor_infos["token_embd.weight"]
-                } else {
-                    tensor_infos
-                        .remove(&weight_name.replace('/', "."))
-                        .unwrap_or_else(|| panic!("Couldn't find weight {weight_name}"))
-                };
+                tensor_infos.remove(&weight_name.replace('/', ".")).unwrap();
             let n_bytes = match data_type {
                 GgmlDType::F32 => n_elements * 4,
                 GgmlDType::Q8_0 => {
