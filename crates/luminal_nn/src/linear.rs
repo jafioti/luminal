@@ -42,6 +42,13 @@ impl Linear {
                 .map(|_| rng.gen_range(-1_f32..1_f32))
                 .collect::<Vec<_>>(),
         );
+        if let Some(bias) = self.bias {
+            bias.set(
+                (0..bias.shape.n_elements().to_usize().unwrap())
+                    .map(|_| rng.gen_range(-1_f32..1_f32))
+                    .collect::<Vec<_>>(),
+            );
+        }
         self
     }
 }
