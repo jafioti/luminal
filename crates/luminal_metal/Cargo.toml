@@ -23,5 +23,5 @@ indicatif = "0.17.8"
 dfdx = { version = "0.13", features = ["f16"] }
 paste = "1.0.14"
 rand = "0.8.5"
-luminal_nn = {path="../../crates/luminal_nn"}
-candle-core = "0.5.0"
+luminal_nn = { path = "../../crates/luminal_nn" }
+candle-core = "0.9.1"
