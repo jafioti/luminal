@@ -54,9 +54,9 @@ fn apply_rotary_embeddings(input: GraphTensor, prev_seq: Expression) -> GraphTen
     let (b, h, s, d) = input.dims4();
 
     // Get freqs
-    let freq = ROPE_THETA.pow(input.graph().arange(d / 2) * 2 / d); // [d / 2]
+    let inv_freq = ROPE_THETA.pow(input.graph().arange(d / 2) * 2 / d).recip(); // [d / 2]
     let pos = input.graph().arange(s) + prev_seq; // [s]
-    let freqs = pos.expand(1, 1).matmul(freq.expand(0, 1)); // [s, d / 2]
+    let freqs = pos.expand(1, 1).matmul(inv_freq.expand(0, 1)); // [s, d / 2]
     let freqs = freqs
         .concat_along(freqs, freqs.shape.last_axis())
         .expand_to((b, h, s, d))

@@ -54,9 +54,9 @@ fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> Gra
     let (batch, n_heads, seq, head_dim) = input.dims4();
     // Get freqs
     let freqs = (input.graph().arange(head_dim / 2) * 2.0) / (head_dim.to_usize().unwrap() as f32);
-    let freqs = 500_000_f32.pow(freqs);
+    let inv_freqs = 500_000_f32.pow(freqs).recip();
     let pos = input.graph().arange(seq) + prev_seq;
-    let emb = pos.expand(1, 1).matmul(freqs.expand(0, 1));
+    let emb = pos.expand(1, 1).matmul(inv_freqs.expand(0, 1));
 
     // Split input into evens and odds
     let split = input.reshape((batch, n_heads, seq, head_dim / 2, 2));

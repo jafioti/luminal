@@ -304,7 +304,7 @@ pub trait F32Pow {
 
 impl F32Pow for f32 {
     fn pow(self, e: GraphTensor) -> GraphTensor {
-        e.mul(self.abs().ln()).exp().recip()
+        e.mul(self.abs().ln()).exp()
     }
 }
 
