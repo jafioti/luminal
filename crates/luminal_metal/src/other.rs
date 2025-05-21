@@ -110,7 +110,7 @@ kernel void metal_arange(device {type_name} *out [[buffer(0)]], device int& n_el
 
 impl<T: MetalFloat> MetalKernel for MetalARange<T> {
     fn output_buffer_sizes(&self, _: &[ShapeTracker]) -> Vec<Expression> {
-        vec![self.size * std::mem::size_of::<f16>()]
+        vec![self.size * std::mem::size_of::<T>()]
     }
     fn metal_forward(
         &self,
@@ -149,7 +149,7 @@ impl<T: MetalFloat> Operator for MetalARange<T> {
                 .exec(unsafe { self.dyn_map.as_ref().unwrap() })
                 .unwrap();
             let out = self.device.new_buffer(
-                (size * std::mem::size_of::<f16>()) as u64,
+                (size * std::mem::size_of::<T>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
 

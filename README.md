@@ -9,7 +9,8 @@
 
 Luminal is a deep learning library that uses **composable compilers** to achieve high performance.
 
-Recently signifigant work is happening to focus much more on a search-first compiler with the goal of discovering advanced kernels like FlashAttention automatically. See progress on the `next` branch.
+> [!IMPORTANT]  
+> Recently significant work is happening to focus much more on a search-first compiler with the goal of discovering advanced kernels like FlashAttention automatically. See progress on the `next` branch.
 
 ```rust
 use luminal::prelude::*;
@@ -79,7 +80,7 @@ A core tenet of Luminal is ahead-of-time compilation. Whenever possible, push ev
 
 **But why?**
 
-A consequence of this is that the actual computation that gets ran can be radically different than the code that was written. Since we have an entire neural network fully represented in a compute graph, our compilers have global knowledge. This means we can push most ML complexity to the compilers. For instance, devices, datatypes, and execution schedules are all handled by compliers. Even autograd will be handled by a compiler!
+A consequence of this is that the actual computation that gets ran can be radically different than the code that was written. Since we have an entire neural network fully represented in a compute graph, our compilers have global knowledge. This means we can push most ML complexity to the compilers. For instance, devices, datatypes, and execution schedules are all handled by compliers. Even autograd is handled by a compiler!
 
 Now we can do:
 - Aggressive kernel fusion
