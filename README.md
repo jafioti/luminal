@@ -9,6 +9,9 @@
 
 Luminal is a deep learning library that uses **composable compilers** to achieve high performance.
 
+> [!IMPORTANT]  
+> Recently significant work is happening to focus much more on a search-first compiler with the goal of discovering advanced kernels like FlashAttention automatically. See progress on the `next` branch.
+
 ```rust
 use luminal::prelude::*;
 
@@ -30,6 +33,8 @@ println!("Result: {:?}", c);
 
 ## Getting Started
 **Llama 3 8B**
+- the below is a quick example of how you can run Llama 3 8B locally using Luminal
+    - to go indepth on this example check out [the documentation here](https://github.com/jafioti/luminal/tree/main/examples/llama/README.md)
 ```bash
 cd ./examples/llama
 # Download the model
@@ -48,12 +53,15 @@ Luminal can run Q8 Llama 3 8B on M-series Macbooks at 15-25 tokens per second. T
 The core of luminal is and always will be minimal. It should be possible to understand the entire core library in an afternoon.
 
 ### RISC-style architecture
-Everything in luminal boils down to 11 primitive ops:
+Everything in luminal boils down to 12 primitive ops:
 - Unary - `Log2, Exp2, Sin, Sqrt, Recip`
 - Binary - `Add, Mul, Mod, LessThan`
 - Other - `SumReduce, MaxReduce, Contiguous`
 
 These ops are enough to support transformers, convnets, etc.
+
+### Speed
+We compile these ops into complex GPU kernels, so even though our ops are simple, we get high performance through the power of compilers! This is how we overcome the typical RISC disadvantages, btw. 
 
 ### Native
 The current ML ecosystem is too fragmented, and the solution isn't another layer of abstraction. Luminal is written in rust, and interacts directly with the CUDA / Metal APIs. No indirections or abstractions, docker containers, or virtual environments. Just a statically-linked rust crate.
@@ -72,7 +80,7 @@ A core tenet of Luminal is ahead-of-time compilation. Whenever possible, push ev
 
 **But why?**
 
-A consequence of this is that the actual computation that gets ran can be radically different than the code that was written. Since we have an entire neural network fully represented in a compute graph, our compilers have global knowledge. This means we can push most ML complexity to the compilers. For instance, devices, datatypes, and execution schedules are all handled by compliers. Even autograd will be handled by a compiler!
+A consequence of this is that the actual computation that gets ran can be radically different than the code that was written. Since we have an entire neural network fully represented in a compute graph, our compilers have global knowledge. This means we can push most ML complexity to the compilers. For instance, devices, datatypes, and execution schedules are all handled by compliers. Even autograd is handled by a compiler!
 
 Now we can do:
 - Aggressive kernel fusion

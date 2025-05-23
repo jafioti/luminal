@@ -466,7 +466,6 @@ impl<T: MetalFloat> FusedElementwiseOp<T> {
             .cloned()
             .zip(&stacked_shapes)
             .map(|(partial, sh)| {
-                println!("Ind: {}", sh[0].index_expression());
                 sh[0]
                     .index_expression()
                     .simplify()
@@ -822,7 +821,7 @@ mod tests {
             .set(random_vec_rng(BATCH * N_HEADS * SEQ * HEAD_DIM, &mut rng))
             .keep();
         let freqs = (cx.arange(HEAD_DIM / 2) * 2.0) / (HEAD_DIM as f32);
-        let freqs = 1000000_f32.pow(freqs);
+        let freqs = 1000000_f32.pow(freqs).recip();
         let pos = cx.arange(SEQ) + 0;
         let emb = pos.expand(1, 1).matmul(freqs.expand(0, SEQ));
         // Split input into evens and odds
@@ -1064,9 +1063,9 @@ mod tests {
                 self.attention_norm = self.attention_norm.initialize();
                 self.feed_forward_norm = self.feed_forward_norm.initialize();
                 self.attention = self.attention.initialize();
-                self.feed_forward.down_proj = self.feed_forward.down_proj.initialize();
-                self.feed_forward.up_proj = self.feed_forward.up_proj.initialize();
-                self.feed_forward.gate_proj = self.feed_forward.gate_proj.initialize();
+                self.feed_forward.down_proj = self.feed_forward.down_proj.init_rand();
+                self.feed_forward.up_proj = self.feed_forward.up_proj.init_rand();
+                self.feed_forward.gate_proj = self.feed_forward.gate_proj.init_rand();
                 self
             }
         }

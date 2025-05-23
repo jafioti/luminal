@@ -544,7 +544,7 @@ pub struct NewOp<'a> {
     num_srcs: u8,
 }
 
-impl<'a> NewOp<'a> {
+impl NewOp<'_> {
     pub fn finish(self) -> NodeIndex {
         self.new_op_id
     }

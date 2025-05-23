@@ -302,6 +302,17 @@ impl<T> MetalKernel for QuantizedMatmul<T> {
             !inputs[1].1.is_contiguous(),
             "Weight matrix must be column-major"
         );
+        assert!(
+            inputs[1]
+                .1
+                .dims()
+                .iter()
+                .filter(|i| **i != 0 && **i != 1)
+                .count()
+                == 2,
+            "weight matrix is not a weight matrix: {:?}",
+            inputs[1].1.dims()
+        );
         let (a_shape, b_shape) = (
             inputs[0]
                 .1
@@ -529,11 +540,11 @@ impl<T: MetalFloat + Default> Compiler for MetalQuantizedCompiler<T> {
                 .filter_map(|e| e.weight().as_data().map(|i| (e.target(), i)))
                 .collect::<Vec<_>>()
             {
+                let op_node = graph.node_weight_mut(target).unwrap();
                 assert_eq!(
                     inp_ind, 1,
-                    "Quantized weight {target:?} is the wrong input!",
+                    "Quantized weight {target:?} is the wrong input, op {op_node:?}",
                 );
-                let op_node = graph.node_weight_mut(target).unwrap();
                 if let Some(gather) = op_node.as_any().downcast_ref::<MetalGather<T>>() {
                     *op_node = Box::new(QuantizedGather::<T>::new(
                         device.clone(),

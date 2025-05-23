@@ -162,6 +162,7 @@ impl GraphTensor {
         self.pad(p)
     }
 
+    /// Concat along an existing dimension
     pub fn concat_along(self, rhs: GraphTensor, axis: usize) -> GraphTensor {
         // Pad and add
         self.pad_along(0, rhs.shape.dims()[axis], axis)

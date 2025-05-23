@@ -1,0 +1,4 @@
+*.safetensors
+*.json
+*.ttf
+*.jpg

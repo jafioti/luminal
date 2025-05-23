@@ -230,13 +230,14 @@ pub struct Serializer {
 }
 
 impl Serializer {
-    pub fn tensor(&mut self, name: &str, tensor: GraphTensor) {
+    pub fn tensor(&mut self, name: &str, tensor: impl Into<GraphTensor>) {
         if !name.is_empty() {
             // Add new path component
             self.current_path.push(name.to_string());
         }
         // Insert tensor id
-        self.state.insert(self.current_path.join("/"), tensor.id);
+        self.state
+            .insert(self.current_path.join("/"), tensor.into().id);
         if !name.is_empty() {
             // Remove new path component
             self.current_path.pop();

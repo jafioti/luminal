@@ -57,6 +57,17 @@ impl Module<GraphTensor> for Embedding {
     }
 }
 
+impl Embedding {
+    // Reverse from embedding to token distribution
+    pub fn reverse(&self, input: GraphTensor) -> GraphTensor {
+        if self.permute {
+            input.matmul(self.weight)
+        } else {
+            input.matmul(self.weight.permute((1, 0)))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use dfdx::{

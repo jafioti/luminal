@@ -111,7 +111,7 @@ fn main() {
     logits.drop();
     transfer_data_same_graph(&cache_dest, &cache_src, &mut dec_cx);
     delete_inputs(&cache_src, &mut dec_cx);
-    delete_inputs(&downstream(decoder_params, &dec_cx), &mut dec_cx);
+    delete_inputs(downstream(decoder_params, &dec_cx), &mut dec_cx);
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
     // Process audio into mel spectrogram

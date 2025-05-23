@@ -10,7 +10,7 @@ use std::{
     sync::Arc,
 };
 
-use cudarc::driver::{CudaDevice, CudaFunction, DeviceRepr, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaFunction, LaunchConfig, PushKernelArg};
 
 use luminal::{
     op::{Function as LFunction, *},
@@ -19,11 +19,11 @@ use luminal::{
 
 /// Copy a tensor to the GPU
 #[derive(Clone)]
-pub struct CudaCopyToDevice<T>(Arc<CudaDevice>, PhantomData<T>);
+pub struct CudaCopyToDevice<T>(Arc<CudaContext>, PhantomData<T>);
 crate::debug_type!(CudaCopyToDevice);
 
 impl<T> CudaCopyToDevice<T> {
-    pub fn new(dev: Arc<CudaDevice>) -> Self {
+    pub fn new(dev: Arc<CudaContext>) -> Self {
         CudaCopyToDevice(dev, Default::default())
     }
 }
@@ -40,17 +40,19 @@ impl<T: CudaFloat> Operator for CudaCopyToDevice<T> {
             .copied()
             .map(T::from_f32)
             .collect::<Vec<_>>();
-        vec![Tensor::new(CudaData(self.0.htod_sync_copy(&vec).unwrap()))]
+        vec![Tensor::new(CudaData(
+            self.0.default_stream().memcpy_stod(&vec).unwrap(),
+        ))]
     }
 }
 
 /// Copy a tensor from the GPU
 #[derive(Clone)]
-pub struct CudaCopyFromDevice<T>(Arc<CudaDevice>, PhantomData<T>);
+pub struct CudaCopyFromDevice<T>(Arc<CudaContext>, PhantomData<T>);
 crate::debug_type!(CudaCopyFromDevice);
 
 impl<T> CudaCopyFromDevice<T> {
-    pub fn new(dev: Arc<CudaDevice>) -> Self {
+    pub fn new(dev: Arc<CudaContext>) -> Self {
         CudaCopyFromDevice(dev, Default::default())
     }
 }
@@ -63,7 +65,8 @@ impl<T: CudaFloat> Operator for CudaCopyFromDevice<T> {
         }
         let buf = self
             .0
-            .dtoh_sync_copy(get_buffer_from_tensor::<T>(&inp[0].0))
+            .default_stream()
+            .memcpy_dtov(get_buffer_from_tensor::<T>(&inp[0].0))
             .unwrap();
         vec![Tensor::new(
             buf.into_iter().map(T::to_f32).collect::<Vec<_>>(),
@@ -75,7 +78,7 @@ impl<T: CudaFloat> Operator for CudaCopyFromDevice<T> {
 #[derive(Clone)]
 pub struct CudaConstant<T> {
     pub value: ConstantValue,
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     dyn_map: *const FxHashMap<char, usize>,
     _phantom: PhantomData<T>,
 }
@@ -87,7 +90,7 @@ impl<T> core::fmt::Debug for CudaConstant<T> {
 
 impl<T> CudaConstant<T> {
     pub fn new(
-        device: Arc<CudaDevice>,
+        device: Arc<CudaContext>,
         value: ConstantValue,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
@@ -102,14 +105,15 @@ impl<T> CudaConstant<T> {
 
 impl<T: CudaFloat> Operator for CudaConstant<T> {
     fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut a = unsafe { self.device.alloc::<T>(1).unwrap() };
+        let stream = self.device.default_stream();
+        let mut a = unsafe { stream.alloc::<T>(1).unwrap() };
         let value = match &self.value {
             ConstantValue::Expression(e) => {
                 T::from_f32(e.exec(unsafe { self.dyn_map.as_ref().unwrap() }).unwrap() as f32)
             }
             ConstantValue::Float(f) => T::from_f32(*f),
         };
-        self.device.htod_copy_into(vec![value], &mut a).unwrap();
+        stream.memcpy_htod(&vec![value], &mut a).unwrap();
         vec![Tensor::new(CudaData(a))]
     }
 
@@ -129,7 +133,7 @@ macro_rules! cuda_unary_op {
         #[derive(Clone)]
         pub struct $op_name<T> {
             function: CudaFunction,
-            device: Arc<CudaDevice>,
+            device: Arc<cudarc::driver::CudaContext>,
             dyn_symbols: Vec<char>,
             dyn_map: *const FxHashMap<char, usize>,
             _phantom: PhantomData<T>,
@@ -138,7 +142,7 @@ macro_rules! cuda_unary_op {
         impl<T: CudaFloat> $op_name<T> {
             pub fn new(
                 shape: ShapeTracker,
-                device: Arc<CudaDevice>,
+                device: Arc<cudarc::driver::CudaContext>,
                 dyn_map: *const FxHashMap<char, usize>,
             ) -> Self {
                 let (idx_exp, valid_exp) = get_idx_valid_exps(shape);
@@ -166,19 +170,19 @@ macro_rules! cuda_unary_op {
 
         impl<T: CudaFloat> Operator for $op_name<T> {
             fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+            	use cudarc::driver::PushKernelArg;
                 let inp = get_buffer_from_tensor::<T>(&tensors[0].0);
                 let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
-                let out = self.device.alloc_zeros::<T>(inp_size).unwrap();
-                let mut params = vec![
-                    (&out).as_kernel_param(),
-                    inp.as_kernel_param(),
-                    inp_size.as_kernel_param(),
-                ];
-                input_dyn_dims(&mut params, &self.dyn_symbols, self.dyn_map);
+                let stream = self.device.default_stream();
+                let mut out = unsafe { stream.alloc::<T>(inp_size).unwrap() };
+                let mut launch_args = stream.launch_builder(&self.function);
+                launch_args.arg(&mut out);
+                launch_args.arg(inp);
+                launch_args.arg(&inp_size);
+                input_dyn_dims(&mut launch_args, &self.dyn_symbols, self.dyn_map);
                 unsafe {
-                    self.function
-                        .clone()
-                        .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+                    launch_args
+                        .launch(LaunchConfig::for_num_elems(inp_size as u32))
                         .unwrap();
                 }
 
@@ -208,7 +212,7 @@ cuda_unary_op!(if T::is_f32() { "__frcp_rn" } else { "hrcp" }, CudaRecip);
 #[derive(Clone)]
 pub struct CudaAdd<T> {
     function: CudaFunction,
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     _phantom: PhantomData<T>,
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
@@ -219,7 +223,7 @@ impl<T: CudaFloat> CudaAdd<T> {
     pub fn new(
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
-        device: Arc<CudaDevice>,
+        device: Arc<CudaContext>,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (a_idx, a_valid) = get_idx_valid_exps(a_shape);
@@ -252,19 +256,17 @@ impl<T: CudaFloat> Operator for CudaAdd<T> {
         let a = get_buffer_from_tensor::<T>(&tensors[0].0);
         let b = get_buffer_from_tensor::<T>(&tensors[1].0);
         let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
-        let out = unsafe { self.device.alloc::<T>(inp_size).unwrap() };
-        let mut params = vec![
-            (&out).as_kernel_param(),
-            a.as_kernel_param(),
-            b.as_kernel_param(),
-            inp_size.as_kernel_param(),
-        ];
-        input_dyn_dims(&mut params, &self.dyn_symbols, self.dyn_map);
-
+        let stream = self.device.default_stream();
+        let mut out = unsafe { stream.alloc::<T>(inp_size).unwrap() };
+        let mut launch_args = stream.launch_builder(&self.function);
+        launch_args.arg(&mut out);
+        launch_args.arg(a);
+        launch_args.arg(b);
+        launch_args.arg(&inp_size);
+        input_dyn_dims(&mut launch_args, &self.dyn_symbols, self.dyn_map);
         unsafe {
-            self.function
-                .clone()
-                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+            launch_args
+                .launch(LaunchConfig::for_num_elems(inp_size as u32))
                 .unwrap();
         }
 
@@ -282,7 +284,7 @@ impl<T: CudaFloat> Operator for CudaAdd<T> {
 #[derive(Clone)]
 pub struct CudaMul<T> {
     function: CudaFunction,
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     _phantom: PhantomData<T>,
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
@@ -293,7 +295,7 @@ impl<T: CudaFloat> CudaMul<T> {
     pub fn new(
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
-        device: Arc<CudaDevice>,
+        device: Arc<CudaContext>,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (a_idx, a_valid) = get_idx_valid_exps(a_shape);
@@ -323,19 +325,17 @@ impl<T: CudaFloat> Operator for CudaMul<T> {
         let a = get_buffer_from_tensor::<T>(&tensors[0].0);
         let b = get_buffer_from_tensor::<T>(&tensors[1].0);
         let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
-        let out = unsafe { self.device.alloc::<T>(inp_size).unwrap() };
-        let mut params = vec![
-            (&out).as_kernel_param(),
-            a.as_kernel_param(),
-            b.as_kernel_param(),
-            inp_size.as_kernel_param(),
-        ];
-        input_dyn_dims(&mut params, &self.dyn_symbols, self.dyn_map);
-
+        let stream = self.device.default_stream();
+        let mut out = unsafe { stream.alloc::<T>(inp_size).unwrap() };
+        let mut launch_args = stream.launch_builder(&self.function);
+        launch_args.arg(&mut out);
+        launch_args.arg(a);
+        launch_args.arg(b);
+        launch_args.arg(&inp_size);
+        input_dyn_dims(&mut launch_args, &self.dyn_symbols, self.dyn_map);
         unsafe {
-            self.function
-                .clone()
-                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+            launch_args
+                .launch(LaunchConfig::for_num_elems(inp_size as u32))
                 .unwrap();
         }
 
@@ -353,7 +353,7 @@ impl<T: CudaFloat> Operator for CudaMul<T> {
 #[derive(Clone)]
 pub struct CudaMod<T> {
     function: CudaFunction,
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     _phantom: PhantomData<T>,
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
@@ -364,7 +364,7 @@ impl<T: CudaFloat> CudaMod<T> {
     pub fn new(
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
-        device: Arc<CudaDevice>,
+        device: Arc<CudaContext>,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (a_idx, a_valid) = get_idx_valid_exps(a_shape);
@@ -394,19 +394,17 @@ impl<T: CudaFloat> Operator for CudaMod<T> {
         let a = get_buffer_from_tensor::<T>(&tensors[0].0);
         let b = get_buffer_from_tensor::<T>(&tensors[1].0);
         let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
-        let out = unsafe { self.device.alloc::<T>(inp_size).unwrap() };
-        let mut params = vec![
-            (&out).as_kernel_param(),
-            a.as_kernel_param(),
-            b.as_kernel_param(),
-            inp_size.as_kernel_param(),
-        ];
-        input_dyn_dims(&mut params, &self.dyn_symbols, self.dyn_map);
-
+        let stream = self.device.default_stream();
+        let mut out = unsafe { stream.alloc::<T>(inp_size).unwrap() };
+        let mut launch_args = stream.launch_builder(&self.function);
+        launch_args.arg(&mut out);
+        launch_args.arg(a);
+        launch_args.arg(b);
+        launch_args.arg(&inp_size);
+        input_dyn_dims(&mut launch_args, &self.dyn_symbols, self.dyn_map);
         unsafe {
-            self.function
-                .clone()
-                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+            launch_args
+                .launch(LaunchConfig::for_num_elems(inp_size as u32))
                 .unwrap();
         }
 
@@ -424,7 +422,7 @@ impl<T: CudaFloat> Operator for CudaMod<T> {
 #[derive(Clone)]
 pub struct CudaLessThan<T> {
     function: CudaFunction,
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     _phantom: PhantomData<T>,
     dyn_symbols: Vec<char>,
     dyn_map: *const FxHashMap<char, usize>,
@@ -435,7 +433,7 @@ impl<T: CudaFloat> CudaLessThan<T> {
     pub fn new(
         a_shape: ShapeTracker,
         b_shape: ShapeTracker,
-        device: Arc<CudaDevice>,
+        device: Arc<CudaContext>,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (a_idx, a_valid) = get_idx_valid_exps(a_shape);
@@ -471,19 +469,17 @@ impl<T: CudaFloat> Operator for CudaLessThan<T> {
         let a = get_buffer_from_tensor::<T>(&tensors[0].0);
         let b = get_buffer_from_tensor::<T>(&tensors[1].0);
         let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
-        let out = unsafe { self.device.alloc::<T>(inp_size).unwrap() };
-        let mut params = vec![
-            (&out).as_kernel_param(),
-            a.as_kernel_param(),
-            b.as_kernel_param(),
-            inp_size.as_kernel_param(),
-        ];
-        input_dyn_dims(&mut params, &self.dyn_symbols, self.dyn_map);
-
+        let stream = self.device.default_stream();
+        let mut out = unsafe { stream.alloc::<T>(inp_size).unwrap() };
+        let mut launch_args = stream.launch_builder(&self.function);
+        launch_args.arg(&mut out);
+        launch_args.arg(a);
+        launch_args.arg(b);
+        launch_args.arg(&inp_size);
+        input_dyn_dims(&mut launch_args, &self.dyn_symbols, self.dyn_map);
         unsafe {
-            self.function
-                .clone()
-                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+            launch_args
+                .launch(LaunchConfig::for_num_elems(inp_size as u32))
                 .unwrap();
         }
 
@@ -501,7 +497,7 @@ impl<T: CudaFloat> Operator for CudaLessThan<T> {
 #[derive(Clone)]
 pub struct CudaSumReduce<T> {
     function: CudaFunction,
-    pub device: Arc<CudaDevice>,
+    pub device: Arc<CudaContext>,
     pub dim: usize,
     _phantom: PhantomData<T>,
     dyn_symbols: Vec<char>,
@@ -513,7 +509,7 @@ impl<T: CudaFloat> CudaSumReduce<T> {
     pub fn new(
         dim: usize,
         shape: ShapeTracker,
-        device: Arc<CudaDevice>,
+        device: Arc<CudaContext>,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (idx, valid) = get_idx_valid_exps(shape);
@@ -571,21 +567,19 @@ where
             .map(|i| i.to_usize().unwrap())
             .product();
         let dim_size = tensors[0].1.dims()[self.dim].to_usize().unwrap();
-
-        let out = self.device.alloc_zeros::<T>(inp_size).unwrap();
-        let mut params = vec![
-            (&out).as_kernel_param(),
-            inp.as_kernel_param(),
-            front_size.as_kernel_param(),
-            back_size.as_kernel_param(),
-            dim_size.as_kernel_param(),
-            inp_size.as_kernel_param(),
-        ];
-        input_dyn_dims(&mut params, &self.dyn_symbols, self.dyn_map);
+        let stream = self.device.default_stream();
+        let mut out = stream.alloc_zeros::<T>(inp_size).unwrap();
+        let mut launch_args = stream.launch_builder(&self.function);
+        launch_args.arg(&mut out);
+        launch_args.arg(inp);
+        launch_args.arg(&front_size);
+        launch_args.arg(&back_size);
+        launch_args.arg(&dim_size);
+        launch_args.arg(&inp_size);
+        input_dyn_dims(&mut launch_args, &self.dyn_symbols, self.dyn_map);
         unsafe {
-            self.function
-                .clone()
-                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+            launch_args
+                .launch(LaunchConfig::for_num_elems(inp_size as u32))
                 .unwrap();
         }
         vec![Tensor::new(CudaData(out))]
@@ -595,7 +589,7 @@ where
 #[derive(Clone)]
 pub struct CudaMaxReduce<T> {
     function: CudaFunction,
-    pub device: Arc<CudaDevice>,
+    pub device: Arc<CudaContext>,
     pub dim: usize,
     _phantom: PhantomData<T>,
     dyn_symbols: Vec<char>,
@@ -607,7 +601,7 @@ impl<T: CudaFloat> CudaMaxReduce<T> {
     pub fn new(
         dim: usize,
         shape: ShapeTracker,
-        device: Arc<CudaDevice>,
+        device: Arc<CudaContext>,
         dyn_map: *const FxHashMap<char, usize>,
     ) -> Self {
         let (idx, valid) = get_idx_valid_exps(shape);
@@ -661,21 +655,19 @@ impl<T: CudaFloat> Operator for CudaMaxReduce<T> {
             .map(|i| i.to_usize().unwrap())
             .product();
         let dim_size = tensors[0].1.dims()[self.dim].to_usize().unwrap();
-
-        let out = self.device.alloc_zeros::<T>(inp_size).unwrap();
-        let mut params = vec![
-            (&out).as_kernel_param(),
-            inp.as_kernel_param(),
-            front_size.as_kernel_param(),
-            back_size.as_kernel_param(),
-            dim_size.as_kernel_param(),
-            inp_size.as_kernel_param(),
-        ];
-        input_dyn_dims(&mut params, &self.dyn_symbols, self.dyn_map);
+        let stream = self.device.default_stream();
+        let mut out = stream.alloc_zeros::<T>(inp_size).unwrap();
+        let mut launch_args = stream.launch_builder(&self.function);
+        launch_args.arg(&mut out);
+        launch_args.arg(inp);
+        launch_args.arg(&front_size);
+        launch_args.arg(&back_size);
+        launch_args.arg(&dim_size);
+        launch_args.arg(&inp_size);
+        input_dyn_dims(&mut launch_args, &self.dyn_symbols, self.dyn_map);
         unsafe {
-            self.function
-                .clone()
-                .launch(LaunchConfig::for_num_elems(inp_size as u32), &mut params)
+            launch_args
+                .launch(LaunchConfig::for_num_elems(inp_size as u32))
                 .unwrap();
         }
         vec![Tensor::new(CudaData(out))]
@@ -689,7 +681,7 @@ pub struct PrimitiveCompiler<T>(PhantomData<T>);
 impl<T: CudaFloat> Compiler for PrimitiveCompiler<T> {
     type Output = ();
     fn compile<To: ToIdsMut>(&self, graph: &mut Graph, mut ids: To) {
-        let dev = CudaDevice::new(0).unwrap();
+        let dev = CudaContext::new(0).unwrap();
         // Go through the graph and insert copy ops
         // Copy function output to device and input from device
         for function_node in graph

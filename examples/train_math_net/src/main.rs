@@ -11,11 +11,11 @@ fn main() {
     // Setup gradient graph
     let mut cx = Graph::new();
     let model = (
-        Linear::new(8, 16, false, &mut cx).initialize(),
+        Linear::new(8, 16, false, &mut cx).init_rand(),
         Swish,
-        Linear::new(16, 16, false, &mut cx).initialize(),
+        Linear::new(16, 16, false, &mut cx).init_rand(),
         Swish,
-        Linear::new(16, 5, false, &mut cx).initialize(),
+        Linear::new(16, 5, false, &mut cx).init_rand(),
     );
     let mut input = cx.tensor(8);
     let mut target = cx.tensor(5);
@@ -29,38 +29,15 @@ fn main() {
     cx.keep_tensors(&weights);
     lr.set(1e-1);
 
-    #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
-    cx.compile(
-        GenericCompiler::default(),
-        (
-            &mut input,
-            &mut target,
-            &mut loss,
-            &mut output,
-            &mut weights,
-            &mut new_weights,
-        ),
-    );
-
-    #[cfg(feature = "metal")]
     cx.compile(
         (
+            #[cfg(not(feature = "cuda"))]
             GenericCompiler::default(),
+            #[cfg(feature = "metal")]
             luminal_metal::MetalCompiler::<f32>::default(),
+            #[cfg(feature = "cuda")]
+            luminal_cuda::CudaCompiler::<f32>::default(),
         ),
-        (
-            &mut input,
-            &mut target,
-            &mut loss,
-            &mut output,
-            &mut weights,
-            &mut new_weights,
-        ),
-    );
-
-    #[cfg(feature = "cuda")]
-    cx.compile(
-        luminal_cuda::CudaCompiler::<f32>::default(),
         (
             &mut input,
             &mut target,
@@ -81,8 +58,9 @@ fn main() {
         input.set(problem);
         target.set(answer);
 
-        // Execute graph and update weights
+        // Execute graph
         cx.execute();
+        // Update weights
         transfer_data_same_graph(&new_weights, &weights, &mut cx);
 
         // Report progress
@@ -93,9 +71,10 @@ fn main() {
                 .data()
                 .into_iter()
                 .zip(answer)
+                // If the difference between the answer and the predicted bit is less than 0.5, its a correct prediction
                 .filter(|(a, b)| (a - b).abs() < 0.5)
                 .count() as f32
-                / 5.,
+                / 5., // 5 bits predicted
         );
         output.drop();
         println!(
@@ -114,6 +93,13 @@ fn main() {
 
 // Generate data
 fn make_problem(rng: &mut ThreadRng) -> ([f32; 8], [f32; 5]) {
+    fn get_lower_bits(byte: u8, bits: usize, slice: &mut [f32]) {
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..bits {
+            slice[i] = if (byte >> i) & 1 == 1 { 1.0 } else { 0.0 };
+        }
+    }
+
     let (n1, n2): (u8, u8) = (rng.gen_range(0..16), rng.gen_range(0..16));
     let ans = n1.wrapping_add(n2);
     let mut p = [0.; 8];
@@ -122,13 +108,6 @@ fn make_problem(rng: &mut ThreadRng) -> ([f32; 8], [f32; 5]) {
     let mut a = [0.; 5];
     get_lower_bits(ans, 5, &mut a);
     (p, a)
-}
-
-fn get_lower_bits(byte: u8, bits: usize, slice: &mut [f32]) {
-    #[allow(clippy::needless_range_loop)]
-    for i in 0..bits {
-        slice[i] = if byte >> i & 1 == 1 { 1.0 } else { 0.0 };
-    }
 }
 
 // Smooth metrics

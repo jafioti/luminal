@@ -156,9 +156,14 @@ impl GraphTensor {
         1. / (1. + (-self).exp())
     }
 
-    /// The swish activation function
+    /// The swish (aka silu) activation function
     pub fn swish(self) -> GraphTensor {
         self * self.sigmoid()
+    }
+
+    /// The silu (aka swish) activation function
+    pub fn silu(self) -> GraphTensor {
+        self.swish()
     }
 
     /// The tanh activation function

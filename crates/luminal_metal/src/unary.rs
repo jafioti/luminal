@@ -783,7 +783,6 @@ mod tests {
             )>::default(),
             &mut b,
         );
-
         assert_op_in_graph::<MetalStdNorm<f16>>(&cx);
         assert_op_in_graph::<MetalMeanReduce<f16>>(&cx);
     }
