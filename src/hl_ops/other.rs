@@ -149,12 +149,12 @@ impl GraphTensor {
     }
 
     /// Check the tensor value against a binary file
-    pub fn diff(&self, file: impl Into<PathBuf>, threshold: f32) -> Self {
+    pub fn diff(&self, file: impl Into<PathBuf>, atol: f32, rtol: f32) -> Self {
         let path = file.into();
         let id = self
             .graph()
             .add_op(op::Function(
-                "Diff".to_string(),
+                format!("Diff {path:?}"),
                 Box::new(move |mut inp| {
                     // Get tensor data and file data
                     let (tensor, shape) = inp.pop().unwrap();
@@ -213,10 +213,11 @@ impl GraphTensor {
                     }
                     let mut matched = true;
                     for (i, (a, b)) in data.iter().zip(bin_data.iter()).enumerate() {
-                        if (a - b).abs() > threshold {
+                        let tolerance = atol + rtol * a.abs().max(b.abs());
+                        if (a - b).abs() > tolerance {
                             println!(
                                 "{}",
-                                format!("{} | Mismatch!", path.to_str().unwrap())
+                                format!("{} | Value Mismatch!", path.to_str().unwrap())
                                     .bold()
                                     .red()
                             );
@@ -225,31 +226,46 @@ impl GraphTensor {
                                 println!("Index {} is nan!", i.to_string().bold());
                             }
                             println!("{a} is not equal to {b}, index {i}");
-                            let avg_dist = data
+
+                            let mut diffs: Vec<f32> = data
                                 .iter()
                                 .zip(bin_data.iter())
                                 .map(|(a, b)| (a - b).abs())
-                                .sum::<f32>()
-                                / data.len() as f32;
-                            let max_dist = data
-                                .iter()
-                                .zip(bin_data.iter())
-                                .map(|(a, b)| (a - b).abs())
-                                .max_by(|a, b| {
-                                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-                                })
-                                .unwrap();
+                                .collect();
+                            diffs.sort_by(|x, y| {
+                                x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
+                            });
+                            let len = diffs.len();
+                            // percentile indices (clamp to len-1)
+                            let p50_idx = ((len as f32) * 0.50).round() as usize;
+                            let p95_idx = ((len as f32) * 0.95).round() as usize;
+                            let p99_idx = ((len as f32) * 0.99).round() as usize;
+                            let p50 = diffs[p50_idx.min(len - 1)];
+                            let p95 = diffs[p95_idx.min(len - 1)];
+                            let p99 = diffs[p99_idx.min(len - 1)];
+
+                            // summary stats
+                            let avg_dist = diffs.iter().sum::<f32>() / len as f32;
+                            let max_dist = *diffs.last().unwrap();
                             let sum_dist = data
                                 .iter()
                                 .zip(bin_data.iter())
-                                .map(|(a, b)| (a - b) * (a - b))
+                                .map(|(a, b)| (a - b).powi(2))
                                 .sum::<f32>();
+
                             println!(
                                 "Avg dist: {}, Max dist: {} Sum dist: {}",
                                 avg_dist.to_string().bold().red(),
                                 max_dist.to_string().bold().red(),
                                 sum_dist.to_string().bold().red(),
                             );
+                            println!(
+                                "p50: {}  p95: {}  p99: {}",
+                                p50.to_string().bold().red(),
+                                p95.to_string().bold().red(),
+                                p99.to_string().bold().red(),
+                            );
+
                             println!("Data Shape: {shape:?}");
                             println!("{}: {:?}", "This".bold(), &data[..10]);
                             println!("{}: {:?}", "File".bold(), &bin_data[..10]);
