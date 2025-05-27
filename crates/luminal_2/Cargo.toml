@@ -7,12 +7,11 @@ edition = "2024"
 
 [dependencies]
 itertools = "0.14.0"
-
-[target.'cfg(target_os = "macos")'.dependencies]
+egglog = { git = "https://github.com/egraphs-good/egglog" }
+petgraph = "0.8.1"
 metal-rs = { version = "0.28.0", package = "metal" }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-cudarc = { git = "https://github.com/coreylowman/cudarc", features = [
-	"cuda-version-from-build-system",
-	"f16",
-] }
+urlencoding = "2.1.3"
+webbrowser = "1.0.4"
+regex = "1.11.1"
+serde_json = "1.0.140"
+colored = "3.0.0"
