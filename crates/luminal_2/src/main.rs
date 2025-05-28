@@ -100,7 +100,78 @@ impl TermToString for (GraphTerm, usize) {
     }
 }
 
+fn make_sum_reduce() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
+    let mut graph = StableGraph::new();
+    let pad_l_in = GraphTerm::LoopIn {
+        range: "1".to_string(),
+        stride: "0".to_string(),
+    };
+    let pad_l_out = GraphTerm::LoopOut {
+        range: "1".to_string(),
+        stride: "0".to_string(),
+    };
+    let lin0 = graph.add_node(pad_l_in.clone());
+    let lin1 = graph.add_node(pad_l_in.clone());
+    graph.add_edge(lin0, lin1, 0);
+    let lin2 = graph.add_node(pad_l_in.clone());
+    graph.add_edge(lin1, lin2, 0);
+    let lin3 = graph.add_node(pad_l_in.clone());
+    graph.add_edge(lin2, lin3, 0);
+    let lin4 = graph.add_node(pad_l_in.clone());
+    graph.add_edge(lin3, lin4, 0);
+    let lin5 = graph.add_node(pad_l_in.clone());
+    graph.add_edge(lin4, lin5, 0);
+    let lin6 = graph.add_node(GraphTerm::LoopIn {
+        range: "5".to_string(),
+        stride: "z".to_string(),
+    });
+    graph.add_edge(lin5, lin6, 0);
+
+    let slin0 = graph.add_node(pad_l_in.clone());
+    let slin1 = graph.add_node(pad_l_in.clone());
+    graph.add_edge(slin0, slin1, 0);
+    let slin2 = graph.add_node(pad_l_in.clone());
+    graph.add_edge(slin1, slin2, 0);
+    let slin3 = graph.add_node(pad_l_in.clone());
+    graph.add_edge(slin2, slin3, 0);
+    let slin4 = graph.add_node(pad_l_in.clone());
+    graph.add_edge(slin3, slin4, 0);
+    let slin5 = graph.add_node(pad_l_in.clone());
+    graph.add_edge(slin4, slin5, 0);
+    let slin6 = graph.add_node(GraphTerm::LoopIn {
+        range: "5".to_string(),
+        stride: "Accz".to_string(),
+    });
+    graph.add_edge(slin5, slin6, 0);
+
+    let add = graph.add_node(GraphTerm::Add);
+    graph.add_edge(lin6, add, 0);
+    graph.add_edge(slin6, add, 0);
+
+    let acc = graph.add_node(GraphTerm::LoopOut {
+        range: "5".to_string(),
+        stride: "Accz".to_string(),
+    });
+    graph.add_edge(add, acc, 0);
+    let olin0 = graph.add_node(pad_l_out.clone());
+    graph.add_edge(acc, olin0, 0);
+    let olin1 = graph.add_node(pad_l_out.clone());
+    graph.add_edge(olin0, olin1, 0);
+    let olin2 = graph.add_node(pad_l_out.clone());
+    graph.add_edge(olin1, olin2, 0);
+    let olin3 = graph.add_node(pad_l_out.clone());
+    graph.add_edge(olin2, olin3, 0);
+    let olin4 = graph.add_node(pad_l_out.clone());
+    graph.add_edge(olin3, olin4, 0);
+    let olin5 = graph.add_node(pad_l_out.clone());
+    graph.add_edge(olin4, olin5, 0);
+
+    (graph, olin5)
+}
+
 fn main() {
+    let (g, r) = make_sum_reduce();
+    // display_graph(&g, &[]);
     match run_egglog_program(include_str!("code.lisp")) {
         Ok((s, _serialized, termdag, root)) => {
             if s.is_empty() {
@@ -108,8 +179,8 @@ fn main() {
             } else {
                 println!("{}", format!("Success: {s:?}").bright_green().bold())
             }
-            let (graph, root) = dag_to_petgraph(&termdag, termdag.lookup(&root));
-            codegen(graph, root);
+            // let (graph, root) = dag_to_petgraph(&termdag, termdag.lookup(&root));
+            codegen(g, r);
         }
         Err(e) => println!("{e}"),
     }
@@ -119,15 +190,16 @@ fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (Str
     let (kernels, _root_kernel) = split_kernels(graph, root);
 
     for (n_kernel, (kernel_graph, inputs, outputs)) in kernels.into_iter().enumerate() {
+        display_graph(&kernel_graph, &[]);
         let inputs: Vec<_> = inputs
             .into_iter()
             .enumerate()
-            .map(|(a, (_, _, b))| (97 + a, b))
+            .map(|(a, (_, _, b))| (a, b))
             .collect();
         let outputs: Vec<_> = outputs
             .into_iter()
             .enumerate()
-            .map(|(i, a)| (97 + inputs.len() + i, a))
+            .map(|(i, a)| (inputs.len() + i, a))
             .collect();
         let mut loop_levels = vec![];
         let kernel = make_kernel(
@@ -135,7 +207,7 @@ fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (Str
             inputs.clone(),
             outputs.clone(),
             &mut HashMap::new(),
-            &mut (96 + inputs.len() + outputs.len()),
+            &mut (inputs.len() + outputs.len()),
             &mut loop_levels,
         );
         let grid = loop_levels
@@ -157,7 +229,7 @@ fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (Str
             inputs
                 .into_iter()
                 .chain(outputs)
-                .map(|(a, _)| format!("float* {}", a as u8 as char))
+                .map(|(a, _)| format!("float* {}", var_to_char(a)))
                 .join(", "),
             kernel.into_iter().map(|s| format!("\t{s}")).join("\n")
         );
@@ -255,55 +327,94 @@ fn make_kernel(
                 loop_body_covered.extend(new_loop_body_covered);
 
                 // Make new loop
-                *prev_max_var += 1;
-                let loop_var = *prev_max_var as u8 as char;
+                let loop_kernel_line = kernel_lines.len();
                 if *loop_level < 6 {
-                    kernel_lines.push(format!(
-                        "int loop_{loop_var} = {};",
-                        [
-                            "blockIdx.x",
-                            "blockIdx.y",
-                            "blockIdx.z",
-                            "threadIdx.x",
-                            "threadIdx.y",
-                            "threadIdx.z"
-                        ][*loop_level]
-                    ));
+                    if loop_inputs.iter().any(|(_, st)| **st != "0")
+                        || loop_outputs.iter().any(|(_, st)| **st != "0")
+                    {
+                        *prev_max_var += 1;
+                        kernel_lines.push(format!(
+                            "int loop_{} = {};",
+                            [
+                                "blockIdx.x",
+                                "blockIdx.y",
+                                "blockIdx.z",
+                                "threadIdx.x",
+                                "threadIdx.y",
+                                "threadIdx.z"
+                            ][*loop_level],
+                            var_to_char(*prev_max_var)
+                        ));
+                    }
                 } else {
+                    *prev_max_var += 1;
+                    let loop_var = var_to_char(*prev_max_var);
                     kernel_lines.push(format!("{}for (int loop_{loop_var} = 0; loop_{loop_var} < {range}; loop_{loop_var} += 1) {{", (0..loop_level.saturating_sub(6)).map(|_| "\t").join("")));
-                }
+                };
+                let loop_var = var_to_char(*prev_max_var);
 
                 // Move input pointers (allocate new variables)
                 let mut new_vars = vec![];
-                for (input, stride) in loop_inputs {
-                    *prev_max_var += 1;
+                for (input, stride) in &loop_inputs {
+                    if stride.contains("Acc") {
+                        assert!(
+                            *loop_level > 5,
+                            "No accumulations allowed on grid or threadblock levels!"
+                        );
+                        *prev_max_var += 1;
+                        // Create accumulator
+                        kernel_lines.insert(
+                            loop_kernel_line,
+                            format!("float {} = 0.0;", var_to_char(*prev_max_var)),
+                        );
+                        new_vars.push(*prev_max_var);
+                        node_to_var.insert(*input, (*prev_max_var, false));
+                        continue;
+                    }
                     let real_input = if let Some(n) = kernel_graph
-                        .neighbors_directed(input, Direction::Incoming)
+                        .neighbors_directed(*input, Direction::Incoming)
                         .next()
                     {
                         node_to_var[&n].0
                     } else {
                         inputs
                             .iter()
-                            .find_map(|(i, n)| if *n == input { Some(*i) } else { None })
+                            .find_map(|(i, n)| if *n == *input { Some(*i) } else { None })
                             .unwrap()
                     };
-                    kernel_lines.push(format!(
-                        "{}float* {} = {} + {};",
-                        (0..(*loop_level + 1).saturating_sub(6))
-                            .map(|_| "\t")
-                            .join(""),
-                        *prev_max_var as u8 as char,
-                        real_input as u8 as char,
-                        stride.replace('z', &format!("loop_{}", loop_var as u8 as char))
-                    ));
-                    new_vars.push(*prev_max_var);
-                    node_to_var.insert(input, (*prev_max_var, true));
+                    if *stride != "0" {
+                        *prev_max_var += 1;
+                        kernel_lines.push(format!(
+                            "{}float* {} = {} + {};",
+                            (0..(*loop_level + 1).saturating_sub(6))
+                                .map(|_| "\t")
+                                .join(""),
+                            var_to_char(*prev_max_var),
+                            var_to_char(real_input),
+                            stride.replace('z', &format!("loop_{loop_var}"))
+                        ));
+                        new_vars.push(*prev_max_var);
+                        node_to_var.insert(*input, (*prev_max_var, true));
+                    } else {
+                        new_vars.push(real_input);
+                        node_to_var.insert(*input, (real_input, true));
+                    }
                 }
                 // Move output pointers (allocate new variables)
                 let mut new_output_vars = vec![];
                 for (output, stride) in &loop_outputs {
-                    *prev_max_var += 1;
+                    if stride.contains("Acc") {
+                        assert!(
+                            *loop_level > 5,
+                            "No accumulations allowed on grid or threadblock levels!"
+                        );
+                        // Re-use accumulator
+                        let (input, _) = loop_inputs.iter().find(|(_, s)| **s == **stride).unwrap();
+                        let (input_var, _) = node_to_var[input];
+                        new_output_vars.push(input_var);
+                        node_to_var.insert(*output, (input_var, false));
+                        continue;
+                    }
                     let real_output = if let Some(v) = node_to_var.get(&output) {
                         v.0
                     } else {
@@ -312,17 +423,23 @@ fn make_kernel(
                             .find_map(|(i, n)| if *n == *output { Some(*i) } else { None })
                             .unwrap()
                     };
-                    kernel_lines.push(format!(
-                        "{}float* {} = {} + {};",
-                        (0..(*loop_level + 1).saturating_sub(6))
-                            .map(|_| "\t")
-                            .join(""),
-                        *prev_max_var as u8 as char,
-                        real_output as u8 as char,
-                        stride.replace('z', &format!("loop_{}", loop_var as u8 as char))
-                    ));
-                    new_output_vars.push(*prev_max_var);
-                    node_to_var.insert(*output, (*prev_max_var, true));
+                    if *stride != "0" {
+                        *prev_max_var += 1;
+                        kernel_lines.push(format!(
+                            "{}float* {} = {} + {};",
+                            (0..(*loop_level + 1).saturating_sub(6))
+                                .map(|_| "\t")
+                                .join(""),
+                            var_to_char(*prev_max_var),
+                            var_to_char(real_output),
+                            stride.replace('z', &format!("loop_{loop_var}"))
+                        ));
+                        new_output_vars.push(*prev_max_var);
+                        node_to_var.insert(*output, (*prev_max_var, true));
+                    } else {
+                        new_output_vars.push(real_output);
+                        node_to_var.insert(*output, (real_output, true));
+                    }
                 }
                 loop_levels.push(range.to_string());
                 let loop_body = make_kernel(
@@ -341,17 +458,22 @@ fn make_kernel(
 
                 // Set outputs if nessecary
                 for (body_out, (output, _)) in body_outputs.into_iter().zip(loop_outputs) {
-                    if !matches!(
-                        kernel_graph.node_weight(body_out).unwrap().0,
-                        GraphTerm::LoopOut { .. }
-                    ) {
+                    let save_var = if let GraphTerm::LoopOut { stride, .. } =
+                        &kernel_graph.node_weight(body_out).unwrap().0
+                    {
+                        stride.contains("Acc")
+                    } else {
+                        true
+                    };
+                    if save_var {
                         kernel_lines.push(format!(
-                            "{}*{} = {}",
+                            "{}{}{} = {}",
                             (0..(*loop_level + 1).saturating_sub(6))
                                 .map(|_| "\t")
                                 .join(""),
-                            node_to_var[&output].0 as u8 as char,
-                            node_to_var[&body_out].0 as u8 as char,
+                            if node_to_var[&output].1 { "*" } else { "" },
+                            var_to_char(node_to_var[&output].0),
+                            var_to_char(node_to_var[&body_out].0),
                         ));
                     }
                 }
@@ -389,9 +511,9 @@ fn make_kernel(
                 kernel_lines.push(format!(
                     "{}float {} = sin({}{});",
                     (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
-                    *prev_max_var as u8 as char,
+                    var_to_char(*prev_max_var),
                     if src.1 { "*" } else { "" },
-                    src.0 as u8 as char
+                    var_to_char(src.0)
                 ));
             }
             GraphTerm::Exp => {
@@ -404,9 +526,9 @@ fn make_kernel(
                 kernel_lines.push(format!(
                     "{}float {} = exp({}{});",
                     (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
-                    *prev_max_var as u8 as char,
+                    var_to_char(*prev_max_var),
                     if src.1 { "*" } else { "" },
-                    src.0 as u8 as char
+                    var_to_char(src.0)
                 ));
             }
             GraphTerm::Add => {
@@ -418,11 +540,11 @@ fn make_kernel(
                 kernel_lines.push(format!(
                     "{}float {} = {}{} + {}{};",
                     (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
-                    *prev_max_var as u8 as char,
+                    var_to_char(*prev_max_var),
                     if src_a.1 { "*" } else { "" },
-                    src_a.0 as u8 as char,
+                    var_to_char(src_a.0),
                     if src_b.1 { "*" } else { "" },
-                    src_b.0 as u8 as char
+                    var_to_char(src_b.0)
                 ));
             }
         }
@@ -892,5 +1014,15 @@ pub fn display_graph<G: TermToString>(
     );
     if let Err(e) = webbrowser::open(&url) {
         panic!("Error displaying graph: {:?}", e);
+    }
+}
+
+fn var_to_char(var: usize) -> char {
+    if var < 26 {
+        (var + 97) as u8 as char
+    } else if var < 52 {
+        (var - 26 + 65) as u8 as char
+    } else {
+        panic!("Var is too high: {var}");
     }
 }
