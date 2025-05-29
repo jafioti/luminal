@@ -52,7 +52,7 @@ The typical approach in Luminal for supporting new backends would be:
 Since we looked at a CUDA kernel above, let's go through how we do this for the Metal backend to support Apple GPUs.
 
 ### Step 1: Metal Primops
-We want to generically support all possible models in Luminal, so our first step is to replicate all primitive operations with a Metal version. Since there are 11 primitive operations, we need 11 Metal ops. You can see these in `crates/luminal_metal/src/prim.rs`. The compiler simply loops through all ops in the graph and swaps them out with the Metal variant.
+We want to generically support all possible models in Luminal, so our first step is to replicate all primitive operations with a Metal version. Since there are 12 primitive operations, we need 12 Metal ops. You can see these in `crates/luminal_metal/src/prim.rs`. The compiler simply loops through all ops in the graph and swaps them out with the Metal variant.
 
 These primitive operations are very simple. Here's the [MetalExp2](https://github.com/jafioti/luminal/blob/d3178b3443ee7fc887f8f0988a77736b73e618d0/crates/luminal_metal/src/prim.rs#L346) op, slightly simplified for clarity:
 ```rust

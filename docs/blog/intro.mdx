@@ -10,7 +10,7 @@ Current ML libraries tend to be large and complex because they try to map high l
 
 But does it need to be so complex? ML models tend to be static dataflow graphs made up of a few simple operators. This allows us to have a dirt simple core only supporting a few primitive operations, and use them to build up complex neural networks. We can then write compilers that modify the graph after we build it, to swap more efficient ops back in depending on which backend we're running on.
 
-Luminal takes this approach to the extreme, supporting only 11 primitive operations (primops):
+Luminal takes this approach to the extreme, supporting only 12 primitive operations (primops):
 - **Unary** - Log2, Exp2, Sin, Sqrt, Recip
 - **Binary** - Add, Mul, Mod, LessThan
 - **Other** - SumReduce, MaxReduce, Contiguous
