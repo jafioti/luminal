@@ -34,7 +34,7 @@ Let's learn the same lesson in ML. If you want to know how something is achieved
 
 How simple *could* an ML library get? Surely after you made a linear algebra library you'd need to deal with datatypes, devices, backprop, and all the usual list of ML concerns, right? What if you could throw all those things away and just worry about doing the minimum to support arbitrary neural networks?
 
-It turns out, it can get extremely simple. The core of Luminal is a few thousand lines of code and only 11 operations, which allows anyone to understand the whole thing in an afternoon.
+It turns out, it can get extremely simple. The core of Luminal is a few thousand lines of code and only 12 operations, which allows anyone to understand the whole thing in an afternoon.
 
 But wouldn't that make your library so limited it's useless? **No!** Not if you can use compilers to add functionality back, in a composable, isolated way.
 
@@ -43,7 +43,7 @@ Let's see what we can do.
 #### Devices
 Since devices aren't handled by the core library, what if we had a compiler take each op present in the network and swap it out with equivalent operations on other devices, like CUDA GPUs? Or TPUs? Or quantum photonic retro-encabulators?
 
-If you only have 11 ops, it's extremely straightforward. We can also have the compilers insert copy-to-device and copy-from-device ops so our data is moved correctly without us thinking about it.
+If you only have 12 ops, it's extremely straightforward. We can also have the compilers insert copy-to-device and copy-from-device ops so our data is moved correctly without us thinking about it.
 
 So compilers get us support for other devices.
 
