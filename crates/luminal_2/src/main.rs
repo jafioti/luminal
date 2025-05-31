@@ -57,6 +57,7 @@ enum GraphTerm {
     LoopIn { range: String, stride: String },
     LoopOut { range: String, stride: String },
     Add,
+    Mul,
     Exp,
     Sin,
 }
@@ -90,6 +91,7 @@ impl TermToString for (GraphTerm, usize) {
     fn term_to_string(&self) -> String {
         let s = match &self.0 {
             GraphTerm::Add => "Add".to_string(),
+            GraphTerm::Mul => "Mul".to_string(),
             GraphTerm::Exp => "Exp".to_string(),
             GraphTerm::Sin => "Sin".to_string(),
             GraphTerm::LoopIn { range, stride } => format!("LoopIn ({range}; {stride})"),
@@ -100,44 +102,139 @@ impl TermToString for (GraphTerm, usize) {
     }
 }
 
+impl TermToString for (GraphTerm, Vec<String>, usize) {
+    fn term_to_string(&self) -> String {
+        let s = match &self.0 {
+            GraphTerm::Add => "Add".to_string(),
+            GraphTerm::Mul => "Mul".to_string(),
+            GraphTerm::Exp => "Exp".to_string(),
+            GraphTerm::Sin => "Sin".to_string(),
+            GraphTerm::LoopIn { range, stride } => format!("LoopIn ({range}; {stride})"),
+            GraphTerm::LoopOut { range, stride } => format!("LoopOut ({range}; {stride})"),
+            GraphTerm::Tensor { name } => format!("Tensor({name})"),
+        };
+        format!("{s} [{}]", self.1.len())
+    }
+}
+
+fn make_complex_kernel() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
+    let mut graph = StableGraph::new();
+    let a = graph.add_node(GraphTerm::Tensor {
+        name: "A".to_string(),
+    });
+    let in_a = loop_in(
+        loop_in(pad_in(a, &mut graph, 6), "50", "z * 5", &mut graph),
+        "5",
+        "z",
+        &mut graph,
+    );
+
+    // Acc
+    let slin0 = graph.add_node(GraphTerm::Tensor {
+        name: "acc".to_string(),
+    });
+    let in_exp_acc = loop_in(
+        loop_in(pad_in(slin0, &mut graph, 6), "50", "z", &mut graph),
+        "5",
+        "Accz",
+        &mut graph,
+    );
+
+    // Exp-acc
+    let exp = graph.add_node(GraphTerm::Exp);
+    graph.add_edge(in_a, exp, 0);
+    let add_acc = graph.add_node(GraphTerm::Add);
+    graph.add_edge(exp, add_acc, 0);
+    graph.add_edge(in_exp_acc, add_acc, 0);
+    let add_acc_out = loop_out(add_acc, "5", "Accz", &mut graph);
+
+    // Sin
+    let sin = graph.add_node(GraphTerm::Sin);
+    graph.add_edge(add_acc_out, sin, 0);
+
+    // Other input
+    let b = graph.add_node(GraphTerm::Tensor {
+        name: "B".to_string(),
+    });
+    let in_b = loop_in(pad_in(b, &mut graph, 6), "50", "z", &mut graph);
+
+    // Mul
+    let mul = graph.add_node(GraphTerm::Mul);
+    graph.add_edge(sin, mul, 0);
+    graph.add_edge(in_b, mul, 0);
+
+    let mul_out = loop_out(mul, "50", "z", &mut graph);
+
+    let out = pad_out(mul_out, &mut graph, 6);
+    (graph, out)
+}
+
+fn loop_in(
+    node: NodeIndex,
+    range: impl ToString,
+    stride: impl ToString,
+    graph: &mut StableGraph<GraphTerm, u8, Directed>,
+) -> NodeIndex {
+    let tmp = graph.add_node(GraphTerm::LoopIn {
+        range: range.to_string(),
+        stride: stride.to_string(),
+    });
+    graph.add_edge(node, tmp, 0);
+    tmp
+}
+
+fn loop_out(
+    node: NodeIndex,
+    range: impl ToString,
+    stride: impl ToString,
+    graph: &mut StableGraph<GraphTerm, u8, Directed>,
+) -> NodeIndex {
+    let tmp = graph.add_node(GraphTerm::LoopOut {
+        range: range.to_string(),
+        stride: stride.to_string(),
+    });
+    graph.add_edge(node, tmp, 0);
+    tmp
+}
+
+fn pad_in(
+    mut node: NodeIndex,
+    graph: &mut StableGraph<GraphTerm, u8, Directed>,
+    levels: usize,
+) -> NodeIndex {
+    for _ in 0..levels {
+        node = loop_in(node, "1", "0", graph);
+    }
+    node
+}
+
+fn pad_out(
+    mut node: NodeIndex,
+    graph: &mut StableGraph<GraphTerm, u8, Directed>,
+    levels: usize,
+) -> NodeIndex {
+    for _ in 0..levels {
+        node = loop_out(node, "1", "0", graph);
+    }
+    node
+}
+
 fn make_sum_reduce() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
     let mut graph = StableGraph::new();
-    let pad_l_in = GraphTerm::LoopIn {
-        range: "1".to_string(),
-        stride: "0".to_string(),
-    };
-    let pad_l_out = GraphTerm::LoopOut {
-        range: "1".to_string(),
-        stride: "0".to_string(),
-    };
-    let lin0 = graph.add_node(pad_l_in.clone());
-    let lin1 = graph.add_node(pad_l_in.clone());
-    graph.add_edge(lin0, lin1, 0);
-    let lin2 = graph.add_node(pad_l_in.clone());
-    graph.add_edge(lin1, lin2, 0);
-    let lin3 = graph.add_node(pad_l_in.clone());
-    graph.add_edge(lin2, lin3, 0);
-    let lin4 = graph.add_node(pad_l_in.clone());
-    graph.add_edge(lin3, lin4, 0);
-    let lin5 = graph.add_node(pad_l_in.clone());
-    graph.add_edge(lin4, lin5, 0);
+    let lin0 = graph.add_node(GraphTerm::Tensor {
+        name: "A".to_string(),
+    });
+    let lin5 = pad_in(lin0, &mut graph, 6);
     let lin6 = graph.add_node(GraphTerm::LoopIn {
         range: "5".to_string(),
         stride: "z".to_string(),
     });
     graph.add_edge(lin5, lin6, 0);
 
-    let slin0 = graph.add_node(pad_l_in.clone());
-    let slin1 = graph.add_node(pad_l_in.clone());
-    graph.add_edge(slin0, slin1, 0);
-    let slin2 = graph.add_node(pad_l_in.clone());
-    graph.add_edge(slin1, slin2, 0);
-    let slin3 = graph.add_node(pad_l_in.clone());
-    graph.add_edge(slin2, slin3, 0);
-    let slin4 = graph.add_node(pad_l_in.clone());
-    graph.add_edge(slin3, slin4, 0);
-    let slin5 = graph.add_node(pad_l_in.clone());
-    graph.add_edge(slin4, slin5, 0);
+    let slin0 = graph.add_node(GraphTerm::Tensor {
+        name: "acc".to_string(),
+    });
+    let slin5 = pad_in(slin0, &mut graph, 6);
     let slin6 = graph.add_node(GraphTerm::LoopIn {
         range: "5".to_string(),
         stride: "Accz".to_string(),
@@ -153,25 +250,13 @@ fn make_sum_reduce() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
         stride: "Accz".to_string(),
     });
     graph.add_edge(add, acc, 0);
-    let olin0 = graph.add_node(pad_l_out.clone());
-    graph.add_edge(acc, olin0, 0);
-    let olin1 = graph.add_node(pad_l_out.clone());
-    graph.add_edge(olin0, olin1, 0);
-    let olin2 = graph.add_node(pad_l_out.clone());
-    graph.add_edge(olin1, olin2, 0);
-    let olin3 = graph.add_node(pad_l_out.clone());
-    graph.add_edge(olin2, olin3, 0);
-    let olin4 = graph.add_node(pad_l_out.clone());
-    graph.add_edge(olin3, olin4, 0);
-    let olin5 = graph.add_node(pad_l_out.clone());
-    graph.add_edge(olin4, olin5, 0);
+    let olin5 = pad_out(acc, &mut graph, 6);
 
     (graph, olin5)
 }
 
 fn main() {
-    let (g, r) = make_sum_reduce();
-    // display_graph(&g, &[]);
+    let (g, r) = make_complex_kernel();
     match run_egglog_program(include_str!("code.lisp")) {
         Ok((s, _serialized, termdag, root)) => {
             if s.is_empty() {
@@ -186,11 +271,53 @@ fn main() {
     }
 }
 
+fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
+    // walk the graph and make sure loopins -> next loop level (or loopout) and prev loop (or loopin) -> loopout
+    for node in graph.node_indices() {
+        let (curr_term, curr_level) = graph.node_weight(node).unwrap();
+        if matches!(curr_term, GraphTerm::LoopIn { .. }) {
+            for new_node in graph.neighbors_directed(node, Direction::Outgoing) {
+                let (new_term, new_level) = graph.node_weight(new_node).unwrap();
+                if !matches!(new_term, GraphTerm::LoopOut { .. }) {
+                    if *new_level != *curr_level + 1 {
+                        display_graph(graph, &[node, new_node]);
+                        panic!("incorrect levels");
+                    }
+                }
+            }
+        } else if matches!(curr_term, GraphTerm::LoopOut { .. }) {
+            for new_node in graph.neighbors_directed(node, Direction::Incoming) {
+                let (new_term, new_level) = graph.node_weight(new_node).unwrap();
+                if !matches!(new_term, GraphTerm::LoopIn { .. }) {
+                    if *new_level != *curr_level + 1 {
+                        display_graph(graph, &[node, new_node]);
+                        panic!("incorrect levels");
+                    }
+                }
+            }
+        } else {
+            for new_node in graph.neighbors_directed(node, Direction::Incoming) {
+                let (new_term, new_level) = graph.node_weight(new_node).unwrap();
+                if !matches!(
+                    new_term,
+                    GraphTerm::LoopIn { .. } | GraphTerm::LoopOut { .. }
+                ) {
+                    if *new_level != *curr_level {
+                        display_graph(graph, &[node, new_node]);
+                        panic!("incorrect levels");
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (String, TermId) {
     let (kernels, _root_kernel) = split_kernels(graph, root);
 
     for (n_kernel, (kernel_graph, inputs, outputs)) in kernels.into_iter().enumerate() {
-        display_graph(&kernel_graph, &[]);
+        validate_graph(&kernel_graph);
+
         let inputs: Vec<_> = inputs
             .into_iter()
             .enumerate()
@@ -365,7 +492,11 @@ fn make_kernel(
                         // Create accumulator
                         kernel_lines.insert(
                             loop_kernel_line,
-                            format!("float {} = 0.0;", var_to_char(*prev_max_var)),
+                            format!(
+                                "{}float {} = 0.0;",
+                                (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
+                                var_to_char(*prev_max_var)
+                            ),
                         );
                         new_vars.push(*prev_max_var);
                         node_to_var.insert(*input, (*prev_max_var, false));
@@ -531,18 +662,23 @@ fn make_kernel(
                     var_to_char(src.0)
                 ));
             }
-            GraphTerm::Add => {
+            GraphTerm::Mul | GraphTerm::Add => {
                 *prev_max_var += 1;
                 let mut srcs = kernel_graph.neighbors_directed(node, Direction::Incoming);
                 let src_a = node_to_var[&srcs.next().unwrap()];
                 let src_b = node_to_var[&srcs.next().unwrap()];
                 node_to_var.insert(node, (*prev_max_var, false));
                 kernel_lines.push(format!(
-                    "{}float {} = {}{} + {}{};",
+                    "{}float {} = {}{} {} {}{};",
                     (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
                     var_to_char(*prev_max_var),
                     if src_a.1 { "*" } else { "" },
                     var_to_char(src_a.0),
+                    match &term {
+                        GraphTerm::Add => "+",
+                        GraphTerm::Mul => "*",
+                        _ => panic!(),
+                    },
                     if src_b.1 { "*" } else { "" },
                     var_to_char(src_b.0)
                 ));
@@ -716,7 +852,6 @@ pub fn run_egglog_program(code: &str) -> Result<(Vec<String>, String, TermDag, T
     let (sort, value) = egraph.eval_expr(&var!("full"))?;
     let (termdag, root) = egraph.extract_value(&sort, value)?;
     let (_petgraph, _root_idx) = dag_to_petgraph(&termdag, termdag.lookup(&root));
-    // display_graph(&petgraph, &[root_idx]);
     let s = egraph.serialize(egglog::SerializeConfig {
         root_eclasses: vec![(sort, value)],
         ..Default::default()
