@@ -37,5 +37,6 @@ members = [
 	"crates/luminal_cpu",
 	"crates/luminal_nn",
 	"crates/luminal_training",
+	"crates/luminal_hlo",
 ]
 exclude = ["examples/yolo_v8", "crates/luminal_cuda", "crates/luminal_metal"]
