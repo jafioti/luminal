@@ -2,14 +2,15 @@ use std::collections::HashMap;
 
 use luminal::prelude::*;
 
-pub fn import_hlo(path: &str, cx: &mut Graph) -> HashMap<String, GraphTensor> {
+pub fn import_hlo(path: &str) -> (Box<Graph>, HashMap<String, GraphTensor>) {
     let contents = std::fs::read_to_string(path).expect("Failed to read file.");
 
+    let mut cx = Box::new(Graph::new());
     let mut tensor_map = HashMap::new();
 
     for line in contents.lines().map(str::trim) {
         if line.starts_with("func.func") {
-            parse_func_args(line, cx, &mut tensor_map);
+            parse_func_args(line, &mut cx, &mut tensor_map);
         } else if line.starts_with('%') && line.contains(" = stablehlo.") {
             parse_hlo_op(line, &mut tensor_map);
         } else if line.starts_with("return") {
@@ -17,7 +18,7 @@ pub fn import_hlo(path: &str, cx: &mut Graph) -> HashMap<String, GraphTensor> {
         }
     }
 
-    tensor_map
+    (cx, tensor_map)
 }
 
 fn parse_func_args(line: &str, cx: &mut Graph, tensor_map: &mut HashMap<String, GraphTensor>) {

@@ -8,4 +8,3 @@ luminal = { path = "../.." }
 
 [dev-dependencies]
 dfdx = { version = "0.13", features = ["f16"] }
-luminal_hlo = { path = "." }
