@@ -24,7 +24,10 @@
       "to": "#07C983"
     }
   },
-  "topbarLinks": [],
+  "topbarLinks": [{
+      "name": "Company",
+      "url": "https://www.luminalai.com/"
+    }],
   "topbarCtaButton": {
     "name": "Github",
     "url": "https://github.com/jafioti/luminal"
