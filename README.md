@@ -7,7 +7,7 @@
 
 **Deep learning at the speed of light.**
 
-Luminal is a deep learning library that uses **composable compilers** to achieve high performance.
+Luminal is a deep learning library that **generates optimized code** to achieve high performance.
 
 > [!IMPORTANT]  
 > Recently significant work is happening to focus much more on a search-first compiler with the goal of discovering advanced kernels like FlashAttention automatically. See progress on the `next` branch.
