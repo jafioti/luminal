@@ -1,4 +1,8 @@
-use axum::{Router, response::Html, routing::get};
+use axum::{
+    Router,
+    response::{Html, Redirect},
+    routing::get,
+};
 use std::fs;
 
 async fn index() -> Html<String> {
@@ -7,10 +11,16 @@ async fn index() -> Html<String> {
     Html(html)
 }
 
+async fn redirect() -> Redirect {
+    Redirect::to("https://luminalai.com")
+}
+
 #[tokio::main]
 async fn main() {
     // single route for “/”
-    let app = Router::new().route("/", get(index));
+    let app = Router::new()
+        .route("/", get(index))
+        .route("/docs/introduction", get(redirect));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
