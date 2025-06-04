@@ -3,12 +3,9 @@ use axum::{
     response::{Html, Redirect},
     routing::get,
 };
-use std::fs;
 
 async fn index() -> Html<String> {
-    // Read the file at runtime so you can edit without rebuilding
-    let html = fs::read_to_string("static/index.html").expect("`static/index.html` not found");
-    Html(html)
+    Html(include_str!("../static/index.html").to_string())
 }
 
 async fn redirect() -> Redirect {
