@@ -26,7 +26,7 @@ use petgraph::{
     Directed, Direction,
     graph::NodeIndex,
     prelude::{Dfs, StableGraph},
-    visit::EdgeRef,
+    visit::{EdgeRef, NodeRef},
 };
 use regex::Regex;
 use std::{
@@ -56,12 +56,14 @@ __device__ float mul(float a, float b) {
 #[derive(Clone, Debug)]
 enum GraphTerm {
     Tensor { name: String },
+    Smem,
     LoopIn { range: String, stride: String },
     LoopOut { range: String, stride: String },
     Add,
     Mul,
     Exp,
     Sin,
+    SmemCopy,
 }
 
 pub trait TermToString {
@@ -89,9 +91,9 @@ impl TermToString for (Term, usize) {
     }
 }
 
-impl TermToString for (GraphTerm, usize) {
+impl TermToString for GraphTerm {
     fn term_to_string(&self) -> String {
-        let s = match &self.0 {
+        match self {
             GraphTerm::Add => "Add".to_string(),
             GraphTerm::Mul => "Mul".to_string(),
             GraphTerm::Exp => "Exp".to_string(),
@@ -99,28 +101,26 @@ impl TermToString for (GraphTerm, usize) {
             GraphTerm::LoopIn { range, stride } => format!("LoopIn ({range}; {stride})"),
             GraphTerm::LoopOut { range, stride } => format!("LoopOut ({range}; {stride})"),
             GraphTerm::Tensor { name } => format!("Tensor({name})"),
-        };
-        format!("{s} [{}]", self.1)
+            GraphTerm::Smem => "SMEM".to_string(),
+            GraphTerm::SmemCopy => "SmemCopy".to_string(),
+        }
+    }
+}
+
+impl TermToString for (GraphTerm, usize) {
+    fn term_to_string(&self) -> String {
+        format!("{} [{}]", self.0.term_to_string(), self.1)
     }
 }
 
 impl TermToString for (GraphTerm, Vec<String>, usize) {
     fn term_to_string(&self) -> String {
-        let s = match &self.0 {
-            GraphTerm::Add => "Add".to_string(),
-            GraphTerm::Mul => "Mul".to_string(),
-            GraphTerm::Exp => "Exp".to_string(),
-            GraphTerm::Sin => "Sin".to_string(),
-            GraphTerm::LoopIn { range, stride } => format!("LoopIn ({range}; {stride})"),
-            GraphTerm::LoopOut { range, stride } => format!("LoopOut ({range}; {stride})"),
-            GraphTerm::Tensor { name } => format!("Tensor({name})"),
-        };
-        format!("{s} [{}]", self.1.len())
+        format!("{} [{}]", self.0.term_to_string(), self.1.len())
     }
 }
 
 fn main() {
-    let (g, r) = kernels::make_matmul();
+    let (g, r) = kernels::make_tiled_matmul_basic();
     match run_egglog_program(include_str!("code.lisp")) {
         Ok((s, _serialized, termdag, root)) => {
             if s.is_empty() {
@@ -179,9 +179,10 @@ fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
 fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (String, TermId) {
     let (kernels, _root_kernel) = split_kernels(graph, root);
 
-    for (n_kernel, (kernel_graph, inputs, outputs)) in kernels.into_iter().enumerate() {
+    for (n_kernel, (kernel_graph, inputs, outputs, smem_buffers)) in kernels.into_iter().enumerate()
+    {
         validate_graph(&kernel_graph);
-
+        // display_graph(&kernel_graph, &[]);
         let inputs: Vec<_> = inputs
             .into_iter()
             .enumerate()
@@ -195,7 +196,11 @@ fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (Str
         let mut loop_levels = vec![];
         let kernel = make_kernel(
             &kernel_graph,
-            inputs.clone(),
+            inputs
+                .iter()
+                .cloned()
+                .chain(smem_buffers.iter().map(|(a, b, _)| (*a, *b)))
+                .collect(),
             outputs.clone(),
             &mut HashMap::new(),
             &mut (inputs.len() + outputs.len()),
@@ -215,13 +220,26 @@ fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (Str
             .collect_vec();
         let kernel = format!(
             "extern \"C\" __global__ void kernel{n_kernel}({}) {{
-{}
+{}{}{}
 }}",
             inputs
                 .into_iter()
                 .chain(outputs)
                 .map(|(a, _)| format!("float* {}", var_to_char(a)))
                 .join(", "),
+            if smem_buffers.is_empty() {
+                ""
+            } else {
+                "\textern __shared__ float sm[];\n"
+            },
+            smem_buffers
+                .into_iter()
+                .scan("".to_string(), |prev_buffers, (n, _, size)| {
+                    let r = format!("\tfloat* {} = sm{};\n", var_to_char(n), prev_buffers);
+                    prev_buffers.push_str(&format!(" + {size}"));
+                    Some(r)
+                })
+                .join(""),
             kernel.into_iter().map(|s| format!("\t{s}")).join("\n")
         );
         println!("Grid: {grid:?} Threadblock: {threadblock:?}");
@@ -247,6 +265,7 @@ fn make_kernel(
         &outputs.iter().map(|(_, i)| *i).collect_vec(),
     );
     for node in toposorted {
+        println!("Node: {:?}", node.index());
         if loop_body_covered.contains(&node) {
             continue;
         }
@@ -354,12 +373,18 @@ fn make_kernel(
                         );
                         *prev_max_var += 1;
                         // Create accumulator
+                        let src = kernel_graph
+                            .neighbors_directed(*input, Direction::Incoming)
+                            .next()
+                            .unwrap();
                         kernel_lines.insert(
                             loop_kernel_line,
                             format!(
-                                "{}float {} = 0.0;",
+                                "{}float {} = {}{};",
                                 (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
-                                var_to_char(*prev_max_var)
+                                var_to_char(*prev_max_var),
+                                if node_to_var[&src].1 { "*" } else { "" },
+                                var_to_char(node_to_var[&src].0)
                             ),
                         );
                         new_vars.push(*prev_max_var);
@@ -462,12 +487,13 @@ fn make_kernel(
                     };
                     if save_var {
                         kernel_lines.push(format!(
-                            "{}{}{} = {};",
+                            "{}{}{} = {}{};",
                             (0..(*loop_level + 1).saturating_sub(6))
                                 .map(|_| "\t")
                                 .join(""),
                             if node_to_var[&output].1 { "*" } else { "" },
                             var_to_char(node_to_var[&output].0),
+                            if node_to_var[&body_out].1 { "*" } else { "" },
                             var_to_char(node_to_var[&body_out].0),
                         ));
                     }
@@ -483,7 +509,7 @@ fn make_kernel(
             GraphTerm::LoopOut { range, stride } => {
                 panic!("found loopout range: {range} stride: {stride}")
             }
-            GraphTerm::Tensor { .. } => {
+            GraphTerm::Tensor { .. } | GraphTerm::Smem => {
                 node_to_var.insert(
                     node,
                     (
@@ -495,6 +521,33 @@ fn make_kernel(
                         true,
                     ),
                 );
+            }
+            GraphTerm::SmemCopy => {
+                let srcs = kernel_graph
+                    .edges_directed(node, Direction::Incoming)
+                    .map(|e| e.id())
+                    .sorted()
+                    .map(|e| kernel_graph.edge_endpoints(e).unwrap().0)
+                    .collect_vec();
+                println!("srcs: {:?}", srcs[0]);
+                let src_a = node_to_var[&srcs[0]];
+                let src_b = node_to_var[&srcs[1]];
+                kernel_lines.push(format!(
+                    "{}__syncthreads();",
+                    (0..loop_level.saturating_sub(6)).map(|_| "\t").join("")
+                ));
+                kernel_lines.push(format!(
+                    "{}*{} = {}{};",
+                    (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
+                    var_to_char(src_a.0),
+                    if src_b.1 { "*" } else { "" },
+                    var_to_char(src_b.0)
+                ));
+                kernel_lines.push(format!(
+                    "{}__syncthreads();",
+                    (0..loop_level.saturating_sub(6)).map(|_| "\t").join("")
+                ));
+                node_to_var.insert(node, (src_a.0, true));
             }
             GraphTerm::Sin => {
                 *prev_max_var += 1;
@@ -804,7 +857,8 @@ fn split_kernels(
     Vec<(
         StableGraph<(GraphTerm, usize), u8, Directed>,
         Vec<(Option<usize>, usize, NodeIndex)>, // (src kernel, src kernel output, current graph node)
-        Vec<NodeIndex>,
+        Vec<NodeIndex>,                         // output node
+        Vec<(usize, NodeIndex, String)>,        // (shared memory buffer name, node, buffer size)
     )>,
     usize, // Root kernel
 ) {
@@ -910,12 +964,12 @@ fn split_kernels(
 
     // Place nodes in kernel graphs
     let mut kernel_graphs = (0..n_kernels)
-        .map(|_| (StableGraph::new(), vec![], vec![]))
+        .map(|_| (StableGraph::new(), vec![], vec![], vec![]))
         .collect_vec();
     let mut node_maps = (0..n_kernels).map(|_| HashMap::new()).collect_vec();
     for node in marked_graph.node_indices() {
         let (term, loop_level, kernel) = marked_graph.node_weight(node).unwrap();
-        let (kernel_graph, _, outputs) = &mut kernel_graphs[*kernel];
+        let (kernel_graph, _, outputs, _) = &mut kernel_graphs[*kernel];
         node_maps[*kernel].insert(
             node,
             kernel_graph.add_node((term.clone(), loop_level.len())),
@@ -931,8 +985,10 @@ fn split_kernels(
             .next()
             .is_none()
     }) {
-        let (_, _, kernel) = marked_graph.node_weight(input).unwrap();
-        kernel_graphs[*kernel].1.push((None, 0, input));
+        let (t, _, kernel) = marked_graph.node_weight(input).unwrap();
+        if !matches!(t, GraphTerm::Smem) {
+            kernel_graphs[*kernel].1.push((None, 0, input));
+        }
     }
     for edge in marked_graph.edge_indices() {
         let (start, end) = marked_graph.edge_endpoints(edge).unwrap();
@@ -968,6 +1024,33 @@ fn split_kernels(
                 src_output_index,
                 dest_kernel_node,
             ));
+        }
+    }
+    // Go through SMEM buffers
+    for (kernel_graph, inputs, outputs, smem_buffers) in &mut kernel_graphs {
+        for node in kernel_graph.node_indices() {
+            if matches!(kernel_graph.node_weight(node).unwrap().0, GraphTerm::Smem) {
+                // Walk forward through all loopins to get size of buffer
+                let mut curr_node = node;
+                let mut buf_size = vec![];
+                loop {
+                    curr_node = kernel_graph
+                        .neighbors_directed(curr_node, Direction::Outgoing)
+                        .next()
+                        .unwrap();
+                    if let GraphTerm::LoopIn { range, stride } =
+                        &kernel_graph.node_weight(curr_node).unwrap().0
+                    {
+                        if stride != "0" {
+                            buf_size.push(range);
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                let buf_index = inputs.len() + outputs.len() + smem_buffers.len();
+                smem_buffers.push((buf_index, node, buf_size.into_iter().join(" * ")));
+            }
         }
     }
     let root_kernel = marked_graph.node_weight(root).unwrap().2;
