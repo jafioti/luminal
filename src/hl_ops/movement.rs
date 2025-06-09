@@ -7,6 +7,59 @@ impl GraphTensor {
         self
     }
 
+    pub fn transpose(self, dims: impl ToAxes) -> GraphTensor {
+        let axes = dims.to_axes();
+        let num_dims = self.shape.len();
+
+        if axes.len() == 2 {
+            // Traditional transpose: swap two dimensions
+            let (dim0, dim1) = (axes[0], axes[1]);
+
+            assert!(
+                dim0 < num_dims && dim1 < num_dims,
+                "transpose dimensions ({}, {}) out of bounds for tensor with {} dimensions",
+                dim0,
+                dim1,
+                num_dims
+            );
+
+            // Create identity permutation, then swap the two specified dimensions
+            let mut perm_axes: Vec<usize> = (0..num_dims).collect();
+            perm_axes.swap(dim0, dim1);
+
+            self.permute(perm_axes)
+        } else if axes.len() == num_dims {
+            // Full permutation: rearrange all dimensions
+            for &axis in &axes {
+                assert!(
+                    axis < num_dims,
+                    "transpose axis {} out of bounds for tensor with {} dimensions",
+                    axis,
+                    num_dims
+                );
+            }
+
+            // Verify it's a valid permutation (all indices 0..num_dims used exactly once)
+            let mut sorted_axes = axes.clone();
+            sorted_axes.sort_unstable();
+            let expected: Vec<usize> = (0..num_dims).collect();
+            assert!(
+                sorted_axes == expected,
+                "transpose axes {:?} is not a valid permutation of dimensions 0..{}",
+                axes,
+                num_dims
+            );
+
+            self.permute(axes)
+        } else {
+            panic!(
+            "transpose expects either 2 dimensions to swap or {} dimensions for full permutation, got {}",
+            num_dims,
+            axes.len()
+        );
+        }
+    }
+
     /// Broadcast tensor along new dimensions
     pub fn expand(mut self, axis: usize, size: impl Into<Expression>) -> GraphTensor {
         self.shape.expand(axis, size);
@@ -179,6 +232,64 @@ mod tests {
     };
 
     crate::test_imports!();
+
+    #[test]
+    fn test_transpose_simple_2d() {
+        let mut cx = Graph::new();
+
+        let inp1 = cx.tensor((4, 4)).set(vec![
+            1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
+        ]);
+        // 3x3 kernel
+        let out1 = inp1
+            // Pool first dim first by moving it to end
+            .transpose((1, 0))
+            .retrieve();
+
+        cx.execute();
+
+        assert_exact(
+            &out1.data(),
+            &[
+                1., 5., 9., 13., 2., 6., 10., 14., 3., 7., 11., 15., 4., 8., 12., 16.,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_transpose_simple_3d() {
+        let mut cx = Graph::new();
+
+        let inp1 = cx.tensor((2, 2, 4)).set(vec![
+            1., 2., 3., 4., // [0,0,:]
+            5., 6., 7., 8., // [0,1,:]
+            9., 10., 11., 12., // [1,0,:]
+            13., 14., 15., 16., // [1,1,:]
+        ]);
+
+        // Transpose dimensions 0 and 2 (swap first and last dimensions)
+        let out1 = inp1
+            .transpose((2, 1, 0)) // This swaps dim 0 and dim 2, keeps dim 1 in middle
+            .retrieve();
+
+        cx.execute();
+
+        // After transpose(2,1,0): shape goes from (2,2,4) to (4,2,2)
+        // Element at [i,j,k] goes to [k,j,i]
+        assert_exact(
+            &out1.data(),
+            &[
+                1., 9., // [0,0,:] -> [:, 0, 0] = [1,9]
+                5., 13., // [0,1,:] -> [:, 1, 0] = [5,13]
+                2., 10., // [1,0,:] -> [:, 0, 1] = [2,10]
+                6., 14., // [1,1,:] -> [:, 1, 1] = [6,14]
+                3., 11., // [2,0,:] -> [:, 0, 2] = [3,11]
+                7., 15., // [2,1,:] -> [:, 1, 2] = [7,15]
+                4., 12., // [3,0,:] -> [:, 0, 3] = [4,12]
+                8., 16., // [3,1,:] -> [:, 1, 3] = [8,16]
+            ],
+        );
+    }
 
     #[test]
     fn test_concat_1d() {
