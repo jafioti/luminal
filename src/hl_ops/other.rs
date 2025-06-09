@@ -82,6 +82,25 @@ impl Graph {
         }
     }
 
+    /// ARange from beg to end
+    pub fn arange_in_range(&mut self, beg: usize, end: usize) -> GraphTensor {
+        let range = end - beg;
+        let mut tensor = self.arange(range);
+        tensor = tensor + beg;
+        tensor
+    }
+
+    /// ARange from beg to end
+    pub fn arange_step(&mut self, beg: f32, end: f32, step: f32) -> GraphTensor {
+        assert!(step > 0.0, "step must be positive");
+
+        let num_steps = ((end - beg) / step).ceil() as usize;
+
+        let mut tensor = self.arange(num_steps);
+        tensor = tensor * step + beg;
+        tensor
+    }
+
     /// Lower left-hand triangle of 1s. Currently required to be square
     ///
     /// Same API as https://pytorch.org/docs/stable/generated/torch.tril
@@ -347,6 +366,62 @@ mod tests {
         cx.execute();
 
         assert_exact(&arange.data(), &[0., 1., 2., 3., 4., 5., 6., 7., 8., 9.]);
+    }
+
+    #[test]
+    fn test_arange_from_zero() {
+        let mut cx = Graph::new();
+
+        let tensor = cx.arange(5).retrieve();
+        cx.execute();
+
+        assert_eq!(tensor.data(), vec![0., 1., 2., 3., 4.]);
+    }
+
+    #[test]
+    fn test_arange_in_range() {
+        let mut cx = Graph::new();
+
+        let tensor = cx.arange_in_range(3, 8).retrieve();
+        cx.execute();
+
+        assert_eq!(tensor.data(), vec![3., 4., 5., 6., 7.]);
+    }
+
+    #[test]
+    fn test_arange_step_simple() {
+        let mut cx = Graph::new();
+
+        let tensor = cx.arange_step(1.0, 5.0, 1.0).retrieve();
+        cx.execute();
+
+        assert_eq!(tensor.data(), vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_arange_step_fractional() {
+        let mut cx = Graph::new();
+
+        let tensor = cx.arange_step(0.0, 1.0, 0.3).retrieve();
+        cx.execute();
+
+        // Should produce [0.0, 0.3, 0.6, 0.9] — note that 1.2 would be >= 1.0 so we stop before that.
+        let expected = vec![0.0, 0.3, 0.6, 0.9];
+
+        // Floating point comparison with tolerance:
+        assert_eq!(tensor.data().len(), expected.len());
+        for (v, e) in tensor.data().iter().zip(expected.iter()) {
+            assert!((v - e).abs() < 1e-5, "Expected {}, got {}", e, v);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "step must be positive")]
+    fn test_arange_step_zero_step_panics() {
+        let mut cx = Graph::new();
+
+        // Should panic because step is zero
+        cx.arange_step(0.0, 5.0, 0.0);
     }
 
     #[test]
