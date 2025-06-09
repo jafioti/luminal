@@ -53,12 +53,9 @@ impl GraphTensor {
     pub fn unsqueeze(mut self, dim: usize) -> GraphTensor {
         // Insert contiguous call
         self = self.contiguous();
-        let mut last_shape = self.shape.dims();
-
+        let last_shape = self.shape.dims();
         assert!(last_shape.len() < 6, "Shape is maxed out at 6 dimensions");
-        last_shape.insert(dim, Expression::from(1));
-
-        self.shape = ShapeTracker::new(last_shape);
+        self.shape.expand(dim, 1);
         self
     }
 
