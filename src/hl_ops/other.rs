@@ -406,7 +406,7 @@ mod tests {
         cx.execute();
 
         // Should produce [0.0, 0.3, 0.6, 0.9] — note that 1.2 would be >= 1.0 so we stop before that.
-        let expected = vec![0.0, 0.3, 0.6, 0.9];
+        let expected = &[0.0, 0.3, 0.6, 0.9];
 
         // Floating point comparison with tolerance:
         assert_eq!(tensor.data().len(), expected.len());
