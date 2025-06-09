@@ -7,6 +7,23 @@ impl GraphTensor {
         self
     }
 
+    pub fn transpose(self, dim0: usize, dim1: usize) -> GraphTensor {
+        let num_dims = self.shape.len();
+        assert!(
+            dim0 < num_dims && dim1 < num_dims,
+            "transpose dimensions ({}, {}) out of bounds for tensor with {} dimensions",
+            dim0,
+            dim1,
+            num_dims
+        );
+
+        // Create identity permutation, then swap the two specified dimensions
+        let mut perm_axes: Vec<usize> = (0..num_dims).collect();
+        perm_axes.swap(dim0, dim1);
+
+        self.permute(perm_axes)
+    }
+
     /// Broadcast tensor along new dimensions
     pub fn expand(mut self, axis: usize, size: impl Into<Expression>) -> GraphTensor {
         self.shape.expand(axis, size);
@@ -179,6 +196,42 @@ mod tests {
     };
 
     crate::test_imports!();
+
+    #[test]
+    fn test_transpose_simple_2d() {
+        let mut cx = Graph::new();
+
+        let inp1 = cx.tensor((4, 4)).set(vec![
+            1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
+        ]);
+        // 3x3 kernel
+        let out1 = inp1
+            // Pool first dim first by moving it to end
+            .transpose(1, 0)
+            .retrieve();
+
+        cx.execute();
+
+        assert_exact(
+            &out1.data(),
+            &[
+                1., 5., 9., 13., 2., 6., 10., 14., 3., 7., 11., 15., 4., 8., 12., 16.,
+            ],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "transpose dimensions")]
+    fn test_transpose_out_of_bounds() {
+        let mut cx = Graph::new();
+
+        let inp1 = cx.tensor((4, 4)).set(vec![
+            1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
+        ]);
+
+        // This should panic because dims 6 and 5 are out of bounds for a 2D tensor
+        let _out1 = inp1.transpose(6, 5);
+    }
 
     #[test]
     fn test_concat_1d() {
