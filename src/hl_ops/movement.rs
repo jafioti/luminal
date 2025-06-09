@@ -49,6 +49,19 @@ impl GraphTensor {
         self
     }
 
+    /// add a new dimension of size 1 at the specified place
+    pub fn unsqueeze(mut self, dim: usize) -> GraphTensor {
+        // Insert contiguous call
+        self = self.contiguous();
+        let mut last_shape = self.shape.dims();
+
+        assert!(last_shape.len() < 6, "Shape is maxed out at 6 dimensions");
+        last_shape.insert(dim, Expression::from(1));
+
+        self.shape = ShapeTracker::new(last_shape);
+        self
+    }
+
     pub fn contiguous(mut self) -> GraphTensor {
         if !self.shape.is_reshaped() {
             return self;
@@ -196,6 +209,56 @@ mod tests {
     };
 
     crate::test_imports!();
+
+    #[test]
+    fn test_unsqueeze_at_start() {
+        let mut cx = Graph::new();
+
+        let inp = cx.tensor((2, 2)).set(vec![1., 2., 3., 4.]);
+        let out = inp.unsqueeze(0).retrieve();
+
+        cx.execute();
+
+        assert_eq!(out.dims(), &[1, 2, 2]);
+        assert_exact(&out.data(), &[1., 2., 3., 4.]);
+    }
+
+    #[test]
+    fn test_unsqueeze_in_middle() {
+        let mut cx = Graph::new();
+
+        let inp = cx.tensor((2, 2)).set(vec![1., 2., 3., 4.]);
+        let out = inp.unsqueeze(1).retrieve();
+
+        cx.execute();
+
+        assert_eq!(out.dims(), &[2, 1, 2]);
+        assert_exact(&out.data(), &[1., 2., 3., 4.]);
+    }
+
+    #[test]
+    fn test_unsqueeze_at_end() {
+        let mut cx = Graph::new();
+
+        let inp = cx.tensor((2, 2)).set(vec![1., 2., 3., 4.]);
+        let out = inp.unsqueeze(2).retrieve();
+
+        cx.execute();
+
+        assert_eq!(out.dims(), &[2, 2, 1]);
+        assert_exact(&out.data(), &[1., 2., 3., 4.]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Shape is maxed out at 6 dimensions")]
+    fn test_unsqueeze_panics_when_shape_exceeds_max() {
+        let mut cx = Graph::new();
+
+        let inp = cx.tensor((2, 2, 2, 2, 2, 2)).set(vec![0.; 64]);
+        let _out = inp.unsqueeze(6).retrieve();
+
+        cx.execute();
+    }
 
     #[test]
     fn test_transpose_simple_2d() {
