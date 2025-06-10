@@ -6,8 +6,9 @@ mod test_prim;
 
 use std::fmt::Debug;
 
+#[cfg(test)]
+use crate::prelude::*;
 use rand::{thread_rng, Rng};
-
 
 // Integration and other tests
 
