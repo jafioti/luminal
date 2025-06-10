@@ -436,6 +436,19 @@ mod tests {
     }
 
     #[test]
+    fn test_gather() {
+        let mut cx = Graph::new();
+
+        let matrix = cx.tensor((3, 2)).set(vec![1., 2., 3., 4., 5., 6.]);
+        let indexes = cx.tensor(2).set(vec![2., 0.]);
+        let result = matrix.gather(indexes).retrieve();
+
+        cx.execute();
+
+        assert_exact(&result.data(), &[5., 6., 1., 2.]);
+    }
+
+    #[test]
     fn test_dyn_arange() {
         let mut cx = Graph::new();
 
