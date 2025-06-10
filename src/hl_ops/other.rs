@@ -57,7 +57,7 @@ impl GraphTensor {
 
     /// Cumulative product last dimension
     pub fn cumprod_last_dim(self) -> Self {
-        self.ln().cumsum_last_dim().exp()
+        self.log().cumsum_last_dim().exp()
     }
 }
 
@@ -109,7 +109,7 @@ impl Graph {
         let horizontal = self.arange(size).expand(0, size);
         let vertical = self.arange(size).expand(1, size);
 
-        (horizontal - (diagonal as f32 + 1.)).less_than(vertical)
+        (horizontal - (diagonal as f32 + 1.)).lt(vertical)
     }
 
     /// Upper right-hand triangle of 1s
@@ -120,7 +120,7 @@ impl Graph {
         let horizontal = self.arange(size).expand(0, size);
         let vertical = self.arange(size).expand(1, size);
 
-        (horizontal - (diagonal as f32 - 1.)).greater_than(vertical)
+        (horizontal - (diagonal as f32 - 1.)).gt(vertical)
     }
 }
 
@@ -133,8 +133,8 @@ impl GraphTensor {
             .graph()
             .arange(vocab)
             .expand(0, batch)
-            .equals(indexes.expand(1, vocab));
-        (one_hot.expand(2, dim) * self.expand(0, batch)).sum_reduce(1)
+            .eq(indexes.expand(1, vocab));
+        (one_hot.expand(2, dim) * self.expand(0, batch)).sum(1)
     }
 
     /// Print the value of this tensor when the graph is ran

@@ -13,7 +13,7 @@ impl GraphTensor {
             let mul = self.expand(1, n) * rhs.permute((1, 0)).expand(0, m);
 
             // Sum Reduce
-            let mut ret = mul.sum_reduce(2);
+            let mut ret = mul.sum(2);
             if vec {
                 ret = ret.reshape(ret.dims().last().unwrap());
             }
@@ -30,7 +30,7 @@ impl GraphTensor {
                 let mul = self.expand(2, d) * w.expand(0, a).expand(1, b);
 
                 // Sum Reduce
-                mul.sum_reduce(3)
+                mul.sum(3)
             } else if rhs.shape.len() == 3 {
                 // Reshape
                 let w = rhs.permute((0, 2, 1));
@@ -39,7 +39,7 @@ impl GraphTensor {
                 let mul = self.expand(2, d) * w.expand(1, b);
 
                 // Sum Reduce
-                mul.sum_reduce(3)
+                mul.sum(3)
             } else {
                 panic!(
                     "Can't matmul lhs {:?} and rhs {:?}",
@@ -58,7 +58,7 @@ impl GraphTensor {
                 let mul = self.expand(3, e) * rhs.expand(0, a).expand(1, b).expand(2, c);
 
                 // Sum Reduce
-                mul.sum_reduce(4)
+                mul.sum(4)
             } else if rhs.shape.len() == 4 {
                 // ABCDxABDE -> ABCE
                 let (_, _, _, e) = rhs.dims4();
@@ -69,7 +69,7 @@ impl GraphTensor {
                 let mul = self.expand(3, e) * rhs.expand(2, c);
 
                 // Sum Reduce
-                mul.sum_reduce(4)
+                mul.sum(4)
             } else {
                 panic!(
                     "Can't matmul lhs {:?} and rhs {:?}",
@@ -89,7 +89,7 @@ impl GraphTensor {
             let mul = s.expand(2, f) * w.expand(1, d);
 
             // Sum Reduce
-            mul.sum_reduce(3).reshape((a, b, c, d, f))
+            mul.sum(3).reshape((a, b, c, d, f))
         } else {
             panic!(
                 "Can't matmul lhs {:?} and rhs {:?}",
@@ -101,7 +101,7 @@ impl GraphTensor {
 
     /// Simple dot product of two vectors
     pub fn dot(self, rhs: GraphTensor) -> GraphTensor {
-        (self * rhs).sum_reduce(0)
+        (self * rhs).sum(0)
     }
 }
 

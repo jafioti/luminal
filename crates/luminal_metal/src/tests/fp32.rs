@@ -9,10 +9,10 @@ luminal::test_imports!();
 
 unary_test!(|a| a.sin(), |a| a.sin(), test_sin, f32);
 unary_test!(|a| a.sqrt(), |a| a.sqrt(), test_sqrt, f32);
-unary_test!(|a| a.recip(), |a| a.recip(), test_recip, f32);
+unary_test!(|a| a.reciprocal(), |a| a.reciprocal(), test_reciprocal, f32);
 unary_test!(|a| a * a, |a| a.clone() * a, test_square, f32);
-unary_test!(|a| a.ln(), |a| a.ln(), test_ln, f32);
-unary_test!(|a| a.log2(), |a| a.ln() / 2_f32.ln(), test_log2, f32);
+unary_test!(|a| a.log(), |a| a.log(), test_log, f32);
+unary_test!(|a| a.log2(), |a| a.log() / 2_f32.ln(), test_log2, f32);
 unary_test!(|a| a.exp2(), |a| (a * 2_f32.ln()).exp(), test_exp2, f32);
 unary_test!(
     |a| a.softmax(0),
@@ -59,14 +59,14 @@ fn test_contiguous() {
 // Reduction op tests
 
 #[test]
-fn test_sum_reduce() {
+fn test_sum() {
     let mut cx = Graph::new();
     let data = random_vec(4 * 4096);
     let a = cx.tensor((1, 4, 4096));
     a.set(data.clone());
-    let mut b = a.sum_reduce(1).retrieve();
-    let mut c = a.sum_reduce(0).retrieve();
-    let mut d = a.sum_reduce(2).retrieve();
+    let mut b = a.sum(1).retrieve();
+    let mut c = a.sum(0).retrieve();
+    let mut d = a.sum(2).retrieve();
 
     cx.compile(MetalCompiler::<f32>::default(), (&mut b, &mut c, &mut d));
     cx.execute();
@@ -83,14 +83,14 @@ fn test_sum_reduce() {
 }
 
 #[test]
-fn test_max_reduce() {
+fn test_max() {
     let mut cx = Graph::new();
     let data = random_vec(12);
     let a = cx.tensor((2, 2, 3));
     a.set(data.clone());
-    let mut b = a.max_reduce(1).retrieve();
-    let mut c = a.max_reduce(0).retrieve();
-    let mut d = a.max_reduce(2).retrieve();
+    let mut b = a.max(1).retrieve();
+    let mut c = a.max(0).retrieve();
+    let mut d = a.max(2).retrieve();
 
     cx.compile(MetalCompiler::<f32>::default(), (&mut b, &mut c, &mut d));
     cx.execute();
@@ -107,11 +107,11 @@ fn test_max_reduce() {
 }
 
 #[test]
-fn test_mean_reduce() {
+fn test_mean() {
     let data = random_vec(40960);
     let mut cx = Graph::new();
     let a = cx.tensor((1, 10, 4096)).set(data.clone());
-    let mut b = a.mean_reduce(2).retrieve();
+    let mut b = a.mean(2).retrieve();
 
     cx.compile(MetalCompiler::<f32>::default(), &mut b);
     cx.execute();

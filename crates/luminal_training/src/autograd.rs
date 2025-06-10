@@ -140,7 +140,7 @@ impl Compiler for Autograd {
                         .shape
                         .expand(op.0, inps[0].shape.dims[inps[0].shape.indexes[op.0]]);
                     let reduced = GraphTensor::from_id(fwd_node, prev_grad.shape, graph_ref);
-                    let grad = inps[0].equals(reduced) * prev_grad;
+                    let grad = inps[0].eq(reduced) * prev_grad;
                     add_grad(grad, inps[0], graph, &mut grads);
                 }
             } else if op == TypeId::of::<Contiguous>() {
@@ -250,7 +250,7 @@ mod tests {
     fn test_autograd_max_reduce() {
         let mut cx = Graph::new();
         let a = cx.named_tensor("Input", 2).set([10., 5.]);
-        let b = a.max_reduce(0);
+        let b = a.max(0);
 
         let grads = cx.compile(Autograd::new(a, b), ());
         cx.keep_tensors(&grads);
@@ -269,7 +269,7 @@ mod tests {
         let mut cx = Graph::new();
         let a = cx.named_tensor("A", (2, 2)).set([[2., 4.], [3., 1.]]);
         let input = cx.named_tensor("Input", 2).set([10., 5.]);
-        let output = (input.matmul(a)).sum_reduce(0);
+        let output = (input.matmul(a)).sum(0);
 
         let grads = cx.compile(Autograd::new(a, output), ());
         cx.keep_tensors(&grads);
@@ -295,7 +295,7 @@ mod tests {
         model.0.weight.set([[2., 4.], [3., 1.]]);
         model.2.weight.set([[6.], [5.]]);
         let input = cx.named_tensor("Input", 2).set([10., 5.]);
-        let output = model.forward(input).sum_reduce(0);
+        let output = model.forward(input).sum(0);
 
         let mut grads = cx.compile(Autograd::new(params(model), output), ());
         cx.keep_tensors(&grads);
@@ -328,7 +328,7 @@ mod tests {
     fn test_autograd_layer_norm() {
         let mut cx = Graph::new();
         let a = cx.tensor(3).set([-1., 2., 3.]);
-        let mut b = a.layer_norm(0, 1e-5).max_reduce(0).retrieve();
+        let mut b = a.layer_norm(0, 1e-5).max(0).retrieve();
 
         let grads = cx.compile(Autograd::new(a, b), &mut b);
         cx.keep_tensors(&grads);
@@ -347,7 +347,7 @@ mod tests {
     fn test_autograd_softmax() {
         let mut cx = Graph::new();
         let a = cx.tensor(3).set([-1., 2., 3.]);
-        let mut b = a.softmax(0).max_reduce(0).retrieve();
+        let mut b = a.softmax(0).max(0).retrieve();
 
         let mut grads = cx.compile(Autograd::new(a, b), &mut b);
         cx.keep_tensors(&grads);

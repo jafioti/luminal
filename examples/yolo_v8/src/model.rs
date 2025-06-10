@@ -214,7 +214,7 @@ impl Module<GraphTensor> for SPPF {
                 (self.k / 2, self.k / 2),
             ))
             .pool_last_dim(self.k, 1, 1)
-            .max_reduce(4);
+            .max(4);
         let xs3 = xs2
             .pad((
                 (0, 0),
@@ -223,7 +223,7 @@ impl Module<GraphTensor> for SPPF {
                 (self.k / 2, self.k / 2),
             ))
             .pool_last_dim(self.k, 1, 1)
-            .max_reduce(4);
+            .max(4);
         let xs4 = xs3
             .pad((
                 (0, 0),
@@ -232,7 +232,7 @@ impl Module<GraphTensor> for SPPF {
                 (self.k / 2, self.k / 2),
             ))
             .pool_last_dim(self.k, 1, 1)
-            .max_reduce(4);
+            .max(4);
         self.cv2.forward(
             xs.concat_along(xs2, 1)
                 .concat_along(xs3, 1)

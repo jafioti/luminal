@@ -407,9 +407,9 @@ mod tests {
         let input_one_hot = input
             .graph()
             .arange(CLASSES)
-            .equals(input.expand(0, CLASSES));
-        let input_embedding = (input_one_hot.expand(1, TARGET) * embedder).sum_reduce(0);
-        let mut loss = input_embedding.sum_reduce(0);
+            .eq(input.expand(0, CLASSES));
+        let input_embedding = (input_one_hot.expand(1, TARGET) * embedder).sum(0);
+        let mut loss = input_embedding.sum(0);
         let mut weights = vec![embedder.id];
 
         cx.compile(
@@ -431,10 +431,10 @@ mod tests {
             .graph()
             .arange(CLASSES)
             .expand(0, 1)
-            .equals(input.expand(1, CLASSES));
+            .eq(input.expand(1, CLASSES));
         let input_embedding =
-            (input_one_hot.expand(2, TARGET) * embedder.expand(0, 1)).sum_reduce(1);
-        let mut loss = input_embedding.sum_reduce(0);
+            (input_one_hot.expand(2, TARGET) * embedder.expand(0, 1)).sum(1);
+        let mut loss = input_embedding.sum(0);
         let mut weights = vec![embedder.id];
 
         cx.compile(

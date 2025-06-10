@@ -697,7 +697,7 @@ mod tests {
         let a = cx.named_tensor("a", 10).set(random_vec(10)).keep();
         let b = cx.named_tensor("b", 10).set(random_vec(10)).keep();
         let d = cx.named_tensor("d", 10).set(random_vec(10)).keep();
-        let mut out = ((a.exp2() - b.sin()).sin() * 3.4).less_than(d).retrieve();
+        let mut out = ((a.exp2() - b.sin()).sin() * 3.4).lt(d).retrieve();
 
         cx.execute();
         let unopt_out = out.data();
@@ -821,7 +821,7 @@ mod tests {
             .set(random_vec_rng(BATCH * N_HEADS * SEQ * HEAD_DIM, &mut rng))
             .keep();
         let freqs = (cx.arange(HEAD_DIM / 2) * 2.0) / (HEAD_DIM as f32);
-        let freqs = 1000000_f32.pow(freqs).recip();
+        let freqs = 1000000_f32.pow(freqs).reciprocal();
         let pos = cx.arange(SEQ) + 0;
         let emb = pos.expand(1, 1).matmul(freqs.expand(0, SEQ));
         // Split input into evens and odds

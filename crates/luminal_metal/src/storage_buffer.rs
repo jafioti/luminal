@@ -393,7 +393,7 @@ fn test_shared_buffers() {
     let a = cx.tensor(5).set(random_vec(5)).keep();
     let b = a.exp2();
     let c = a.log2() * b;
-    let d = b.recip();
+    let d = b.reciprocal();
     let mut e = (c + d).retrieve();
 
     cx.execute();
