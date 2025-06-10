@@ -3,7 +3,7 @@ use metal_rs::objc::rc::autoreleasepool;
 use rand::{rngs::StdRng, SeedableRng};
 
 use luminal::{module::Module, prelude::*};
-use luminal_nn::{Conv1D, LayerNorm, Linear, ReLU};
+use luminal_nn::{Conv1D, LayerNorm};
 
 use crate::{binary_test, unary_test, MetalCompiler};
 luminal::test_imports!();
