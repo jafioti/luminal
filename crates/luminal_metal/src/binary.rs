@@ -20,7 +20,7 @@ use luminal::{
 
 use super::other::MetalARange;
 
-crate::metal_binary_op!("{} - {}", MetalSub);
+crate::metal_binary_op!(|a, b| format!("{a} - {b}"), MetalSub);
 
 #[derive(Debug, Default)]
 pub struct MetalSubtractionCompiler<T: MetalFloat>(PhantomData<T>);
@@ -78,8 +78,10 @@ impl<T: MetalFloat> Compiler for MetalSubtractionCompiler<T> {
         }
     }
 }
-crate::metal_binary_op!("({type_name})({} == {})", MetalEqual);
-
+crate::metal_binary_op!(
+    |a, b| format!("({})({a} == {b})", T::type_name()),
+    MetalEqual
+);
 
 #[derive(Debug, Default)]
 pub struct MetalEqualCompiler<T: MetalFloat>(PhantomData<T>);

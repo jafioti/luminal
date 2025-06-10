@@ -244,7 +244,7 @@ metal_unary_op!("1.0 / ", MetalRecip);
 
 #[macro_export]
 macro_rules! metal_binary_op {
-    ($expr:expr, $name:ident) => {
+    ($fn:expr, $name:ident) => {
         #[derive(Clone)]
         pub struct $name<T> {
             pipeline: ComputePipelineState,
@@ -268,10 +268,9 @@ macro_rules! metal_binary_op {
                 let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
                 let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
                 let type_name = T::type_name();
-                let op = format!(
-                    $expr,
-                    format!("(({}) == 0 ? 0.0h : inp_a[{}])", a_valid_exp, a_idx_exp),
-                    format!("(({}) == 0 ? 0.0h : inp_b[{}])", b_valid_exp, b_idx_exp),
+                let op = $fn(
+                	format!("(({}) == 0 ? 0.0h : inp_a[{}])", a_valid_exp, a_idx_exp),
+                 	format!("(({}) == 0 ? 0.0h : inp_b[{}])", b_valid_exp, b_idx_exp)
                 );
                 let code = format!(
                     "
@@ -350,7 +349,7 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
                     return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(self.clone())))));
                 }
                 if key == "elementwise" {
-                    return Some(Box::new(format!($expr, "input0", "input1")));
+                    return Some(Box::new($fn("input0", "input1")));
                 }
                 None
             }
@@ -358,10 +357,10 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
     };
 }
 
-metal_binary_op!("{} + {}", MetalAdd);
-metal_binary_op!("{} * {}", MetalMul);
-metal_binary_op!("(float)({} < {})", MetalLessThan);
-metal_binary_op!("fmod({}, {})", MetalMod);
+metal_binary_op!(|a, b| format!("{a} + {b}"), MetalAdd);
+metal_binary_op!(|a, b| format!("{a} * {b}"), MetalMul);
+metal_binary_op!(|a, b| format!("(float)({a} < {b})"), MetalLessThan);
+metal_binary_op!(|a, b| format!("fmod({a}, {b})"), MetalMod);
 
 #[derive(Clone)]
 pub struct MetalSumReduce<T> {
