@@ -10,12 +10,12 @@ luminal::test_imports!();
 
 unary_test!(|a| a.sin(), |a| a.sin(), test_sin, f16);
 unary_test!(|a| a.sqrt(), |a| a.sqrt(), test_sqrt, f16);
-unary_test!(|a| a.reciprocal(), |a| a.reciprocal(), test_reciprocal, f16);
+unary_test!(|a| a.reciprocal(), |a| a.recip(), test_reciprocal, f16);
 unary_test!(|a| a * a, |a| a.clone() * a, test_square, f16);
-unary_test!(|a| a.log(), |a| a.log(), test_log, f16);
+unary_test!(|a| a.log(), |a| a.ln(), test_log, f16);
 unary_test!(
     |a| a.log2(),
-    |a| (a.to_dtype::<f32>().log() / 2_f32.ln()).to_dtype::<f16>(),
+    |a| (a.to_dtype::<f32>().ln() / 2_f32.ln()).to_dtype::<f16>(),
     test_log2,
     f16
 );
@@ -40,8 +40,8 @@ binary_test!(|a, b| a + b, |a, b| a + b, test_add, f16);
 binary_test!(|a, b| a - b, |a, b| a - b, test_sub, f16);
 binary_test!(|a, b| a * b, |a, b| a * b, test_mul, f16);
 binary_test!(|a, b| a / b, |a, b| a / b, test_div, f16);
-binary_test!(|a, b| a.max(b), |a, b| a.maximum(b), test_max, f16);
-binary_test!(|a, b| a.min(b), |a, b| a.minimum(b), test_min, f16);
+binary_test!(|a, b| a.maximum(b), |a, b| a.maximum(b), test_max, f16);
+binary_test!(|a, b| a.minimum(b), |a, b| a.minimum(b), test_min, f16);
 binary_test!(
     |a, b| a % b,
     |a, b| (a.clone().to_dtype::<f32>()
