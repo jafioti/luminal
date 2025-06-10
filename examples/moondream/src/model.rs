@@ -2,6 +2,7 @@
 //! Luminal implementation of Moondream 2 (vision‑language model)
 
 use luminal::prelude::{binary::F32Pow, *};
+#[allow(unused_imports)]
 use luminal_nn::{Conv2D, Embedding, LayerNorm, Linear};
 
 ////////////////////////////////////////////////////////////////
@@ -13,6 +14,7 @@ pub const TXT_DIM: usize = 2048;
 pub const TXT_FF_DIM: usize = 8192;
 pub const TXT_N_LAYERS: usize = 24;
 pub const TXT_VOCAB: usize = 51_200;
+#[allow(dead_code)]
 pub const TXT_MAX_CTX: usize = 2048;
 pub const TXT_N_HEADS: usize = 32;
 pub const TXT_N_KV: usize = 32;
@@ -24,6 +26,7 @@ pub const VIS_LAYERS: usize = 27;
 pub const VIS_FF_DIM: usize = 4304;
 pub const VIS_HEADS: usize = 16;
 pub const VIS_CROP: usize = 378;
+#[allow(dead_code)]
 pub const VIS_MAX_CROPS: usize = 12;
 pub const VIS_PROJ_DIM: usize = 2048;
 pub const VIS_PROJ_INNER: usize = 8192;
@@ -223,6 +226,7 @@ impl RegionHead {
 // Text transformer – identical style  //
 /////////////////////////////////////////
 
+#[allow(dead_code)]
 pub const TXT_ATT_GROUPS: usize = 1; // n_heads == n_kv_heads
 pub const TXT_HEAD_DIM: usize = TXT_DIM / TXT_N_HEADS;
 
@@ -299,6 +303,7 @@ impl SerializeModule for SelfAttention {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
 pub struct FFN {
     fc1: Linear,
     fc2: Linear,

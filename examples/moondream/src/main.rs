@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 use std::{
     fs::File,
     io::{self, Read, Write},
@@ -7,6 +8,7 @@ use std::{
 use clap::Parser;
 use colored::Colorize;
 use itertools::Itertools;
+#[allow(unused_imports)]
 use safetensors::SafeTensors;
 use tokenizers::Tokenizer;
 
