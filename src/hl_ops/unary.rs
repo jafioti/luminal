@@ -36,12 +36,12 @@ impl GraphTensor {
     }
 
     /// Natural log
-    pub fn ln(self) -> GraphTensor {
+    pub fn log(self) -> GraphTensor {
         self.log2() * f32::ln(2.)
     }
 
     /// Take the reciprocal of each element
-    pub fn recip(self) -> GraphTensor {
+    pub fn reciprocal(self) -> GraphTensor {
         let new_id = self
             .graph()
             .add_op(op::Recip)
@@ -86,17 +86,17 @@ impl GraphTensor {
         GraphTensor: Add<T, Output = GraphTensor>,
     {
         (self * self)
-            .mean_reduce(axes)
+            .mean(axes)
             .add(epsilon)
             .sqrt()
-            .recip()
+            .reciprocal()
             .expand_to(self.shape)
             .mul(self)
     }
 
     /// Center so mean is 0.0
     pub fn mean_norm(self, axes: impl ToAxes) -> GraphTensor {
-        self - self.mean_reduce(axes).expand_to(self.shape)
+        self - self.mean(axes).expand_to(self.shape)
     }
 
     /// Applies a layer norm along an axis
@@ -109,21 +109,21 @@ impl GraphTensor {
 
     /// Applies a softmax function along an axis
     pub fn softmax(self, axes: impl ToAxes) -> GraphTensor {
-        let m = self - self.max_reduce(axes.to_axes()).expand_to(self.shape);
+        let m = self - self.max(axes.to_axes()).expand_to(self.shape);
         let exp = m.exp();
-        exp / exp.sum_reduce(axes).expand_to(exp.shape)
+        exp / exp.sum(axes).expand_to(exp.shape)
     }
 
     /// Applies a log softmax function along an axis
     pub fn log_softmax(self, axes: impl ToAxes) -> GraphTensor {
-        let m = self - self.max_reduce(axes.to_axes()).expand_to(self.shape);
-        m - m.exp().sum_reduce(axes.to_axes()).ln().expand_to(m.shape)
+        let m = self - self.max(axes.to_axes()).expand_to(self.shape);
+        m - m.exp().sum(axes.to_axes()).log().expand_to(m.shape)
     }
 
     /// Get the indicies of the max elements along the last axis
     pub fn argmax(self) -> GraphTensor {
         // Get one-hot along last dimension
-        let x_equal = self.equals(self.max_reduce(self.shape.len() - 1).expand_to(self.shape));
+        let x_equal = self.eq(self.max(self.shape.len() - 1).expand_to(self.shape));
         // Create index arange for last dimension
         let r = self
             .graph()
@@ -132,7 +132,7 @@ impl GraphTensor {
             .cumsum_last_dim()
             - 1.;
         // Multiply one-hot by expanded index arange
-        (x_equal * r.expand_to(self.shape)).max_reduce(self.shape.len() - 1)
+        (x_equal * r.expand_to(self.shape)).max(self.shape.len() - 1)
     }
 
     /// Take the absolute value
@@ -147,7 +147,7 @@ impl GraphTensor {
 
     /// The Rectified Linear Unit activation function
     pub fn relu(self) -> GraphTensor {
-        self.max_f32(0.)
+        self.maximum_f32(0.)
     }
 
     /// The sigmoid activation function

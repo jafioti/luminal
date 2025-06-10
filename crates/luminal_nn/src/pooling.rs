@@ -41,7 +41,7 @@ impl AvgPool2D {
                 self.kernel.0 * self.kernel.1,
                 dimx_out * dimy_out,
             ))
-            .mean_reduce(2) // Average over the kernel dimension
+            .mean(2) // Average over the kernel dimension
             .reshape((batch, ch_in, dimx_out, dimy_out));
 
         if expanded {
@@ -93,7 +93,7 @@ impl AdaptiveAvgPool2D {
             .pool_last_dim(kernel_h, stride_h, 1)
             .permute((0, 1, 5, 3, 4, 2))
             .reshape((batch, ch, kernel_h * kernel_w, h_out * w_out))
-            .mean_reduce(2)
+            .mean(2)
             .reshape((batch, ch, h_out, w_out));
 
         // Remove batch dim if it was originally absent
