@@ -1,16 +1,12 @@
-#![allow(unused)]
-
 #[cfg(test)]
 mod dynamic;
-#[cfg(test)]
-pub mod harness;
 pub mod test_graphs;
 #[cfg(test)]
 mod test_prim;
 
 use std::fmt::Debug;
 
-use rand::{distributions::uniform::SampleRange, thread_rng, Rng};
+use rand::{thread_rng, Rng};
 
 use crate::prelude::*;
 
