@@ -120,19 +120,24 @@ impl GraphTensor {
         m - m.exp().sum(axes.to_axes()).log().expand_to(m.shape)
     }
 
-    /// Get the indicies of the max elements along the last axis
-    pub fn argmax(self) -> GraphTensor {
-        // Get one-hot along last dimension
-        let x_equal = self.eq(self.max(self.shape.len() - 1).expand_to(self.shape));
-        // Create index arange for last dimension
-        let r = self
-            .graph()
-            .constant(1.)
-            .expand_to(ShapeTracker::new(self.shape.dims().last().unwrap()))
-            .cumsum_last_dim()
-            - 1.;
+    /// Get the indicies of the max elements along the specified axis
+    pub fn argmax(self, axis: usize) -> GraphTensor {
+        assert!(axis < self.shape.len(), "axis out of bounds");
+        // Get one-hot along the axis
+        let x_equal = self.eq(self.max(axis).expand_to(self.shape));
+
+        // Create index arange for the axis dimension and expand to tensor shape
+        let dims = self.dims();
+        let mut r = self.graph().arange(dims[axis]);
+        for i in (0..axis).rev() {
+            r = r.expand(0, dims[i]);
+        }
+        for i in axis + 1..dims.len() {
+            r = r.expand(r.shape.len(), dims[i]);
+        }
+
         // Multiply one-hot by expanded index arange
-        (x_equal * r.expand_to(self.shape)).max(self.shape.len() - 1)
+        (x_equal * r).max(axis)
     }
 
     /// Take the absolute value
@@ -327,6 +332,58 @@ mod tests {
         let d_a = d_dev.tensor_from_vec(a_data, (DConst::<2>, DConst::<2>));
         let d_b = d_a.clone() * d_a.sigmoid();
         assert_close(&b.data(), &d_b.as_vec());
+    }
+
+    #[test]
+    fn test_argmax_dim1() {
+        let mut cx = Graph::new();
+        let a_data = random_vec(6);
+        let a = cx.tensor((2, 3)).set(a_data.clone());
+        let b = a.argmax(1).retrieve();
+
+        cx.execute();
+
+        let mut expected = Vec::new();
+        for row in 0..2 {
+            let mut max_val = f32::MIN;
+            let mut idx = 0usize;
+            for col in 0..3 {
+                let v = a_data[row * 3 + col];
+                if v > max_val {
+                    max_val = v;
+                    idx = col;
+                }
+            }
+            expected.push(idx as f32);
+        }
+
+        assert_exact(&b.data(), &expected);
+    }
+
+    #[test]
+    fn test_argmax_dim0() {
+        let mut cx = Graph::new();
+        let a_data = random_vec(6);
+        let a = cx.tensor((2, 3)).set(a_data.clone());
+        let b = a.argmax(0).retrieve();
+
+        cx.execute();
+
+        let mut expected = Vec::new();
+        for col in 0..3 {
+            let mut max_val = f32::MIN;
+            let mut idx = 0usize;
+            for row in 0..2 {
+                let v = a_data[row * 3 + col];
+                if v > max_val {
+                    max_val = v;
+                    idx = row;
+                }
+            }
+            expected.push(idx as f32);
+        }
+
+        assert_exact(&b.data(), &expected);
     }
 
     #[test]
