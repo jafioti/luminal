@@ -242,486 +242,126 @@ metal_unary_op!("sin", MetalSin);
 metal_unary_op!("sqrt", MetalSqrt);
 metal_unary_op!("1.0 / ", MetalRecip);
 
-#[derive(Clone)]
-pub struct MetalAdd<T> {
-    pipeline: ComputePipelineState,
-    queue: CommandQueue,
-    device: Device,
-    _phantom: PhantomData<T>,
-    dyn_symbols: Vec<char>,
-    dyn_map: *const FxHashMap<char, usize>,
-}
-crate::debug_type!(MetalAdd);
+#[macro_export]
+macro_rules! metal_binary_op {
+    ($expr:expr, $name:ident) => {
+        #[derive(Clone)]
+        pub struct $name<T> {
+            pipeline: ComputePipelineState,
+            queue: CommandQueue,
+            device: Device,
+            dyn_symbols: Vec<char>,
+            _phantom: PhantomData<T>,
+            dyn_map: *const FxHashMap<char, usize>,
+        }
+        $crate::debug_type!($name);
 
-impl<T: MetalFloat> MetalAdd<T> {
-    pub fn new(
-        a_shape: ShapeTracker,
-        b_shape: ShapeTracker,
-        device: Device,
-        queue: CommandQueue,
-        dyn_map: *const FxHashMap<char, usize>,
-    ) -> Self {
-        let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
-        let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
-        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
-        let type_name = T::type_name();
-        let code = format!("
+        impl<T: MetalFloat> $name<T> {
+            pub fn new(
+                a_shape: ShapeTracker,
+                b_shape: ShapeTracker,
+                device: Device,
+                queue: CommandQueue,
+                dyn_map: *const FxHashMap<char, usize>,
+            ) -> Self {
+                let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
+                let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
+                let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
+                let type_name = T::type_name();
+                let op = format!(
+                    $expr,
+                    format!("(({}) == 0 ? 0.0h : inp_a[{}])", a_valid_exp, a_idx_exp),
+                    format!("(({}) == 0 ? 0.0h : inp_b[{}])", b_valid_exp, b_idx_exp),
+                );
+                let code = format!(
+                    "
 #include <metal_stdlib>
 using namespace metal;
 kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} *inp_b [[buffer(1)]], device {type_name} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{rendered}) {{
-    if (idx < n_elements) {{
-        out[idx] =
-            (({a_valid_exp}) == 0 ? 0.0h : inp_a[{a_idx_exp}])
-            + (({b_valid_exp}) == 0 ? 0.0h : inp_b[{b_idx_exp}]);
-    }}
-}}
-");
-        Self {
-            pipeline: compile_function("mkernel", &code, &device),
-            queue,
-            device,
-            dyn_symbols,
-            _phantom: Default::default(),
-            dyn_map,
+	if (idx < n_elements) {{
+		out[idx] = {op};
+	}}
+}}"
+                );
+                Self {
+                    pipeline: compile_function("mkernel", &code, &device),
+                    queue,
+                    device,
+                    dyn_symbols,
+                    _phantom: Default::default(),
+                    dyn_map,
+                }
+            }
         }
-    }
-}
 
-impl<T> MetalKernel for MetalAdd<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
-        vec![input_shapes[0].n_elements() * size_of::<T>()]
-    }
-    fn metal_forward(
-        &self,
-        inputs: &[(&Buffer, ShapeTracker)],
-        command_buffer: &CommandBufferRef,
-        _: &[&Buffer],
-        output_buffers: &[&Buffer],
-    ) {
-        let inp_size = inputs[0].1.n_elements().to_usize().unwrap();
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.pipeline);
-
-        // Set inputs
-        encoder.set_buffer(0, Some(inputs[0].0), 0);
-        encoder.set_buffer(1, Some(inputs[1].0), 0);
-        encoder.set_buffer(2, Some(output_buffers[0]), 0);
-        encoder.set_u32(3, inp_size as u32);
-        input_dyn_dims(
-            &self.dyn_symbols,
-            unsafe { self.dyn_map.as_ref().unwrap() },
-            encoder,
-            4,
-        );
-        // Execute
-        encoder.dispatch_1d(inp_size);
-        encoder.end_encoding();
-    }
-}
-
-impl<T: MetalFloat> Operator for MetalAdd<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        autoreleasepool(|| {
-            let command_buffer = self.queue.new_command_buffer();
-            let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
-            let out = self.device.new_buffer(
-                (inp_size * std::mem::size_of::<T>()) as u64,
-                MTLResourceOptions::StorageModeShared,
-            );
-
-            self.metal_forward(
-                &[
-                    (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
-                    (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
-                ],
-                command_buffer,
-                &[],
-                &[&out],
-            );
-
-            command_buffer.commit();
-            command_buffer.wait_until_completed();
-
-            vec![Tensor::new(MetalBuffer(out))]
-        })
-    }
-
-    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
-        if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
-                self.clone(),
-            )))));
+        impl<T> MetalKernel for $name<T> {
+            fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
+                vec![input_shapes[0].n_elements() * size_of::<T>()]
+            }
+            fn metal_forward(
+                &self,
+                inputs: &[(&Buffer, ShapeTracker)],
+                command_buffer: &CommandBufferRef,
+                _: &[&Buffer],
+                output_buffers: &[&Buffer],
+            ) {
+                let inp_size = inputs[0].1.n_elements().to_usize().unwrap();
+                let encoder = command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+                encoder.set_compute_pipeline_state(&self.pipeline);
+                encoder.set_buffer(0, Some(inputs[0].0), 0);
+                encoder.set_buffer(1, Some(inputs[1].0), 0);
+                encoder.set_buffer(2, Some(output_buffers[0]), 0);
+                encoder.set_u32(3, inp_size as u32);
+                input_dyn_dims(&self.dyn_symbols, unsafe { self.dyn_map.as_ref().unwrap() }, encoder, 4);
+                encoder.dispatch_1d(inp_size);
+                encoder.end_encoding();
+            }
         }
-        if key == "elementwise" {
-            return Some(Box::new("input0 + input1".to_string()));
+
+        impl<T: MetalFloat> Operator for $name<T> {
+            fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+                autoreleasepool(|| {
+                    let command_buffer = self.queue.new_command_buffer();
+                    let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
+                    let out = self.device.new_buffer(
+                        (inp_size * size_of::<T>()) as u64,
+                        MTLResourceOptions::StorageModeShared,
+                    );
+
+                    self.metal_forward(
+                        &[
+                            (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
+                            (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
+                        ],
+                        command_buffer,
+                        &[],
+                        &[&out],
+                    );
+
+                    command_buffer.commit();
+                    command_buffer.wait_until_completed();
+
+                    vec![Tensor::new(MetalBuffer(out))]
+                })
+            }
+
+            fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
+                if key == "metal" {
+                    return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(self.clone())))));
+                }
+                if key == "elementwise" {
+                    return Some(Box::new(format!($expr, "input0", "input1")));
+                }
+                None
+            }
         }
-        None
-    }
+    };
 }
 
-#[derive(Clone)]
-pub struct MetalMul<T> {
-    pipeline: ComputePipelineState,
-    queue: CommandQueue,
-    device: Device,
-    dyn_symbols: Vec<char>,
-    _phantom: PhantomData<T>,
-    dyn_map: *const FxHashMap<char, usize>,
-}
-crate::debug_type!(MetalMul);
-
-impl<T: MetalFloat> MetalMul<T> {
-    pub fn new(
-        a_shape: ShapeTracker,
-        b_shape: ShapeTracker,
-        device: Device,
-        queue: CommandQueue,
-        dyn_map: *const FxHashMap<char, usize>,
-    ) -> Self {
-        let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
-        let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
-        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
-        let type_name = T::type_name();
-        let code = format!("
-#include <metal_stdlib>
-using namespace metal;
-kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} *inp_b [[buffer(1)]], device {type_name} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{rendered}) {{
-    if (idx < n_elements) {{
-        out[idx] =
-            (({a_valid_exp}) == 0 ? 0.0h : inp_a[{a_idx_exp}])
-            * (({b_valid_exp}) == 0 ? 0.0h : inp_b[{b_idx_exp}]);
-    }}
-}}
-");
-        Self {
-            pipeline: compile_function("mkernel", &code, &device),
-            queue,
-            device,
-            dyn_symbols,
-            _phantom: Default::default(),
-            dyn_map,
-        }
-    }
-}
-impl<T> MetalKernel for MetalMul<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
-        vec![input_shapes[0].n_elements() * size_of::<T>()]
-    }
-    fn metal_forward(
-        &self,
-        inputs: &[(&Buffer, ShapeTracker)],
-        command_buffer: &CommandBufferRef,
-        _: &[&Buffer],
-        output_buffers: &[&Buffer],
-    ) {
-        let inp_size = inputs[0].1.n_elements().to_usize().unwrap();
-
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.pipeline);
-
-        // Set inputs
-        encoder.set_buffer(0, Some(inputs[0].0), 0);
-        encoder.set_buffer(1, Some(inputs[1].0), 0);
-        encoder.set_buffer(2, Some(output_buffers[0]), 0);
-        encoder.set_u32(3, inp_size as u32);
-        input_dyn_dims(
-            &self.dyn_symbols,
-            unsafe { self.dyn_map.as_ref().unwrap() },
-            encoder,
-            4,
-        );
-
-        // Execute
-        encoder.dispatch_1d(inp_size);
-        encoder.end_encoding();
-    }
-}
-
-impl<T: MetalFloat> Operator for MetalMul<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        autoreleasepool(|| {
-            let command_buffer = self.queue.new_command_buffer();
-            let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
-            let out = self.device.new_buffer(
-                (inp_size * std::mem::size_of::<T>()) as u64,
-                MTLResourceOptions::StorageModeShared,
-            );
-
-            self.metal_forward(
-                &[
-                    (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
-                    (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
-                ],
-                command_buffer,
-                &[],
-                &[&out],
-            );
-
-            command_buffer.commit();
-            command_buffer.wait_until_completed();
-
-            vec![Tensor::new(MetalBuffer(out))]
-        })
-    }
-
-    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
-        if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
-                self.clone(),
-            )))));
-        }
-        if key == "elementwise" {
-            return Some(Box::new("input0 * input1".to_string()));
-        }
-        None
-    }
-}
-
-#[derive(Clone)]
-pub struct MetalLessThan<T> {
-    pipeline: ComputePipelineState,
-    queue: CommandQueue,
-    device: Device,
-    dyn_symbols: Vec<char>,
-    _phantom: PhantomData<T>,
-    dyn_map: *const FxHashMap<char, usize>,
-}
-crate::debug_type!(MetalLessThan);
-
-impl<T: MetalFloat> MetalLessThan<T> {
-    pub fn new(
-        a_shape: ShapeTracker,
-        b_shape: ShapeTracker,
-        device: Device,
-        queue: CommandQueue,
-        dyn_map: *const FxHashMap<char, usize>,
-    ) -> Self {
-        let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
-        let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
-        let type_name = T::type_name();
-        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
-        let code = format!("
-#include <metal_stdlib>
-using namespace metal;
-kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} *inp_b [[buffer(1)]], device {type_name} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{rendered}) {{
-    if (idx < n_elements) {{
-        {type_name} a_t = 0.0h;
-        {type_name} b_t = 0.0h;
-        if (({a_valid_exp}) != 0) {{
-            a_t = inp_a[{a_idx_exp}];
-        }}
-        if (({b_valid_exp}) != 0) {{
-            b_t = inp_b[{b_idx_exp}];
-        }}
-        out[idx] = ({type_name})(a_t < b_t);
-    }}
-}}
-"
-        );
-        Self {
-            pipeline: compile_function("mkernel", &code, &device),
-            queue,
-            device,
-            dyn_symbols,
-            _phantom: Default::default(),
-            dyn_map,
-        }
-    }
-}
-
-impl<T> MetalKernel for MetalLessThan<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
-        vec![input_shapes[0].n_elements() * size_of::<T>()]
-    }
-    fn metal_forward(
-        &self,
-        inputs: &[(&Buffer, ShapeTracker)],
-        command_buffer: &CommandBufferRef,
-        _: &[&Buffer],
-        output_buffers: &[&Buffer],
-    ) {
-        let inp_size = inputs[0].1.n_elements().to_usize().unwrap();
-
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.pipeline);
-
-        // Set inputs
-        encoder.set_buffer(0, Some(inputs[0].0), 0);
-        encoder.set_buffer(1, Some(inputs[1].0), 0);
-        encoder.set_buffer(2, Some(output_buffers[0]), 0);
-        encoder.set_u32(3, inp_size as u32);
-        input_dyn_dims(
-            &self.dyn_symbols,
-            unsafe { self.dyn_map.as_ref().unwrap() },
-            encoder,
-            4,
-        );
-
-        // Execute
-        encoder.dispatch_1d(inp_size);
-        encoder.end_encoding();
-    }
-}
-
-impl<T: MetalFloat> Operator for MetalLessThan<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        autoreleasepool(|| {
-            let command_buffer = self.queue.new_command_buffer();
-            let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
-            let out = self.device.new_buffer(
-                (inp_size * std::mem::size_of::<T>()) as u64,
-                MTLResourceOptions::StorageModeShared,
-            );
-
-            self.metal_forward(
-                &[
-                    (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
-                    (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
-                ],
-                command_buffer,
-                &[],
-                &[&out],
-            );
-
-            command_buffer.commit();
-            command_buffer.wait_until_completed();
-
-            vec![Tensor::new(MetalBuffer(out))]
-        })
-    }
-
-    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
-        if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
-                self.clone(),
-            )))));
-        }
-        if key == "elementwise" {
-            return Some(Box::new("(float)((input0) < (input1))".to_string()));
-        }
-        None
-    }
-}
-
-#[derive(Clone)]
-pub struct MetalMod<T> {
-    pipeline: ComputePipelineState,
-    queue: CommandQueue,
-    device: Device,
-    dyn_symbols: Vec<char>,
-    _phantom: PhantomData<T>,
-    dyn_map: *const FxHashMap<char, usize>,
-}
-crate::debug_type!(MetalMod);
-
-impl<T: MetalFloat> MetalMod<T> {
-    pub fn new(
-        a_shape: ShapeTracker,
-        b_shape: ShapeTracker,
-        device: Device,
-        queue: CommandQueue,
-        dyn_map: *const FxHashMap<char, usize>,
-    ) -> Self {
-        let (a_idx_exp, a_valid_exp) = get_idx_valid_exps(a_shape);
-        let (b_idx_exp, b_valid_exp) = get_idx_valid_exps(b_shape);
-        let (dyn_symbols, rendered) = render_dyn_dim_inputs(&[a_shape, b_shape], 4);
-        let type_name = T::type_name();
-        let code = format!(
-            "
-#include <metal_stdlib>
-using namespace metal;
-kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} *inp_b [[buffer(1)]], device {type_name} *out [[buffer(2)]], device int& n_elements [[buffer(3)]], uint idx [[thread_position_in_grid]]{rendered}) {{
-    if (idx < n_elements) {{
-        out[idx] = fmod(({a_valid_exp}) == 0 ? 0.0 : inp_a[{a_idx_exp}], ({b_valid_exp}) == 0 ? 0.0 : inp_b[{b_idx_exp}]);
-    }}
-}}
-");
-        Self {
-            pipeline: compile_function("mkernel", &code, &device),
-            queue,
-            device,
-            dyn_symbols,
-            _phantom: Default::default(),
-            dyn_map,
-        }
-    }
-}
-impl<T> MetalKernel for MetalMod<T> {
-    fn output_buffer_sizes(&self, input_shapes: &[ShapeTracker]) -> Vec<Expression> {
-        vec![input_shapes[0].n_elements() * size_of::<T>()]
-    }
-    fn metal_forward(
-        &self,
-        inputs: &[(&Buffer, ShapeTracker)],
-        command_buffer: &CommandBufferRef,
-        _: &[&Buffer],
-        output_buffers: &[&Buffer],
-    ) {
-        let inp_size = inputs[0].1.n_elements().to_usize().unwrap();
-
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        encoder.set_compute_pipeline_state(&self.pipeline);
-
-        // Set inputs
-        encoder.set_buffer(0, Some(inputs[0].0), 0);
-        encoder.set_buffer(1, Some(inputs[1].0), 0);
-        encoder.set_buffer(2, Some(output_buffers[0]), 0);
-        encoder.set_u32(3, inp_size as u32);
-        input_dyn_dims(
-            &self.dyn_symbols,
-            unsafe { self.dyn_map.as_ref().unwrap() },
-            encoder,
-            4,
-        );
-        // Execute
-        encoder.dispatch_1d(inp_size);
-        encoder.end_encoding();
-    }
-}
-
-impl<T: MetalFloat> Operator for MetalMod<T> {
-    fn process(&mut self, tensors: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        autoreleasepool(|| {
-            let command_buffer = self.queue.new_command_buffer();
-            let inp_size = tensors[0].1.n_elements().to_usize().unwrap();
-            let out = self.device.new_buffer(
-                (inp_size * std::mem::size_of::<T>()) as u64,
-                MTLResourceOptions::StorageModeShared,
-            );
-
-            self.metal_forward(
-                &[
-                    (get_buffer_from_tensor(&tensors[0].0), tensors[0].1),
-                    (get_buffer_from_tensor(&tensors[1].0), tensors[1].1),
-                ],
-                command_buffer,
-                &[],
-                &[&out],
-            );
-
-            command_buffer.commit();
-            command_buffer.wait_until_completed();
-
-            vec![Tensor::new(MetalBuffer(out))]
-        })
-    }
-
-    fn custom(&mut self, key: &str, _: Box<dyn Any>) -> Option<Box<dyn Any>> {
-        if key == "metal" {
-            return Some(Box::new(MetalKernelWrapper(Arc::new(Box::new(
-                self.clone(),
-            )))));
-        }
-        if key == "elementwise" {
-            return Some(Box::new("fmod(input0, input1)".to_string()));
-        }
-        None
-    }
-}
+metal_binary_op!("{} + {}", MetalAdd);
+metal_binary_op!("{} * {}", MetalMul);
+metal_binary_op!("(float)({} < {})", MetalLessThan);
+metal_binary_op!("fmod({}, {})", MetalMod);
 
 #[derive(Clone)]
 pub struct MetalSumReduce<T> {
