@@ -31,6 +31,7 @@ use petgraph::{
 use regex::Regex;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    f32::consts::PI,
     fmt::{Debug, Display, format},
     iter::repeat,
 };
@@ -56,14 +57,13 @@ __device__ float mul(float a, float b) {
 #[derive(Clone, Debug)]
 enum GraphTerm {
     Tensor { name: String },
-    Smem,
     LoopIn { range: String, stride: String },
     LoopOut { range: String, stride: String },
     Add,
     Mul,
     Exp,
     Sin,
-    SmemCopy,
+    ZeroStrideLoad { range: String, stride: String },
 }
 
 pub trait TermToString {
@@ -101,8 +101,9 @@ impl TermToString for GraphTerm {
             GraphTerm::LoopIn { range, stride } => format!("LoopIn ({range}; {stride})"),
             GraphTerm::LoopOut { range, stride } => format!("LoopOut ({range}; {stride})"),
             GraphTerm::Tensor { name } => format!("Tensor({name})"),
-            GraphTerm::Smem => "SMEM".to_string(),
-            GraphTerm::SmemCopy => "SmemCopy".to_string(),
+            GraphTerm::ZeroStrideLoad { range, stride } => {
+                format!("ZeroStrideLoad({range}; {stride})")
+            }
         }
     }
 }
@@ -196,16 +197,18 @@ fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (Str
         let mut loop_levels = vec![];
         let kernel = make_kernel(
             &kernel_graph,
-            inputs
-                .iter()
-                .cloned()
-                .chain(smem_buffers.iter().map(|(a, b, _)| (*a, *b)))
-                .collect(),
+            inputs.iter().cloned().collect(),
             outputs.clone(),
             &mut HashMap::new(),
             &mut (inputs.len() + outputs.len()),
             &mut loop_levels,
-        );
+            &mut HashMap::default(),
+            &smem_buffers
+                .iter()
+                .map(|(ind, node, _)| (*node, *ind))
+                .collect(),
+        )
+        .unwrap();
         let grid = loop_levels
             .clone()
             .into_iter()
@@ -255,7 +258,9 @@ fn make_kernel(
     node_to_var: &mut HashMap<NodeIndex, (usize, bool)>,
     prev_max_var: &mut usize, // contains the char last used
     loop_levels: &mut Vec<String>,
-) -> Vec<String> {
+    loop_indexes: &mut HashMap<NodeIndex, usize>,
+    smem_buffers: &HashMap<NodeIndex, usize>,
+) -> Option<Vec<String>> {
     let mut kernel_lines = vec![];
     let mut loop_body_covered = HashSet::new();
     // toposort down the graph
@@ -265,7 +270,6 @@ fn make_kernel(
         &outputs.iter().map(|(_, i)| *i).collect_vec(),
     );
     for node in toposorted {
-        println!("Node: {:?}", node.index());
         if loop_body_covered.contains(&node) {
             continue;
         }
@@ -362,6 +366,7 @@ fn make_kernel(
                     kernel_lines.push(format!("{}for (int loop_{loop_var} = 0; loop_{loop_var} < {range}; loop_{loop_var} += 1) {{", (0..loop_level.saturating_sub(6)).map(|_| "\t").join("")));
                 };
                 let loop_var = var_to_char(*prev_max_var);
+                let loop_var_int = *prev_max_var;
 
                 // Move input pointers (allocate new variables)
                 let mut new_vars = vec![];
@@ -462,6 +467,9 @@ fn make_kernel(
                     }
                 }
                 loop_levels.push(range.to_string());
+                for (inp, _) in &loop_inputs {
+                    loop_indexes.insert(*inp, loop_var_int);
+                }
                 let loop_body = make_kernel(
                     kernel_graph,
                     new_vars.into_iter().zip(body_inputs).collect_vec(),
@@ -472,7 +480,9 @@ fn make_kernel(
                     node_to_var,
                     prev_max_var,
                     loop_levels,
-                );
+                    loop_indexes,
+                    smem_buffers,
+                )?;
 
                 kernel_lines.extend(loop_body);
 
@@ -509,7 +519,74 @@ fn make_kernel(
             GraphTerm::LoopOut { range, stride } => {
                 panic!("found loopout range: {range} stride: {stride}")
             }
-            GraphTerm::Tensor { .. } | GraphTerm::Smem => {
+            GraphTerm::ZeroStrideLoad { range, stride } => {
+                // Search back for last loopin of same range with stride of 0
+                let mut curr = node;
+                let mut found = None;
+                let mut offset = vec![];
+                loop {
+                    let prev = kernel_graph
+                        .neighbors_directed(curr, Direction::Incoming)
+                        .next()
+                        .unwrap();
+                    if let (
+                        GraphTerm::LoopIn {
+                            range: prev_range,
+                            stride: prev_stride,
+                        },
+                        level,
+                    ) = kernel_graph.node_weight(prev).unwrap()
+                    {
+                        if *prev_range == *range {
+                            // Found
+                            found = Some((prev, *level));
+                            break;
+                        }
+                        offset.push(
+                            prev_stride.replace("z", &var_to_char(loop_indexes[&prev]).to_string()),
+                        );
+                    } else {
+                        panic!("found non-loop-in!");
+                    }
+                    curr = prev;
+                }
+                let Some((base, level)) = found else {
+                    return None;
+                };
+                let src = kernel_graph
+                    .neighbors_directed(node, Direction::Incoming)
+                    .next()
+                    .unwrap();
+                // Depending on the level do different things
+                match level {
+                    ..3 => return None, // Grid
+                    3..6 => {
+                        // Threadblock
+                        // We need to get the smem pointer to write to and pass along
+                        let buffer = smem_buffers[&node];
+                        *prev_max_var += 1;
+                        kernel_lines.push(format!(
+                            "float* {} = {} + {}",
+                            var_to_char(*prev_max_var),
+                            var_to_char(buffer),
+                            offset.iter().join(" + ")
+                        ));
+                        kernel_lines.push(format!(
+                            "{}[{}] = *{} + {}",
+                            var_to_char(*prev_max_var),
+                            loop_indexes[&base],
+                            var_to_char(node_to_var[&src].0),
+                            stride.replace("z", &var_to_char(loop_indexes[&base]).to_string())
+                        ));
+                        node_to_var.insert(node, (*prev_max_var, false));
+                    }
+                    6.. => {
+                        // Thread
+                        panic!("Need to set up zerostrideload for register buffers")
+                    }
+                }
+            }
+            GraphTerm::Tensor { .. } => {
                 node_to_var.insert(
                     node,
                     (
@@ -521,33 +598,6 @@ fn make_kernel(
                         true,
                     ),
                 );
-            }
-            GraphTerm::SmemCopy => {
-                let srcs = kernel_graph
-                    .edges_directed(node, Direction::Incoming)
-                    .map(|e| e.id())
-                    .sorted()
-                    .map(|e| kernel_graph.edge_endpoints(e).unwrap().0)
-                    .collect_vec();
-                println!("srcs: {:?}", srcs[0]);
-                let src_a = node_to_var[&srcs[0]];
-                let src_b = node_to_var[&srcs[1]];
-                kernel_lines.push(format!(
-                    "{}__syncthreads();",
-                    (0..loop_level.saturating_sub(6)).map(|_| "\t").join("")
-                ));
-                kernel_lines.push(format!(
-                    "{}*{} = {}{};",
-                    (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
-                    var_to_char(src_a.0),
-                    if src_b.1 { "*" } else { "" },
-                    var_to_char(src_b.0)
-                ));
-                kernel_lines.push(format!(
-                    "{}__syncthreads();",
-                    (0..loop_level.saturating_sub(6)).map(|_| "\t").join("")
-                ));
-                node_to_var.insert(node, (src_a.0, true));
             }
             GraphTerm::Sin => {
                 *prev_max_var += 1;
@@ -602,7 +652,7 @@ fn make_kernel(
             }
         }
     }
-    kernel_lines
+    Some(kernel_lines)
 }
 
 fn partial_toposort<N, E>(
@@ -829,6 +879,10 @@ fn dag_to_petgraph(
                         },
                     }
                 }
+                "ZeroStrideLoad" => {
+                    let (_, range, stride) = get_loop_info(dag, dag.lookup(&t));
+                    GraphTerm::ZeroStrideLoad { range, stride }
+                }
                 _ => panic!("invalid term: {}", a.as_str()),
             },
             Term::Lit(_) | Term::Var(_) => return None,
@@ -985,10 +1039,8 @@ fn split_kernels(
             .next()
             .is_none()
     }) {
-        let (t, _, kernel) = marked_graph.node_weight(input).unwrap();
-        if !matches!(t, GraphTerm::Smem) {
-            kernel_graphs[*kernel].1.push((None, 0, input));
-        }
+        let (_, _, kernel) = marked_graph.node_weight(input).unwrap();
+        kernel_graphs[*kernel].1.push((None, 0, input));
     }
     for edge in marked_graph.edge_indices() {
         let (start, end) = marked_graph.edge_endpoints(edge).unwrap();
@@ -1028,28 +1080,41 @@ fn split_kernels(
     }
     // Go through SMEM buffers
     for (kernel_graph, inputs, outputs, smem_buffers) in &mut kernel_graphs {
+        // Get all ZeroStrideLoad ones at thread level 0..3
         for node in kernel_graph.node_indices() {
-            if matches!(kernel_graph.node_weight(node).unwrap().0, GraphTerm::Smem) {
-                // Walk forward through all loopins to get size of buffer
-                let mut curr_node = node;
-                let mut buf_size = vec![];
+            if let (GraphTerm::ZeroStrideLoad { range, .. }, level) =
+                kernel_graph.node_weight(node).unwrap()
+            {
+                if *level < 3 || *level > 5 {
+                    continue;
+                }
+                // Walk backwards to find threadblock level loopins and multiply all ranges with non-zero strides
+                let mut size = range.to_string();
+                let mut curr = node;
                 loop {
-                    curr_node = kernel_graph
-                        .neighbors_directed(curr_node, Direction::Outgoing)
+                    let prev = graph
+                        .neighbors_directed(curr, Direction::Incoming)
                         .next()
                         .unwrap();
-                    if let GraphTerm::LoopIn { range, stride } =
-                        &kernel_graph.node_weight(curr_node).unwrap().0
+                    if let (
+                        GraphTerm::LoopIn {
+                            range: prev_range,
+                            stride,
+                        },
+                        prev_level,
+                    ) = kernel_graph.node_weight(prev).unwrap()
                     {
-                        if stride != "0" {
-                            buf_size.push(range);
+                        if *prev_level < 3 {
+                            break;
                         }
-                    } else {
-                        break;
+                        if *stride != "0" {
+                            size = format!("{size} * {prev_range}");
+                        }
                     }
+                    curr = prev;
                 }
                 let buf_index = inputs.len() + outputs.len() + smem_buffers.len();
-                smem_buffers.push((buf_index, node, buf_size.into_iter().join(" * ")));
+                smem_buffers.push((buf_index, node, size));
             }
         }
     }

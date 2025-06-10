@@ -91,6 +91,7 @@
       	(Recip Expr)
        	(Neg Expr)
      	(Unary String Expr)
+      	(ZeroStrideLoad Expr LoopType Math)
      	(Add Expr Expr)
      	(Mul Expr Expr)
       	(Max Expr Expr)
@@ -439,6 +440,12 @@
 	)
 )
 
+; add zero stride load
+(rewrite
+	(LoopIn (LoopIn (LoopIn ?x (Loop ?outer ?n) (MNum 0)) ?mid ?midSt) (Loop ?inner ?n) ?innerSt)
+	(LoopIn (ZeroStrideLoad (LoopIn (LoopIn ?x (Loop ?outer ?n) (MNum 0)) ?mid ?midSt) (Loop ?outer ?n) ?innerSt) (Loop ?inner ?n) ?innerSt)
+	:when ((!= ?innerSt (MNum 0)))
+)
 
 
 ; ───────────────── TESTS ─────────────────
