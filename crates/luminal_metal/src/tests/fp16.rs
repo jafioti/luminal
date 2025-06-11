@@ -790,7 +790,7 @@ fn test_slice_add() {
     let mut cx = Graph::new();
     let a = cx.tensor(256).set(random_array::<256>());
     let mut b = (a.slice(0..64) + a.slice(64..128) + a.slice(128..192) + a.slice(192..256))
-        .expand(0, 4)
+        .expand_dim(0, 4)
         .retrieve();
 
     cx.compile(MetalCompiler::<f16>::default(), &mut b);

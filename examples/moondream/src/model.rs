@@ -48,7 +48,7 @@ fn apply_rotary_embeddings(t: GraphTensor, pos: Expression) -> GraphTensor {
     let freqs = (t.graph().arange(d / 2) * 2.0) / (d.to_usize().unwrap() as f32);
     let freqs = 500_000_f32.pow(freqs); // θ_i = 500k^(-2i/d)
     let pos = t.graph().arange(s) + pos; // absolute positions
-    let emb = pos.expand(1, 1).matmul(freqs.expand(0, 1));
+    let emb = pos.expand_dim(1, 1).matmul(freqs.expand_dim(0, 1));
 
     let split = t.reshape((b, h, s, d / 2, 2));
     let x0 = split.slice((.., .., .., .., ..1));
@@ -284,7 +284,12 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         // attention
         let att = q.matmul(k.permute((0, 1, 3, 2))) / (head_dim as f32).sqrt();
         let mask = self.qkv.weight.graph().triu(s, 1) * f16::MIN.to_f32();
-        let att = (att + mask.pad(((0, 0), (p, 0))).expand(0, b).expand(1, TXT_N_KV)).softmax(3);
+        let att = (att
+            + mask
+                .pad(((0, 0), (p, 0)))
+                .expand_dim(0, b)
+                .expand_dim(1, TXT_N_KV))
+        .softmax(3);
 
         let out = att
             .matmul(v)
