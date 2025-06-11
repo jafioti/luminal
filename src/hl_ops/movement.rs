@@ -24,17 +24,17 @@ impl GraphTensor {
         self.permute(perm_axes)
     }
 
-    /// Broadcast tensor along new dimensions
-    pub fn expand(mut self, axis: usize, size: impl Into<Expression>) -> GraphTensor {
-        self.shape.expand(axis, size);
+    /// Broadcast tensor along a new dimension
+    pub fn expand_dim(mut self, axis: usize, size: impl Into<Expression>) -> GraphTensor {
+        self.shape.expand_dim(axis, size);
         self
     }
 
     /// Broadcast tensor along new dimensions (with explicitly given dest shape)
-    pub fn expand_to(mut self, shape: impl ToShape) -> GraphTensor {
+    pub fn expand(mut self, shape: impl ToShape) -> GraphTensor {
         for (i, s) in shape.to_shape().into_iter().enumerate() {
             if self.shape.len() <= i || self.shape.dims[self.shape.indexes[i]] != s {
-                self.shape.expand(i, s);
+                self.shape.expand_dim(i, s);
             }
         }
 
@@ -55,7 +55,7 @@ impl GraphTensor {
         self = self.contiguous();
         let last_shape = self.shape.dims();
         assert!(last_shape.len() < 6, "Shape is maxed out at 6 dimensions");
-        self.shape.expand(dim, 1);
+        self.shape.expand_dim(dim, 1);
         self
     }
 
@@ -106,7 +106,7 @@ impl GraphTensor {
         self = self.contiguous();
         // Expand a new dimension to do the slicing on
         let n_rows = total_size / (spacing + size);
-        self.shape.expand(n_dims, spacing + size);
+        self.shape.expand_dim(n_dims, spacing + size);
         // self = self.contiguous();
         self.shape.dims[self.shape.indexes[n_dims - 1]] = n_rows;
         self.shape.fake[self.shape.indexes[n_dims]] = false;
@@ -133,7 +133,7 @@ impl GraphTensor {
         let dim_size = self.dims().pop().unwrap().simplify();
         let number_of_windows = (((dim_size - full_kernel) / stride) + 1).simplify();
         // Expand new dimension
-        self.shape.expand(n_dims - 1, number_of_windows);
+        self.shape.expand_dim(n_dims - 1, number_of_windows);
         self = self.contiguous();
         if n_dims > 1 {
             // View as single dimension of matrix with wider width
@@ -414,10 +414,10 @@ mod tests {
     #[test]
     fn test_cumsum() {
         let mut cx = Graph::new();
-        let a = cx.constant(1.).expand(0, 3);
+        let a = cx.constant(1.).expand_dim(0, 3);
         let b = a.cumsum_last_dim().retrieve();
         let c = a
-            .expand(1, 3)
+            .expand_dim(1, 3)
             .permute((1, 0))
             .cumsum_last_dim()
             .permute((1, 0))

@@ -404,8 +404,11 @@ mod tests {
         let mut input = cx.tensor(());
         let embedder = cx.tensor((CLASSES, TARGET));
 
-        let input_one_hot = input.graph().arange(CLASSES).eq(input.expand(0, CLASSES));
-        let input_embedding = (input_one_hot.expand(1, TARGET) * embedder).sum(0);
+        let input_one_hot = input
+            .graph()
+            .arange(CLASSES)
+            .eq(input.expand_dim(0, CLASSES));
+        let input_embedding = (input_one_hot.expand_dim(1, TARGET) * embedder).sum(0);
         let mut loss = input_embedding.sum(0);
         let mut weights = vec![embedder.id];
 
@@ -427,9 +430,10 @@ mod tests {
         let input_one_hot = input
             .graph()
             .arange(CLASSES)
-            .expand(0, 1)
-            .eq(input.expand(1, CLASSES));
-        let input_embedding = (input_one_hot.expand(2, TARGET) * embedder.expand(0, 1)).sum(1);
+            .expand_dim(0, 1)
+            .eq(input.expand_dim(1, CLASSES));
+        let input_embedding =
+            (input_one_hot.expand_dim(2, TARGET) * embedder.expand_dim(0, 1)).sum(1);
         let mut loss = input_embedding.sum(0);
         let mut weights = vec![embedder.id];
 

@@ -48,14 +48,14 @@ fn apply_rotary_embeddings(t: GraphTensor, pos: Expression) -> GraphTensor {
     let freqs = (t.graph().arange(d / 2) * 2.0) / (d.to_usize().unwrap() as f32);
     let freqs = 500_000_f32.pow(freqs); // θ_i = 500k^(-2i/d)
     let pos = t.graph().arange(s) + pos; // absolute positions
-    let emb = pos.expand(1, 1).matmul(freqs.expand(0, 1));
+    let emb = pos.expand_dim(1, 1).matmul(freqs.expand_dim(0, 1));
 
     let split = t.reshape((b, h, s, d / 2, 2));
     let x0 = split.slice((.., .., .., .., ..1));
     let x1 = split.slice((.., .., .., .., 1..));
 
-    let out0 = x0 * emb.cos().expand_to(x0.shape) - x1 * emb.sin().expand_to(x1.shape);
-    let out1 = x0 * emb.sin().expand_to(x0.shape) + x1 * emb.cos().expand_to(x1.shape);
+    let out0 = x0 * emb.cos().expand(x0.shape) - x1 * emb.sin().expand(x1.shape);
+    let out1 = x0 * emb.sin().expand(x0.shape) + x1 * emb.cos().expand(x1.shape);
 
     out0.concat_along(out1, 4).reshape(t.shape)
 }
@@ -184,7 +184,7 @@ impl Module<GraphTensor> for VisionProjection {
     type Output = GraphTensor;
     fn forward(&self, vis: GraphTensor) -> GraphTensor {
         let (b, n, _) = vis.dims3(); // n == 729
-        let g = vis.slice((.., ..1, ..)).expand_to((b, n, VIS_DIM));
+        let g = vis.slice((.., ..1, ..)).expand((b, n, VIS_DIM));
         let grid = vis.slice((.., 1.., ..));
         let feats = g.concat_along(grid, 2); // (b,729,2304)
         self.fc2.forward(self.fc1.forward(feats).swish())
@@ -284,7 +284,12 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         // attention
         let att = q.matmul(k.permute((0, 1, 3, 2))) / (head_dim as f32).sqrt();
         let mask = self.qkv.weight.graph().triu(s, 1) * f16::MIN.to_f32();
-        let att = (att + mask.pad(((0, 0), (p, 0))).expand(0, b).expand(1, TXT_N_KV)).softmax(3);
+        let att = (att
+            + mask
+                .pad(((0, 0), (p, 0)))
+                .expand_dim(0, b)
+                .expand_dim(1, TXT_N_KV))
+        .softmax(3);
 
         let out = att
             .matmul(v)

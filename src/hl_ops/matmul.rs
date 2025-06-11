@@ -5,12 +5,12 @@ impl GraphTensor {
         if (self.shape.len() == 1 || self.shape.len() == 2) && rhs.shape.len() == 2 {
             let vec = self.shape.len() == 1;
             if vec {
-                self = self.expand(0, 1);
+                self = self.expand_dim(0, 1);
             }
             let (m, _) = self.dims2();
             let (_, n) = rhs.dims2();
             // Broadcasted Multiply
-            let mul = self.expand(1, n) * rhs.permute((1, 0)).expand(0, m);
+            let mul = self.expand_dim(1, n) * rhs.permute((1, 0)).expand_dim(0, m);
 
             // Sum Reduce
             let mut ret = mul.sum(2);
@@ -27,7 +27,7 @@ impl GraphTensor {
                 let w = rhs.permute((1, 0));
 
                 // Broadcasted Multiply
-                let mul = self.expand(2, d) * w.expand(0, a).expand(1, b);
+                let mul = self.expand_dim(2, d) * w.expand_dim(0, a).expand_dim(1, b);
 
                 // Sum Reduce
                 mul.sum(3)
@@ -36,7 +36,7 @@ impl GraphTensor {
                 let w = rhs.permute((0, 2, 1));
 
                 // Broadcasted Multiply
-                let mul = self.expand(2, d) * w.expand(1, b);
+                let mul = self.expand_dim(2, d) * w.expand_dim(1, b);
 
                 // Sum Reduce
                 mul.sum(3)
@@ -55,7 +55,8 @@ impl GraphTensor {
                 // Reshape
                 rhs = rhs.permute((1, 0));
                 // Broadcasted Multiply
-                let mul = self.expand(3, e) * rhs.expand(0, a).expand(1, b).expand(2, c);
+                let mul =
+                    self.expand_dim(3, e) * rhs.expand_dim(0, a).expand_dim(1, b).expand_dim(2, c);
 
                 // Sum Reduce
                 mul.sum(4)
@@ -66,7 +67,7 @@ impl GraphTensor {
                 rhs = rhs.permute((0, 1, 3, 2));
 
                 // Broadcasted Multiply
-                let mul = self.expand(3, e) * rhs.expand(2, c);
+                let mul = self.expand_dim(3, e) * rhs.expand_dim(2, c);
 
                 // Sum Reduce
                 mul.sum(4)
@@ -86,7 +87,7 @@ impl GraphTensor {
             let s = self.reshape((a * b * c, d, e));
 
             // Broadcasted Multiply
-            let mul = s.expand(2, f) * w.expand(1, d);
+            let mul = s.expand_dim(2, f) * w.expand_dim(1, d);
 
             // Sum Reduce
             mul.sum(3).reshape((a, b, c, d, f))
@@ -197,7 +198,7 @@ mod tests {
         let (a_data, b_data) = (random_vec(4), random_vec(6));
         let a = cx.tensor(('a', 'b'));
         a.set_dyn(a_data.clone(), (2, 2));
-        let a = a.expand(0, 1);
+        let a = a.expand_dim(0, 1);
         let b = cx.tensor((1, 'b', 3));
         b.set_dyn(b_data.clone(), (1, 2, 3));
         let c = a.matmul(b);

@@ -72,7 +72,7 @@ impl Module<GraphTensor> for Linear {
             self.weight
         });
         if let Some(bias) = self.bias {
-            output += bias.expand_to(output.shape);
+            output += bias.expand(output.shape);
         }
         output
     }

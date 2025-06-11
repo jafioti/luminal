@@ -58,10 +58,10 @@ fn apply_rotary_embeddings(input: GraphTensor, prev_seq: Expression) -> GraphTen
         .pow(input.graph().arange(d / 2) * 2 / d)
         .reciprocal(); // [d / 2]
     let pos = input.graph().arange(s) + prev_seq; // [s]
-    let freqs = pos.expand(1, 1).matmul(inv_freq.expand(0, 1)); // [s, d / 2]
+    let freqs = pos.expand_dim(1, 1).matmul(inv_freq.expand_dim(0, 1)); // [s, d / 2]
     let freqs = freqs
         .concat_along(freqs, freqs.shape.last_axis())
-        .expand_to((b, h, s, d))
+        .expand((b, h, s, d))
         .contiguous(); // [b, h, s, d]
 
     // Rotate input
@@ -120,8 +120,8 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         let values = v_cache.concat_along(values, 2);
 
         // Repeat the KV States for Grouped-Query Attention
-        let repeated_keys = keys.expand(2, N_HEADS / N_KV_HEADS);
-        let repeated_values = values.expand(2, N_HEADS / N_KV_HEADS);
+        let repeated_keys = keys.expand_dim(2, N_HEADS / N_KV_HEADS);
+        let repeated_values = values.expand_dim(2, N_HEADS / N_KV_HEADS);
 
         // Calculate attention weights
         let mut attention_weights = queries
@@ -132,9 +132,9 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         let attention_mask = self.k_proj.graph().triu(seq, 1) * f32::MIN;
         attention_weights += attention_mask
             .pad(((0, 0), (prev_seq, 0)))
-            .expand(0, batch)
-            .expand(1, N_KV_HEADS)
-            .expand(2, N_HEADS / N_KV_HEADS);
+            .expand_dim(0, batch)
+            .expand_dim(1, N_KV_HEADS)
+            .expand_dim(2, N_HEADS / N_KV_HEADS);
 
         // Calculate final outputs
         let output = attention_weights
