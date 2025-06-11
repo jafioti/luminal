@@ -81,7 +81,7 @@ impl Module<GraphTensor> for Conv1D {
             .matmul(w)
             .permute((0, 1, 3, 2));
         if let Some(b) = self.bias {
-            out += b.expand_to(out.shape);
+            out += b.expand(out.shape);
         }
 
         // Reshape back to original shape
@@ -171,7 +171,7 @@ impl Conv2D {
             .matmul(input_pooled)
             .reshape((batch, self.ch_out, dimx_out, dimy_out));
         if let Some(b) = self.bias {
-            o += b.expand_to(o.shape);
+            o += b.expand(o.shape);
         }
         if expanded {
             o.reshape((self.ch_out, dimx_out, dimy_out))

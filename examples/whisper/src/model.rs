@@ -265,7 +265,7 @@ impl Module<GraphTensor> for AudioEncoder {
         let mut x = x.permute((0, 2, 1));
 
         // Sinusoidal positional embedding
-        x += sinusoids(D_MODEL, seq / 2, x.graph()).expand_to(x.shape);
+        x += sinusoids(D_MODEL, seq / 2, x.graph()).expand(x.shape);
 
         // Transformer layers
         let out = self.layers.forward(x);
@@ -398,7 +398,7 @@ impl Module<(GraphTensor, GraphTensor, &[KVCache])> for TextDecoder {
             .pos_embedding
             .slice((prev_dec_seq..cur_dec_seq + prev_dec_seq, ..))
             .contiguous()
-            .expand_to(x.shape);
+            .expand(x.shape);
 
         // Run through layers and collect new caches
         let (mut new_caches, mut enc_states) = (vec![], vec![]);

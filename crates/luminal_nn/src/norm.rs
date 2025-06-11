@@ -61,10 +61,10 @@ impl Module<GraphTensor> for LayerNorm {
         }
         input = input.std_norm(input.shape.last_axis(), self.epsilon);
         if let Some(w) = self.weight {
-            input *= w.expand_to(input.shape);
+            input *= w.expand(input.shape);
         }
         if let Some(b) = self.bias {
-            input += b.expand_to(input.shape);
+            input += b.expand(input.shape);
         }
         input
     }

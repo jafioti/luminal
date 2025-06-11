@@ -30,14 +30,8 @@ impl GraphTensor {
         self
     }
 
-    /// Expand tensor to a new shape following PyTorch semantics
-    pub fn expand(mut self, shape: impl ToShape) -> GraphTensor {
-        self.shape.expand(shape);
-        self
-    }
-
     /// Broadcast tensor along new dimensions (with explicitly given dest shape)
-    pub fn expand_to(mut self, shape: impl ToShape) -> GraphTensor {
+    pub fn expand(mut self, shape: impl ToShape) -> GraphTensor {
         for (i, s) in shape.to_shape().into_iter().enumerate() {
             if self.shape.len() <= i || self.shape.dims[self.shape.indexes[i]] != s {
                 self.shape.expand_dim(i, s);

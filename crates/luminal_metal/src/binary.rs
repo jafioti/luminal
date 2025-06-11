@@ -290,8 +290,8 @@ mod tests {
             .tensor(10)
             .set(vec![1., 2., 3., 4., 5., 6., 7., 8., 9., 10.]);
         let b = cx.tensor(()).set(vec![1.]);
-        let mut c = (a - b.expand_to(a.shape)).retrieve();
-        let mut d = (-a + b.expand_to(a.shape)).retrieve();
+        let mut c = (a - b.expand(a.shape)).retrieve();
+        let mut d = (-a + b.expand(a.shape)).retrieve();
 
         cx.execute();
 

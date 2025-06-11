@@ -61,7 +61,7 @@ fn apply_rotary_embeddings(input: GraphTensor, prev_seq: Expression) -> GraphTen
     let freqs = pos.expand_dim(1, 1).matmul(inv_freq.expand_dim(0, 1)); // [s, d / 2]
     let freqs = freqs
         .concat_along(freqs, freqs.shape.last_axis())
-        .expand_to((b, h, s, d))
+        .expand((b, h, s, d))
         .contiguous(); // [b, h, s, d]
 
     // Rotate input

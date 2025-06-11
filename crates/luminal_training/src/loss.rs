@@ -41,9 +41,8 @@ pub fn huber_loss(
     let abs_error = (prediction - target).abs();
     let delta_tensor = prediction.graph().constant(delta);
     let huber_error = (0.5 * (prediction - target).square())
-        * abs_error.lt(delta_tensor.expand_to(abs_error.shape))
-        + (delta * (abs_error - 0.5 * delta))
-            * abs_error.ge(delta_tensor.expand_to(abs_error.shape));
+        * abs_error.lt(delta_tensor.expand(abs_error.shape))
+        + (delta * (abs_error - 0.5 * delta)) * abs_error.ge(delta_tensor.expand(abs_error.shape));
     huber_error.mean(huber_error.shape.all_axes())
 }
 
