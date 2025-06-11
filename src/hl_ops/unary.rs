@@ -108,7 +108,6 @@ impl GraphTensor {
     }
 
     /// Normalize the tensor along `axes` using an Lp norm.
-    /// Equivalent to PyTorch's [`F.normalize`](https://pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html).
     pub fn normalize(self, p: f32, axes: impl ToAxes, epsilon: f32) -> GraphTensor {
         let norm = self.abs().pow(p).sum(axes).pow(1.0 / p);
         self / norm.maximum_f32(epsilon).expand_to(self.shape)
