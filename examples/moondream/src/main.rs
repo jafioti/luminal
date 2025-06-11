@@ -65,7 +65,7 @@ fn main() {
     let model = model::Moondream::new(&mut cx);
     let mut model_weights = params(&model);
     cx.keep_tensors(&model_weights);
-    let img = cx.constant(0).expand_to((1, 64, 64, model::VIS_DIM));
+    let img = cx.constant(0).expand((1, 64, 64, model::VIS_DIM));
     let (logits, mut cache_dest) = model.forward((img, input, &cache_src));
     let mut logits = logits
         .slice((.., Expression::from('s') - 1.., ..))

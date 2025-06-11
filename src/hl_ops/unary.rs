@@ -90,13 +90,13 @@ impl GraphTensor {
             .add(epsilon)
             .sqrt()
             .reciprocal()
-            .expand_to(self.shape)
+            .expand(self.shape)
             .mul(self)
     }
 
     /// Center so mean is 0.0
     pub fn mean_norm(self, axes: impl ToAxes) -> GraphTensor {
-        self - self.mean(axes).expand_to(self.shape)
+        self - self.mean(axes).expand(self.shape)
     }
 
     /// Applies a layer norm along an axis
@@ -109,30 +109,30 @@ impl GraphTensor {
 
     /// Applies a softmax function along an axis
     pub fn softmax(self, axes: impl ToAxes) -> GraphTensor {
-        let m = self - self.max(axes.to_axes()).expand_to(self.shape);
+        let m = self - self.max(axes.to_axes()).expand(self.shape);
         let exp = m.exp();
-        exp / exp.sum(axes).expand_to(exp.shape)
+        exp / exp.sum(axes).expand(exp.shape)
     }
 
     /// Applies a log softmax function along an axis
     pub fn log_softmax(self, axes: impl ToAxes) -> GraphTensor {
-        let m = self - self.max(axes.to_axes()).expand_to(self.shape);
-        m - m.exp().sum(axes.to_axes()).log().expand_to(m.shape)
+        let m = self - self.max(axes.to_axes()).expand(self.shape);
+        m - m.exp().sum(axes.to_axes()).log().expand(m.shape)
     }
 
     /// Get the indicies of the max elements along the last axis
     pub fn argmax(self) -> GraphTensor {
         // Get one-hot along last dimension
-        let x_equal = self.eq(self.max(self.shape.len() - 1).expand_to(self.shape));
+        let x_equal = self.eq(self.max(self.shape.len() - 1).expand(self.shape));
         // Create index arange for last dimension
         let r = self
             .graph()
             .constant(1.)
-            .expand_to(ShapeTracker::new(self.shape.dims().last().unwrap()))
+            .expand(self.shape.dims().last().unwrap())
             .cumsum_last_dim()
             - 1.;
         // Multiply one-hot by expanded index arange
-        (x_equal * r.expand_to(self.shape)).max(self.shape.len() - 1)
+        (x_equal * r.expand(self.shape)).max(self.shape.len() - 1)
     }
 
     /// Take the absolute value

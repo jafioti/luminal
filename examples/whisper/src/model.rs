@@ -93,7 +93,7 @@ impl Module<(GraphTensor, Option<KVCache>, bool)> for SelfAttention {
                 let (_, _, _, prev_seq) = c.dims4();
                 attention_mask = attention_mask.pad(((0, 0), (prev_seq, 0)));
             }
-            attention_weights += attention_mask.expand(0, batch).expand(1, HEADS);
+            attention_weights += attention_mask.expand_dim(0, batch).expand_dim(1, HEADS);
         }
 
         // Calculate final outputs
@@ -249,7 +249,8 @@ fn sinusoids(channels: usize, length: Expression, cx: &mut Graph) -> GraphTensor
         .map(|i| (i as f32 * (-log_timescale_increment)).exp())
         .collect::<Vec<_>>();
     let mut inv_timescales = cx.tensor(channels / 2).set(inv_timescales);
-    let scaled_time = cx.arange(length).expand(1, channels / 2) * inv_timescales.expand(0, length);
+    let scaled_time =
+        cx.arange(length).expand_dim(1, channels / 2) * inv_timescales.expand_dim(0, length);
     scaled_time.sin().concat_along(scaled_time.cos(), 1)
 }
 
@@ -264,7 +265,7 @@ impl Module<GraphTensor> for AudioEncoder {
         let mut x = x.permute((0, 2, 1));
 
         // Sinusoidal positional embedding
-        x += sinusoids(D_MODEL, seq / 2, x.graph()).expand_to(x.shape);
+        x += sinusoids(D_MODEL, seq / 2, x.graph()).expand(x.shape);
 
         // Transformer layers
         let out = self.layers.forward(x);
@@ -397,7 +398,7 @@ impl Module<(GraphTensor, GraphTensor, &[KVCache])> for TextDecoder {
             .pos_embedding
             .slice((prev_dec_seq..cur_dec_seq + prev_dec_seq, ..))
             .contiguous()
-            .expand_to(x.shape);
+            .expand(x.shape);
 
         // Run through layers and collect new caches
         let (mut new_caches, mut enc_states) = (vec![], vec![]);

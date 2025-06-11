@@ -150,7 +150,7 @@ impl Add<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn add(self, rhs: f32) -> Self::Output {
-        self + self.graph().constant(rhs).expand_to(self.shape)
+        self + self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -158,7 +158,7 @@ impl<S: Into<Expression>> Add<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn add(self, rhs: S) -> Self::Output {
-        self + self.graph().constant(rhs).expand_to(self.shape)
+        self + self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -166,7 +166,7 @@ impl Sub<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn sub(self, rhs: f32) -> Self::Output {
-        self - self.graph().constant(rhs).expand_to(self.shape)
+        self - self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -174,7 +174,7 @@ impl<S: Into<Expression>> Sub<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn sub(self, rhs: S) -> Self::Output {
-        self - self.graph().constant(rhs).expand_to(self.shape)
+        self - self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -182,7 +182,7 @@ impl Mul<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn mul(self, rhs: f32) -> Self::Output {
-        self * self.graph().constant(rhs).expand_to(self.shape)
+        self * self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -190,7 +190,7 @@ impl<S: Into<Expression>> Mul<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn mul(self, rhs: S) -> Self::Output {
-        self * self.graph().constant(rhs).expand_to(self.shape)
+        self * self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -199,7 +199,7 @@ impl Div<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn div(self, rhs: f32) -> Self::Output {
-        self * self.graph().constant(rhs.recip()).expand_to(self.shape)
+        self * self.graph().constant(rhs.recip()).expand(self.shape)
     }
 }
 
@@ -207,7 +207,7 @@ impl<S: Into<Expression>> Div<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn div(self, rhs: S) -> Self::Output {
-        self / self.graph().constant(rhs).expand_to(self.shape)
+        self / self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -215,7 +215,7 @@ impl Rem<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn rem(self, rhs: f32) -> Self::Output {
-        self % self.graph().constant(rhs).expand_to(self.shape)
+        self % self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -223,7 +223,7 @@ impl<S: Into<Expression>> Rem<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn rem(self, rhs: S) -> Self::Output {
-        self % self.graph().constant(rhs).expand_to(self.shape)
+        self % self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -279,7 +279,7 @@ impl GraphTensor {
 
     /// Take the elementwise maximum of a tensor and a float
     pub fn maximum_f32(self, rhs: f32) -> GraphTensor {
-        self.maximum(self.graph().constant(rhs).expand_to(self.shape))
+        self.maximum(self.graph().constant(rhs).expand(self.shape))
     }
 
     /// Take the elementwise minimum of two tensors
