@@ -110,7 +110,7 @@ impl GraphTensor {
     /// Normalize the tensor along `axes` using an Lp norm.
     pub fn normalize(self, p: f32, axes: impl ToAxes, epsilon: f32) -> GraphTensor {
         let norm = self.abs().pow(p).sum(axes).pow(1.0 / p);
-        self / norm.maximum_f32(epsilon).expand_to(self.shape)
+        self / norm.maximum_f32(epsilon).expand(self.shape)
     }
 
     /// Applies a softmax function along an axis
