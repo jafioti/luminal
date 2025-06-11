@@ -54,7 +54,7 @@ fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> Gra
     let freqs = (input.graph().arange(head_dim / 2) * 2.0) / (head_dim.to_usize().unwrap() as f32);
     let inv_freqs = 10_000_f32.pow(freqs).reciprocal();
     let pos = input.graph().arange(seq) + prev_seq;
-    let emb = pos.expand(1, 1).matmul(inv_freqs.expand(0, 1));
+    let emb = pos.expand_dim(1, 1).matmul(inv_freqs.expand_dim(0, 1));
 
     // Split input into evens and odds
     let split = input.reshape((batch, n_heads, seq, head_dim / 2, 2));
@@ -114,8 +114,8 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         let attention_mask = self.k_proj.graph().triu(seq, 1) * f16::MIN.to_f32();
         attention_weights += attention_mask
             .pad(((0, 0), (prev_seq, 0)))
-            .expand(0, batch)
-            .expand(1, N_HEADS);
+            .expand_dim(0, batch)
+            .expand_dim(1, N_HEADS);
 
         // Calculate final outputs
         let output = attention_weights

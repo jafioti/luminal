@@ -57,7 +57,7 @@ impl Module<GraphTensor> for Conv1D {
         let n_expands = 4 - input.shape.len();
         let mut inp = input;
         for _ in 0..n_expands {
-            inp = inp.expand(0, 1);
+            inp = inp.expand_dim(0, 1);
         }
 
         let batch1 = inp.dims()[0];
@@ -144,7 +144,7 @@ impl Conv2D {
         let mut expanded = false;
         if input.shape.len() == 3 {
             // Expand batch
-            input = input.expand(0, 1);
+            input = input.expand_dim(0, 1);
             expanded = true;
         }
         let (batch, _, dimx_in, dimy_in) = input.dims4();
@@ -165,12 +165,11 @@ impl Conv2D {
                 dimx_out * dimy_out,
             ));
 
-        let mut o = self.weight.expand(0, batch).matmul(input_pooled).reshape((
-            batch,
-            self.ch_out,
-            dimx_out,
-            dimy_out,
-        ));
+        let mut o = self
+            .weight
+            .expand_dim(0, batch)
+            .matmul(input_pooled)
+            .reshape((batch, self.ch_out, dimx_out, dimy_out));
         if let Some(b) = self.bias {
             o += b.expand_to(o.shape);
         }

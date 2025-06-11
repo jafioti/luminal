@@ -125,7 +125,7 @@ impl Compiler for Autograd {
                 if valid_set.contains(&inps[0].id) {
                     prev_grad
                         .shape
-                        .expand(op.0, inps[0].shape.dims[inps[0].shape.indexes[op.0]]);
+                        .expand_dim(op.0, inps[0].shape.dims[inps[0].shape.indexes[op.0]]);
                     add_grad(prev_grad, inps[0], graph, &mut grads);
                 }
             } else if let Some(op) = unsafe { graph_ref.as_ref().unwrap() } // Needed to get around multiple borrows
@@ -138,7 +138,7 @@ impl Compiler for Autograd {
                     // fwd_nod is already max_reduce(x)
                     prev_grad
                         .shape
-                        .expand(op.0, inps[0].shape.dims[inps[0].shape.indexes[op.0]]);
+                        .expand_dim(op.0, inps[0].shape.dims[inps[0].shape.indexes[op.0]]);
                     let reduced = GraphTensor::from_id(fwd_node, prev_grad.shape, graph_ref);
                     let grad = inps[0].eq(reduced) * prev_grad;
                     add_grad(grad, inps[0], graph, &mut grads);

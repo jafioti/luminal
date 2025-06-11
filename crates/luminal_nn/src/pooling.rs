@@ -23,7 +23,7 @@ impl AvgPool2D {
         let mut expanded = false;
         if input.shape.len() == 3 {
             // Expand batch
-            input = input.expand(0, 1);
+            input = input.expand_dim(0, 1);
             expanded = true;
         }
         let (batch, ch_in, dimx_in, dimy_in) = input.dims4();
@@ -73,7 +73,7 @@ impl AdaptiveAvgPool2D {
         let mut expanded = false;
         // Handle missing batch dimension
         if input.shape.len() == 3 {
-            input = input.expand(0, 1);
+            input = input.expand_dim(0, 1);
             expanded = true;
         }
 

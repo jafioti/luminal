@@ -76,9 +76,9 @@ impl Graph {
         let to = to.into();
         if to.to_usize().map(|i| i == 1).unwrap_or_default() {
             // Single number ARange is just 0
-            self.constant(0.).expand(0, to)
+            self.constant(0.).expand_dim(0, to)
         } else {
-            self.constant(1.).expand(0, to).cumsum_last_dim() - 1.
+            self.constant(1.).expand_dim(0, to).cumsum_last_dim() - 1.
         }
     }
 
@@ -106,8 +106,8 @@ impl Graph {
     /// Same API as https://pytorch.org/docs/stable/generated/torch.tril
     pub fn tril(&mut self, size: impl Into<Expression>, diagonal: i32) -> GraphTensor {
         let size = size.into();
-        let horizontal = self.arange(size).expand(0, size);
-        let vertical = self.arange(size).expand(1, size);
+        let horizontal = self.arange(size).expand_dim(0, size);
+        let vertical = self.arange(size).expand_dim(1, size);
 
         (horizontal - (diagonal as f32 + 1.)).lt(vertical)
     }
@@ -117,8 +117,8 @@ impl Graph {
     /// Same API as https://pytorch.org/docs/stable/generated/torch.triu
     pub fn triu(&mut self, size: impl Into<Expression>, diagonal: i32) -> GraphTensor {
         let size = size.into();
-        let horizontal = self.arange(size).expand(0, size);
-        let vertical = self.arange(size).expand(1, size);
+        let horizontal = self.arange(size).expand_dim(0, size);
+        let vertical = self.arange(size).expand_dim(1, size);
 
         (horizontal - (diagonal as f32 - 1.)).gt(vertical)
     }
@@ -132,9 +132,9 @@ impl GraphTensor {
         let one_hot = indexes
             .graph()
             .arange(vocab)
-            .expand(0, batch)
-            .eq(indexes.expand(1, vocab));
-        (one_hot.expand(2, dim) * self.expand(0, batch)).sum(1)
+            .expand_dim(0, batch)
+            .eq(indexes.expand_dim(1, vocab));
+        (one_hot.expand_dim(2, dim) * self.expand_dim(0, batch)).sum(1)
     }
 
     /// Print the value of this tensor when the graph is ran

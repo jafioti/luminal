@@ -36,7 +36,21 @@ fn test_permute() {
 fn test_expand() {
     let mut cx = Graph::new();
     let a = cx.tensor(3).set([1., 2., 3.]);
-    let b = a.expand(1, 2).retrieve();
+    let b = a.expand_dim(1, 2).retrieve();
+    cx.execute();
+
+    let d_dev = Cpu::default();
+    let d_a = d_dev.tensor([1., 2., 3.]);
+    let d_b: dfdx::tensor::Tensor<Rank2<3, 2>, f32, Cpu> = d_a.broadcast();
+
+    assert_close(&b.data(), &d_b.as_vec());
+}
+
+#[test]
+fn test_expand_pytorch() {
+    let mut cx = Graph::new();
+    let a = cx.tensor(3).set([1., 2., 3.]);
+    let b = a.expand((3, 2)).retrieve();
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -193,7 +207,7 @@ fn test_permute_mul() {
     let mut cx = Graph::new();
     let a = cx.tensor((3, 2)).set([[1., 2.], [3., 2.], [3., 1.]]);
     let b = cx.tensor((3, 2)).set([[1., 2.], [3., -1.], [3., 0.]]);
-    let c = a.expand(2, 3) * b.expand(2, 3);
+    let c = a.expand_dim(2, 3) * b.expand_dim(2, 3);
     c.retrieve();
     cx.execute();
 

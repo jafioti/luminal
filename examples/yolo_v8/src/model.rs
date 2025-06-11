@@ -15,8 +15,8 @@ impl Module<GraphTensor> for Upsample {
     type Output = GraphTensor;
     fn forward(&self, xs: GraphTensor) -> GraphTensor {
         let (batch, channels, h, w) = xs.dims4();
-        xs.expand(3, self.scale_factor)
-            .expand(5, self.scale_factor)
+        xs.expand_dim(3, self.scale_factor)
+            .expand_dim(5, self.scale_factor)
             .reshape((
                 batch,
                 channels,
@@ -47,12 +47,12 @@ impl ConvBlock {
         let eps = 1e-3;
         let mut conv = Conv2D::new(ch_in, ch_out, kernel, stride, dilation, false, cx);
         let original_weight = conv.weight;
-        let running_mean = cx.constant(0.).expand(0, ch_out);
-        let running_var = cx.constant(1.).expand(0, ch_out);
-        let o_weight = cx.constant(1.).expand(0, ch_out);
-        let o_bias = cx.constant(0.).expand(0, ch_out);
+        let running_mean = cx.constant(0.).expand_dim(0, ch_out);
+        let running_var = cx.constant(1.).expand_dim(0, ch_out);
+        let o_weight = cx.constant(1.).expand_dim(0, ch_out);
+        let o_bias = cx.constant(0.).expand_dim(0, ch_out);
         let std_ = o_weight / ((running_var + eps).sqrt());
-        let weight = conv.weight * std_.expand(1, conv.weight.dims2().1);
+        let weight = conv.weight * std_.expand_dim(1, conv.weight.dims2().1);
         let bias = o_bias - (std_ * running_mean);
         conv.weight = weight;
         conv.bias = Some(bias);
@@ -542,7 +542,7 @@ impl Module<(GraphTensor, GraphTensor, GraphTensor)> for DetectionHead {
         let xs2 = forward_cv(xs2, 2);
 
         let (anchors, strides) = make_anchors(xs0, xs1, xs2, (8, 16, 32), 0.5);
-        let anchors = anchors.permute((1, 0)).expand(0, 1);
+        let anchors = anchors.permute((1, 0)).expand_dim(0, 1);
         let strides = strides.permute((1, 0));
 
         let reshape = |xs: GraphTensor| {
@@ -607,10 +607,10 @@ fn make_anchors(
         let (_, _, h, w) = xs.dims4();
         let sx = cx.arange(w) + grid_cell_offset as f32;
         let sy = cx.arange(h) + grid_cell_offset as f32;
-        let sx = sx.reshape((1, w)).expand(0, h).reshape(h * w);
-        let sy = sy.reshape((h, 1)).expand(1, w).reshape(h * w);
-        anchor_points.push(sx.expand(0, 1).concat_along(sy.expand(0, 1), 0));
-        stride_tensor.push(cx.constant(1.).expand(0, h * w) * stride as f32);
+        let sx = sx.reshape((1, w)).expand_dim(0, h).reshape(h * w);
+        let sy = sy.reshape((h, 1)).expand_dim(1, w).reshape(h * w);
+        anchor_points.push(sx.expand_dim(0, 1).concat_along(sy.expand_dim(0, 1), 0));
+        stride_tensor.push(cx.constant(1.).expand_dim(0, h * w) * stride as f32);
     }
     let anchor_points = anchor_points
         .into_iter()
@@ -620,7 +620,7 @@ fn make_anchors(
         .into_iter()
         .reduce(|acc, t| acc.concat_along(t, 0))
         .unwrap()
-        .expand(1, 1);
+        .expand_dim(1, 1);
     (anchor_points, stride_tensor)
 }
 
