@@ -121,7 +121,7 @@ impl TermToString for (GraphTerm, Vec<String>, usize) {
 }
 
 fn main() {
-    let (g, r) = kernels::make_tiled_matmul_basic();
+    let (g, r) = kernels::make_tiled_matmul();
     match run_egglog_program(include_str!("code.lisp")) {
         Ok((s, _serialized, termdag, root)) => {
             if s.is_empty() {
@@ -182,6 +182,7 @@ fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (Str
 
     for (n_kernel, (kernel_graph, inputs, outputs, smem_buffers)) in kernels.into_iter().enumerate()
     {
+        println!("SMEM BUFFERS: {:?}", smem_buffers);
         validate_graph(&kernel_graph);
         // display_graph(&kernel_graph, &[]);
         let inputs: Vec<_> = inputs
@@ -522,7 +523,7 @@ fn make_kernel(
             GraphTerm::ZeroStrideLoad { range, stride } => {
                 // Search back for last loopin of same range with stride of 0
                 let mut curr = node;
-                let mut found = None;
+                let found;
                 let mut offset = vec![];
                 loop {
                     let prev = kernel_graph
@@ -537,14 +538,17 @@ fn make_kernel(
                         level,
                     ) = kernel_graph.node_weight(prev).unwrap()
                     {
-                        if *prev_range == *range {
+                        if *prev_range == *range && prev_stride == "0" {
                             // Found
                             found = Some((prev, *level));
                             break;
                         }
-                        offset.push(
-                            prev_stride.replace("z", &var_to_char(loop_indexes[&prev]).to_string()),
-                        );
+                        if *level < 6 && *level > 2 && prev_stride != "0" {
+                            offset.push(prev_stride.replace(
+                                "z",
+                                &format!("loop_{}", var_to_char(loop_indexes[&prev])),
+                            ));
+                        }
                     } else {
                         panic!("found non-loop-in!");
                     }
@@ -564,21 +568,46 @@ fn make_kernel(
                         // Threadblock
                         // We need to get the smem pointer to write to and pass along
                         let buffer = smem_buffers[&node];
-                        *prev_max_var += 1;
+                        let mut smem_ptr = buffer;
+                        if !offset.is_empty() {
+                            *prev_max_var += 1;
+                            smem_ptr = *prev_max_var;
+                            kernel_lines.push(format!(
+                                "{}float* {} = {} + {};",
+                                (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
+                                var_to_char(smem_ptr),
+                                var_to_char(buffer),
+                                offset.iter().join(" + ")
+                            ));
+                        }
+                        if kernel_lines
+                            .last()
+                            .map(|i| i.contains("__syncthreads()"))
+                            .unwrap_or_default()
+                        {
+                            kernel_lines.pop();
+                        } else {
+                            kernel_lines.push(format!(
+                                "{}__syncthreads();",
+                                (0..loop_level.saturating_sub(6)).map(|_| "\t").join("")
+                            ));
+                        }
                         kernel_lines.push(format!(
-                            "float* {} = {} + {}",
-                            var_to_char(*prev_max_var),
-                            var_to_char(buffer),
-                            offset.iter().join(" + ")
-                        ));
-                        kernel_lines.push(format!(
-                            "{}[{}] = *{} + {}",
-                            var_to_char(*prev_max_var),
-                            loop_indexes[&base],
+                            "{}{}[loop_{}] = *{} + {};",
+                            (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
+                            var_to_char(smem_ptr),
+                            var_to_char(loop_indexes[&base]),
                             var_to_char(node_to_var[&src].0),
-                            stride.replace("z", &var_to_char(loop_indexes[&base]).to_string())
+                            stride.replace(
+                                "z",
+                                &format!("loop_{}", var_to_char(loop_indexes[&base]))
+                            )
                         ));
-                        node_to_var.insert(node, (*prev_max_var, false));
+                        kernel_lines.push(format!(
+                            "{}__syncthreads();",
+                            (0..loop_level.saturating_sub(6)).map(|_| "\t").join("")
+                        ));
+                        node_to_var.insert(node, (smem_ptr, false));
                     }
                     6.. => {
                         // Thread
@@ -1082,15 +1111,13 @@ fn split_kernels(
     for (kernel_graph, inputs, outputs, smem_buffers) in &mut kernel_graphs {
         // Get all ZeroStrideLoad ones at thread level 0..3
         for node in kernel_graph.node_indices() {
-            if let (GraphTerm::ZeroStrideLoad { range, .. }, level) =
+            if let (GraphTerm::ZeroStrideLoad { range, .. }, _) =
                 kernel_graph.node_weight(node).unwrap()
             {
-                if *level < 3 || *level > 5 {
-                    continue;
-                }
                 // Walk backwards to find threadblock level loopins and multiply all ranges with non-zero strides
                 let mut size = range.to_string();
                 let mut curr = node;
+                let mut base_level;
                 loop {
                     let prev = graph
                         .neighbors_directed(curr, Direction::Incoming)
@@ -1104,14 +1131,20 @@ fn split_kernels(
                         prev_level,
                     ) = kernel_graph.node_weight(prev).unwrap()
                     {
+                        base_level = *prev_level;
                         if *prev_level < 3 {
                             break;
+                        } else if *prev_level < 6 {
+                            if *stride != "0" {
+                                size = format!("{size} * {prev_range}");
+                            }
                         }
-                        if *stride != "0" {
-                            size = format!("{size} * {prev_range}");
-                        }
+                        // UNCLEAR IF THIS IS CORRECT OR NOT. THIS MULTIPLIES ALL THREADBLOCK DIMS
                     }
                     curr = prev;
+                }
+                if base_level > 5 {
+                    continue;
                 }
                 let buf_index = inputs.len() + outputs.len() + smem_buffers.len();
                 smem_buffers.push((buf_index, node, size));

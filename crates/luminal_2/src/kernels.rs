@@ -259,3 +259,77 @@ pub fn make_tiled_matmul_basic() -> (StableGraph<GraphTerm, u8, Directed>, NodeI
 
     (graph, out)
 }
+
+pub fn make_tiled_matmul() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
+    let mut graph = StableGraph::new();
+    let mut a = graph.add_node(GraphTerm::Tensor {
+        name: "A".to_string(),
+    });
+    a = loop_in(a, "M / 8", "z * K * 8", &mut graph);
+    a = loop_in(a, "N / 8", "0", &mut graph);
+    a = pad_in(a, &mut graph, 1);
+    a = loop_in(a, "8", "z * K", &mut graph);
+    a = loop_in(a, "8", "0", &mut graph);
+    a = pad_in(a, &mut graph, 1);
+    a = loop_in(a, "K / 8", "z * 8", &mut graph);
+    a = unary(
+        a,
+        GraphTerm::ZeroStrideLoad {
+            range: "8".to_string(),
+            stride: "z".to_string(),
+        },
+        &mut graph,
+    );
+    a = loop_in(a, "8", "z", &mut graph);
+
+    let mut b = graph.add_node(GraphTerm::Tensor {
+        name: "B".to_string(),
+    });
+    b = loop_in(b, "M / 8", "0", &mut graph);
+    b = loop_in(b, "N / 8", "z * 8", &mut graph);
+    b = pad_in(b, &mut graph, 1);
+    b = loop_in(b, "8", "0", &mut graph);
+    b = loop_in(b, "8", "z", &mut graph);
+    b = pad_in(b, &mut graph, 1);
+    b = loop_in(b, "K / 8", "z * N * 8", &mut graph);
+    b = unary(
+        b,
+        GraphTerm::ZeroStrideLoad {
+            range: "8".to_string(),
+            stride: "z".to_string(),
+        },
+        &mut graph,
+    );
+    b = loop_in(b, "8", "z * N", &mut graph);
+
+    let mut acc = graph.add_node(GraphTerm::Tensor {
+        name: "acc".to_string(),
+    });
+    acc = loop_in(acc, "M / 8", "0", &mut graph);
+    acc = loop_in(acc, "N / 8", "0", &mut graph);
+    acc = pad_in(acc, &mut graph, 1);
+    acc = loop_in(acc, "8", "0", &mut graph);
+    acc = loop_in(acc, "8", "0", &mut graph);
+    acc = pad_in(acc, &mut graph, 1);
+    acc = loop_in(acc, "K / 8", "Acca", &mut graph);
+    acc = loop_in(acc, "8", "Accb", &mut graph);
+
+    let mul = graph.add_node(GraphTerm::Mul);
+    graph.add_edge(a, mul, 0);
+    graph.add_edge(b, mul, 0);
+
+    let add = graph.add_node(GraphTerm::Add);
+    graph.add_edge(mul, add, 0);
+    graph.add_edge(acc, add, 0);
+
+    let mut out = loop_out(add, "8", "Accb", &mut graph);
+    out = loop_out(out, "K / 8", "Acca", &mut graph);
+    out = pad_out(out, &mut graph, 1);
+    out = loop_out(out, "8", "z", &mut graph);
+    out = loop_out(out, "8", "z * N", &mut graph);
+    out = pad_out(out, &mut graph, 1);
+    out = loop_out(out, "N / 8", "z * 8", &mut graph);
+    out = loop_out(out, "M / 8", "z * N * 8", &mut graph);
+
+    (graph, out)
+}
