@@ -473,3 +473,117 @@ pub fn make_naive_attention() -> (StableGraph<GraphTerm, u8, Directed>, NodeInde
 
     (graph, output)
 }
+
+pub fn make_flash_attention() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
+    let mut graph = StableGraph::new();
+
+    // inputs
+    let mut q = graph.add_node(GraphTerm::Tensor {
+        name: "Q".to_string(),
+    });
+    q = loop_in(q, "4096", "z * 64", &mut graph);
+    q = loop_in(q, "4096", "0", &mut graph);
+    q = pad_in(q, &mut graph, 4);
+    q = loop_in(q, "64", "z", &mut graph);
+    let mut k = graph.add_node(GraphTerm::Tensor {
+        name: "K".to_string(),
+    });
+    k = loop_in(k, "4096", "0", &mut graph);
+    k = loop_in(k, "4096", "z", &mut graph);
+    k = pad_in(k, &mut graph, 4);
+    k = loop_in(k, "64", "z * 64", &mut graph);
+    let mut v = graph.add_node(GraphTerm::Tensor {
+        name: "V".to_string(),
+    });
+    v = loop_in(v, "4096", "0", &mut graph);
+    v = loop_in(v, "4096", "z * 64", &mut graph);
+    v = pad_in(v, &mut graph, 4);
+    v = loop_in(v, "64", "z", &mut graph);
+
+    // accumulators
+    let mut dot_acc = graph.add_node(GraphTerm::Tensor {
+        name: "dot_acc".to_string(),
+    });
+    dot_acc = loop_in(dot_acc, "4096", "z * 4096", &mut graph);
+    dot_acc = loop_in(dot_acc, "4096", "z", &mut graph);
+    dot_acc = pad_in(dot_acc, &mut graph, 4);
+    dot_acc = loop_in(dot_acc, "64", "AccDot", &mut graph);
+    let mut score_max_acc = graph.add_node(GraphTerm::Tensor {
+        name: "score_max_acc".to_string(),
+    });
+    score_max_acc = loop_in(score_max_acc, "4096", "z", &mut graph);
+    score_max_acc = pad_in(score_max_acc, &mut graph, 5);
+    score_max_acc = loop_in(score_max_acc, "4096", "AccScoreMax", &mut graph);
+    let mut exp_sum_acc = graph.add_node(GraphTerm::Tensor {
+        name: "exp_sum_acc".to_string(),
+    });
+    exp_sum_acc = loop_in(exp_sum_acc, "4096", "z", &mut graph);
+    exp_sum_acc = pad_in(exp_sum_acc, &mut graph, 5);
+    exp_sum_acc = loop_in(exp_sum_acc, "4096", "AccExpSum", &mut graph);
+    let mut output_acc = graph.add_node(GraphTerm::Tensor {
+        name: "output_acc".to_string(),
+    });
+    output_acc = loop_in(output_acc, "4096", "z * 64", &mut graph);
+    output_acc = loop_in(output_acc, "4096", "AccOutput", &mut graph);
+    output_acc = pad_in(output_acc, &mut graph, 4);
+    output_acc = loop_in(output_acc, "64", "z", &mut graph);
+
+    // get dot products
+    let dots = binary(
+        binary(q, k, GraphTerm::Mul, &mut graph),
+        dot_acc,
+        GraphTerm::Add,
+        &mut graph,
+    );
+    let new_max = binary(score_max_acc, dots, GraphTerm::Max, &mut graph);
+    let rescale = unary(
+        binary(
+            score_max_acc,
+            unary(dots, GraphTerm::Neg, &mut graph),
+            GraphTerm::Add,
+            &mut graph,
+        ),
+        GraphTerm::Exp,
+        &mut graph,
+    );
+    let weight = unary(
+        binary(
+            dots,
+            unary(new_max, GraphTerm::Neg, &mut graph),
+            GraphTerm::Add,
+            &mut graph,
+        ),
+        GraphTerm::Exp,
+        &mut graph,
+    );
+    let exp_sum_new = binary(
+        binary(exp_sum_acc, rescale, GraphTerm::Mul, &mut graph),
+        weight,
+        GraphTerm::Add,
+        &mut graph,
+    );
+    let weight_b = loop_in(weight, "64", "0", &mut graph);
+    let rescale_b = loop_in(rescale, "64", "0", &mut graph);
+    let mut partial_output = binary(
+        binary(output_acc, rescale_b, GraphTerm::Mul, &mut graph),
+        binary(weight_b, v, GraphTerm::Mul, &mut graph),
+        GraphTerm::Add,
+        &mut graph,
+    );
+    partial_output = loop_out(partial_output, "64", "z", &mut graph);
+    partial_output = loop_out(partial_output, "4096", "AccPartial", &mut graph);
+    partial_output = loop_in(partial_output, "64", "z", &mut graph);
+    let exp_sum = loop_out(exp_sum_new, "4096", "AccExpSum", &mut graph);
+    let exp_sum_b = loop_in(exp_sum, "64", "0", &mut graph);
+    let mut output = binary(
+        partial_output,
+        unary(exp_sum_b, GraphTerm::Recip, &mut graph),
+        GraphTerm::Mul,
+        &mut graph,
+    );
+    output = loop_out(output, "64", "z", &mut graph);
+    output = pad_out(output, &mut graph, 5);
+    output = loop_out(output, "4096", "z * 64", &mut graph);
+
+    (graph, output)
+}

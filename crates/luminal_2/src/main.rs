@@ -127,7 +127,7 @@ impl TermToString for (GraphTerm, Vec<String>, usize) {
 }
 
 fn main() {
-    let (g, r) = kernels::make_tiled_matmul();
+    let (g, r) = kernels::make_naive_attention();
     match run_egglog_program(include_str!("code.lisp")) {
         Ok((s, _serialized, termdag, root)) => {
             if s.is_empty() {
@@ -185,7 +185,10 @@ fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
 
 fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (String, TermId) {
     let (kernels, _root_kernel) = split_kernels(graph, root);
-
+    println!("Kernels: {}", kernels.len());
+    // for (kernel, inp, out, smem) in &kernels {
+    //     display_graph(&kernel, &[]);
+    // }
     for (n_kernel, (kernel_graph, inputs, outputs, smem_buffers)) in kernels.into_iter().enumerate()
     {
         println!("SMEM BUFFERS: {:?}", smem_buffers);
@@ -1003,8 +1006,8 @@ fn split_kernels(
             }
             if *src_kernel < real_kernel {
                 *src_kernel = real_kernel;
-                dfs_stack.push(source);
             }
+            dfs_stack.push(source);
         }
     }
 
