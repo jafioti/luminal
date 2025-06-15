@@ -61,8 +61,11 @@ enum GraphTerm {
     LoopOut { range: String, stride: String },
     Add,
     Mul,
+    Max,
     Exp,
+    Recip,
     Sin,
+    Neg,
     ZeroStrideLoad { range: String, stride: String },
 }
 
@@ -96,8 +99,11 @@ impl TermToString for GraphTerm {
         match self {
             GraphTerm::Add => "Add".to_string(),
             GraphTerm::Mul => "Mul".to_string(),
+            GraphTerm::Max => "Max".to_string(),
             GraphTerm::Exp => "Exp".to_string(),
             GraphTerm::Sin => "Sin".to_string(),
+            GraphTerm::Recip => "Recip".to_string(),
+            GraphTerm::Neg => "Neg".to_string(),
             GraphTerm::LoopIn { range, stride } => format!("LoopIn ({range}; {stride})"),
             GraphTerm::LoopOut { range, stride } => format!("LoopOut ({range}; {stride})"),
             GraphTerm::Tensor { name } => format!("Tensor({name})"),
@@ -628,55 +634,45 @@ fn make_kernel(
                     ),
                 );
             }
-            GraphTerm::Sin => {
+            GraphTerm::Sin | GraphTerm::Exp | GraphTerm::Neg | GraphTerm::Recip => {
                 *prev_max_var += 1;
                 let src = node_to_var[&kernel_graph
                     .neighbors_directed(node, Direction::Incoming)
                     .next()
                     .unwrap()];
                 node_to_var.insert(node, (*prev_max_var, false));
+                let inp = format!("{}{}", if src.1 { "*" } else { "" }, var_to_char(src.0));
+                let expr = match term {
+                    GraphTerm::Sin => format!("sin({inp})"),
+                    GraphTerm::Exp => format!("exp({inp})"),
+                    GraphTerm::Neg => format!("-{inp}"),
+                    GraphTerm::Recip => format!("1.0 / {inp}"),
+                    _ => panic!(),
+                };
                 kernel_lines.push(format!(
-                    "{}float {} = sin({}{});",
+                    "{}float {} = {expr};",
                     (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
                     var_to_char(*prev_max_var),
-                    if src.1 { "*" } else { "" },
-                    var_to_char(src.0)
                 ));
             }
-            GraphTerm::Exp => {
-                *prev_max_var += 1;
-                let src = node_to_var[&kernel_graph
-                    .neighbors_directed(node, Direction::Incoming)
-                    .next()
-                    .unwrap()];
-                node_to_var.insert(node, (*prev_max_var, false));
-                kernel_lines.push(format!(
-                    "{}float {} = exp({}{});",
-                    (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
-                    var_to_char(*prev_max_var),
-                    if src.1 { "*" } else { "" },
-                    var_to_char(src.0)
-                ));
-            }
-            GraphTerm::Mul | GraphTerm::Add => {
+            GraphTerm::Mul | GraphTerm::Add | GraphTerm::Max => {
                 *prev_max_var += 1;
                 let mut srcs = kernel_graph.neighbors_directed(node, Direction::Incoming);
                 let src_a = node_to_var[&srcs.next().unwrap()];
                 let src_b = node_to_var[&srcs.next().unwrap()];
                 node_to_var.insert(node, (*prev_max_var, false));
+                let inp_a = format!("{}{}", if src_a.1 { "*" } else { "" }, var_to_char(src_a.0));
+                let inp_b = format!("{}{}", if src_b.1 { "*" } else { "" }, var_to_char(src_b.0));
+                let expr = match &term {
+                    GraphTerm::Add => format!("{inp_a} + {inp_b}"),
+                    GraphTerm::Mul => format!("{inp_a} * {inp_b}"),
+                    GraphTerm::Max => format!("fmax({inp_a}, {inp_b}"),
+                    _ => panic!(),
+                };
                 kernel_lines.push(format!(
-                    "{}float {} = {}{} {} {}{};",
+                    "{}float {} = {expr};",
                     (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
-                    var_to_char(*prev_max_var),
-                    if src_a.1 { "*" } else { "" },
-                    var_to_char(src_a.0),
-                    match &term {
-                        GraphTerm::Add => "+",
-                        GraphTerm::Mul => "*",
-                        _ => panic!(),
-                    },
-                    if src_b.1 { "*" } else { "" },
-                    var_to_char(src_b.0)
+                    var_to_char(*prev_max_var)
                 ));
             }
         }
