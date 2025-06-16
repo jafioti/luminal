@@ -357,7 +357,7 @@ pub fn make_naive_attention() -> (StableGraph<GraphTerm, u8, Directed>, NodeInde
     });
     v = loop_in(v, "4096", "0", &mut graph);
     v = loop_in(v, "4096", "z * 64", &mut graph);
-    v = pad_in(v, &mut graph, 4);
+    v = pad_in(v, &mut graph, 5);
     v = loop_in(v, "64", "z", &mut graph);
 
     // accumulators
@@ -384,8 +384,8 @@ pub fn make_naive_attention() -> (StableGraph<GraphTerm, u8, Directed>, NodeInde
         name: "output_acc".to_string(),
     });
     output_acc = loop_in(output_acc, "4096", "z * 64", &mut graph);
+    output_acc = pad_in(output_acc, &mut graph, 5);
     output_acc = loop_in(output_acc, "4096", "AccOutput", &mut graph);
-    output_acc = pad_in(output_acc, &mut graph, 4);
     output_acc = loop_in(output_acc, "64", "z", &mut graph);
 
     // get dot products

@@ -122,12 +122,28 @@ impl TermToString for (GraphTerm, usize) {
 
 impl TermToString for (GraphTerm, Vec<String>, usize) {
     fn term_to_string(&self) -> String {
-        format!("{} [{}]", self.0.term_to_string(), self.1.len())
+        format!(
+            "{} [{}] {{{}}}",
+            self.0.term_to_string(),
+            self.1.len(),
+            self.2
+        )
+    }
+}
+
+impl TermToString for (GraphTerm, Vec<String>, Vec<usize>) {
+    fn term_to_string(&self) -> String {
+        format!(
+            "{} [{}] {{{:?}}}",
+            self.0.term_to_string(),
+            self.1.len(),
+            self.2
+        )
     }
 }
 
 fn main() {
-    let (g, r) = kernels::make_naive_attention();
+    let (g, r) = kernels::make_complex_kernel();
     match run_egglog_program(include_str!("code.lisp")) {
         Ok((s, _serialized, termdag, root)) => {
             if s.is_empty() {
@@ -147,6 +163,7 @@ fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
     for node in graph.node_indices() {
         let (curr_term, curr_level) = graph.node_weight(node).unwrap();
         if matches!(curr_term, GraphTerm::LoopIn { .. }) {
+            // All loopins must have outputs that are one level more, unless they are loopouts
             for new_node in graph.neighbors_directed(node, Direction::Outgoing) {
                 let (new_term, new_level) = graph.node_weight(new_node).unwrap();
                 if !matches!(new_term, GraphTerm::LoopOut { .. }) {
@@ -157,6 +174,7 @@ fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
                 }
             }
         } else if matches!(curr_term, GraphTerm::LoopOut { .. }) {
+            // All loopouts must have inputs that are one level more, unless they are loopins
             for new_node in graph.neighbors_directed(node, Direction::Incoming) {
                 let (new_term, new_level) = graph.node_weight(new_node).unwrap();
                 if !matches!(new_term, GraphTerm::LoopIn { .. }) {
@@ -179,16 +197,29 @@ fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
                     }
                 }
             }
+
+            if graph
+                .neighbors_directed(node, Direction::Incoming)
+                .next()
+                .is_none()
+            {
+                assert_eq!(*curr_level, 0, "Inputs must have level 0");
+            }
         }
     }
 }
 
 fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (String, TermId) {
-    let (kernels, _root_kernel) = split_kernels(graph, root);
-    println!("Kernels: {}", kernels.len());
-    // for (kernel, inp, out, smem) in &kernels {
-    //     display_graph(&kernel, &[]);
-    // }
+    let (kernels, root_kernel) = split_kernels(graph, root);
+    println!("Kernels: {} Root Kernel: {root_kernel}", kernels.len());
+    for (kernel, inp, out, smem) in &kernels {
+        println!("INP: {:?}", inp);
+        for i in inp {
+            assert!(kernel.contains_node(i.2));
+        }
+        println!("OUT: {:?}", out);
+        // display_graph(&kernel, &inp.iter().map(|i| i.2).collect_vec());
+    }
     for (n_kernel, (kernel_graph, inputs, outputs, smem_buffers)) in kernels.into_iter().enumerate()
     {
         println!("SMEM BUFFERS: {:?}", smem_buffers);
@@ -346,6 +377,7 @@ fn make_kernel(
                         inputs.iter().all(|(_, a)| *a != *i) // not in input
                     }
                 }) {
+                    println!("did not find {:?}", node);
                     continue;
                 }
                 loop_body_covered.extend(new_loop_body_covered);
@@ -949,7 +981,10 @@ fn split_kernels(
     let mut map = HashMap::<NodeIndex, NodeIndex>::default();
     for node in graph.node_indices() {
         let weight = graph.node_weight(node).unwrap().clone();
-        map.insert(node, marked_graph.add_node((weight, vec![], 0_usize)));
+        map.insert(
+            node,
+            marked_graph.add_node((weight, vec![], if node == root { vec![0] } else { vec![] })),
+        );
     }
     for edge in graph.edge_indices() {
         let (start, end) = graph.edge_endpoints(edge).unwrap();
@@ -989,13 +1024,16 @@ fn split_kernels(
             .collect_vec()
         {
             let (src_term, src_level, src_kernel) = marked_graph.node_weight_mut(source).unwrap();
-            let mut real_kernel = curr_kernel;
+            let mut real_kernel = curr_kernel.clone();
+            let mut stepped = None;
             if matches!(term, GraphTerm::LoopIn { .. })
                 && matches!(src_term, GraphTerm::LoopOut { .. })
                 && curr_level.len() < 3
             {
-                real_kernel += 1;
-                n_kernels = n_kernels.max(real_kernel + 1);
+                let max_kernel = *real_kernel.iter().max().unwrap();
+                real_kernel = vec![max_kernel + 1];
+                n_kernels = n_kernels.max(max_kernel + 2);
+                stepped = Some(max_kernel + 1);
             } else if !matches!(term, GraphTerm::LoopIn { .. } | GraphTerm::LoopOut { .. })
                 && !matches!(
                     src_term,
@@ -1004,11 +1042,39 @@ fn split_kernels(
             {
                 assert_eq!(curr_level, *src_level); // Edges need to go between the same levels if neither op is a LoopIn or LoopOut
             }
-            if *src_kernel < real_kernel {
-                *src_kernel = real_kernel;
+            if let Some(s) = stepped {
+                *src_kernel = vec![s];
+            } else {
+                for k in &real_kernel {
+                    if !src_kernel.contains(k) {
+                        src_kernel.push(*k);
+                    }
+                }
             }
             dfs_stack.push(source);
         }
+    }
+    // Prune out unnessecary kernel members
+    let mut dfs_stack = marked_graph
+        .neighbors_directed(root, Direction::Incoming)
+        .collect_vec();
+    while let Some(node) = dfs_stack.pop() {
+        dfs_stack.extend(marked_graph.neighbors_directed(node, Direction::Incoming));
+        let (term, curr_level, mut curr_kernel) = marked_graph.node_weight(node).unwrap().clone();
+        let split_cond = curr_level.len() < 3 && matches!(term, GraphTerm::LoopOut { .. });
+        curr_kernel.retain(|k| {
+            marked_graph
+                .neighbors_directed(node, Direction::Outgoing)
+                .any(|n| {
+                    (split_cond
+                        && matches!(
+                            marked_graph.node_weight(n).unwrap().0,
+                            GraphTerm::LoopIn { .. }
+                        ))
+                        || marked_graph.node_weight(n).unwrap().2.contains(k)
+                })
+        });
+        marked_graph.node_weight_mut(node).unwrap().2 = curr_kernel;
     }
 
     // Add kernel barriers
@@ -1016,7 +1082,7 @@ fn split_kernels(
         let (source, dest) = marked_graph.edge_endpoints(edge).unwrap();
         let (_, dest_level, dest_kernel) = marked_graph.node_weight(dest).unwrap().clone();
         let (_, _, src_kernel) = marked_graph.node_weight(source).unwrap().clone();
-        if dest_level.len() > 0 && dest_kernel != src_kernel {
+        if dest_level.len() > 0 && dest_kernel.iter().any(|i| !src_kernel.contains(i)) {
             // Put a barrier here
             let (mut src, mut dest) = (dest, source);
             for i in (0..dest_level.len()).rev() {
@@ -1026,7 +1092,7 @@ fn split_kernels(
                         stride: "0".to_string(),
                     },
                     dest_level[..i].to_vec(),
-                    src_kernel,
+                    src_kernel.clone(),
                 ));
                 marked_graph.add_edge(src, new_src, 0);
                 src = new_src;
@@ -1036,13 +1102,14 @@ fn split_kernels(
                         stride: "0".to_string(),
                     },
                     dest_level[..i].to_vec(),
-                    dest_kernel,
+                    dest_kernel.clone(),
                 ));
                 marked_graph.add_edge(new_dest, dest, 0);
                 dest = new_dest;
             }
         }
     }
+    display_graph(&marked_graph, &[]);
 
     // Place nodes in kernel graphs
     let mut kernel_graphs = (0..n_kernels)
@@ -1050,14 +1117,16 @@ fn split_kernels(
         .collect_vec();
     let mut node_maps = (0..n_kernels).map(|_| HashMap::new()).collect_vec();
     for node in marked_graph.node_indices() {
-        let (term, loop_level, kernel) = marked_graph.node_weight(node).unwrap();
-        let (kernel_graph, _, outputs, _) = &mut kernel_graphs[*kernel];
-        node_maps[*kernel].insert(
-            node,
-            kernel_graph.add_node((term.clone(), loop_level.len())),
-        );
-        if node == root {
-            outputs.push(node_maps[*kernel][&node]);
+        let (term, loop_level, kernels) = marked_graph.node_weight(node).unwrap();
+        for kernel in kernels {
+            let (kernel_graph, _, outputs, _) = &mut kernel_graphs[*kernel];
+            node_maps[*kernel].insert(
+                node,
+                kernel_graph.add_node((term.clone(), loop_level.len())),
+            );
+            if node == root {
+                outputs.push(node_maps[*kernel][&node]);
+            }
         }
     }
     // Go through inputs
@@ -1067,43 +1136,51 @@ fn split_kernels(
             .next()
             .is_none()
     }) {
-        let (_, _, kernel) = marked_graph.node_weight(input).unwrap();
-        kernel_graphs[*kernel].1.push((None, 0, input));
+        let (_, _, kernels) = marked_graph.node_weight(input).unwrap();
+        for kernel in kernels {
+            kernel_graphs[*kernel]
+                .1
+                .push((None, 0, node_maps[*kernel][&input]));
+        }
     }
     for edge in marked_graph.edge_indices() {
         let (start, end) = marked_graph.edge_endpoints(edge).unwrap();
         let weight = marked_graph.edge_weight(edge).unwrap();
-        let (_, _, start_kernel) = marked_graph.node_weight(start).unwrap();
-        let (_, _, end_kernel) = marked_graph.node_weight(end).unwrap();
-        if *start_kernel == *end_kernel {
-            // Start and end are in the same kernel
-            kernel_graphs[*start_kernel].0.add_edge(
-                node_maps[*start_kernel][&start],
-                node_maps[*start_kernel][&end],
-                *weight,
-            );
-        } else {
-            // Start and end are in different kernels
-            let src_kernel_node = node_maps[*start_kernel][&start];
-            let dest_kernel_node = node_maps[*end_kernel][&end];
+        let (_, _, start_kernels) = marked_graph.node_weight(start).unwrap();
+        let (_, _, end_kernels) = marked_graph.node_weight(end).unwrap();
+        for end_kernel in end_kernels {
+            if !start_kernels.contains(end_kernel) {
+                // start kernel must be outputted
+                let start_kernel = start_kernels.first().unwrap();
+                // Start and end are in different kernels
+                let src_kernel_node = node_maps[*start_kernel][&start];
+                let dest_kernel_node = node_maps[*end_kernel][&end];
 
-            // make sure we're outputting the src node from the src graph
-            let src_output_index = if let Some(p) = kernel_graphs[*start_kernel]
-                .2
-                .iter()
-                .position(|s| *s == src_kernel_node)
-            {
-                p
+                // make sure we're outputting the src node from the src graph
+                let src_output_index = if let Some(p) = kernel_graphs[*start_kernel]
+                    .2
+                    .iter()
+                    .position(|s| *s == src_kernel_node)
+                {
+                    p
+                } else {
+                    kernel_graphs[*start_kernel].2.push(src_kernel_node);
+                    kernel_graphs[*start_kernel].2.len() - 1
+                };
+                // add input to dest
+                kernel_graphs[*end_kernel].1.push((
+                    Some(*start_kernel),
+                    src_output_index,
+                    dest_kernel_node,
+                ));
             } else {
-                kernel_graphs[*start_kernel].2.push(src_kernel_node);
-                kernel_graphs[*start_kernel].2.len() - 1
-            };
-            // add input to dest
-            kernel_graphs[*end_kernel].1.push((
-                Some(*start_kernel),
-                src_output_index,
-                dest_kernel_node,
-            ));
+                // end kernel is same as start kernel
+                kernel_graphs[*end_kernel].0.add_edge(
+                    node_maps[*end_kernel][&start],
+                    node_maps[*end_kernel][&end],
+                    *weight,
+                );
+            }
         }
     }
     // Go through SMEM buffers
@@ -1150,7 +1227,7 @@ fn split_kernels(
             }
         }
     }
-    let root_kernel = marked_graph.node_weight(root).unwrap().2;
+    let root_kernel = marked_graph.node_weight(root).unwrap().2[0];
     (kernel_graphs, root_kernel)
 }
 
