@@ -23,16 +23,12 @@ use colored::Colorize;
 use egglog::{EGraph, Error, Term, TermDag, TermId, ast::Literal, var};
 use itertools::Itertools;
 use petgraph::{
-    Directed, Direction,
-    graph::NodeIndex,
-    prelude::{Dfs, StableGraph},
-    visit::{EdgeRef, NodeRef},
+    Directed, Direction, algo::toposort, graph::NodeIndex, prelude::StableGraph, visit::EdgeRef,
 };
 use regex::Regex;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    f32::consts::PI,
-    fmt::{Debug, Display, format},
+    fmt::Debug,
     iter::repeat,
 };
 
@@ -59,6 +55,7 @@ enum GraphTerm {
     Tensor { name: String },
     LoopIn { range: String, stride: String },
     LoopOut { range: String, stride: String },
+    NewAcc { starting_value: String },
     Add,
     Mul,
     Max,
@@ -83,6 +80,12 @@ impl TermToString for Term {
     }
 }
 
+impl TermToString for usize {
+    fn term_to_string(&self) -> String {
+        self.to_string()
+    }
+}
+
 impl TermToString for (Term, usize) {
     fn term_to_string(&self) -> String {
         let s = match &self.0 {
@@ -104,6 +107,7 @@ impl TermToString for GraphTerm {
             GraphTerm::Sin => "Sin".to_string(),
             GraphTerm::Recip => "Recip".to_string(),
             GraphTerm::Neg => "Neg".to_string(),
+            GraphTerm::NewAcc { starting_value } => format!("NewAcc({starting_value})"),
             GraphTerm::LoopIn { range, stride } => format!("LoopIn ({range}; {stride})"),
             GraphTerm::LoopOut { range, stride } => format!("LoopOut ({range}; {stride})"),
             GraphTerm::Tensor { name } => format!("Tensor({name})"),
@@ -143,19 +147,20 @@ impl TermToString for (GraphTerm, Vec<String>, Vec<usize>) {
 }
 
 fn main() {
-    let (g, r) = kernels::make_complex_kernel();
-    match run_egglog_program(include_str!("code.lisp")) {
-        Ok((s, _serialized, termdag, root)) => {
-            if s.is_empty() {
-                println!("{}", "Success!".bright_green().bold())
-            } else {
-                println!("{}", format!("Success: {s:?}").bright_green().bold())
-            }
-            // let (graph, root) = dag_to_petgraph(&termdag, termdag.lookup(&root));
-            codegen(g, r);
-        }
-        Err(e) => println!("{e}"),
-    }
+    let (g, r) = kernels::make_naive_attention();
+    codegen(g, r);
+    // match run_egglog_program(include_str!("code.lisp")) {
+    //     Ok((s, _serialized, termdag, root)) => {
+    //         if s.is_empty() {
+    //             println!("{}", "Success!".bright_green().bold())
+    //         } else {
+    //             println!("{}", format!("Success: {s:?}").bright_green().bold())
+    //         }
+    //         // let (graph, root) = dag_to_petgraph(&termdag, termdag.lookup(&root));
+
+    //     }
+    //     Err(e) => println!("{e}"),
+    // }
 }
 
 fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
@@ -202,6 +207,7 @@ fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
                 .neighbors_directed(node, Direction::Incoming)
                 .next()
                 .is_none()
+                && !matches!(graph.node_weight(node).unwrap().0, GraphTerm::NewAcc { .. })
             {
                 assert_eq!(*curr_level, 0, "Inputs must have level 0");
             }
@@ -212,17 +218,22 @@ fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
 fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (String, TermId) {
     let (kernels, root_kernel) = split_kernels(graph, root);
     println!("Kernels: {} Root Kernel: {root_kernel}", kernels.len());
-    for (kernel, inp, out, smem) in &kernels {
-        println!("INP: {:?}", inp);
-        for i in inp {
-            assert!(kernel.contains_node(i.2));
-        }
-        println!("OUT: {:?}", out);
-        // display_graph(&kernel, &inp.iter().map(|i| i.2).collect_vec());
+    // Create kernel meta graph to toposort
+    let mut meta_graph = StableGraph::<usize, u8, Directed>::default();
+    for i in 0..kernels.len() {
+        meta_graph.add_node(i);
     }
-    for (n_kernel, (kernel_graph, inputs, outputs, smem_buffers)) in kernels.into_iter().enumerate()
-    {
-        println!("SMEM BUFFERS: {:?}", smem_buffers);
+    for (n_kernel, (_, inputs, _, _)) in kernels.iter().enumerate() {
+        for (input_kernel, _, _) in inputs {
+            if let Some(input_kernel) = input_kernel {
+                meta_graph.add_edge(NodeIndex::new(*input_kernel), NodeIndex::new(n_kernel), 0);
+            }
+        }
+    }
+    for node in toposort(&meta_graph, None).unwrap() {
+        let kernel_index = *meta_graph.node_weight(node).unwrap();
+        let (kernel_graph, inputs, outputs, smem_buffers) = kernels[kernel_index].clone();
+        println!("KERNEL {kernel_index}");
         validate_graph(&kernel_graph);
         // display_graph(&kernel_graph, &[]);
         let inputs: Vec<_> = inputs
@@ -263,13 +274,17 @@ fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (Str
             .take(3)
             .collect_vec();
         let kernel = format!(
-            "extern \"C\" __global__ void kernel{n_kernel}({}) {{
+            "extern \"C\" __global__ void kernel{kernel_index}({}) {{
 {}{}{}
 }}",
             inputs
                 .into_iter()
-                .chain(outputs)
-                .map(|(a, _)| format!("float* {}", var_to_char(a)))
+                .map(|(a, _)| format!("float* {}", var_to_char(a))) // put const in here for the future
+                .chain(
+                    outputs
+                        .into_iter()
+                        .map(|(a, _)| format!("float* {}", var_to_char(a)))
+                )
                 .join(", "),
             if smem_buffers.is_empty() {
                 ""
@@ -296,29 +311,28 @@ fn make_kernel(
     kernel_graph: &StableGraph<(GraphTerm, usize), u8, Directed>,
     inputs: Vec<(usize, NodeIndex)>,
     outputs: Vec<(usize, NodeIndex)>,
-    node_to_var: &mut HashMap<NodeIndex, (usize, bool)>,
+    node_to_var: &mut HashMap<NodeIndex, (usize, bool, Option<String>)>,
     prev_max_var: &mut usize, // contains the char last used
     loop_levels: &mut Vec<String>,
     loop_indexes: &mut HashMap<NodeIndex, usize>,
     smem_buffers: &HashMap<NodeIndex, usize>,
 ) -> Option<Vec<String>> {
     let mut kernel_lines = vec![];
-    let mut loop_body_covered = HashSet::new();
     // toposort down the graph
-    let toposorted = partial_toposort(
+    let mut toposorted = partial_toposort(
         kernel_graph,
         &inputs.iter().map(|(_, i)| *i).collect_vec(),
         &outputs.iter().map(|(_, i)| *i).collect_vec(),
     );
+    toposorted.retain(|n| kernel_graph.node_weight(*n).unwrap().1 == loop_levels.len());
     for node in toposorted {
-        if loop_body_covered.contains(&node) {
+        if node_to_var.contains_key(&node) {
             continue;
         }
         let (term, loop_level) = kernel_graph.node_weight(node).unwrap();
         match term {
             GraphTerm::LoopIn { range, .. } => {
                 // go through graph to find inputs and outputs
-                let mut new_loop_body_covered = HashSet::new();
                 let mut loop_outputs = vec![];
                 let mut body_outputs = vec![];
                 let mut dfs = vec![node];
@@ -340,7 +354,6 @@ fn make_kernel(
                     } else {
                         dfs.extend(kernel_graph.neighbors_directed(n, Direction::Outgoing));
                     }
-                    new_loop_body_covered.insert(n);
                 }
                 dfs.clear();
                 dfs.push(loop_outputs[0].0);
@@ -364,10 +377,9 @@ fn make_kernel(
                     } else {
                         dfs.extend(kernel_graph.neighbors_directed(n, Direction::Incoming));
                     }
-                    new_loop_body_covered.insert(n);
                 }
 
-                if loop_inputs.iter().any(|(i, _)| {
+                if let Some((_, _)) = loop_inputs.iter().find(|(i, _)| {
                     if let Some(inp) = kernel_graph
                         .neighbors_directed(*i, Direction::Incoming)
                         .next()
@@ -377,13 +389,10 @@ fn make_kernel(
                         inputs.iter().all(|(_, a)| *a != *i) // not in input
                     }
                 }) {
-                    println!("did not find {:?}", node);
                     continue;
                 }
-                loop_body_covered.extend(new_loop_body_covered);
 
                 // Make new loop
-                let loop_kernel_line = kernel_lines.len();
                 if *loop_level < 6 {
                     if loop_inputs.iter().any(|(_, st)| **st != "0")
                         || loop_outputs.iter().any(|(_, st)| **st != "0")
@@ -413,58 +422,45 @@ fn make_kernel(
                 // Move input pointers (allocate new variables)
                 let mut new_vars = vec![];
                 for (input, stride) in &loop_inputs {
+                    let (real_input, real_size) = if let Some(n) = kernel_graph
+                        .neighbors_directed(*input, Direction::Incoming)
+                        .next()
+                    {
+                        (node_to_var[&n].0, node_to_var[&n].2.clone())
+                    } else {
+                        (
+                            inputs
+                                .iter()
+                                .find_map(|(i, n)| if *n == *input { Some(*i) } else { None })
+                                .unwrap(),
+                            None,
+                        )
+                    };
                     if stride.contains("Acc") {
                         assert!(
                             *loop_level > 5,
                             "No accumulations allowed on grid or threadblock levels!"
                         );
-                        *prev_max_var += 1;
-                        // Create accumulator
-                        let src = kernel_graph
-                            .neighbors_directed(*input, Direction::Incoming)
-                            .next()
-                            .unwrap();
-                        kernel_lines.insert(
-                            loop_kernel_line,
-                            format!(
-                                "{}float {} = {}{};",
-                                (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
-                                var_to_char(*prev_max_var),
-                                if node_to_var[&src].1 { "*" } else { "" },
-                                var_to_char(node_to_var[&src].0)
-                            ),
-                        );
-                        new_vars.push(*prev_max_var);
-                        node_to_var.insert(*input, (*prev_max_var, false));
-                        continue;
-                    }
-                    let real_input = if let Some(n) = kernel_graph
-                        .neighbors_directed(*input, Direction::Incoming)
-                        .next()
-                    {
-                        node_to_var[&n].0
-                    } else {
-                        inputs
-                            .iter()
-                            .find_map(|(i, n)| if *n == *input { Some(*i) } else { None })
-                            .unwrap()
-                    };
-                    if *stride != "0" {
-                        *prev_max_var += 1;
-                        kernel_lines.push(format!(
-                            "{}float* {} = {} + {};",
-                            (0..(*loop_level + 1).saturating_sub(6))
-                                .map(|_| "\t")
-                                .join(""),
-                            var_to_char(*prev_max_var),
-                            var_to_char(real_input),
-                            stride.replace('z', &format!("loop_{loop_var}"))
-                        ));
-                        new_vars.push(*prev_max_var);
-                        node_to_var.insert(*input, (*prev_max_var, true));
-                    } else {
                         new_vars.push(real_input);
-                        node_to_var.insert(*input, (real_input, true));
+                        node_to_var.insert(*input, (real_input, true, real_size));
+                    } else {
+                        if *stride != "0" {
+                            *prev_max_var += 1;
+                            kernel_lines.push(format!(
+                                "{}float* {} = {} + {};",
+                                (0..(*loop_level + 1).saturating_sub(6))
+                                    .map(|_| "\t")
+                                    .join(""),
+                                var_to_char(*prev_max_var),
+                                var_to_char(real_input),
+                                stride.replace('z', &format!("loop_{loop_var}"))
+                            ));
+                            new_vars.push(*prev_max_var);
+                            node_to_var.insert(*input, (*prev_max_var, true, None));
+                        } else {
+                            new_vars.push(real_input);
+                            node_to_var.insert(*input, (real_input, true, real_size));
+                        }
                     }
                 }
                 // Move output pointers (allocate new variables)
@@ -476,19 +472,25 @@ fn make_kernel(
                             "No accumulations allowed on grid or threadblock levels!"
                         );
                         // Re-use accumulator
-                        let (input, _) = loop_inputs.iter().find(|(_, s)| **s == **stride).unwrap();
-                        let (input_var, _) = node_to_var[input];
+                        let (input, _) = loop_inputs
+                            .iter()
+                            .find(|(_, s)| **s == **stride)
+                            .unwrap_or_else(|| panic!("Cannot find accumulator {stride}"));
+                        let (input_var, _, input_size) = node_to_var[input].clone();
                         new_output_vars.push(input_var);
-                        node_to_var.insert(*output, (input_var, false));
+                        node_to_var.insert(*output, (input_var, true, input_size));
                         continue;
                     }
-                    let real_output = if let Some(v) = node_to_var.get(&output) {
-                        v.0
+                    let (real_output, real_size) = if let Some(v) = node_to_var.get(&output) {
+                        (v.0, v.2.clone())
                     } else {
-                        outputs
-                            .iter()
-                            .find_map(|(i, n)| if *n == *output { Some(*i) } else { None })
-                            .unwrap()
+                        (
+                            outputs
+                                .iter()
+                                .find_map(|(i, n)| if *n == *output { Some(*i) } else { None })
+                                .unwrap(),
+                            None,
+                        )
                     };
                     if *stride != "0" {
                         *prev_max_var += 1;
@@ -502,10 +504,10 @@ fn make_kernel(
                             stride.replace('z', &format!("loop_{loop_var}"))
                         ));
                         new_output_vars.push(*prev_max_var);
-                        node_to_var.insert(*output, (*prev_max_var, true));
+                        node_to_var.insert(*output, (*prev_max_var, true, None));
                     } else {
                         new_output_vars.push(real_output);
-                        node_to_var.insert(*output, (real_output, true));
+                        node_to_var.insert(*output, (real_output, true, real_size));
                     }
                 }
                 loop_levels.push(range.to_string());
@@ -537,17 +539,45 @@ fn make_kernel(
                     } else {
                         true
                     };
-                    if save_var {
-                        kernel_lines.push(format!(
-                            "{}{}{} = {}{};",
-                            (0..(*loop_level + 1).saturating_sub(6))
-                                .map(|_| "\t")
-                                .join(""),
-                            if node_to_var[&output].1 { "*" } else { "" },
-                            var_to_char(node_to_var[&output].0),
-                            if node_to_var[&body_out].1 { "*" } else { "" },
-                            var_to_char(node_to_var[&body_out].0),
-                        ));
+                    if save_var && node_to_var[&output].0 != node_to_var[&body_out].0 {
+                        if let Some(size) = &node_to_var[&body_out].2 {
+                            // Save size numbers
+                            kernel_lines.push(format!(
+                                "{}for (int save = 0; save < {size}; save++) {{",
+                                (0..(*loop_level + 1).saturating_sub(6))
+                                    .map(|_| "\t")
+                                    .join("")
+                            ));
+                            assert!(
+                                node_to_var[&output].1 && node_to_var[&body_out].1,
+                                "Both src and dest must be pointers when saving a block"
+                            );
+                            kernel_lines.push(format!(
+                                "{}{}[save] = {}[save];",
+                                (0..(*loop_level + 2).saturating_sub(6))
+                                    .map(|_| "\t")
+                                    .join(""),
+                                var_to_char(node_to_var[&output].0),
+                                var_to_char(node_to_var[&body_out].0),
+                            ));
+                            kernel_lines.push(format!(
+                                "{}}}",
+                                (0..(*loop_level + 1).saturating_sub(6))
+                                    .map(|_| "\t")
+                                    .join("")
+                            ));
+                        } else {
+                            kernel_lines.push(format!(
+                                "{}{}{} = {}{};",
+                                (0..(*loop_level + 1).saturating_sub(6))
+                                    .map(|_| "\t")
+                                    .join(""),
+                                if node_to_var[&output].1 { "*" } else { "" },
+                                var_to_char(node_to_var[&output].0),
+                                if node_to_var[&body_out].1 { "*" } else { "" },
+                                var_to_char(node_to_var[&body_out].0),
+                            ));
+                        }
                     }
                 }
 
@@ -557,6 +587,34 @@ fn make_kernel(
                         (0..loop_level.saturating_sub(6)).map(|_| "\t").join("")
                     ));
                 }
+            }
+            GraphTerm::NewAcc { starting_value } => {
+                // Go through all loopins after this to figure out how many accumulators we need
+                let mut curr = node;
+                let mut size = "1".to_string();
+                loop {
+                    curr = kernel_graph
+                        .neighbors_directed(curr, Direction::Outgoing)
+                        .next()
+                        .unwrap();
+                    if let GraphTerm::LoopIn { range, stride } =
+                        &kernel_graph.node_weight(curr).unwrap().0
+                    {
+                        if !stride.contains("Acc") && stride != "0" {
+                            size = format!("{size} * {range}");
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                // Create accumulator
+                *prev_max_var += 1;
+                kernel_lines.push(format!(
+                    "{}float {}[{size}] = {{{starting_value}}};",
+                    (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
+                    var_to_char(*prev_max_var)
+                ));
+                node_to_var.insert(node, (*prev_max_var, true, Some(size)));
             }
             GraphTerm::LoopOut { range, stride } => {
                 panic!("found loopout range: {range} stride: {stride}")
@@ -648,7 +706,7 @@ fn make_kernel(
                             "{}__syncthreads();",
                             (0..loop_level.saturating_sub(6)).map(|_| "\t").join("")
                         ));
-                        node_to_var.insert(node, (smem_ptr, false));
+                        node_to_var.insert(node, (smem_ptr, false, None));
                     }
                     6.. => {
                         // Thread
@@ -666,17 +724,18 @@ fn make_kernel(
                             .map(|(a, _)| *a)
                             .unwrap(),
                         true,
+                        None,
                     ),
                 );
             }
             GraphTerm::Sin | GraphTerm::Exp | GraphTerm::Neg | GraphTerm::Recip => {
                 *prev_max_var += 1;
-                let src = node_to_var[&kernel_graph
+                let (src, src_ptr, _) = node_to_var[&kernel_graph
                     .neighbors_directed(node, Direction::Incoming)
                     .next()
                     .unwrap()];
-                node_to_var.insert(node, (*prev_max_var, false));
-                let inp = format!("{}{}", if src.1 { "*" } else { "" }, var_to_char(src.0));
+                node_to_var.insert(node, (*prev_max_var, false, None));
+                let inp = format!("{}{}", if src_ptr { "*" } else { "" }, var_to_char(src));
                 let expr = match term {
                     GraphTerm::Sin => format!("sin({inp})"),
                     GraphTerm::Exp => format!("exp({inp})"),
@@ -693,15 +752,15 @@ fn make_kernel(
             GraphTerm::Mul | GraphTerm::Add | GraphTerm::Max => {
                 *prev_max_var += 1;
                 let mut srcs = kernel_graph.neighbors_directed(node, Direction::Incoming);
-                let src_a = node_to_var[&srcs.next().unwrap()];
-                let src_b = node_to_var[&srcs.next().unwrap()];
-                node_to_var.insert(node, (*prev_max_var, false));
-                let inp_a = format!("{}{}", if src_a.1 { "*" } else { "" }, var_to_char(src_a.0));
-                let inp_b = format!("{}{}", if src_b.1 { "*" } else { "" }, var_to_char(src_b.0));
+                let (src_a, src_a_ptr, _) = node_to_var[&srcs.next().unwrap()];
+                let (src_b, src_b_ptr, _) = node_to_var[&srcs.next().unwrap()];
+                node_to_var.insert(node, (*prev_max_var, false, None));
+                let inp_a = format!("{}{}", if src_a_ptr { "*" } else { "" }, var_to_char(src_a));
+                let inp_b = format!("{}{}", if src_b_ptr { "*" } else { "" }, var_to_char(src_b));
                 let expr = match &term {
                     GraphTerm::Add => format!("{inp_a} + {inp_b}"),
                     GraphTerm::Mul => format!("{inp_a} * {inp_b}"),
-                    GraphTerm::Max => format!("fmax({inp_a}, {inp_b}"),
+                    GraphTerm::Max => format!("fmax({inp_a}, {inp_b})"),
                     _ => panic!(),
                 };
                 kernel_lines.push(format!(
@@ -715,107 +774,75 @@ fn make_kernel(
     Some(kernel_lines)
 }
 
-fn partial_toposort<N, E>(
+/// Toposort a graph but don't traverse up beyond the start nodes or down below the end nodes
+pub fn partial_toposort<N, E>(
     graph: &StableGraph<N, E, Directed>,
     start_nodes: &[NodeIndex],
     end_nodes: &[NodeIndex],
 ) -> Vec<NodeIndex> {
-    // Find valid subgraph nodes
-    let reachable_from_start = find_reachable_nodes(graph, start_nodes);
-    let can_reach_end = find_nodes_that_can_reach(graph, end_nodes);
-    let valid_nodes: HashSet<NodeIndex> = reachable_from_start
-        .intersection(&can_reach_end)
-        .copied()
-        .collect();
+    // bfs hashset helper
+    let bfs = |seeds: &[NodeIndex], dir| {
+        let mut seen = HashSet::new();
+        let mut q = VecDeque::new();
+        for &n in seeds {
+            seen.insert(n);
+            q.push_back(n);
+        }
+        while let Some(c) = q.pop_front() {
+            for n in graph.neighbors_directed(c, dir) {
+                if seen.insert(n) {
+                    q.push_back(n);
+                }
+            }
+        }
+        seen
+    };
+    // reachability
+    let forward = bfs(start_nodes, Direction::Outgoing); // from starts
+    let backward = bfs(end_nodes, Direction::Incoming); // to ends
+    let start_set: HashSet<_> = start_nodes.iter().copied().collect();
 
-    // Calculate in-degrees for valid nodes only
-    let mut in_degree: std::collections::HashMap<NodeIndex, usize> =
-        valid_nodes.iter().map(|&n| (n, 0)).collect();
-
-    for &node in &valid_nodes {
-        for neighbor in graph.neighbors_directed(node, Direction::Outgoing) {
-            if valid_nodes.contains(&neighbor) {
-                *in_degree.get_mut(&neighbor).unwrap() += 1;
+    // nodes on any branch that ends up in forward ∩ backward
+    let mut valid: HashSet<NodeIndex> = forward.intersection(&backward).copied().collect();
+    let mut q: VecDeque<NodeIndex> = valid.iter().copied().collect();
+    while let Some(cur) = q.pop_front() {
+        for pred in graph.neighbors_directed(cur, Direction::Incoming) {
+            if backward.contains(&pred)                         // can reach an end
+                && !start_set.contains(&pred)                  // don't walk past start
+                && valid.insert(pred)
+            // new node
+            {
+                q.push_back(pred);
             }
         }
     }
 
-    // Kahn's algorithm for topological sorting
-    let mut queue = VecDeque::new();
-    let mut result = Vec::new();
-
-    // Start with nodes that have in-degree 0 within our subgraph
-    for (&node, &degree) in &in_degree {
-        if degree == 0 {
-            queue.push_back(node);
+    // Kahn topological sort on valid
+    let mut indeg: HashMap<NodeIndex, usize> = valid.iter().map(|&n| (n, 0)).collect();
+    for &n in &valid {
+        for m in graph.neighbors_directed(n, Direction::Outgoing) {
+            if valid.contains(&m) {
+                *indeg.get_mut(&m).unwrap() += 1;
+            }
         }
     }
-
-    while let Some(current) = queue.pop_front() {
-        result.push(current);
-
-        // Reduce in-degree of neighbors
-        for neighbor in graph.neighbors_directed(current, Direction::Outgoing) {
-            if let Some(degree) = in_degree.get_mut(&neighbor) {
-                *degree -= 1;
-                if *degree == 0 {
-                    queue.push_back(neighbor);
+    let mut queue: VecDeque<_> = indeg
+        .iter()
+        .filter_map(|(&n, &d)| (d == 0).then_some(n))
+        .collect();
+    let mut order = Vec::with_capacity(valid.len());
+    while let Some(cur) = queue.pop_front() {
+        order.push(cur);
+        for m in graph.neighbors_directed(cur, Direction::Outgoing) {
+            if let Some(d) = indeg.get_mut(&m) {
+                *d -= 1;
+                if *d == 0 {
+                    queue.push_back(m);
                 }
             }
         }
     }
-
-    result
-}
-
-fn find_reachable_nodes<N, E>(
-    graph: &StableGraph<N, E, Directed>,
-    start_nodes: &[NodeIndex],
-) -> HashSet<NodeIndex> {
-    let mut reachable = HashSet::new();
-    let mut queue = VecDeque::new();
-
-    // Add all start nodes
-    for &node in start_nodes {
-        queue.push_back(node);
-        reachable.insert(node);
-    }
-
-    // BFS to find all reachable nodes
-    while let Some(current) = queue.pop_front() {
-        for neighbor in graph.neighbors_directed(current, Direction::Outgoing) {
-            if reachable.insert(neighbor) {
-                queue.push_back(neighbor);
-            }
-        }
-    }
-
-    reachable
-}
-
-fn find_nodes_that_can_reach<N, E>(
-    graph: &StableGraph<N, E, Directed>,
-    end_nodes: &[NodeIndex],
-) -> HashSet<NodeIndex> {
-    let mut can_reach = HashSet::new();
-    let mut queue = VecDeque::new();
-
-    // Add all end nodes
-    for &node in end_nodes {
-        queue.push_back(node);
-        can_reach.insert(node);
-    }
-
-    // Reverse BFS to find all nodes that can reach end nodes
-    while let Some(current) = queue.pop_front() {
-        for neighbor in graph.neighbors_directed(current, Direction::Incoming) {
-            if can_reach.insert(neighbor) {
-                queue.push_back(neighbor);
-            }
-        }
-    }
-
-    can_reach
+    order
 }
 
 /// Given a loop term in the dag, return the loop's name, range, and stride for this loop in / out
@@ -1109,7 +1136,6 @@ fn split_kernels(
             }
         }
     }
-    display_graph(&marked_graph, &[]);
 
     // Place nodes in kernel graphs
     let mut kernel_graphs = (0..n_kernels)
@@ -1135,6 +1161,10 @@ fn split_kernels(
             .neighbors_directed(*n, Direction::Incoming)
             .next()
             .is_none()
+            && !matches!(
+                marked_graph.node_weight(*n).unwrap().0,
+                GraphTerm::NewAcc { .. }
+            )
     }) {
         let (_, _, kernels) = marked_graph.node_weight(input).unwrap();
         for kernel in kernels {
