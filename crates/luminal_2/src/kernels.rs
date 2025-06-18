@@ -80,8 +80,8 @@ fn pad_out(
 
 pub fn make_complex_kernel() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
     let mut graph = StableGraph::new();
-    let a = graph.add_node(GraphTerm::Tensor {
-        name: "A".to_string(),
+    let a = graph.add_node(GraphTerm::GMEM {
+        label: Some("A".to_string()),
     });
     let in_a = loop_in(
         loop_in(pad_in(a, &mut graph, 6), "50", "z * 5", &mut graph),
@@ -91,8 +91,8 @@ pub fn make_complex_kernel() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex
     );
 
     // Acc
-    let slin0 = graph.add_node(GraphTerm::Tensor {
-        name: "acc".to_string(),
+    let slin0 = graph.add_node(GraphTerm::GMEM {
+        label: Some("acc".to_string()),
     });
     let in_exp_acc = loop_in(
         loop_in(pad_in(slin0, &mut graph, 6), "50", "z", &mut graph),
@@ -110,8 +110,8 @@ pub fn make_complex_kernel() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex
     let sin = unary(add_acc_out, GraphTerm::Sin, &mut graph);
 
     // Other input
-    let b = graph.add_node(GraphTerm::Tensor {
-        name: "B".to_string(),
+    let b = graph.add_node(GraphTerm::GMEM {
+        label: Some("B".to_string()),
     });
     let in_b = loop_in(pad_in(b, &mut graph, 6), "50", "z", &mut graph);
 
@@ -120,14 +120,15 @@ pub fn make_complex_kernel() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex
 
     let mul_out = loop_out(mul, "50", "z", &mut graph);
 
-    let out = pad_out(mul_out, &mut graph, 6);
+    let mut out = pad_out(mul_out, &mut graph, 6);
+    out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);
     (graph, out)
 }
 
 pub fn make_sum_reduce() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
     let mut graph = StableGraph::new();
-    let mut a = graph.add_node(GraphTerm::Tensor {
-        name: "A".to_string(),
+    let mut a = graph.add_node(GraphTerm::GMEM {
+        label: Some("A".to_string()),
     });
     a = pad_in(a, &mut graph, 6);
     a = loop_in(a, "5", "z", &mut graph);
@@ -140,22 +141,22 @@ pub fn make_sum_reduce() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
     let mut out = binary(a, acc, GraphTerm::Add, &mut graph);
     out = loop_out(out, "5", "Accz", &mut graph);
     out = pad_out(out, &mut graph, 6);
-
+    out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);
     (graph, out)
 }
 
 pub fn make_matmul() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
     let mut graph = StableGraph::new();
-    let mut a = graph.add_node(GraphTerm::Tensor {
-        name: "A".to_string(),
+    let mut a = graph.add_node(GraphTerm::GMEM {
+        label: Some("A".to_string()),
     });
     a = loop_in(a, "M", "z * K", &mut graph);
     a = loop_in(a, "N", "0", &mut graph);
     a = pad_in(a, &mut graph, 4);
     a = loop_in(a, "K", "z", &mut graph);
 
-    let mut b = graph.add_node(GraphTerm::Tensor {
-        name: "B".to_string(),
+    let mut b = graph.add_node(GraphTerm::GMEM {
+        label: Some("B".to_string()),
     });
     b = loop_in(b, "M", "0", &mut graph);
     b = loop_in(b, "N", "z", &mut graph);
@@ -178,14 +179,14 @@ pub fn make_matmul() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
     out = pad_out(out, &mut graph, 4);
     out = loop_out(out, "N", "z", &mut graph);
     out = loop_out(out, "M", "z * N", &mut graph);
-
+    out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);
     (graph, out)
 }
 
 pub fn make_tiled_matmul_basic() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
     let mut graph = StableGraph::new();
-    let mut a = graph.add_node(GraphTerm::Tensor {
-        name: "A".to_string(),
+    let mut a = graph.add_node(GraphTerm::GMEM {
+        label: Some("A".to_string()),
     });
     a = loop_in(a, "M / 8", "z * K * 8", &mut graph);
     a = loop_in(a, "N / 8", "0", &mut graph);
@@ -196,8 +197,8 @@ pub fn make_tiled_matmul_basic() -> (StableGraph<GraphTerm, u8, Directed>, NodeI
     a = loop_in(a, "K / 8", "z * 8", &mut graph);
     a = loop_in(a, "8", "z", &mut graph);
 
-    let mut b = graph.add_node(GraphTerm::Tensor {
-        name: "B".to_string(),
+    let mut b = graph.add_node(GraphTerm::GMEM {
+        label: Some("B".to_string()),
     });
     b = loop_in(b, "M / 8", "0", &mut graph);
     b = loop_in(b, "N / 8", "z * 8", &mut graph);
@@ -229,14 +230,14 @@ pub fn make_tiled_matmul_basic() -> (StableGraph<GraphTerm, u8, Directed>, NodeI
     out = pad_out(out, &mut graph, 1);
     out = loop_out(out, "N / 8", "z * 8", &mut graph);
     out = loop_out(out, "M / 8", "z * N * 8", &mut graph);
-
+    out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);
     (graph, out)
 }
 
 pub fn make_tiled_matmul() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
     let mut graph = StableGraph::new();
-    let mut a = graph.add_node(GraphTerm::Tensor {
-        name: "A".to_string(),
+    let mut a = graph.add_node(GraphTerm::GMEM {
+        label: Some("A".to_string()),
     });
     a = loop_in(a, "M / 8", "z * K * 8", &mut graph);
     a = loop_in(a, "N / 8", "0", &mut graph);
@@ -255,8 +256,8 @@ pub fn make_tiled_matmul() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) 
     );
     a = loop_in(a, "8", "z", &mut graph);
 
-    let mut b = graph.add_node(GraphTerm::Tensor {
-        name: "B".to_string(),
+    let mut b = graph.add_node(GraphTerm::GMEM {
+        label: Some("B".to_string()),
     });
     b = loop_in(b, "M / 8", "0", &mut graph);
     b = loop_in(b, "N / 8", "z * 8", &mut graph);
@@ -296,7 +297,7 @@ pub fn make_tiled_matmul() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) 
     out = pad_out(out, &mut graph, 1);
     out = loop_out(out, "N / 8", "z * 8", &mut graph);
     out = loop_out(out, "M / 8", "z * N * 8", &mut graph);
-
+    out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);
     (graph, out)
 }
 
@@ -304,22 +305,22 @@ pub fn make_naive_attention() -> (StableGraph<GraphTerm, u8, Directed>, NodeInde
     let mut graph = StableGraph::new();
 
     // inputs
-    let mut q = graph.add_node(GraphTerm::Tensor {
-        name: "Q".to_string(),
+    let mut q = graph.add_node(GraphTerm::GMEM {
+        label: Some("Q".to_string()),
     });
     q = loop_in(q, "4096", "z * 64", &mut graph);
     q = loop_in(q, "4096", "0", &mut graph);
     q = pad_in(q, &mut graph, 4);
     q = loop_in(q, "64", "z", &mut graph);
-    let mut k = graph.add_node(GraphTerm::Tensor {
-        name: "K".to_string(),
+    let mut k = graph.add_node(GraphTerm::GMEM {
+        label: Some("K".to_string()),
     });
     k = loop_in(k, "4096", "0", &mut graph);
     k = loop_in(k, "4096", "z * 64", &mut graph);
     k = pad_in(k, &mut graph, 4);
     k = loop_in(k, "64", "z", &mut graph);
-    let mut v = graph.add_node(GraphTerm::Tensor {
-        name: "V".to_string(),
+    let mut v = graph.add_node(GraphTerm::GMEM {
+        label: Some("V".to_string()),
     });
     v = loop_in(v, "4096", "0", &mut graph);
     v = pad_in(v, &mut graph, 5);
@@ -427,7 +428,7 @@ pub fn make_naive_attention() -> (StableGraph<GraphTerm, u8, Directed>, NodeInde
     output = loop_out(output, "4096", "AccOutput", &mut graph);
     output = pad_out(output, &mut graph, 5);
     output = loop_out(output, "4096", "z * 64", &mut graph);
-
+    output = unary(output, GraphTerm::GMEM { label: None }, &mut graph);
     (graph, output)
 }
 
@@ -435,68 +436,66 @@ pub fn make_flash_attention() -> (StableGraph<GraphTerm, u8, Directed>, NodeInde
     let mut graph = StableGraph::new();
 
     // inputs
-    let mut q = graph.add_node(GraphTerm::Tensor {
-        name: "Q".to_string(),
+    let mut q = graph.add_node(GraphTerm::GMEM {
+        label: Some("Q".to_string()),
     });
     q = loop_in(q, "4096", "z * 64", &mut graph);
+    q = pad_in(q, &mut graph, 5);
     q = loop_in(q, "4096", "0", &mut graph);
-    q = pad_in(q, &mut graph, 4);
     q = loop_in(q, "64", "z", &mut graph);
-    let mut k = graph.add_node(GraphTerm::Tensor {
-        name: "K".to_string(),
+    let mut k = graph.add_node(GraphTerm::GMEM {
+        label: Some("K".to_string()),
     });
     k = loop_in(k, "4096", "0", &mut graph);
-    k = loop_in(k, "4096", "z", &mut graph);
-    k = pad_in(k, &mut graph, 4);
-    k = loop_in(k, "64", "z * 64", &mut graph);
-    let mut v = graph.add_node(GraphTerm::Tensor {
-        name: "V".to_string(),
+    k = pad_in(k, &mut graph, 5);
+    k = loop_in(k, "4096", "z * 64", &mut graph);
+    k = loop_in(k, "64", "z", &mut graph);
+    let mut v = graph.add_node(GraphTerm::GMEM {
+        label: Some("V".to_string()),
     });
     v = loop_in(v, "4096", "0", &mut graph);
+    v = pad_in(v, &mut graph, 5);
     v = loop_in(v, "4096", "z * 64", &mut graph);
-    v = pad_in(v, &mut graph, 4);
     v = loop_in(v, "64", "z", &mut graph);
 
     // accumulators
-    let mut dot_acc = graph.add_node(GraphTerm::Tensor {
-        name: "dot_acc".to_string(),
+    let mut dot_acc = graph.add_node(GraphTerm::NewAcc {
+        starting_value: "0.0".to_string(),
     });
-    dot_acc = loop_in(dot_acc, "4096", "z * 4096", &mut graph);
-    dot_acc = loop_in(dot_acc, "4096", "z", &mut graph);
-    dot_acc = pad_in(dot_acc, &mut graph, 4);
     dot_acc = loop_in(dot_acc, "64", "AccDot", &mut graph);
-    let mut score_max_acc = graph.add_node(GraphTerm::Tensor {
-        name: "score_max_acc".to_string(),
+    let mut score_max_acc = graph.add_node(GraphTerm::NewAcc {
+        starting_value: "-INFINITY".to_string(),
     });
-    score_max_acc = loop_in(score_max_acc, "4096", "z", &mut graph);
-    score_max_acc = pad_in(score_max_acc, &mut graph, 5);
     score_max_acc = loop_in(score_max_acc, "4096", "AccScoreMax", &mut graph);
-    let mut exp_sum_acc = graph.add_node(GraphTerm::Tensor {
-        name: "exp_sum_acc".to_string(),
+    let mut exp_sum_acc = graph.add_node(GraphTerm::NewAcc {
+        starting_value: "0.0".to_string(),
     });
-    exp_sum_acc = loop_in(exp_sum_acc, "4096", "z", &mut graph);
-    exp_sum_acc = pad_in(exp_sum_acc, &mut graph, 5);
     exp_sum_acc = loop_in(exp_sum_acc, "4096", "AccExpSum", &mut graph);
-    let mut output_acc = graph.add_node(GraphTerm::Tensor {
-        name: "output_acc".to_string(),
+    let mut output_acc = graph.add_node(GraphTerm::NewAcc {
+        starting_value: "0.0".to_string(),
     });
-    output_acc = loop_in(output_acc, "4096", "z * 64", &mut graph);
     output_acc = loop_in(output_acc, "4096", "AccOutput", &mut graph);
-    output_acc = pad_in(output_acc, &mut graph, 4);
     output_acc = loop_in(output_acc, "64", "z", &mut graph);
 
     // get dot products
-    let dots = binary(
-        binary(q, k, GraphTerm::Mul, &mut graph),
-        dot_acc,
-        GraphTerm::Add,
+    let dots = loop_out(
+        binary(
+            binary(q, k, GraphTerm::Mul, &mut graph),
+            dot_acc,
+            GraphTerm::Add,
+            &mut graph,
+        ),
+        "64",
+        "AccDot",
         &mut graph,
     );
     let new_max = binary(score_max_acc, dots, GraphTerm::Max, &mut graph);
+    loop_out(new_max, "4096", "AccScoreMax", &mut graph); // This is needed so we know to feed new max back in for score max acc
+
     let rescale = unary(
         binary(
             score_max_acc,
-            unary(dots, GraphTerm::Neg, &mut graph),
+            unary(new_max, GraphTerm::Neg, &mut graph),
             GraphTerm::Add,
             &mut graph,
         ),
@@ -528,7 +527,7 @@ pub fn make_flash_attention() -> (StableGraph<GraphTerm, u8, Directed>, NodeInde
         &mut graph,
     );
     partial_output = loop_out(partial_output, "64", "z", &mut graph);
-    partial_output = loop_out(partial_output, "4096", "AccPartial", &mut graph);
+    partial_output = loop_out(partial_output, "4096", "AccOutput", &mut graph);
     partial_output = loop_in(partial_output, "64", "z", &mut graph);
     let exp_sum = loop_out(exp_sum_new, "4096", "AccExpSum", &mut graph);
     let exp_sum_b = loop_in(exp_sum, "64", "0", &mut graph);
@@ -541,6 +540,6 @@ pub fn make_flash_attention() -> (StableGraph<GraphTerm, u8, Directed>, NodeInde
     output = loop_out(output, "64", "z", &mut graph);
     output = pad_out(output, &mut graph, 5);
     output = loop_out(output, "4096", "z * 64", &mut graph);
-
+    output = unary(output, GraphTerm::GMEM { label: None }, &mut graph);
     (graph, output)
 }
