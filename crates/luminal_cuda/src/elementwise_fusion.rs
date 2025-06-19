@@ -566,7 +566,7 @@ mod tests {
         let a = cx.named_tensor("a", 10).set(random_vec(10)).keep();
         let b = cx.named_tensor("b", 10).set(random_vec(10)).keep();
         let d = cx.named_tensor("d", 10).set(random_vec(10)).keep();
-        let mut out = ((a.exp2() - b.sin()).sin() * 3.4).less_than(d).retrieve();
+        let mut out = ((a.exp2() - b.sin()).sin() * 3.4).lt(d).retrieve();
 
         cx.execute();
         let unopt_out = out.data();
@@ -628,7 +628,10 @@ mod tests {
         let freqs = (cx.arange(HEAD_DIM / 2) * 2.0) / (HEAD_DIM as f32);
         let freqs = 1000000_f32.pow(freqs);
         let pos = cx.arange(SEQ) + Expression::from(0);
-        let mut emb = pos.expand(1, 1).matmul(freqs.expand(0, 1)).retrieve();
+        let mut emb = pos
+            .expand_dim(1, 1)
+            .matmul(freqs.expand_dim(0, 1))
+            .retrieve();
 
         cx.execute();
         let unopt_out = emb.data();
@@ -692,7 +695,7 @@ mod tests {
         let freqs = (cx.arange(HEAD_DIM / 2) * 2.0) / (HEAD_DIM as f32);
         let freqs = 1000000_f32.pow(freqs);
         let pos = cx.arange(SEQ) + 0;
-        let emb = pos.expand(1, 1).matmul(freqs.expand(0, SEQ));
+        let emb = pos.expand_dim(1, 1).matmul(freqs.expand_dim(0, SEQ));
         // Split input into evens and odds
         let split = a.reshape((BATCH, N_HEADS, SEQ, HEAD_DIM / 2, 2));
         let x0 = split.slice((.., .., .., .., ..1)).contiguous();
@@ -772,7 +775,7 @@ mod tests {
                 (input.graph().arange(head_dim / 2) * 2.0) / (head_dim.to_usize().unwrap() as f32);
             let freqs = 500_000_f32.pow(freqs);
             let pos = input.graph().arange(seq) + prev_seq;
-            let emb = pos.expand(1, 1).matmul(freqs.expand(0, seq));
+            let emb = pos.expand_dim(1, 1).matmul(freqs.expand_dim(0, seq));
 
             // Split input into evens and odds
             let split = input.reshape((batch, n_heads, seq, head_dim / 2, 2));
@@ -825,8 +828,8 @@ mod tests {
                 let values = v_cache.concat_along(values, 2);
 
                 // Repeat the KV States for Grouped-Query Attention
-                let repeated_keys = keys.expand(2, N_ATTENTION_GROUPS);
-                let repeated_values = values.expand(2, N_ATTENTION_GROUPS);
+                let repeated_keys = keys.expand_dim(2, N_ATTENTION_GROUPS);
+                let repeated_values = values.expand_dim(2, N_ATTENTION_GROUPS);
 
                 // Calculate attention weights
                 let mut attention_weights = queries
@@ -837,9 +840,9 @@ mod tests {
                 let attention_mask = self.k_proj.graph().triu(seq, 1) * f16::MIN.to_f32();
                 attention_weights += attention_mask
                     .pad(((0, 0), (prev_seq, 0)))
-                    .expand(0, batch)
-                    .expand(1, N_KV_HEADS)
-                    .expand(2, N_ATTENTION_GROUPS);
+                    .expand_dim(0, batch)
+                    .expand_dim(1, N_KV_HEADS)
+                    .expand_dim(2, N_ATTENTION_GROUPS);
 
                 // Calculate final outputs
                 let output = attention_weights

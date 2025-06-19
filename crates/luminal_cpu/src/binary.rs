@@ -113,7 +113,7 @@ impl Operator for Equal {
             } else {
                 0.0
             };
-            data[i] = if a < b { 1. } else { 0. };
+            data[i] = if (a - b).abs() < 1e-6 { 1. } else { 0. };
         }
         vec![Tensor::new(data)]
     }

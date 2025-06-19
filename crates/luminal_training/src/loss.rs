@@ -6,7 +6,7 @@ use luminal::prelude::*;
 pub fn mse_loss(prediction: GraphTensor, target: GraphTensor) -> GraphTensor {
     (prediction - target)
         .square()
-        .mean_reduce(prediction.shape.all_axes())
+        .mean(prediction.shape.all_axes())
 }
 
 /// [Root Mean square error](https://en.wikipedia.org/wiki/Root-mean-square_deviation).
@@ -22,7 +22,7 @@ pub fn rmse_loss(prediction: GraphTensor, target: GraphTensor) -> GraphTensor {
 pub fn mae_loss(prediction: GraphTensor, target: GraphTensor) -> GraphTensor {
     (prediction - target)
         .abs()
-        .mean_reduce(prediction.shape.all_axes())
+        .mean(prediction.shape.all_axes())
 }
 
 /// [Huber Loss](https://en.wikipedia.org/wiki/Huber_loss)
@@ -41,10 +41,9 @@ pub fn huber_loss(
     let abs_error = (prediction - target).abs();
     let delta_tensor = prediction.graph().constant(delta);
     let huber_error = (0.5 * (prediction - target).square())
-        * abs_error.less_than(delta_tensor.expand_to(abs_error.shape))
-        + (delta * (abs_error - 0.5 * delta))
-            * abs_error.greater_than_equal(delta_tensor.expand_to(abs_error.shape));
-    huber_error.mean_reduce(huber_error.shape.all_axes())
+        * abs_error.lt(delta_tensor.expand(abs_error.shape))
+        + (delta * (abs_error - 0.5 * delta)) * abs_error.ge(delta_tensor.expand(abs_error.shape));
+    huber_error.mean(huber_error.shape.all_axes())
 }
 
 /// Smooth l1 loss (closely related to [Huber Loss](https://en.wikipedia.org/wiki/Huber_loss))
@@ -81,7 +80,7 @@ pub fn cross_entropy_with_logits_loss(
             .graph()
             .constant(*logits.shape.dims().last().unwrap());
     let probs = logits.log_softmax(logits.shape.last_axis());
-    (-(probs * target_probabilities).mean_reduce(target_probabilities.shape.all_axes()))
+    (-(probs * target_probabilities).mean(target_probabilities.shape.all_axes()))
         / inv_last_axis_numel
 }
 
@@ -104,8 +103,8 @@ pub fn kl_div_with_logits_loss(
             .graph()
             .constant(*logits.shape.dims().last().unwrap());
     let probs = logits.log_softmax(logits.shape.last_axis());
-    (-((probs - target_probabilities.ln()) * target_probabilities)
-        .mean_reduce(target_probabilities.shape.all_axes()))
+    (-((probs - target_probabilities.log()) * target_probabilities)
+        .mean(target_probabilities.shape.all_axes()))
         / inv_last_axis_numel
 }
 
@@ -122,6 +121,6 @@ pub fn binary_cross_entropy_with_logits_loss(
     logits: GraphTensor,
     target_probabilities: GraphTensor,
 ) -> GraphTensor {
-    let bce = (1.0 - target_probabilities) * logits + (1.0 + (-logits).exp()).ln();
-    bce.mean_reduce(bce.shape.all_axes())
+    let bce = (1.0 - target_probabilities) * logits + (1.0 + (-logits).exp()).log();
+    bce.mean(bce.shape.all_axes())
 }

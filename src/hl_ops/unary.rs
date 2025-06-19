@@ -36,12 +36,12 @@ impl GraphTensor {
     }
 
     /// Natural log
-    pub fn ln(self) -> GraphTensor {
+    pub fn log(self) -> GraphTensor {
         self.log2() * f32::ln(2.)
     }
 
     /// Take the reciprocal of each element
-    pub fn recip(self) -> GraphTensor {
+    pub fn reciprocal(self) -> GraphTensor {
         let new_id = self
             .graph()
             .add_op(op::Recip)
@@ -86,17 +86,17 @@ impl GraphTensor {
         GraphTensor: Add<T, Output = GraphTensor>,
     {
         (self * self)
-            .mean_reduce(axes)
+            .mean(axes)
             .add(epsilon)
             .sqrt()
-            .recip()
-            .expand_to(self.shape)
+            .reciprocal()
+            .expand(self.shape)
             .mul(self)
     }
 
     /// Center so mean is 0.0
     pub fn mean_norm(self, axes: impl ToAxes) -> GraphTensor {
-        self - self.mean_reduce(axes).expand_to(self.shape)
+        self - self.mean(axes).expand(self.shape)
     }
 
     /// Applies a layer norm along an axis
@@ -107,32 +107,38 @@ impl GraphTensor {
         self.mean_norm(axes.to_axes()).std_norm(axes, epsilon)
     }
 
+    /// Normalize the tensor along `axes` using an Lp norm.
+    pub fn normalize(self, p: f32, axes: impl ToAxes, epsilon: f32) -> GraphTensor {
+        let norm = self.abs().pow(p).sum(axes).pow(1.0 / p);
+        self / norm.maximum_f32(epsilon).expand(self.shape)
+    }
+
     /// Applies a softmax function along an axis
     pub fn softmax(self, axes: impl ToAxes) -> GraphTensor {
-        let m = self - self.max_reduce(axes.to_axes()).expand_to(self.shape);
+        let m = self - self.max(axes.to_axes()).expand(self.shape);
         let exp = m.exp();
-        exp / exp.sum_reduce(axes).expand_to(exp.shape)
+        exp / exp.sum(axes).expand(exp.shape)
     }
 
     /// Applies a log softmax function along an axis
     pub fn log_softmax(self, axes: impl ToAxes) -> GraphTensor {
-        let m = self - self.max_reduce(axes.to_axes()).expand_to(self.shape);
-        m - m.exp().sum_reduce(axes.to_axes()).ln().expand_to(m.shape)
+        let m = self - self.max(axes.to_axes()).expand(self.shape);
+        m - m.exp().sum(axes.to_axes()).log().expand(m.shape)
     }
 
     /// Get the indicies of the max elements along the last axis
     pub fn argmax(self) -> GraphTensor {
         // Get one-hot along last dimension
-        let x_equal = self.equals(self.max_reduce(self.shape.len() - 1).expand_to(self.shape));
+        let x_equal = self.eq(self.max(self.shape.len() - 1).expand(self.shape));
         // Create index arange for last dimension
         let r = self
             .graph()
             .constant(1.)
-            .expand_to(ShapeTracker::new(self.shape.dims().last().unwrap()))
+            .expand(self.shape.dims().last().unwrap())
             .cumsum_last_dim()
             - 1.;
         // Multiply one-hot by expanded index arange
-        (x_equal * r.expand_to(self.shape)).max_reduce(self.shape.len() - 1)
+        (x_equal * r.expand(self.shape)).max(self.shape.len() - 1)
     }
 
     /// Take the absolute value
@@ -147,7 +153,7 @@ impl GraphTensor {
 
     /// The Rectified Linear Unit activation function
     pub fn relu(self) -> GraphTensor {
-        self.max_f32(0.)
+        self.maximum_f32(0.)
     }
 
     /// The sigmoid activation function
@@ -219,6 +225,28 @@ mod tests {
 
         assert_close(&b.data(), &d_b.as_vec());
         assert_close(&c.data(), &d_c.as_vec());
+    }
+
+    #[test]
+    fn test_normalize_lp() {
+        let mut cx = Graph::new();
+        let a_data = random_vec(6);
+        let a = cx.tensor((2, 3)).set(a_data.clone());
+        let b = a.normalize(3.0, 1, 1e-5).retrieve();
+
+        cx.execute();
+
+        let mut expected = vec![0.0; 6];
+        for i in 0..2 {
+            let row = &a_data[(i * 3)..((i + 1) * 3)];
+            let mut norm = row.iter().map(|v| v.abs().powf(3.0)).sum::<f32>();
+            norm = norm.powf(1.0 / 3.0).max(1e-5);
+            for j in 0..3 {
+                expected[i * 3 + j] = row[j] / norm;
+            }
+        }
+
+        assert_close(&b.data(), &expected);
     }
 
     #[test]

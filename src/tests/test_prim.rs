@@ -36,7 +36,21 @@ fn test_permute() {
 fn test_expand() {
     let mut cx = Graph::new();
     let a = cx.tensor(3).set([1., 2., 3.]);
-    let b = a.expand(1, 2).retrieve();
+    let b = a.expand_dim(1, 2).retrieve();
+    cx.execute();
+
+    let d_dev = Cpu::default();
+    let d_a = d_dev.tensor([1., 2., 3.]);
+    let d_b: dfdx::tensor::Tensor<Rank2<3, 2>, f32, Cpu> = d_a.broadcast();
+
+    assert_close(&b.data(), &d_b.as_vec());
+}
+
+#[test]
+fn test_expand_pytorch() {
+    let mut cx = Graph::new();
+    let a = cx.tensor(3).set([1., 2., 3.]);
+    let b = a.expand((3, 2)).retrieve();
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -97,10 +111,10 @@ fn test_exp2() {
 }
 
 #[test]
-fn test_recip() {
+fn test_reciprocal() {
     let mut cx = Graph::new();
     let a = cx.tensor(3).set([1., 2., 3.]);
-    let b = a.recip().retrieve();
+    let b = a.reciprocal().retrieve();
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -193,7 +207,7 @@ fn test_permute_mul() {
     let mut cx = Graph::new();
     let a = cx.tensor((3, 2)).set([[1., 2.], [3., 2.], [3., 1.]]);
     let b = cx.tensor((3, 2)).set([[1., 2.], [3., -1.], [3., 0.]]);
-    let c = a.expand(2, 3) * b.expand(2, 3);
+    let c = a.expand_dim(2, 3) * b.expand_dim(2, 3);
     c.retrieve();
     cx.execute();
 
@@ -227,7 +241,7 @@ fn test_max() {
     let mut cx = Graph::new();
     let a = cx.tensor(3).set([1., 0., 3.]);
     let b = cx.tensor(3).set([1., 2., -2.]);
-    let c = a.max(b).retrieve();
+    let c = a.maximum(b).retrieve();
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -261,14 +275,14 @@ fn test_mod() {
 // Reduction op tests
 
 #[test]
-fn test_sum_reduce() {
+fn test_sum() {
     let mut cx = Graph::new();
     let a = cx
         .tensor((2, 2, 3))
         .set([[[1., 2., 3.], [1., 2., 3.]], [[1., 2., 3.], [1., 2., 3.]]]);
-    let b = a.sum_reduce(1).retrieve();
-    let c = a.sum_reduce(0).retrieve();
-    let d = a.sum_reduce(2).retrieve();
+    let b = a.sum(1).retrieve();
+    let c = a.sum(0).retrieve();
+    let d = a.sum(2).retrieve();
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -283,13 +297,13 @@ fn test_sum_reduce() {
 }
 
 #[test]
-fn test_sum_reduce2() {
+fn test_sum2() {
     let mut cx = Graph::new();
     let a = cx.tensor((1, 2, 2, 3)).set([[
         [[34.4, -96.0, 144.0], [43.0, 560.0, 180.0]],
         [[39.6, -120.0, 180.0], [49.5, 700.0, 225.0]],
     ]]);
-    let b = a.sum_reduce(3).retrieve();
+    let b = a.sum(3).retrieve();
     cx.execute();
 
     let d_dev = Cpu::default();
@@ -308,9 +322,9 @@ fn test_max_reduce() {
     let a = cx
         .tensor((2, 2, 3))
         .set([[[1., 2., 3.], [1., 2., 3.]], [[1., 2., 3.], [1., 2., 3.]]]);
-    let b = a.max_reduce(1).retrieve();
-    let c = a.max_reduce(0).retrieve();
-    let d = a.max_reduce(2).retrieve();
+    let b = a.max(1).retrieve();
+    let c = a.max(0).retrieve();
+    let d = a.max(2).retrieve();
     cx.execute();
 
     let d_dev = Cpu::default();
