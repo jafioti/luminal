@@ -593,17 +593,17 @@ fn make_kernel(
                     } else {
                         false
                     };
-                    if node_to_var[&output].0 != node_to_var[&body_out].0
-                        && (!node_to_var[&body_out].1 || is_acc)
-                    {
-                        if let Some(size) = &node_to_var[&body_out].2 {
+                    let (output, output_ptr, _) = &node_to_var[&output];
+                    let (body_out, body_out_ptr, body_out_size) = &node_to_var[&body_out];
+                    if output != body_out && (!body_out_ptr || is_acc) {
+                        if let Some(size) = &body_out_size {
                             if size == "1" {
                                 kernel_lines.push(format!(
                                     "{inner_spacing}{}{} = {}{};",
-                                    if node_to_var[&output].1 { "*" } else { "" },
-                                    var_to_char(node_to_var[&output].0),
-                                    if node_to_var[&body_out].1 { "*" } else { "" },
-                                    var_to_char(node_to_var[&body_out].0),
+                                    if *output_ptr { "*" } else { "" },
+                                    var_to_char(*output),
+                                    if *body_out_ptr { "*" } else { "" },
+                                    var_to_char(*body_out),
                                 ));
                             } else {
                                 // Save size numbers
@@ -611,23 +611,23 @@ fn make_kernel(
                                     "{inner_spacing}for (int save = 0; save < {size}; save++) {{",
                                 ));
                                 assert!(
-                                    node_to_var[&output].1 && node_to_var[&body_out].1,
+                                    *output_ptr && *body_out_ptr,
                                     "Both src and dest must be pointers when saving a block"
                                 );
                                 kernel_lines.push(format!(
                                     "{inner_spacing}\t{}[save] = {}[save];",
-                                    var_to_char(node_to_var[&output].0),
-                                    var_to_char(node_to_var[&body_out].0),
+                                    var_to_char(*output),
+                                    var_to_char(*body_out),
                                 ));
                                 kernel_lines.push(format!("{inner_spacing}}}"));
                             }
                         } else {
                             kernel_lines.push(format!(
                                 "{inner_spacing}{}{} = {}{};",
-                                if node_to_var[&output].1 { "*" } else { "" },
-                                var_to_char(node_to_var[&output].0),
-                                if node_to_var[&body_out].1 { "*" } else { "" },
-                                var_to_char(node_to_var[&body_out].0),
+                                if *output_ptr { "*" } else { "" },
+                                var_to_char(*output),
+                                if *body_out_ptr { "*" } else { "" },
+                                var_to_char(*body_out),
                             ));
                         }
                     }
@@ -896,7 +896,7 @@ pub fn run_egglog_program(code: &str) -> Result<(Vec<String>, String, TermDag, T
     let msgs = egraph.run_program(commands)?;
     println!("Run Report:  {}", egraph.get_run_report().as_ref().unwrap());
     let (sort, value) = egraph.eval_expr(&var!("full"))?;
-    let (termdag, root) = egraph.extract_value(&sort, value)?;
+    let (termdag, root, _) = egraph.extract_value(&sort, value)?;
     let (_petgraph, _root_idx) = dag_to_petgraph(&termdag, termdag.lookup(&root));
     let s = egraph.serialize(egglog::SerializeConfig {
         root_eclasses: vec![(sort, value)],

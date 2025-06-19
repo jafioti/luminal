@@ -7,7 +7,7 @@ edition = "2024"
 
 [dependencies]
 itertools = "0.14.0"
-egglog = { git = "https://github.com/egraphs-good/egglog" }
+egglog = { git = "https://github.com/egraphs-good/egglog", rev="b8ae2d18e68667af966ef392156db30a802ef07f" }
 petgraph = "0.8.1"
 metal-rs = { version = "0.28.0", package = "metal" }
 urlencoding = "2.1.3"
