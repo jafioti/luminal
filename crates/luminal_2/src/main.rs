@@ -1,5 +1,5 @@
 // TODO
-// get complex codegen working
+// unit test complex codegen with correctness checks
 // get profiling working
 // get brute force extraction working
 
@@ -40,23 +40,11 @@ use std::{
     iter::repeat,
 };
 
-#[cfg(target_os = "macos")]
-const PRELUDE: &str = "
-#include <metal_stdlib>
-using namespace metal;
-
-float mul(float a, float b) {
-	return a * b;
+#[derive(Clone, Copy)]
+enum GPUArch {
+    CUDA,
+    Metal,
 }
-";
-
-#[cfg(target_os = "linux")]
-const PRELUDE: &str = "
-#include \"cuda_fp16.h\"
-__device__ float mul(float a, float b) {
-	return a * b;
-}
-";
 
 #[derive(Clone, Debug)]
 enum GraphTerm {
@@ -162,7 +150,7 @@ impl TermToString for (GraphTerm, Vec<String>, Vec<usize>) {
 
 fn main() {
     let (g, r) = kernels::make_flash_attention();
-    codegen(g, r);
+    codegen(g, r, GPUArch::CUDA);
     // match run_egglog_program(include_str!("code.lisp")) {
     //     Ok((s, _serialized, termdag, root)) => {
     //         if s.is_empty() {
@@ -250,7 +238,11 @@ fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
     }
 }
 
-fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (String, TermId) {
+fn codegen(
+    graph: StableGraph<GraphTerm, u8, Directed>,
+    root: NodeIndex,
+    arch: GPUArch,
+) -> (String, TermId) {
     let (kernels, root_kernel) = split_kernels(graph, root);
     println!("Kernels: {} Root Kernel: {root_kernel}", kernels.len());
     // Create kernel meta graph to toposort
@@ -270,24 +262,14 @@ fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (Str
         let (kernel_graph, inputs, outputs, smem_buffers) = kernels[kernel_index].clone();
         println!("KERNEL {kernel_index}");
         validate_graph(&kernel_graph);
-        let inputs: Vec<_> = inputs
-            .into_iter()
-            .enumerate()
-            .map(|(a, (_, _, b))| (a, b))
-            .collect();
-        let outputs: Vec<_> = outputs
-            .into_iter()
-            .enumerate()
-            .map(|(i, a)| (inputs.len() + i, a))
-            .collect();
-        let mut loop_levels = vec![];
         let mut node_to_var = inputs
             .iter()
-            .map(|(v, n)| (*n, *v))
-            .chain(outputs.iter().map(|(v, n)| (*n, *v)))
-            .map(|(k, v)| (k, (v, true, None)))
+            .map(|(_, _, n)| *n)
+            .chain(outputs.iter().copied())
+            .enumerate()
+            .map(|(v, n)| (n, (v, true, None)))
             .collect::<HashMap<_, _>>();
-
+        let mut loop_levels = vec![];
         let kernel = make_kernel(
             &kernel_graph,
             kernel_graph.node_indices().collect(),
@@ -300,6 +282,7 @@ fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (Str
                 .map(|(ind, node, _)| (*node, *ind))
                 .collect(),
             0,
+            arch,
         )
         .unwrap();
         let grid = loop_levels
@@ -314,34 +297,67 @@ fn codegen(graph: StableGraph<GraphTerm, u8, Directed>, root: NodeIndex) -> (Str
             .chain(repeat("1".to_string()))
             .take(3)
             .collect_vec();
-        let kernel = format!(
-            "extern \"C\" __global__ void kernel{kernel_index}({}) {{
-{}{}{}
+        let kernel_lines = kernel.into_iter().map(|s| format!("\t{s}")).join("\n");
+        let kernel = match arch {
+            GPUArch::CUDA => {
+                let inputs = inputs
+                    .into_iter()
+                    .map(|(_, _, a)| a)
+                    .chain(outputs)
+                    .map(|a| format!("float* {}", var_to_char(node_to_var[&a].0)))
+                    .join(", ");
+                let smem_setup = if smem_buffers.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(
+                        "\textern __shared__ float sm[];\n{}",
+                        smem_buffers
+                            .into_iter()
+                            .scan("".to_string(), |prev_buffers, (n, _, size)| {
+                                let r =
+                                    format!("\tfloat* {} = sm{prev_buffers};\n", var_to_char(n));
+                                prev_buffers.push_str(&format!(" + {size}"));
+                                Some(r)
+                            })
+                            .join("")
+                    )
+                };
+                format!(
+                    "extern \"C\" __global__ void kernel{kernel_index}({inputs}) {{
+{smem_setup}{kernel_lines}
 }}",
-            inputs
-                .into_iter()
-                .map(|(a, _)| format!("float* {}", var_to_char(a))) // put const in here for the future
-                .chain(
-                    outputs
-                        .into_iter()
-                        .map(|(a, _)| format!("float* {}", var_to_char(a)))
                 )
-                .join(", "),
-            if smem_buffers.is_empty() {
-                ""
-            } else {
-                "\textern __shared__ float sm[];\n"
-            },
-            smem_buffers
-                .into_iter()
-                .scan("".to_string(), |prev_buffers, (n, _, size)| {
-                    let r = format!("\tfloat* {} = sm{};\n", var_to_char(n), prev_buffers);
-                    prev_buffers.push_str(&format!(" + {size}"));
-                    Some(r)
-                })
-                .join(""),
-            kernel.into_iter().map(|s| format!("\t{s}")).join("\n")
-        );
+            }
+            GPUArch::Metal => {
+                let inputs = inputs
+                    .into_iter()
+                    .map(|(_, _, a)| a)
+                    .chain(outputs)
+                    .map(|a| format!("float* {}", var_to_char(node_to_var[&a].0)))
+                    .join(", ");
+                let smem_setup = if smem_buffers.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(
+                        "\textern __shared__ float sm[];\n{}",
+                        smem_buffers
+                            .into_iter()
+                            .scan("".to_string(), |prev_buffers, (n, _, size)| {
+                                let r =
+                                    format!("\tfloat* {} = sm{prev_buffers};\n", var_to_char(n));
+                                prev_buffers.push_str(&format!(" + {size}"));
+                                Some(r)
+                            })
+                            .join("")
+                    )
+                };
+                format!(
+                    "extern \"C\" __global__ void kernel{kernel_index}({inputs}) {{
+{smem_setup}{kernel_lines}
+}}",
+                )
+            }
+        };
         println!("Grid: {grid:?} Threadblock: {threadblock:?}");
         println!("{kernel}");
     }
@@ -357,15 +373,15 @@ fn make_kernel(
     loop_indexes: &mut HashMap<NodeIndex, usize>,
     smem_buffers: &HashMap<NodeIndex, usize>,
     current_loop_level: usize,
+    arch: GPUArch,
 ) -> Option<Vec<String>> {
     let mut kernel_lines = vec![];
-    // toposort down the graph
-    let toposorted = toposort_subset(kernel_graph, &include_nodes);
-    for node in toposorted
-        .into_iter()
-        .filter(|n| kernel_graph.node_weight(*n).unwrap().1 == current_loop_level)
-    {
-        if node_to_var.contains_key(&node) {
+
+    // Walk through the toposorted nodes
+    for node in toposort_subset(kernel_graph, &include_nodes) {
+        if node_to_var.contains_key(&node)
+            || kernel_graph.node_weight(node).unwrap().1 != current_loop_level
+        {
             continue;
         }
         let (term, loop_level) = kernel_graph.node_weight(node).unwrap();
@@ -560,6 +576,7 @@ fn make_kernel(
                     loop_indexes,
                     smem_buffers,
                     current_loop_level + 1,
+                    arch,
                 )?;
 
                 kernel_lines.extend(loop_body);
