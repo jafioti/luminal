@@ -31,15 +31,11 @@ use colored::Colorize;
 use egglog::{EGraph, Error, Term, TermDag, TermId, ast::Literal, var};
 use itertools::Itertools;
 use petgraph::{
-    Directed, Direction,
-    algo::toposort,
-    graph::NodeIndex,
-    prelude::StableGraph,
-    visit::{EdgeRef, NodeRef},
+    Directed, Direction, algo::toposort, graph::NodeIndex, prelude::StableGraph, visit::EdgeRef,
 };
 use regex::Regex;
 use std::{
-    collections::{BTreeSet, HashMap, HashSet, VecDeque},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt::Debug,
     iter::repeat,
 };
@@ -481,7 +477,7 @@ fn make_kernel(
                         node_to_var.insert(*input, (real_input, is_ptr, real_size));
                     } else {
                         if *stride != "0" {
-                            assert!(is_ptr);
+                            // assert!(is_ptr);
                             *prev_max_var += 1;
                             kernel_lines.push(format!(
                                 "{}float* {} = {} + {};",
@@ -574,35 +570,55 @@ fn make_kernel(
                         .neighbors_directed(output, Direction::Incoming)
                         .next()
                         .unwrap();
+                    let is_acc = if let GraphTerm::LoopOut { stride, .. } =
+                        &kernel_graph.node_weight(body_out).unwrap().0
+                    {
+                        stride.contains("Acc")
+                    } else {
+                        false
+                    };
                     if node_to_var[&output].0 != node_to_var[&body_out].0
-                        && !node_to_var[&body_out].1
+                        && (!node_to_var[&body_out].1 || is_acc)
                     {
                         if let Some(size) = &node_to_var[&body_out].2 {
-                            // Save size numbers
-                            kernel_lines.push(format!(
-                                "{}for (int save = 0; save < {size}; save++) {{",
-                                (0..(*loop_level + 1).saturating_sub(6))
-                                    .map(|_| "\t")
-                                    .join("")
-                            ));
-                            assert!(
-                                node_to_var[&output].1 && node_to_var[&body_out].1,
-                                "Both src and dest must be pointers when saving a block"
-                            );
-                            kernel_lines.push(format!(
-                                "{}{}[save] = {}[save];",
-                                (0..(*loop_level + 2).saturating_sub(6))
-                                    .map(|_| "\t")
-                                    .join(""),
-                                var_to_char(node_to_var[&output].0),
-                                var_to_char(node_to_var[&body_out].0),
-                            ));
-                            kernel_lines.push(format!(
-                                "{}}}",
-                                (0..(*loop_level + 1).saturating_sub(6))
-                                    .map(|_| "\t")
-                                    .join("")
-                            ));
+                            if size == "1" {
+                                kernel_lines.push(format!(
+                                    "{}{}{} = {}{};",
+                                    (0..(*loop_level + 1).saturating_sub(6))
+                                        .map(|_| "\t")
+                                        .join(""),
+                                    if node_to_var[&output].1 { "*" } else { "" },
+                                    var_to_char(node_to_var[&output].0),
+                                    if node_to_var[&body_out].1 { "*" } else { "" },
+                                    var_to_char(node_to_var[&body_out].0),
+                                ));
+                            } else {
+                                // Save size numbers
+                                kernel_lines.push(format!(
+                                    "{}for (int save = 0; save < {size}; save++) {{",
+                                    (0..(*loop_level + 1).saturating_sub(6))
+                                        .map(|_| "\t")
+                                        .join("")
+                                ));
+                                assert!(
+                                    node_to_var[&output].1 && node_to_var[&body_out].1,
+                                    "Both src and dest must be pointers when saving a block"
+                                );
+                                kernel_lines.push(format!(
+                                    "{}{}[save] = {}[save];",
+                                    (0..(*loop_level + 2).saturating_sub(6))
+                                        .map(|_| "\t")
+                                        .join(""),
+                                    var_to_char(node_to_var[&output].0),
+                                    var_to_char(node_to_var[&body_out].0),
+                                ));
+                                kernel_lines.push(format!(
+                                    "{}}}",
+                                    (0..(*loop_level + 1).saturating_sub(6))
+                                        .map(|_| "\t")
+                                        .join("")
+                                ));
+                            }
                         } else {
                             kernel_lines.push(format!(
                                 "{}{}{} = {}{};",
@@ -717,11 +733,11 @@ fn make_kernel(
                             ));
                         }
                         if kernel_lines
-                            .last()
+                            .get(kernel_lines.len() - 2)
                             .map(|i| i.contains("__syncthreads()"))
                             .unwrap_or_default()
                         {
-                            kernel_lines.pop();
+                            kernel_lines.remove(kernel_lines.len() - 2);
                         } else {
                             kernel_lines.push(format!(
                                 "{}__syncthreads();",
@@ -1058,18 +1074,60 @@ fn split_kernels(
     }
 
     // Assign kernel numbers
-    dfs = vec![root];
-    seen.clear();
+    let mut dfs_stack = vec![root];
     let mut n_kernels = 1;
-    while let Some(node) = dfs.pop() {
-        if seen.contains(&node) {
+    while let Some(node) = dfs_stack.pop() {
+        let (term, curr_level, curr_kernel) = marked_graph.node_weight(node).unwrap().clone();
+        for source in marked_graph
+            .edges_directed(node, Direction::Incoming)
+            .map(|e| e.source())
+            .collect_vec()
+        {
+            let (src_term, src_level, src_kernel) = marked_graph.node_weight_mut(source).unwrap();
+            if matches!(term, GraphTerm::LoopIn { .. })
+                && matches!(src_term, GraphTerm::LoopOut { .. })
+                && curr_level.len() < 3
+            {
+                let max_kernel = *curr_kernel.iter().max().unwrap();
+                n_kernels = n_kernels.max(max_kernel + 2);
+                *src_kernel = vec![max_kernel + 1];
+            } else {
+                for k in &curr_kernel {
+                    if !src_kernel.contains(k) {
+                        src_kernel.push(*k);
+                    }
+                }
+            }
+            if !matches!(term, GraphTerm::LoopIn { .. } | GraphTerm::LoopOut { .. })
+                && !matches!(
+                    src_term,
+                    GraphTerm::LoopIn { .. } | GraphTerm::LoopOut { .. }
+                )
+            {
+                assert_eq!(curr_level, *src_level); // Edges need to go between the same levels if neither op is a LoopIn or LoopOut
+            }
+            dfs_stack.push(source);
+        }
+    }
+    // Run forward from all inputs to catch any nodes we didn't hit already
+    dfs_stack = marked_graph
+        .node_indices()
+        .filter(|n| {
+            marked_graph
+                .neighbors_directed(*n, Direction::Incoming)
+                .next()
+                .is_none()
+        })
+        .collect_vec();
+    while let Some(node) = dfs_stack.pop() {
+        dfs_stack.extend(marked_graph.neighbors_directed(node, Direction::Outgoing));
+        let (term, curr_level, mut curr_kernel) = marked_graph.node_weight(node).unwrap().clone();
+        if !curr_kernel.is_empty() {
             continue;
         }
-        seen.insert(node);
-        let (term, curr_level, mut curr_kernel) = marked_graph.node_weight(node).unwrap().clone();
         for source in marked_graph
-            .neighbors_undirected(node)
-            .filter(|n| seen.contains(n))
+            .edges_directed(node, Direction::Incoming)
+            .map(|e| e.source())
             .collect_vec()
         {
             let (src_term, src_level, src_kernel) = marked_graph.node_weight(source).unwrap();
@@ -1077,70 +1135,49 @@ fn split_kernels(
                 && matches!(src_term, GraphTerm::LoopOut { .. })
                 && curr_level.len() < 3
             {
-                // We have a loopout -> loopin at a grid level, which means we make a new kernel
-                let max_kernel = *curr_kernel.iter().max().unwrap();
+                let max_kernel = *src_kernel.iter().max().unwrap();
                 n_kernels = n_kernels.max(max_kernel + 2);
                 curr_kernel = vec![max_kernel + 1];
-                break;
             } else {
-                // We are in the same kernel(s) as the source
                 for k in src_kernel {
                     if !curr_kernel.contains(k) {
                         curr_kernel.push(*k);
                     }
                 }
             }
-            // Correctness check
             if !matches!(term, GraphTerm::LoopIn { .. } | GraphTerm::LoopOut { .. })
                 && !matches!(
                     src_term,
                     GraphTerm::LoopIn { .. } | GraphTerm::LoopOut { .. }
                 )
             {
-                assert_eq!(
-                    curr_level, *src_level,
-                    "Edges need to go between the same levels if src and dest are not LoopIn or LoopOut"
-                );
+                assert_eq!(curr_level, *src_level); // Edges need to go between the same levels if neither op is a LoopIn or LoopOut
             }
         }
         marked_graph.node_weight_mut(node).unwrap().2 = curr_kernel;
-        dfs.extend(marked_graph.neighbors_undirected(node));
     }
-    // // Prune out unnessecary kernel members
-    // let mut dfs_stack = marked_graph
-    //     .node_indices()
-    //     .filter(|n| {
-    //         marked_graph
-    //             .neighbors_directed(*n, Direction::Outgoing)
-    //             .next()
-    //             .is_none()
-    //     })
-    //     .collect_vec();
-    // while let Some(node) = dfs_stack.pop() {
-    //     dfs_stack.extend(marked_graph.neighbors_directed(node, Direction::Incoming));
-    //     if marked_graph
-    //         .neighbors_directed(node, Direction::Outgoing)
-    //         .next()
-    //         .is_none()
-    //     {
-    //         continue;
-    //     }
-    //     let (term, curr_level, mut curr_kernel) = marked_graph.node_weight(node).unwrap().clone();
-    //     let split_cond = curr_level.len() < 3 && matches!(term, GraphTerm::LoopOut { .. });
-    //     curr_kernel.retain(|k| {
-    //         marked_graph
-    //             .neighbors_directed(node, Direction::Outgoing)
-    //             .any(|n| {
-    //                 (split_cond
-    //                     && matches!(
-    //                         marked_graph.node_weight(n).unwrap().0,
-    //                         GraphTerm::LoopIn { .. }
-    //                     ))
-    //                     || marked_graph.node_weight(n).unwrap().2.contains(k)
-    //             })
-    //     });
-    //     marked_graph.node_weight_mut(node).unwrap().2 = curr_kernel;
-    // }
+    // Prune out unnessecary kernel members
+    let mut dfs_stack = marked_graph
+        .neighbors_directed(root, Direction::Incoming)
+        .collect_vec();
+    while let Some(node) = dfs_stack.pop() {
+        dfs_stack.extend(marked_graph.neighbors_directed(node, Direction::Incoming));
+        let (term, curr_level, mut curr_kernel) = marked_graph.node_weight(node).unwrap().clone();
+        let split_cond = curr_level.len() < 3 && matches!(term, GraphTerm::LoopOut { .. });
+        curr_kernel.retain(|k| {
+            marked_graph
+                .neighbors_directed(node, Direction::Outgoing)
+                .any(|n| {
+                    (split_cond
+                        && matches!(
+                            marked_graph.node_weight(n).unwrap().0,
+                            GraphTerm::LoopIn { .. }
+                        ))
+                        || marked_graph.node_weight(n).unwrap().2.contains(k)
+                })
+        });
+        marked_graph.node_weight_mut(node).unwrap().2 = curr_kernel;
+    }
 
     // Add kernel barriers
     for edge in marked_graph.edge_indices().collect_vec() {
@@ -1301,6 +1338,28 @@ fn split_kernels(
                 }
                 let buf_index = inputs.len() + outputs.len() + smem_buffers.len();
                 smem_buffers.push((buf_index, node, size));
+            }
+        }
+
+        // Ensure GMEM is placed on the graph
+        for (_, _, input) in inputs {
+            if !matches!(
+                kernel_graph.node_weight(*input).unwrap().0,
+                GraphTerm::GMEM { .. }
+            ) {
+                let new_input = kernel_graph.add_node((GraphTerm::GMEM { label: None }, 0));
+                kernel_graph.add_edge(new_input, *input, 0);
+                *input = new_input;
+            }
+        }
+        for output in outputs {
+            if !matches!(
+                kernel_graph.node_weight(*output).unwrap().0,
+                GraphTerm::GMEM { .. }
+            ) {
+                let new_output = kernel_graph.add_node((GraphTerm::GMEM { label: None }, 0));
+                kernel_graph.add_edge(*output, new_output, 0);
+                *output = new_output;
             }
         }
     }
