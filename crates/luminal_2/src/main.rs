@@ -376,6 +376,9 @@ fn make_kernel(
     arch: GPUArch,
 ) -> Option<Vec<String>> {
     let mut kernel_lines = vec![];
+    let spacing = (0..current_loop_level.saturating_sub(6))
+        .map(|_| "\t")
+        .join("");
 
     // Walk through the toposorted nodes
     for node in toposort_subset(kernel_graph, &include_nodes) {
@@ -421,22 +424,17 @@ fn make_kernel(
                 }
 
                 if let Some((_, _)) = loop_inputs.iter().find(|(i, _)| {
-                    if let Some(inp) = kernel_graph
+                    kernel_graph
                         .neighbors_directed(*i, Direction::Incoming)
                         .next()
-                    {
-                        !node_to_var.contains_key(&inp) // no recorded key
-                    } else {
-                        false
-                    }
+                        .map(|n| !node_to_var.contains_key(&n))
+                        .unwrap_or_default()
                 }) {
+                    // Not all inputs to this loop are ready
                     continue;
                 }
-                for i in &loop_inputs {
-                    body_nodes.remove(&i.0);
-                }
-                for i in &loop_outputs {
-                    body_nodes.remove(&i.0);
+                for (i, _) in loop_inputs.iter().chain(&loop_outputs) {
+                    body_nodes.remove(i);
                 }
                 // display_graph(
                 //     &kernel_graph,
@@ -449,10 +447,19 @@ fn make_kernel(
                 //         .collect_vec(),
                 // );
 
+                let inner_spacing = if current_loop_level < 6 {
+                    "".to_string()
+                } else {
+                    format!("{spacing}\t")
+                };
+
                 // Make new loop
                 if *loop_level < 6 {
-                    if loop_inputs.iter().any(|(_, st)| **st != "0")
-                        || loop_outputs.iter().any(|(_, st)| **st != "0")
+                    loop_levels.push(range.to_string());
+                    if loop_inputs
+                        .iter()
+                        .chain(&loop_outputs)
+                        .any(|(_, st)| **st != "0")
                     {
                         *prev_max_var += 1;
                         kernel_lines.push(format!(
@@ -471,7 +478,7 @@ fn make_kernel(
                 } else {
                     *prev_max_var += 1;
                     let loop_var = var_to_char(*prev_max_var);
-                    kernel_lines.push(format!("{}for (int loop_{loop_var} = 0; loop_{loop_var} < {range}; loop_{loop_var} += 1) {{", (0..loop_level.saturating_sub(6)).map(|_| "\t").join("")));
+                    kernel_lines.push(format!("{spacing}for (int loop_{loop_var} = 0; loop_{loop_var} < {range}; loop_{loop_var} += 1) {{"));
                 };
                 let loop_var = var_to_char(*prev_max_var);
                 let loop_var_int = *prev_max_var;
@@ -493,13 +500,9 @@ fn make_kernel(
                         node_to_var.insert(*input, (real_input, is_ptr, real_size));
                     } else {
                         if *stride != "0" {
-                            // assert!(is_ptr);
                             *prev_max_var += 1;
                             kernel_lines.push(format!(
-                                "{}float* {} = {} + {};",
-                                (0..(*loop_level + 1).saturating_sub(6))
-                                    .map(|_| "\t")
-                                    .join(""),
+                                "{inner_spacing}float* {} = {} + {};",
                                 var_to_char(*prev_max_var),
                                 var_to_char(real_input),
                                 stride.replace('z', &format!("loop_{loop_var}"))
@@ -548,10 +551,7 @@ fn make_kernel(
                         assert!(is_ptr, "Only pointers can be offset!");
                         *prev_max_var += 1;
                         kernel_lines.push(format!(
-                            "{}float* {} = {} + {};",
-                            (0..(*loop_level + 1).saturating_sub(6))
-                                .map(|_| "\t")
-                                .join(""),
+                            "{inner_spacing}float* {} = {} + {};",
                             var_to_char(*prev_max_var),
                             var_to_char(real_output),
                             stride.replace('z', &format!("loop_{loop_var}"))
@@ -563,7 +563,6 @@ fn make_kernel(
                         node_to_var.insert(*output, (real_output, is_ptr, real_size));
                     }
                 }
-                loop_levels.push(range.to_string());
                 for (inp, _) in &loop_inputs {
                     loop_indexes.insert(*inp, loop_var_int);
                 }
@@ -600,10 +599,7 @@ fn make_kernel(
                         if let Some(size) = &node_to_var[&body_out].2 {
                             if size == "1" {
                                 kernel_lines.push(format!(
-                                    "{}{}{} = {}{};",
-                                    (0..(*loop_level + 1).saturating_sub(6))
-                                        .map(|_| "\t")
-                                        .join(""),
+                                    "{inner_spacing}{}{} = {}{};",
                                     if node_to_var[&output].1 { "*" } else { "" },
                                     var_to_char(node_to_var[&output].0),
                                     if node_to_var[&body_out].1 { "*" } else { "" },
@@ -612,36 +608,22 @@ fn make_kernel(
                             } else {
                                 // Save size numbers
                                 kernel_lines.push(format!(
-                                    "{}for (int save = 0; save < {size}; save++) {{",
-                                    (0..(*loop_level + 1).saturating_sub(6))
-                                        .map(|_| "\t")
-                                        .join("")
+                                    "{inner_spacing}for (int save = 0; save < {size}; save++) {{",
                                 ));
                                 assert!(
                                     node_to_var[&output].1 && node_to_var[&body_out].1,
                                     "Both src and dest must be pointers when saving a block"
                                 );
                                 kernel_lines.push(format!(
-                                    "{}{}[save] = {}[save];",
-                                    (0..(*loop_level + 2).saturating_sub(6))
-                                        .map(|_| "\t")
-                                        .join(""),
+                                    "{inner_spacing}\t{}[save] = {}[save];",
                                     var_to_char(node_to_var[&output].0),
                                     var_to_char(node_to_var[&body_out].0),
                                 ));
-                                kernel_lines.push(format!(
-                                    "{}}}",
-                                    (0..(*loop_level + 1).saturating_sub(6))
-                                        .map(|_| "\t")
-                                        .join("")
-                                ));
+                                kernel_lines.push(format!("{inner_spacing}}}"));
                             }
                         } else {
                             kernel_lines.push(format!(
-                                "{}{}{} = {}{};",
-                                (0..(*loop_level + 1).saturating_sub(6))
-                                    .map(|_| "\t")
-                                    .join(""),
+                                "{inner_spacing}{}{} = {}{};",
                                 if node_to_var[&output].1 { "*" } else { "" },
                                 var_to_char(node_to_var[&output].0),
                                 if node_to_var[&body_out].1 { "*" } else { "" },
@@ -652,10 +634,7 @@ fn make_kernel(
                 }
 
                 if *loop_level >= 6 {
-                    kernel_lines.push(format!(
-                        "{}}}",
-                        (0..loop_level.saturating_sub(6)).map(|_| "\t").join("")
-                    ));
+                    kernel_lines.push(format!("{spacing}}}"));
                 }
             }
             GraphTerm::NewAcc { starting_value } => {
@@ -680,8 +659,7 @@ fn make_kernel(
                 // Create accumulator
                 *prev_max_var += 1;
                 kernel_lines.push(format!(
-                    "{}float {}[{size}] = {{{starting_value}}};",
-                    (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
+                    "{spacing}float {}[{size}] = {{{starting_value}}};",
                     var_to_char(*prev_max_var)
                 ));
                 node_to_var.insert(node, (*prev_max_var, true, Some(size)));
@@ -742,8 +720,7 @@ fn make_kernel(
                             *prev_max_var += 1;
                             smem_ptr = *prev_max_var;
                             kernel_lines.push(format!(
-                                "{}float* {} = {} + {};",
-                                (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
+                                "{spacing}float* {} = {} + {};",
                                 var_to_char(smem_ptr),
                                 var_to_char(buffer),
                                 offset.iter().join(" + ")
@@ -756,14 +733,10 @@ fn make_kernel(
                         {
                             kernel_lines.remove(kernel_lines.len() - 2);
                         } else {
-                            kernel_lines.push(format!(
-                                "{}__syncthreads();",
-                                (0..loop_level.saturating_sub(6)).map(|_| "\t").join("")
-                            ));
+                            kernel_lines.push(format!("{spacing}__syncthreads();"));
                         }
                         kernel_lines.push(format!(
-                            "{}{}[loop_{}] = *{} + {};",
-                            (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
+                            "{spacing}{}[loop_{}] = *{} + {};",
                             var_to_char(smem_ptr),
                             var_to_char(loop_indexes[&base]),
                             var_to_char(node_to_var[&src].0),
@@ -772,10 +745,7 @@ fn make_kernel(
                                 &format!("loop_{}", var_to_char(loop_indexes[&base]))
                             )
                         ));
-                        kernel_lines.push(format!(
-                            "{}__syncthreads();",
-                            (0..loop_level.saturating_sub(6)).map(|_| "\t").join("")
-                        ));
+                        kernel_lines.push(format!("{spacing}__syncthreads();"));
                         node_to_var.insert(node, (smem_ptr, false, None));
                     }
                     6.. => {
@@ -801,8 +771,7 @@ fn make_kernel(
                     _ => panic!(),
                 };
                 kernel_lines.push(format!(
-                    "{}float {} = {expr};",
-                    (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
+                    "{spacing}float {} = {expr};",
                     var_to_char(*prev_max_var),
                 ));
             }
@@ -821,8 +790,7 @@ fn make_kernel(
                     _ => panic!(),
                 };
                 kernel_lines.push(format!(
-                    "{}float {} = {expr};",
-                    (0..loop_level.saturating_sub(6)).map(|_| "\t").join(""),
+                    "{spacing}float {} = {expr};",
                     var_to_char(*prev_max_var)
                 ));
             }
