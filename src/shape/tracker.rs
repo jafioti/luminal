@@ -4,6 +4,49 @@ use tinyvec::ArrayVec;
 use crate::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NewShapeTracker {
+    pub dims: ArrayVec<[Expression; 10]>,
+    pub strides: ArrayVec<[Expression; 10]>,
+}
+
+impl NewShapeTracker {
+    /// Make a new row-major shape tracker
+    pub fn new(dims: impl ToShape) -> NewShapeTracker {
+        let mut s = Self {
+            dims: Default::default(),
+            strides: Default::default(),
+        };
+        let mut stride = Expression::from(1);
+        for d in dims.to_shape().into_iter().rev() {
+            s.dims.insert(0, d);
+            s.strides.insert(0, stride);
+            stride *= d;
+        }
+        s
+    }
+
+    /// Make a new shape tracker with custom strides
+    pub fn new_strided(dims: impl ToShape, strides: impl ToShape) -> NewShapeTracker {
+        let dims = dims.to_shape();
+        let strides = strides.to_shape();
+        assert_eq!(
+            dims.len(),
+            strides.len(),
+            "Dimensions and strides need to be the same size!"
+        );
+        let mut s = Self {
+            dims: Default::default(),
+            strides: Default::default(),
+        };
+        for (dim, stride) in dims.into_iter().zip(strides) {
+            s.dims.push(dim);
+            s.strides.push(stride);
+        }
+        s
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ShapeTracker {
     pub dims: ArrayVec<[Expression; 6]>,
     pub indexes: ArrayVec<[usize; 6]>,
