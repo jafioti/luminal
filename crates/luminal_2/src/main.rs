@@ -26,6 +26,7 @@
 // }
 
 mod kernels;
+mod symbolic;
 
 use colored::Colorize;
 use egglog::{EGraph, Error, Term, TermDag, TermId, ast::Literal, var};
@@ -43,6 +44,8 @@ use std::{
     fmt::Debug,
     iter::repeat,
 };
+
+use crate::symbolic::Expression;
 
 #[derive(Clone, PartialEq, Eq)]
 enum GPUArch {
@@ -69,10 +72,10 @@ impl GPUArch {
 struct Kernel {
     code: String,
     // launch params
-    grid: (String, String, String),
-    threadblock: (String, String, String),
-    smem: String, // sizes of required shared memory buffers
-    outputs: Vec<String>,
+    grid: (Expression, Expression, Expression),
+    threadblock: (Expression, Expression, Expression),
+    smem: Expression, // sizes of required shared memory buffers
+    outputs: Vec<Expression>,
 }
 
 #[derive(Clone, Copy)]
@@ -83,10 +86,20 @@ enum GMEMBuffer {
 
 #[derive(Clone, Debug)]
 enum GraphTerm {
-    GMEM { label: Option<String> },
-    LoopIn { range: String, stride: String },
-    LoopOut { range: String, stride: String },
-    NewAcc { starting_value: String },
+    GMEM {
+        label: Option<String>,
+    },
+    LoopIn {
+        range: Expression,
+        stride: Expression,
+    },
+    LoopOut {
+        range: Expression,
+        stride: Expression,
+    },
+    NewAcc {
+        starting_value: String,
+    },
     Add,
     Mul,
     Max,
@@ -94,7 +107,10 @@ enum GraphTerm {
     Recip,
     Sin,
     Neg,
-    ZeroStrideLoad { range: String, stride: String },
+    ZeroStrideLoad {
+        range: Expression,
+        stride: Expression,
+    },
 }
 
 pub trait TermToString {
@@ -183,10 +199,10 @@ impl TermToString for (GraphTerm, usize) {
     }
 }
 
-impl TermToString for (GraphTerm, Vec<String>, usize) {
+impl TermToString for (GraphTerm, Vec<Expression>, Vec<usize>) {
     fn term_to_string(&self) -> String {
         format!(
-            "{} [{}] {{{}}}",
+            "{} [{}] {{{:?}}}",
             self.0.term_to_string(),
             self.1.len(),
             self.2
@@ -368,13 +384,13 @@ fn codegen(
         let grid = loop_levels
             .clone()
             .into_iter()
-            .chain(repeat("1".to_string()))
+            .chain(repeat(1.into()))
             .take(3)
             .collect_vec();
         let threadblock = loop_levels
             .into_iter()
             .skip(3)
-            .chain(repeat("1".to_string()))
+            .chain(repeat(1.into()))
             .take(3)
             .collect_vec();
         let kernel_lines = kernel.into_iter().map(|s| format!("\t{s}")).join("\n");
@@ -441,7 +457,9 @@ fn codegen(
                     )
                 };
                 format!(
-                    "kernel void kernel{}({inputs}{smem_input}) {{
+                    "#include <metal_stdlib>
+using namespace metal;
+kernel void kernel{}(uint3 blockIdx [[threadgroup_position_in_grid]], uint3 threadIdx [[thread_position_in_threadgroup]], {inputs}{smem_input}) {{
 {smem_setup}{kernel_lines}
 }}",
                     node.index(),
@@ -458,7 +476,7 @@ fn codegen(
                 threadblock[1].clone(),
                 threadblock[2].clone(),
             ),
-            smem: smem_buffers.into_iter().map(|(_, _, a)| a).join(" * "),
+            smem: smem_buffers.into_iter().map(|(_, _, a)| a).product(),
             outputs: outputs.into_iter().map(|(o, _)| o).collect(),
         };
     }
@@ -468,9 +486,9 @@ fn codegen(
 fn make_kernel(
     kernel_graph: &StableGraph<(GraphTerm, usize), u8, Directed>,
     include_nodes: HashSet<NodeIndex>,
-    node_to_var: &mut HashMap<NodeIndex, (usize, bool, Option<String>)>,
+    node_to_var: &mut HashMap<NodeIndex, (usize, bool, Option<Expression>)>,
     prev_max_var: &mut usize, // contains the char last used
-    loop_levels: &mut Vec<String>,
+    loop_levels: &mut Vec<Expression>,
     loop_indexes: &mut HashMap<NodeIndex, usize>,
     smem_buffers: &HashMap<NodeIndex, usize>,
     current_loop_level: usize,
@@ -556,11 +574,11 @@ fn make_kernel(
 
                 // Make new loop
                 if *loop_level < 6 {
-                    loop_levels.push(range.to_string());
+                    loop_levels.push(*range);
                     if loop_inputs
                         .iter()
                         .chain(&loop_outputs)
-                        .any(|(_, st)| **st != "0")
+                        .any(|(_, st)| **st != 0)
                     {
                         *prev_max_var += 1;
                         kernel_lines.push(format!(
@@ -592,7 +610,7 @@ fn make_kernel(
                         .next()
                         .unwrap();
                     let (real_input, is_ptr, real_size) = node_to_var[&src].clone();
-                    if stride.contains("Acc") {
+                    if stride.is_acc() {
                         assert!(
                             *loop_level > 5,
                             "No accumulations allowed on grid or threadblock levels!"
@@ -600,7 +618,7 @@ fn make_kernel(
                         new_vars.push(real_input);
                         node_to_var.insert(*input, (real_input, is_ptr, real_size));
                     } else {
-                        if *stride != "0" {
+                        if **stride != 0 {
                             *prev_max_var += 1;
                             arch.add_metal_buffer_type(
                                 *prev_max_var,
@@ -611,7 +629,7 @@ fn make_kernel(
                                 arch.metal_buffer_type(*prev_max_var),
                                 var_to_char(*prev_max_var),
                                 var_to_char(real_input),
-                                stride.replace('z', &format!("loop_{loop_var}"))
+                                stride.to_string().replace('z', &format!("loop_{loop_var}"))
                             ));
                             new_vars.push(*prev_max_var);
                             node_to_var.insert(*input, (*prev_max_var, is_ptr, None));
@@ -624,7 +642,7 @@ fn make_kernel(
                 // Move output pointers (allocate new variables)
                 let mut new_output_vars = vec![];
                 for (output, stride) in &loop_outputs {
-                    if stride.contains("Acc") {
+                    if stride.is_acc() {
                         assert!(
                             *loop_level > 5,
                             "No accumulations allowed on grid or threadblock levels!"
@@ -653,7 +671,7 @@ fn make_kernel(
                         .next()
                         .unwrap();
                     let (real_output, is_ptr, real_size) = node_to_var[&dest].clone();
-                    if *stride != "0" {
+                    if **stride != 0 {
                         assert!(is_ptr, "Only pointers can be offset!");
                         *prev_max_var += 1;
                         arch.add_metal_buffer_type(
@@ -665,7 +683,7 @@ fn make_kernel(
                             arch.metal_buffer_type(*prev_max_var),
                             var_to_char(*prev_max_var),
                             var_to_char(real_output),
-                            stride.replace('z', &format!("loop_{loop_var}"))
+                            stride.to_string().replace('z', &format!("loop_{loop_var}"))
                         ));
                         new_output_vars.push(*prev_max_var);
                         node_to_var.insert(*output, (*prev_max_var, is_ptr, None));
@@ -700,7 +718,7 @@ fn make_kernel(
                     let is_acc = if let GraphTerm::LoopOut { stride, .. } =
                         &kernel_graph.node_weight(body_out).unwrap().0
                     {
-                        stride.contains("Acc")
+                        stride.is_acc()
                     } else {
                         false
                     };
@@ -708,7 +726,7 @@ fn make_kernel(
                     let (body_out, body_out_ptr, body_out_size) = &node_to_var[&body_out];
                     if output != body_out && (!body_out_ptr || is_acc) {
                         if let Some(size) = &body_out_size {
-                            if size == "1" {
+                            if *size == 1 {
                                 kernel_lines.push(format!(
                                     "{inner_spacing}{}{} = {}{};",
                                     if *output_ptr { "*" } else { "" },
@@ -751,7 +769,7 @@ fn make_kernel(
             GraphTerm::NewAcc { starting_value } => {
                 // Go through all loopins after this to figure out how many accumulators we need
                 let mut curr = node;
-                let mut size = "1".to_string();
+                let mut size = Expression::from(1);
                 loop {
                     curr = kernel_graph
                         .neighbors_directed(curr, Direction::Outgoing)
@@ -760,8 +778,8 @@ fn make_kernel(
                     if let GraphTerm::LoopIn { range, stride } =
                         &kernel_graph.node_weight(curr).unwrap().0
                     {
-                        if !stride.contains("Acc") && stride != "0" {
-                            size = format!("{size} * {range}");
+                        if !stride.is_acc() && *stride != 0 {
+                            size *= range;
                         }
                     } else {
                         break;
@@ -798,13 +816,13 @@ fn make_kernel(
                         level,
                     ) = kernel_graph.node_weight(prev).unwrap()
                     {
-                        if *prev_range == *range && prev_stride == "0" {
+                        if *prev_range == *range && *prev_stride == 0 {
                             // Found
                             found = Some((prev, *level));
                             break;
                         }
-                        if *level < 6 && *level > 2 && prev_stride != "0" {
-                            offset.push(prev_stride.replace(
+                        if *level < 6 && *level > 2 && *prev_stride != 0 {
+                            offset.push(prev_stride.to_string().replace(
                                 "z",
                                 &format!("loop_{}", var_to_char(loop_indexes[&prev])),
                             ));
@@ -855,7 +873,7 @@ fn make_kernel(
                             var_to_char(smem_ptr),
                             var_to_char(loop_indexes[&base]),
                             var_to_char(node_to_var[&src].0),
-                            stride.replace(
+                            stride.to_string().replace(
                                 "z",
                                 &format!("loop_{}", var_to_char(loop_indexes[&base]))
                             )
@@ -901,7 +919,14 @@ fn make_kernel(
                 let expr = match &term {
                     GraphTerm::Add => format!("{inp_a} + {inp_b}"),
                     GraphTerm::Mul => format!("{inp_a} * {inp_b}"),
-                    GraphTerm::Max => format!("fmax({inp_a}, {inp_b})"),
+                    GraphTerm::Max => format!(
+                        "{}({inp_a}, {inp_b})",
+                        if matches!(arch, GPUArch::Metal(_)) {
+                            "fmax"
+                        } else {
+                            "__max"
+                        }
+                    ),
                     _ => panic!(),
                 };
                 kernel_lines.push(format!(
@@ -1056,11 +1081,17 @@ fn dag_to_petgraph(
                 "Add" => GraphTerm::Add,
                 "LoopIn" => {
                     let (_, range, stride) = get_loop_info(dag, dag.lookup(&t));
-                    GraphTerm::LoopIn { range, stride }
+                    GraphTerm::LoopIn {
+                        range: Expression::from_string(&range),
+                        stride: Expression::from_string(&stride),
+                    }
                 }
                 "LoopOut" => {
                     let (_, range, stride) = get_loop_info(dag, dag.lookup(&t));
-                    GraphTerm::LoopOut { range, stride }
+                    GraphTerm::LoopOut {
+                        range: Expression::from_string(&range),
+                        stride: Expression::from_string(&stride),
+                    }
                 }
                 "GMEM" => {
                     let Term::Lit(name) = dag.get(ch[0]) else {
@@ -1075,7 +1106,10 @@ fn dag_to_petgraph(
                 }
                 "ZeroStrideLoad" => {
                     let (_, range, stride) = get_loop_info(dag, dag.lookup(&t));
-                    GraphTerm::ZeroStrideLoad { range, stride }
+                    GraphTerm::ZeroStrideLoad {
+                        range: Expression::from_string(&range),
+                        stride: Expression::from_string(&stride),
+                    }
                 }
                 _ => panic!("invalid term: {}", a.as_str()),
             },
@@ -1105,8 +1139,8 @@ fn split_kernels(
     Vec<(
         StableGraph<(GraphTerm, usize), u8, Directed>,
         Vec<(GMEMBuffer, NodeIndex)>, // (src buffer, current graph node)
-        Vec<(String, NodeIndex)>,     // output node
-        Vec<(usize, NodeIndex, String)>, // (shared memory buffer name, node, buffer size)
+        Vec<(Expression, NodeIndex)>, // output node
+        Vec<(usize, NodeIndex, Expression)>, // (shared memory buffer name, node, buffer size)
     )>,
     usize, // Root kernel
 ) {
@@ -1291,7 +1325,7 @@ fn split_kernels(
                 let new_src = marked_graph.add_node((
                     GraphTerm::LoopOut {
                         range: dest_level[i].clone(),
-                        stride: "0".to_string(),
+                        stride: 0.into(),
                     },
                     dest_level[..i].to_vec(),
                     src_kernel.clone(),
@@ -1301,7 +1335,7 @@ fn split_kernels(
                 let new_dest = marked_graph.add_node((
                     GraphTerm::LoopIn {
                         range: dest_level[i].clone(),
-                        stride: "0".to_string(),
+                        stride: 0.into(),
                     },
                     dest_level[..i].to_vec(),
                     dest_kernel.clone(),
@@ -1326,7 +1360,7 @@ fn split_kernels(
                 kernel_graph.add_node((term.clone(), loop_level.len())),
             );
             if node == root {
-                outputs.push(("".to_string(), node_maps[*kernel][&node]));
+                outputs.push((Expression::default(), node_maps[*kernel][&node]));
             }
         }
     }
@@ -1380,7 +1414,7 @@ fn split_kernels(
                 } else {
                     kernel_graphs[*start_kernel]
                         .2
-                        .push(("".to_string(), src_kernel_node));
+                        .push((Expression::default(), src_kernel_node));
                     kernel_graphs[*start_kernel].2.len() - 1
                 };
                 // add input to dest
@@ -1410,7 +1444,7 @@ fn split_kernels(
                 kernel_graph.node_weight(node).unwrap()
             {
                 // Walk backwards to find threadblock level loopins and multiply all ranges with non-zero strides
-                let mut size = range.to_string();
+                let mut size = *range;
                 let mut curr = node;
                 let mut base_level;
                 loop {
@@ -1430,8 +1464,8 @@ fn split_kernels(
                         if *prev_level < 3 {
                             break;
                         } else if *prev_level < 6 {
-                            if *stride != "0" {
-                                size = format!("{size} * {prev_range}");
+                            if *stride != 0 {
+                                size *= prev_range;
                             }
                         }
                         // UNCLEAR IF THIS IS CORRECT OR NOT. THIS MULTIPLIES ALL THREADBLOCK DIMS
@@ -1468,12 +1502,12 @@ fn split_kernels(
             }
             // Loop back through all loopouts to find the size of the output
             let mut curr = *output;
-            let mut new_size = vec!["1"];
+            let mut new_size = vec![Expression::from(1)];
             loop {
                 let term = &kernel_graph.node_weight(curr).unwrap().0;
                 if let GraphTerm::LoopOut { range, stride } = term {
-                    if !stride.contains("Acc") && stride != "0" {
-                        new_size.push(range);
+                    if !stride.is_acc() && *stride != 0 {
+                        new_size.push(*range);
                     }
                 } else if !matches!(term, GraphTerm::GMEM { .. }) {
                     break;
@@ -1483,7 +1517,7 @@ fn split_kernels(
                     .next()
                     .unwrap();
             }
-            *size = new_size.into_iter().join(" * ");
+            *size = new_size.into_iter().product();
         }
     }
     let root_kernel = marked_graph.node_weight(root).unwrap().2[0];
@@ -1591,9 +1625,8 @@ fn run_graph(inputs: Vec<Vec<f32>>, kernels: &StableGraph<Kernel, (u8, u8)>) -> 
                 .outputs
                 .iter()
                 .map(|size| {
-                    let size = size.parse::<usize>().unwrap();
                     device.new_buffer(
-                        (size * std::mem::size_of::<f32>()) as u64,
+                        (size.to_usize().unwrap() * std::mem::size_of::<f32>()) as u64,
                         MTLResourceOptions::StorageModeShared,
                     )
                 })
@@ -1636,22 +1669,23 @@ fn run_graph(inputs: Vec<Vec<f32>>, kernels: &StableGraph<Kernel, (u8, u8)>) -> 
             }
             // set smem
             if !kernel.smem.is_empty() {
-                let smem = kernel.smem.parse::<usize>().unwrap();
-                encoder
-                    .set_threadgroup_memory_length(0, (smem * std::mem::size_of::<f32>()) as u64);
+                encoder.set_threadgroup_memory_length(
+                    0,
+                    (kernel.smem.to_usize().unwrap() * std::mem::size_of::<f32>()) as u64,
+                );
             }
 
             // Set dispatch
             encoder.dispatch_thread_groups(
                 MTLSize::new(
-                    kernel.grid.0.parse::<u64>().unwrap(),
-                    kernel.grid.1.parse::<u64>().unwrap(),
-                    kernel.grid.2.parse::<u64>().unwrap(),
+                    kernel.grid.0.to_usize().unwrap() as u64,
+                    kernel.grid.1.to_usize().unwrap() as u64,
+                    kernel.grid.2.to_usize().unwrap() as u64,
                 ),
                 MTLSize::new(
-                    kernel.threadblock.0.parse::<u64>().unwrap(),
-                    kernel.threadblock.1.parse::<u64>().unwrap(),
-                    kernel.threadblock.2.parse::<u64>().unwrap(),
+                    kernel.threadblock.0.to_usize().unwrap() as u64,
+                    kernel.threadblock.1.to_usize().unwrap() as u64,
+                    kernel.threadblock.2.to_usize().unwrap() as u64,
                 ),
             );
             encoder.end_encoding();
