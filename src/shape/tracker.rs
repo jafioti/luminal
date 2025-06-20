@@ -92,9 +92,40 @@ impl ShapeTracker {
     }
 
     /// Add fake dim along a certian axis
-    pub fn expand(&mut self, axis: usize, dim: impl Into<Expression>) {
+    pub fn expand_dim(&mut self, axis: usize, dim: impl Into<Expression>) {
         self.add_dim(axis, dim);
         self.fake[self.indexes[axis]] = true;
+    }
+
+    /// Expand this shape to a new shape following PyTorch semantics
+    pub fn expand(&mut self, new_shape: impl ToShape) {
+        let new_shape = new_shape.to_shape();
+        assert!(
+            new_shape.len() >= self.len(),
+            "Cannot expand from {} dims to {} dims",
+            self.len(),
+            new_shape.len()
+        );
+
+        while self.len() < new_shape.len() {
+            self.expand_dim(0, 1);
+        }
+
+        for (axis, size) in new_shape.into_iter().enumerate() {
+            let ind = self.indexes[axis];
+            if self.dims[ind] == size {
+                continue;
+            }
+            if self.dims[ind].to_usize() == Some(1) {
+                self.dims[ind] = size;
+                self.fake[ind] = true;
+            } else {
+                panic!(
+                    "Cannot expand dim {axis} from {:?} to {:?}",
+                    self.dims[ind], size
+                );
+            }
+        }
     }
 
     /// Remove a dimension

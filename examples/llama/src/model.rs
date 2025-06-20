@@ -54,9 +54,9 @@ fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> Gra
     let (batch, n_heads, seq, head_dim) = input.dims4();
     // Get freqs
     let freqs = (input.graph().arange(head_dim / 2) * 2.0) / (head_dim.to_usize().unwrap() as f32);
-    let inv_freqs = 500_000_f32.pow(freqs).recip();
+    let inv_freqs = 500_000_f32.pow(freqs).reciprocal();
     let pos = input.graph().arange(seq) + prev_seq;
-    let emb = pos.expand(1, 1).matmul(inv_freqs.expand(0, 1));
+    let emb = pos.expand_dim(1, 1).matmul(inv_freqs.expand_dim(0, 1));
 
     // Split input into evens and odds
     let split = input.reshape((batch, n_heads, seq, head_dim / 2, 2));
@@ -64,8 +64,8 @@ fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> Gra
     let x1 = split.slice((.., .., .., .., 1..));
 
     // Apply sin and cos embeddings
-    let x0_out = x0 * emb.cos().expand_to(x0.shape) - x1 * emb.sin().expand_to(x1.shape);
-    let x1_out = x0 * emb.sin().expand_to(x0.shape) + x1 * emb.cos().expand_to(x1.shape);
+    let x0_out = x0 * emb.cos().expand(x0.shape) - x1 * emb.sin().expand(x1.shape);
+    let x1_out = x0 * emb.sin().expand(x0.shape) + x1 * emb.cos().expand(x1.shape);
 
     // Combine back into output
     x0_out.concat_along(x1_out, 4).reshape(input.shape)
@@ -110,8 +110,8 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         let values = v_cache.concat_along(values, 2);
 
         // Repeat the KV States for Grouped-Query Attention
-        let repeated_keys = keys.expand(2, N_ATTENTION_GROUPS);
-        let repeated_values = values.expand(2, N_ATTENTION_GROUPS);
+        let repeated_keys = keys.expand_dim(2, N_ATTENTION_GROUPS);
+        let repeated_values = values.expand_dim(2, N_ATTENTION_GROUPS);
 
         // Calculate attention weights
         let mut attention_weights = queries
@@ -122,9 +122,9 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         let attention_mask = self.k_proj.graph().triu(seq, 1) * f16::MIN.to_f32();
         attention_weights += attention_mask
             .pad(((0, 0), (prev_seq, 0)))
-            .expand(0, batch)
-            .expand(1, N_KV_HEADS)
-            .expand(2, N_ATTENTION_GROUPS);
+            .expand_dim(0, batch)
+            .expand_dim(1, N_KV_HEADS)
+            .expand_dim(2, N_ATTENTION_GROUPS);
 
         // Calculate final outputs
         let output = attention_weights
