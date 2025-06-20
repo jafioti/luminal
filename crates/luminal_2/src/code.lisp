@@ -83,7 +83,7 @@
 (datatype LoopType (Loop String Math))
 (datatype*
  	(Expr
-     	(Tensor String)
+     	(GMEM String)
      	(LoopIn Expr LoopType Math)
      	(LoopOut Expr LoopType Math)
      	(Exp Expr)
@@ -450,9 +450,9 @@
 
 ; ───────────────── TESTS ─────────────────
 ; Common variables
-(let tensorA (Tensor "A"))
-(let tensorB (Tensor "B"))
-(let tensorC (Tensor "C"))
+(let tensorA (GMEM "A"))
+(let tensorB (GMEM "B"))
+(let tensorC (GMEM "C"))
 (let strideOne (MVar "z"))
 
 ; ───────────────── Fission test (1 loop -> 3 sequential loops) ─────────────────

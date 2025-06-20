@@ -543,3 +543,21 @@ pub fn make_flash_attention() -> (StableGraph<GraphTerm, u8, Directed>, NodeInde
     output = unary(output, GraphTerm::GMEM { label: None }, &mut graph);
     (graph, output)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crate::{GPUArch, codegen, run_graph};
+
+    use super::*;
+
+    #[test]
+    fn test_sum_reduce() {
+        let (graph, root) = make_sum_reduce();
+        let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
+        let input = vec![0., 1., 2., 3., 4.];
+        let outputs = run_graph(vec![input], &kernels);
+        assert_eq!(outputs[0], vec![10.0]);
+    }
+}

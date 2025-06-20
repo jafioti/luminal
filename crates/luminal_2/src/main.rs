@@ -31,7 +31,11 @@ use colored::Colorize;
 use egglog::{EGraph, Error, Term, TermDag, TermId, ast::Literal, var};
 use itertools::Itertools;
 use petgraph::{
-    Directed, Direction, algo::toposort, graph::NodeIndex, prelude::StableGraph, visit::EdgeRef,
+    Directed, Direction,
+    algo::toposort,
+    graph::NodeIndex,
+    prelude::StableGraph,
+    visit::{EdgeRef, NodeRef},
 };
 use regex::Regex;
 use std::{
@@ -40,10 +44,41 @@ use std::{
     iter::repeat,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, PartialEq, Eq)]
 enum GPUArch {
     CUDA,
-    Metal,
+    Metal(HashMap<usize, &'static str>),
+}
+
+impl GPUArch {
+    fn metal_buffer_type(&self, var: usize) -> &'static str {
+        match self {
+            Self::Metal(m) => m.get(&var).copied().unwrap_or(""),
+            _ => "",
+        }
+    }
+
+    fn add_metal_buffer_type(&mut self, var: usize, buf_type: &'static str) {
+        if let Self::Metal(m) = self {
+            m.insert(var, buf_type);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct Kernel {
+    code: String,
+    // launch params
+    grid: (String, String, String),
+    threadblock: (String, String, String),
+    smem: String, // sizes of required shared memory buffers
+    outputs: Vec<String>,
+}
+
+#[derive(Clone, Copy)]
+enum GMEMBuffer {
+    PrevKernel { kernel: usize, output: usize },
+    Input(usize),
 }
 
 #[derive(Clone, Debug)]
@@ -64,6 +99,22 @@ enum GraphTerm {
 
 pub trait TermToString {
     fn term_to_string(&self) -> String;
+}
+
+pub trait EdgeToString {
+    fn edge_to_string(&self) -> String;
+}
+
+impl EdgeToString for u8 {
+    fn edge_to_string(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl EdgeToString for (u8, u8) {
+    fn edge_to_string(&self) -> String {
+        format!("{}, {}", self.0, self.1)
+    }
 }
 
 impl TermToString for Term {
@@ -90,6 +141,12 @@ impl TermToString for (Term, usize) {
             Term::Var(v) => v.to_string(),
         };
         format!("{s}[{}]", self.1)
+    }
+}
+
+impl TermToString for Kernel {
+    fn term_to_string(&self) -> String {
+        (&self.code[..6.min(self.code.len() - 1)]).to_string()
     }
 }
 
@@ -241,34 +298,57 @@ fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
 fn codegen(
     graph: StableGraph<GraphTerm, u8, Directed>,
     root: NodeIndex,
-    arch: GPUArch,
-) -> (String, TermId) {
+    mut arch: GPUArch,
+) -> StableGraph<Kernel, (u8, u8), Directed> {
     let (kernels, root_kernel) = split_kernels(graph, root);
     println!("Kernels: {} Root Kernel: {root_kernel}", kernels.len());
     // Create kernel meta graph to toposort
-    let mut meta_graph = StableGraph::<usize, u8, Directed>::default();
-    for i in 0..kernels.len() {
-        meta_graph.add_node(i);
+    let mut meta_graph = StableGraph::new();
+    for _ in 0..kernels.len() {
+        meta_graph.add_node(Kernel::default());
     }
+    let global_input = meta_graph.add_node(Kernel {
+        code: "Input".to_string(),
+        ..Default::default()
+    });
+    let global_output = meta_graph.add_node(Kernel {
+        code: "Output".to_string(),
+        ..Default::default()
+    });
     for (n_kernel, (_, inputs, _, _)) in kernels.iter().enumerate() {
-        for (input_kernel, _, _) in inputs {
-            if let Some(input_kernel) = input_kernel {
-                meta_graph.add_edge(NodeIndex::new(*input_kernel), NodeIndex::new(n_kernel), 0);
-            }
+        for (n_input, (input_kernel, _)) in inputs.into_iter().enumerate() {
+            match input_kernel {
+                GMEMBuffer::PrevKernel { kernel, output } => meta_graph.add_edge(
+                    NodeIndex::new(*kernel),
+                    NodeIndex::new(n_kernel),
+                    (*output as u8, n_input as u8),
+                ),
+                GMEMBuffer::Input(g_inp) => meta_graph.add_edge(
+                    global_input,
+                    NodeIndex::new(n_kernel),
+                    (*g_inp as u8, n_input as u8),
+                ),
+            };
         }
     }
+    meta_graph.add_edge(NodeIndex::new(root_kernel), global_output, (0, 0));
     for node in toposort(&meta_graph, None).unwrap() {
-        let kernel_index = *meta_graph.node_weight(node).unwrap();
-        let (kernel_graph, inputs, outputs, smem_buffers) = kernels[kernel_index].clone();
-        println!("KERNEL {kernel_index}");
+        if kernels.len() <= node.index() {
+            continue; // Either input node or output node
+        }
+        let (kernel_graph, inputs, outputs, smem_buffers) = kernels[node.index()].clone();
+        println!("KERNEL {}", node.index());
         validate_graph(&kernel_graph);
         let mut node_to_var = inputs
             .iter()
-            .map(|(_, _, n)| *n)
-            .chain(outputs.iter().copied())
+            .map(|(_, n)| *n)
+            .chain(outputs.iter().map(|(_, i)| *i))
             .enumerate()
             .map(|(v, n)| (n, (v, true, None)))
             .collect::<HashMap<_, _>>();
+        for (_, (n, _, _)) in &node_to_var {
+            arch.add_metal_buffer_type(*n, "device ");
+        }
         let mut loop_levels = vec![];
         let kernel = make_kernel(
             &kernel_graph,
@@ -282,7 +362,7 @@ fn codegen(
                 .map(|(ind, node, _)| (*node, *ind))
                 .collect(),
             0,
-            arch,
+            &mut arch,
         )
         .unwrap();
         let grid = loop_levels
@@ -298,12 +378,12 @@ fn codegen(
             .take(3)
             .collect_vec();
         let kernel_lines = kernel.into_iter().map(|s| format!("\t{s}")).join("\n");
-        let kernel = match arch {
+        let kernel = match &arch {
             GPUArch::CUDA => {
                 let inputs = inputs
                     .into_iter()
-                    .map(|(_, _, a)| a)
-                    .chain(outputs)
+                    .map(|(_, a)| a)
+                    .chain(outputs.iter().map(|(_, i)| *i))
                     .map(|a| format!("float* {}", var_to_char(node_to_var[&a].0)))
                     .join(", ");
                 let smem_setup = if smem_buffers.is_empty() {
@@ -312,10 +392,10 @@ fn codegen(
                     format!(
                         "\textern __shared__ float sm[];\n{}",
                         smem_buffers
-                            .into_iter()
+                            .iter()
                             .scan("".to_string(), |prev_buffers, (n, _, size)| {
                                 let r =
-                                    format!("\tfloat* {} = sm{prev_buffers};\n", var_to_char(n));
+                                    format!("\tfloat* {} = sm{prev_buffers};\n", var_to_char(*n));
                                 prev_buffers.push_str(&format!(" + {size}"));
                                 Some(r)
                             })
@@ -323,45 +403,66 @@ fn codegen(
                     )
                 };
                 format!(
-                    "extern \"C\" __global__ void kernel{kernel_index}({inputs}) {{
+                    "extern \"C\" __global__ void kernel{}({inputs}) {{
 {smem_setup}{kernel_lines}
 }}",
+                    node.index()
                 )
             }
-            GPUArch::Metal => {
+            GPUArch::Metal { .. } => {
                 let inputs = inputs
                     .into_iter()
-                    .map(|(_, _, a)| a)
-                    .chain(outputs)
-                    .map(|a| format!("float* {}", var_to_char(node_to_var[&a].0)))
+                    .map(|(_, a)| a)
+                    .chain(outputs.iter().map(|(_, i)| *i))
+                    .enumerate()
+                    .map(|(i, a)| {
+                        format!(
+                            "device float* {} [[buffer({i})]]",
+                            var_to_char(node_to_var[&a].0)
+                        )
+                    })
                     .join(", ");
-                let smem_setup = if smem_buffers.is_empty() {
-                    "".to_string()
+                let (smem_setup, smem_input) = if smem_buffers.is_empty() {
+                    ("".to_string(), "".to_string())
                 } else {
-                    format!(
-                        "\textern __shared__ float sm[];\n{}",
+                    (
                         smem_buffers
-                            .into_iter()
+                            .iter()
                             .scan("".to_string(), |prev_buffers, (n, _, size)| {
-                                let r =
-                                    format!("\tfloat* {} = sm{prev_buffers};\n", var_to_char(n));
+                                let r = format!(
+                                    "\tthreadgroup float* {} = sm{prev_buffers};\n",
+                                    var_to_char(*n)
+                                );
                                 prev_buffers.push_str(&format!(" + {size}"));
                                 Some(r)
                             })
-                            .join("")
+                            .join(""),
+                        ", threadgroup float* sm [[threadgroup(0)]]".to_string(),
                     )
                 };
                 format!(
-                    "extern \"C\" __global__ void kernel{kernel_index}({inputs}) {{
+                    "kernel void kernel{}({inputs}{smem_input}) {{
 {smem_setup}{kernel_lines}
 }}",
+                    node.index(),
                 )
             }
         };
         println!("Grid: {grid:?} Threadblock: {threadblock:?}");
         println!("{kernel}");
+        *meta_graph.node_weight_mut(node).unwrap() = Kernel {
+            code: kernel,
+            grid: (grid[0].clone(), grid[1].clone(), grid[2].clone()),
+            threadblock: (
+                threadblock[0].clone(),
+                threadblock[1].clone(),
+                threadblock[2].clone(),
+            ),
+            smem: smem_buffers.into_iter().map(|(_, _, a)| a).join(" * "),
+            outputs: outputs.into_iter().map(|(o, _)| o).collect(),
+        };
     }
-    ("".to_string(), 0)
+    meta_graph
 }
 
 fn make_kernel(
@@ -373,7 +474,7 @@ fn make_kernel(
     loop_indexes: &mut HashMap<NodeIndex, usize>,
     smem_buffers: &HashMap<NodeIndex, usize>,
     current_loop_level: usize,
-    arch: GPUArch,
+    arch: &mut GPUArch,
 ) -> Option<Vec<String>> {
     let mut kernel_lines = vec![];
     let spacing = (0..current_loop_level.saturating_sub(6))
@@ -501,8 +602,13 @@ fn make_kernel(
                     } else {
                         if *stride != "0" {
                             *prev_max_var += 1;
+                            arch.add_metal_buffer_type(
+                                *prev_max_var,
+                                arch.metal_buffer_type(real_input),
+                            );
                             kernel_lines.push(format!(
-                                "{inner_spacing}float* {} = {} + {};",
+                                "{inner_spacing}{}float* {} = {} + {};",
+                                arch.metal_buffer_type(*prev_max_var),
                                 var_to_char(*prev_max_var),
                                 var_to_char(real_input),
                                 stride.replace('z', &format!("loop_{loop_var}"))
@@ -550,8 +656,13 @@ fn make_kernel(
                     if *stride != "0" {
                         assert!(is_ptr, "Only pointers can be offset!");
                         *prev_max_var += 1;
+                        arch.add_metal_buffer_type(
+                            *prev_max_var,
+                            arch.metal_buffer_type(real_output),
+                        );
                         kernel_lines.push(format!(
-                            "{inner_spacing}float* {} = {} + {};",
+                            "{inner_spacing}{}float* {} = {} + {};",
+                            arch.metal_buffer_type(*prev_max_var),
                             var_to_char(*prev_max_var),
                             var_to_char(real_output),
                             stride.replace('z', &format!("loop_{loop_var}"))
@@ -658,8 +769,10 @@ fn make_kernel(
                 }
                 // Create accumulator
                 *prev_max_var += 1;
+                arch.add_metal_buffer_type(*prev_max_var, "thread ");
                 kernel_lines.push(format!(
-                    "{spacing}float {}[{size}] = {{{starting_value}}};",
+                    "{spacing}{}float {}[{size}] = {{{starting_value}}};",
+                    arch.metal_buffer_type(*prev_max_var),
                     var_to_char(*prev_max_var)
                 ));
                 node_to_var.insert(node, (*prev_max_var, true, Some(size)));
@@ -718,9 +831,11 @@ fn make_kernel(
                         let mut smem_ptr = buffer;
                         if !offset.is_empty() {
                             *prev_max_var += 1;
+                            arch.add_metal_buffer_type(*prev_max_var, "threadgroup ");
                             smem_ptr = *prev_max_var;
                             kernel_lines.push(format!(
-                                "{spacing}float* {} = {} + {};",
+                                "{spacing}{}float* {} = {} + {};",
+                                arch.metal_buffer_type(*prev_max_var),
                                 var_to_char(smem_ptr),
                                 var_to_char(buffer),
                                 offset.iter().join(" + ")
@@ -947,7 +1062,7 @@ fn dag_to_petgraph(
                     let (_, range, stride) = get_loop_info(dag, dag.lookup(&t));
                     GraphTerm::LoopOut { range, stride }
                 }
-                "Tensor" => {
+                "GMEM" => {
                     let Term::Lit(name) = dag.get(ch[0]) else {
                         panic!("invalid tensor")
                     };
@@ -989,9 +1104,9 @@ fn split_kernels(
 ) -> (
     Vec<(
         StableGraph<(GraphTerm, usize), u8, Directed>,
-        Vec<(Option<usize>, usize, NodeIndex)>, // (src kernel, src kernel output, current graph node)
-        Vec<NodeIndex>,                         // output node
-        Vec<(usize, NodeIndex, String)>,        // (shared memory buffer name, node, buffer size)
+        Vec<(GMEMBuffer, NodeIndex)>, // (src buffer, current graph node)
+        Vec<(String, NodeIndex)>,     // output node
+        Vec<(usize, NodeIndex, String)>, // (shared memory buffer name, node, buffer size)
     )>,
     usize, // Root kernel
 ) {
@@ -1211,12 +1326,12 @@ fn split_kernels(
                 kernel_graph.add_node((term.clone(), loop_level.len())),
             );
             if node == root {
-                outputs.push(node_maps[*kernel][&node]);
+                outputs.push(("".to_string(), node_maps[*kernel][&node]));
             }
         }
     }
     // Go through graph inputs and add them to the kernel hashmap as inputs
-    for input in marked_graph
+    for (n, input) in marked_graph
         .node_indices()
         // Must not have any input nodes
         .filter(|n| {
@@ -1232,12 +1347,13 @@ fn split_kernels(
                 GraphTerm::NewAcc { .. }
             )
         })
+        .enumerate()
     {
         let (_, _, kernels) = marked_graph.node_weight(input).unwrap();
         for kernel in kernels {
             kernel_graphs[*kernel]
                 .1
-                .push((None, 0, node_maps[*kernel][&input]));
+                .push((GMEMBuffer::Input(n), node_maps[*kernel][&input]));
         }
     }
     // Mark cross kernel dependencies in the kernel inputs / outputs
@@ -1258,17 +1374,21 @@ fn split_kernels(
                 let src_output_index = if let Some(p) = kernel_graphs[*start_kernel]
                     .2
                     .iter()
-                    .position(|s| *s == src_kernel_node)
+                    .position(|(_, s)| *s == src_kernel_node)
                 {
                     p
                 } else {
-                    kernel_graphs[*start_kernel].2.push(src_kernel_node);
+                    kernel_graphs[*start_kernel]
+                        .2
+                        .push(("".to_string(), src_kernel_node));
                     kernel_graphs[*start_kernel].2.len() - 1
                 };
                 // add input to dest
                 kernel_graphs[*end_kernel].1.push((
-                    Some(*start_kernel),
-                    src_output_index,
+                    GMEMBuffer::PrevKernel {
+                        kernel: *start_kernel,
+                        output: src_output_index,
+                    },
                     dest_kernel_node,
                 ));
             } else {
@@ -1327,7 +1447,7 @@ fn split_kernels(
         }
 
         // Ensure GMEM is placed on the graph
-        for (_, _, input) in inputs {
+        for (_, input) in inputs {
             if !matches!(
                 kernel_graph.node_weight(*input).unwrap().0,
                 GraphTerm::GMEM { .. }
@@ -1337,7 +1457,7 @@ fn split_kernels(
                 *input = new_input;
             }
         }
-        for output in outputs {
+        for (size, output) in outputs {
             if !matches!(
                 kernel_graph.node_weight(*output).unwrap().0,
                 GraphTerm::GMEM { .. }
@@ -1346,6 +1466,24 @@ fn split_kernels(
                 kernel_graph.add_edge(*output, new_output, 0);
                 *output = new_output;
             }
+            // Loop back through all loopouts to find the size of the output
+            let mut curr = *output;
+            let mut new_size = vec!["1"];
+            loop {
+                let term = &kernel_graph.node_weight(curr).unwrap().0;
+                if let GraphTerm::LoopOut { range, stride } = term {
+                    if !stride.contains("Acc") && stride != "0" {
+                        new_size.push(range);
+                    }
+                } else if !matches!(term, GraphTerm::GMEM { .. }) {
+                    break;
+                }
+                curr = kernel_graph
+                    .neighbors_directed(curr, Direction::Incoming)
+                    .next()
+                    .unwrap();
+            }
+            *size = new_size.into_iter().join(" * ");
         }
     }
     let root_kernel = marked_graph.node_weight(root).unwrap().2[0];
@@ -1353,8 +1491,8 @@ fn split_kernels(
 }
 
 /// View a debug graph in the browser
-pub fn display_graph<G: TermToString>(
-    graph: &petgraph::stable_graph::StableGraph<G, u8, petgraph::Directed, u32>,
+pub fn display_graph<G: TermToString, E: EdgeToString>(
+    graph: &petgraph::stable_graph::StableGraph<G, E, petgraph::Directed, u32>,
     mark_nodes: &[(NodeIndex, String)],
 ) {
     let mut new_graph = StableGraph::new();
@@ -1368,7 +1506,7 @@ pub fn display_graph<G: TermToString>(
     for edge in graph.edge_indices() {
         let weight = graph.edge_weight(edge).unwrap();
         let (src, dest) = graph.edge_endpoints(edge).unwrap();
-        new_graph.add_edge(map[&src], map[&dest], weight);
+        new_graph.add_edge(map[&src], map[&dest], weight.edge_to_string());
     }
     let mut graph_string =
         petgraph::dot::Dot::with_config(&new_graph, &[petgraph::dot::Config::EdgeIndexLabel])
@@ -1400,4 +1538,124 @@ fn var_to_char(var: usize) -> String {
     } else {
         ((var + 97) as u8 as char).to_string()
     }
+}
+
+fn run_graph(inputs: Vec<Vec<f32>>, kernels: &StableGraph<Kernel, (u8, u8)>) -> Vec<Vec<f32>> {
+    use metal_rs::{
+        CompileOptions, ComputePassDescriptor, ComputePipelineDescriptor, Device,
+        MTLResourceOptions, MTLSize,
+    };
+    let device = Device::system_default().unwrap();
+    let queue = device.new_command_queue();
+    let command_buffer = queue.new_command_buffer();
+    // Allocate input buffers
+    let mut buffers = HashMap::new();
+    for node in toposort(kernels, None).unwrap() {
+        let kernel = kernels.node_weight(node).unwrap();
+        if kernel.code == "Input" {
+            buffers.insert(
+                node,
+                inputs
+                    .iter()
+                    .map(|buf| {
+                        device.new_buffer_with_data(
+                            buf.as_ptr() as *mut _,
+                            (buf.len() * std::mem::size_of::<f32>()) as u64,
+                            MTLResourceOptions::StorageModeShared,
+                        )
+                    })
+                    .collect_vec(),
+            );
+        } else if kernel.code == "Output" {
+            // Run
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
+
+            // Copy outputs back
+            return kernels
+                .edges_directed(node, Direction::Incoming)
+                .map(|e| &buffers[&e.source()][e.weight().0 as usize])
+                .map(|buffer| {
+                    let mut curr_data =
+                        vec![0.0; buffer.length() as usize / std::mem::size_of::<f32>()];
+                    let ptr = buffer.contents() as *mut f32;
+                    for (i, d) in curr_data.iter_mut().enumerate() {
+                        *d = unsafe { *ptr.add(i) };
+                    }
+                    curr_data
+                })
+                .collect();
+        } else {
+            // allocate output buffers
+            let outputs = kernel
+                .outputs
+                .iter()
+                .map(|size| {
+                    let size = size.parse::<usize>().unwrap();
+                    device.new_buffer(
+                        (size * std::mem::size_of::<f32>()) as u64,
+                        MTLResourceOptions::StorageModeShared,
+                    )
+                })
+                .collect_vec();
+            buffers.insert(node, outputs);
+
+            // compile kernel
+            let encoder = command_buffer
+                .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+            let options = CompileOptions::new();
+            options.set_fast_math_enabled(true);
+            let lib = device
+                .new_library_with_source(&kernel.code, &options)
+                .unwrap();
+            let pipeline_state_descriptor = ComputePipelineDescriptor::new();
+            pipeline_state_descriptor.set_compute_function(Some(
+                &lib.get_function(&format!("kernel{}", node.index()), None)
+                    .unwrap(),
+            ));
+            let pipeline = device
+                .new_compute_pipeline_state_with_function(
+                    pipeline_state_descriptor.compute_function().unwrap(),
+                )
+                .unwrap();
+            encoder.set_compute_pipeline_state(&pipeline);
+
+            // set inputs
+            for (i, (input, input_index)) in kernels
+                .edges_directed(node, Direction::Incoming)
+                .sorted_by_key(|n| n.weight().1)
+                .map(|n| (n.source(), n.weight().0))
+                .enumerate()
+            {
+                encoder.set_buffer(i as u64, Some(&buffers[&input][input_index as usize]), 0);
+            }
+            // set output
+            let n_inputs = kernels.edges_directed(node, Direction::Incoming).count();
+            for (i, output) in buffers[&node].iter().enumerate() {
+                encoder.set_buffer((i + n_inputs) as u64, Some(output), 0);
+            }
+            // set smem
+            if !kernel.smem.is_empty() {
+                let smem = kernel.smem.parse::<usize>().unwrap();
+                encoder
+                    .set_threadgroup_memory_length(0, (smem * std::mem::size_of::<f32>()) as u64);
+            }
+
+            // Set dispatch
+            encoder.dispatch_thread_groups(
+                MTLSize::new(
+                    kernel.grid.0.parse::<u64>().unwrap(),
+                    kernel.grid.1.parse::<u64>().unwrap(),
+                    kernel.grid.2.parse::<u64>().unwrap(),
+                ),
+                MTLSize::new(
+                    kernel.threadblock.0.parse::<u64>().unwrap(),
+                    kernel.threadblock.1.parse::<u64>().unwrap(),
+                    kernel.threadblock.2.parse::<u64>().unwrap(),
+                ),
+            );
+            encoder.end_encoding();
+        }
+    }
+    panic!("No output kernel detected in graph!");
 }
