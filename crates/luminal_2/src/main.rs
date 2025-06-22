@@ -162,7 +162,20 @@ impl TermToString for (Term, usize) {
 
 impl TermToString for Kernel {
     fn term_to_string(&self) -> String {
-        (&self.code[..6.min(self.code.len() - 1)]).to_string()
+        if self.code == "Inputs" || self.code == "Outputs" {
+            return self.code.clone();
+        } else {
+            format!(
+                "Kernel ({}, {}, {}), ({}, {}, {}) -> {:?}",
+                self.grid.0,
+                self.grid.1,
+                self.grid.2,
+                self.threadblock.0,
+                self.threadblock.1,
+                self.threadblock.2,
+                self.outputs
+            )
+        }
     }
 }
 
@@ -324,11 +337,11 @@ fn codegen(
         meta_graph.add_node(Kernel::default());
     }
     let global_input = meta_graph.add_node(Kernel {
-        code: "Input".to_string(),
+        code: "Inputs".to_string(),
         ..Default::default()
     });
     let global_output = meta_graph.add_node(Kernel {
-        code: "Output".to_string(),
+        code: "Outputs".to_string(),
         ..Default::default()
     });
     for (n_kernel, (_, inputs, _, _)) in kernels.iter().enumerate() {
@@ -1586,7 +1599,7 @@ fn run_graph(inputs: Vec<Vec<f32>>, kernels: &StableGraph<Kernel, (u8, u8)>) -> 
     let mut buffers = HashMap::new();
     for node in toposort(kernels, None).unwrap() {
         let kernel = kernels.node_weight(node).unwrap();
-        if kernel.code == "Input" {
+        if kernel.code == "Inputs" {
             buffers.insert(
                 node,
                 inputs
@@ -1600,7 +1613,7 @@ fn run_graph(inputs: Vec<Vec<f32>>, kernels: &StableGraph<Kernel, (u8, u8)>) -> 
                     })
                     .collect_vec(),
             );
-        } else if kernel.code == "Output" {
+        } else if kernel.code == "Outputs" {
             // Run
             command_buffer.commit();
             command_buffer.wait_until_completed();
