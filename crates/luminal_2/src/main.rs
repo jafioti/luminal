@@ -437,7 +437,7 @@ fn codegen(
                             var_to_char(node_to_var[&a].0)
                         )
                     })
-                    .join(", ");
+                    .join(",\n\t");
                 let (smem_setup, smem_input) = if smem_buffers.is_empty() {
                     ("".to_string(), "".to_string())
                 } else {
@@ -459,7 +459,11 @@ fn codegen(
                 format!(
                     "#include <metal_stdlib>
 using namespace metal;
-kernel void kernel{}(uint3 blockIdx [[threadgroup_position_in_grid]], uint3 threadIdx [[thread_position_in_threadgroup]], {inputs}{smem_input}) {{
+kernel void kernel{}(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	{inputs}{smem_input}
+) {{
 {smem_setup}{kernel_lines}
 }}",
                     node.index(),
@@ -470,12 +474,8 @@ kernel void kernel{}(uint3 blockIdx [[threadgroup_position_in_grid]], uint3 thre
         println!("{kernel}");
         *meta_graph.node_weight_mut(node).unwrap() = Kernel {
             code: kernel,
-            grid: (grid[0].clone(), grid[1].clone(), grid[2].clone()),
-            threadblock: (
-                threadblock[0].clone(),
-                threadblock[1].clone(),
-                threadblock[2].clone(),
-            ),
+            grid: (grid[0], grid[1], grid[2]),
+            threadblock: (threadblock[0], threadblock[1], threadblock[2]),
             smem: smem_buffers.into_iter().map(|(_, _, a)| a).product(),
             outputs: outputs.into_iter().map(|(o, _)| o).collect(),
         };

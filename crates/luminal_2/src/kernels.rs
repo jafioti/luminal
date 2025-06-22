@@ -678,10 +678,57 @@ mod tests {
             [0.4418, 0.2469, 0.0769, 0.3380, 0.4544],
         ]
         .into_flattened();
-        println!("start");
-        let outputs = run_graph(vec![q, k, v], &kernels);
-        println!("end");
-        println!("Outputs: {:?}", outputs);
+        let outputs = run_graph(vec![q, k, v], &kernels).pop().unwrap();
+        let pt_output = vec![
+            [0.5441, 0.2194, -0.0533, 0.6271, -0.0108],
+            [0.8770, 0.8527, 0.5614, 1.2643, 0.6696],
+            [1.2617, 1.5422, 1.1725, 1.9658, 1.2628],
+            [1.2003, 1.3576, 0.9888, 1.9141, 0.9768],
+        ]
+        .into_flattened();
+        for (a, b) in outputs.into_iter().zip(pt_output) {
+            assert!((a - b).abs() < 1e-3);
+        }
+        expression_cleanup();
+    }
+
+    #[test]
+    fn test_naive_attention() {
+        let (graph, root) = make_naive_attention();
+        let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
+        let q = vec![
+            [-1.1258, -1.1524, -0.2506, -0.4339, 0.5988],
+            [-1.5551, -0.3414, 1.8530, 0.4681, -0.1577],
+            [1.4437, 0.2660, 1.3894, 1.5863, 0.9463],
+            [-0.8437, 0.9318, 1.2590, 2.0050, 0.0537],
+        ]
+        .into_flattened();
+        let k = vec![
+            [0.4397, 0.1124, 0.6408, 0.4412, 0.2055],
+            [-0.4503, -0.5731, -0.5554, 0.5943, 1.5419],
+            [0.5073, -0.5910, -1.3253, 0.1886, -0.0691],
+            [-0.4949, -1.4959, -0.1938, 0.4455, 1.3253],
+        ]
+        .into_flattened();
+        let v = vec![
+            [1.5091, 2.0820, 1.7067, 2.3804, 1.9415],
+            [0.7915, -0.0203, -0.4372, 1.6459, -1.3602],
+            [0.3446, 0.5199, -0.3656, -1.3024, 0.0994],
+            [0.4418, 0.2469, 0.0769, 0.3380, 0.4544],
+        ]
+        .into_flattened();
+        let outputs = run_graph(vec![q, k, v], &kernels).pop().unwrap();
+        let pt_output = vec![
+            [0.5441, 0.2194, -0.0533, 0.6271, -0.0108],
+            [0.8770, 0.8527, 0.5614, 1.2643, 0.6696],
+            [1.2617, 1.5422, 1.1725, 1.9658, 1.2628],
+            [1.2003, 1.3576, 0.9888, 1.9141, 0.9768],
+        ]
+        .into_flattened();
+        println!("{:?}", outputs.len());
+        for (a, b) in outputs.into_iter().zip(pt_output) {
+            assert!((a - b).abs() < 1e-3);
+        }
         expression_cleanup();
     }
 }
