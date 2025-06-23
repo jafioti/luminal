@@ -5,7 +5,7 @@ use crate::{
 
 impl GraphTensor {
     /// Reduce a dimension of the tensor by summing all elements along that axis.
-    pub fn sum_reduce(self, axes: impl ToAxes) -> GraphTensor {
+    pub fn sum(self, axes: impl ToAxes) -> GraphTensor {
         let (mut shape, mut id) = (self.shape, self.id);
         // Sum reduce each dimension
         for dim in axes.to_axes().into_iter().rev() {
@@ -20,7 +20,7 @@ impl GraphTensor {
     }
 
     /// Reduce a dimension of the tensor by taking the maximum of all elements along that axis.
-    pub fn max_reduce(self, axes: impl ToAxes) -> GraphTensor {
+    pub fn max(self, axes: impl ToAxes) -> GraphTensor {
         let (mut shape, mut id) = (self.shape, self.id);
         // Max reduce each dimension
         for dim in axes.to_axes().into_iter().rev() {
@@ -35,18 +35,18 @@ impl GraphTensor {
     }
 
     /// Reduce a dimension of the tensor by taking the mean of all elements along that axis.
-    pub fn mean_reduce(self, axes: impl ToAxes) -> GraphTensor {
+    pub fn mean(self, axes: impl ToAxes) -> GraphTensor {
         let reduced_elements = axes
             .to_axes()
             .into_iter()
             .map(|i| self.dims()[i])
             .product::<Expression>();
-        self.sum_reduce(axes) / reduced_elements
+        self.sum(axes) / reduced_elements
     }
 
     /// Reduce a dimension of the tensor by multiplying all elements along that axis.
-    pub fn prod_reduce(self, axes: impl ToAxes) -> GraphTensor {
-        self.ln().sum_reduce(axes).exp()
+    pub fn prod(self, axes: impl ToAxes) -> GraphTensor {
+        self.log().sum(axes).exp()
     }
 }
 
@@ -55,11 +55,11 @@ mod tests {
     crate::test_imports!();
 
     #[test]
-    fn test_sum_reduce() {
+    fn test_sum() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
         let a = cx.tensor((2, 3)).set(a_data.clone());
-        let b = a.sum_reduce(1).retrieve();
+        let b = a.sum(1).retrieve();
 
         cx.execute();
 
@@ -71,11 +71,11 @@ mod tests {
     }
 
     #[test]
-    fn test_max_reduce() {
+    fn test_max() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
         let a = cx.tensor((2, 3)).set(a_data.clone());
-        let b = a.max_reduce(1).retrieve();
+        let b = a.max(1).retrieve();
 
         cx.execute();
 
@@ -87,11 +87,11 @@ mod tests {
     }
 
     #[test]
-    fn test_mean_reduce() {
+    fn test_mean() {
         let mut cx = Graph::new();
         let a_data = random_vec(6);
         let a = cx.tensor((2, 3)).set(a_data.clone());
-        let b = a.mean_reduce(1).retrieve();
+        let b = a.mean(1).retrieve();
 
         cx.execute();
 

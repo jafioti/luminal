@@ -1,8 +1,12 @@
+#[allow(unused_imports)]
 use std::io::Read;
+#[allow(unused_imports)]
 use std::path::Path;
+#[allow(unused_imports)]
 use std::{fs::File, io::Seek};
 
 use luminal::{op::Function, prelude::*};
+#[allow(unused_imports)]
 use memmap2::{Mmap, MmapOptions};
 use safetensors::{Dtype, SafeTensors};
 

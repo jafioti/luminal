@@ -106,7 +106,7 @@ impl Div<GraphTensor> for GraphTensor {
     type Output = GraphTensor;
 
     fn div(self, rhs: GraphTensor) -> Self::Output {
-        self * rhs.recip()
+        self * rhs.reciprocal()
     }
 }
 
@@ -115,7 +115,7 @@ impl Div<GraphTensor> for f32 {
     type Output = GraphTensor;
 
     fn div(self, rhs: GraphTensor) -> Self::Output {
-        self * rhs.recip()
+        self * rhs.reciprocal()
     }
 }
 
@@ -150,7 +150,7 @@ impl Add<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn add(self, rhs: f32) -> Self::Output {
-        self + self.graph().constant(rhs).expand_to(self.shape)
+        self + self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -158,7 +158,7 @@ impl<S: Into<Expression>> Add<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn add(self, rhs: S) -> Self::Output {
-        self + self.graph().constant(rhs).expand_to(self.shape)
+        self + self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -166,7 +166,7 @@ impl Sub<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn sub(self, rhs: f32) -> Self::Output {
-        self - self.graph().constant(rhs).expand_to(self.shape)
+        self - self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -174,7 +174,7 @@ impl<S: Into<Expression>> Sub<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn sub(self, rhs: S) -> Self::Output {
-        self - self.graph().constant(rhs).expand_to(self.shape)
+        self - self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -182,7 +182,7 @@ impl Mul<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn mul(self, rhs: f32) -> Self::Output {
-        self * self.graph().constant(rhs).expand_to(self.shape)
+        self * self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -190,7 +190,7 @@ impl<S: Into<Expression>> Mul<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn mul(self, rhs: S) -> Self::Output {
-        self * self.graph().constant(rhs).expand_to(self.shape)
+        self * self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -199,7 +199,7 @@ impl Div<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn div(self, rhs: f32) -> Self::Output {
-        self * self.graph().constant(rhs.recip()).expand_to(self.shape)
+        self * self.graph().constant(rhs.recip()).expand(self.shape)
     }
 }
 
@@ -207,7 +207,7 @@ impl<S: Into<Expression>> Div<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn div(self, rhs: S) -> Self::Output {
-        self / self.graph().constant(rhs).expand_to(self.shape)
+        self / self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -215,7 +215,7 @@ impl Rem<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn rem(self, rhs: f32) -> Self::Output {
-        self % self.graph().constant(rhs).expand_to(self.shape)
+        self % self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -223,13 +223,13 @@ impl<S: Into<Expression>> Rem<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn rem(self, rhs: S) -> Self::Output {
-        self % self.graph().constant(rhs).expand_to(self.shape)
+        self % self.graph().constant(rhs).expand(self.shape)
     }
 }
 
 // Comparisons (based on https://github.com/tinygrad/tinygrad/blob/3e0c2d256fe9f4f5f85cd3e4d8733a51d7b4a984/tinygrad/tensor.py#L653)
 impl GraphTensor {
-    pub fn less_than(self, rhs: GraphTensor) -> GraphTensor {
+    pub fn lt(self, rhs: GraphTensor) -> GraphTensor {
         assert_eq!(self.dims(), rhs.dims(), "Dims must match to lt tensors.");
         let new_id = self
             .graph()
@@ -240,24 +240,24 @@ impl GraphTensor {
         GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 
-    pub fn greater_than(self, rhs: GraphTensor) -> GraphTensor {
-        rhs.less_than(self)
+    pub fn gt(self, rhs: GraphTensor) -> GraphTensor {
+        rhs.lt(self)
     }
 
-    pub fn less_than_equal(self, rhs: GraphTensor) -> GraphTensor {
-        -self.greater_than(rhs) + 1.0
+    pub fn le(self, rhs: GraphTensor) -> GraphTensor {
+        -self.gt(rhs) + 1.0
     }
 
-    pub fn greater_than_equal(self, rhs: GraphTensor) -> GraphTensor {
-        -self.less_than(rhs) + 1.0
+    pub fn ge(self, rhs: GraphTensor) -> GraphTensor {
+        -self.lt(rhs) + 1.0
     }
 
-    pub fn not_equals(self, rhs: GraphTensor) -> GraphTensor {
-        self.less_than(rhs) + self.greater_than(rhs)
+    pub fn ne(self, rhs: GraphTensor) -> GraphTensor {
+        self.lt(rhs) + self.gt(rhs)
     }
 
-    pub fn equals(self, rhs: GraphTensor) -> GraphTensor {
-        -self.not_equals(rhs) + 1.0
+    pub fn eq(self, rhs: GraphTensor) -> GraphTensor {
+        -self.ne(rhs) + 1.0
     }
 
     /// Raise the tensor to a power
@@ -266,35 +266,35 @@ impl GraphTensor {
         Self: Mul<T, Output = Self>,
     {
         // Approximate, see full impl here: https://github.com/tinygrad/tinygrad/blob/a32c67760140dd26b60d7932268f2e62e96a66e0/tinygrad/tensor.py#L568
-        self.abs().ln().mul(e).exp()
+        self.abs().log().mul(e).exp()
     }
 }
 
-// Clipping ops (min, max, clip)
+// Clipping ops (minimum, maximum, clip)
 impl GraphTensor {
     /// Take the elementwise maximum of two tensors
-    pub fn max(self, rhs: GraphTensor) -> GraphTensor {
-        (self.less_than(rhs) * rhs) + (rhs.less_than_equal(self) * self)
+    pub fn maximum(self, rhs: GraphTensor) -> GraphTensor {
+        (self.lt(rhs) * rhs) + (rhs.le(self) * self)
     }
 
     /// Take the elementwise maximum of a tensor and a float
-    pub fn max_f32(self, rhs: f32) -> GraphTensor {
-        self.max(self.graph().constant(rhs).expand_to(self.shape))
+    pub fn maximum_f32(self, rhs: f32) -> GraphTensor {
+        self.maximum(self.graph().constant(rhs).expand(self.shape))
     }
 
     /// Take the elementwise minimum of two tensors
-    pub fn min(self, rhs: GraphTensor) -> GraphTensor {
-        -(-self).max(-rhs)
+    pub fn minimum(self, rhs: GraphTensor) -> GraphTensor {
+        -(-self).maximum(-rhs)
     }
 
     /// Take the elementwise minimum of a tensor and a float
-    pub fn min_f32(self, rhs: f32) -> GraphTensor {
-        -(-self).max_f32(-rhs)
+    pub fn minimum_f32(self, rhs: f32) -> GraphTensor {
+        -(-self).maximum_f32(-rhs)
     }
 
     /// Clip (clamp) a tensor into the range [`min`, `max`]
     pub fn clip(self, min: f32, max: f32) -> GraphTensor {
-        self.max_f32(min).min_f32(max)
+        self.maximum_f32(min).minimum_f32(max)
     }
 }
 

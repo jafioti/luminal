@@ -49,7 +49,7 @@ pub fn sgd_on_graph(
         let gradient = GraphTensor::from_id(grad_id, grad_shape, graph);
 
         // SGD
-        let new_weight = old_weight - (gradient * lr.expand_to(grad_shape));
+        let new_weight = old_weight - (gradient * lr.expand(grad_shape));
         new_weight.keep();
 
         new_weights.push(new_weight.id);

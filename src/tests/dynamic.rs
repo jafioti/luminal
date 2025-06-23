@@ -1,10 +1,8 @@
 // Tests with dynamic dimensions
 
 use dfdx::{
-    nn::BuildOnDevice,
-    prelude::Module as DfdxModule,
     shapes::Rank2,
-    tensor::{Cpu, TensorFrom, TensorFromVec},
+    tensor::{Cpu, TensorFrom},
     tensor_ops::{PermuteTo, ReshapeTo, TryMatMul},
 };
 
