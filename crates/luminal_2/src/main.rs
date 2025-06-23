@@ -87,6 +87,7 @@ enum GMEMBuffer {
 #[derive(Clone, Debug)]
 enum GraphTerm {
     GMEM {
+        // Signifies global memory
         label: Option<String>,
     },
     LoopIn {
@@ -107,10 +108,9 @@ enum GraphTerm {
     Recip,
     Sin,
     Neg,
-    ZeroStrideLoad {
-        range: Expression,
-        stride: Expression,
-    },
+    SMEM,     // Signifies shared memory
+    SMEMLoad, // Takes in an smem pointer and a gmem pointer, copies the gmem element to smem and returns the smem pointer
+    SMEMRead, // Takes in an smem pointer and an smemload, returns the smem pointer
 }
 
 pub trait TermToString {
@@ -199,9 +199,9 @@ impl TermToString for GraphTerm {
                     "GMEM".to_string()
                 }
             }
-            GraphTerm::ZeroStrideLoad { range, stride } => {
-                format!("ZeroStrideLoad({range}; {stride})")
-            }
+            GraphTerm::SMEM => "SMEM".to_string(),
+            GraphTerm::SMEMLoad => "SMEMLoad".to_string(),
+            GraphTerm::SMEMRead => "SMEMRead".to_string(),
         }
     }
 }
@@ -313,7 +313,10 @@ fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
                 .neighbors_directed(node, Direction::Incoming)
                 .next()
                 .is_none()
-                && !matches!(graph.node_weight(node).unwrap().0, GraphTerm::NewAcc { .. })
+                && !matches!(
+                    graph.node_weight(node).unwrap().0,
+                    GraphTerm::NewAcc { .. } | GraphTerm::SMEM
+                )
             {
                 if *curr_level != 0 {
                     display_graph(graph, &[(node, "yellow".to_string())]);
@@ -372,11 +375,15 @@ fn codegen(
             .iter()
             .map(|(_, n)| *n)
             .chain(outputs.iter().map(|(_, i)| *i))
+            .chain(smem_buffers.iter().map(|(_, i, _)| *i))
             .enumerate()
             .map(|(v, n)| (n, (v, true, None)))
             .collect::<HashMap<_, _>>();
         for (_, (n, _, _)) in &node_to_var {
             arch.add_metal_buffer_type(*n, "device ");
+        }
+        for (n, _, _) in &smem_buffers {
+            arch.add_metal_buffer_type(*n, "threadgroup ");
         }
         let mut loop_levels = vec![];
         let kernel = make_kernel(
@@ -483,13 +490,23 @@ kernel void kernel{}(
                 )
             }
         };
-        println!("Grid: {grid:?} Threadblock: {threadblock:?}");
+        println!(
+            "Grid: {grid:?} Threadblock: {threadblock:?}{}",
+            if smem_buffers.is_empty() {
+                "".to_string()
+            } else {
+                format!(
+                    " Smem: {} elements",
+                    smem_buffers.iter().map(|(_, _, a)| *a).sum::<Expression>()
+                )
+            }
+        );
         println!("{kernel}");
         *meta_graph.node_weight_mut(node).unwrap() = Kernel {
             code: kernel,
             grid: (grid[0], grid[1], grid[2]),
             threadblock: (threadblock[0], threadblock[1], threadblock[2]),
-            smem: smem_buffers.into_iter().map(|(_, _, a)| a).product(),
+            smem: smem_buffers.into_iter().map(|(_, _, a)| a).sum(),
             outputs: outputs.into_iter().map(|(o, _)| o).collect(),
         };
     }
@@ -811,96 +828,61 @@ fn make_kernel(
             GraphTerm::LoopOut { range, stride } => {
                 panic!("found loopout range: {range} stride: {stride}")
             }
-            GraphTerm::ZeroStrideLoad { range, stride } => {
-                // Search back for last loopin of same range with stride of 0
-                let mut curr = node;
-                let found;
-                let mut offset = vec![];
-                loop {
-                    let prev = kernel_graph
-                        .neighbors_directed(curr, Direction::Incoming)
-                        .next()
-                        .unwrap();
-                    if let (
-                        GraphTerm::LoopIn {
-                            range: prev_range,
-                            stride: prev_stride,
-                        },
-                        level,
-                    ) = kernel_graph.node_weight(prev).unwrap()
-                    {
-                        if *prev_range == *range && *prev_stride == 0 {
-                            // Found
-                            found = Some((prev, *level));
-                            break;
-                        }
-                        if *level < 6 && *level > 2 && *prev_stride != 0 {
-                            offset.push(prev_stride.to_string().replace(
-                                "z",
-                                &format!("loop_{}", var_to_char(loop_indexes[&prev])),
-                            ));
-                        }
-                    } else {
-                        panic!("found non-loop-in!");
-                    }
-                    curr = prev;
-                }
-                let Some((base, level)) = found else {
-                    return None;
-                };
-                let src = kernel_graph
+            GraphTerm::SMEMLoad | GraphTerm::SMEMRead => {
+                // Find the gmem input and smem input
+                let inputs = kernel_graph
                     .neighbors_directed(node, Direction::Incoming)
-                    .next()
-                    .unwrap();
-                // Depending on the level do different things
-                match level {
-                    ..3 => return None, // Grid
-                    3..6 => {
-                        // Threadblock
-                        // We need to get the smem pointer to write to and pass along
-                        let buffer = smem_buffers[&node];
-                        let mut smem_ptr = buffer;
-                        if !offset.is_empty() {
-                            *prev_max_var += 1;
-                            arch.add_metal_buffer_type(*prev_max_var, "threadgroup ");
-                            smem_ptr = *prev_max_var;
-                            kernel_lines.push(format!(
-                                "{spacing}{}float* {} = {} + {};",
-                                arch.metal_buffer_type(*prev_max_var),
-                                var_to_char(smem_ptr),
-                                var_to_char(buffer),
-                                offset.iter().join(" + ")
-                            ));
-                        }
-                        if kernel_lines
-                            .get(kernel_lines.len() - 2)
-                            .map(|i| i.contains("__syncthreads()"))
-                            .unwrap_or_default()
-                        {
-                            kernel_lines.remove(kernel_lines.len() - 2);
-                        } else {
-                            kernel_lines.push(format!("{spacing}__syncthreads();"));
-                        }
+                    .collect_vec();
+                assert_eq!(inputs.len(), 2);
+                let search_for_smem = |mut node| {
+                    loop {
+                        let Some(prev) = kernel_graph
+                            .neighbors_directed(node, Direction::Incoming)
+                            .next()
+                        else {
+                            return false;
+                        };
+                        match kernel_graph.node_weight(prev).unwrap().0 {
+                            GraphTerm::LoopIn { .. } => node = prev,
+                            GraphTerm::SMEM => return true,
+                            _ => return false,
+                        };
+                    }
+                };
+                let (smem, gmem) = if search_for_smem(inputs[0]) {
+                    (inputs[0], inputs[1])
+                } else {
+                    assert!(search_for_smem(inputs[1])); // ensure the other input is an smem ptr
+                    (inputs[1], inputs[0])
+                };
+                let (gmem, gmem_ptr, _) = node_to_var[&gmem];
+                let (smem, smem_ptr, _) = node_to_var[&smem];
+                assert!(smem_ptr);
+                let sync_barrier = match arch {
+                    GPUArch::CUDA => "__syncthreads()",
+                    GPUArch::Metal(_) => "threadgroup_barrier(mem_flags::mem_threadgroup)",
+                };
+                match term {
+                    GraphTerm::SMEMLoad => {
+                        kernel_lines.push(format!("{spacing}{sync_barrier};"));
                         kernel_lines.push(format!(
-                            "{spacing}{}[loop_{}] = *{} + {};",
-                            var_to_char(smem_ptr),
-                            var_to_char(loop_indexes[&base]),
-                            var_to_char(node_to_var[&src].0),
-                            stride.to_string().replace(
-                                "z",
-                                &format!("loop_{}", var_to_char(loop_indexes[&base]))
-                            )
+                            "{spacing}*{} = {}{};",
+                            var_to_char(smem),
+                            if gmem_ptr { "*" } else { "" },
+                            var_to_char(gmem),
                         ));
-                        kernel_lines.push(format!("{spacing}__syncthreads();"));
-                        node_to_var.insert(node, (smem_ptr, false, None));
+                        node_to_var.insert(node, (smem, true, None));
                     }
-                    6.. => {
-                        // Thread
-                        panic!("Need to set up zerostrideload for register buffers")
+                    GraphTerm::SMEMRead => {
+                        // gmem ptr isn't actually gmem, it should be pointing to the smem copy
+                        kernel_lines.push(format!("{spacing}{sync_barrier};"));
+                        node_to_var.insert(node, (smem, true, None));
                     }
+                    _ => panic!(),
                 }
             }
             GraphTerm::GMEM { .. } => {}
+            GraphTerm::SMEM => {}
             GraphTerm::Sin | GraphTerm::Exp | GraphTerm::Neg | GraphTerm::Recip => {
                 *prev_max_var += 1;
                 let (src, src_ptr, _) = node_to_var[&kernel_graph
@@ -1115,13 +1097,6 @@ fn dag_to_petgraph(
                             Literal::String(s) => Some(s.as_str().to_string()),
                             _ => panic!(),
                         },
-                    }
-                }
-                "ZeroStrideLoad" => {
-                    let (_, range, stride) = get_loop_info(dag, dag.lookup(&t));
-                    GraphTerm::ZeroStrideLoad {
-                        range: Expression::from_string(&range),
-                        stride: Expression::from_string(&stride),
                     }
                 }
                 _ => panic!("invalid term: {}", a.as_str()),
@@ -1391,7 +1366,7 @@ fn split_kernels(
         .filter(|n| {
             !matches!(
                 marked_graph.node_weight(*n).unwrap().0,
-                GraphTerm::NewAcc { .. }
+                GraphTerm::NewAcc { .. } | GraphTerm::SMEM
             )
         })
         .enumerate()
@@ -1453,43 +1428,35 @@ fn split_kernels(
     for (kernel_graph, inputs, outputs, smem_buffers) in &mut kernel_graphs {
         // Get all ZeroStrideLoad ones at thread level 0..3
         for node in kernel_graph.node_indices() {
-            if let (GraphTerm::ZeroStrideLoad { range, .. }, _) =
-                kernel_graph.node_weight(node).unwrap()
-            {
-                // Walk backwards to find threadblock level loopins and multiply all ranges with non-zero strides
-                let mut size = *range;
-                let mut curr = node;
-                let mut base_level;
-                loop {
-                    let prev = graph
-                        .neighbors_directed(curr, Direction::Incoming)
-                        .next()
-                        .unwrap();
-                    if let (
-                        GraphTerm::LoopIn {
-                            range: prev_range,
-                            stride,
-                        },
-                        prev_level,
-                    ) = kernel_graph.node_weight(prev).unwrap()
-                    {
-                        base_level = *prev_level;
-                        if *prev_level < 3 {
-                            break;
-                        } else if *prev_level < 6 {
-                            if *stride != 0 {
-                                size *= prev_range;
+            if let (GraphTerm::SMEM, _) = kernel_graph.node_weight(node).unwrap() {
+                // Walk forward until load to find the size
+                for mut curr in kernel_graph.neighbors_directed(node, Direction::Outgoing) {
+                    let mut size = Expression::from(1);
+                    let mut load = false;
+                    loop {
+                        match kernel_graph.node_weight(curr).unwrap().0 {
+                            GraphTerm::LoopIn { range, stride } => {
+                                if stride != 0 {
+                                    size *= range;
+                                }
+                                curr = kernel_graph
+                                    .neighbors_directed(curr, Direction::Outgoing)
+                                    .next()
+                                    .unwrap();
                             }
+                            GraphTerm::SMEMLoad => {
+                                load = true;
+                                break;
+                            }
+                            _ => break,
                         }
-                        // UNCLEAR IF THIS IS CORRECT OR NOT. THIS MULTIPLIES ALL THREADBLOCK DIMS
                     }
-                    curr = prev;
+                    if load {
+                        let buf_index = inputs.len() + outputs.len() + smem_buffers.len();
+                        smem_buffers.push((buf_index, node, size));
+                        break;
+                    }
                 }
-                if base_level > 5 {
-                    continue;
-                }
-                let buf_index = inputs.len() + outputs.len() + smem_buffers.len();
-                smem_buffers.push((buf_index, node, size));
             }
         }
 

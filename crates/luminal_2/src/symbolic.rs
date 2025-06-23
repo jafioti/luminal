@@ -165,6 +165,7 @@ impl Debug for Expression {
             let new_symbol = match term {
                 Term::Num(n) => n.to_string(),
                 Term::Var(c) => c.to_string(),
+                Term::Acc(s) => format!("Acc({s})"),
                 Term::Max => format!(
                     "max({}, {})",
                     symbols.pop().unwrap(),
@@ -743,6 +744,18 @@ impl std::iter::Product for Expression {
         };
         for n in iter {
             p *= n;
+        }
+        p
+    }
+}
+
+impl std::iter::Sum for Expression {
+    fn sum<I: Iterator<Item = Expression>>(mut iter: I) -> Self {
+        let Some(mut p) = iter.next() else {
+            return 0.into();
+        };
+        for n in iter {
+            p += n;
         }
         p
     }
