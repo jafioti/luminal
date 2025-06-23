@@ -153,10 +153,8 @@ pub fn make_sum_reduce() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
     (graph, out)
 }
 
-pub fn make_matmul() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
+pub fn make_matmul(m: i32, k: i32, n: i32) -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
     let mut graph = StableGraph::new();
-
-    let (m, k, n) = (3, 4, 5);
 
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
@@ -194,9 +192,12 @@ pub fn make_matmul() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
     (graph, out)
 }
 
-pub fn make_tiled_matmul_basic() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
+pub fn make_tiled_matmul_basic(
+    m: i32,
+    k: i32,
+    n: i32,
+) -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
     let mut graph = StableGraph::new();
-    let (m, k, n) = (16, 8, 32);
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
     });
@@ -276,9 +277,12 @@ pub fn make_tiled_matmul_basic() -> (StableGraph<GraphTerm, u8, Directed>, NodeI
     (graph, out)
 }
 
-pub fn make_tiled_matmul() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
+pub fn make_tiled_matmul(
+    m: i32,
+    k: i32,
+    n: i32,
+) -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
     let mut graph = StableGraph::new();
-    let (m, k, n) = (16, 8, 32);
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
     });
@@ -662,7 +666,7 @@ mod tests {
 
     #[test]
     fn test_matmul() {
-        let (graph, root) = make_matmul();
+        let (graph, root) = make_matmul(3, 4, 5);
         let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
         let a = vec![
             [1.5410, -0.2934, -2.1788, 0.5684],
@@ -692,7 +696,7 @@ mod tests {
 
     #[test]
     fn test_tiled_matmul_basic() {
-        let (graph, root) = make_tiled_matmul_basic();
+        let (graph, root) = make_tiled_matmul_basic(16, 8, 32);
         let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
         let a = vec![
             [
@@ -1464,7 +1468,7 @@ mod tests {
 
     #[test]
     fn test_tiled_matmul_smem() {
-        let (graph, root) = make_tiled_matmul();
+        let (graph, root) = make_tiled_matmul(16, 8, 32);
         let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
         let a = vec![
             [

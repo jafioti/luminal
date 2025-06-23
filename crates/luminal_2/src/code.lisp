@@ -14,7 +14,7 @@
 	(MLt Math Math)
 	(MFloorTo Math Math)
     (MReplace Math Math Math)
-    (MAccum) ; this marks that we feed the output (also marked with MAccum) back in
+    (MAccum String) ; this marks that we feed the output (also marked with MAccum) back in
 )
 
 ; Communative
@@ -74,7 +74,7 @@
 (rewrite (MReplace (MFloorTo ?a ?b) ?x ?y) (MFloorTo (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)))
 ;; leave numbers unchanged
 (rewrite (MReplace (MNum ?n) ?x ?y) (MNum ?n))
-(rewrite (MReplace (MAccum) ?x ?y) (MAccum))
+(rewrite (MReplace (MAccum ?acc) ?x ?y) (MAccum ?acc))
 
 ;; leave other vars unchanged
 (rewrite (MReplace (MVar ?v) (MVar ?x) ?y) (MVar ?v) :when ((!= ?v ?x)))
@@ -374,17 +374,17 @@
 (rewrite
 	(LoopOut (Add (Exp (Add
 		?online
-		(Neg (LoopIn (LoopOut (Max (LoopIn ?maxAcc ?loop (MAccum)) ?online) ?loop (MAccum)) ?loop (MNum 0)))
-	)) (LoopIn ?sumAcc ?loop (MAccum))) ?loop (MAccum))
+		(Neg (LoopIn (LoopOut (Max (LoopIn ?maxAcc ?loop (MAccum ?maxAccName)) ?online) ?loop (MAccum ?maxAccName)) ?loop (MNum 0)))
+	)) (LoopIn ?sumAcc ?loop (MAccum ?sumAccName))) ?loop (MAccum ?sumAccName))
 	(LoopOut
 		(Add
 			(Mul
-				(LoopIn ?sumAcc ?loop (MAccum))
-				(Exp (Add (LoopIn ?maxAcc ?loop (MAccum)) (Neg (Max (LoopIn ?maxAcc ?loop (MAccum)) ?online))))
+				(LoopIn ?sumAcc ?loop (MAccum ?sumAccName))
+				(Exp (Add (LoopIn ?maxAcc ?loop (MAccum ?maxAccName)) (Neg (Max (LoopIn ?maxAcc ?loop (MAccum ?maxAccName)) ?online))))
 			)
-			(Exp (Add ?online (Neg (Max (LoopIn ?maxAcc ?loop (MAccum)) ?online))))
+			(Exp (Add ?online (Neg (Max (LoopIn ?maxAcc ?loop (MAccum ?maxAccName)) ?online))))
 		)
-	?loop (MAccum))
+	?loop (MAccum ?maxAccName))
 )
 
 ; Online softmax -> weighted sum trick
@@ -398,20 +398,20 @@
 							(Exp
 								(Add
 									(LoopIn (LoopOut ?dot ?kLoop (MVar "z")) ?kLoop (MVar "z"))
-									(Neg (LoopIn (LoopOut ?max_acc ?kLoop (MAccum)) ?kLoop (MNum 0)))
+									(Neg (LoopIn (LoopOut ?max_acc ?kLoop (MAccum ?maxAcc)) ?kLoop (MNum 0)))
 								)
 							)
-							(Recip (LoopIn (LoopOut (Add (Mul ?exp_sum_acc (Exp (Add ?redot (Neg ?renew_max)))) ?weight) ?kLoop (MAccum)) ?kLoop (MNum 0)))
+							(Recip (LoopIn (LoopOut (Add (Mul ?exp_sum_acc (Exp (Add ?redot (Neg ?renew_max)))) ?weight) ?kLoop (MAccum ?preAcc)) ?kLoop (MNum 0)))
 						)
 						?vLoop (MNum 0)
 					)
 					(LoopIn (LoopIn ?val ?kLoop ?valRow) ?vLoop (MVar "z"))
 				)
-				(LoopIn (LoopIn ?output_acc ?kLoop (MAccum)) ?vLoop (MVar "z"))
+				(LoopIn (LoopIn ?output_acc ?kLoop (MAccum ?acc)) ?vLoop (MVar "z"))
 			)
 			?vLoop (MVar "z")
 		)
-		?kLoop (MAccum)
+		?kLoop (MAccum ?acc)
 	)
 	(LoopOut
 		(Mul
@@ -420,7 +420,7 @@
 					(LoopOut
 						(Add
 							(Mul
-								(LoopIn (LoopIn ?output_acc ?kLoop (MAccum)) ?vLoop (MVar "z"))
+								(LoopIn (LoopIn ?output_acc ?kLoop (MAccum ?acc)) ?vLoop (MVar "z"))
 								(LoopIn (Exp (Add ?redot (Neg ?renew_max))) ?vLoop (MNum 0))
 							)
 							(Mul
@@ -430,11 +430,11 @@
 						)
 						?vLoop (MVar "z")
 					)
-					?kLoop (MAccum)
+					?kLoop (MAccum ?acc)
 				)
 				?vLoop (MVar "z")
 			)
-			(Recip (LoopIn (LoopOut (Add (Mul ?exp_sum_acc (Exp (Add ?redot (Neg ?renew_max)))) ?weight) ?kLoop (MAccum)) ?vLoop (MNum 0)))
+			(Recip (LoopIn (LoopOut (Add (Mul ?exp_sum_acc (Exp (Add ?redot (Neg ?renew_max)))) ?weight) ?kLoop (MAccum ?preAcc)) ?vLoop (MNum 0)))
 		)
 		?vLoop (MVar "z")
 	)

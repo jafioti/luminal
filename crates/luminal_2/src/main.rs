@@ -38,6 +38,7 @@ use petgraph::{
     prelude::StableGraph,
     visit::{EdgeRef, NodeRef},
 };
+use rand::{Rng, rng};
 use regex::Regex;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
@@ -45,7 +46,10 @@ use std::{
     iter::repeat,
 };
 
-use crate::symbolic::Expression;
+use crate::{
+    kernels::make_tiled_matmul_basic,
+    symbolic::{Expression, expression_cleanup},
+};
 
 #[derive(Clone, PartialEq, Eq)]
 enum GPUArch {
@@ -235,8 +239,29 @@ impl TermToString for (GraphTerm, Vec<String>, Vec<usize>) {
 }
 
 fn main() {
-    let (g, r) = kernels::make_flash_attention();
-    codegen(g, r, GPUArch::CUDA);
+    let (graph, root) = kernels::make_tiled_matmul_basic(4096, 4096, 4096);
+    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
+    let mut rng = rng();
+    let a = (0..(4096 * 4096)).map(|_| rng.random()).collect_vec();
+    let b = (0..(4096 * 4096)).map(|_| rng.random()).collect_vec();
+    let mut avgs = vec![];
+    for _ in 0..5 {
+        let start = std::time::Instant::now();
+        run_graph(vec![a.clone(), b.clone()], &kernels);
+        avgs.push(start.elapsed().as_millis());
+    }
+    println!("naive {}ms", avgs.into_iter().sum::<u128>() / 10);
+
+    let (graph, root) = kernels::make_tiled_matmul(4096, 4096, 4096);
+    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
+    let mut avgs = vec![];
+    for _ in 0..5 {
+        let start = std::time::Instant::now();
+        run_graph(vec![a.clone(), b.clone()], &kernels);
+        avgs.push(start.elapsed().as_millis());
+    }
+    println!("tiled {}ms", avgs.into_iter().sum::<u128>() / 10);
+    expression_cleanup();
     // match run_egglog_program(include_str!("code.lisp")) {
     //     Ok((s, _serialized, termdag, root)) => {
     //         if s.is_empty() {
@@ -244,8 +269,6 @@ fn main() {
     //         } else {
     //             println!("{}", format!("Success: {s:?}").bright_green().bold())
     //         }
-    //         // let (graph, root) = dag_to_petgraph(&termdag, termdag.lookup(&root));
-
     //     }
     //     Err(e) => println!("{e}"),
     // }
@@ -333,7 +356,12 @@ fn codegen(
     mut arch: GPUArch,
 ) -> StableGraph<Kernel, (u8, u8), Directed> {
     let (kernels, root_kernel) = split_kernels(graph, root);
-    println!("Kernels: {} Root Kernel: {root_kernel}", kernels.len());
+    if option_env!("PRINT_KERNELS")
+        .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
+        .unwrap_or_default()
+    {
+        println!("Kernels: {} Root Kernel: {root_kernel}", kernels.len());
+    }
     // Create kernel meta graph to toposort
     let mut meta_graph = StableGraph::new();
     for _ in 0..kernels.len() {
@@ -369,7 +397,12 @@ fn codegen(
             continue; // Either input node or output node
         }
         let (kernel_graph, inputs, outputs, smem_buffers) = kernels[node.index()].clone();
-        println!("KERNEL {}", node.index());
+        if option_env!("PRINT_KERNELS")
+            .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
+            .unwrap_or_default()
+        {
+            println!("KERNEL {}", node.index());
+        }
         validate_graph(&kernel_graph);
         let mut node_to_var = inputs
             .iter()
@@ -490,18 +523,23 @@ kernel void kernel{}(
                 )
             }
         };
-        println!(
-            "Grid: {grid:?} Threadblock: {threadblock:?}{}",
-            if smem_buffers.is_empty() {
-                "".to_string()
-            } else {
-                format!(
-                    " Smem: {} elements",
-                    smem_buffers.iter().map(|(_, _, a)| *a).sum::<Expression>()
-                )
-            }
-        );
-        println!("{kernel}");
+        if option_env!("PRINT_KERNELS")
+            .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
+            .unwrap_or_default()
+        {
+            println!(
+                "Grid: {grid:?} Threadblock: {threadblock:?}{}",
+                if smem_buffers.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(
+                        " Smem: {} elements",
+                        smem_buffers.iter().map(|(_, _, a)| *a).sum::<Expression>()
+                    )
+                }
+            );
+            println!("{kernel}");
+        }
         *meta_graph.node_weight_mut(node).unwrap() = Kernel {
             code: kernel,
             grid: (grid[0], grid[1], grid[2]),
@@ -1032,7 +1070,7 @@ pub fn run_egglog_program(code: &str) -> Result<(Vec<String>, String, TermDag, T
     println!("Run Report:  {}", egraph.get_run_report().as_ref().unwrap());
     let (sort, value) = egraph.eval_expr(&var!("full"))?;
     let (termdag, root, _) = egraph.extract_value(&sort, value)?;
-    let (_petgraph, _root_idx) = dag_to_petgraph(&termdag, termdag.lookup(&root));
+    // let (_petgraph, _root_idx) = dag_to_petgraph(&termdag, termdag.lookup(&root));
     let s = egraph.serialize(egglog::SerializeConfig {
         root_eclasses: vec![(sort, value)],
         ..Default::default()
