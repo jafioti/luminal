@@ -41,11 +41,6 @@ impl Expression {
     pub fn is_acc(&self) -> bool {
         self.terms.read().len() == 1 && matches!(self.terms.read()[0], Term::Acc(_))
     }
-
-    pub fn from_string(s: &str) -> Self {
-        println!("HERHERHERHE");
-        todo!()
-    }
 }
 
 impl Hash for Expression {
@@ -76,7 +71,7 @@ pub enum Term {
     Or,
     Gte,
     Lt,
-    Acc(&'static str),
+    Acc(char),
 }
 
 impl std::fmt::Debug for Term {
