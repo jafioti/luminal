@@ -1,22 +1,20 @@
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
-use indexmap::IndexMap;
-use itertools::Itertools;
 use petgraph::{Directed, Direction};
-use std::hash::{DefaultHasher, Hash, Hasher};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 const WARMUP_TRIALS: usize = 5;
 const TRIALS: usize = 5;
 
-/// Enumerate every possible extraction (one node per e‑class reachable
-/// from `roots`), call `cost_fn` on each *complete* ExtractionResult,
-/// and return all (ExtractionResult, cost) pairs.
-///
-/// This does a full Cartesian‐product recursion with ZERO partial‐cost pruning.
-/// Expect it to blow up exponentially for even modest graphs!
-pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
-    // 1) Build class → Vec<NodeId> by scanning all nodes in the graph
-    let mut class_nodes = IndexMap::<ClassId, Vec<NodeId>>::new();
+type Cost = u128; // Execution time in microseconds
+
+use std::collections::HashMap;
+
+/// All complete extractions whose nodes lie in the sub-DAG reachable from
+/// `roots`.  **Exponential** in the number of reachable e-classes.
+pub fn list_extractions(egraph: &EGraph, roots: &[ClassId]) -> Vec<ExtractionResult> {
+    // 1) Build class → Vec<NodeId>  (one scan of the graph)
+    let mut class_nodes: FxHashMap<ClassId, Vec<NodeId>> = FxHashMap::default();
     for (nid, node) in &egraph.nodes {
         class_nodes
             .entry(node.eclass.clone())
@@ -24,128 +22,97 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
             .push(nid.clone());
     }
 
-    // 2) Find exactly the set of classes reachable from the roots
-    let mut reachable: Vec<ClassId> = Vec::new();
-    fn dfs_collect(
-        egraph: &EGraph,
+    // 2) Collect the *set* of e-classes that are reachable from the roots
+    fn collect(
         cid: &ClassId,
-        seen: &mut Vec<ClassId>,
-        class_nodes: &IndexMap<ClassId, Vec<NodeId>>,
+        egraph: &EGraph,
+        class_nodes: &FxHashMap<ClassId, Vec<NodeId>>,
+        seen: &mut FxHashSet<ClassId>,
     ) {
-        if seen.contains(cid) {
-            return;
+        if !seen.insert(cid.clone()) {
+            return; // already visited
         }
-        seen.push(cid.clone());
-        // For each node in this class, recurse into its children’s classes
         if let Some(nodes) = class_nodes.get(cid) {
             for nid in nodes {
-                for child in &egraph[nid].children {
-                    let child_cid = egraph.nid_to_cid(child);
-                    dfs_collect(egraph, &child_cid, seen, class_nodes);
+                for child_cid in &egraph.nodes[nid].children {
+                    let ccid = egraph.nid_to_cid(child_cid);
+                    collect(&ccid, egraph, class_nodes, seen);
                 }
             }
         }
     }
-    for root in &egraph.root_eclasses {
-        dfs_collect(egraph, root, &mut reachable, &class_nodes);
+
+    let mut reachable: FxHashSet<ClassId> = FxHashSet::default();
+    for root in roots {
+        collect(root, egraph, &class_nodes, &mut reachable);
     }
 
-    // 3) Filter class_nodes to only reachable classes, and make it a Vec for ordered recursion
-    let class_nodes: Vec<(ClassId, Vec<NodeId>)> = reachable
-        .into_iter()
-        .filter_map(|cid| {
-            class_nodes
-                .get(&cid)
-                .map(|nodes| (cid.clone(), nodes.clone()))
-        })
-        .collect();
+    // 3) Put the reachable classes in a deterministic order
+    let mut classes: Vec<ClassId> = reachable.into_iter().collect();
+    classes.sort(); // optional but nice for reproducibility
 
-    // 4) Recursively walk the Cartesian product of choices
-    let mut out: Vec<(ExtractionResult, u128)> = Vec::new();
-    let mut er = ExtractionResult::default();
+    // 4) Depth-first Cartesian product
+    let mut out = Vec::<ExtractionResult>::new();
+    let mut choc = FxHashMap::<ClassId, NodeId>::default();
 
     fn recurse(
         idx: usize,
-        egraph: &EGraph,
-        class_nodes: &[(ClassId, Vec<NodeId>)],
-        er: &mut ExtractionResult,
-        out: &mut Vec<(ExtractionResult, u128)>,
-        inputs: &[Vec<f32>],
-        n_accepted: &mut usize,
-        memo: &mut HashSet<u64>,
+        classes: &[ClassId],
+        class_nodes: &FxHashMap<ClassId, Vec<NodeId>>,
+        current: &mut FxHashMap<ClassId, NodeId>,
+        out: &mut Vec<ExtractionResult>,
     ) {
-        if idx == class_nodes.len() {
-            // We have chosen one node for every class → compute cost
-            let mut hasher = DefaultHasher::new();
-            er.choices.iter().collect_vec().hash(&mut hasher);
-            let h = hasher.finish();
-            if memo.contains(&h) {
-                println!("{}", "Seen".bold());
-                return;
-            }
-            memo.insert(h);
-            print!("{}", format!("Graph {} ", n_accepted).bold());
-            if let Some(c) = cost(er, egraph, inputs) {
-                println!("{}", format!("{c}µs").bright_green().bold());
-                out.push((er.clone(), c));
-            } else {
-                println!("{}", "Invalid".bright_red().bold());
-            }
-            *n_accepted += 1;
+        if idx == classes.len() {
+            out.push(ExtractionResult {
+                choices: current.clone(),
+                ..Default::default()
+            });
             return;
         }
-
-        let (ref cid, ref opts) = class_nodes[idx];
-        for nid in opts {
-            er.choices.insert(cid.clone(), nid.clone());
-            recurse(
-                idx + 1,
-                egraph,
-                class_nodes,
-                er,
-                out,
-                inputs,
-                n_accepted,
-                memo,
-            );
+        let cid = &classes[idx];
+        for nid in &class_nodes[cid] {
+            current.insert(cid.clone(), nid.clone());
+            recurse(idx + 1, classes, class_nodes, current, out);
+            current.remove(cid);
         }
-        er.choices.shift_remove(cid);
     }
 
-    recurse(
-        0,
-        egraph,
-        &class_nodes,
-        &mut er,
-        &mut out,
-        inputs,
-        &mut 0,
-        &mut HashSet::new(),
-    );
-    // out
+    recurse(0, &classes, &class_nodes, &mut choc, &mut out);
+    out
+}
+
+/// Enumerate every possible extraction and get the runtime cost for each
+pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
+    let extractions = list_extractions(egraph, &egraph.root_eclasses);
+    println!("Extractions: {}", extractions.len());
+
+    // Get runtime cost for each extraction
+    for (i, extraction) in extractions.into_iter().enumerate() {
+        print!("{}", format!("Graph {i} ").bold());
+        if let Some(c) = cost(&extraction, egraph, inputs) {
+            println!("{}", format!("{c}µs").bright_green().bold());
+        } else {
+            println!("{}", "Invalid".bright_red().bold());
+        }
+    }
 }
 
 #[derive(Default, Clone)]
 pub struct ExtractionResult {
-    pub choices: IndexMap<ClassId, NodeId>,
+    pub choices: FxHashMap<ClassId, NodeId>,
 }
 
-fn cost(extraction: &ExtractionResult, egraph: &EGraph, inputs: &[Vec<f32>]) -> Option<u128> {
-    // Convert to a petgraph
+fn cost(extraction: &ExtractionResult, egraph: &EGraph, inputs: &[Vec<f32>]) -> Option<Cost> {
+    // Convert to a petgraph and find the root node
     let graph = extraction_to_graph(egraph, extraction, &egraph.root_eclasses)?;
-    let root = graph
-        .node_indices()
-        .find(|n| {
-            graph
-                .neighbors_directed(*n, Direction::Outgoing)
-                .next()
-                .is_none()
-        })
-        .unwrap();
+    let root = graph.externals(Direction::Outgoing).next().unwrap();
+    // Codegen
     let kernels = crate::codegen::codegen(graph, root, GPUArch::Metal(HashMap::new()));
+    // Warm up resources (buffer allocation, kernel compiler, etc.)
     for _ in 0..WARMUP_TRIALS {
         run_graph(inputs, &kernels);
     }
+    // Test runtime
     let mut micros = vec![];
     for _ in 0..TRIALS {
         let (_outputs, m) = run_graph(inputs, &kernels);
@@ -155,7 +122,7 @@ fn cost(extraction: &ExtractionResult, egraph: &EGraph, inputs: &[Vec<f32>]) -> 
 }
 
 use petgraph::prelude::{NodeIndex, StableGraph};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 /// Build a StableGraph from an ExtractionResult.
 ///
@@ -270,7 +237,7 @@ pub fn extraction_to_graph(
                 g.add_edge(a, n, 0);
                 Some(n)
             }
-            "Unary" | "Binary" => return None,
+            "Unary" | "Binary" | "SwapLoops" => return None,
             _ => unreachable!("unsupported op {}", enode.op),
         }
     }

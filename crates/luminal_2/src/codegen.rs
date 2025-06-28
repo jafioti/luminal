@@ -410,26 +410,34 @@ fn make_kernel(
                         .neighbors_directed(*output, Direction::Outgoing)
                         .next()
                         .unwrap();
-                    let (real_output, is_ptr, real_size) = node_to_var[&dest].clone();
-                    if **stride != 0 {
-                        assert!(is_ptr, "Only pointers can be offset!");
-                        *prev_max_var += 1;
-                        arch.add_metal_buffer_type(
-                            *prev_max_var,
-                            arch.metal_buffer_type(real_output),
-                        );
-                        kernel_lines.push(format!(
-                            "{inner_spacing}{}float* {} = {} + {};",
-                            arch.metal_buffer_type(*prev_max_var),
-                            var_to_char(*prev_max_var),
-                            var_to_char(real_output),
-                            stride.to_string().replace('z', &format!("loop_{loop_var}"))
-                        ));
-                        new_output_vars.push(*prev_max_var);
-                        node_to_var.insert(*output, (*prev_max_var, is_ptr, None));
+                    if !node_to_var.contains_key(&dest) {
+                        println!("Dest: {:?}", dest);
+                        // display_graph(&kernel_graph, &[]);
+                    }
+                    if let Some((real_output, is_ptr, real_size)) = node_to_var.get(&dest).copied()
+                    {
+                        if **stride != 0 && *range != 1 {
+                            assert!(is_ptr, "Only pointers can be offset!");
+                            *prev_max_var += 1;
+                            arch.add_metal_buffer_type(
+                                *prev_max_var,
+                                arch.metal_buffer_type(real_output),
+                            );
+                            kernel_lines.push(format!(
+                                "{inner_spacing}{}float* {} = {} + {};",
+                                arch.metal_buffer_type(*prev_max_var),
+                                var_to_char(*prev_max_var),
+                                var_to_char(real_output),
+                                stride.to_string().replace('z', &format!("loop_{loop_var}"))
+                            ));
+                            new_output_vars.push(*prev_max_var);
+                            node_to_var.insert(*output, (*prev_max_var, is_ptr, None));
+                        } else {
+                            new_output_vars.push(real_output);
+                            node_to_var.insert(*output, (real_output, is_ptr, real_size));
+                        }
                     } else {
-                        new_output_vars.push(real_output);
-                        node_to_var.insert(*output, (real_output, is_ptr, real_size));
+                        // Handle the case where the dest is not the real loop output
                     }
                 }
                 for (inp, _) in &loop_inputs {
@@ -462,11 +470,35 @@ fn make_kernel(
                     } else {
                         false
                     };
-                    let (output, output_ptr, _) = &node_to_var[&output];
-                    let (body_out, body_out_ptr, body_out_size) = &node_to_var[&body_out];
-                    if output != body_out && (!body_out_ptr || is_acc) {
-                        if let Some(size) = &body_out_size {
-                            if *size == 1 {
+                    if let Some((output, output_ptr, _)) = node_to_var.get(&output) {
+                        let (body_out, body_out_ptr, body_out_size) = &node_to_var[&body_out];
+                        if output != body_out && (!body_out_ptr || is_acc) {
+                            if let Some(size) = &body_out_size {
+                                if *size == 1 {
+                                    kernel_lines.push(format!(
+                                        "{inner_spacing}{}{} = {}{};",
+                                        if *output_ptr { "*" } else { "" },
+                                        var_to_char(*output),
+                                        if *body_out_ptr { "*" } else { "" },
+                                        var_to_char(*body_out),
+                                    ));
+                                } else {
+                                    // Save size numbers
+                                    kernel_lines.push(format!(
+                                    "{inner_spacing}for (int save = 0; save < {size}; save++) {{",
+                                ));
+                                    assert!(
+                                        *output_ptr && *body_out_ptr,
+                                        "Both src and dest must be pointers when saving a block"
+                                    );
+                                    kernel_lines.push(format!(
+                                        "{inner_spacing}\t{}[save] = {}[save];",
+                                        var_to_char(*output),
+                                        var_to_char(*body_out),
+                                    ));
+                                    kernel_lines.push(format!("{inner_spacing}}}"));
+                                }
+                            } else {
                                 kernel_lines.push(format!(
                                     "{inner_spacing}{}{} = {}{};",
                                     if *output_ptr { "*" } else { "" },
@@ -474,30 +506,8 @@ fn make_kernel(
                                     if *body_out_ptr { "*" } else { "" },
                                     var_to_char(*body_out),
                                 ));
-                            } else {
-                                // Save size numbers
-                                kernel_lines.push(format!(
-                                    "{inner_spacing}for (int save = 0; save < {size}; save++) {{",
-                                ));
-                                assert!(
-                                    *output_ptr && *body_out_ptr,
-                                    "Both src and dest must be pointers when saving a block"
-                                );
-                                kernel_lines.push(format!(
-                                    "{inner_spacing}\t{}[save] = {}[save];",
-                                    var_to_char(*output),
-                                    var_to_char(*body_out),
-                                ));
-                                kernel_lines.push(format!("{inner_spacing}}}"));
                             }
                         } else {
-                            kernel_lines.push(format!(
-                                "{inner_spacing}{}{} = {}{};",
-                                if *output_ptr { "*" } else { "" },
-                                var_to_char(*output),
-                                if *body_out_ptr { "*" } else { "" },
-                                var_to_char(*body_out),
-                            ));
                         }
                     }
                 }
@@ -536,7 +546,7 @@ fn make_kernel(
                 node_to_var.insert(node, (*prev_max_var, true, Some(size)));
             }
             GraphTerm::LoopOut { range, stride } => {
-                panic!("found loopout range: {range} stride: {stride}")
+                // panic!("found loopout range: {range} stride: {stride}")
             }
             GraphTerm::SMEMLoad | GraphTerm::SMEMRead => {
                 // Find the gmem input and smem input

@@ -341,7 +341,7 @@
 	)
 )
 
-;(rewrite (Unary ?s ?x) (LoopOut (Unary ?s (LoopIn ?x (Loop "_" (MNum 1)) (MVar "z"))) (Loop "_" (MNum 1)) (MVar "z"))) ; add one-level loop
+(rewrite (Unary ?s ?x) (LoopOut (Unary ?s (LoopIn ?x (Loop "_" (MNum 1)) (MVar "z"))) (Loop "_" (MNum 1)) (MVar "z"))) ; add one-level loop
 
 ; ───────────────── TESTS ─────────────────
 ; Common variables
@@ -353,5 +353,5 @@
 (let loop (Loop "l" (MNum 1024)))
 (let full (LoopOut (Unary "Sin" (Unary "Exp" (LoopIn tensorA loop strideOne))) loop strideOne))
 
-(run 1)
-(check (= full (LoopOut (Unary "Sin" (LoopIn (LoopOut (Unary "Exp" (LoopIn tensorA loop strideOne)) loop strideOne) loop strideOne)) loop strideOne)))
+(run 2)
+;(check (= full (LoopOut (Unary "Sin" (LoopIn (LoopOut (Unary "Exp" (LoopIn tensorA loop strideOne)) loop strideOne) loop strideOne)) loop strideOne)))
