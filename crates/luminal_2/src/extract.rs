@@ -1,10 +1,12 @@
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
+use petgraph::prelude::{NodeIndex, StableGraph};
 use petgraph::{Directed, Direction};
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::HashSet;
 
-const WARMUP_TRIALS: usize = 5;
-const TRIALS: usize = 5;
+const WARMUP_TRIALS: usize = 1;
+const TRIALS: usize = 3;
 
 type Cost = u128; // Execution time in microseconds
 
@@ -61,6 +63,7 @@ pub fn list_extractions(egraph: &EGraph, roots: &[ClassId]) -> Vec<ExtractionRes
         class_nodes: &FxHashMap<ClassId, Vec<NodeId>>,
         current: &mut FxHashMap<ClassId, NodeId>,
         out: &mut Vec<ExtractionResult>,
+        egraph: &EGraph,
     ) {
         if idx == classes.len() {
             out.push(ExtractionResult {
@@ -72,12 +75,12 @@ pub fn list_extractions(egraph: &EGraph, roots: &[ClassId]) -> Vec<ExtractionRes
         let cid = &classes[idx];
         for nid in &class_nodes[cid] {
             current.insert(cid.clone(), nid.clone());
-            recurse(idx + 1, classes, class_nodes, current, out);
-            current.remove(cid);
+            recurse(idx + 1, classes, class_nodes, current, out, egraph);
         }
+        current.remove(cid);
     }
 
-    recurse(0, &classes, &class_nodes, &mut choc, &mut out);
+    recurse(0, &classes, &class_nodes, &mut choc, &mut out, &egraph);
     out
 }
 
@@ -87,12 +90,15 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
     println!("Extractions: {}", extractions.len());
 
     // Get runtime cost for each extraction
-    for (i, extraction) in extractions.into_iter().enumerate() {
-        print!("{}", format!("Graph {i} ").bold());
+    let mut accepted = 0;
+    for extraction in extractions {
         if let Some(c) = cost(&extraction, egraph, inputs) {
-            println!("{}", format!("{c}µs").bright_green().bold());
-        } else {
-            println!("{}", "Invalid".bright_red().bold());
+            println!(
+                "{}{}",
+                format!("Graph {accepted} ").bold(),
+                format!("{c}µs").bright_green().bold()
+            );
+            accepted += 1;
         }
     }
 }
@@ -120,9 +126,6 @@ fn cost(extraction: &ExtractionResult, egraph: &EGraph, inputs: &[Vec<f32>]) -> 
     }
     Some(micros.into_iter().sum::<u128>() / TRIALS as u128)
 }
-
-use petgraph::prelude::{NodeIndex, StableGraph};
-use std::collections::HashSet;
 
 /// Build a StableGraph from an ExtractionResult.
 ///
@@ -161,9 +164,10 @@ pub fn extraction_to_graph(
 
             // LoopIn  = (LoopIn <expr> <LoopType> <Math>)
             "LoopIn" => {
-                let range = convert_math(egraph.nid_to_cid(&enode.children[1]), egraph, extraction);
+                let range =
+                    convert_math(egraph.nid_to_cid(&enode.children[1]), egraph, extraction)?;
                 let stride =
-                    convert_math(egraph.nid_to_cid(&enode.children[2]), egraph, extraction);
+                    convert_math(egraph.nid_to_cid(&enode.children[2]), egraph, extraction)?;
                 let n = g.add_node(GraphTerm::LoopIn { range, stride });
                 let child = emit(
                     &extraction.choices[egraph.nid_to_cid(&enode.children[0])],
@@ -178,9 +182,10 @@ pub fn extraction_to_graph(
 
             // LoopOut = same child layout as LoopIn
             "LoopOut" => {
-                let range = convert_math(egraph.nid_to_cid(&enode.children[1]), egraph, extraction);
+                let range =
+                    convert_math(egraph.nid_to_cid(&enode.children[1]), egraph, extraction)?;
                 let stride =
-                    convert_math(egraph.nid_to_cid(&enode.children[2]), egraph, extraction);
+                    convert_math(egraph.nid_to_cid(&enode.children[2]), egraph, extraction)?;
 
                 let n = g.add_node(GraphTerm::LoopOut { range, stride });
                 let child = emit(
@@ -253,21 +258,25 @@ pub fn extraction_to_graph(
 use crate::symbolic::{Expression, Term};
 use crate::{GPUArch, GraphTerm, run::run_graph};
 
-fn convert_math(cid: &ClassId, egraph: &EGraph, extraction: &ExtractionResult) -> Expression {
+fn convert_math(
+    cid: &ClassId,
+    egraph: &EGraph,
+    extraction: &ExtractionResult,
+) -> Option<Expression> {
     // Memoise by NodeId so we don’t re-convert shared sub-expressions.
     fn build(
         nid: NodeId,
         egraph: &EGraph,
         extraction: &ExtractionResult,
         memo: &mut HashMap<NodeId, Expression>,
-    ) -> Expression {
+    ) -> Option<Expression> {
         if let Some(m) = memo.get(&nid) {
-            return m.clone();
+            return Some(*m);
         }
 
         let enode = &egraph.nodes[&nid];
         let make_child =
-            |child_cid: &ClassId, memo: &mut HashMap<NodeId, Expression>| -> Expression {
+            |child_cid: &ClassId, memo: &mut HashMap<NodeId, Expression>| -> Option<Expression> {
                 let child_nid = extraction.choices[child_cid].clone();
                 build(child_nid, egraph, extraction, memo)
             };
@@ -292,7 +301,7 @@ fn convert_math(cid: &ClassId, egraph: &EGraph, extraction: &ExtractionResult) -
 
             // ----------- unary ops -----------
             "MNeg" | "MRecip" => {
-                let c0 = make_child(&egraph.nid_to_cid(&enode.children[0]), memo);
+                let c0 = make_child(&egraph.nid_to_cid(&enode.children[0]), memo)?;
                 match enode.op.as_str() {
                     "MNeg" => c0 * -1,
                     "MRecip" => 1 / c0,
@@ -303,8 +312,8 @@ fn convert_math(cid: &ClassId, egraph: &EGraph, extraction: &ExtractionResult) -
             // ----------- binary ops -----------
             "MAdd" | "MSub" | "MMul" | "MDiv" | "MMod" | "MMin" | "MMax" | "MAnd" | "MOr"
             | "MGte" | "MLt" | "MFloorTo" => {
-                let lhs = make_child(&egraph.nid_to_cid(&enode.children[0]), memo);
-                let rhs = make_child(&egraph.nid_to_cid(&enode.children[1]), memo);
+                let lhs = make_child(&egraph.nid_to_cid(&enode.children[0]), memo)?;
+                let rhs = make_child(&egraph.nid_to_cid(&enode.children[1]), memo)?;
                 match enode.op.as_str() {
                     "MAdd" => lhs + rhs,
                     "MSub" => lhs - rhs,
@@ -321,7 +330,7 @@ fn convert_math(cid: &ClassId, egraph: &EGraph, extraction: &ExtractionResult) -
             }
 
             // ----------- ternary -----------
-            "MReplace" => panic!("MReplace not codegennable"),
+            "MReplace" => return None,
 
             // ----------- accumulator marker -----------
             "MAccum" => {
@@ -332,8 +341,8 @@ fn convert_math(cid: &ClassId, egraph: &EGraph, extraction: &ExtractionResult) -
                 };
                 Expression::from(Term::Acc(name.chars().next().unwrap()))
             }
-            "Loop" => make_child(&egraph.nid_to_cid(&enode.children[1]), memo),
-            "MNum" | "MVar" => make_child(&egraph.nid_to_cid(&enode.children[0]), memo),
+            "Loop" => make_child(&egraph.nid_to_cid(&enode.children[1]), memo)?,
+            "MNum" | "MVar" => make_child(&egraph.nid_to_cid(&enode.children[0]), memo)?,
             _ => {
                 if let Ok(n) = enode.op.parse::<usize>() {
                     Expression::from(n)
@@ -344,7 +353,7 @@ fn convert_math(cid: &ClassId, egraph: &EGraph, extraction: &ExtractionResult) -
         };
 
         memo.insert(nid, term.clone());
-        term
+        Some(term)
     }
 
     let mut memo: HashMap<NodeId, Expression> = HashMap::new();

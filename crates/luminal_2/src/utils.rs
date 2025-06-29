@@ -107,12 +107,7 @@ impl TermToString for (GraphTerm, usize) {
 
 impl TermToString for (GraphTerm, Vec<Expression>, Vec<usize>) {
     fn term_to_string(&self) -> String {
-        format!(
-            "{} [{}] {{{:?}}}",
-            self.0.term_to_string(),
-            self.1.len(),
-            self.2
-        )
+        format!("{} {:?} {{{:?}}}", self.0.term_to_string(), self.1, self.2)
     }
 }
 

@@ -358,7 +358,8 @@ fn make_kernel(
                         new_vars.push(real_input);
                         node_to_var.insert(*input, (real_input, is_ptr, real_size));
                     } else {
-                        if **stride != 0 {
+                        if **stride != 0 && *range != 1 {
+                            assert!(is_ptr);
                             *prev_max_var += 1;
                             arch.add_metal_buffer_type(
                                 *prev_max_var,
@@ -410,10 +411,6 @@ fn make_kernel(
                         .neighbors_directed(*output, Direction::Outgoing)
                         .next()
                         .unwrap();
-                    if !node_to_var.contains_key(&dest) {
-                        println!("Dest: {:?}", dest);
-                        // display_graph(&kernel_graph, &[]);
-                    }
                     if let Some((real_output, is_ptr, real_size)) = node_to_var.get(&dest).copied()
                     {
                         if **stride != 0 && *range != 1 {
@@ -470,17 +467,17 @@ fn make_kernel(
                     } else {
                         false
                     };
-                    if let Some((output, output_ptr, _)) = node_to_var.get(&output) {
-                        let (body_out, body_out_ptr, body_out_size) = &node_to_var[&body_out];
+                    let (body_out, body_out_ptr, body_out_size) = node_to_var[&body_out];
+                    if let Some((output, output_ptr, _)) = node_to_var.get(&output).copied() {
                         if output != body_out && (!body_out_ptr || is_acc) {
                             if let Some(size) = &body_out_size {
                                 if *size == 1 {
                                     kernel_lines.push(format!(
                                         "{inner_spacing}{}{} = {}{};",
-                                        if *output_ptr { "*" } else { "" },
-                                        var_to_char(*output),
-                                        if *body_out_ptr { "*" } else { "" },
-                                        var_to_char(*body_out),
+                                        if output_ptr { "*" } else { "" },
+                                        var_to_char(output),
+                                        if body_out_ptr { "*" } else { "" },
+                                        var_to_char(body_out),
                                     ));
                                 } else {
                                     // Save size numbers
@@ -488,27 +485,29 @@ fn make_kernel(
                                     "{inner_spacing}for (int save = 0; save < {size}; save++) {{",
                                 ));
                                     assert!(
-                                        *output_ptr && *body_out_ptr,
+                                        output_ptr && body_out_ptr,
                                         "Both src and dest must be pointers when saving a block"
                                     );
                                     kernel_lines.push(format!(
                                         "{inner_spacing}\t{}[save] = {}[save];",
-                                        var_to_char(*output),
-                                        var_to_char(*body_out),
+                                        var_to_char(output),
+                                        var_to_char(body_out),
                                     ));
                                     kernel_lines.push(format!("{inner_spacing}}}"));
                                 }
                             } else {
                                 kernel_lines.push(format!(
                                     "{inner_spacing}{}{} = {}{};",
-                                    if *output_ptr { "*" } else { "" },
-                                    var_to_char(*output),
-                                    if *body_out_ptr { "*" } else { "" },
-                                    var_to_char(*body_out),
+                                    if output_ptr { "*" } else { "" },
+                                    var_to_char(output),
+                                    if body_out_ptr { "*" } else { "" },
+                                    var_to_char(body_out),
                                 ));
                             }
-                        } else {
                         }
+                    } else {
+                        assert!(body_out_size.is_none());
+                        node_to_var.insert(output, (body_out, false, None));
                     }
                 }
 
@@ -876,12 +875,12 @@ fn split_kernels(
 
     // Add kernel barriers
     for edge in marked_graph.edge_indices().collect_vec() {
-        let (source, dest) = marked_graph.edge_endpoints(edge).unwrap();
+        let (mut src, mut dest) = marked_graph.edge_endpoints(edge).unwrap();
         let (_, dest_level, dest_kernel) = marked_graph.node_weight(dest).unwrap().clone();
-        let (_, _, src_kernel) = marked_graph.node_weight(source).unwrap().clone();
+        let (_, _, src_kernel) = marked_graph.node_weight(src).unwrap().clone();
         if dest_level.len() > 0 && dest_kernel.iter().any(|i| !src_kernel.contains(i)) {
             // Put a barrier here
-            let (mut src, mut dest) = (dest, source);
+            marked_graph.remove_edge(edge);
             for i in (0..dest_level.len()).rev() {
                 let new_src = marked_graph.add_node((
                     GraphTerm::LoopOut {
@@ -904,6 +903,7 @@ fn split_kernels(
                 marked_graph.add_edge(new_dest, dest, 0);
                 dest = new_dest;
             }
+            marked_graph.add_edge(src, dest, 0);
         }
     }
 
@@ -1068,10 +1068,7 @@ fn split_kernels(
                 curr = kernel_graph
                     .neighbors_directed(curr, Direction::Incoming)
                     .next()
-                    .unwrap_or_else(|| {
-                        display_graph(&kernel_graph, &[]);
-                        panic!()
-                    });
+                    .unwrap();
             }
             *size = new_size.into_iter().product();
         }
