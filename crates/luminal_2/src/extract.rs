@@ -1,5 +1,6 @@
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
+use itertools::Itertools;
 use petgraph::prelude::{NodeIndex, StableGraph};
 use petgraph::{Directed, Direction};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -7,15 +8,15 @@ use std::collections::HashSet;
 
 const WARMUP_TRIALS: usize = 1;
 const TRIALS: usize = 3;
+const MAX_SEARCHED_GRAPHS: usize = 1_000;
 
 type Cost = u128; // Execution time in microseconds
 
 use std::collections::HashMap;
 
-/// All complete extractions whose nodes lie in the sub-DAG reachable from
-/// `roots`.  **Exponential** in the number of reachable e-classes.
-pub fn list_extractions(egraph: &EGraph, roots: &[ClassId]) -> Vec<ExtractionResult> {
-    // 1) Build class → Vec<NodeId>  (one scan of the graph)
+/// Enumerate every possible extraction and get the runtime cost for each
+pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
+    // class → nodes
     let mut class_nodes: FxHashMap<ClassId, Vec<NodeId>> = FxHashMap::default();
     for (nid, node) in &egraph.nodes {
         class_nodes
@@ -24,88 +25,129 @@ pub fn list_extractions(egraph: &EGraph, roots: &[ClassId]) -> Vec<ExtractionRes
             .push(nid.clone());
     }
 
-    // 2) Collect the *set* of e-classes that are reachable from the roots
-    fn collect(
-        cid: &ClassId,
-        egraph: &EGraph,
-        class_nodes: &FxHashMap<ClassId, Vec<NodeId>>,
-        seen: &mut FxHashSet<ClassId>,
-    ) {
-        if !seen.insert(cid.clone()) {
-            return; // already visited
-        }
-        if let Some(nodes) = class_nodes.get(cid) {
-            for nid in nodes {
-                for child_cid in &egraph.nodes[nid].children {
-                    let ccid = egraph.nid_to_cid(child_cid);
-                    collect(&ccid, egraph, class_nodes, seen);
-                }
+    // reachable classes
+    let mut reach = FxHashSet::default();
+    let mut stack: Vec<_> = egraph.root_eclasses.iter().collect_vec();
+    while let Some(cid) = stack.pop() {
+        if reach.insert(cid.clone())
+            && let Some(ns) = class_nodes.get(&cid)
+        {
+            for nid in ns {
+                stack.extend(
+                    egraph.nodes[nid]
+                        .children
+                        .iter()
+                        .map(|c| egraph.nid_to_cid(c)),
+                );
             }
         }
     }
 
-    let mut reachable: FxHashSet<ClassId> = FxHashSet::default();
-    for root in roots {
-        collect(root, egraph, &class_nodes, &mut reachable);
-    }
+    let mut classes: Vec<_> = reach.into_iter().collect();
+    classes.sort();
 
-    // 3) Put the reachable classes in a deterministic order
-    let mut classes: Vec<ClassId> = reachable.into_iter().collect();
-    classes.sort(); // optional but nice for reproducibility
-
-    // 4) Depth-first Cartesian product
-    let mut out = Vec::<ExtractionResult>::new();
-    let mut choc = FxHashMap::<ClassId, NodeId>::default();
-
-    fn recurse(
+    // depth-first cartesian product
+    fn dfs(
         idx: usize,
         classes: &[ClassId],
         class_nodes: &FxHashMap<ClassId, Vec<NodeId>>,
-        current: &mut FxHashMap<ClassId, NodeId>,
-        out: &mut Vec<ExtractionResult>,
-        egraph: &EGraph,
+        cur: &mut FxHashMap<ClassId, NodeId>,
+        accepted: &mut usize,
+        eg: &EGraph,
+        inputs: &[Vec<f32>],
     ) {
+        if *accepted >= MAX_SEARCHED_GRAPHS {
+            return;
+        }
         if idx == classes.len() {
-            out.push(ExtractionResult {
-                choices: current.clone(),
-                ..Default::default()
-            });
+            let er = ExtractionResult {
+                choices: cur.clone(),
+            };
+            if !extraction_contains_cycle(eg, &er) {
+                if let Some(c) = cost(&er, eg, inputs) {
+                    println!(
+                        "{}{}",
+                        format!("Graph {accepted} ").bold(),
+                        format!("{c}µs").bright_green().bold()
+                    );
+                    *accepted += 1;
+                }
+            }
             return;
         }
         let cid = &classes[idx];
         for nid in &class_nodes[cid] {
-            current.insert(cid.clone(), nid.clone());
-            recurse(idx + 1, classes, class_nodes, current, out, egraph);
+            cur.insert(cid.clone(), nid.clone());
+            dfs(idx + 1, classes, class_nodes, cur, accepted, eg, inputs);
         }
-        current.remove(cid);
+        cur.remove(cid);
     }
 
-    recurse(0, &classes, &class_nodes, &mut choc, &mut out, &egraph);
-    out
-}
-
-/// Enumerate every possible extraction and get the runtime cost for each
-pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
-    let extractions = list_extractions(egraph, &egraph.root_eclasses);
-    println!("Extractions: {}", extractions.len());
-
-    // Get runtime cost for each extraction
-    let mut accepted = 0;
-    for extraction in extractions {
-        if let Some(c) = cost(&extraction, egraph, inputs) {
-            println!(
-                "{}{}",
-                format!("Graph {accepted} ").bold(),
-                format!("{c}µs").bright_green().bold()
-            );
-            accepted += 1;
-        }
-    }
+    dfs(
+        0,
+        &classes,
+        &class_nodes,
+        &mut FxHashMap::default(),
+        &mut 0,
+        egraph,
+        inputs,
+    );
 }
 
 #[derive(Default, Clone)]
 pub struct ExtractionResult {
     pub choices: FxHashMap<ClassId, NodeId>,
+}
+
+pub fn extraction_contains_cycle(egraph: &EGraph, extraction: &ExtractionResult) -> bool {
+    use std::collections::HashMap;
+
+    #[derive(Copy, Clone)]
+    enum Mark {
+        Temp,
+        Perm,
+    } // DFS colours
+
+    let mut marks: HashMap<ClassId, Mark> = HashMap::default();
+
+    fn dfs(
+        cid: &ClassId,
+        egraph: &EGraph,
+        ex: &ExtractionResult,
+        marks: &mut HashMap<ClassId, Mark>,
+    ) -> bool {
+        match marks.get(cid) {
+            Some(Mark::Perm) => return false, // already finished, no cycle here
+            Some(Mark::Temp) => return true,  // back-edge ⇒ cycle
+            None => {}
+        }
+        marks.insert(cid.clone(), Mark::Temp);
+
+        if let Some(nid) = ex.choices.get(cid)
+            && let Some(node) = egraph.nodes.get(nid)
+        {
+            // if node.op == "SwapLoops" || node.op == "Unary" || node.op == "Binary" {
+            //     return true;
+            // }
+            // `children()` should yield the child ClassIds of this node
+            for child in &node.children {
+                let child_cid = egraph.nid_to_cid(child);
+                // Only follow edges that stay inside the chosen sub-graph
+                if ex.choices.contains_key(child_cid) && dfs(child_cid, egraph, ex, marks) {
+                    return true;
+                }
+            }
+        }
+
+        marks.insert(cid.clone(), Mark::Perm);
+        false
+    }
+
+    // Cycle exists if any DFS starting at a chosen class finds one
+    extraction
+        .choices
+        .keys()
+        .any(|cid| dfs(cid, egraph, extraction, &mut marks))
 }
 
 fn cost(extraction: &ExtractionResult, egraph: &EGraph, inputs: &[Vec<f32>]) -> Option<Cost> {
@@ -139,6 +181,7 @@ pub fn extraction_to_graph(
     extraction: &ExtractionResult,
     roots: &[ClassId],
 ) -> Option<StableGraph<GraphTerm, u8, Directed>> {
+    // display_graph(&extraction_to_petgraph(egraph, extraction), &[]);
     let mut g: StableGraph<GraphTerm, u8, Directed> = StableGraph::new();
 
     fn emit<'a>(
@@ -292,11 +335,11 @@ fn convert_math(
             }
             op if op.starts_with("Boxed(\"") => {
                 let name = op.replace("Boxed(\"", "").replace("\")", "");
-                if name.len() == 1 {
-                    Expression::from(name.chars().next().unwrap())
-                } else {
-                    panic!("Variable name too long: {name}")
-                }
+                // if name.len() == 1 {
+                Expression::from(name.chars().next().unwrap())
+                // } else {
+                //     panic!("Variable name too long: {name}")
+                // }
             }
 
             // ----------- unary ops -----------
@@ -352,7 +395,7 @@ fn convert_math(
             }
         };
 
-        memo.insert(nid, term.clone());
+        memo.insert(nid, term);
         Some(term)
     }
 

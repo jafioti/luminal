@@ -1,10 +1,13 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use egglog::Term;
+use egraph_serialize::{ClassId, EGraph, NodeId};
+use itertools::Itertools;
 use petgraph::{Directed, Direction, graph::NodeIndex, prelude::StableGraph};
 use regex::Regex;
+use rustc_hash::FxHashMap;
 
-use crate::{GraphTerm, Kernel, symbolic::Expression};
+use crate::{GraphTerm, Kernel, extract::ExtractionResult, symbolic::Expression};
 
 pub trait TermToString {
     fn term_to_string(&self) -> String;
@@ -17,6 +20,12 @@ pub trait EdgeToString {
 impl EdgeToString for u8 {
     fn edge_to_string(&self) -> String {
         self.to_string()
+    }
+}
+
+impl EdgeToString for () {
+    fn edge_to_string(&self) -> String {
+        "".to_string()
     }
 }
 
@@ -39,6 +48,12 @@ impl TermToString for Term {
 impl TermToString for usize {
     fn term_to_string(&self) -> String {
         self.to_string()
+    }
+}
+
+impl TermToString for String {
+    fn term_to_string(&self) -> String {
+        self.clone()
     }
 }
 
@@ -238,4 +253,44 @@ pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
             }
         }
     }
+}
+
+pub fn extraction_to_petgraph(
+    egraph: &EGraph,
+    extraction: &ExtractionResult,
+) -> StableGraph<String, (), Directed> {
+    let mut map = HashMap::<&NodeId, NodeIndex>::default();
+    let mut dfs = egraph
+        .root_eclasses
+        .iter()
+        .map(|c| &extraction.choices[c])
+        .collect_vec();
+    let mut graph = StableGraph::default();
+    for root in &dfs {
+        let new_node = graph.add_node(egraph.nodes[*root].op.clone());
+        map.insert(*root, new_node);
+    }
+    let mut finished = HashSet::<&NodeId>::new();
+
+    while let Some(node) = dfs.pop() {
+        if finished.contains(node) {
+            continue;
+        }
+        // Create children
+        let g_node = map[node];
+        for child in &egraph.nodes[node].children {
+            let g_child = match map.get(child) {
+                Some(c) => *c,
+                None => {
+                    let new_node = graph.add_node(egraph.nodes[child].op.clone());
+                    map.insert(child, new_node);
+                    dfs.push(child);
+                    new_node
+                }
+            };
+            graph.add_edge(g_node, g_child, ());
+        }
+        finished.insert(node);
+    }
+    graph
 }
