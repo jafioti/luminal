@@ -350,8 +350,27 @@
 
 ; ───────────────── Fission test (1 loop -> 3 sequential loops) ─────────────────
 (push)
-(let loop (Loop "l" (MNum 1024)))
-(let full (LoopOut (Unary "Sin" (Unary "Exp" (LoopIn tensorA loop strideOne))) loop strideOne))
+(let A (GMEM))
+(let B (GMEM))
+(let C (NewAcc 0))
+(let M (MNum 1024))  ; Matrix dimensions
+(let N (MNum 1024))
+(let K (MNum 1024))
+(let i_loop (Loop "I" M))
+(let j_loop (Loop "J" N))
+(let k_loop (Loop "K" K))
 
-(run 2)
+; Standard i-j-k matmul: C[i,j] += A[i,k] * B[k,j]
+(let full (LoopOut (LoopOut (LoopOut
+    (Add
+        (LoopIn C k_loop (MAccum "C"))
+        (Mul
+            (LoopIn A k_loop (MVar "k"))                    ; A[i,k]
+            (LoopIn B k_loop (MMul (MVar "k") N))           ; B[k,j]
+        )
+    )
+    k_loop (MAccum "C")
+) j_loop (MVar "j")) i_loop (MMul (MVar "i") N)))
+
+;(run 2)
 ;(check (= full (LoopOut (Unary "Sin" (LoopIn (LoopOut (Unary "Exp" (LoopIn tensorA loop strideOne)) loop strideOne) loop strideOne)) loop strideOne)))
