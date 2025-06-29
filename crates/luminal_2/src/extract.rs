@@ -4,18 +4,18 @@ use itertools::Itertools;
 use petgraph::prelude::{NodeIndex, StableGraph};
 use petgraph::{Directed, Direction};
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::collections::HashSet;
 
 const WARMUP_TRIALS: usize = 1;
 const TRIALS: usize = 3;
 const MAX_SEARCHED_GRAPHS: usize = 1_000;
+const MAX_CYCLES: usize = 1;
 
 type Cost = u128; // Execution time in microseconds
 
 use std::collections::HashMap;
 
 /// Enumerate every possible extraction and get the runtime cost for each
-pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
+pub fn search(egraph: EGraph, inputs: &[Vec<f32>]) {
     // class → nodes
     let mut class_nodes: FxHashMap<ClassId, Vec<NodeId>> = FxHashMap::default();
     for (nid, node) in &egraph.nodes {
@@ -43,7 +43,17 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
         }
     }
 
-    let mut classes: Vec<_> = reach.into_iter().collect();
+    let mut classes: Vec<_> = reach
+        .into_iter()
+        // .filter(|c| egraph.classes().contains_key(c))
+        // .filter(|c| {
+        //     egraph.classes()[c].nodes.iter().any(|n| {
+        //         egraph.nodes[n].op != "SwapLoops"
+        //             && egraph.nodes[n].op != "Unary"
+        //             && egraph.nodes[n].op != "Binary"
+        //     })
+        // })
+        .collect();
     classes.sort();
 
     // depth-first cartesian product
@@ -63,20 +73,24 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
             let er = ExtractionResult {
                 choices: cur.clone(),
             };
-            if !extraction_contains_cycle(eg, &er) {
-                if let Some(c) = cost(&er, eg, inputs) {
-                    println!(
-                        "{}{}",
-                        format!("Graph {accepted} ").bold(),
-                        format!("{c}µs").bright_green().bold()
-                    );
-                    *accepted += 1;
-                }
+            if let Some(c) = cost(&er, eg, inputs) {
+                println!(
+                    "{}{}",
+                    format!("Graph {accepted} ").bold(),
+                    format!("{c}µs").bright_green().bold()
+                );
+                *accepted += 1;
             }
             return;
         }
         let cid = &classes[idx];
         for nid in &class_nodes[cid] {
+            // if eg.nodes[nid].op == "SwapLoops"
+            //     || eg.nodes[nid].op == "Unary"
+            //     || eg.nodes[nid].op == "Binary"
+            // {
+            //     continue;
+            // }
             cur.insert(cid.clone(), nid.clone());
             dfs(idx + 1, classes, class_nodes, cur, accepted, eg, inputs);
         }
@@ -89,7 +103,7 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
         &class_nodes,
         &mut FxHashMap::default(),
         &mut 0,
-        egraph,
+        &egraph,
         inputs,
     );
 }
@@ -97,57 +111,6 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
 #[derive(Default, Clone)]
 pub struct ExtractionResult {
     pub choices: FxHashMap<ClassId, NodeId>,
-}
-
-pub fn extraction_contains_cycle(egraph: &EGraph, extraction: &ExtractionResult) -> bool {
-    use std::collections::HashMap;
-
-    #[derive(Copy, Clone)]
-    enum Mark {
-        Temp,
-        Perm,
-    } // DFS colours
-
-    let mut marks: HashMap<ClassId, Mark> = HashMap::default();
-
-    fn dfs(
-        cid: &ClassId,
-        egraph: &EGraph,
-        ex: &ExtractionResult,
-        marks: &mut HashMap<ClassId, Mark>,
-    ) -> bool {
-        match marks.get(cid) {
-            Some(Mark::Perm) => return false, // already finished, no cycle here
-            Some(Mark::Temp) => return true,  // back-edge ⇒ cycle
-            None => {}
-        }
-        marks.insert(cid.clone(), Mark::Temp);
-
-        if let Some(nid) = ex.choices.get(cid)
-            && let Some(node) = egraph.nodes.get(nid)
-        {
-            // if node.op == "SwapLoops" || node.op == "Unary" || node.op == "Binary" {
-            //     return true;
-            // }
-            // `children()` should yield the child ClassIds of this node
-            for child in &node.children {
-                let child_cid = egraph.nid_to_cid(child);
-                // Only follow edges that stay inside the chosen sub-graph
-                if ex.choices.contains_key(child_cid) && dfs(child_cid, egraph, ex, marks) {
-                    return true;
-                }
-            }
-        }
-
-        marks.insert(cid.clone(), Mark::Perm);
-        false
-    }
-
-    // Cycle exists if any DFS starting at a chosen class finds one
-    extraction
-        .choices
-        .keys()
-        .any(|cid| dfs(cid, egraph, extraction, &mut marks))
 }
 
 fn cost(extraction: &ExtractionResult, egraph: &EGraph, inputs: &[Vec<f32>]) -> Option<Cost> {
@@ -186,15 +149,33 @@ pub fn extraction_to_graph(
 
     fn emit<'a>(
         nid: &'a NodeId,
-        egraph: &EGraph,
+        egraph: &'a EGraph,
         extraction: &'a ExtractionResult,
         g: &mut StableGraph<GraphTerm, u8, Directed>,
-        seen: &mut HashSet<&'a NodeId>,
+        seen: &mut HashMap<&'a NodeId, usize>,
     ) -> Option<NodeIndex> {
-        if seen.contains(nid) {
-            return None;
-        }
-        seen.insert(nid);
+        let mut pick_child = |child| {
+            let child_cid = egraph.nid_to_cid(child);
+            let Some(mut child_nid) = extraction.choices.get(child_cid) else {
+                return None;
+            };
+            if seen
+                .get(child_nid)
+                .map(|s| *s > MAX_CYCLES)
+                .unwrap_or_default()
+            {
+                // Pick another one we haven't seen more tha max cycles (THIS SHOULD BE PART OF EXTRACTION)
+                child_nid = egraph.classes()[child_cid]
+                    .nodes
+                    .iter()
+                    .find(|n| seen.get(*n).map(|s| *s <= MAX_CYCLES).unwrap_or(true))
+                    .unwrap();
+            }
+            *seen.entry(child_nid).or_default() += 1;
+            let r = emit(child_nid, egraph, extraction, g, seen);
+            *seen.get_mut(child_nid).unwrap() += 1;
+            r
+        };
         let enode = &egraph.nodes[nid];
         match enode.op.as_str() {
             "GMEM" => Some(g.add_node(GraphTerm::GMEM { label: None })),
@@ -211,14 +192,8 @@ pub fn extraction_to_graph(
                     convert_math(egraph.nid_to_cid(&enode.children[1]), egraph, extraction)?;
                 let stride =
                     convert_math(egraph.nid_to_cid(&enode.children[2]), egraph, extraction)?;
+                let child = pick_child(&enode.children[0])?;
                 let n = g.add_node(GraphTerm::LoopIn { range, stride });
-                let child = emit(
-                    &extraction.choices[egraph.nid_to_cid(&enode.children[0])],
-                    egraph,
-                    extraction,
-                    g,
-                    seen,
-                )?;
                 g.add_edge(child, n, 0);
                 Some(n)
             }
@@ -230,44 +205,27 @@ pub fn extraction_to_graph(
                 let stride =
                     convert_math(egraph.nid_to_cid(&enode.children[2]), egraph, extraction)?;
 
+                let child = pick_child(&enode.children[0])?;
                 let n = g.add_node(GraphTerm::LoopOut { range, stride });
-                let child = emit(
-                    &extraction.choices[egraph.nid_to_cid(&enode.children[0])],
-                    egraph,
-                    extraction,
-                    g,
-                    seen,
-                )?;
                 g.add_edge(child, n, 0);
                 Some(n)
             }
 
             "Add" | "Mul" | "Max" => {
+                let a = pick_child(&enode.children[0])?;
+                let b = pick_child(&enode.children[1])?;
                 let n = g.add_node(match enode.op.as_str() {
                     "Add" => GraphTerm::Add,
                     "Mul" => GraphTerm::Mul,
                     "Max" => GraphTerm::Max,
                     _ => panic!(),
                 });
-                let a = emit(
-                    &extraction.choices[egraph.nid_to_cid(&enode.children[0])],
-                    egraph,
-                    extraction,
-                    g,
-                    seen,
-                )?;
-                let b = emit(
-                    &extraction.choices[egraph.nid_to_cid(&enode.children[1])],
-                    egraph,
-                    extraction,
-                    g,
-                    seen,
-                )?;
                 g.add_edge(a, n, 0);
                 g.add_edge(b, n, 0);
                 Some(n)
             }
             "Exp" | "Sin" | "Recip" | "Neg" => {
+                let a = pick_child(&enode.children[0])?;
                 let n = g.add_node(match enode.op.as_str() {
                     "Exp" => GraphTerm::Exp,
                     "Sin" => GraphTerm::Sin,
@@ -275,13 +233,6 @@ pub fn extraction_to_graph(
                     "Neg" => GraphTerm::Neg,
                     _ => panic!(),
                 });
-                let a = emit(
-                    &extraction.choices[egraph.nid_to_cid(&enode.children[0])],
-                    egraph,
-                    extraction,
-                    g,
-                    seen,
-                )?;
                 g.add_edge(a, n, 0);
                 Some(n)
             }
@@ -292,13 +243,14 @@ pub fn extraction_to_graph(
 
     for root_cid in roots {
         if let Some(root_nid) = extraction.choices.get(root_cid) {
-            emit(root_nid, egraph, extraction, &mut g, &mut HashSet::new())?;
+            emit(root_nid, egraph, extraction, &mut g, &mut HashMap::new())?;
         }
     }
     Some(g)
 }
 
 use crate::symbolic::{Expression, Term};
+use crate::utils::display_graph;
 use crate::{GPUArch, GraphTerm, run::run_graph};
 
 fn convert_math(
@@ -307,22 +259,32 @@ fn convert_math(
     extraction: &ExtractionResult,
 ) -> Option<Expression> {
     // Memoise by NodeId so we don’t re-convert shared sub-expressions.
-    fn build(
-        nid: NodeId,
-        egraph: &EGraph,
-        extraction: &ExtractionResult,
-        memo: &mut HashMap<NodeId, Expression>,
+    fn build<'a>(
+        nid: &'a NodeId,
+        egraph: &'a EGraph,
+        extraction: &'a ExtractionResult,
+        seen: &mut HashMap<&'a NodeId, usize>,
     ) -> Option<Expression> {
-        if let Some(m) = memo.get(&nid) {
-            return Some(*m);
-        }
-
-        let enode = &egraph.nodes[&nid];
-        let make_child =
-            |child_cid: &ClassId, memo: &mut HashMap<NodeId, Expression>| -> Option<Expression> {
-                let child_nid = extraction.choices[child_cid].clone();
-                build(child_nid, egraph, extraction, memo)
-            };
+        let enode = &egraph.nodes[nid];
+        let mut make_child = |child_cid: &ClassId| -> Option<Expression> {
+            let mut child_nid = &extraction.choices[child_cid];
+            if seen
+                .get(child_nid)
+                .map(|s| *s > MAX_CYCLES)
+                .unwrap_or_default()
+            {
+                // Pick another one we haven't seen more tha max cycles (THIS SHOULD BE PART OF EXTRACTION)
+                child_nid = egraph.classes()[child_cid]
+                    .nodes
+                    .iter()
+                    .find(|n| seen.get(*n).map(|s| *s <= MAX_CYCLES).unwrap_or(true))
+                    .unwrap();
+            }
+            *seen.entry(child_nid).or_default() += 1;
+            let r = build(child_nid, egraph, extraction, seen);
+            *seen.get_mut(child_nid).unwrap() -= 1;
+            r
+        };
         let term = match enode.op.as_str() {
             // ----------- literals & vars -----------
             op if op.starts_with("MNum:") => {
@@ -344,7 +306,7 @@ fn convert_math(
 
             // ----------- unary ops -----------
             "MNeg" | "MRecip" => {
-                let c0 = make_child(&egraph.nid_to_cid(&enode.children[0]), memo)?;
+                let c0 = make_child(&egraph.nid_to_cid(&enode.children[0]))?;
                 match enode.op.as_str() {
                     "MNeg" => c0 * -1,
                     "MRecip" => 1 / c0,
@@ -355,8 +317,8 @@ fn convert_math(
             // ----------- binary ops -----------
             "MAdd" | "MSub" | "MMul" | "MDiv" | "MMod" | "MMin" | "MMax" | "MAnd" | "MOr"
             | "MGte" | "MLt" | "MFloorTo" => {
-                let lhs = make_child(&egraph.nid_to_cid(&enode.children[0]), memo)?;
-                let rhs = make_child(&egraph.nid_to_cid(&enode.children[1]), memo)?;
+                let lhs = make_child(&egraph.nid_to_cid(&enode.children[0]))?;
+                let rhs = make_child(&egraph.nid_to_cid(&enode.children[1]))?;
                 match enode.op.as_str() {
                     "MAdd" => lhs + rhs,
                     "MSub" => lhs - rhs,
@@ -384,8 +346,8 @@ fn convert_math(
                 };
                 Expression::from(Term::Acc(name.chars().next().unwrap()))
             }
-            "Loop" => make_child(&egraph.nid_to_cid(&enode.children[1]), memo)?,
-            "MNum" | "MVar" => make_child(&egraph.nid_to_cid(&enode.children[0]), memo)?,
+            "Loop" => make_child(&egraph.nid_to_cid(&enode.children[1]))?,
+            "MNum" | "MVar" => make_child(&egraph.nid_to_cid(&enode.children[0]))?,
             _ => {
                 if let Ok(n) = enode.op.parse::<usize>() {
                     Expression::from(n)
@@ -395,11 +357,9 @@ fn convert_math(
             }
         };
 
-        memo.insert(nid, term);
         Some(term)
     }
 
-    let mut memo: HashMap<NodeId, Expression> = HashMap::new();
-    let nid = extraction.choices[cid].clone();
-    build(nid, egraph, extraction, &mut memo)
+    let nid = &extraction.choices[cid];
+    build(nid, egraph, extraction, &mut HashMap::new())
 }

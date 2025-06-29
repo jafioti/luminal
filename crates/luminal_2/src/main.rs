@@ -143,10 +143,7 @@ fn main() {
                 format!("{}ms", start.elapsed().as_millis()).bold()
             );
             let mut rng = rng();
-            search(
-                &serialized,
-                &[(0..1024).map(|_| rng.random()).collect_vec()],
-            );
+            search(serialized, &[(0..1024).map(|_| rng.random()).collect_vec()]);
         }
         Err(e) => println!("{e}"),
     }
