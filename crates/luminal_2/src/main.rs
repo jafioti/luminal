@@ -66,7 +66,7 @@ impl GPUArch {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 struct Kernel {
     code: String,
     // launch params

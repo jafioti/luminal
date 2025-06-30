@@ -179,7 +179,7 @@ impl Debug for Expression {
             };
             symbols.push(new_symbol);
         }
-        write!(f, "{}", symbols.pop().unwrap())
+        write!(f, "{}", symbols.pop().unwrap_or_default())
     }
 }
 

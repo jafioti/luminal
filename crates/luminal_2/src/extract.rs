@@ -1,14 +1,19 @@
+use crate::Kernel;
+use crate::symbolic::{Expression, Term};
+use crate::{GPUArch, GraphTerm, run::run_graph};
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
 use itertools::Itertools;
+use petgraph::algo::toposort;
 use petgraph::prelude::{NodeIndex, StableGraph};
 use petgraph::{Directed, Direction};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 const WARMUP_TRIALS: usize = 1;
 const TRIALS: usize = 3;
-const MAX_SEARCHED_GRAPHS: usize = 1_000;
+const MAX_SEARCHED_GRAPHS: usize = 10_000;
 const MAX_CYCLES: usize = 1;
+const INVALID_IR: &[&str] = &["SwapLoops", "Unary", "Binary"];
 
 type Cost = u128; // Execution time in microseconds
 
@@ -45,14 +50,13 @@ pub fn search(egraph: EGraph, inputs: &[Vec<f32>]) {
 
     let mut classes: Vec<_> = reach
         .into_iter()
-        // .filter(|c| egraph.classes().contains_key(c))
-        // .filter(|c| {
-        //     egraph.classes()[c].nodes.iter().any(|n| {
-        //         egraph.nodes[n].op != "SwapLoops"
-        //             && egraph.nodes[n].op != "Unary"
-        //             && egraph.nodes[n].op != "Binary"
-        //     })
-        // })
+        .filter(|c| egraph.classes().contains_key(c))
+        .filter(|c| {
+            egraph.classes()[c]
+                .nodes
+                .iter()
+                .any(|n| !INVALID_IR.contains(&egraph.nodes[n].op.as_str()))
+        })
         .collect();
     classes.sort();
 
@@ -65,6 +69,7 @@ pub fn search(egraph: EGraph, inputs: &[Vec<f32>]) {
         accepted: &mut usize,
         eg: &EGraph,
         inputs: &[Vec<f32>],
+        memo: &mut FxHashSet<String>,
     ) {
         if *accepted >= MAX_SEARCHED_GRAPHS {
             return;
@@ -73,7 +78,8 @@ pub fn search(egraph: EGraph, inputs: &[Vec<f32>]) {
             let er = ExtractionResult {
                 choices: cur.clone(),
             };
-            if let Some(c) = cost(&er, eg, inputs) {
+
+            if let Some(c) = cost(&er, eg, inputs, memo) {
                 println!(
                     "{}{}",
                     format!("Graph {accepted} ").bold(),
@@ -85,14 +91,21 @@ pub fn search(egraph: EGraph, inputs: &[Vec<f32>]) {
         }
         let cid = &classes[idx];
         for nid in &class_nodes[cid] {
-            // if eg.nodes[nid].op == "SwapLoops"
-            //     || eg.nodes[nid].op == "Unary"
-            //     || eg.nodes[nid].op == "Binary"
-            // {
-            //     continue;
-            // }
+            // println!("{:?}", nid);
+            if INVALID_IR.contains(&eg.nodes[nid].op.as_str()) {
+                continue;
+            }
             cur.insert(cid.clone(), nid.clone());
-            dfs(idx + 1, classes, class_nodes, cur, accepted, eg, inputs);
+            dfs(
+                idx + 1,
+                classes,
+                class_nodes,
+                cur,
+                accepted,
+                eg,
+                inputs,
+                memo,
+            );
         }
         cur.remove(cid);
     }
@@ -105,6 +118,7 @@ pub fn search(egraph: EGraph, inputs: &[Vec<f32>]) {
         &mut 0,
         &egraph,
         inputs,
+        &mut FxHashSet::default(),
     );
 }
 
@@ -113,12 +127,48 @@ pub struct ExtractionResult {
     pub choices: FxHashMap<ClassId, NodeId>,
 }
 
-fn cost(extraction: &ExtractionResult, egraph: &EGraph, inputs: &[Vec<f32>]) -> Option<Cost> {
+fn cost(
+    extraction: &ExtractionResult,
+    egraph: &EGraph,
+    inputs: &[Vec<f32>],
+    memo: &mut FxHashSet<String>,
+) -> Option<Cost> {
     // Convert to a petgraph and find the root node
     let graph = extraction_to_graph(egraph, extraction, &egraph.root_eclasses)?;
     let root = graph.externals(Direction::Outgoing).next().unwrap();
     // Codegen
     let kernels = crate::codegen::codegen(graph, root, GPUArch::Metal(HashMap::new()));
+
+    let key = kernels
+        .node_weights()
+        .map(|k| format!("{}{:?}{:?}", k.code, k.grid, k.threadblock))
+        .join("");
+    if memo.contains(&key) {
+        return None;
+    }
+    memo.insert(key);
+
+    // Print kernels
+    if option_env!("PRINT_KERNELS")
+        .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
+        .unwrap_or_default()
+    {
+        println!("Kernels: {}", kernels.node_count() - 2);
+        for (i, node) in toposort(&kernels, None).unwrap().into_iter().enumerate() {
+            let Kernel {
+                code,
+                grid,
+                threadblock,
+                smem,
+                ..
+            } = kernels.node_weight(node).unwrap();
+            if code != "Inputs" && code != "Outputs" {
+                println!("Kernel {i} Grid: {grid:?} Threadblock: {threadblock:?} Smem: {smem}");
+                println!("{code}");
+            }
+        }
+    }
+
     // Warm up resources (buffer allocation, kernel compiler, etc.)
     for _ in 0..WARMUP_TRIALS {
         run_graph(inputs, &kernels);
@@ -173,7 +223,7 @@ pub fn extraction_to_graph(
             }
             *seen.entry(child_nid).or_default() += 1;
             let r = emit(child_nid, egraph, extraction, g, seen);
-            *seen.get_mut(child_nid).unwrap() -= 1;
+            *seen.get_mut(child_nid).unwrap() += 1;
             r
         };
         let enode = &egraph.nodes[nid];
@@ -248,10 +298,6 @@ pub fn extraction_to_graph(
     }
     Some(g)
 }
-
-use crate::symbolic::{Expression, Term};
-use crate::utils::display_graph;
-use crate::{GPUArch, GraphTerm, run::run_graph};
 
 fn convert_math(
     cid: &ClassId,

@@ -19,12 +19,6 @@ pub fn codegen(
     mut arch: GPUArch,
 ) -> StableGraph<Kernel, (u8, u8), Directed> {
     let (kernels, root_kernel) = split_kernels(graph, root);
-    if option_env!("PRINT_KERNELS")
-        .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
-        .unwrap_or_default()
-    {
-        println!("Kernels: {} Root Kernel: {root_kernel}", kernels.len());
-    }
     // Create kernel meta graph to toposort
     let mut meta_graph = StableGraph::new();
     for _ in 0..kernels.len() {
@@ -60,12 +54,6 @@ pub fn codegen(
             continue; // Either input node or output node
         }
         let (kernel_graph, inputs, outputs, smem_buffers) = kernels[node.index()].clone();
-        if option_env!("PRINT_KERNELS")
-            .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
-            .unwrap_or_default()
-        {
-            println!("KERNEL {}", node.index());
-        }
         validate_graph(&kernel_graph);
         // display_graph(&kernel_graph, &[]);
         let mut node_to_var = inputs
@@ -187,23 +175,6 @@ kernel void kernel{}(
                 )
             }
         };
-        if option_env!("PRINT_KERNELS")
-            .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
-            .unwrap_or_default()
-        {
-            println!(
-                "Grid: {grid:?} Threadblock: {threadblock:?}{}",
-                if smem_buffers.is_empty() {
-                    "".to_string()
-                } else {
-                    format!(
-                        " Smem: {} elements",
-                        smem_buffers.iter().map(|(_, _, a)| *a).sum::<Expression>()
-                    )
-                }
-            );
-            println!("{kernel}");
-        }
         *meta_graph.node_weight_mut(node).unwrap() = Kernel {
             code: kernel,
             grid: (grid[0], grid[1], grid[2]),
@@ -359,7 +330,10 @@ fn make_kernel(
                         node_to_var.insert(*input, (real_input, is_ptr, real_size));
                     } else {
                         if **stride != 0 && *range != 1 {
-                            assert!(is_ptr);
+                            if !is_ptr {
+                                display_graph(&kernel_graph, &[]);
+                                panic!();
+                            }
                             *prev_max_var += 1;
                             arch.add_metal_buffer_type(
                                 *prev_max_var,
@@ -780,7 +754,7 @@ fn split_kernels(
             let (src_term, src_level, src_kernel) = marked_graph.node_weight_mut(source).unwrap();
             if matches!(term, GraphTerm::LoopIn { .. })
                 && matches!(src_term, GraphTerm::LoopOut { .. })
-                && curr_level.len() < 3
+                && curr_level.len() < 6
             {
                 let max_kernel = *curr_kernel.iter().max().unwrap();
                 n_kernels = n_kernels.max(max_kernel + 2);
@@ -827,7 +801,7 @@ fn split_kernels(
             let (src_term, src_level, src_kernel) = marked_graph.node_weight(source).unwrap();
             if matches!(term, GraphTerm::LoopIn { .. })
                 && matches!(src_term, GraphTerm::LoopOut { .. })
-                && curr_level.len() < 3
+                && curr_level.len() < 6
             {
                 let max_kernel = *src_kernel.iter().max().unwrap();
                 n_kernels = n_kernels.max(max_kernel + 2);
@@ -857,7 +831,7 @@ fn split_kernels(
     while let Some(node) = dfs_stack.pop() {
         dfs_stack.extend(marked_graph.neighbors_directed(node, Direction::Incoming));
         let (term, curr_level, mut curr_kernel) = marked_graph.node_weight(node).unwrap().clone();
-        let split_cond = curr_level.len() < 3 && matches!(term, GraphTerm::LoopOut { .. });
+        let split_cond = curr_level.len() < 6 && matches!(term, GraphTerm::LoopOut { .. });
         curr_kernel.retain(|k| {
             marked_graph
                 .neighbors_directed(node, Direction::Outgoing)

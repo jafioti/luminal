@@ -235,113 +235,7 @@
     )
 )
 
-
-; Swap dimensions
-(rewrite  ; 0-1
-	(LoopOut (LoopOut ?body (Loop ?innerLoop ?innerLoopAmt) ?innerSt) (Loop ?outerLoop ?outerLoopAmt) ?outerSt)
-	(LoopOut (LoopOut (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?outerLoop ?outerLoopAmt) ?outerSt) (Loop ?innerLoop ?innerLoopAmt) ?innerSt)
-)
-(rewrite  ; 0-2 SHORTCUT
-	(LoopOut (LoopOut (LoopOut ?body (Loop ?innerLoop ?innerLoopAmt) ?innerSt) ?midLoop ?midSt) (Loop ?outerLoop ?outerLoopAmt) ?outerSt)
-	(LoopOut (LoopOut (LoopOut (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?outerLoop ?outerLoopAmt) ?outerSt) ?midLoop ?midSt) (Loop ?innerLoop ?innerLoopAmt) ?innerSt)
-)
-(rewrite ; 0-1
-	(SwapLoops (LoopIn (LoopIn ?body (Loop ?outerLoop ?outerLoopAmt) ?outerSt) (Loop ?innerLoop ?innerLoopAmt) ?innerSt) ?innerLoop ?outerLoop)
-	(LoopIn (LoopIn ?body (Loop ?innerLoop ?innerLoopAmt) ?innerSt) (Loop ?outerLoop ?outerLoopAmt) ?outerSt)
-)
-(rewrite ; 0-2 SHORTCUT
-	(SwapLoops (LoopIn (LoopIn (LoopIn ?body (Loop ?outerLoop ?outerLoopAmt) ?outerSt) ?midLoop ?midSt) (Loop ?innerLoop ?innerLoopAmt) ?innerSt) ?innerLoop ?outerLoop)
-	(LoopIn (LoopIn (LoopIn ?body (Loop ?innerLoop ?innerLoopAmt) ?innerSt) ?midLoop ?midSt) (Loop ?outerLoop ?outerLoopAmt) ?outerSt)
-)
-(rewrite
-	(SwapLoops (LoopIn ?body (Loop ?otherLoop ?otherLoopAmt) ?otherSt) ?innerLoop ?outerLoop)
-	(LoopIn (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?otherLoop ?otherLoopAmt) ?otherSt)
-	:when ((!= ?innerLoop ?otherLoop))
-)
-(rewrite
-	(SwapLoops (LoopOut ?body (Loop ?otherLoop ?otherLoopAmt) ?otherSt) ?innerLoop ?outerLoop)
-	(LoopOut (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?otherLoop ?otherLoopAmt) ?otherSt)
-)
-(rewrite
-	(SwapLoops (Unary ?un ?body) ?innerLoop ?outerLoop)
-	(Unary ?un (SwapLoops ?body ?innerLoop ?outerLoop))
-)
-(rewrite
-	(SwapLoops (Binary ?bin ?bodyA ?bodyB) ?innerLoop ?outerLoop)
-	(Binary ?bin (SwapLoops ?bodyA ?innerLoop ?outerLoop) (SwapLoops ?bodyB ?innerLoop ?outerLoop))
-)
-
-; Exp-Sum-Max Online Trick
-(rewrite
-	(LoopOut (Add (Exp (Add
-		?online
-		(Neg (LoopIn (LoopOut (Max (LoopIn ?maxAcc ?loop (MAccum ?maxAccName)) ?online) ?loop (MAccum ?maxAccName)) ?loop (MNum 0)))
-	)) (LoopIn ?sumAcc ?loop (MAccum ?sumAccName))) ?loop (MAccum ?sumAccName))
-	(LoopOut
-		(Add
-			(Mul
-				(LoopIn ?sumAcc ?loop (MAccum ?sumAccName))
-				(Exp (Add (LoopIn ?maxAcc ?loop (MAccum ?maxAccName)) (Neg (Max (LoopIn ?maxAcc ?loop (MAccum ?maxAccName)) ?online))))
-			)
-			(Exp (Add ?online (Neg (Max (LoopIn ?maxAcc ?loop (MAccum ?maxAccName)) ?online))))
-		)
-	?loop (MAccum ?maxAccName))
-)
-
-; Online softmax -> weighted sum trick
-(rewrite
-	(LoopOut
-		(LoopOut
-			(Add
-				(Mul
-					(LoopIn
-						(Mul
-							(Exp
-								(Add
-									(LoopIn (LoopOut ?dot ?kLoop (MVar "z")) ?kLoop (MVar "z"))
-									(Neg (LoopIn (LoopOut ?max_acc ?kLoop (MAccum ?maxAcc)) ?kLoop (MNum 0)))
-								)
-							)
-							(Recip (LoopIn (LoopOut (Add (Mul ?exp_sum_acc (Exp (Add ?redot (Neg ?renew_max)))) ?weight) ?kLoop (MAccum ?preAcc)) ?kLoop (MNum 0)))
-						)
-						?vLoop (MNum 0)
-					)
-					(LoopIn (LoopIn ?val ?kLoop ?valRow) ?vLoop (MVar "z"))
-				)
-				(LoopIn (LoopIn ?output_acc ?kLoop (MAccum ?acc)) ?vLoop (MVar "z"))
-			)
-			?vLoop (MVar "z")
-		)
-		?kLoop (MAccum ?acc)
-	)
-	(LoopOut
-		(Mul
-			(LoopIn
-				(LoopOut
-					(LoopOut
-						(Add
-							(Mul
-								(LoopIn (LoopIn ?output_acc ?kLoop (MAccum ?acc)) ?vLoop (MVar "z"))
-								(LoopIn (Exp (Add ?redot (Neg ?renew_max))) ?vLoop (MNum 0))
-							)
-							(Mul
-								(LoopIn ?weight ?vLoop (MNum 0))
-								(LoopIn (LoopIn ?val ?kLoop ?valRow) ?vLoop (MVar "z"))
-							)
-						)
-						?vLoop (MVar "z")
-					)
-					?kLoop (MAccum ?acc)
-				)
-				?vLoop (MVar "z")
-			)
-			(Recip (LoopIn (LoopOut (Add (Mul ?exp_sum_acc (Exp (Add ?redot (Neg ?renew_max)))) ?weight) ?kLoop (MAccum ?preAcc)) ?vLoop (MNum 0)))
-		)
-		?vLoop (MVar "z")
-	)
-)
-
-(rewrite (Unary ?s ?x) (LoopOut (Unary ?s (LoopIn ?x (Loop "_" (MNum 1)) (MVar "z"))) (Loop "_" (MNum 1)) (MVar "z"))) ; add one-level loop
+;(rewrite (Unary ?s ?x) (LoopOut (Unary ?s (LoopIn ?x (Loop "_" (MNum 1)) (MVar "z"))) (Loop "_" (MNum 1)) (MVar "z"))) ; add one-level loop
 
 ; ───────────────── TESTS ─────────────────
 ; Common variables
@@ -350,27 +244,30 @@
 
 ; ───────────────── Fission test (1 loop -> 3 sequential loops) ─────────────────
 (push)
-(let A (GMEM))
-(let B (GMEM))
-(let C (NewAcc 0))
-(let M (MNum 1024))  ; Matrix dimensions
-(let N (MNum 1024))
-(let K (MNum 1024))
-(let i_loop (Loop "I" M))
-(let j_loop (Loop "J" N))
-(let k_loop (Loop "K" K))
+(let loop (Loop "l" (MNum 1024)))
+(let singleLoop (Loop "one" (MNum 1)))
+(let inp
+	(LoopIn
+		(LoopIn
+			(LoopIn
+				(LoopIn
+					tensorA
+				singleLoop strideOne)
+			singleLoop strideOne)
+		singleLoop strideOne)
+	loop strideOne)
+)
+(let full
+	(LoopOut
+		(LoopOut
+			(LoopOut
+				(LoopOut
+					(Sin (Exp inp))
+				loop strideOne)
+			singleLoop strideOne)
+		singleLoop strideOne)
+	singleLoop strideOne)
+)
 
-; Standard i-j-k matmul: C[i,j] += A[i,k] * B[k,j]
-(let full (LoopOut (LoopOut (LoopOut
-    (Add
-        (LoopIn C k_loop (MAccum "C"))
-        (Mul
-            (LoopIn A k_loop (MVar "k"))                    ; A[i,k]
-            (LoopIn B k_loop (MMul (MVar "k") N))           ; B[k,j]
-        )
-    )
-    k_loop (MAccum "C")
-) j_loop (MVar "j")) i_loop (MMul (MVar "i") N)))
-
-;(run 2)
+(run 50)
 ;(check (= full (LoopOut (Unary "Sin" (LoopIn (LoopOut (Unary "Exp" (LoopIn tensorA loop strideOne)) loop strideOne) loop strideOne)) loop strideOne)))
