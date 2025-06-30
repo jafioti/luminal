@@ -162,6 +162,10 @@
 	(Binary ?second (Binary ?first (LoopIn ?a ?loop ?inASt) (LoopIn ?c ?loop ?inCSt)) (LoopIn ?b ?loop ?inBSt))
 	(Binary ?second (LoopIn (LoopOut (Binary ?first (LoopIn ?a ?loop ?inASt) (LoopIn ?c ?loop ?inCSt)) ?loop  (MVar "z")) ?loop (MVar "z")) (LoopIn ?b ?loop ?inBSt))
 )
+(rewrite
+	(LoopOut (Binary ?second (Unary ?first ?a) ?b) ?loop ?outSt)
+	(LoopOut (Binary ?second (LoopIn (LoopOut (Unary ?first ?a) ?loop  (MVar "z")) ?loop (MVar "z")) (LoopIn (LoopOut ?b ?loop  (MVar "z")) ?loop (MVar "z"))) ?loop ?outSt)
+)
 (rewrite (LoopOut (LoopOut
 	(Unary
 		?unHere
@@ -240,13 +244,14 @@
 ; ───────────────── TESTS ─────────────────
 ; Common variables
 (let tensorA (GMEM))
+(let tensorB (GMEM))
 (let strideOne (MVar "z"))
 
 ; ───────────────── Fission test (1 loop -> 3 sequential loops) ─────────────────
 (push)
 (let loop (Loop "l" (MNum 1024)))
 (let singleLoop (Loop "one" (MNum 1)))
-(let inp
+(let inpA
 	(LoopIn
 		(LoopIn
 			(LoopIn
@@ -257,17 +262,28 @@
 		singleLoop strideOne)
 	loop strideOne)
 )
+(let inpB
+	(LoopIn
+		(LoopIn
+			(LoopIn
+				(LoopIn
+					tensorB
+				singleLoop strideOne)
+			singleLoop strideOne)
+		singleLoop strideOne)
+	loop strideOne)
+)
 (let full
 	(LoopOut
 		(LoopOut
 			(LoopOut
 				(LoopOut
-					(Sin (Exp inp))
+					(Add (Sin (Exp inpA)) inpB)
 				loop strideOne)
 			singleLoop strideOne)
 		singleLoop strideOne)
 	singleLoop strideOne)
 )
 
-(run 50)
+(run 5)
 ;(check (= full (LoopOut (Unary "Sin" (LoopIn (LoopOut (Unary "Exp" (LoopIn tensorA loop strideOne)) loop strideOne) loop strideOne)) loop strideOne)))

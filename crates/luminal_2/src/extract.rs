@@ -219,11 +219,11 @@ pub fn extraction_to_graph(
                     .nodes
                     .iter()
                     .find(|n| seen.get(*n).map(|s| *s <= MAX_CYCLES).unwrap_or(true))
-                    .unwrap();
+                    .expect(&format!("{:?}", child_cid));
             }
             *seen.entry(child_nid).or_default() += 1;
             let r = emit(child_nid, egraph, extraction, g, seen);
-            *seen.get_mut(child_nid).unwrap() += 1;
+            *seen.get_mut(child_nid).unwrap() -= 1;
             r
         };
         let enode = &egraph.nodes[nid];
