@@ -1,4 +1,6 @@
+use crate::{GPUArch, codegen::codegen, run::run_graph, symbolic::expression_cleanup};
 use petgraph::{Directed, graph::NodeIndex, prelude::StableGraph};
+use std::collections::HashMap;
 
 use crate::{
     GraphTerm,
@@ -645,10 +647,6 @@ pub fn make_flash_attention() -> (StableGraph<GraphTerm, u8, Directed>, NodeInde
     output = unary(output, GraphTerm::GMEM { label: None }, &mut graph);
     (graph, output)
 }
-
-use std::collections::HashMap;
-
-use crate::{GPUArch, codegen::codegen, run::run_graph, symbolic::expression_cleanup};
 
 #[test]
 fn test_sum_reduce() {
