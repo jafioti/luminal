@@ -38,6 +38,7 @@ use colored::Colorize;
 use egglog::{EGraph, Error, var};
 use itertools::Itertools;
 use rand::{Rng, rng};
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Debug};
 
 use crate::{
@@ -82,7 +83,7 @@ enum GMEMBuffer {
     Input(usize),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 enum GraphTerm {
     GMEM {
         // Signifies global memory
@@ -144,7 +145,7 @@ fn main() {
             );
             let mut rng = rng();
             search(
-                serialized,
+                &serialized,
                 &[
                     (0..1024).map(|_| rng.random()).collect_vec(),
                     (0..1024).map(|_| rng.random()).collect_vec(),

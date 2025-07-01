@@ -17,24 +17,9 @@
     (MAccum String) ; this marks that we feed the output (also marked with MAccum) back in
 )
 
-; Communative
-;(rewrite (MAdd a b) (MAdd b a))
-;(rewrite (MMul a b) (MMul b a))
-;(rewrite (MMin a b) (MMin b a))
-;(rewrite (MMax a b) (MMax b a))
-;(rewrite (MAnd a b) (MAnd b a))
-;(rewrite (MOr a b) (MOr b a))
-
 ; Associative
 (rewrite (MAdd (MAdd a b) c) (MAdd a (MAdd b c)))
 (rewrite (MMul (MMul a b) c) (MMul a (MMul b c)))
-;(rewrite (MDiv (MDiv a b) c) (MDiv a (MMul b c)))
-;(rewrite (MDiv (MMul a b) c) (MMul a (MDiv b c)))
-;(rewrite (MMul a (MDiv b c)) (MDiv (MMul a b) c))
-
-; Distributive
-;(rewrite (MMul a (MAdd b c)) (MAdd (MMul a b) (MMul a c)))
-;(rewrite (MDiv (MAdd a b) c) (MAdd (MDiv a c) (MDiv b c)))
 
 ; Constant folding
 (rewrite (MAdd (MNum a) (MNum b)) (MNum (+ a b)))
@@ -44,11 +29,6 @@
 (rewrite (MMax (MNum a) (MNum b)) (MNum (max a b)))
 (rewrite (MMin (MNum a) (MNum b)) (MNum (min a b)))
 (rewrite (MAnd (MNum a) (MNum b)) (MNum (& a b)))
-;(rewrite (MOr (MNum a) (MNum b)) (MNum (| a b)))
-
-; Factoring
-;(rewrite (MAdd (MMul a b) (MMul a c)) (MMul a (MAdd b c)))
-;(rewrite (MAdd a a) (MMul (MNum 2) a))
 
 ; Simple reductions
 (rewrite (MAdd a (MNum 0)) a)
@@ -57,10 +37,6 @@
 (rewrite (MDiv a (MNum 1)) a)
 (rewrite (MMul (MDiv ?a ?b) ?b) (MFloorTo ?a ?b))
 (rewrite (MAdd (MFloorTo ?a ?b) (MMod ?a ?b)) ?a)
-
-
-; Other
-;(rewrite (MAdd (MDiv a b) c) (MDiv (MAdd a (MMul c b)) b))
 
 ; Replacement
 (rewrite (MReplace ?x ?y ?z) ?z :when ((= ?x ?y)))
@@ -196,47 +172,33 @@
 )
 
 ; Loop merging
+
+
+(rewrite  ; 0-1
+	(LoopOut (LoopOut ?body (Loop ?innerLoop ?innerLoopAmt) ?innerSt) (Loop ?outerLoop ?outerLoopAmt) ?outerSt)
+	(LoopOut (LoopOut (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?outerLoop ?outerLoopAmt) ?outerSt) (Loop ?innerLoop ?innerLoopAmt) ?innerSt)
+)
+(rewrite ; 0-1
+	(SwapLoops (LoopIn (LoopIn ?body (Loop ?outerLoop ?outerLoopAmt) ?outerSt) (Loop ?innerLoop ?innerLoopAmt) ?innerSt) ?innerLoop ?outerLoop)
+	(LoopIn (LoopIn ?body (Loop ?innerLoop ?innerLoopAmt) ?innerSt) (Loop ?outerLoop ?outerLoopAmt) ?outerSt)
+)
+; propogate
 (rewrite
- 	(LoopOut (LoopOut
-       	(Unary ?merge
-      		(LoopIn (LoopIn ?here (Loop ?outerL ?outer) ?outerStride) (Loop ?innerL ?inner) ?innerStride)
-        )
-    (Loop ?innerL ?inner) ?innerStride) (Loop ?outerL ?outer) ?outerStride)
- 	(LoopOut
-     	(Unary ?merge
-           	(LoopIn ?here
-               	(Loop (+ ?outerL ?innerL) (MMul ?inner ?outer))
-               	(MAdd (MReplace ?outerStride (MVar "z") (MDiv (MVar "z") ?inner)) (MReplace ?innerStride (MVar "z") (MMod (MVar "z") ?inner)))
-            )
-    	)
-     	(Loop (+ ?outerL ?innerL) (MMul ?inner ?outer))
-		(MAdd (MReplace ?outerStride (MVar "z") (MDiv (MVar "z") ?inner)) (MReplace ?innerStride (MVar "z") (MMod (MVar "z") ?inner)))
-    )
+	(SwapLoops (LoopIn ?body (Loop ?otherLoop ?otherLoopAmt) ?otherSt) ?innerLoop ?outerLoop)
+	(LoopIn (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?otherLoop ?otherLoopAmt) ?otherSt)
+	:when ((!= ?innerLoop ?otherLoop))
 )
 (rewrite
- 	(LoopOut (LoopOut
-       	(Binary
-           	?binmerge
-           	(LoopIn (LoopIn ?a (Loop ?outerL ?outer) ?outerStrideA) (Loop ?innerL ?inner) ?innerStrideA)
-           	(LoopIn (LoopIn ?b (Loop ?outerL ?outer) ?outerStrideB) (Loop ?innerL ?inner) ?innerStrideB)
-        )
-    (Loop ?innerL ?inner) ?innerStride) (Loop  ?outerL ?outer) ?outerStride)
- 	(LoopOut
-     	(Binary ?binmerge
-        	(LoopIn
-             	?a
-               	(Loop (+ ?outerL ?innerL) (MMul ?inner ?outer))
-               	(MAdd (MReplace ?outerStrideA (MVar "z") (MDiv (MVar "z") ?inner)) (MReplace ?innerStrideA (MVar "z") (MMod (MVar "z") ?inner)))
-            )
-            (LoopIn
-             	?b
-               	(Loop (+ ?outerL ?innerL) (MMul ?inner ?outer))
-               	(MAdd (MReplace ?outerStrideB (MVar "z") (MDiv (MVar "z") ?inner)) (MReplace ?innerStrideB (MVar "z") (MMod (MVar "z") ?inner)))
-            )
-    	)
-     	(Loop (+ ?outerL ?innerL) (MMul ?inner ?outer))
-		(MAdd (MReplace ?outerStride (MVar "z") (MDiv (MVar "z") ?inner)) (MReplace ?innerStride (MVar "z") (MMod (MVar "z") ?inner)))
-    )
+	(SwapLoops (LoopOut ?body (Loop ?otherLoop ?otherLoopAmt) ?otherSt) ?innerLoop ?outerLoop)
+	(LoopOut (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?otherLoop ?otherLoopAmt) ?otherSt)
+)
+(rewrite
+	(SwapLoops (Unary ?un ?body) ?innerLoop ?outerLoop)
+	(Unary ?un (SwapLoops ?body ?innerLoop ?outerLoop))
+)
+(rewrite
+	(SwapLoops (Binary ?bin ?bodyA ?bodyB) ?innerLoop ?outerLoop)
+	(Binary ?bin (SwapLoops ?bodyA ?innerLoop ?outerLoop) (SwapLoops ?bodyB ?innerLoop ?outerLoop))
 )
 
 ;(rewrite (Unary ?s ?x) (LoopOut (Unary ?s (LoopIn ?x (Loop "_" (MNum 1)) (MVar "z"))) (Loop "_" (MNum 1)) (MVar "z"))) ; add one-level loop
@@ -248,42 +210,12 @@
 (let strideOne (MVar "z"))
 
 ; ───────────────── Fission test (1 loop -> 3 sequential loops) ─────────────────
-(push)
-(let loop (Loop "l" (MNum 1024)))
-(let singleLoop (Loop "one" (MNum 1)))
-(let inpA
-	(LoopIn
-		(LoopIn
-			(LoopIn
-				(LoopIn
-					tensorA
-				singleLoop strideOne)
-			singleLoop strideOne)
-		singleLoop strideOne)
-	loop strideOne)
-)
-(let inpB
-	(LoopIn
-		(LoopIn
-			(LoopIn
-				(LoopIn
-					tensorB
-				singleLoop strideOne)
-			singleLoop strideOne)
-		singleLoop strideOne)
-	loop strideOne)
-)
-(let full
-	(LoopOut
-		(LoopOut
-			(LoopOut
-				(LoopOut
-					(Add (Sin (Exp inpA)) inpB)
-				loop strideOne)
-			singleLoop strideOne)
-		singleLoop strideOne)
-	singleLoop strideOne)
-)
-
-(run 5)
-;(check (= full (LoopOut (Unary "Sin" (LoopIn (LoopOut (Unary "Exp" (LoopIn tensorA loop strideOne)) loop strideOne) loop strideOne)) loop strideOne)))
+(let mLoop (Loop "m" (MNum 4096)))
+(let nLoop (Loop "n" (MNum 10)))
+(let mStride (MMul (MVar "z") (MNum 10)))
+(let nStride (MVar "z"))
+(let aStrided (LoopIn (LoopIn tensorA mLoop mStride) nLoop nStride))
+(let bStrided (LoopIn (LoopIn tensorB mLoop mStride) nLoop nStride))
+(let body (Exp (Add (Sin aStrided) bStrided)))
+(let full (LoopOut (LoopOut body nLoop nStride) mLoop mStride))
+(run 7)

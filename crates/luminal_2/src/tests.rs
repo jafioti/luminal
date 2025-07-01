@@ -651,7 +651,7 @@ pub fn make_flash_attention() -> (StableGraph<GraphTerm, u8, Directed>, NodeInde
 #[test]
 fn test_sum_reduce() {
     let (graph, root) = make_sum_reduce();
-    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
+    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new())).unwrap();
     let input = vec![0., 1., 2., 3., 4.];
     let outputs = run_graph(&[input], &kernels).0;
     assert_eq!(outputs[0], vec![10.0]);
@@ -661,7 +661,7 @@ fn test_sum_reduce() {
 #[test]
 fn test_matmul() {
     let (graph, root) = make_matmul(3, 4, 5);
-    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
+    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new())).unwrap();
     let a = vec![
         [1.5410, -0.2934, -2.1788, 0.5684],
         [-1.0845, -1.3986, 0.4033, 0.8380],
@@ -691,7 +691,7 @@ fn test_matmul() {
 #[test]
 fn test_tiled_matmul_basic() {
     let (graph, root) = make_tiled_matmul_basic(16, 8, 32);
-    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
+    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new())).unwrap();
     let a = vec![
         [
             -1.1258e+00,
@@ -1463,7 +1463,7 @@ fn test_tiled_matmul_basic() {
 #[test]
 fn test_tiled_matmul_smem() {
     let (graph, root) = make_tiled_matmul(16, 8, 32);
-    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
+    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new())).unwrap();
     let a = vec![
         [
             -1.1258e+00,
@@ -2235,7 +2235,7 @@ fn test_tiled_matmul_smem() {
 #[test]
 fn test_flash_attention() {
     let (graph, root) = make_flash_attention();
-    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
+    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new())).unwrap();
     let q = vec![
         [-1.1258, -1.1524, -0.2506, -0.4339, 0.5988],
         [-1.5551, -0.3414, 1.8530, 0.4681, -0.1577],
@@ -2274,7 +2274,7 @@ fn test_flash_attention() {
 #[test]
 fn test_naive_attention() {
     let (graph, root) = make_naive_attention();
-    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
+    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new())).unwrap();
     let q = vec![
         [-1.1258, -1.1524, -0.2506, -0.4339, 0.5988],
         [-1.5551, -0.3414, 1.8530, 0.4681, -0.1577],

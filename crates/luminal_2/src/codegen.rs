@@ -17,7 +17,7 @@ pub fn codegen(
     graph: StableGraph<GraphTerm, u8, Directed>,
     root: NodeIndex,
     mut arch: GPUArch,
-) -> StableGraph<Kernel, (u8, u8), Directed> {
+) -> Option<StableGraph<Kernel, (u8, u8), Directed>> {
     let (kernels, root_kernel) = split_kernels(graph, root);
     // Create kernel meta graph to toposort
     let mut meta_graph = StableGraph::new();
@@ -84,8 +84,7 @@ pub fn codegen(
                 .collect(),
             0,
             &mut arch,
-        )
-        .unwrap();
+        )?;
         let grid = loop_levels
             .clone()
             .into_iter()
@@ -183,7 +182,7 @@ kernel void kernel{}(
             outputs: outputs.into_iter().map(|(o, _)| o).collect(),
         };
     }
-    meta_graph
+    Some(meta_graph)
 }
 
 fn var_to_char(var: usize) -> String {
@@ -285,7 +284,9 @@ fn make_kernel(
 
                 // Make new loop
                 if *loop_level < 6 {
-                    loop_levels.push(*range);
+                    if current_loop_level >= loop_levels.len() {
+                        loop_levels.push(*range);
+                    }
                     if loop_inputs
                         .iter()
                         .chain(&loop_outputs)
@@ -331,8 +332,7 @@ fn make_kernel(
                     } else {
                         if **stride != 0 && *range != 1 {
                             if !is_ptr {
-                                display_graph(&kernel_graph, &[]);
-                                panic!();
+                                return None; // We can't handle thread-level buffers yet!
                             }
                             *prev_max_var += 1;
                             arch.add_metal_buffer_type(
@@ -519,7 +519,7 @@ fn make_kernel(
                 node_to_var.insert(node, (*prev_max_var, true, Some(size)));
             }
             GraphTerm::LoopOut { range, stride } => {
-                // panic!("found loopout range: {range} stride: {stride}")
+                panic!("found loopout range: {range} stride: {stride}")
             }
             GraphTerm::SMEMLoad | GraphTerm::SMEMRead => {
                 // Find the gmem input and smem input

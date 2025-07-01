@@ -255,15 +255,15 @@ pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
     }
 }
 
-pub fn extraction_to_petgraph(
-    egraph: &EGraph,
-    extraction: &ExtractionResult,
+pub fn extraction_to_petgraph<'a>(
+    egraph: &'a EGraph,
+    extraction: &'a ExtractionResult<'a>,
 ) -> StableGraph<String, (), Directed> {
     let mut map = HashMap::<&NodeId, NodeIndex>::default();
     let mut dfs = egraph
         .root_eclasses
         .iter()
-        .map(|c| &extraction.choices[c])
+        .map(|c| extraction.choices[c])
         .collect_vec();
     let mut graph = StableGraph::default();
     for root in &dfs {
