@@ -218,4 +218,4 @@
 (let bStrided (LoopIn (LoopIn tensorB mLoop mStride) nLoop nStride))
 (let body (Exp (Add (Sin aStrided) bStrided)))
 (let full (LoopOut (LoopOut body nLoop nStride) mLoop mStride))
-(run 3)
+(run 5)

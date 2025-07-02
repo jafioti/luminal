@@ -426,6 +426,17 @@ fn make_kernel(
                     arch,
                 )?;
 
+                if loop_body.is_empty() && loop_inputs.len() == 1 && loop_outputs.len() == 1 {
+                    // Need to copy inputs to outputs
+                    let (src, src_ptr, _) = node_to_var[&loop_inputs.iter().next().unwrap().0];
+                    let (dest, _, _) = node_to_var[&loop_outputs.iter().next().unwrap().0];
+                    kernel_lines.push(format!(
+                        "{inner_spacing}*{} = {}{};",
+                        var_to_char(dest),
+                        if src_ptr { "*" } else { "" },
+                        var_to_char(src)
+                    ));
+                }
                 kernel_lines.extend(loop_body);
 
                 // Set outputs if nessecary

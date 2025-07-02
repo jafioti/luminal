@@ -1,6 +1,5 @@
 use crate::Kernel;
 use crate::symbolic::{Expression, Term};
-use crate::utils::display_graph;
 use crate::{GPUArch, GraphTerm, run::run_graph};
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
@@ -59,6 +58,7 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
         inputs: &[Vec<f32>],
         seen: &mut FxHashSet<String>,     // already timed signatures
         tmp_memo: &mut FxHashSet<String>, // memo passed to cost()
+        prev_outputs: &mut Vec<Vec<f32>>,
     ) {
         if *printed >= MAX_SEARCHED_GRAPHS {
             return;
@@ -81,6 +81,17 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
                 );
                 println!("Inputs: {:?}", inputs);
                 println!("Outputs: {:?}", outputs);
+                if prev_outputs.is_empty() {
+                    *prev_outputs = outputs;
+                } else {
+                    for (a, b) in prev_outputs.iter().zip(&outputs) {
+                        for (a, b) in a.iter().zip(b) {
+                            if (*a - *b).abs() > 1e-3 {
+                                panic!("{a} | {b}");
+                            }
+                        }
+                    }
+                }
                 *printed += 1;
             }
             return;
@@ -101,6 +112,7 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
                 inputs,
                 seen,
                 tmp_memo,
+                prev_outputs,
             );
             return;
         }
@@ -132,6 +144,7 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
                 inputs,
                 seen,
                 tmp_memo,
+                prev_outputs,
             );
             current.remove(&cid);
         }
@@ -158,6 +171,7 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
         inputs,
         &mut FxHashSet::default(), // seen signatures
         &mut FxHashSet::default(), // memo for cost()
+        &mut vec![],
     );
 }
 
@@ -183,7 +197,6 @@ fn cost<'a>(
 
     // Codegen
     let kernels = crate::codegen::codegen(graph.clone(), root, GPUArch::Metal(HashMap::new()))?;
-
     // Print kernels
     if option_env!("PRINT_KERNELS")
         .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
