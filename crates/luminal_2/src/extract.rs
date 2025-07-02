@@ -79,8 +79,6 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
                     format!("Graph {printed} ").bold(),
                     format!("{us}µs").bright_green().bold()
                 );
-                println!("Inputs: {:?}", inputs);
-                println!("Outputs: {:?}", outputs);
                 if prev_outputs.is_empty() {
                     *prev_outputs = outputs;
                 } else {
@@ -91,6 +89,7 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
                             }
                         }
                     }
+                    println!("{}", "Outputs Validated".on_bright_green());
                 }
                 *printed += 1;
             }
