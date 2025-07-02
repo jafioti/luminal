@@ -147,8 +147,8 @@ fn main() {
             search(
                 &serialized,
                 &[
-                    (0..128 * 128).map(|_| rng.random()).collect_vec(),
-                    (0..128 * 128).map(|_| rng.random()).collect_vec(),
+                    (0..10 * 5).map(|_| rng.random()).collect_vec(),
+                    (0..10 * 5).map(|_| rng.random()).collect_vec(),
                 ],
             );
         }

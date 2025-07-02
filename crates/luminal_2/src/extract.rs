@@ -73,12 +73,14 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
             if !seen.insert(signature(&er)) {
                 return; // duplicate expression
             }
-            if let Some(us) = cost(&er, egraph, inputs, tmp_memo, *printed) {
+            if let Some((us, outputs)) = cost(&er, egraph, inputs, tmp_memo) {
                 println!(
                     "{}{}",
                     format!("Graph {printed} ").bold(),
                     format!("{us}µs").bright_green().bold()
                 );
+                println!("Inputs: {:?}", inputs);
+                println!("Outputs: {:?}", outputs);
                 *printed += 1;
             }
             return;
@@ -169,8 +171,7 @@ fn cost<'a>(
     egraph: &'a EGraph,
     inputs: &[Vec<f32>],
     memo: &mut FxHashSet<String>,
-    printed: usize,
-) -> Option<Cost> {
+) -> Option<(Cost, Vec<Vec<f32>>)> {
     // Convert to a petgraph and find the root node
     let graph = extraction_to_graph(egraph, extraction, &egraph.root_eclasses)?;
     let key = serde_json::to_string(&graph).unwrap();
@@ -210,11 +211,13 @@ fn cost<'a>(
     }
     // Test runtime
     let mut micros = vec![];
+    let mut outputs = vec![];
+    let mut m;
     for _ in 0..TRIALS {
-        let (_outputs, m) = run_graph(inputs, &kernels);
+        (outputs, m) = run_graph(inputs, &kernels);
         micros.push(m);
     }
-    Some(micros.into_iter().sum::<u128>() / TRIALS as u128)
+    Some((micros.into_iter().sum::<u128>() / TRIALS as u128, outputs))
 }
 
 /// Build a StableGraph from an ExtractionResult.

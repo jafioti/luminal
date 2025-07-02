@@ -103,10 +103,10 @@
 (rewrite (Binary "Max" ?a ?b) (Max ?a ?b))
 
 ; Communative binary ops
-(rewrite (Binary ?bin ?a ?b) (Binary ?bin ?b ?a))
+;(rewrite (Binary ?bin ?a ?b) (Binary ?bin ?b ?a))
 ; distributive/associative skeletons so sums and products re-associate
-(rewrite (Add (Add ?a ?b) ?c) (Add ?a (Add ?b ?c)))
-(rewrite (Mul (Mul ?a ?b) ?c) (Mul ?a (Mul ?b ?c)))
+;(rewrite (Add (Add ?a ?b) ?c) (Add ?a (Add ?b ?c)))
+;(rewrite (Mul (Mul ?a ?b) ?c) (Mul ?a (Mul ?b ?c)))
 
 ; remove 1-level loop
 (rewrite
@@ -210,15 +210,12 @@
 (let strideOne (MVar "z"))
 
 ; ───────────────── Fission test (1 loop -> 3 sequential loops) ─────────────────
-(let mLoop (Loop "m" (MNum 128)))
-(let nLoop (Loop "n" (MNum 128)))
-(let kLoop (Loop "k" (MNum 128)))
-(let pad (Loop "pad" (MNum 1)))
-
-(let aStrided (LoopIn (LoopIn (LoopIn (LoopIn (LoopIn (LoopIn (LoopIn tensorA mLoop (MMul (MVar "z") (MNum 4096))) nLoop (MNum 0)) pad (MNum 0)) pad (MNum 0)) pad (MNum 0)) pad (MNum 0)) kLoop (MVar "z")))
-(let bStrided (LoopIn (LoopIn (LoopIn (LoopIn (LoopIn (LoopIn (LoopIn tensorB mLoop (MNum 0)) nLoop (MVar "z")) pad (MNum 0)) pad (MNum 0)) pad (MNum 0)) pad (MNum 0)) kLoop (MMul (MVar "z") (MNum 4096))))
-(let acc (LoopIn (NewAcc 0) kLoop (MAccum "z")))
-(let newAcc (Add (Mul aStrided bStrided) acc))
-(let full (LoopOut (LoopOut (LoopOut (LoopOut (LoopOut (LoopOut (LoopOut newAcc kLoop (MAccum "z")) pad (MNum 0)) pad (MNum 0)) pad (MNum 0)) pad (MNum 0)) nLoop (MVar "z")) mLoop (MMul (MVar "z") (MNum 4096))))
-
-(run 10)
+(let mLoop (Loop "m" (MNum 10)))
+(let nLoop (Loop "n" (MNum 5)))
+(let mStride (MMul (MVar "z") (MNum 5)))
+(let nStride (MVar "z"))
+(let aStrided (LoopIn (LoopIn tensorA mLoop mStride) nLoop nStride))
+(let bStrided (LoopIn (LoopIn tensorB mLoop mStride) nLoop nStride))
+(let body (Exp (Add (Sin aStrided) bStrided)))
+(let full (LoopOut (LoopOut body nLoop nStride) mLoop mStride))
+(run 3)
