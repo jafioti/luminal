@@ -220,6 +220,7 @@ fn cost<'a>(
         }
     }
 
+    println!("running...");
     // Warm up resources (buffer allocation, kernel compiler, etc.)
     for _ in 0..WARMUP_TRIALS {
         run_graph(inputs, &kernels);

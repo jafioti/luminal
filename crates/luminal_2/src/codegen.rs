@@ -913,32 +913,32 @@ fn split_kernels(
     // Add kernel barriers
     for edge in marked_graph.edge_indices().collect_vec() {
         let (mut src, mut dest) = marked_graph.edge_endpoints(edge).unwrap();
-        let (dest_term, dest_level, dest_kernel) = marked_graph.node_weight(dest).unwrap().clone();
-        let (src_term, _, src_kernel) = marked_graph.node_weight(src).unwrap().clone();
+        let (_, dest_level, dest_kernel) = marked_graph.node_weight(dest).unwrap().clone();
+        let (_, _, src_kernel) = marked_graph.node_weight(src).unwrap().clone();
         if dest_level.len() > 0 && dest_kernel.iter().any(|i| !src_kernel.contains(i)) {
             // Put a barrier here
-            let GraphTerm::LoopOut {
-                range: src_range,
-                stride: src_stride,
-            } = src_term
-            else {
-                panic!("{:?}", src_term);
-            };
-            println!("SRC {:?} {:?}", src_range, src_stride);
-            let GraphTerm::LoopIn {
-                range: dest_range,
-                stride: dest_stride,
-            } = dest_term
-            else {
-                panic!("{:?}", dest_term);
-            };
+            // Get buffer size before this loop
+            let mut curr = src;
+            let mut total_size = Expression::from(0);
+            loop {
+                match marked_graph.node_weight(curr).unwrap().0 {
+                    GraphTerm::LoopOut { range, stride } => {
+                        total_size = total_size.max(stride.substitute('z', range));
+                    }
+                    _ => break,
+                }
+                curr = marked_graph
+                    .neighbors_directed(curr, Direction::Incoming)
+                    .next()
+                    .unwrap();
+            }
 
             marked_graph.remove_edge(edge);
             for i in (0..dest_level.len()).rev() {
                 let new_src = marked_graph.add_node((
                     GraphTerm::LoopOut {
                         range: dest_level[i].clone(),
-                        stride: src_stride * src_range,
+                        stride: total_size * 'z',
                     },
                     dest_level[..i].to_vec(),
                     src_kernel.clone(),
@@ -948,7 +948,7 @@ fn split_kernels(
                 let new_dest = marked_graph.add_node((
                     GraphTerm::LoopIn {
                         range: dest_level[i].clone(),
-                        stride: dest_stride * dest_range,
+                        stride: total_size * 'z',
                     },
                     dest_level[..i].to_vec(),
                     dest_kernel.clone(),

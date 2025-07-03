@@ -173,8 +173,76 @@
 )
 
 ; Loop merging
+(rewrite
+ 	(LoopOut (LoopOut
+       	(Unary ?merge
+      		(LoopIn (LoopIn ?here (Loop ?outerL ?outer) ?outerStride) (Loop ?innerL ?inner) ?innerStride)
+        )
+    (Loop ?innerL ?inner) ?innerStride) (Loop ?outerL ?outer) ?outerStride)
+ 	(LoopOut
+     	(Unary ?merge
+           	(LoopIn ?here
+               	(Loop (+ ?outerL ?innerL) (MMul ?inner ?outer))
+               	(MAdd (MReplace ?outerStride (MVar "z") (MDiv (MVar "z") ?inner)) (MReplace ?innerStride (MVar "z") (MMod (MVar "z") ?inner)))
+            )
+    	)
+     	(Loop (+ ?outerL ?innerL) (MMul ?inner ?outer))
+		(MAdd (MReplace ?outerStride (MVar "z") (MDiv (MVar "z") ?inner)) (MReplace ?innerStride (MVar "z") (MMod (MVar "z") ?inner)))
+    )
+)
+(rewrite
+ 	(LoopOut (LoopOut
+       	(Binary
+           	?binmerge
+           	(LoopIn (LoopIn ?a (Loop ?outerL ?outer) ?outerStrideA) (Loop ?innerL ?inner) ?innerStrideA)
+           	(LoopIn (LoopIn ?b (Loop ?outerL ?outer) ?outerStrideB) (Loop ?innerL ?inner) ?innerStrideB)
+        )
+    (Loop ?innerL ?inner) ?innerStride) (Loop  ?outerL ?outer) ?outerStride)
+ 	(LoopOut
+     	(Binary ?binmerge
+        	(LoopIn
+             	?a
+               	(Loop (+ ?outerL ?innerL) (MMul ?inner ?outer))
+               	(MAdd (MReplace ?outerStrideA (MVar "z") (MDiv (MVar "z") ?inner)) (MReplace ?innerStrideA (MVar "z") (MMod (MVar "z") ?inner)))
+            )
+            (LoopIn
+             	?b
+               	(Loop (+ ?outerL ?innerL) (MMul ?inner ?outer))
+               	(MAdd (MReplace ?outerStrideB (MVar "z") (MDiv (MVar "z") ?inner)) (MReplace ?innerStrideB (MVar "z") (MMod (MVar "z") ?inner)))
+            )
+    	)
+     	(Loop (+ ?outerL ?innerL) (MMul ?inner ?outer))
+		(MAdd (MReplace ?outerStride (MVar "z") (MDiv (MVar "z") ?inner)) (MReplace ?innerStride (MVar "z") (MMod (MVar "z") ?inner)))
+    )
+)
 
+; Split loops
+(let splitFactor 2)
+(rewrite
+ 	(LoopOut (Unary ?spun (LoopIn ?x (Loop ?loopL (MNum ?loop)) ?stride)) (Loop ?loopL (MNum ?loop)) ?stride)
+ 	(LoopOut
+     	(LoopOut
+         	(Unary ?spun
+            	(LoopIn
+                 	(LoopIn
+                     	?x
+                     	(Loop ?loopL (MNum (/ ?loop splitFactor)))
+                     	(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum splitFactor)))
+                     )
+                 	(Loop (+ ?loopL "Split") (MNum splitFactor))
+                 	?stride
+                )
+            )
+         	(Loop (+ ?loopL "Split") (MNum splitFactor))
+         	?stride
+        )
+     	(Loop ?loopL (MNum (/ ?loop splitFactor)))
+    	(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum splitFactor)))
+    )
+ 	:when ((> ?loop splitFactor) (= (% ?loop splitFactor) 0))
+)
 
+; Loop swapping
 (rewrite  ; 0-1
 	(LoopOut (LoopOut ?body (Loop ?innerLoop ?innerLoopAmt) ?innerSt) (Loop ?outerLoop ?outerLoopAmt) ?outerSt)
 	(LoopOut (LoopOut (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?outerLoop ?outerLoopAmt) ?outerSt) (Loop ?innerLoop ?innerLoopAmt) ?innerSt)
@@ -219,4 +287,4 @@
 (let bStrided (LoopIn (LoopIn tensorB mLoop mStride) nLoop nStride))
 (let body (Exp (Add (Sin aStrided) bStrided)))
 (let full (LoopOut (LoopOut body nLoop nStride) mLoop mStride))
-(run 10)
+(run 7)
