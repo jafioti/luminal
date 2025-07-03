@@ -7,6 +7,82 @@ use petgraph::{Directed, Direction, graph::NodeIndex, prelude::StableGraph};
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
+pub fn unary(
+    a: NodeIndex,
+    term: GraphTerm,
+    graph: &mut StableGraph<GraphTerm, (), Directed>,
+) -> NodeIndex {
+    let tmp = graph.add_node(term);
+    graph.add_edge(a, tmp, ());
+    tmp
+}
+
+pub fn binary(
+    a: NodeIndex,
+    b: NodeIndex,
+    term: GraphTerm,
+    graph: &mut StableGraph<GraphTerm, (), Directed>,
+) -> NodeIndex {
+    let tmp = graph.add_node(term);
+    graph.add_edge(a, tmp, ());
+    graph.add_edge(b, tmp, ());
+    tmp
+}
+
+pub fn loop_in(
+    node: NodeIndex,
+    range: impl Into<Expression>,
+    stride: impl Into<Expression>,
+    graph: &mut StableGraph<GraphTerm, (), Directed>,
+) -> NodeIndex {
+    unary(
+        node,
+        GraphTerm::LoopIn {
+            range: range.into(),
+            stride: stride.into(),
+        },
+        graph,
+    )
+}
+
+pub fn loop_out(
+    node: NodeIndex,
+    range: impl Into<Expression>,
+    stride: impl Into<Expression>,
+    graph: &mut StableGraph<GraphTerm, (), Directed>,
+) -> NodeIndex {
+    unary(
+        node,
+        GraphTerm::LoopOut {
+            range: range.into(),
+            stride: stride.into(),
+        },
+        graph,
+    )
+}
+
+pub fn pad_in(
+    mut node: NodeIndex,
+    graph: &mut StableGraph<GraphTerm, (), Directed>,
+    levels: usize,
+) -> NodeIndex {
+    for _ in 0..levels {
+        node = loop_in(node, 1, 0, graph);
+    }
+    node
+}
+
+pub fn pad_out(
+    mut node: NodeIndex,
+    graph: &mut StableGraph<GraphTerm, (), Directed>,
+    levels: usize,
+) -> NodeIndex {
+    for _ in 0..levels {
+        node = loop_out(node, 1, 0, graph);
+    }
+    node
+}
+
 use crate::{GraphTerm, Kernel, extract::ExtractionResult, symbolic::Expression};
 
 pub trait TermToString {
@@ -179,7 +255,7 @@ pub fn display_graph<G: TermToString, E: EdgeToString>(
     }
 }
 
-pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
+pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), (), Directed>) {
     // walk the graph and make sure loopins -> next loop level (or loopout) and prev loop (or loopin) -> loopout
     for node in graph.node_indices() {
         let (curr_term, curr_level) = graph.node_weight(node).unwrap();

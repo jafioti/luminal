@@ -37,13 +37,15 @@ mod tests;
 use colored::Colorize;
 use egglog::{EGraph, Error, var};
 use itertools::Itertools;
+use petgraph::{Directed, graph::NodeIndex, prelude::StableGraph, visit::Topo};
 use rand::{Rng, rng};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Debug};
+use utils::*;
 
 use crate::{
     extract::search,
-    symbolic::{Expression, expression_cleanup},
+    symbolic::{Expression, Term, expression_cleanup},
 };
 
 #[derive(Clone, PartialEq, Eq)]
@@ -137,7 +139,12 @@ fn main() {
     // println!("tiled {}ms", avgs.into_iter().sum::<u128>() / 10);
     // expression_cleanup();
     let start = std::time::Instant::now();
-    match run_egglog_program(include_str!("code.lisp")) {
+    let (g, r) = make_sum_reduce();
+    let (rendered, root) = render_egglog(g);
+    let code = include_str!("code.lisp");
+    let final_code = code.replace("{code}", &rendered);
+    println!("{final_code}");
+    match run_egglog_program(&final_code, &root) {
         Ok((_egglog_messages, serialized)) => {
             println!(
                 "Search space built in {}",
@@ -147,8 +154,8 @@ fn main() {
             search(
                 &serialized,
                 &[
-                    (0..10 * 5).map(|_| rng.random()).collect_vec(),
-                    (0..10 * 5).map(|_| rng.random()).collect_vec(),
+                    (0..5).map(|i| i as f32).collect_vec(),
+                    // (0..10 * 5).map(|_| rng.random()).collect_vec(),
                 ],
             );
         }
@@ -157,8 +164,126 @@ fn main() {
     expression_cleanup();
 }
 
+fn render_egglog(graph: StableGraph<GraphTerm, (), Directed>) -> (String, String) {
+    // 1.  Topo-order so operands are rendered before users
+    let mut topo = Topo::new(&graph);
+
+    // 2.  Map <node-id> → <egglog var name>
+    let mut names: HashMap<NodeIndex, String> = HashMap::new();
+    let mut next_id = 0usize;
+    let mut out = String::new();
+
+    // helper to fetch operand text (there are up-edges from user → operand)
+    let operand = |n: NodeIndex,
+                   names: &HashMap<NodeIndex, String>,
+                   g: &StableGraph<GraphTerm, (), Directed>|
+     -> Vec<String> {
+        g.neighbors_directed(n, petgraph::Incoming)
+            .map(|child| names[&child].clone())
+            .collect()
+    };
+
+    while let Some(n) = topo.next(&graph) {
+        let var = format!("t{next_id}");
+        next_id += 1;
+        let code = match &graph[n] {
+            GraphTerm::GMEM { .. } => "(GMEM)".to_string(),
+            GraphTerm::SMEM => "(SMEM)".into(),
+            GraphTerm::NewAcc { starting_value } => format!("(NewAcc {})", starting_value),
+
+            GraphTerm::LoopIn { range, stride } => {
+                let [ref src] = operand(n, &names, &graph)[..] else {
+                    panic!("LoopIn expects 1 child");
+                };
+                format!(
+                    "(LoopIn {src} (Loop \"a\" {}) {})",
+                    range.to_egglog(),
+                    stride.to_egglog()
+                )
+            }
+            GraphTerm::LoopOut { range, stride } => {
+                let [ref body] = operand(n, &names, &graph)[..] else {
+                    panic!("LoopOut expects 1 child");
+                };
+                format!(
+                    "(LoopOut {body} (Loop \"a\" {}) {})",
+                    range.to_egglog(),
+                    stride.to_egglog()
+                )
+            }
+
+            GraphTerm::Add
+            | GraphTerm::Mul
+            | GraphTerm::Max
+            | GraphTerm::Exp
+            | GraphTerm::Recip
+            | GraphTerm::Sin
+            | GraphTerm::Neg
+            | GraphTerm::SMEMLoad
+            | GraphTerm::SMEMRead => {
+                let mut ops = operand(n, &names, &graph);
+                let op = match &graph[n] {
+                    GraphTerm::Add => "Add",
+                    GraphTerm::Mul => "Mul",
+                    GraphTerm::Max => "Max",
+                    GraphTerm::Exp => "Exp",
+                    GraphTerm::Recip => "Recip",
+                    GraphTerm::Sin => "Sin",
+                    GraphTerm::Neg => "Neg",
+                    GraphTerm::SMEMLoad => "SMEMLoad",
+                    GraphTerm::SMEMRead => "SMEMRead",
+                    _ => unreachable!(),
+                };
+                if ops.len() == 1 {
+                    format!("({op} {})", ops.pop().unwrap())
+                } else {
+                    format!("({op} {})", ops.join(" "))
+                }
+            }
+        };
+
+        out.push_str(&format!("(let {var} {code})\n"));
+        names.insert(n, var);
+    }
+
+    let root = graph
+        .node_indices()
+        .find(|&idx| {
+            graph
+                .neighbors_directed(idx, petgraph::Outgoing)
+                .next()
+                .is_none()
+        })
+        .and_then(|idx| names.get(&idx))
+        .cloned()
+        .unwrap_or_else(|| "t0".into());
+    (out, root)
+}
+
+fn make_sum_reduce() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
+    let mut graph = StableGraph::new();
+    let mut a = graph.add_node(GraphTerm::GMEM {
+        label: Some("A".to_string()),
+    });
+    a = pad_in(a, &mut graph, 6);
+    a = loop_in(a, 5, 'z', &mut graph);
+
+    let mut acc = graph.add_node(GraphTerm::NewAcc {
+        starting_value: "0".to_string(),
+    });
+    acc = loop_in(acc, 5, Term::Acc('z'), &mut graph);
+
+    let mut out = binary(a, acc, GraphTerm::Add, &mut graph);
+    out = loop_out(out, 5, Term::Acc('z'), &mut graph);
+    out = pad_out(out, &mut graph, 6);
+    (graph, out)
+}
+
 /// Runs an Egglog program from a string and returns its output messages.
-pub fn run_egglog_program(code: &str) -> Result<(Vec<String>, egraph_serialize::EGraph), Error> {
+pub fn run_egglog_program(
+    code: &str,
+    root: &str,
+) -> Result<(Vec<String>, egraph_serialize::EGraph), Error> {
     // Create a fresh EGraph with all the defaults
     let mut egraph = EGraph::default();
     egraph.enable_messages();
@@ -170,7 +295,7 @@ pub fn run_egglog_program(code: &str) -> Result<(Vec<String>, egraph_serialize::
     {
         println!("Run Report:  {}", egraph.get_run_report().as_ref().unwrap());
     }
-    let (sort, value) = egraph.eval_expr(&var!("full"))?;
+    let (sort, value) = egraph.eval_expr(&var!(root))?;
     // let (_petgraph, _root_idx) = dag_to_petgraph(&termdag, termdag.lookup(&root));
     let s = egraph.serialize(egglog::SerializeConfig {
         root_eclasses: vec![(sort, value)],

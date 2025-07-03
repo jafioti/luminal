@@ -5,85 +5,10 @@ use std::collections::HashMap;
 use crate::{
     GraphTerm,
     symbolic::{Expression, Term},
+    utils::*,
 };
 
-fn unary(
-    a: NodeIndex,
-    term: GraphTerm,
-    graph: &mut StableGraph<GraphTerm, u8, Directed>,
-) -> NodeIndex {
-    let tmp = graph.add_node(term);
-    graph.add_edge(a, tmp, 0);
-    tmp
-}
-
-fn binary(
-    a: NodeIndex,
-    b: NodeIndex,
-    term: GraphTerm,
-    graph: &mut StableGraph<GraphTerm, u8, Directed>,
-) -> NodeIndex {
-    let tmp = graph.add_node(term);
-    graph.add_edge(a, tmp, 0);
-    graph.add_edge(b, tmp, 0);
-    tmp
-}
-
-fn loop_in(
-    node: NodeIndex,
-    range: impl Into<Expression>,
-    stride: impl Into<Expression>,
-    graph: &mut StableGraph<GraphTerm, u8, Directed>,
-) -> NodeIndex {
-    unary(
-        node,
-        GraphTerm::LoopIn {
-            range: range.into(),
-            stride: stride.into(),
-        },
-        graph,
-    )
-}
-
-fn loop_out(
-    node: NodeIndex,
-    range: impl Into<Expression>,
-    stride: impl Into<Expression>,
-    graph: &mut StableGraph<GraphTerm, u8, Directed>,
-) -> NodeIndex {
-    unary(
-        node,
-        GraphTerm::LoopOut {
-            range: range.into(),
-            stride: stride.into(),
-        },
-        graph,
-    )
-}
-
-fn pad_in(
-    mut node: NodeIndex,
-    graph: &mut StableGraph<GraphTerm, u8, Directed>,
-    levels: usize,
-) -> NodeIndex {
-    for _ in 0..levels {
-        node = loop_in(node, 1, 0, graph);
-    }
-    node
-}
-
-fn pad_out(
-    mut node: NodeIndex,
-    graph: &mut StableGraph<GraphTerm, u8, Directed>,
-    levels: usize,
-) -> NodeIndex {
-    for _ in 0..levels {
-        node = loop_out(node, 1, 0, graph);
-    }
-    node
-}
-
-pub fn make_complex_kernel() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
+pub fn make_complex_kernel() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
     let mut graph = StableGraph::new();
     let a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),

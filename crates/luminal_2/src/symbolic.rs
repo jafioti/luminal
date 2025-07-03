@@ -1,7 +1,7 @@
 use egg::*;
 use generational_box::{AnyStorage, GenerationalBox, Owner, UnsyncStorage};
 use rustc_hash::FxHashMap;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Serialize, Serializer};
 use std::{
     cell::RefCell,
     fmt::Debug,
@@ -191,6 +191,36 @@ impl Debug for Expression {
             symbols.push(new_symbol);
         }
         write!(f, "{}", symbols.pop().unwrap_or_default())
+    }
+}
+
+impl Expression {
+    pub fn to_egglog(&self) -> String {
+        let mut symbols = vec![];
+        for term in self.terms.read().iter() {
+            let new_symbol = match term {
+                Term::Num(n) => format!("(MNum {n})"),
+                Term::Var(c) => format!("(MVar \"{c}\")"),
+                Term::Acc(s) => format!("(MAccum \"{s}\")"),
+                Term::Max => format!(
+                    "(MMax {} {})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+                Term::Min => format!(
+                    "(MMin {} {})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+                _ => format!(
+                    "(M{term:?} {} {})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+            };
+            symbols.push(new_symbol);
+        }
+        symbols.pop().unwrap_or_default()
     }
 }
 

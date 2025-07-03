@@ -247,15 +247,15 @@ pub fn extraction_to_graph(
     egraph: &EGraph,
     extraction: &ExtractionResult,
     roots: &[ClassId],
-) -> Option<StableGraph<GraphTerm, u8, Directed>> {
+) -> Option<StableGraph<GraphTerm, (), Directed>> {
     // display_graph(&extraction_to_petgraph(egraph, extraction), &[]);
-    let mut g: StableGraph<GraphTerm, u8, Directed> = StableGraph::new();
+    let mut g: StableGraph<GraphTerm, (), Directed> = StableGraph::new();
 
     fn emit<'a>(
         nid: &'a NodeId,
         egraph: &'a EGraph,
         extraction: &'a ExtractionResult,
-        g: &mut StableGraph<GraphTerm, u8, Directed>,
+        g: &mut StableGraph<GraphTerm, (), Directed>,
         seen: &mut HashMap<&'a NodeId, usize>,
     ) -> Option<NodeIndex> {
         let mut pick_child = |child| {
@@ -298,7 +298,7 @@ pub fn extraction_to_graph(
                     convert_math(egraph.nid_to_cid(&enode.children[2]), egraph, extraction)?;
                 let child = pick_child(&enode.children[0])?;
                 let n = g.add_node(GraphTerm::LoopIn { range, stride });
-                g.add_edge(child, n, 0);
+                g.add_edge(child, n, ());
                 Some(n)
             }
 
@@ -311,7 +311,7 @@ pub fn extraction_to_graph(
 
                 let child = pick_child(&enode.children[0])?;
                 let n = g.add_node(GraphTerm::LoopOut { range, stride });
-                g.add_edge(child, n, 0);
+                g.add_edge(child, n, ());
                 Some(n)
             }
 
@@ -324,8 +324,8 @@ pub fn extraction_to_graph(
                     "Max" => GraphTerm::Max,
                     _ => panic!(),
                 });
-                g.add_edge(a, n, 0);
-                g.add_edge(b, n, 0);
+                g.add_edge(a, n, ());
+                g.add_edge(b, n, ());
                 Some(n)
             }
             "Exp" | "Sin" | "Recip" | "Neg" => {
@@ -337,7 +337,7 @@ pub fn extraction_to_graph(
                     "Neg" => GraphTerm::Neg,
                     _ => panic!(),
                 });
-                g.add_edge(a, n, 0);
+                g.add_edge(a, n, ());
                 Some(n)
             }
             "Unary" | "Binary" | "SwapLoops" => {

@@ -14,7 +14,7 @@ use crate::{
 };
 
 pub fn codegen(
-    graph: StableGraph<GraphTerm, u8, Directed>,
+    graph: StableGraph<GraphTerm, (), Directed>,
     root: NodeIndex,
     mut arch: GPUArch,
     n_graph: usize,
@@ -195,7 +195,7 @@ fn var_to_char(var: usize) -> String {
 }
 
 fn make_kernel(
-    kernel_graph: &StableGraph<(GraphTerm, usize), u8, Directed>,
+    kernel_graph: &StableGraph<(GraphTerm, usize), (), Directed>,
     include_nodes: HashSet<NodeIndex>,
     node_to_var: &mut HashMap<NodeIndex, (usize, bool, Option<Expression>)>,
     prev_max_var: &mut usize, // contains the char last used
@@ -679,12 +679,12 @@ fn toposort_subset<N, E>(
 
 /// add kernel dimensions so that all loop-to-loop dependencies are between seperate kernels or on the threadblock / thread levels
 fn split_kernels(
-    graph: StableGraph<GraphTerm, u8, Directed>,
+    graph: StableGraph<GraphTerm, (), Directed>,
     mut root: NodeIndex,
     n_graph: usize,
 ) -> (
     Vec<(
-        StableGraph<(GraphTerm, usize), u8, Directed>,
+        StableGraph<(GraphTerm, usize), (), Directed>,
         Vec<(GMEMBuffer, NodeIndex)>, // (src buffer, current graph node)
         Vec<(Expression, NodeIndex)>, // output node
         Vec<(usize, NodeIndex, Expression)>, // (shared memory buffer name, node, buffer size)
@@ -943,7 +943,7 @@ fn split_kernels(
                     dest_level[..i].to_vec(),
                     src_kernel.clone(),
                 ));
-                marked_graph.add_edge(src, new_src, 0);
+                marked_graph.add_edge(src, new_src, ());
                 src = new_src;
                 let new_dest = marked_graph.add_node((
                     GraphTerm::LoopIn {
@@ -953,10 +953,10 @@ fn split_kernels(
                     dest_level[..i].to_vec(),
                     dest_kernel.clone(),
                 ));
-                marked_graph.add_edge(new_dest, dest, 0);
+                marked_graph.add_edge(new_dest, dest, ());
                 dest = new_dest;
             }
-            marked_graph.add_edge(src, dest, 0);
+            marked_graph.add_edge(src, dest, ());
         }
     }
 
@@ -1093,7 +1093,7 @@ fn split_kernels(
                 GraphTerm::GMEM { .. }
             ) {
                 let new_input = kernel_graph.add_node((GraphTerm::GMEM { label: None }, 0));
-                kernel_graph.add_edge(new_input, *input, 0);
+                kernel_graph.add_edge(new_input, *input, ());
                 *input = new_input;
             }
         }
@@ -1103,7 +1103,7 @@ fn split_kernels(
                 GraphTerm::GMEM { .. }
             ) {
                 let new_output = kernel_graph.add_node((GraphTerm::GMEM { label: None }, 0));
-                kernel_graph.add_edge(*output, new_output, 0);
+                kernel_graph.add_edge(*output, new_output, ());
                 *output = new_output;
             }
             // Loop back through all loopouts to find the size of the output
