@@ -132,7 +132,7 @@
 )
 (rewrite
 	(Binary ?second (Unary ?first (LoopIn ?a ?loop ?inASt)) (LoopIn ?b ?loop ?inBSt))
-	(Binary ?second (LoopIn (LoopOut (Unary ?first (LoopIn ?a ?loop ?inASt)) ?loop  (MVar "z")) ?loop (MVar "z")) (LoopIn ?b ?loop ?inBSt))
+	(Binary ?second (LoopIn (LoopOut (Unary ?first (LoopIn ?a ?loop ?inASt)) ?loop  ?inASt) ?loop ?inASt) (LoopIn ?b ?loop ?inBSt))
 )
 (rewrite
 	(Binary ?second (Binary ?first (LoopIn ?a ?loop ?inASt) (LoopIn ?c ?loop ?inCSt)) (LoopIn ?b ?loop ?inBSt))
@@ -140,32 +140,33 @@
 )
 (rewrite
 	(LoopOut (Binary ?second (Unary ?first ?a) ?b) ?loop ?outSt)
-	(LoopOut (Binary ?second (LoopIn (LoopOut (Unary ?first ?a) ?loop  (MVar "z")) ?loop (MVar "z")) (LoopIn (LoopOut ?b ?loop  (MVar "z")) ?loop (MVar "z"))) ?loop ?outSt)
+	(LoopOut (Binary ?second (LoopIn (LoopOut (Unary ?first ?a) ?loop  ?outSt) ?loop ?outSt) (LoopIn (LoopOut ?b ?loop  ?outSt) ?loop ?outSt)) ?loop ?outSt)
 )
+; PROBLEM HERE (NOT CALCULATING STRIDES CORRECTLY)
 (rewrite (LoopOut (LoopOut
 	(Unary
 		?unHere
-		(LoopIn (LoopOut ?inpA ?first ?firstStA) ?n ?inASt)
+		(LoopIn (LoopOut ?inpA (Loop ?f ?first) ?firstStA) ?n ?inASt)
 	) ?n ?st) ?lower ?lowerSt)
 	(LoopOut (LoopOut
 		(Unary
 			?unHere
 	       	(LoopIn	(LoopIn
-	           	(LoopOut (LoopOut ?inpA ?first ?firstStA) ?lower ?lowerSt)
-	       	?lower ?lowerSt) ?n ?inASt)
+	           	(LoopOut (LoopOut ?inpA (Loop ?f ?first) ?firstStA) ?lower (MMul ?first ?firstStA))
+	       	?lower (MMul ?first ?firstStA)) ?n ?inASt)
 		)
 	?n ?st) ?lower ?lowerSt)
 )
 (rewrite (LoopOut (LoopOut
     (Binary ?binHereA
-    	(LoopIn (LoopOut ?inpB ?first ?firstStB) ?n ?inBSt)
+    	(LoopIn (LoopOut ?inpB (Loop ?f ?first) ?firstStB) ?n ?inBSt)
         ?a
     ) ?n  ?st) ?lower ?lowerSt)
   	(LoopOut (LoopOut
         (Binary ?binHereA
         	(LoopIn (LoopIn
-                (LoopOut (LoopOut ?inpB ?first ?firstStB) ?lower ?lowerSt)
-            ?lower ?lowerSt) ?n ?inBSt)
+                (LoopOut (LoopOut ?inpB (Loop ?f ?first) ?firstStB) ?lower (MMul ?first ?firstStB))
+            ?lower (MMul ?first ?firstStB)) ?n ?inBSt)
             ?a
         )
     ?n  ?st) ?lower ?lowerSt)
@@ -218,4 +219,4 @@
 (let bStrided (LoopIn (LoopIn tensorB mLoop mStride) nLoop nStride))
 (let body (Exp (Add (Sin aStrided) bStrided)))
 (let full (LoopOut (LoopOut body nLoop nStride) mLoop mStride))
-(run 5)
+(run 10)

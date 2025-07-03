@@ -73,7 +73,7 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
             if !seen.insert(signature(&er)) {
                 return; // duplicate expression
             }
-            if let Some((us, outputs)) = cost(&er, egraph, inputs, tmp_memo) {
+            if let Some((us, outputs)) = cost(&er, egraph, inputs, tmp_memo, *printed) {
                 println!(
                     "{}{}",
                     format!("Graph {printed} ").bold(),
@@ -184,6 +184,7 @@ fn cost<'a>(
     egraph: &'a EGraph,
     inputs: &[Vec<f32>],
     memo: &mut FxHashSet<String>,
+    n_graph: usize,
 ) -> Option<(Cost, Vec<Vec<f32>>)> {
     // Convert to a petgraph and find the root node
     let graph = extraction_to_graph(egraph, extraction, &egraph.root_eclasses)?;
@@ -195,7 +196,8 @@ fn cost<'a>(
     let root = graph.externals(Direction::Outgoing).next().unwrap();
 
     // Codegen
-    let kernels = crate::codegen::codegen(graph.clone(), root, GPUArch::Metal(HashMap::new()))?;
+    let kernels =
+        crate::codegen::codegen(graph.clone(), root, GPUArch::Metal(HashMap::new()), n_graph)?;
     // Print kernels
     if option_env!("PRINT_KERNELS")
         .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
@@ -208,11 +210,12 @@ fn cost<'a>(
                 grid,
                 threadblock,
                 smem,
-                ..
+                outputs,
             } = kernels.node_weight(node).unwrap();
             if code != "Inputs" && code != "Outputs" {
                 println!("Kernel {i} Grid: {grid:?} Threadblock: {threadblock:?} Smem: {smem}");
                 println!("{code}");
+                println!("Outputs: {:?}", outputs);
             }
         }
     }

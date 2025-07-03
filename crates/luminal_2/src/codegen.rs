@@ -17,8 +17,9 @@ pub fn codegen(
     graph: StableGraph<GraphTerm, u8, Directed>,
     root: NodeIndex,
     mut arch: GPUArch,
+    n_graph: usize,
 ) -> Option<StableGraph<Kernel, (u8, u8), Directed>> {
-    let (kernels, root_kernel) = split_kernels(graph, root);
+    let (kernels, root_kernel) = split_kernels(graph, root, n_graph);
     // Create kernel meta graph to toposort
     let mut meta_graph = StableGraph::new();
     for _ in 0..kernels.len() {
@@ -680,6 +681,7 @@ fn toposort_subset<N, E>(
 fn split_kernels(
     graph: StableGraph<GraphTerm, u8, Directed>,
     mut root: NodeIndex,
+    n_graph: usize,
 ) -> (
     Vec<(
         StableGraph<(GraphTerm, usize), u8, Directed>,
@@ -858,6 +860,56 @@ fn split_kernels(
         marked_graph.node_weight_mut(node).unwrap().2 = curr_kernel;
     }
 
+    // Disallow disjoint nodes to be in the same kernel
+    let mut by_kernel: HashMap<usize, Vec<NodeIndex>> = HashMap::new();
+    for n in marked_graph.node_indices() {
+        for &k in &marked_graph[n].2 {
+            // field 2 == Vec<usize> of kernel IDs
+            by_kernel.entry(k).or_default().push(n);
+        }
+    }
+    use std::collections::{HashSet, VecDeque};
+    let mut next_kernel = n_kernels; // keep issuing fresh IDs
+
+    for (k, nodes) in by_kernel {
+        let mut seen: HashSet<NodeIndex> = HashSet::new();
+
+        for &seed in &nodes {
+            if seen.contains(&seed) {
+                continue;
+            }
+
+            // BFS restricted to nodes that still carry -k-
+            let mut q = VecDeque::from([seed]);
+            let mut comp: Vec<NodeIndex> = Vec::new();
+            while let Some(v) = q.pop_front() {
+                if !seen.insert(v) {
+                    continue;
+                }
+                comp.push(v);
+                for nb in marked_graph.neighbors_undirected(v) {
+                    if marked_graph[nb].2.contains(&k) {
+                        q.push_back(nb);
+                    }
+                }
+            }
+
+            // first component keeps k; extra components get fresh IDs
+            if !comp.is_empty() && seed != nodes[0] {
+                let new_k = {
+                    next_kernel += 1;
+                    next_kernel - 1
+                };
+                for v in comp {
+                    let kernels = &mut marked_graph.node_weight_mut(v).unwrap().2;
+                    kernels.retain(|id| *id != k);
+                    kernels.push(new_k);
+                }
+            }
+        }
+    }
+    n_kernels = next_kernel;
+
     // Add kernel barriers
     for edge in marked_graph.edge_indices().collect_vec() {
         let (mut src, mut dest) = marked_graph.edge_endpoints(edge).unwrap();
@@ -872,6 +924,7 @@ fn split_kernels(
             else {
                 panic!("{:?}", src_term);
             };
+            println!("SRC {:?} {:?}", src_range, src_stride);
             let GraphTerm::LoopIn {
                 range: dest_range,
                 stride: dest_stride,
@@ -879,6 +932,7 @@ fn split_kernels(
             else {
                 panic!("{:?}", dest_term);
             };
+
             marked_graph.remove_edge(edge);
             for i in (0..dest_level.len()).rev() {
                 let new_src = marked_graph.add_node((
@@ -1054,12 +1108,12 @@ fn split_kernels(
             }
             // Loop back through all loopouts to find the size of the output
             let mut curr = *output;
-            let mut new_size = vec![Expression::from(1)];
+            let mut new_size = Expression::from(0);
             loop {
                 let term = &kernel_graph.node_weight(curr).unwrap().0;
                 if let GraphTerm::LoopOut { range, stride } = term {
                     if !stride.is_acc() && *stride != 0 {
-                        new_size.push(*range);
+                        new_size = new_size.max(stride.substitute('z', *range));
                     }
                 } else if !matches!(term, GraphTerm::GMEM { .. }) {
                     break;
@@ -1069,7 +1123,7 @@ fn split_kernels(
                     .next()
                     .unwrap();
             }
-            *size = new_size.into_iter().product();
+            *size = new_size;
         }
     }
     let root_kernel = marked_graph.node_weight(root).unwrap().2[0];

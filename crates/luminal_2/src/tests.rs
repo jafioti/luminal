@@ -154,7 +154,7 @@ fn test_sum_reduce() {
     out = pad_out(out, &mut graph, 6);
     out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);
 
-    let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new())).unwrap();
+    let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new()), 0).unwrap();
     let input = vec![0., 1., 2., 3., 4.];
     let outputs = run_graph(&[input], &kernels).0;
     assert_eq!(outputs[0], vec![10.0]);
@@ -199,7 +199,7 @@ fn test_matmul() {
     out = loop_out(out, n, 'z', &mut graph);
     out = loop_out(out, m, Expression::from('z') * n, &mut graph);
     out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);
-    let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new())).unwrap();
+    let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new()), 0).unwrap();
     let a = vec![
         [1.5410, -0.2934, -2.1788, 0.5684],
         [-1.0845, -1.3986, 0.4033, 0.8380],
@@ -306,7 +306,7 @@ fn test_tiled_matmul_basic() {
         &mut graph,
     );
     out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);
-    let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new())).unwrap();
+    let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new()), 0).unwrap();
     let a = vec![
         [
             -1.1258e+00,
@@ -1180,7 +1180,7 @@ fn test_tiled_matmul_smem() {
         &mut graph,
     );
     out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);
-    let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new())).unwrap();
+    let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new()), 0).unwrap();
     let a = vec![
         [
             -1.1258e+00,
@@ -2062,7 +2062,7 @@ fn test_flash_attention() {
     output = pad_out(output, &mut graph, 5);
     output = loop_out(output, n_qkv, Expression::from('z') * d, &mut graph);
     output = unary(output, GraphTerm::GMEM { label: None }, &mut graph);
-    let kernels = codegen(graph, output, GPUArch::Metal(HashMap::new())).unwrap();
+    let kernels = codegen(graph, output, GPUArch::Metal(HashMap::new()), 0).unwrap();
     let q = vec![
         [-1.1258, -1.1524, -0.2506, -0.4339, 0.5988],
         [-1.5551, -0.3414, 1.8530, 0.4681, -0.1577],
@@ -2240,7 +2240,7 @@ fn test_naive_attention() {
     output = pad_out(output, &mut graph, 5);
     output = loop_out(output, n_qkv, Expression::from('z') * d, &mut graph);
     output = unary(output, GraphTerm::GMEM { label: None }, &mut graph);
-    let kernels = codegen(graph, output, GPUArch::Metal(HashMap::new())).unwrap();
+    let kernels = codegen(graph, output, GPUArch::Metal(HashMap::new()), 0).unwrap();
     let q = vec![
         [-1.1258, -1.1524, -0.2506, -0.4339, 0.5988],
         [-1.5551, -0.3414, 1.8530, 0.4681, -0.1577],
