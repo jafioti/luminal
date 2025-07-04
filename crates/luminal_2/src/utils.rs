@@ -33,6 +33,7 @@ pub fn loop_in(
     node: NodeIndex,
     range: impl Into<Expression>,
     stride: impl Into<Expression>,
+    marker: impl ToString,
     graph: &mut StableGraph<GraphTerm, (), Directed>,
 ) -> NodeIndex {
     unary(
@@ -40,6 +41,7 @@ pub fn loop_in(
         GraphTerm::LoopIn {
             range: range.into(),
             stride: stride.into(),
+            marker: marker.to_string(),
         },
         graph,
     )
@@ -49,6 +51,7 @@ pub fn loop_out(
     node: NodeIndex,
     range: impl Into<Expression>,
     stride: impl Into<Expression>,
+    marker: impl ToString,
     graph: &mut StableGraph<GraphTerm, (), Directed>,
 ) -> NodeIndex {
     unary(
@@ -56,6 +59,7 @@ pub fn loop_out(
         GraphTerm::LoopOut {
             range: range.into(),
             stride: stride.into(),
+            marker: marker.to_string(),
         },
         graph,
     )
@@ -66,8 +70,8 @@ pub fn pad_in(
     graph: &mut StableGraph<GraphTerm, (), Directed>,
     levels: usize,
 ) -> NodeIndex {
-    for _ in 0..levels {
-        node = loop_in(node, 1, 0, graph);
+    for i in 0..levels {
+        node = loop_in(node, 1, 0, format!("pad{i}"), graph);
     }
     node
 }
@@ -77,8 +81,8 @@ pub fn pad_out(
     graph: &mut StableGraph<GraphTerm, (), Directed>,
     levels: usize,
 ) -> NodeIndex {
-    for _ in 0..levels {
-        node = loop_out(node, 1, 0, graph);
+    for i in (0..levels).rev() {
+        node = loop_out(node, 1, 0, format!("pad{i}"), graph);
     }
     node
 }
@@ -174,8 +178,16 @@ impl TermToString for GraphTerm {
             GraphTerm::Recip => "Recip".to_string(),
             GraphTerm::Neg => "Neg".to_string(),
             GraphTerm::NewAcc { starting_value } => format!("NewAcc({starting_value})"),
-            GraphTerm::LoopIn { range, stride } => format!("LoopIn ({range}; {stride})"),
-            GraphTerm::LoopOut { range, stride } => format!("LoopOut ({range}; {stride})"),
+            GraphTerm::LoopIn {
+                range,
+                stride,
+                marker,
+            } => format!("LoopIn ({range}; {stride}; -{marker}-)"),
+            GraphTerm::LoopOut {
+                range,
+                stride,
+                marker,
+            } => format!("LoopOut ({range}; {stride}; -{marker}-)"),
             GraphTerm::GMEM { label } => {
                 if let Some(label) = label {
                     format!("GMEM ({label})")

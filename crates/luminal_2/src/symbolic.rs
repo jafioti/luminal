@@ -145,6 +145,19 @@ impl Term {
             _ => None,
         }
     }
+    pub fn to_egglog(self) -> String {
+        match self {
+            Term::Add => "MAdd",
+            Term::Sub => "MSub",
+            Term::Mul => "MMul",
+            Term::Div => "MDiv",
+            Term::Mod => "MMod",
+            Term::Max => "MMax",
+            Term::Min => "MMin",
+            _ => panic!("egglog doesn't implement {self:?}"),
+        }
+        .to_string()
+    }
 }
 
 impl<T> PartialEq<T> for Expression
@@ -213,7 +226,8 @@ impl Expression {
                     symbols.pop().unwrap()
                 ),
                 _ => format!(
-                    "(M{term:?} {} {})",
+                    "({} {} {})",
+                    term.to_egglog(),
                     symbols.pop().unwrap(),
                     symbols.pop().unwrap()
                 ),

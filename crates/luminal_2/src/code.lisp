@@ -60,7 +60,7 @@
 (datatype*
  	(Expr
   		; General kernel stuff
-     	(GMEM)
+     	(GMEM String)
      	(LoopIn Expr LoopType Math)
      	(LoopOut Expr LoopType Math)
       	(SMEM)
@@ -278,6 +278,7 @@
 (rewrite  ; 0-1
 	(LoopOut (LoopOut ?body (Loop ?innerLoop ?innerLoopAmt) ?innerSt) (Loop ?outerLoop ?outerLoopAmt) ?outerSt)
 	(LoopOut (LoopOut (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?outerLoop ?outerLoopAmt) ?outerSt) (Loop ?innerLoop ?innerLoopAmt) ?innerSt)
+	:when ((!= ?innerLoop ?outerLoop) (!= ?innerLoopAmt ?outerLoopAmt))
 )
 (rewrite ; 0-1
 	(SwapLoops (LoopIn (LoopIn ?body (Loop ?outerLoop ?outerLoopAmt) ?outerSt) (Loop ?innerLoop ?innerLoopAmt) ?innerSt) ?innerLoop ?outerLoop)
@@ -301,8 +302,12 @@
 	(SwapLoops (Binary ?bin ?bodyA ?bodyB) ?innerLoop ?outerLoop)
 	(Binary ?bin (SwapLoops ?bodyA ?innerLoop ?outerLoop) (SwapLoops ?bodyB ?innerLoop ?outerLoop))
 )
+(rewrite
+	(SwapLoops (NewAcc ?x) ?innerLoop ?outerLoop)
+	(NewAcc ?x)
+)
 
 ;(rewrite (Unary ?s ?x) (LoopOut (Unary ?s (LoopIn ?x (Loop "_" (MNum 1)) (MVar "z"))) (Loop "_" (MNum 1)) (MVar "z"))) ; add one-level loop
 
 {code}
-(run 7)
+(run 14)

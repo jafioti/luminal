@@ -79,10 +79,10 @@ struct Kernel {
     outputs: Vec<Expression>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum GMEMBuffer {
     PrevKernel { kernel: usize, output: usize },
-    Input(usize),
+    Input { index: usize, label: Option<String> },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -94,10 +94,12 @@ enum GraphTerm {
     LoopIn {
         range: Expression,
         stride: Expression,
+        marker: String,
     },
     LoopOut {
         range: Expression,
         stride: Expression,
+        marker: String,
     },
     NewAcc {
         starting_value: String,
@@ -154,8 +156,8 @@ fn main() {
             search(
                 &serialized,
                 &[
-                    (0..5).map(|i| i as f32).collect_vec(),
-                    // (0..10 * 5).map(|_| rng.random()).collect_vec(),
+                    (0..5 * 10).map(|_| rng.random()).collect_vec(),
+                    (0..10 * 20).map(|_| rng.random()).collect_vec(),
                 ],
             );
         }
@@ -187,26 +189,36 @@ fn render_egglog(graph: StableGraph<GraphTerm, (), Directed>) -> (String, String
         let var = format!("t{next_id}");
         next_id += 1;
         let code = match &graph[n] {
-            GraphTerm::GMEM { .. } => "(GMEM)".to_string(),
+            GraphTerm::GMEM { label } => {
+                format!("(GMEM \"{}\")", label.clone().unwrap_or_default())
+            }
             GraphTerm::SMEM => "(SMEM)".into(),
             GraphTerm::NewAcc { starting_value } => format!("(NewAcc {})", starting_value),
 
-            GraphTerm::LoopIn { range, stride } => {
+            GraphTerm::LoopIn {
+                range,
+                stride,
+                marker,
+            } => {
                 let [ref src] = operand(n, &names, &graph)[..] else {
                     panic!("LoopIn expects 1 child");
                 };
                 format!(
-                    "(LoopIn {src} (Loop \"a\" {}) {})",
+                    "(LoopIn {src} (Loop \"{marker}\" {}) {})",
                     range.to_egglog(),
                     stride.to_egglog()
                 )
             }
-            GraphTerm::LoopOut { range, stride } => {
+            GraphTerm::LoopOut {
+                range,
+                stride,
+                marker,
+            } => {
                 let [ref body] = operand(n, &names, &graph)[..] else {
                     panic!("LoopOut expects 1 child");
                 };
                 format!(
-                    "(LoopOut {body} (Loop \"a\" {}) {})",
+                    "(LoopOut {body} (Loop \"{marker}\" {}) {})",
                     range.to_egglog(),
                     stride.to_egglog()
                 )
@@ -261,21 +273,41 @@ fn render_egglog(graph: StableGraph<GraphTerm, (), Directed>) -> (String, String
 }
 
 fn make_sum_reduce() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
+    let (m, k, n) = (5, 10, 20);
     let mut graph = StableGraph::new();
+
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
     });
-    a = pad_in(a, &mut graph, 6);
-    a = loop_in(a, 5, 'z', &mut graph);
+    a = pad_in(a, &mut graph, 2);
+    a = loop_in(a, m, Expression::from('z') * k, 'm', &mut graph);
+    a = loop_in(a, n, 0, 'n', &mut graph);
+    a = loop_in(a, k, 'z', 'k', &mut graph);
+
+    let mut b = graph.add_node(GraphTerm::GMEM {
+        label: Some("B".to_string()),
+    });
+    b = pad_in(b, &mut graph, 2);
+    b = loop_in(b, m, 0, 'm', &mut graph);
+    b = loop_in(b, n, 'z', 'n', &mut graph);
+    b = loop_in(b, k, Expression::from('z') * n, 'k', &mut graph);
 
     let mut acc = graph.add_node(GraphTerm::NewAcc {
         starting_value: "0".to_string(),
     });
-    acc = loop_in(acc, 5, Term::Acc('z'), &mut graph);
+    acc = loop_in(acc, k, Term::Acc('a'), 'k', &mut graph);
 
-    let mut out = binary(a, acc, GraphTerm::Add, &mut graph);
-    out = loop_out(out, 5, Term::Acc('z'), &mut graph);
-    out = pad_out(out, &mut graph, 6);
+    let mut out = binary(
+        binary(a, b, GraphTerm::Mul, &mut graph),
+        acc,
+        GraphTerm::Add,
+        &mut graph,
+    );
+
+    out = loop_out(out, k, Term::Acc('a'), 'k', &mut graph);
+    out = loop_out(out, n, 'z', 'n', &mut graph);
+    out = loop_out(out, m, Expression::from('z') * n, 'm', &mut graph);
+    out = pad_out(out, &mut graph, 2);
     (graph, out)
 }
 

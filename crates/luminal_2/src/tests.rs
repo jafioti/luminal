@@ -18,10 +18,12 @@ pub fn make_complex_kernel() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex
             pad_in(a, &mut graph, 6),
             50,
             Expression::from('z') * 5,
+            'a',
             &mut graph,
         ),
         5,
         'z',
+        'b',
         &mut graph,
     );
 
@@ -30,16 +32,17 @@ pub fn make_complex_kernel() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex
         label: Some("acc".to_string()),
     });
     let in_exp_acc = loop_in(
-        loop_in(pad_in(slin0, &mut graph, 6), 50, 'z', &mut graph),
+        loop_in(pad_in(slin0, &mut graph, 6), 50, 'z', 'a', &mut graph),
         5,
         Term::Acc('z'),
+        'b',
         &mut graph,
     );
 
     // Exp-acc
     let exp = unary(in_a, GraphTerm::Exp, &mut graph);
     let add_acc = binary(exp, in_exp_acc, GraphTerm::Add, &mut graph);
-    let add_acc_out = loop_out(add_acc, 5, Term::Acc('z'), &mut graph);
+    let add_acc_out = loop_out(add_acc, 5, Term::Acc('z'), 'b', &mut graph);
 
     // Sin
     let sin = unary(add_acc_out, GraphTerm::Sin, &mut graph);
@@ -48,12 +51,12 @@ pub fn make_complex_kernel() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex
     let b = graph.add_node(GraphTerm::GMEM {
         label: Some("B".to_string()),
     });
-    let in_b = loop_in(pad_in(b, &mut graph, 6), 50, 'z', &mut graph);
+    let in_b = loop_in(pad_in(b, &mut graph, 6), 50, 'z', 'a', &mut graph);
 
     // Mul
     let mul = binary(sin, in_b, GraphTerm::Mul, &mut graph);
 
-    let mul_out = loop_out(mul, 50, 'z', &mut graph);
+    let mul_out = loop_out(mul, 50, 'z', 'a', &mut graph);
 
     let mut out = pad_out(mul_out, &mut graph, 6);
     out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);

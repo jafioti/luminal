@@ -220,7 +220,6 @@ fn cost<'a>(
         }
     }
 
-    println!("running...");
     // Warm up resources (buffer allocation, kernel compiler, etc.)
     for _ in 0..WARMUP_TRIALS {
         run_graph(inputs, &kernels);
@@ -282,7 +281,16 @@ pub fn extraction_to_graph(
         };
         let enode = &egraph.nodes[nid];
         match enode.op.as_str() {
-            "GMEM" => Some(g.add_node(GraphTerm::GMEM { label: None })),
+            "GMEM" => Some(
+                g.add_node(GraphTerm::GMEM {
+                    label: Some(
+                        egraph.nodes[&enode.children[0]]
+                            .op
+                            .replace("Boxed(\"", "")
+                            .replace("\")", ""),
+                    ),
+                }),
+            ),
             "SMEM" => Some(g.add_node(GraphTerm::SMEM)),
             "SMEMLoad" => Some(g.add_node(GraphTerm::SMEMLoad)),
             "SMEMRead" => Some(g.add_node(GraphTerm::SMEMRead)),
@@ -297,7 +305,11 @@ pub fn extraction_to_graph(
                 let stride =
                     convert_math(egraph.nid_to_cid(&enode.children[2]), egraph, extraction)?;
                 let child = pick_child(&enode.children[0])?;
-                let n = g.add_node(GraphTerm::LoopIn { range, stride });
+                let n = g.add_node(GraphTerm::LoopIn {
+                    range,
+                    stride,
+                    marker: "".to_string(),
+                });
                 g.add_edge(child, n, ());
                 Some(n)
             }
@@ -310,7 +322,11 @@ pub fn extraction_to_graph(
                     convert_math(egraph.nid_to_cid(&enode.children[2]), egraph, extraction)?;
 
                 let child = pick_child(&enode.children[0])?;
-                let n = g.add_node(GraphTerm::LoopOut { range, stride });
+                let n = g.add_node(GraphTerm::LoopOut {
+                    range,
+                    stride,
+                    marker: "".to_string(),
+                });
                 g.add_edge(child, n, ());
                 Some(n)
             }
