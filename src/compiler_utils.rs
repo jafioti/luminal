@@ -8,13 +8,75 @@ use petgraph::{
     algo::toposort,
     stable_graph::{EdgeIndex, EdgeReference, StableGraph},
     visit::EdgeRef,
-    Direction,
+    Directed, Direction,
 };
 use regex::Regex;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use uuid::Uuid;
 
+use crate::symbolic::Expression as expression_two;
+
 use crate::prelude::*;
+
+#[derive(Clone, Debug)]
+enum GraphTerm {
+    GMEM {
+        // Signifies global memory
+        label: Option<String>,
+    },
+    LoopIn {
+        range: expression_two,
+        stride: expression_two,
+    },
+    LoopOut {
+        range: expression_two,
+        stride: expression_two,
+    },
+    NewAcc {
+        starting_value: String,
+    },
+    Add,
+    Mul,
+    Max,
+    Exp,
+    Recip,
+    Sin,
+    Neg,
+    SMEM,     // Signifies shared memory
+    SMEMLoad, // Takes in an smem pointer and a gmem pointer, copies the gmem element to smem and returns the smem pointer
+    SMEMRead, // Takes in an smem pointer and an smemload, returns the smem pointer
+}
+
+impl std::fmt::Display for GraphTerm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GraphTerm::GMEM { label } => {
+                if let Some(label) = label {
+                    write!(f, "GMEM({})", label)
+                } else {
+                    write!(f, "GMEM")
+                }
+            }
+            GraphTerm::LoopIn { range, stride } => {
+                write!(f, "LoopIn(range: {:?}, stride: {:?})", range, stride)
+            }
+            GraphTerm::LoopOut { range, stride } => {
+                write!(f, "LoopOut(range: {:?}, stride: {:?})", range, stride)
+            }
+            GraphTerm::NewAcc { starting_value } => write!(f, "NewAcc({})", starting_value),
+            GraphTerm::Add => write!(f, "Add"),
+            GraphTerm::Mul => write!(f, "Mul"),
+            GraphTerm::Max => write!(f, "Max"),
+            GraphTerm::Exp => write!(f, "Exp"),
+            GraphTerm::Recip => write!(f, "Recip"),
+            GraphTerm::Sin => write!(f, "Sin"),
+            GraphTerm::Neg => write!(f, "Neg"),
+            GraphTerm::SMEM => write!(f, "SMEM"),
+            GraphTerm::SMEMLoad => write!(f, "SMEMLoad"),
+            GraphTerm::SMEMRead => write!(f, "SMEMRead"),
+        }
+    }
+}
 
 pub trait ToIdsMut {
     fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex>;
@@ -437,6 +499,650 @@ impl Graph {
     pub fn display(&self) {
         let (g, e, _) = self.debug_graph(false);
         display_graph(&g, &e, &[]);
+    }
+
+    pub fn translate_to_2(&self) {
+        let mut new_graph: StableGraph<GraphTerm, u8, Directed> = StableGraph::new();
+        let mut node_mapping: FxHashMap<NodeIndex, NodeIndex> = FxHashMap::default();
+        let mut manually_handled_nodes: FxHashSet<NodeIndex> = FxHashSet::default();
+
+        // First, process nodes in topological order to ensure dependencies are handled first
+        let mut topo_order = Vec::new();
+        let mut visited = FxHashSet::default();
+        let mut temp_visited = FxHashSet::default();
+
+        fn dfs_topo<N, E>(
+            graph: &StableGraph<N, E, Directed>,
+            node: NodeIndex,
+            visited: &mut FxHashSet<NodeIndex>,
+            temp_visited: &mut FxHashSet<NodeIndex>,
+            topo_order: &mut Vec<NodeIndex>,
+        ) {
+            if temp_visited.contains(&node) || visited.contains(&node) {
+                return;
+            }
+
+            temp_visited.insert(node);
+
+            for edge in graph.edges_directed(node, Direction::Incoming) {
+                dfs_topo(graph, edge.source(), visited, temp_visited, topo_order);
+            }
+
+            temp_visited.remove(&node);
+            visited.insert(node);
+            topo_order.push(node);
+        }
+
+        for node_idx in self.graph.node_indices() {
+            if !visited.contains(&node_idx) {
+                dfs_topo(
+                    &self.graph,
+                    node_idx,
+                    &mut visited,
+                    &mut temp_visited,
+                    &mut topo_order,
+                );
+            }
+        }
+
+        // Process nodes in topological order
+        for node_idx in topo_order {
+            if let Some(node_weight) = self.graph.node_weight(node_idx) {
+                let op_name = format!("{:?}", node_weight);
+                let op = op_name.split('|').next().unwrap_or(&op_name).trim();
+
+                let incoming_edges: Vec<_> = self
+                    .graph
+                    .edges_directed(node_idx, Direction::Incoming)
+                    .filter_map(|e| {
+                        e.weight()
+                            .as_data()
+                            .map(|data| (e.source(), data.0, data.1, data.2.clone()))
+                    })
+                    .collect();
+
+                let input_shapes: Vec<ShapeTracker> = incoming_edges
+                    .iter()
+                    .sorted_by_key(|&(_, input_order, _, _)| input_order)
+                    .map(|(_, _, _, shape)| shape.clone())
+                    .collect();
+
+                let new_node_idx = match op {
+                    "Add" => {
+                        manually_handled_nodes.insert(node_idx);
+                        let mut loop_in_nodes = Vec::new();
+
+                        for (input_idx, shape) in input_shapes.iter().enumerate() {
+                            let mut input_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let input_node = incoming_edges[input_idx].0;
+
+                            for &dim_size in dims.iter() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                                let loop_in = new_graph.add_node(GraphTerm::LoopIn {
+                                    range: range_expr,
+                                    stride: expression_two::from(1),
+                                });
+
+                                input_loop_chain.push(loop_in);
+                            }
+
+                            // Connect to the mapped input node (the output of the previous operation)
+                            if let Some(&mapped_input_node) = node_mapping.get(&input_node) {
+                                if let Some(&first_loop_in) = input_loop_chain.first() {
+                                    new_graph.add_edge(mapped_input_node, first_loop_in, 0);
+                                }
+                            } else {
+                                println!(
+                                    "WARNING: Input node {:?} not found in mapping for {:?}",
+                                    input_node, op
+                                );
+                            }
+
+                            // Chain the loop_in nodes
+                            for i in 0..input_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(input_loop_chain[i], input_loop_chain[i + 1], 0);
+                            }
+
+                            loop_in_nodes.push(input_loop_chain);
+                        }
+
+                        let add_node = new_graph.add_node(GraphTerm::Add);
+
+                        // Connect all input chains to the add node
+                        for input_loop_chain in &loop_in_nodes {
+                            if let Some(&final_loop_in) = input_loop_chain.last() {
+                                new_graph.add_edge(final_loop_in, add_node, 0);
+                            }
+                        }
+
+                        // Create output loop chain
+                        let output_dims =
+                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
+                        let mut output_loop_chain = Vec::new();
+
+                        for &dim_size in output_dims.iter() {
+                            let range_expr =
+                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                range: range_expr,
+                                stride: expression_two::from(1),
+                            });
+
+                            output_loop_chain.push(loop_out);
+                        }
+
+                        if let Some(&first_loop_out) = output_loop_chain.first() {
+                            new_graph.add_edge(add_node, first_loop_out, 0);
+                        }
+
+                        for i in 0..output_loop_chain.len().saturating_sub(1) {
+                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
+                        }
+
+                        output_loop_chain.last().copied().unwrap_or(add_node)
+                    }
+                    "Mul" => {
+                        manually_handled_nodes.insert(node_idx);
+                        let mut loop_in_nodes = Vec::new();
+
+                        for (input_idx, shape) in input_shapes.iter().enumerate() {
+                            let mut input_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let input_node = incoming_edges[input_idx].0;
+
+                            for &dim_size in dims.iter() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                                let loop_in = new_graph.add_node(GraphTerm::LoopIn {
+                                    range: range_expr,
+                                    stride: expression_two::from(1),
+                                });
+
+                                input_loop_chain.push(loop_in);
+                            }
+
+                            // Connect to the mapped input node (the output of the previous operation)
+                            if let Some(&mapped_input_node) = node_mapping.get(&input_node) {
+                                if let Some(&first_loop_in) = input_loop_chain.first() {
+                                    new_graph.add_edge(mapped_input_node, first_loop_in, 0);
+                                }
+                            }
+
+                            // Chain the loop_in nodes
+                            for i in 0..input_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(input_loop_chain[i], input_loop_chain[i + 1], 0);
+                            }
+
+                            loop_in_nodes.push(input_loop_chain);
+                        }
+
+                        let mul_node = new_graph.add_node(GraphTerm::Mul);
+
+                        // Connect all input chains to the mul node
+                        for input_loop_chain in &loop_in_nodes {
+                            if let Some(&final_loop_in) = input_loop_chain.last() {
+                                new_graph.add_edge(final_loop_in, mul_node, 0);
+                            }
+                        }
+
+                        // Create output loop chain
+                        let output_dims =
+                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
+                        let mut output_loop_chain = Vec::new();
+
+                        for &dim_size in output_dims.iter() {
+                            let range_expr =
+                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                range: range_expr,
+                                stride: expression_two::from(1),
+                            });
+
+                            output_loop_chain.push(loop_out);
+                        }
+
+                        if let Some(&first_loop_out) = output_loop_chain.first() {
+                            new_graph.add_edge(mul_node, first_loop_out, 0);
+                        }
+
+                        for i in 0..output_loop_chain.len().saturating_sub(1) {
+                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
+                        }
+
+                        output_loop_chain.last().copied().unwrap_or(mul_node)
+                    }
+                    "Sin" => {
+                        manually_handled_nodes.insert(node_idx);
+                        let mut loop_in_nodes = Vec::new();
+
+                        // Sin is unary, so we only process the first (and only) input
+                        if let Some((input_idx, shape)) = input_shapes.iter().enumerate().next() {
+                            let mut input_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let input_node = incoming_edges[input_idx].0;
+
+                            for &dim_size in dims.iter() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                                let loop_in = new_graph.add_node(GraphTerm::LoopIn {
+                                    range: range_expr,
+                                    stride: expression_two::from(1),
+                                });
+
+                                input_loop_chain.push(loop_in);
+                            }
+
+                            // Connect to the mapped input node (which should be the output of the previous operation)
+                            if let Some(&mapped_input_node) = node_mapping.get(&input_node) {
+                                if let Some(&first_loop_in) = input_loop_chain.first() {
+                                    new_graph.add_edge(mapped_input_node, first_loop_in, 0);
+                                }
+                            }
+
+                            for i in 0..input_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(input_loop_chain[i], input_loop_chain[i + 1], 0);
+                            }
+
+                            loop_in_nodes.push(input_loop_chain);
+                        }
+
+                        let sin_node = new_graph.add_node(GraphTerm::Sin);
+
+                        // Connect the single input loop chain to the sin node
+                        if let Some(input_loop_chain) = loop_in_nodes.first() {
+                            if let Some(&final_loop_in) = input_loop_chain.last() {
+                                new_graph.add_edge(final_loop_in, sin_node, 0);
+                            }
+                        }
+
+                        // Output loops (same shape as input for unary operations)
+                        let output_dims =
+                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
+                        let mut output_loop_chain = Vec::new();
+
+                        for &dim_size in output_dims.iter() {
+                            let range_expr =
+                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                range: range_expr,
+                                stride: expression_two::from(1),
+                            });
+
+                            output_loop_chain.push(loop_out);
+                        }
+
+                        if let Some(&first_loop_out) = output_loop_chain.first() {
+                            new_graph.add_edge(sin_node, first_loop_out, 0);
+                        }
+
+                        for i in 0..output_loop_chain.len().saturating_sub(1) {
+                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
+                        }
+
+                        output_loop_chain.last().copied().unwrap_or(sin_node)
+                    }
+                    "Max" => {
+                        manually_handled_nodes.insert(node_idx);
+                        let mut loop_in_nodes = Vec::new();
+
+                        // Sin is unary, so we only process the first (and only) input
+                        if let Some((input_idx, shape)) = input_shapes.iter().enumerate().next() {
+                            let mut input_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let input_node = incoming_edges[input_idx].0;
+
+                            for &dim_size in dims.iter() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                                let loop_in = new_graph.add_node(GraphTerm::LoopIn {
+                                    range: range_expr,
+                                    stride: expression_two::from(1),
+                                });
+
+                                input_loop_chain.push(loop_in);
+                            }
+
+                            // Connect to the mapped input node (which should be the output of the previous operation)
+                            if let Some(&mapped_input_node) = node_mapping.get(&input_node) {
+                                if let Some(&first_loop_in) = input_loop_chain.first() {
+                                    new_graph.add_edge(mapped_input_node, first_loop_in, 0);
+                                }
+                            }
+
+                            for i in 0..input_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(input_loop_chain[i], input_loop_chain[i + 1], 0);
+                            }
+
+                            loop_in_nodes.push(input_loop_chain);
+                        }
+
+                        let sin_node = new_graph.add_node(GraphTerm::Max);
+
+                        // Connect the single input loop chain to the sin node
+                        if let Some(input_loop_chain) = loop_in_nodes.first() {
+                            if let Some(&final_loop_in) = input_loop_chain.last() {
+                                new_graph.add_edge(final_loop_in, sin_node, 0);
+                            }
+                        }
+
+                        // Output loops (same shape as input for unary operations)
+                        let output_dims =
+                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
+                        let mut output_loop_chain = Vec::new();
+
+                        for &dim_size in output_dims.iter() {
+                            let range_expr =
+                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                range: range_expr,
+                                stride: expression_two::from(1),
+                            });
+
+                            output_loop_chain.push(loop_out);
+                        }
+
+                        if let Some(&first_loop_out) = output_loop_chain.first() {
+                            new_graph.add_edge(sin_node, first_loop_out, 0);
+                        }
+
+                        for i in 0..output_loop_chain.len().saturating_sub(1) {
+                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
+                        }
+
+                        output_loop_chain.last().copied().unwrap_or(sin_node)
+                    }
+                    "Exp" => {
+                        manually_handled_nodes.insert(node_idx);
+                        let mut loop_in_nodes = Vec::new();
+
+                        // Sin is unary, so we only process the first (and only) input
+                        if let Some((input_idx, shape)) = input_shapes.iter().enumerate().next() {
+                            let mut input_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let input_node = incoming_edges[input_idx].0;
+
+                            for &dim_size in dims.iter() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                                let loop_in = new_graph.add_node(GraphTerm::LoopIn {
+                                    range: range_expr,
+                                    stride: expression_two::from(1),
+                                });
+
+                                input_loop_chain.push(loop_in);
+                            }
+
+                            // Connect to the mapped input node (which should be the output of the previous operation)
+                            if let Some(&mapped_input_node) = node_mapping.get(&input_node) {
+                                if let Some(&first_loop_in) = input_loop_chain.first() {
+                                    new_graph.add_edge(mapped_input_node, first_loop_in, 0);
+                                }
+                            }
+
+                            for i in 0..input_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(input_loop_chain[i], input_loop_chain[i + 1], 0);
+                            }
+
+                            loop_in_nodes.push(input_loop_chain);
+                        }
+
+                        let sin_node = new_graph.add_node(GraphTerm::Exp);
+
+                        // Connect the single input loop chain to the sin node
+                        if let Some(input_loop_chain) = loop_in_nodes.first() {
+                            if let Some(&final_loop_in) = input_loop_chain.last() {
+                                new_graph.add_edge(final_loop_in, sin_node, 0);
+                            }
+                        }
+
+                        // Output loops (same shape as input for unary operations)
+                        let output_dims =
+                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
+                        let mut output_loop_chain = Vec::new();
+
+                        for &dim_size in output_dims.iter() {
+                            let range_expr =
+                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                range: range_expr,
+                                stride: expression_two::from(1),
+                            });
+
+                            output_loop_chain.push(loop_out);
+                        }
+
+                        if let Some(&first_loop_out) = output_loop_chain.first() {
+                            new_graph.add_edge(sin_node, first_loop_out, 0);
+                        }
+
+                        for i in 0..output_loop_chain.len().saturating_sub(1) {
+                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
+                        }
+
+                        output_loop_chain.last().copied().unwrap_or(sin_node)
+                    }
+                    "Recip" => {
+                        manually_handled_nodes.insert(node_idx);
+                        let mut loop_in_nodes = Vec::new();
+
+                        // Sin is unary, so we only process the first (and only) input
+                        if let Some((input_idx, shape)) = input_shapes.iter().enumerate().next() {
+                            let mut input_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let input_node = incoming_edges[input_idx].0;
+
+                            for &dim_size in dims.iter() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                                let loop_in = new_graph.add_node(GraphTerm::LoopIn {
+                                    range: range_expr,
+                                    stride: expression_two::from(1),
+                                });
+
+                                input_loop_chain.push(loop_in);
+                            }
+
+                            // Connect to the mapped input node (which should be the output of the previous operation)
+                            if let Some(&mapped_input_node) = node_mapping.get(&input_node) {
+                                if let Some(&first_loop_in) = input_loop_chain.first() {
+                                    new_graph.add_edge(mapped_input_node, first_loop_in, 0);
+                                }
+                            }
+
+                            for i in 0..input_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(input_loop_chain[i], input_loop_chain[i + 1], 0);
+                            }
+
+                            loop_in_nodes.push(input_loop_chain);
+                        }
+
+                        let sin_node = new_graph.add_node(GraphTerm::Recip);
+
+                        // Connect the single input loop chain to the sin node
+                        if let Some(input_loop_chain) = loop_in_nodes.first() {
+                            if let Some(&final_loop_in) = input_loop_chain.last() {
+                                new_graph.add_edge(final_loop_in, sin_node, 0);
+                            }
+                        }
+
+                        // Output loops (same shape as input for unary operations)
+                        let output_dims =
+                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
+                        let mut output_loop_chain = Vec::new();
+
+                        for &dim_size in output_dims.iter() {
+                            let range_expr =
+                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                range: range_expr,
+                                stride: expression_two::from(1),
+                            });
+
+                            output_loop_chain.push(loop_out);
+                        }
+
+                        if let Some(&first_loop_out) = output_loop_chain.first() {
+                            new_graph.add_edge(sin_node, first_loop_out, 0);
+                        }
+
+                        for i in 0..output_loop_chain.len().saturating_sub(1) {
+                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
+                        }
+
+                        output_loop_chain.last().copied().unwrap_or(sin_node)
+                    }
+                    "Neg" => {
+                        manually_handled_nodes.insert(node_idx);
+                        let mut loop_in_nodes = Vec::new();
+
+                        // Sin is unary, so we only process the first (and only) input
+                        if let Some((input_idx, shape)) = input_shapes.iter().enumerate().next() {
+                            let mut input_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let input_node = incoming_edges[input_idx].0;
+
+                            for &dim_size in dims.iter() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                                let loop_in = new_graph.add_node(GraphTerm::LoopIn {
+                                    range: range_expr,
+                                    stride: expression_two::from(1),
+                                });
+
+                                input_loop_chain.push(loop_in);
+                            }
+
+                            // Connect to the mapped input node (which should be the output of the previous operation)
+                            if let Some(&mapped_input_node) = node_mapping.get(&input_node) {
+                                if let Some(&first_loop_in) = input_loop_chain.first() {
+                                    new_graph.add_edge(mapped_input_node, first_loop_in, 0);
+                                }
+                            }
+
+                            for i in 0..input_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(input_loop_chain[i], input_loop_chain[i + 1], 0);
+                            }
+
+                            loop_in_nodes.push(input_loop_chain);
+                        }
+
+                        let sin_node = new_graph.add_node(GraphTerm::Neg);
+
+                        // Connect the single input loop chain to the sin node
+                        if let Some(input_loop_chain) = loop_in_nodes.first() {
+                            if let Some(&final_loop_in) = input_loop_chain.last() {
+                                new_graph.add_edge(final_loop_in, sin_node, 0);
+                            }
+                        }
+
+                        // Output loops (same shape as input for unary operations)
+                        let output_dims =
+                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
+                        let mut output_loop_chain = Vec::new();
+
+                        for &dim_size in output_dims.iter() {
+                            let range_expr =
+                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                range: range_expr,
+                                stride: expression_two::from(1),
+                            });
+
+                            output_loop_chain.push(loop_out);
+                        }
+
+                        if let Some(&first_loop_out) = output_loop_chain.first() {
+                            new_graph.add_edge(sin_node, first_loop_out, 0);
+                        }
+
+                        for i in 0..output_loop_chain.len().saturating_sub(1) {
+                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
+                        }
+
+                        output_loop_chain.last().copied().unwrap_or(sin_node)
+                    }
+                    _ => {
+                        // For unimplemented operations, create a simple GMEM node
+                        let gmem_node = new_graph.add_node(GraphTerm::GMEM {
+                            label: Some(format!("NOT YET IMPLEMENTED: {}", op)),
+                        });
+                        gmem_node
+                    }
+                };
+
+                node_mapping.insert(node_idx, new_node_idx);
+            }
+        }
+
+        // Edge copying is now handled within each operation's implementation
+        // Only copy edges for non-manually-handled nodes
+        for node_idx in self.graph.node_indices() {
+            if !manually_handled_nodes.contains(&node_idx) {
+                for edge in self.graph.edges_directed(node_idx, Direction::Outgoing) {
+                    let source = edge.source();
+                    let target = edge.target();
+
+                    // Skip edges where the target is manually handled
+                    if manually_handled_nodes.contains(&target) {
+                        continue;
+                    }
+
+                    let weight = if let Some(data) = edge.weight().as_data() {
+                        data.0
+                    } else {
+                        0
+                    };
+
+                    if let (Some(&new_source), Some(&new_target)) =
+                        (node_mapping.get(&source), node_mapping.get(&target))
+                    {
+                        new_graph.add_edge(new_source, new_target, weight);
+                    }
+                }
+            }
+        }
+
+        // Display
+        let mut graph_to_display: StableGraph<String, u8, Directed> = StableGraph::new();
+        let mut display_node_mapping: FxHashMap<NodeIndex, NodeIndex> = FxHashMap::default();
+
+        for node_idx in new_graph.node_indices() {
+            if let Some(graph_term) = new_graph.node_weight(node_idx) {
+                let display_node = graph_to_display.add_node(graph_term.to_string());
+                display_node_mapping.insert(node_idx, display_node);
+            }
+        }
+
+        for edge in new_graph.edge_indices() {
+            if let Some((source, target)) = new_graph.edge_endpoints(edge) {
+                if let Some(weight) = new_graph.edge_weight(edge) {
+                    if let (Some(&display_source), Some(&display_target)) = (
+                        display_node_mapping.get(&source),
+                        display_node_mapping.get(&target),
+                    ) {
+                        graph_to_display.add_edge(display_source, display_target, *weight);
+                    }
+                }
+            }
+        }
+
+        display_graph(&graph_to_display, &[], &[]);
     }
 
     pub fn display_shapes(&self) {
