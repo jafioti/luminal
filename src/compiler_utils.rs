@@ -45,6 +45,11 @@ enum GraphTerm {
     SMEM,     // Signifies shared memory
     SMEMLoad, // Takes in an smem pointer and a gmem pointer, copies the gmem element to smem and returns the smem pointer
     SMEMRead, // Takes in an smem pointer and an smemload, returns the smem pointer
+    Constant {
+        val: expression_two,
+    },
+    Sqrt,
+    LessThan,
 }
 
 impl std::fmt::Display for GraphTerm {
@@ -74,6 +79,11 @@ impl std::fmt::Display for GraphTerm {
             GraphTerm::SMEM => write!(f, "SMEM"),
             GraphTerm::SMEMLoad => write!(f, "SMEMLoad"),
             GraphTerm::SMEMRead => write!(f, "SMEMRead"),
+            GraphTerm::Constant { val } => {
+                write!(f, "Constant(val: {:?})", val)
+            }
+            GraphTerm::Sqrt => write!(f, "Sqrt"),
+            GraphTerm::LessThan => write!(f, "LessThan"),
         }
     }
 }
@@ -610,6 +620,237 @@ impl Graph {
                         }
 
                         let add_node = new_graph.add_node(GraphTerm::Add);
+
+                        // Connect all input chains to the add node
+                        for input_loop_chain in &loop_in_nodes {
+                            if let Some(&final_loop_in) = input_loop_chain.last() {
+                                new_graph.add_edge(final_loop_in, add_node, 0);
+                            }
+                        }
+
+                        // Create output loop chain
+                        let output_dims =
+                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
+                        let mut output_loop_chain = Vec::new();
+
+                        for &dim_size in output_dims.iter() {
+                            let range_expr =
+                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                range: range_expr,
+                                stride: expression_two::from(1),
+                            });
+
+                            output_loop_chain.push(loop_out);
+                        }
+
+                        if let Some(&first_loop_out) = output_loop_chain.first() {
+                            new_graph.add_edge(add_node, first_loop_out, 0);
+                        }
+
+                        for i in 0..output_loop_chain.len().saturating_sub(1) {
+                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
+                        }
+
+                        output_loop_chain.last().copied().unwrap_or(add_node)
+                    }
+                    "Exp2" => {
+                        manually_handled_nodes.insert(node_idx);
+                        let mut loop_in_nodes = Vec::new();
+
+                        for (input_idx, shape) in input_shapes.iter().enumerate() {
+                            let mut input_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let input_node = incoming_edges[input_idx].0;
+
+                            for &dim_size in dims.iter() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                                let loop_in = new_graph.add_node(GraphTerm::LoopIn {
+                                    range: range_expr,
+                                    stride: expression_two::from(1),
+                                });
+
+                                input_loop_chain.push(loop_in);
+                            }
+
+                            // Connect to the mapped input node (the output of the previous operation)
+                            if let Some(&mapped_input_node) = node_mapping.get(&input_node) {
+                                if let Some(&first_loop_in) = input_loop_chain.first() {
+                                    new_graph.add_edge(mapped_input_node, first_loop_in, 0);
+                                }
+                            } else {
+                                println!(
+                                    "WARNING: Input node {:?} not found in mapping for {:?}",
+                                    input_node, op
+                                );
+                            }
+
+                            // Chain the loop_in nodes
+                            for i in 0..input_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(input_loop_chain[i], input_loop_chain[i + 1], 0);
+                            }
+
+                            loop_in_nodes.push(input_loop_chain);
+                        }
+
+                        let add_node = new_graph.add_node(GraphTerm::Exp);
+
+                        // Connect all input chains to the add node
+                        for input_loop_chain in &loop_in_nodes {
+                            if let Some(&final_loop_in) = input_loop_chain.last() {
+                                new_graph.add_edge(final_loop_in, add_node, 0);
+                            }
+                        }
+
+                        // Create output loop chain
+                        let output_dims =
+                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
+                        let mut output_loop_chain = Vec::new();
+
+                        for &dim_size in output_dims.iter() {
+                            let range_expr =
+                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                range: range_expr,
+                                stride: expression_two::from(1),
+                            });
+
+                            output_loop_chain.push(loop_out);
+                        }
+
+                        if let Some(&first_loop_out) = output_loop_chain.first() {
+                            new_graph.add_edge(add_node, first_loop_out, 0);
+                        }
+
+                        for i in 0..output_loop_chain.len().saturating_sub(1) {
+                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
+                        }
+
+                        output_loop_chain.last().copied().unwrap_or(add_node)
+                    }
+                    "Sqrt" => {
+                        manually_handled_nodes.insert(node_idx);
+                        let mut loop_in_nodes = Vec::new();
+
+                        for (input_idx, shape) in input_shapes.iter().enumerate() {
+                            let mut input_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let input_node = incoming_edges[input_idx].0;
+
+                            for &dim_size in dims.iter() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                                let loop_in = new_graph.add_node(GraphTerm::LoopIn {
+                                    range: range_expr,
+                                    stride: expression_two::from(1),
+                                });
+
+                                input_loop_chain.push(loop_in);
+                            }
+
+                            // Connect to the mapped input node (the output of the previous operation)
+                            if let Some(&mapped_input_node) = node_mapping.get(&input_node) {
+                                if let Some(&first_loop_in) = input_loop_chain.first() {
+                                    new_graph.add_edge(mapped_input_node, first_loop_in, 0);
+                                }
+                            } else {
+                                println!(
+                                    "WARNING: Input node {:?} not found in mapping for {:?}",
+                                    input_node, op
+                                );
+                            }
+
+                            // Chain the loop_in nodes
+                            for i in 0..input_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(input_loop_chain[i], input_loop_chain[i + 1], 0);
+                            }
+
+                            loop_in_nodes.push(input_loop_chain);
+                        }
+
+                        let add_node = new_graph.add_node(GraphTerm::Sqrt);
+
+                        // Connect all input chains to the add node
+                        for input_loop_chain in &loop_in_nodes {
+                            if let Some(&final_loop_in) = input_loop_chain.last() {
+                                new_graph.add_edge(final_loop_in, add_node, 0);
+                            }
+                        }
+
+                        // Create output loop chain
+                        let output_dims =
+                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
+                        let mut output_loop_chain = Vec::new();
+
+                        for &dim_size in output_dims.iter() {
+                            let range_expr =
+                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                range: range_expr,
+                                stride: expression_two::from(1),
+                            });
+
+                            output_loop_chain.push(loop_out);
+                        }
+
+                        if let Some(&first_loop_out) = output_loop_chain.first() {
+                            new_graph.add_edge(add_node, first_loop_out, 0);
+                        }
+
+                        for i in 0..output_loop_chain.len().saturating_sub(1) {
+                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
+                        }
+
+                        output_loop_chain.last().copied().unwrap_or(add_node)
+                    }
+                    "LessThan" => {
+                        manually_handled_nodes.insert(node_idx);
+                        let mut loop_in_nodes = Vec::new();
+
+                        for (input_idx, shape) in input_shapes.iter().enumerate() {
+                            let mut input_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let input_node = incoming_edges[input_idx].0;
+
+                            for &dim_size in dims.iter() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                                let loop_in = new_graph.add_node(GraphTerm::LoopIn {
+                                    range: range_expr,
+                                    stride: expression_two::from(1),
+                                });
+
+                                input_loop_chain.push(loop_in);
+                            }
+
+                            // Connect to the mapped input node (the output of the previous operation)
+                            if let Some(&mapped_input_node) = node_mapping.get(&input_node) {
+                                if let Some(&first_loop_in) = input_loop_chain.first() {
+                                    new_graph.add_edge(mapped_input_node, first_loop_in, 0);
+                                }
+                            } else {
+                                println!(
+                                    "WARNING: Input node {:?} not found in mapping for {:?}",
+                                    input_node, op
+                                );
+                            }
+
+                            // Chain the loop_in nodes
+                            for i in 0..input_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(input_loop_chain[i], input_loop_chain[i + 1], 0);
+                            }
+
+                            loop_in_nodes.push(input_loop_chain);
+                        }
+
+                        let add_node = new_graph.add_node(GraphTerm::LessThan);
 
                         // Connect all input chains to the add node
                         for input_loop_chain in &loop_in_nodes {
@@ -1318,6 +1559,59 @@ impl Graph {
 
                         // Return the final output node
                         output_loop_chain.last().copied().unwrap_or(max_node)
+                    }
+                    s if s.starts_with("Constant(") && s.ends_with(")") => {
+                        manually_handled_nodes.insert(node_idx);
+
+                        // Extract the constant value from the string
+                        let param_str = &s[9..s.len() - 1]; // Remove "Constant(" and ")"
+                        let constant_value = param_str.to_string();
+
+                        // Create a Constant node with the extracted value
+                        // Parse the constant value into an expression_two
+                        let val_expr = if let Ok(int_val) = constant_value.parse::<i32>() {
+                            expression_two::from(int_val)
+                        } else if let Ok(float_val) = constant_value.parse::<f64>() {
+                            // Convert float to expression_two (you may need to adjust this based on your expression_two implementation)
+                            expression_two::from(float_val as i32) // or however you handle floats
+                        } else {
+                            // Fallback - treat as string literal or variable
+                            expression_two::from(constant_value.chars().next().unwrap_or('c'))
+                        };
+
+                        let constant_node =
+                            new_graph.add_node(GraphTerm::Constant { val: val_expr });
+
+                        // Constants don't need input loop chains since they don't depend on inputs
+                        // Create output loop chain based on the output shape
+                        let output_dims =
+                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
+                        let mut output_loop_chain = Vec::new();
+
+                        for &dim_size in output_dims.iter() {
+                            let range_expr =
+                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                range: range_expr,
+                                stride: expression_two::from(1),
+                            });
+
+                            output_loop_chain.push(loop_out);
+                        }
+
+                        // Connect constant node to output chain
+                        if let Some(&first_loop_out) = output_loop_chain.first() {
+                            new_graph.add_edge(constant_node, first_loop_out, 0);
+                        }
+
+                        // Chain the output loop_out nodes
+                        for i in 0..output_loop_chain.len().saturating_sub(1) {
+                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
+                        }
+
+                        // Return the final output node
+                        output_loop_chain.last().copied().unwrap_or(constant_node)
                     }
                     _ => {
                         // For unimplemented operations, create a simple GMEM node
