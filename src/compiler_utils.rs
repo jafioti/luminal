@@ -1077,8 +1077,130 @@ impl Graph {
 
                         output_loop_chain.last().copied().unwrap_or(sin_node)
                     }
+                    // Add this case to your match statement where you handle "Add"
+                    s if s.starts_with("SumReduce(") && s.ends_with(")") => {
+                        manually_handled_nodes.insert(node_idx);
+
+                        // Extract the dimension parameter from the string (1-indexed)
+                        let param_str = &s[10..s.len() - 1]; // Remove "SumReduce(" and ")"
+                        let reduce_dim = param_str.parse::<usize>().unwrap_or(1);
+
+                        // Convert to 0-indexed
+                        let reduce_dim_idx = reduce_dim.saturating_sub(1);
+
+                        let input_shape = &input_shapes[0]; // Assuming single input for sum reduce
+                        let input_node = incoming_edges[0].0;
+                        let dims = input_shape.dims();
+
+                        // Create accumulator node with starting value of 0
+                        let acc_node = new_graph.add_node(GraphTerm::NewAcc {
+                            starting_value: "0".to_string(),
+                        });
+
+                        // Create input loop chain for the input tensor
+                        let mut input_loop_chain = Vec::new();
+                        for (dim_idx, &dim_size) in dims.iter().enumerate() {
+                            let range_expr =
+                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                            let loop_in = new_graph.add_node(GraphTerm::LoopIn {
+                                range: range_expr,
+                                stride: expression_two::from(1),
+                            });
+
+                            input_loop_chain.push(loop_in);
+                        }
+
+                        // Create accumulator loop chain (same structure as input but will be connected differently)
+                        let mut acc_loop_chain = Vec::new();
+                        for (dim_idx, &dim_size) in dims.iter().enumerate() {
+                            let range_expr =
+                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                            let loop_in = new_graph.add_node(GraphTerm::LoopIn {
+                                range: range_expr,
+                                stride: expression_two::from(1),
+                            });
+
+                            acc_loop_chain.push(loop_in);
+                        }
+
+                        // Connect accumulator to its loop chain
+                        if let Some(&first_acc_loop) = acc_loop_chain.first() {
+                            new_graph.add_edge(acc_node, first_acc_loop, 0);
+                        }
+
+                        // Connect input node to input loop chain
+                        if let Some(&mapped_input_node) = node_mapping.get(&input_node) {
+                            if let Some(&first_input_loop) = input_loop_chain.first() {
+                                new_graph.add_edge(mapped_input_node, first_input_loop, 0);
+                            }
+                        } else {
+                            println!(
+                                "WARNING: Input node {:?} not found in mapping for SumReduce",
+                                input_node
+                            );
+                        }
+
+                        // Chain the input loop_in nodes
+                        for i in 0..input_loop_chain.len().saturating_sub(1) {
+                            new_graph.add_edge(input_loop_chain[i], input_loop_chain[i + 1], 0);
+                        }
+
+                        // Chain the accumulator loop_in nodes
+                        for i in 0..acc_loop_chain.len().saturating_sub(1) {
+                            new_graph.add_edge(acc_loop_chain[i], acc_loop_chain[i + 1], 0);
+                        }
+
+                        // Create the Add node that will sum the input with the accumulator
+                        let add_node = new_graph.add_node(GraphTerm::Add);
+
+                        // Connect both input and accumulator chains to the add node
+                        if let Some(&final_input_loop) = input_loop_chain.last() {
+                            new_graph.add_edge(final_input_loop, add_node, 0);
+                        }
+                        if let Some(&final_acc_loop) = acc_loop_chain.last() {
+                            new_graph.add_edge(final_acc_loop, add_node, 0);
+                        }
+
+                        // Create output loop chain - this will have reduced dimensions
+                        let mut output_dims = Vec::new();
+                        for (dim_idx, &dim_size) in dims.iter().enumerate() {
+                            if dim_idx != reduce_dim_idx {
+                                // Keep dimensions that are not being reduced
+                                output_dims.push(dim_size);
+                            }
+                        }
+
+                        let mut output_loop_chain = Vec::new();
+                        for &dim_size in output_dims.iter() {
+                            let range_expr =
+                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+
+                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                range: range_expr,
+                                stride: expression_two::from(1),
+                            });
+
+                            output_loop_chain.push(loop_out);
+                        }
+
+                        // Connect add node to output chain
+                        if let Some(&first_loop_out) = output_loop_chain.first() {
+                            new_graph.add_edge(add_node, first_loop_out, 0);
+                        }
+
+                        // Chain the output loop_out nodes
+                        for i in 0..output_loop_chain.len().saturating_sub(1) {
+                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
+                        }
+
+                        // Return the final output node
+                        output_loop_chain.last().copied().unwrap_or(add_node)
+                    }
                     _ => {
                         // For unimplemented operations, create a simple GMEM node
+                        println!("LOOK I AM UNIMPLEMENTED {:?}", op);
                         let gmem_node = new_graph.add_node(GraphTerm::GMEM {
                             label: Some(format!("NOT YET IMPLEMENTED: {}", op)),
                         });
