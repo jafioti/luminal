@@ -156,8 +156,8 @@ fn main() {
             search(
                 &serialized,
                 &[
-                    (0..5 * 10).map(|_| rng.random()).collect_vec(),
-                    (0..10 * 20).map(|_| rng.random()).collect_vec(),
+                    (0..8 * 16).map(|_| rng.random()).collect_vec(),
+                    (0..16 * 32).map(|_| rng.random()).collect_vec(),
                 ],
             );
         }
@@ -273,7 +273,7 @@ fn render_egglog(graph: StableGraph<GraphTerm, (), Directed>) -> (String, String
 }
 
 fn make_sum_reduce() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
-    let (m, k, n) = (5, 10, 20);
+    let (m, k, n) = (8, 16, 32);
     let mut graph = StableGraph::new();
 
     let mut a = graph.add_node(GraphTerm::GMEM {
@@ -295,6 +295,9 @@ fn make_sum_reduce() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
     let mut acc = graph.add_node(GraphTerm::NewAcc {
         starting_value: "0".to_string(),
     });
+    acc = pad_in(acc, &mut graph, 2);
+    acc = loop_in(acc, m, Expression::from('z') * n, 'm', &mut graph);
+    acc = loop_in(acc, n, 'z', 'n', &mut graph);
     acc = loop_in(acc, k, Term::Acc('a'), 'k', &mut graph);
 
     let mut out = binary(

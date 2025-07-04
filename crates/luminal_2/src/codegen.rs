@@ -348,10 +348,13 @@ fn make_kernel(
                         .unwrap();
                     let (real_input, is_ptr, real_size) = node_to_var[&src].clone();
                     if stride.is_acc() {
-                        assert!(
-                            *loop_level >= GRID_DIMS + THREADBLOCK_DIMS,
-                            "No accumulations allowed on grid or threadblock levels!"
-                        );
+                        if *loop_level < GRID_DIMS + THREADBLOCK_DIMS {
+                            return None;
+                        }
+                        // assert!(
+                        //     *loop_level >= GRID_DIMS + THREADBLOCK_DIMS,
+                        //     "No accumulations allowed on grid or threadblock levels!"
+                        // );
                         new_vars.push(real_input);
                         node_to_var.insert(*input, (real_input, is_ptr, real_size));
                     } else {
@@ -383,10 +386,13 @@ fn make_kernel(
                 let mut new_output_vars = vec![];
                 for (output, stride) in &loop_outputs {
                     if stride.is_acc() {
-                        assert!(
-                            *loop_level >= GRID_DIMS + THREADBLOCK_DIMS,
-                            "No accumulations allowed on grid or threadblock levels!"
-                        );
+                        if *loop_level < GRID_DIMS + THREADBLOCK_DIMS {
+                            return None;
+                        }
+                        // assert!(
+                        //     *loop_level >= GRID_DIMS + THREADBLOCK_DIMS,
+                        //     "No accumulations allowed on grid or threadblock levels!"
+                        // );
                         // Re-use accumulator
                         let (input, _) = loop_inputs
                             .iter()
@@ -1030,7 +1036,6 @@ fn split_kernels(
         } else {
             None
         };
-        println!("label: {:?}", label);
         for kernel in kernels {
             kernel_graphs[*kernel].1.push((
                 GMEMBuffer::Input {
