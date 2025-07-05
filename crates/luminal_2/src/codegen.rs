@@ -13,12 +13,17 @@ use crate::{
     utils::{display_graph, validate_graph},
 };
 
+const GRID_DIMS: usize = 2;
+const THREADBLOCK_DIMS: usize = 2;
+
 pub fn codegen(
-    graph: StableGraph<GraphTerm, u8, Directed>,
+    graph: StableGraph<GraphTerm, (), Directed>,
     root: NodeIndex,
     mut arch: GPUArch,
-) -> StableGraph<Kernel, (u8, u8), Directed> {
-    let (kernels, root_kernel) = split_kernels(graph, root);
+    n_graph: usize,
+) -> Option<StableGraph<Kernel, (u8, u8), Directed>> {
+    // display_graph(&graph, &[]);
+    let (kernels, root_kernel) = split_kernels(graph, root, n_graph);
     // Create kernel meta graph to toposort
     let mut meta_graph = StableGraph::new();
     for _ in 0..kernels.len() {
@@ -40,7 +45,7 @@ pub fn codegen(
                     NodeIndex::new(n_kernel),
                     (*output as u8, n_input as u8),
                 ),
-                GMEMBuffer::Input(g_inp) => meta_graph.add_edge(
+                GMEMBuffer::Input { index: g_inp, .. } => meta_graph.add_edge(
                     global_input,
                     NodeIndex::new(n_kernel),
                     (*g_inp as u8, n_input as u8),
@@ -84,19 +89,20 @@ pub fn codegen(
                 .collect(),
             0,
             &mut arch,
-        )
-        .unwrap();
+        )?;
         let grid = loop_levels
             .clone()
             .into_iter()
+            .take(GRID_DIMS)
             .chain(repeat(1.into()))
-            .take(3)
+            .take(3) // Hardware always expects 3 dims
             .collect_vec();
         let threadblock = loop_levels
             .into_iter()
-            .skip(3)
+            .skip(GRID_DIMS)
+            .take(THREADBLOCK_DIMS)
             .chain(repeat(1.into()))
-            .take(3)
+            .take(3) // Hardware always expects 3 dims
             .collect_vec();
         let kernel_lines = kernel.into_iter().map(|s| format!("\t{s}")).join("\n");
         let kernel = match &arch {
@@ -131,7 +137,26 @@ pub fn codegen(
                 )
             }
             GPUArch::Metal { .. } => {
-                let inputs = inputs
+                let mut input_comment = inputs
+                    .iter()
+                    .filter_map(|(buf, ind)| {
+                        if let GMEMBuffer::Input {
+                            label: Some(label), ..
+                        } = buf
+                        {
+                            Some(format!(
+                                "\t// {label} = {}",
+                                var_to_char(node_to_var[ind].0)
+                            ))
+                        } else {
+                            None
+                        }
+                    })
+                    .join("\n");
+                if !input_comment.is_empty() {
+                    input_comment = format!("\t// Inputs\n{input_comment}\n");
+                }
+                let input_string = inputs
                     .into_iter()
                     .map(|(_, a)| a)
                     .chain(outputs.iter().map(|(_, i)| *i))
@@ -161,15 +186,16 @@ pub fn codegen(
                         ", threadgroup float* sm [[threadgroup(0)]]".to_string(),
                     )
                 };
+
                 format!(
                     "#include <metal_stdlib>
 using namespace metal;
 kernel void kernel{}(
 	uint3 blockIdx [[threadgroup_position_in_grid]],
 	uint3 threadIdx [[thread_position_in_threadgroup]],
-	{inputs}{smem_input}
+	{input_string}{smem_input}
 ) {{
-{smem_setup}{kernel_lines}
+{input_comment}{smem_setup}{kernel_lines}
 }}",
                     node.index(),
                 )
@@ -183,7 +209,7 @@ kernel void kernel{}(
             outputs: outputs.into_iter().map(|(o, _)| o).collect(),
         };
     }
-    meta_graph
+    Some(meta_graph)
 }
 
 fn var_to_char(var: usize) -> String {
@@ -195,7 +221,7 @@ fn var_to_char(var: usize) -> String {
 }
 
 fn make_kernel(
-    kernel_graph: &StableGraph<(GraphTerm, usize), u8, Directed>,
+    kernel_graph: &StableGraph<(GraphTerm, usize), (), Directed>,
     include_nodes: HashSet<NodeIndex>,
     node_to_var: &mut HashMap<NodeIndex, (usize, bool, Option<Expression>)>,
     prev_max_var: &mut usize, // contains the char last used
@@ -206,7 +232,7 @@ fn make_kernel(
     arch: &mut GPUArch,
 ) -> Option<Vec<String>> {
     let mut kernel_lines = vec![];
-    let spacing = (0..current_loop_level.saturating_sub(6))
+    let spacing = (0..current_loop_level.saturating_sub(GRID_DIMS + THREADBLOCK_DIMS))
         .map(|_| "\t")
         .join("");
 
@@ -219,7 +245,7 @@ fn make_kernel(
         }
         let (term, loop_level) = kernel_graph.node_weight(node).unwrap();
         match term {
-            GraphTerm::LoopIn { range, stride } => {
+            GraphTerm::LoopIn { range, stride, .. } => {
                 // go through graph to find inputs and outputs
                 let mut loop_inputs = HashSet::new();
                 loop_inputs.insert((node, stride));
@@ -277,15 +303,17 @@ fn make_kernel(
                 //         .collect_vec(),
                 // );
 
-                let inner_spacing = if current_loop_level < 6 {
+                let inner_spacing = if current_loop_level < GRID_DIMS + THREADBLOCK_DIMS {
                     "".to_string()
                 } else {
                     format!("{spacing}\t")
                 };
 
                 // Make new loop
-                if *loop_level < 6 {
-                    loop_levels.push(*range);
+                if *loop_level < GRID_DIMS + THREADBLOCK_DIMS {
+                    if current_loop_level >= loop_levels.len() {
+                        loop_levels.push(*range);
+                    }
                     if loop_inputs
                         .iter()
                         .chain(&loop_outputs)
@@ -295,14 +323,12 @@ fn make_kernel(
                         kernel_lines.push(format!(
                             "int loop_{} = {};",
                             var_to_char(*prev_max_var),
-                            [
-                                "blockIdx.x",
-                                "blockIdx.y",
-                                "blockIdx.z",
-                                "threadIdx.x",
-                                "threadIdx.y",
-                                "threadIdx.z"
-                            ][*loop_level]
+                            if *loop_level >= GRID_DIMS {
+                                ["threadIdx.x", "threadIdx.y", "threadIdx.z"]
+                                    [*loop_level - GRID_DIMS]
+                            } else {
+                                ["blockIdx.x", "blockIdx.y", "blockIdx.z"][*loop_level]
+                            }
                         ));
                     }
                 } else {
@@ -322,17 +348,19 @@ fn make_kernel(
                         .unwrap();
                     let (real_input, is_ptr, real_size) = node_to_var[&src].clone();
                     if stride.is_acc() {
-                        assert!(
-                            *loop_level > 5,
-                            "No accumulations allowed on grid or threadblock levels!"
-                        );
+                        if *loop_level < GRID_DIMS + THREADBLOCK_DIMS {
+                            return None;
+                        }
+                        // assert!(
+                        //     *loop_level >= GRID_DIMS + THREADBLOCK_DIMS,
+                        //     "No accumulations allowed on grid or threadblock levels!"
+                        // );
                         new_vars.push(real_input);
                         node_to_var.insert(*input, (real_input, is_ptr, real_size));
                     } else {
                         if **stride != 0 && *range != 1 {
                             if !is_ptr {
-                                display_graph(&kernel_graph, &[]);
-                                panic!();
+                                return None; // We can't handle thread-level buffers yet!
                             }
                             *prev_max_var += 1;
                             arch.add_metal_buffer_type(
@@ -358,10 +386,13 @@ fn make_kernel(
                 let mut new_output_vars = vec![];
                 for (output, stride) in &loop_outputs {
                     if stride.is_acc() {
-                        assert!(
-                            *loop_level > 5,
-                            "No accumulations allowed on grid or threadblock levels!"
-                        );
+                        if *loop_level < GRID_DIMS + THREADBLOCK_DIMS {
+                            return None;
+                        }
+                        // assert!(
+                        //     *loop_level >= GRID_DIMS + THREADBLOCK_DIMS,
+                        //     "No accumulations allowed on grid or threadblock levels!"
+                        // );
                         // Re-use accumulator
                         let (input, _) = loop_inputs
                             .iter()
@@ -426,6 +457,17 @@ fn make_kernel(
                     arch,
                 )?;
 
+                if loop_body.is_empty() && loop_inputs.len() == 1 && loop_outputs.len() == 1 {
+                    // Need to copy inputs to outputs
+                    let (src, src_ptr, _) = node_to_var[&loop_inputs.iter().next().unwrap().0];
+                    let (dest, _, _) = node_to_var[&loop_outputs.iter().next().unwrap().0];
+                    kernel_lines.push(format!(
+                        "{inner_spacing}*{} = {}{};",
+                        var_to_char(dest),
+                        if src_ptr { "*" } else { "" },
+                        var_to_char(src)
+                    ));
+                }
                 kernel_lines.extend(loop_body);
 
                 // Set outputs if nessecary
@@ -485,7 +527,7 @@ fn make_kernel(
                     }
                 }
 
-                if *loop_level >= 6 {
+                if *loop_level >= GRID_DIMS + THREADBLOCK_DIMS {
                     kernel_lines.push(format!("{spacing}}}"));
                 }
             }
@@ -498,7 +540,7 @@ fn make_kernel(
                         .neighbors_directed(curr, Direction::Outgoing)
                         .next()
                         .unwrap();
-                    if let GraphTerm::LoopIn { range, stride } =
+                    if let GraphTerm::LoopIn { range, stride, .. } =
                         &kernel_graph.node_weight(curr).unwrap().0
                     {
                         if !stride.is_acc() && *stride != 0 {
@@ -518,8 +560,8 @@ fn make_kernel(
                 ));
                 node_to_var.insert(node, (*prev_max_var, true, Some(size)));
             }
-            GraphTerm::LoopOut { range, stride } => {
-                // panic!("found loopout range: {range} stride: {stride}")
+            GraphTerm::LoopOut { range, stride, .. } => {
+                panic!("found loopout range: {range} stride: {stride}")
             }
             GraphTerm::SMEMLoad | GraphTerm::SMEMRead => {
                 // Find the gmem input and smem input
@@ -667,11 +709,12 @@ fn toposort_subset<N, E>(
 
 /// add kernel dimensions so that all loop-to-loop dependencies are between seperate kernels or on the threadblock / thread levels
 fn split_kernels(
-    graph: StableGraph<GraphTerm, u8, Directed>,
+    graph: StableGraph<GraphTerm, (), Directed>,
     mut root: NodeIndex,
+    n_graph: usize,
 ) -> (
     Vec<(
-        StableGraph<(GraphTerm, usize), u8, Directed>,
+        StableGraph<(GraphTerm, usize), (), Directed>,
         Vec<(GMEMBuffer, NodeIndex)>, // (src buffer, current graph node)
         Vec<(Expression, NodeIndex)>, // output node
         Vec<(usize, NodeIndex, Expression)>, // (shared memory buffer name, node, buffer size)
@@ -754,7 +797,7 @@ fn split_kernels(
             let (src_term, src_level, src_kernel) = marked_graph.node_weight_mut(source).unwrap();
             if matches!(term, GraphTerm::LoopIn { .. })
                 && matches!(src_term, GraphTerm::LoopOut { .. })
-                && curr_level.len() < 6
+                && curr_level.len() < GRID_DIMS + THREADBLOCK_DIMS
             {
                 let max_kernel = *curr_kernel.iter().max().unwrap();
                 n_kernels = n_kernels.max(max_kernel + 2);
@@ -801,7 +844,7 @@ fn split_kernels(
             let (src_term, src_level, src_kernel) = marked_graph.node_weight(source).unwrap();
             if matches!(term, GraphTerm::LoopIn { .. })
                 && matches!(src_term, GraphTerm::LoopOut { .. })
-                && curr_level.len() < 6
+                && curr_level.len() < GRID_DIMS + THREADBLOCK_DIMS
             {
                 let max_kernel = *src_kernel.iter().max().unwrap();
                 n_kernels = n_kernels.max(max_kernel + 2);
@@ -831,7 +874,8 @@ fn split_kernels(
     while let Some(node) = dfs_stack.pop() {
         dfs_stack.extend(marked_graph.neighbors_directed(node, Direction::Incoming));
         let (term, curr_level, mut curr_kernel) = marked_graph.node_weight(node).unwrap().clone();
-        let split_cond = curr_level.len() < 6 && matches!(term, GraphTerm::LoopOut { .. });
+        let split_cond = curr_level.len() < GRID_DIMS + THREADBLOCK_DIMS
+            && matches!(term, GraphTerm::LoopOut { .. });
         curr_kernel.retain(|k| {
             marked_graph
                 .neighbors_directed(node, Direction::Outgoing)
@@ -847,6 +891,56 @@ fn split_kernels(
         marked_graph.node_weight_mut(node).unwrap().2 = curr_kernel;
     }
 
+    // Disallow disjoint nodes to be in the same kernel
+    let mut by_kernel: HashMap<usize, Vec<NodeIndex>> = HashMap::new();
+    for n in marked_graph.node_indices() {
+        for &k in &marked_graph[n].2 {
+            // field 2 == Vec<usize> of kernel IDs
+            by_kernel.entry(k).or_default().push(n);
+        }
+    }
+    use std::collections::{HashSet, VecDeque};
+    let mut next_kernel = n_kernels; // keep issuing fresh IDs
+
+    for (k, nodes) in by_kernel {
+        let mut seen: HashSet<NodeIndex> = HashSet::new();
+
+        for &seed in &nodes {
+            if seen.contains(&seed) {
+                continue;
+            }
+
+            // BFS restricted to nodes that still carry -k-
+            let mut q = VecDeque::from([seed]);
+            let mut comp: Vec<NodeIndex> = Vec::new();
+            while let Some(v) = q.pop_front() {
+                if !seen.insert(v) {
+                    continue;
+                }
+                comp.push(v);
+                for nb in marked_graph.neighbors_undirected(v) {
+                    if marked_graph[nb].2.contains(&k) {
+                        q.push_back(nb);
+                    }
+                }
+            }
+
+            // first component keeps k; extra components get fresh IDs
+            if !comp.is_empty() && seed != nodes[0] {
+                let new_k = {
+                    next_kernel += 1;
+                    next_kernel - 1
+                };
+                for v in comp {
+                    let kernels = &mut marked_graph.node_weight_mut(v).unwrap().2;
+                    kernels.retain(|id| *id != k);
+                    kernels.push(new_k);
+                }
+            }
+        }
+    }
+    n_kernels = next_kernel;
+
     // Add kernel barriers
     for edge in marked_graph.edge_indices().collect_vec() {
         let (mut src, mut dest) = marked_graph.edge_endpoints(edge).unwrap();
@@ -854,30 +948,48 @@ fn split_kernels(
         let (_, _, src_kernel) = marked_graph.node_weight(src).unwrap().clone();
         if dest_level.len() > 0 && dest_kernel.iter().any(|i| !src_kernel.contains(i)) {
             // Put a barrier here
+            // Get buffer size before this loop
+            let mut curr = src;
+            let mut total_size = Expression::from(0);
+            loop {
+                match marked_graph.node_weight(curr).unwrap().0 {
+                    GraphTerm::LoopOut { range, stride, .. } => {
+                        total_size = total_size.max(stride.substitute('z', range));
+                    }
+                    _ => break,
+                }
+                curr = marked_graph
+                    .neighbors_directed(curr, Direction::Incoming)
+                    .next()
+                    .unwrap();
+            }
+
             marked_graph.remove_edge(edge);
             for i in (0..dest_level.len()).rev() {
                 let new_src = marked_graph.add_node((
                     GraphTerm::LoopOut {
                         range: dest_level[i].clone(),
-                        stride: 0.into(),
+                        stride: total_size * 'z',
+                        marker: "".to_string(),
                     },
                     dest_level[..i].to_vec(),
                     src_kernel.clone(),
                 ));
-                marked_graph.add_edge(src, new_src, 0);
+                marked_graph.add_edge(src, new_src, ());
                 src = new_src;
                 let new_dest = marked_graph.add_node((
                     GraphTerm::LoopIn {
                         range: dest_level[i].clone(),
-                        stride: 0.into(),
+                        stride: total_size * 'z',
+                        marker: "".to_string(),
                     },
                     dest_level[..i].to_vec(),
                     dest_kernel.clone(),
                 ));
-                marked_graph.add_edge(new_dest, dest, 0);
+                marked_graph.add_edge(new_dest, dest, ());
                 dest = new_dest;
             }
-            marked_graph.add_edge(src, dest, 0);
+            marked_graph.add_edge(src, dest, ());
         }
     }
 
@@ -918,11 +1030,20 @@ fn split_kernels(
         })
         .enumerate()
     {
-        let (_, _, kernels) = marked_graph.node_weight(input).unwrap();
+        let (term, _, kernels) = marked_graph.node_weight(input).unwrap();
+        let label = if let GraphTerm::GMEM { label } = term {
+            label.clone()
+        } else {
+            None
+        };
         for kernel in kernels {
-            kernel_graphs[*kernel]
-                .1
-                .push((GMEMBuffer::Input(n), node_maps[*kernel][&input]));
+            kernel_graphs[*kernel].1.push((
+                GMEMBuffer::Input {
+                    index: n,
+                    label: label.clone(),
+                },
+                node_maps[*kernel][&input],
+            ));
         }
     }
     // Mark cross kernel dependencies in the kernel inputs / outputs
@@ -982,7 +1103,7 @@ fn split_kernels(
                     let mut load = false;
                     loop {
                         match kernel_graph.node_weight(curr).unwrap().0 {
-                            GraphTerm::LoopIn { range, stride } => {
+                            GraphTerm::LoopIn { range, stride, .. } => {
                                 if stride != 0 {
                                     size *= range;
                                 }
@@ -1008,13 +1129,17 @@ fn split_kernels(
         }
 
         // Ensure GMEM is placed on the graph
-        for (_, input) in inputs {
+        for (buf, input) in inputs {
             if !matches!(
                 kernel_graph.node_weight(*input).unwrap().0,
                 GraphTerm::GMEM { .. }
             ) {
-                let new_input = kernel_graph.add_node((GraphTerm::GMEM { label: None }, 0));
-                kernel_graph.add_edge(new_input, *input, 0);
+                let label = match buf {
+                    GMEMBuffer::Input { label, .. } => label.clone(),
+                    _ => None,
+                };
+                let new_input = kernel_graph.add_node((GraphTerm::GMEM { label }, 0));
+                kernel_graph.add_edge(new_input, *input, ());
                 *input = new_input;
             }
         }
@@ -1024,17 +1149,17 @@ fn split_kernels(
                 GraphTerm::GMEM { .. }
             ) {
                 let new_output = kernel_graph.add_node((GraphTerm::GMEM { label: None }, 0));
-                kernel_graph.add_edge(*output, new_output, 0);
+                kernel_graph.add_edge(*output, new_output, ());
                 *output = new_output;
             }
             // Loop back through all loopouts to find the size of the output
             let mut curr = *output;
-            let mut new_size = vec![Expression::from(1)];
+            let mut new_size = Expression::from(1);
             loop {
                 let term = &kernel_graph.node_weight(curr).unwrap().0;
-                if let GraphTerm::LoopOut { range, stride } = term {
+                if let GraphTerm::LoopOut { range, stride, .. } = term {
                     if !stride.is_acc() && *stride != 0 {
-                        new_size.push(*range);
+                        new_size = new_size.max(stride.substitute('z', *range));
                     }
                 } else if !matches!(term, GraphTerm::GMEM { .. }) {
                     break;
@@ -1044,7 +1169,7 @@ fn split_kernels(
                     .next()
                     .unwrap();
             }
-            *size = new_size.into_iter().product();
+            *size = new_size;
         }
     }
     let root_kernel = marked_graph.node_weight(root).unwrap().2[0];

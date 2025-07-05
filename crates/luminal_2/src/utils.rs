@@ -7,6 +7,86 @@ use petgraph::{Directed, Direction, graph::NodeIndex, prelude::StableGraph};
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
+pub fn unary(
+    a: NodeIndex,
+    term: GraphTerm,
+    graph: &mut StableGraph<GraphTerm, (), Directed>,
+) -> NodeIndex {
+    let tmp = graph.add_node(term);
+    graph.add_edge(a, tmp, ());
+    tmp
+}
+
+pub fn binary(
+    a: NodeIndex,
+    b: NodeIndex,
+    term: GraphTerm,
+    graph: &mut StableGraph<GraphTerm, (), Directed>,
+) -> NodeIndex {
+    let tmp = graph.add_node(term);
+    graph.add_edge(a, tmp, ());
+    graph.add_edge(b, tmp, ());
+    tmp
+}
+
+pub fn loop_in(
+    node: NodeIndex,
+    range: impl Into<Expression>,
+    stride: impl Into<Expression>,
+    marker: impl ToString,
+    graph: &mut StableGraph<GraphTerm, (), Directed>,
+) -> NodeIndex {
+    unary(
+        node,
+        GraphTerm::LoopIn {
+            range: range.into(),
+            stride: stride.into(),
+            marker: marker.to_string(),
+        },
+        graph,
+    )
+}
+
+pub fn loop_out(
+    node: NodeIndex,
+    range: impl Into<Expression>,
+    stride: impl Into<Expression>,
+    marker: impl ToString,
+    graph: &mut StableGraph<GraphTerm, (), Directed>,
+) -> NodeIndex {
+    unary(
+        node,
+        GraphTerm::LoopOut {
+            range: range.into(),
+            stride: stride.into(),
+            marker: marker.to_string(),
+        },
+        graph,
+    )
+}
+
+pub fn pad_in(
+    mut node: NodeIndex,
+    graph: &mut StableGraph<GraphTerm, (), Directed>,
+    levels: usize,
+) -> NodeIndex {
+    for i in 0..levels {
+        node = loop_in(node, 1, 0, format!("pad{i}"), graph);
+    }
+    node
+}
+
+pub fn pad_out(
+    mut node: NodeIndex,
+    graph: &mut StableGraph<GraphTerm, (), Directed>,
+    levels: usize,
+) -> NodeIndex {
+    for i in (0..levels).rev() {
+        node = loop_out(node, 1, 0, format!("pad{i}"), graph);
+    }
+    node
+}
+
 use crate::{GraphTerm, Kernel, extract::ExtractionResult, symbolic::Expression};
 
 pub trait TermToString {
@@ -98,8 +178,16 @@ impl TermToString for GraphTerm {
             GraphTerm::Recip => "Recip".to_string(),
             GraphTerm::Neg => "Neg".to_string(),
             GraphTerm::NewAcc { starting_value } => format!("NewAcc({starting_value})"),
-            GraphTerm::LoopIn { range, stride } => format!("LoopIn ({range}; {stride})"),
-            GraphTerm::LoopOut { range, stride } => format!("LoopOut ({range}; {stride})"),
+            GraphTerm::LoopIn {
+                range,
+                stride,
+                marker,
+            } => format!("LoopIn ({range}; {stride}; -{marker}-)"),
+            GraphTerm::LoopOut {
+                range,
+                stride,
+                marker,
+            } => format!("LoopOut ({range}; {stride}; -{marker}-)"),
             GraphTerm::GMEM { label } => {
                 if let Some(label) = label {
                     format!("GMEM ({label})")
@@ -179,7 +267,7 @@ pub fn display_graph<G: TermToString, E: EdgeToString>(
     }
 }
 
-pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
+pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), (), Directed>) {
     // walk the graph and make sure loopins -> next loop level (or loopout) and prev loop (or loopin) -> loopout
     for node in graph.node_indices() {
         let (curr_term, curr_level) = graph.node_weight(node).unwrap();
@@ -255,15 +343,15 @@ pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), u8, Directed>) {
     }
 }
 
-pub fn extraction_to_petgraph(
-    egraph: &EGraph,
-    extraction: &ExtractionResult,
+pub fn extraction_to_petgraph<'a>(
+    egraph: &'a EGraph,
+    extraction: &'a ExtractionResult<'a>,
 ) -> StableGraph<String, (), Directed> {
     let mut map = HashMap::<&NodeId, NodeIndex>::default();
     let mut dfs = egraph
         .root_eclasses
         .iter()
-        .map(|c| &extraction.choices[c])
+        .map(|c| extraction.choices[c])
         .collect_vec();
     let mut graph = StableGraph::default();
     for root in &dfs {

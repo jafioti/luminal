@@ -3,7 +3,6 @@ use crate::symbolic::{Expression, Term};
 use crate::{GPUArch, GraphTerm, run::run_graph};
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
-use itertools::Itertools;
 use petgraph::algo::toposort;
 use petgraph::prelude::{NodeIndex, StableGraph};
 use petgraph::{Directed, Direction};
@@ -20,134 +19,185 @@ type Cost = u128; // Execution time in microseconds
 use std::collections::HashMap;
 
 /// Enumerate every possible extraction and get the runtime cost for each
-pub fn search(egraph: EGraph, inputs: &[Vec<f32>]) {
-    // class → nodes
+pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
+    // ───────────────────────── 1. class → valid nodes
     let mut class_nodes: FxHashMap<ClassId, Vec<NodeId>> = FxHashMap::default();
     for (nid, node) in &egraph.nodes {
+        if INVALID_IR.contains(&node.op.as_str()) {
+            continue;
+        }
         class_nodes
             .entry(node.eclass.clone())
             .or_default()
             .push(nid.clone());
     }
+    class_nodes.retain(|_, v| !v.is_empty());
+    if class_nodes.is_empty() {
+        println!("No legal nodes after applying INVALID_IR.");
+        return;
+    }
 
-    // reachable classes
-    let mut reach = FxHashSet::default();
-    let mut stack: Vec<_> = egraph.root_eclasses.iter().collect_vec();
-    while let Some(cid) = stack.pop() {
-        if reach.insert(cid.clone())
-            && let Some(ns) = class_nodes.get(&cid)
-        {
-            for nid in ns {
-                stack.extend(
-                    egraph.nodes[nid]
-                        .children
-                        .iter()
-                        .map(|c| egraph.nid_to_cid(c)),
-                );
+    // ───────────────────────── helper: fingerprint to dedup expressions
+    fn signature(er: &ExtractionResult) -> String {
+        let mut v: Vec<_> = er
+            .choices
+            .iter()
+            .map(|(c, n)| format!("{:?}:{:?}", c, n))
+            .collect();
+        v.sort();
+        v.join("|")
+    }
+
+    // ───────────────────────── 2. DFS that grows the sub-DAG lazily
+    fn dfs<'a>(
+        stack: Vec<&'a ClassId>, // classes still needing a choice
+        class_nodes: &'a FxHashMap<ClassId, Vec<NodeId>>,
+        current: &mut FxHashMap<&'a ClassId, &'a NodeId>, // building extraction
+        printed: &mut usize,
+        egraph: &'a EGraph,
+        inputs: &[Vec<f32>],
+        seen: &mut FxHashSet<String>,     // already timed signatures
+        tmp_memo: &mut FxHashSet<String>, // memo passed to cost()
+        prev_outputs: &mut Vec<Vec<f32>>,
+    ) {
+        if *printed >= MAX_SEARCHED_GRAPHS {
+            return;
+        }
+
+        if stack.is_empty() {
+            // Complete extraction → evaluate cost
+            let er = ExtractionResult {
+                choices: current.clone(),
+                ..Default::default()
+            };
+            if !seen.insert(signature(&er)) {
+                return; // duplicate expression
             }
+            if let Some((us, outputs)) = cost(&er, egraph, inputs, tmp_memo, *printed) {
+                println!(
+                    "{}{}",
+                    format!("Graph {printed} ").bold(),
+                    format!("{us}µs").bright_green().bold()
+                );
+                if prev_outputs.is_empty() {
+                    *prev_outputs = outputs;
+                } else {
+                    for (a, b) in prev_outputs.iter().zip(&outputs) {
+                        for (a, b) in a.iter().zip(b) {
+                            if (*a - *b).abs() > 1e-3 {
+                                panic!("{a} | {b}");
+                            }
+                        }
+                    }
+                    println!("{}", "Outputs Validated".on_bright_green());
+                }
+                *printed += 1;
+            }
+            return;
+        }
+
+        // Pick the next class (LIFO for small stack, cheap heuristic)
+        let mut stack = stack;
+        let cid = stack.pop().unwrap();
+
+        // If this class already has a node chosen, just continue
+        if current.contains_key(&cid) {
+            dfs(
+                stack,
+                class_nodes,
+                current,
+                printed,
+                egraph,
+                inputs,
+                seen,
+                tmp_memo,
+                prev_outputs,
+            );
+            return;
+        }
+
+        // No legal node? – dead branch
+        let Some(nodes) = class_nodes.get(&cid) else {
+            return;
+        };
+
+        // Branch over every legal node in this class
+        for nid in nodes {
+            current.insert(cid, nid);
+
+            // Push the children classes of this chosen node
+            let mut next_stack = stack.clone();
+            for child in &egraph.nodes[nid].children {
+                let ccid = egraph.nid_to_cid(child);
+                if class_nodes.contains_key(&ccid) && !current.contains_key(&ccid) {
+                    next_stack.push(ccid);
+                }
+            }
+
+            dfs(
+                next_stack,
+                class_nodes,
+                current,
+                printed,
+                egraph,
+                inputs,
+                seen,
+                tmp_memo,
+                prev_outputs,
+            );
+            current.remove(&cid);
         }
     }
 
-    let mut classes: Vec<_> = reach
-        .into_iter()
-        .filter(|c| egraph.classes().contains_key(c))
-        .filter(|c| {
-            egraph.classes()[c]
-                .nodes
-                .iter()
-                .any(|n| !INVALID_IR.contains(&egraph.nodes[n].op.as_str()))
-        })
+    // ───────────────────────── 3. kick it off from the roots
+    let initial_stack: Vec<&ClassId> = egraph
+        .root_eclasses
+        .iter()
+        .filter(|cid| class_nodes.contains_key(*cid))
         .collect();
-    classes.sort();
 
-    // depth-first cartesian product
-    fn dfs(
-        idx: usize,
-        classes: &[ClassId],
-        class_nodes: &FxHashMap<ClassId, Vec<NodeId>>,
-        cur: &mut FxHashMap<ClassId, NodeId>,
-        accepted: &mut usize,
-        eg: &EGraph,
-        inputs: &[Vec<f32>],
-        memo: &mut FxHashSet<String>,
-    ) {
-        if *accepted >= MAX_SEARCHED_GRAPHS {
-            return;
-        }
-        if idx == classes.len() {
-            let er = ExtractionResult {
-                choices: cur.clone(),
-            };
-
-            if let Some(c) = cost(&er, eg, inputs, memo) {
-                println!(
-                    "{}{}",
-                    format!("Graph {accepted} ").bold(),
-                    format!("{c}µs").bright_green().bold()
-                );
-                *accepted += 1;
-            }
-            return;
-        }
-        let cid = &classes[idx];
-        for nid in &class_nodes[cid] {
-            // println!("{:?}", nid);
-            if INVALID_IR.contains(&eg.nodes[nid].op.as_str()) {
-                continue;
-            }
-            cur.insert(cid.clone(), nid.clone());
-            dfs(
-                idx + 1,
-                classes,
-                class_nodes,
-                cur,
-                accepted,
-                eg,
-                inputs,
-                memo,
-            );
-        }
-        cur.remove(cid);
+    if initial_stack.is_empty() {
+        println!("Roots contain no legal nodes.");
+        return;
     }
 
     dfs(
-        0,
-        &classes,
+        initial_stack,
         &class_nodes,
         &mut FxHashMap::default(),
         &mut 0,
-        &egraph,
+        egraph,
         inputs,
-        &mut FxHashSet::default(),
+        &mut FxHashSet::default(), // seen signatures
+        &mut FxHashSet::default(), // memo for cost()
+        &mut vec![],
     );
 }
 
 #[derive(Default, Clone)]
-pub struct ExtractionResult {
-    pub choices: FxHashMap<ClassId, NodeId>,
+pub struct ExtractionResult<'a> {
+    pub choices: FxHashMap<&'a ClassId, &'a NodeId>,
 }
 
-fn cost(
-    extraction: &ExtractionResult,
-    egraph: &EGraph,
+fn cost<'a>(
+    extraction: &'a ExtractionResult<'a>,
+    egraph: &'a EGraph,
     inputs: &[Vec<f32>],
     memo: &mut FxHashSet<String>,
-) -> Option<Cost> {
+    n_graph: usize,
+) -> Option<(Cost, Vec<Vec<f32>>)> {
     // Convert to a petgraph and find the root node
     let graph = extraction_to_graph(egraph, extraction, &egraph.root_eclasses)?;
-    let root = graph.externals(Direction::Outgoing).next().unwrap();
-    // Codegen
-    let kernels = crate::codegen::codegen(graph, root, GPUArch::Metal(HashMap::new()));
-
-    let key = kernels
-        .node_weights()
-        .map(|k| format!("{}{:?}{:?}", k.code, k.grid, k.threadblock))
-        .join("");
+    let key = serde_json::to_string(&graph).unwrap();
     if memo.contains(&key) {
         return None;
     }
     memo.insert(key);
+    let root = graph.externals(Direction::Outgoing).next().unwrap();
 
+    // Codegen
+    let kernels =
+        crate::codegen::codegen(graph.clone(), root, GPUArch::Metal(HashMap::new()), n_graph)?;
     // Print kernels
     if option_env!("PRINT_KERNELS")
         .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
@@ -160,11 +210,12 @@ fn cost(
                 grid,
                 threadblock,
                 smem,
-                ..
+                outputs,
             } = kernels.node_weight(node).unwrap();
             if code != "Inputs" && code != "Outputs" {
                 println!("Kernel {i} Grid: {grid:?} Threadblock: {threadblock:?} Smem: {smem}");
                 println!("{code}");
+                println!("Outputs: {:?}", outputs);
             }
         }
     }
@@ -175,11 +226,13 @@ fn cost(
     }
     // Test runtime
     let mut micros = vec![];
+    let mut outputs = vec![];
+    let mut m;
     for _ in 0..TRIALS {
-        let (_outputs, m) = run_graph(inputs, &kernels);
+        (outputs, m) = run_graph(inputs, &kernels);
         micros.push(m);
     }
-    Some(micros.into_iter().sum::<u128>() / TRIALS as u128)
+    Some((micros.into_iter().sum::<u128>() / TRIALS as u128, outputs))
 }
 
 /// Build a StableGraph from an ExtractionResult.
@@ -193,20 +246,20 @@ pub fn extraction_to_graph(
     egraph: &EGraph,
     extraction: &ExtractionResult,
     roots: &[ClassId],
-) -> Option<StableGraph<GraphTerm, u8, Directed>> {
+) -> Option<StableGraph<GraphTerm, (), Directed>> {
     // display_graph(&extraction_to_petgraph(egraph, extraction), &[]);
-    let mut g: StableGraph<GraphTerm, u8, Directed> = StableGraph::new();
+    let mut g: StableGraph<GraphTerm, (), Directed> = StableGraph::new();
 
     fn emit<'a>(
         nid: &'a NodeId,
         egraph: &'a EGraph,
         extraction: &'a ExtractionResult,
-        g: &mut StableGraph<GraphTerm, u8, Directed>,
+        g: &mut StableGraph<GraphTerm, (), Directed>,
         seen: &mut HashMap<&'a NodeId, usize>,
     ) -> Option<NodeIndex> {
         let mut pick_child = |child| {
             let child_cid = egraph.nid_to_cid(child);
-            let Some(mut child_nid) = extraction.choices.get(child_cid) else {
+            let Some(mut child_nid) = extraction.choices.get(child_cid).copied() else {
                 return None;
             };
             if seen
@@ -219,21 +272,30 @@ pub fn extraction_to_graph(
                     .nodes
                     .iter()
                     .find(|n| seen.get(*n).map(|s| *s <= MAX_CYCLES).unwrap_or(true))
-                    .unwrap();
+                    .expect(&format!("{:?}", child_cid));
             }
             *seen.entry(child_nid).or_default() += 1;
             let r = emit(child_nid, egraph, extraction, g, seen);
-            *seen.get_mut(child_nid).unwrap() += 1;
+            *seen.get_mut(child_nid).unwrap() -= 1;
             r
         };
         let enode = &egraph.nodes[nid];
         match enode.op.as_str() {
-            "GMEM" => Some(g.add_node(GraphTerm::GMEM { label: None })),
+            "GMEM" => Some(
+                g.add_node(GraphTerm::GMEM {
+                    label: Some(
+                        egraph.nodes[&enode.children[0]]
+                            .op
+                            .replace("Boxed(\"", "")
+                            .replace("\")", ""),
+                    ),
+                }),
+            ),
             "SMEM" => Some(g.add_node(GraphTerm::SMEM)),
             "SMEMLoad" => Some(g.add_node(GraphTerm::SMEMLoad)),
             "SMEMRead" => Some(g.add_node(GraphTerm::SMEMRead)),
             "NewAcc" => Some(g.add_node(GraphTerm::NewAcc {
-                starting_value: "acc".into(),
+                starting_value: "0.0".into(),
             })),
 
             // LoopIn  = (LoopIn <expr> <LoopType> <Math>)
@@ -243,8 +305,12 @@ pub fn extraction_to_graph(
                 let stride =
                     convert_math(egraph.nid_to_cid(&enode.children[2]), egraph, extraction)?;
                 let child = pick_child(&enode.children[0])?;
-                let n = g.add_node(GraphTerm::LoopIn { range, stride });
-                g.add_edge(child, n, 0);
+                let n = g.add_node(GraphTerm::LoopIn {
+                    range,
+                    stride,
+                    marker: "".to_string(),
+                });
+                g.add_edge(child, n, ());
                 Some(n)
             }
 
@@ -256,8 +322,12 @@ pub fn extraction_to_graph(
                     convert_math(egraph.nid_to_cid(&enode.children[2]), egraph, extraction)?;
 
                 let child = pick_child(&enode.children[0])?;
-                let n = g.add_node(GraphTerm::LoopOut { range, stride });
-                g.add_edge(child, n, 0);
+                let n = g.add_node(GraphTerm::LoopOut {
+                    range,
+                    stride,
+                    marker: "".to_string(),
+                });
+                g.add_edge(child, n, ());
                 Some(n)
             }
 
@@ -270,8 +340,8 @@ pub fn extraction_to_graph(
                     "Max" => GraphTerm::Max,
                     _ => panic!(),
                 });
-                g.add_edge(a, n, 0);
-                g.add_edge(b, n, 0);
+                g.add_edge(a, n, ());
+                g.add_edge(b, n, ());
                 Some(n)
             }
             "Exp" | "Sin" | "Recip" | "Neg" => {
@@ -283,10 +353,13 @@ pub fn extraction_to_graph(
                     "Neg" => GraphTerm::Neg,
                     _ => panic!(),
                 });
-                g.add_edge(a, n, 0);
+                g.add_edge(a, n, ());
                 Some(n)
             }
-            "Unary" | "Binary" | "SwapLoops" => return None,
+            "Unary" | "Binary" | "SwapLoops" => {
+                println!("expr {}", enode.op);
+                return None;
+            }
             _ => unreachable!("unsupported op {}", enode.op),
         }
     }
@@ -313,7 +386,9 @@ fn convert_math(
     ) -> Option<Expression> {
         let enode = &egraph.nodes[nid];
         let mut make_child = |child_cid: &ClassId| -> Option<Expression> {
-            let mut child_nid = &extraction.choices[child_cid];
+            let Some(mut child_nid) = extraction.choices.get(child_cid).copied() else {
+                return None;
+            };
             if seen
                 .get(child_nid)
                 .map(|s| *s > MAX_CYCLES)
@@ -375,13 +450,16 @@ fn convert_math(
                     "MMax" => lhs.max(rhs),
                     "MAnd" => lhs & rhs,
                     "MOr" => lhs | rhs,
-                    "MFloorTo" => todo!(),
+                    "MFloorTo" => lhs / rhs * rhs, // NOT CORRECT, NEED FLOORTO IN EXPRESSIONS
                     _ => unreachable!(),
                 }
             }
 
             // ----------- ternary -----------
-            "MReplace" => return None,
+            "MReplace" => {
+                // println!("replace");
+                return None;
+            }
 
             // ----------- accumulator marker -----------
             "MAccum" => {

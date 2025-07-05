@@ -17,24 +17,9 @@
     (MAccum String) ; this marks that we feed the output (also marked with MAccum) back in
 )
 
-; Communative
-;(rewrite (MAdd a b) (MAdd b a))
-;(rewrite (MMul a b) (MMul b a))
-;(rewrite (MMin a b) (MMin b a))
-;(rewrite (MMax a b) (MMax b a))
-;(rewrite (MAnd a b) (MAnd b a))
-;(rewrite (MOr a b) (MOr b a))
-
 ; Associative
 (rewrite (MAdd (MAdd a b) c) (MAdd a (MAdd b c)))
 (rewrite (MMul (MMul a b) c) (MMul a (MMul b c)))
-;(rewrite (MDiv (MDiv a b) c) (MDiv a (MMul b c)))
-;(rewrite (MDiv (MMul a b) c) (MMul a (MDiv b c)))
-;(rewrite (MMul a (MDiv b c)) (MDiv (MMul a b) c))
-
-; Distributive
-;(rewrite (MMul a (MAdd b c)) (MAdd (MMul a b) (MMul a c)))
-;(rewrite (MDiv (MAdd a b) c) (MAdd (MDiv a c) (MDiv b c)))
 
 ; Constant folding
 (rewrite (MAdd (MNum a) (MNum b)) (MNum (+ a b)))
@@ -44,11 +29,6 @@
 (rewrite (MMax (MNum a) (MNum b)) (MNum (max a b)))
 (rewrite (MMin (MNum a) (MNum b)) (MNum (min a b)))
 (rewrite (MAnd (MNum a) (MNum b)) (MNum (& a b)))
-;(rewrite (MOr (MNum a) (MNum b)) (MNum (| a b)))
-
-; Factoring
-;(rewrite (MAdd (MMul a b) (MMul a c)) (MMul a (MAdd b c)))
-;(rewrite (MAdd a a) (MMul (MNum 2) a))
 
 ; Simple reductions
 (rewrite (MAdd a (MNum 0)) a)
@@ -57,10 +37,6 @@
 (rewrite (MDiv a (MNum 1)) a)
 (rewrite (MMul (MDiv ?a ?b) ?b) (MFloorTo ?a ?b))
 (rewrite (MAdd (MFloorTo ?a ?b) (MMod ?a ?b)) ?a)
-
-
-; Other
-;(rewrite (MAdd (MDiv a b) c) (MDiv (MAdd a (MMul c b)) b))
 
 ; Replacement
 (rewrite (MReplace ?x ?y ?z) ?z :when ((= ?x ?y)))
@@ -84,7 +60,7 @@
 (datatype*
  	(Expr
   		; General kernel stuff
-     	(GMEM)
+     	(GMEM String)
      	(LoopIn Expr LoopType Math)
      	(LoopOut Expr LoopType Math)
       	(SMEM)
@@ -127,10 +103,10 @@
 (rewrite (Binary "Max" ?a ?b) (Max ?a ?b))
 
 ; Communative binary ops
-(rewrite (Binary ?bin ?a ?b) (Binary ?bin ?b ?a))
+;(rewrite (Binary ?bin ?a ?b) (Binary ?bin ?b ?a))
 ; distributive/associative skeletons so sums and products re-associate
-(rewrite (Add (Add ?a ?b) ?c) (Add ?a (Add ?b ?c)))
-(rewrite (Mul (Mul ?a ?b) ?c) (Mul ?a (Mul ?b ?c)))
+;(rewrite (Add (Add ?a ?b) ?c) (Add ?a (Add ?b ?c)))
+;(rewrite (Mul (Mul ?a ?b) ?c) (Mul ?a (Mul ?b ?c)))
 
 ; remove 1-level loop
 (rewrite
@@ -156,36 +132,41 @@
 )
 (rewrite
 	(Binary ?second (Unary ?first (LoopIn ?a ?loop ?inASt)) (LoopIn ?b ?loop ?inBSt))
-	(Binary ?second (LoopIn (LoopOut (Unary ?first (LoopIn ?a ?loop ?inASt)) ?loop  (MVar "z")) ?loop (MVar "z")) (LoopIn ?b ?loop ?inBSt))
+	(Binary ?second (LoopIn (LoopOut (Unary ?first (LoopIn ?a ?loop ?inASt)) ?loop  ?inASt) ?loop ?inASt) (LoopIn ?b ?loop ?inBSt))
 )
 (rewrite
 	(Binary ?second (Binary ?first (LoopIn ?a ?loop ?inASt) (LoopIn ?c ?loop ?inCSt)) (LoopIn ?b ?loop ?inBSt))
 	(Binary ?second (LoopIn (LoopOut (Binary ?first (LoopIn ?a ?loop ?inASt) (LoopIn ?c ?loop ?inCSt)) ?loop  (MVar "z")) ?loop (MVar "z")) (LoopIn ?b ?loop ?inBSt))
 )
+(rewrite
+	(LoopOut (Binary ?second (Unary ?first ?a) ?b) ?loop ?outSt)
+	(LoopOut (Binary ?second (LoopIn (LoopOut (Unary ?first ?a) ?loop  ?outSt) ?loop ?outSt) (LoopIn (LoopOut ?b ?loop  ?outSt) ?loop ?outSt)) ?loop ?outSt)
+)
+; PROBLEM HERE (NOT CALCULATING STRIDES CORRECTLY)
 (rewrite (LoopOut (LoopOut
 	(Unary
 		?unHere
-		(LoopIn (LoopOut ?inpA ?first ?firstStA) ?n ?inASt)
+		(LoopIn (LoopOut ?inpA (Loop ?f ?first) ?firstStA) ?n ?inASt)
 	) ?n ?st) ?lower ?lowerSt)
 	(LoopOut (LoopOut
 		(Unary
 			?unHere
 	       	(LoopIn	(LoopIn
-	           	(LoopOut (LoopOut ?inpA ?first ?firstStA) ?lower ?lowerSt)
-	       	?lower ?lowerSt) ?n ?inASt)
+	           	(LoopOut (LoopOut ?inpA (Loop ?f ?first) ?firstStA) ?lower (MMul ?first ?firstStA))
+	       	?lower (MMul ?first ?firstStA)) ?n ?inASt)
 		)
 	?n ?st) ?lower ?lowerSt)
 )
 (rewrite (LoopOut (LoopOut
     (Binary ?binHereA
-    	(LoopIn (LoopOut ?inpB ?first ?firstStB) ?n ?inBSt)
+    	(LoopIn (LoopOut ?inpB (Loop ?f ?first) ?firstStB) ?n ?inBSt)
         ?a
     ) ?n  ?st) ?lower ?lowerSt)
   	(LoopOut (LoopOut
         (Binary ?binHereA
         	(LoopIn (LoopIn
-                (LoopOut (LoopOut ?inpB ?first ?firstStB) ?lower ?lowerSt)
-            ?lower ?lowerSt) ?n ?inBSt)
+                (LoopOut (LoopOut ?inpB (Loop ?f ?first) ?firstStB) ?lower (MMul ?first ?firstStB))
+            ?lower (MMul ?first ?firstStB)) ?n ?inBSt)
             ?a
         )
     ?n  ?st) ?lower ?lowerSt)
@@ -235,39 +216,98 @@
     )
 )
 
+; Split loops
+(let tileFactor 8)
+(rewrite
+ 	(LoopOut (Unary ?spun (LoopIn ?x (Loop ?loopL (MNum ?loop)) ?stride)) (Loop ?loopL (MNum ?loop)) ?stride)
+ 	(LoopOut
+     	(LoopOut
+         	(Unary ?spun
+            	(LoopIn
+                 	(LoopIn
+                     	?x
+                     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+                     	(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+                     )
+                 	(Loop (+ ?loopL "Split") (MNum tileFactor))
+                 	?stride
+                )
+            )
+         	(Loop (+ ?loopL "Split") (MNum tileFactor))
+         	?stride
+        )
+     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+    	(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+    )
+ 	:when ((> ?loop tileFactor) (= (% ?loop tileFactor) 0))
+)
+(rewrite
+ 	(LoopOut (Binary ?spbin (LoopIn ?a (Loop ?loopL (MNum ?loop)) ?strideA) (LoopIn ?b (Loop ?loopL (MNum ?loop)) ?strideB)) (Loop ?loopL (MNum ?loop)) ?stride)
+ 	(LoopOut
+     	(LoopOut
+         	(Binary ?spbin
+            	(LoopIn
+                 	(LoopIn
+                     	?a
+                     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+                     	(MReplace ?strideA (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+                    )
+                 	(Loop (+ ?loopL "Split") (MNum tileFactor))
+                 	?strideA
+                )
+                (LoopIn
+                 	(LoopIn
+                     	?b
+                     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+                     	(MReplace ?strideB (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+                    )
+                 	(Loop (+ ?loopL "Split") (MNum tileFactor))
+                 	?strideB
+                )
+            )
+         	(Loop (+ ?loopL "Split") (MNum tileFactor))
+         	?stride
+        )
+     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+    	(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+    )
+ 	:when ((> ?loop tileFactor) (= (% ?loop tileFactor) 0))
+)
+
+; Loop swapping
+(rewrite  ; 0-1
+	(LoopOut (LoopOut ?body (Loop ?innerLoop ?innerLoopAmt) ?innerSt) (Loop ?outerLoop ?outerLoopAmt) ?outerSt)
+	(LoopOut (LoopOut (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?outerLoop ?outerLoopAmt) ?outerSt) (Loop ?innerLoop ?innerLoopAmt) ?innerSt)
+	:when ((!= ?innerLoop ?outerLoop) (!= ?innerLoopAmt ?outerLoopAmt))
+)
+(rewrite ; 0-1
+	(SwapLoops (LoopIn (LoopIn ?body (Loop ?outerLoop ?outerLoopAmt) ?outerSt) (Loop ?innerLoop ?innerLoopAmt) ?innerSt) ?innerLoop ?outerLoop)
+	(LoopIn (LoopIn ?body (Loop ?innerLoop ?innerLoopAmt) ?innerSt) (Loop ?outerLoop ?outerLoopAmt) ?outerSt)
+)
+; propogate
+(rewrite
+	(SwapLoops (LoopIn ?body (Loop ?otherLoop ?otherLoopAmt) ?otherSt) ?innerLoop ?outerLoop)
+	(LoopIn (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?otherLoop ?otherLoopAmt) ?otherSt)
+	:when ((!= ?innerLoop ?otherLoop))
+)
+(rewrite
+	(SwapLoops (LoopOut ?body (Loop ?otherLoop ?otherLoopAmt) ?otherSt) ?innerLoop ?outerLoop)
+	(LoopOut (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?otherLoop ?otherLoopAmt) ?otherSt)
+)
+(rewrite
+	(SwapLoops (Unary ?un ?body) ?innerLoop ?outerLoop)
+	(Unary ?un (SwapLoops ?body ?innerLoop ?outerLoop))
+)
+(rewrite
+	(SwapLoops (Binary ?bin ?bodyA ?bodyB) ?innerLoop ?outerLoop)
+	(Binary ?bin (SwapLoops ?bodyA ?innerLoop ?outerLoop) (SwapLoops ?bodyB ?innerLoop ?outerLoop))
+)
+(rewrite
+	(SwapLoops (NewAcc ?x) ?innerLoop ?outerLoop)
+	(NewAcc ?x)
+)
+
 ;(rewrite (Unary ?s ?x) (LoopOut (Unary ?s (LoopIn ?x (Loop "_" (MNum 1)) (MVar "z"))) (Loop "_" (MNum 1)) (MVar "z"))) ; add one-level loop
 
-; ───────────────── TESTS ─────────────────
-; Common variables
-(let tensorA (GMEM))
-(let strideOne (MVar "z"))
-
-; ───────────────── Fission test (1 loop -> 3 sequential loops) ─────────────────
-(push)
-(let loop (Loop "l" (MNum 1024)))
-(let singleLoop (Loop "one" (MNum 1)))
-(let inp
-	(LoopIn
-		(LoopIn
-			(LoopIn
-				(LoopIn
-					tensorA
-				singleLoop strideOne)
-			singleLoop strideOne)
-		singleLoop strideOne)
-	loop strideOne)
-)
-(let full
-	(LoopOut
-		(LoopOut
-			(LoopOut
-				(LoopOut
-					(Sin (Exp inp))
-				loop strideOne)
-			singleLoop strideOne)
-		singleLoop strideOne)
-	singleLoop strideOne)
-)
-
-(run 50)
-;(check (= full (LoopOut (Unary "Sin" (LoopIn (LoopOut (Unary "Exp" (LoopIn tensorA loop strideOne)) loop strideOne) loop strideOne)) loop strideOne)))
+{code}
+(run 14)

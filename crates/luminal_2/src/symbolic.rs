@@ -1,6 +1,7 @@
 use egg::*;
 use generational_box::{AnyStorage, GenerationalBox, Owner, UnsyncStorage};
 use rustc_hash::FxHashMap;
+use serde::{Serialize, Serializer};
 use std::{
     cell::RefCell,
     fmt::Debug,
@@ -13,7 +14,7 @@ use std::{
 use symbolic_expressions::Sexp;
 
 thread_local! {
-    static EXPRESSION_OWNER: RefCell<Option<Owner<UnsyncStorage>>> = RefCell::new(Some(UnsyncStorage::owner()));
+   static EXPRESSION_OWNER: RefCell<Option<Owner<UnsyncStorage>>> = RefCell::new(Some(UnsyncStorage::owner()));
 }
 
 /// Clean up symbolic expresion storage
@@ -22,13 +23,23 @@ pub fn expression_cleanup() {
 }
 
 /// Get the thread-local owner of expression storage
-fn expression_owner() -> Owner {
+pub fn expression_owner() -> Owner {
     EXPRESSION_OWNER.with(|cell| cell.borrow().clone().unwrap())
 }
 
 #[derive(Clone, Copy)]
 pub struct Expression {
     pub terms: GenerationalBox<Vec<Term>>,
+}
+
+impl Serialize for Expression {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Access the Vec<Term> inside the GenerationalBox and serialize it
+        self.terms.read().serialize(serializer)
+    }
 }
 
 impl Expression {
@@ -56,7 +67,7 @@ impl Default for Expression {
 }
 
 /// A single term of a symbolic expression such as a variable, number or operation.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum Term {
     Num(i32),
     Var(char),
@@ -134,6 +145,19 @@ impl Term {
             _ => None,
         }
     }
+    pub fn to_egglog(self) -> String {
+        match self {
+            Term::Add => "MAdd",
+            Term::Sub => "MSub",
+            Term::Mul => "MMul",
+            Term::Div => "MDiv",
+            Term::Mod => "MMod",
+            Term::Max => "MMax",
+            Term::Min => "MMin",
+            _ => panic!("egglog doesn't implement {self:?}"),
+        }
+        .to_string()
+    }
 }
 
 impl<T> PartialEq<T> for Expression
@@ -180,6 +204,37 @@ impl Debug for Expression {
             symbols.push(new_symbol);
         }
         write!(f, "{}", symbols.pop().unwrap_or_default())
+    }
+}
+
+impl Expression {
+    pub fn to_egglog(&self) -> String {
+        let mut symbols = vec![];
+        for term in self.terms.read().iter() {
+            let new_symbol = match term {
+                Term::Num(n) => format!("(MNum {n})"),
+                Term::Var(c) => format!("(MVar \"{c}\")"),
+                Term::Acc(s) => format!("(MAccum \"{s}\")"),
+                Term::Max => format!(
+                    "(MMax {} {})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+                Term::Min => format!(
+                    "(MMin {} {})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+                _ => format!(
+                    "({} {} {})",
+                    term.to_egglog(),
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+            };
+            symbols.push(new_symbol);
+        }
+        symbols.pop().unwrap_or_default()
     }
 }
 

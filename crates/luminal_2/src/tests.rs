@@ -5,85 +5,10 @@ use std::collections::HashMap;
 use crate::{
     GraphTerm,
     symbolic::{Expression, Term},
+    utils::*,
 };
 
-fn unary(
-    a: NodeIndex,
-    term: GraphTerm,
-    graph: &mut StableGraph<GraphTerm, u8, Directed>,
-) -> NodeIndex {
-    let tmp = graph.add_node(term);
-    graph.add_edge(a, tmp, 0);
-    tmp
-}
-
-fn binary(
-    a: NodeIndex,
-    b: NodeIndex,
-    term: GraphTerm,
-    graph: &mut StableGraph<GraphTerm, u8, Directed>,
-) -> NodeIndex {
-    let tmp = graph.add_node(term);
-    graph.add_edge(a, tmp, 0);
-    graph.add_edge(b, tmp, 0);
-    tmp
-}
-
-fn loop_in(
-    node: NodeIndex,
-    range: impl Into<Expression>,
-    stride: impl Into<Expression>,
-    graph: &mut StableGraph<GraphTerm, u8, Directed>,
-) -> NodeIndex {
-    unary(
-        node,
-        GraphTerm::LoopIn {
-            range: range.into(),
-            stride: stride.into(),
-        },
-        graph,
-    )
-}
-
-fn loop_out(
-    node: NodeIndex,
-    range: impl Into<Expression>,
-    stride: impl Into<Expression>,
-    graph: &mut StableGraph<GraphTerm, u8, Directed>,
-) -> NodeIndex {
-    unary(
-        node,
-        GraphTerm::LoopOut {
-            range: range.into(),
-            stride: stride.into(),
-        },
-        graph,
-    )
-}
-
-fn pad_in(
-    mut node: NodeIndex,
-    graph: &mut StableGraph<GraphTerm, u8, Directed>,
-    levels: usize,
-) -> NodeIndex {
-    for _ in 0..levels {
-        node = loop_in(node, 1, 0, graph);
-    }
-    node
-}
-
-fn pad_out(
-    mut node: NodeIndex,
-    graph: &mut StableGraph<GraphTerm, u8, Directed>,
-    levels: usize,
-) -> NodeIndex {
-    for _ in 0..levels {
-        node = loop_out(node, 1, 0, graph);
-    }
-    node
-}
-
-pub fn make_complex_kernel() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
+pub fn make_complex_kernel() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
     let mut graph = StableGraph::new();
     let a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
@@ -93,10 +18,12 @@ pub fn make_complex_kernel() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex
             pad_in(a, &mut graph, 6),
             50,
             Expression::from('z') * 5,
+            'a',
             &mut graph,
         ),
         5,
         'z',
+        'b',
         &mut graph,
     );
 
@@ -105,16 +32,17 @@ pub fn make_complex_kernel() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex
         label: Some("acc".to_string()),
     });
     let in_exp_acc = loop_in(
-        loop_in(pad_in(slin0, &mut graph, 6), 50, 'z', &mut graph),
+        loop_in(pad_in(slin0, &mut graph, 6), 50, 'z', 'a', &mut graph),
         5,
         Term::Acc('z'),
+        'b',
         &mut graph,
     );
 
     // Exp-acc
     let exp = unary(in_a, GraphTerm::Exp, &mut graph);
     let add_acc = binary(exp, in_exp_acc, GraphTerm::Add, &mut graph);
-    let add_acc_out = loop_out(add_acc, 5, Term::Acc('z'), &mut graph);
+    let add_acc_out = loop_out(add_acc, 5, Term::Acc('z'), 'b', &mut graph);
 
     // Sin
     let sin = unary(add_acc_out, GraphTerm::Sin, &mut graph);
@@ -123,19 +51,20 @@ pub fn make_complex_kernel() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex
     let b = graph.add_node(GraphTerm::GMEM {
         label: Some("B".to_string()),
     });
-    let in_b = loop_in(pad_in(b, &mut graph, 6), 50, 'z', &mut graph);
+    let in_b = loop_in(pad_in(b, &mut graph, 6), 50, 'z', 'a', &mut graph);
 
     // Mul
     let mul = binary(sin, in_b, GraphTerm::Mul, &mut graph);
 
-    let mul_out = loop_out(mul, 50, 'z', &mut graph);
+    let mul_out = loop_out(mul, 50, 'z', 'a', &mut graph);
 
     let mut out = pad_out(mul_out, &mut graph, 6);
     out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);
     (graph, out)
 }
 
-pub fn make_sum_reduce() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
+#[test]
+fn test_sum_reduce() {
     let mut graph = StableGraph::new();
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
@@ -152,11 +81,18 @@ pub fn make_sum_reduce() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
     out = loop_out(out, 5, Term::Acc('z'), &mut graph);
     out = pad_out(out, &mut graph, 6);
     out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);
-    (graph, out)
+
+    let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new()), 0).unwrap();
+    let input = vec![0., 1., 2., 3., 4.];
+    let outputs = run_graph(&[input], &kernels).0;
+    assert_eq!(outputs[0], vec![10.0]);
+    expression_cleanup();
 }
 
-pub fn make_matmul(m: i32, k: i32, n: i32) -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
+#[test]
+fn test_matmul() {
     let mut graph = StableGraph::new();
+    let (m, k, n) = (3, 4, 5);
 
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
@@ -191,14 +127,36 @@ pub fn make_matmul(m: i32, k: i32, n: i32) -> (StableGraph<GraphTerm, u8, Direct
     out = loop_out(out, n, 'z', &mut graph);
     out = loop_out(out, m, Expression::from('z') * n, &mut graph);
     out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);
-    (graph, out)
+    let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new()), 0).unwrap();
+    let a = vec![
+        [1.5410, -0.2934, -2.1788, 0.5684],
+        [-1.0845, -1.3986, 0.4033, 0.8380],
+        [-0.7193, -0.4033, -0.5966, 0.1820],
+    ]
+    .into_flattened();
+    let b = vec![
+        [0.4681, -0.1577, 1.4437, 0.2660, -0.1740],
+        [-0.6787, 0.9383, 0.4889, -0.6731, 0.8728],
+        [1.0554, 0.1778, -0.5181, -0.3067, -1.5810],
+        [1.7066, -0.4462, 0.7440, 1.5210, 3.4105],
+    ]
+    .into_flattened();
+    let outputs = run_graph(&[a, b], &kernels).0.pop().unwrap();
+    let pt_output = vec![
+        [-0.4088, -1.1595, 3.6329, 2.1403, 4.8591],
+        [2.2975, -1.4434, -1.8349, 1.8038, 1.1883],
+        [-0.3819, -0.4523, -0.7910, 0.5400, 1.3372],
+    ]
+    .into_flattened();
+    for (a, b) in outputs.into_iter().zip(pt_output) {
+        assert!((a - b).abs() < 1e-3);
+    }
+    expression_cleanup();
 }
 
-pub fn make_tiled_matmul_basic(
-    m: i32,
-    k: i32,
-    n: i32,
-) -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
+#[test]
+fn test_tiled_matmul_basic() {
+    let (m, k, n) = (16, 8, 32);
     let mut graph = StableGraph::new();
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
@@ -276,422 +234,7 @@ pub fn make_tiled_matmul_basic(
         &mut graph,
     );
     out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);
-    (graph, out)
-}
-
-pub fn make_tiled_matmul(
-    m: i32,
-    k: i32,
-    n: i32,
-) -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
-    let mut graph = StableGraph::new();
-    let mut a = graph.add_node(GraphTerm::GMEM {
-        label: Some("A".to_string()),
-    });
-    a = loop_in(
-        a,
-        Expression::from(m) / 8,
-        Expression::from('z') * k * 8,
-        &mut graph,
-    );
-    a = loop_in(a, Expression::from(n) / 8, 0, &mut graph);
-    a = pad_in(a, &mut graph, 1);
-    a = loop_in(a, 8, Expression::from('z') * k, &mut graph);
-    a = loop_in(a, 8, 'z', &mut graph);
-    a = pad_in(a, &mut graph, 1);
-    a = loop_in(
-        a,
-        Expression::from(k) / 8,
-        Expression::from('z') * 8,
-        &mut graph,
-    );
-
-    let smem_a_orig = graph.add_node(GraphTerm::SMEM);
-    let mut smem_a = loop_in(smem_a_orig, 8, Expression::from('z') * 8, &mut graph);
-    smem_a = loop_in(smem_a, 8, 'z', &mut graph);
-    smem_a = pad_in(smem_a, &mut graph, 1);
-    smem_a = loop_in(smem_a, k / 8, 0, &mut graph);
-    smem_a = binary(smem_a, a, GraphTerm::SMEMLoad, &mut graph);
-
-    let mut smem_read_a = loop_in(smem_a_orig, 8, Expression::from('z') * 8, &mut graph);
-    smem_read_a = loop_in(smem_read_a, 8, 0, &mut graph);
-    smem_read_a = pad_in(smem_read_a, &mut graph, 1);
-    smem_read_a = loop_in(smem_read_a, k / 8, 0, &mut graph);
-    a = binary(smem_read_a, smem_a, GraphTerm::SMEMRead, &mut graph);
-    a = loop_in(a, 8, 'z', &mut graph);
-
-    let mut b = graph.add_node(GraphTerm::GMEM {
-        label: Some("B".to_string()),
-    });
-    b = loop_in(b, Expression::from(m) / 8, 0, &mut graph);
-    b = loop_in(
-        b,
-        Expression::from(n) / 8,
-        Expression::from('z') * 8,
-        &mut graph,
-    );
-    b = pad_in(b, &mut graph, 1);
-    b = loop_in(b, 8, Expression::from('z') * n, &mut graph);
-    b = loop_in(b, 8, 'z', &mut graph);
-    b = pad_in(b, &mut graph, 1);
-    b = loop_in(
-        b,
-        Expression::from(k) / 8,
-        Expression::from('z') * n * 8,
-        &mut graph,
-    );
-    let smem_b_orig = graph.add_node(GraphTerm::SMEM);
-    let mut smem_b = loop_in(smem_b_orig, 8, Expression::from('z') * 8, &mut graph);
-    smem_b = loop_in(smem_b, 8, 'z', &mut graph);
-    smem_b = pad_in(smem_b, &mut graph, 1);
-    smem_b = loop_in(smem_b, k / 8, 0, &mut graph);
-    smem_b = binary(smem_b, b, GraphTerm::SMEMLoad, &mut graph);
-
-    let mut smem_read_b = loop_in(smem_b_orig, 8, 0, &mut graph);
-    smem_read_b = loop_in(smem_read_b, 8, Expression::from('z'), &mut graph);
-    smem_read_b = pad_in(smem_read_b, &mut graph, 1);
-    smem_read_b = loop_in(smem_read_b, k / 8, 0, &mut graph);
-    b = binary(smem_read_b, smem_b, GraphTerm::SMEMRead, &mut graph);
-    b = loop_in(b, 8, Expression::from('z') * 8, &mut graph);
-
-    let mut acc = graph.add_node(GraphTerm::NewAcc {
-        starting_value: "0.0".to_string(),
-    });
-    acc = loop_in(acc, Expression::from(k) / 8, Term::Acc('a'), &mut graph);
-    acc = loop_in(acc, 8, Term::Acc('b'), &mut graph);
-
-    let mut out = binary(
-        binary(a, b, GraphTerm::Mul, &mut graph),
-        acc,
-        GraphTerm::Add,
-        &mut graph,
-    );
-
-    out = loop_out(out, 8, Term::Acc('b'), &mut graph);
-    out = loop_out(out, Expression::from(k) / 8, Term::Acc('a'), &mut graph);
-    out = pad_out(out, &mut graph, 1);
-    out = loop_out(out, 8, 'z', &mut graph);
-    out = loop_out(out, 8, Expression::from('z') * n, &mut graph);
-    out = pad_out(out, &mut graph, 1);
-    out = loop_out(
-        out,
-        Expression::from(n) / 8,
-        Expression::from('z') * 8,
-        &mut graph,
-    );
-    out = loop_out(
-        out,
-        Expression::from(m) / 8,
-        Expression::from('z') * n * 8,
-        &mut graph,
-    );
-    out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);
-    (graph, out)
-}
-
-pub fn make_naive_attention() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
-    let mut graph = StableGraph::new();
-
-    let n_qkv = 4;
-    let d = 5;
-
-    // inputs
-    let mut q = graph.add_node(GraphTerm::GMEM {
-        label: Some("Q".to_string()),
-    });
-    q = loop_in(q, n_qkv, Expression::from('z') * d, &mut graph);
-    q = loop_in(q, n_qkv, 0, &mut graph);
-    q = pad_in(q, &mut graph, 4);
-    q = loop_in(q, d, 'z', &mut graph);
-    let mut k = graph.add_node(GraphTerm::GMEM {
-        label: Some("K".to_string()),
-    });
-    k = loop_in(k, n_qkv, 0, &mut graph);
-    k = loop_in(k, n_qkv, Expression::from('z') * d, &mut graph);
-    k = pad_in(k, &mut graph, 4);
-    k = loop_in(k, d, 'z', &mut graph);
-    let mut v = graph.add_node(GraphTerm::GMEM {
-        label: Some("V".to_string()),
-    });
-    v = loop_in(v, n_qkv, 0, &mut graph);
-    v = pad_in(v, &mut graph, 5);
-    v = loop_in(v, n_qkv, Expression::from('z') * d, &mut graph);
-    v = loop_in(v, d, 'z', &mut graph);
-
-    // accumulators
-    let mut dot_acc = graph.add_node(GraphTerm::NewAcc {
-        starting_value: "0.0".to_string(),
-    });
-    dot_acc = loop_in(dot_acc, d, Term::Acc('d'), &mut graph);
-    let mut score_max_acc = graph.add_node(GraphTerm::NewAcc {
-        starting_value: "-INFINITY".to_string(),
-    });
-    score_max_acc = loop_in(score_max_acc, n_qkv, Term::Acc('m'), &mut graph);
-    let mut exp_sum_acc = graph.add_node(GraphTerm::NewAcc {
-        starting_value: "0.0".to_string(),
-    });
-    exp_sum_acc = loop_in(exp_sum_acc, n_qkv, Term::Acc('e'), &mut graph);
-    let mut output_acc = graph.add_node(GraphTerm::NewAcc {
-        starting_value: "0.0".to_string(),
-    });
-    output_acc = loop_in(output_acc, n_qkv, Term::Acc('o'), &mut graph);
-    output_acc = loop_in(output_acc, d, 'z', &mut graph);
-
-    // get dot products
-    let mut dots = binary(
-        binary(q, k, GraphTerm::Mul, &mut graph),
-        dot_acc,
-        GraphTerm::Add,
-        &mut graph,
-    );
-    dots = loop_out(dots, d, Term::Acc('d'), &mut graph);
-    dots = pad_out(dots, &mut graph, 4);
-    dots = loop_out(dots, n_qkv, 'z', &mut graph);
-    dots = loop_out(dots, n_qkv, Expression::from('z') * n_qkv, &mut graph);
-
-    // get max
-    let mut dots_in = loop_in(dots, n_qkv, Expression::from('z') * n_qkv, &mut graph);
-    dots_in = pad_in(dots_in, &mut graph, 5);
-    dots_in = loop_in(dots_in, n_qkv, 'z', &mut graph);
-    let mut max = binary(score_max_acc, dots_in, GraphTerm::Max, &mut graph);
-    max = loop_out(max, n_qkv, Term::Acc('m'), &mut graph);
-    max = pad_out(max, &mut graph, 5);
-    max = loop_out(max, n_qkv, 'z', &mut graph);
-
-    // get exp sum
-    let mut max_in = loop_in(max, n_qkv, 'z', &mut graph);
-    max_in = pad_in(max_in, &mut graph, 5);
-    max_in = loop_in(max_in, n_qkv, 0, &mut graph);
-    let mut exp_sum = binary(
-        unary(
-            binary(
-                dots_in,
-                unary(max_in, GraphTerm::Neg, &mut graph),
-                GraphTerm::Add,
-                &mut graph,
-            ),
-            GraphTerm::Exp,
-            &mut graph,
-        ),
-        exp_sum_acc,
-        GraphTerm::Add,
-        &mut graph,
-    );
-    exp_sum = loop_out(exp_sum, n_qkv, Term::Acc('e'), &mut graph);
-    exp_sum = pad_out(exp_sum, &mut graph, 5);
-    exp_sum = loop_out(exp_sum, n_qkv, 'z', &mut graph);
-
-    // get final scores
-    let mut exp_sum_in = loop_in(exp_sum, n_qkv, 'z', &mut graph);
-    exp_sum_in = pad_in(exp_sum_in, &mut graph, 5);
-    exp_sum_in = loop_in(exp_sum_in, n_qkv, 0, &mut graph);
-    let mut final_scores = binary(
-        unary(
-            binary(
-                dots_in,
-                unary(max_in, GraphTerm::Neg, &mut graph),
-                GraphTerm::Add,
-                &mut graph,
-            ),
-            GraphTerm::Exp,
-            &mut graph,
-        ),
-        unary(exp_sum_in, GraphTerm::Recip, &mut graph),
-        GraphTerm::Mul,
-        &mut graph,
-    );
-    final_scores = loop_out(final_scores, n_qkv, 'z', &mut graph);
-    final_scores = pad_out(final_scores, &mut graph, 5);
-    final_scores = loop_out(
-        final_scores,
-        n_qkv,
-        Expression::from('z') * n_qkv,
-        &mut graph,
-    );
-
-    // get output
-    let mut final_scores_in = loop_in(
-        final_scores,
-        n_qkv,
-        Expression::from('z') * n_qkv,
-        &mut graph,
-    );
-    final_scores_in = pad_in(final_scores_in, &mut graph, 5);
-    final_scores_in = loop_in(final_scores_in, n_qkv, 'z', &mut graph);
-    final_scores_in = loop_in(final_scores_in, d, 0, &mut graph);
-    let mut output = binary(
-        binary(v, final_scores_in, GraphTerm::Mul, &mut graph),
-        output_acc,
-        GraphTerm::Add,
-        &mut graph,
-    );
-    output = loop_out(output, d, 'z', &mut graph);
-    output = loop_out(output, n_qkv, Term::Acc('o'), &mut graph);
-    output = pad_out(output, &mut graph, 5);
-    output = loop_out(output, n_qkv, Expression::from('z') * d, &mut graph);
-    output = unary(output, GraphTerm::GMEM { label: None }, &mut graph);
-    (graph, output)
-}
-
-pub fn make_flash_attention() -> (StableGraph<GraphTerm, u8, Directed>, NodeIndex) {
-    let mut graph = StableGraph::new();
-
-    let n_qkv = 4;
-    let d = 5;
-
-    // inputs
-    let mut q = graph.add_node(GraphTerm::GMEM {
-        label: Some("Q".to_string()),
-    });
-    q = loop_in(q, n_qkv, Expression::from('z') * d, &mut graph);
-    q = pad_in(q, &mut graph, 5);
-    q = loop_in(q, n_qkv, 0, &mut graph);
-    q = loop_in(q, d, 'z', &mut graph);
-    let mut k = graph.add_node(GraphTerm::GMEM {
-        label: Some("K".to_string()),
-    });
-    k = loop_in(k, n_qkv, 0, &mut graph);
-    k = pad_in(k, &mut graph, 5);
-    k = loop_in(k, n_qkv, Expression::from('z') * d, &mut graph);
-    k = loop_in(k, d, 'z', &mut graph);
-    let mut v = graph.add_node(GraphTerm::GMEM {
-        label: Some("V".to_string()),
-    });
-    v = loop_in(v, n_qkv, 0, &mut graph);
-    v = pad_in(v, &mut graph, 5);
-    v = loop_in(v, n_qkv, Expression::from('z') * d, &mut graph);
-    v = loop_in(v, d, 'z', &mut graph);
-
-    // accumulators
-    let mut dot_acc = graph.add_node(GraphTerm::NewAcc {
-        starting_value: "0.0".to_string(),
-    });
-    dot_acc = loop_in(dot_acc, d, Term::Acc('d'), &mut graph);
-    let mut score_max_acc = graph.add_node(GraphTerm::NewAcc {
-        starting_value: "-INFINITY".to_string(),
-    });
-    score_max_acc = loop_in(score_max_acc, n_qkv, Term::Acc('m'), &mut graph);
-    let mut exp_sum_acc = graph.add_node(GraphTerm::NewAcc {
-        starting_value: "0.0".to_string(),
-    });
-    exp_sum_acc = loop_in(exp_sum_acc, n_qkv, Term::Acc('e'), &mut graph);
-    let mut output_acc = graph.add_node(GraphTerm::NewAcc {
-        starting_value: "0.0".to_string(),
-    });
-    output_acc = loop_in(output_acc, n_qkv, Term::Acc('o'), &mut graph);
-    output_acc = loop_in(output_acc, d, 'z', &mut graph);
-
-    // get dot products
-    let dots = loop_out(
-        binary(
-            binary(q, k, GraphTerm::Mul, &mut graph),
-            dot_acc,
-            GraphTerm::Add,
-            &mut graph,
-        ),
-        d,
-        Term::Acc('d'),
-        &mut graph,
-    );
-    let new_max = binary(score_max_acc, dots, GraphTerm::Max, &mut graph);
-    loop_out(new_max, n_qkv, Term::Acc('m'), &mut graph); // This is needed so we know to feed new max back in for score max acc
-
-    let rescale = unary(
-        binary(
-            score_max_acc,
-            unary(new_max, GraphTerm::Neg, &mut graph),
-            GraphTerm::Add,
-            &mut graph,
-        ),
-        GraphTerm::Exp,
-        &mut graph,
-    );
-    let weight = unary(
-        binary(
-            dots,
-            unary(new_max, GraphTerm::Neg, &mut graph),
-            GraphTerm::Add,
-            &mut graph,
-        ),
-        GraphTerm::Exp,
-        &mut graph,
-    );
-    let exp_sum_new = binary(
-        binary(exp_sum_acc, rescale, GraphTerm::Mul, &mut graph),
-        weight,
-        GraphTerm::Add,
-        &mut graph,
-    );
-    let weight_b = loop_in(weight, d, 0, &mut graph);
-    let rescale_b = loop_in(rescale, d, 0, &mut graph);
-    let mut partial_output = binary(
-        binary(output_acc, rescale_b, GraphTerm::Mul, &mut graph),
-        binary(weight_b, v, GraphTerm::Mul, &mut graph),
-        GraphTerm::Add,
-        &mut graph,
-    );
-    partial_output = loop_out(partial_output, d, 'z', &mut graph);
-    partial_output = loop_out(partial_output, n_qkv, Term::Acc('o'), &mut graph);
-    partial_output = loop_in(partial_output, d, 'z', &mut graph);
-    let exp_sum = loop_out(exp_sum_new, n_qkv, Term::Acc('e'), &mut graph);
-    let exp_sum_b = loop_in(exp_sum, d, 0, &mut graph);
-    let mut output = binary(
-        partial_output,
-        unary(exp_sum_b, GraphTerm::Recip, &mut graph),
-        GraphTerm::Mul,
-        &mut graph,
-    );
-    output = loop_out(output, d, 'z', &mut graph);
-    output = pad_out(output, &mut graph, 5);
-    output = loop_out(output, n_qkv, Expression::from('z') * d, &mut graph);
-    output = unary(output, GraphTerm::GMEM { label: None }, &mut graph);
-    (graph, output)
-}
-
-#[test]
-fn test_sum_reduce() {
-    let (graph, root) = make_sum_reduce();
-    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
-    let input = vec![0., 1., 2., 3., 4.];
-    let outputs = run_graph(&[input], &kernels).0;
-    assert_eq!(outputs[0], vec![10.0]);
-    expression_cleanup();
-}
-
-#[test]
-fn test_matmul() {
-    let (graph, root) = make_matmul(3, 4, 5);
-    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
-    let a = vec![
-        [1.5410, -0.2934, -2.1788, 0.5684],
-        [-1.0845, -1.3986, 0.4033, 0.8380],
-        [-0.7193, -0.4033, -0.5966, 0.1820],
-    ]
-    .into_flattened();
-    let b = vec![
-        [0.4681, -0.1577, 1.4437, 0.2660, -0.1740],
-        [-0.6787, 0.9383, 0.4889, -0.6731, 0.8728],
-        [1.0554, 0.1778, -0.5181, -0.3067, -1.5810],
-        [1.7066, -0.4462, 0.7440, 1.5210, 3.4105],
-    ]
-    .into_flattened();
-    let outputs = run_graph(&[a, b], &kernels).0.pop().unwrap();
-    let pt_output = vec![
-        [-0.4088, -1.1595, 3.6329, 2.1403, 4.8591],
-        [2.2975, -1.4434, -1.8349, 1.8038, 1.1883],
-        [-0.3819, -0.4523, -0.7910, 0.5400, 1.3372],
-    ]
-    .into_flattened();
-    for (a, b) in outputs.into_iter().zip(pt_output) {
-        assert!((a - b).abs() < 1e-3);
-    }
-    expression_cleanup();
-}
-
-#[test]
-fn test_tiled_matmul_basic() {
-    let (graph, root) = make_tiled_matmul_basic(16, 8, 32);
-    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
+    let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new()), 0).unwrap();
     let a = vec![
         [
             -1.1258e+00,
@@ -1462,8 +1005,110 @@ fn test_tiled_matmul_basic() {
 
 #[test]
 fn test_tiled_matmul_smem() {
-    let (graph, root) = make_tiled_matmul(16, 8, 32);
-    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
+    let (m, k, n) = (16, 8, 32);
+    let mut graph = StableGraph::new();
+    let mut a = graph.add_node(GraphTerm::GMEM {
+        label: Some("A".to_string()),
+    });
+    a = loop_in(
+        a,
+        Expression::from(m) / 8,
+        Expression::from('z') * k * 8,
+        &mut graph,
+    );
+    a = loop_in(a, Expression::from(n) / 8, 0, &mut graph);
+    a = pad_in(a, &mut graph, 1);
+    a = loop_in(a, 8, Expression::from('z') * k, &mut graph);
+    a = loop_in(a, 8, 'z', &mut graph);
+    a = pad_in(a, &mut graph, 1);
+    a = loop_in(
+        a,
+        Expression::from(k) / 8,
+        Expression::from('z') * 8,
+        &mut graph,
+    );
+
+    let smem_a_orig = graph.add_node(GraphTerm::SMEM);
+    let mut smem_a = loop_in(smem_a_orig, 8, Expression::from('z') * 8, &mut graph);
+    smem_a = loop_in(smem_a, 8, 'z', &mut graph);
+    smem_a = pad_in(smem_a, &mut graph, 1);
+    smem_a = loop_in(smem_a, k / 8, 0, &mut graph);
+    smem_a = binary(smem_a, a, GraphTerm::SMEMLoad, &mut graph);
+
+    let mut smem_read_a = loop_in(smem_a_orig, 8, Expression::from('z') * 8, &mut graph);
+    smem_read_a = loop_in(smem_read_a, 8, 0, &mut graph);
+    smem_read_a = pad_in(smem_read_a, &mut graph, 1);
+    smem_read_a = loop_in(smem_read_a, k / 8, 0, &mut graph);
+    a = binary(smem_read_a, smem_a, GraphTerm::SMEMRead, &mut graph);
+    a = loop_in(a, 8, 'z', &mut graph);
+
+    let mut b = graph.add_node(GraphTerm::GMEM {
+        label: Some("B".to_string()),
+    });
+    b = loop_in(b, Expression::from(m) / 8, 0, &mut graph);
+    b = loop_in(
+        b,
+        Expression::from(n) / 8,
+        Expression::from('z') * 8,
+        &mut graph,
+    );
+    b = pad_in(b, &mut graph, 1);
+    b = loop_in(b, 8, Expression::from('z') * n, &mut graph);
+    b = loop_in(b, 8, 'z', &mut graph);
+    b = pad_in(b, &mut graph, 1);
+    b = loop_in(
+        b,
+        Expression::from(k) / 8,
+        Expression::from('z') * n * 8,
+        &mut graph,
+    );
+    let smem_b_orig = graph.add_node(GraphTerm::SMEM);
+    let mut smem_b = loop_in(smem_b_orig, 8, Expression::from('z') * 8, &mut graph);
+    smem_b = loop_in(smem_b, 8, 'z', &mut graph);
+    smem_b = pad_in(smem_b, &mut graph, 1);
+    smem_b = loop_in(smem_b, k / 8, 0, &mut graph);
+    smem_b = binary(smem_b, b, GraphTerm::SMEMLoad, &mut graph);
+
+    let mut smem_read_b = loop_in(smem_b_orig, 8, 0, &mut graph);
+    smem_read_b = loop_in(smem_read_b, 8, Expression::from('z'), &mut graph);
+    smem_read_b = pad_in(smem_read_b, &mut graph, 1);
+    smem_read_b = loop_in(smem_read_b, k / 8, 0, &mut graph);
+    b = binary(smem_read_b, smem_b, GraphTerm::SMEMRead, &mut graph);
+    b = loop_in(b, 8, Expression::from('z') * 8, &mut graph);
+
+    let mut acc = graph.add_node(GraphTerm::NewAcc {
+        starting_value: "0.0".to_string(),
+    });
+    acc = loop_in(acc, Expression::from(k) / 8, Term::Acc('a'), &mut graph);
+    acc = loop_in(acc, 8, Term::Acc('b'), &mut graph);
+
+    let mut out = binary(
+        binary(a, b, GraphTerm::Mul, &mut graph),
+        acc,
+        GraphTerm::Add,
+        &mut graph,
+    );
+
+    out = loop_out(out, 8, Term::Acc('b'), &mut graph);
+    out = loop_out(out, Expression::from(k) / 8, Term::Acc('a'), &mut graph);
+    out = pad_out(out, &mut graph, 1);
+    out = loop_out(out, 8, 'z', &mut graph);
+    out = loop_out(out, 8, Expression::from('z') * n, &mut graph);
+    out = pad_out(out, &mut graph, 1);
+    out = loop_out(
+        out,
+        Expression::from(n) / 8,
+        Expression::from('z') * 8,
+        &mut graph,
+    );
+    out = loop_out(
+        out,
+        Expression::from(m) / 8,
+        Expression::from('z') * n * 8,
+        &mut graph,
+    );
+    out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);
+    let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new()), 0).unwrap();
     let a = vec![
         [
             -1.1258e+00,
@@ -2234,8 +1879,118 @@ fn test_tiled_matmul_smem() {
 
 #[test]
 fn test_flash_attention() {
-    let (graph, root) = make_flash_attention();
-    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
+    let mut graph = StableGraph::new();
+
+    let n_qkv = 4;
+    let d = 5;
+
+    // inputs
+    let mut q = graph.add_node(GraphTerm::GMEM {
+        label: Some("Q".to_string()),
+    });
+    q = loop_in(q, n_qkv, Expression::from('z') * d, &mut graph);
+    q = pad_in(q, &mut graph, 5);
+    q = loop_in(q, n_qkv, 0, &mut graph);
+    q = loop_in(q, d, 'z', &mut graph);
+    let mut k = graph.add_node(GraphTerm::GMEM {
+        label: Some("K".to_string()),
+    });
+    k = loop_in(k, n_qkv, 0, &mut graph);
+    k = pad_in(k, &mut graph, 5);
+    k = loop_in(k, n_qkv, Expression::from('z') * d, &mut graph);
+    k = loop_in(k, d, 'z', &mut graph);
+    let mut v = graph.add_node(GraphTerm::GMEM {
+        label: Some("V".to_string()),
+    });
+    v = loop_in(v, n_qkv, 0, &mut graph);
+    v = pad_in(v, &mut graph, 5);
+    v = loop_in(v, n_qkv, Expression::from('z') * d, &mut graph);
+    v = loop_in(v, d, 'z', &mut graph);
+
+    // accumulators
+    let mut dot_acc = graph.add_node(GraphTerm::NewAcc {
+        starting_value: "0.0".to_string(),
+    });
+    dot_acc = loop_in(dot_acc, d, Term::Acc('d'), &mut graph);
+    let mut score_max_acc = graph.add_node(GraphTerm::NewAcc {
+        starting_value: "-INFINITY".to_string(),
+    });
+    score_max_acc = loop_in(score_max_acc, n_qkv, Term::Acc('m'), &mut graph);
+    let mut exp_sum_acc = graph.add_node(GraphTerm::NewAcc {
+        starting_value: "0.0".to_string(),
+    });
+    exp_sum_acc = loop_in(exp_sum_acc, n_qkv, Term::Acc('e'), &mut graph);
+    let mut output_acc = graph.add_node(GraphTerm::NewAcc {
+        starting_value: "0.0".to_string(),
+    });
+    output_acc = loop_in(output_acc, n_qkv, Term::Acc('o'), &mut graph);
+    output_acc = loop_in(output_acc, d, 'z', &mut graph);
+
+    // get dot products
+    let dots = loop_out(
+        binary(
+            binary(q, k, GraphTerm::Mul, &mut graph),
+            dot_acc,
+            GraphTerm::Add,
+            &mut graph,
+        ),
+        d,
+        Term::Acc('d'),
+        &mut graph,
+    );
+    let new_max = binary(score_max_acc, dots, GraphTerm::Max, &mut graph);
+    loop_out(new_max, n_qkv, Term::Acc('m'), &mut graph); // This is needed so we know to feed new max back in for score max acc
+
+    let rescale = unary(
+        binary(
+            score_max_acc,
+            unary(new_max, GraphTerm::Neg, &mut graph),
+            GraphTerm::Add,
+            &mut graph,
+        ),
+        GraphTerm::Exp,
+        &mut graph,
+    );
+    let weight = unary(
+        binary(
+            dots,
+            unary(new_max, GraphTerm::Neg, &mut graph),
+            GraphTerm::Add,
+            &mut graph,
+        ),
+        GraphTerm::Exp,
+        &mut graph,
+    );
+    let exp_sum_new = binary(
+        binary(exp_sum_acc, rescale, GraphTerm::Mul, &mut graph),
+        weight,
+        GraphTerm::Add,
+        &mut graph,
+    );
+    let weight_b = loop_in(weight, d, 0, &mut graph);
+    let rescale_b = loop_in(rescale, d, 0, &mut graph);
+    let mut partial_output = binary(
+        binary(output_acc, rescale_b, GraphTerm::Mul, &mut graph),
+        binary(weight_b, v, GraphTerm::Mul, &mut graph),
+        GraphTerm::Add,
+        &mut graph,
+    );
+    partial_output = loop_out(partial_output, d, 'z', &mut graph);
+    partial_output = loop_out(partial_output, n_qkv, Term::Acc('o'), &mut graph);
+    partial_output = loop_in(partial_output, d, 'z', &mut graph);
+    let exp_sum = loop_out(exp_sum_new, n_qkv, Term::Acc('e'), &mut graph);
+    let exp_sum_b = loop_in(exp_sum, d, 0, &mut graph);
+    let mut output = binary(
+        partial_output,
+        unary(exp_sum_b, GraphTerm::Recip, &mut graph),
+        GraphTerm::Mul,
+        &mut graph,
+    );
+    output = loop_out(output, d, 'z', &mut graph);
+    output = pad_out(output, &mut graph, 5);
+    output = loop_out(output, n_qkv, Expression::from('z') * d, &mut graph);
+    output = unary(output, GraphTerm::GMEM { label: None }, &mut graph);
+    let kernels = codegen(graph, output, GPUArch::Metal(HashMap::new()), 0).unwrap();
     let q = vec![
         [-1.1258, -1.1524, -0.2506, -0.4339, 0.5988],
         [-1.5551, -0.3414, 1.8530, 0.4681, -0.1577],
@@ -2273,8 +2028,147 @@ fn test_flash_attention() {
 
 #[test]
 fn test_naive_attention() {
-    let (graph, root) = make_naive_attention();
-    let kernels = codegen(graph, root, GPUArch::Metal(HashMap::new()));
+    let mut graph = StableGraph::new();
+
+    let n_qkv = 4;
+    let d = 5;
+
+    // inputs
+    let mut q = graph.add_node(GraphTerm::GMEM {
+        label: Some("Q".to_string()),
+    });
+    q = loop_in(q, n_qkv, Expression::from('z') * d, &mut graph);
+    q = loop_in(q, n_qkv, 0, &mut graph);
+    q = pad_in(q, &mut graph, 4);
+    q = loop_in(q, d, 'z', &mut graph);
+    let mut k = graph.add_node(GraphTerm::GMEM {
+        label: Some("K".to_string()),
+    });
+    k = loop_in(k, n_qkv, 0, &mut graph);
+    k = loop_in(k, n_qkv, Expression::from('z') * d, &mut graph);
+    k = pad_in(k, &mut graph, 4);
+    k = loop_in(k, d, 'z', &mut graph);
+    let mut v = graph.add_node(GraphTerm::GMEM {
+        label: Some("V".to_string()),
+    });
+    v = loop_in(v, n_qkv, 0, &mut graph);
+    v = pad_in(v, &mut graph, 5);
+    v = loop_in(v, n_qkv, Expression::from('z') * d, &mut graph);
+    v = loop_in(v, d, 'z', &mut graph);
+
+    // accumulators
+    let mut dot_acc = graph.add_node(GraphTerm::NewAcc {
+        starting_value: "0.0".to_string(),
+    });
+    dot_acc = loop_in(dot_acc, d, Term::Acc('d'), &mut graph);
+    let mut score_max_acc = graph.add_node(GraphTerm::NewAcc {
+        starting_value: "-INFINITY".to_string(),
+    });
+    score_max_acc = loop_in(score_max_acc, n_qkv, Term::Acc('m'), &mut graph);
+    let mut exp_sum_acc = graph.add_node(GraphTerm::NewAcc {
+        starting_value: "0.0".to_string(),
+    });
+    exp_sum_acc = loop_in(exp_sum_acc, n_qkv, Term::Acc('e'), &mut graph);
+    let mut output_acc = graph.add_node(GraphTerm::NewAcc {
+        starting_value: "0.0".to_string(),
+    });
+    output_acc = loop_in(output_acc, n_qkv, Term::Acc('o'), &mut graph);
+    output_acc = loop_in(output_acc, d, 'z', &mut graph);
+
+    // get dot products
+    let mut dots = binary(
+        binary(q, k, GraphTerm::Mul, &mut graph),
+        dot_acc,
+        GraphTerm::Add,
+        &mut graph,
+    );
+    dots = loop_out(dots, d, Term::Acc('d'), &mut graph);
+    dots = pad_out(dots, &mut graph, 4);
+    dots = loop_out(dots, n_qkv, 'z', &mut graph);
+    dots = loop_out(dots, n_qkv, Expression::from('z') * n_qkv, &mut graph);
+
+    // get max
+    let mut dots_in = loop_in(dots, n_qkv, Expression::from('z') * n_qkv, &mut graph);
+    dots_in = pad_in(dots_in, &mut graph, 5);
+    dots_in = loop_in(dots_in, n_qkv, 'z', &mut graph);
+    let mut max = binary(score_max_acc, dots_in, GraphTerm::Max, &mut graph);
+    max = loop_out(max, n_qkv, Term::Acc('m'), &mut graph);
+    max = pad_out(max, &mut graph, 5);
+    max = loop_out(max, n_qkv, 'z', &mut graph);
+
+    // get exp sum
+    let mut max_in = loop_in(max, n_qkv, 'z', &mut graph);
+    max_in = pad_in(max_in, &mut graph, 5);
+    max_in = loop_in(max_in, n_qkv, 0, &mut graph);
+    let mut exp_sum = binary(
+        unary(
+            binary(
+                dots_in,
+                unary(max_in, GraphTerm::Neg, &mut graph),
+                GraphTerm::Add,
+                &mut graph,
+            ),
+            GraphTerm::Exp,
+            &mut graph,
+        ),
+        exp_sum_acc,
+        GraphTerm::Add,
+        &mut graph,
+    );
+    exp_sum = loop_out(exp_sum, n_qkv, Term::Acc('e'), &mut graph);
+    exp_sum = pad_out(exp_sum, &mut graph, 5);
+    exp_sum = loop_out(exp_sum, n_qkv, 'z', &mut graph);
+
+    // get final scores
+    let mut exp_sum_in = loop_in(exp_sum, n_qkv, 'z', &mut graph);
+    exp_sum_in = pad_in(exp_sum_in, &mut graph, 5);
+    exp_sum_in = loop_in(exp_sum_in, n_qkv, 0, &mut graph);
+    let mut final_scores = binary(
+        unary(
+            binary(
+                dots_in,
+                unary(max_in, GraphTerm::Neg, &mut graph),
+                GraphTerm::Add,
+                &mut graph,
+            ),
+            GraphTerm::Exp,
+            &mut graph,
+        ),
+        unary(exp_sum_in, GraphTerm::Recip, &mut graph),
+        GraphTerm::Mul,
+        &mut graph,
+    );
+    final_scores = loop_out(final_scores, n_qkv, 'z', &mut graph);
+    final_scores = pad_out(final_scores, &mut graph, 5);
+    final_scores = loop_out(
+        final_scores,
+        n_qkv,
+        Expression::from('z') * n_qkv,
+        &mut graph,
+    );
+
+    // get output
+    let mut final_scores_in = loop_in(
+        final_scores,
+        n_qkv,
+        Expression::from('z') * n_qkv,
+        &mut graph,
+    );
+    final_scores_in = pad_in(final_scores_in, &mut graph, 5);
+    final_scores_in = loop_in(final_scores_in, n_qkv, 'z', &mut graph);
+    final_scores_in = loop_in(final_scores_in, d, 0, &mut graph);
+    let mut output = binary(
+        binary(v, final_scores_in, GraphTerm::Mul, &mut graph),
+        output_acc,
+        GraphTerm::Add,
+        &mut graph,
+    );
+    output = loop_out(output, d, 'z', &mut graph);
+    output = loop_out(output, n_qkv, Term::Acc('o'), &mut graph);
+    output = pad_out(output, &mut graph, 5);
+    output = loop_out(output, n_qkv, Expression::from('z') * d, &mut graph);
+    output = unary(output, GraphTerm::GMEM { label: None }, &mut graph);
+    let kernels = codegen(graph, output, GPUArch::Metal(HashMap::new()), 0).unwrap();
     let q = vec![
         [-1.1258, -1.1524, -0.2506, -0.4339, 0.5988],
         [-1.5551, -0.3414, 1.8530, 0.4681, -0.1577],
