@@ -23,9 +23,10 @@
 			}
 
 			body {
-				font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
-					"Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans",
-					"Droid Sans", "Helvetica Neue", sans-serif;
+				font-family:
+					-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto",
+					"Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans",
+					"Helvetica Neue", sans-serif;
 				background: #000;
 				color: #fff;
 				line-height: 1.6;
@@ -384,6 +385,40 @@
 				text-decoration: none;
 				color: inherit;
 			}
+
+			.yc-badge {
+				display: inline-flex;
+				align-items: center;
+				border-style: solid;
+				border-color: #ff6600;
+				border-width: 1px;
+				color: white;
+				font-family: sans-serif;
+				font-size: 14px;
+				padding: 4px 12px;
+				border-radius: 10px;
+				font-weight: bold;
+				text-decoration: none;
+				margin-bottom: 20px;
+				-webkit-box-shadow: inset 0 0 10px #ff6600;
+				-moz-box-shadow: inset 0 0 10px #ff6600;
+				box-shadow: inset 0 0 10px #ff6600;
+			}
+
+			.yc-logo {
+				background-color: white;
+				color: #ff6600;
+				font-weight: bold;
+				border-radius: 3px;
+				font-size: 12px;
+				width: 18px;
+				height: 18px;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				margin: 8px;
+				padding-top: 2px;
+			}
 		</style>
 	</head>
 
@@ -414,6 +449,9 @@
 						low-level hardware optimizations and cloud reliability
 						innovators need to reach market first
 					</p>
+					<div class="yc-badge fade-in">
+						Backed by <span class="yc-logo">Y</span> Combinator
+					</div>
 					<div class="hero-cta fade-in">
 						<a
 							href="https://github.com/jafioti/luminal"
