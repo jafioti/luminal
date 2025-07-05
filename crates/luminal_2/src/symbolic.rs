@@ -390,6 +390,7 @@ impl Expression {
         for term in self.terms.read().iter() {
             match term {
                 Term::Num(n) => stack.push(*n as i64),
+                Term::Acc(_) => stack.push(1),
                 Term::Var(_) => stack.push(value as i64),
                 _ => {
                     let a = stack.pop().unwrap();
@@ -413,6 +414,7 @@ impl Expression {
         for term in self.terms.read().iter() {
             match term {
                 Term::Num(n) => stack.push(*n as i64),
+                Term::Acc(_) => stack.push(1),
                 Term::Var(c) =>
                 {
                     #[allow(clippy::needless_borrow)]
@@ -444,6 +446,7 @@ impl Expression {
         for term in self.terms.read().iter() {
             match term {
                 Term::Num(n) => stack.push(*n as f64),
+                Term::Acc(_) => stack.push(1.0),
                 Term::Var(c) =>
                 {
                     #[allow(clippy::needless_borrow)]

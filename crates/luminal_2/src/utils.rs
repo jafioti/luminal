@@ -177,7 +177,6 @@ impl TermToString for GraphTerm {
             GraphTerm::Sin => "Sin".to_string(),
             GraphTerm::Recip => "Recip".to_string(),
             GraphTerm::Neg => "Neg".to_string(),
-            GraphTerm::NewAcc { starting_value } => format!("NewAcc({starting_value})"),
             GraphTerm::LoopIn {
                 range,
                 stride,
@@ -329,10 +328,7 @@ pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), (), Directed>) {
                 .neighbors_directed(node, Direction::Incoming)
                 .next()
                 .is_none()
-                && !matches!(
-                    graph.node_weight(node).unwrap().0,
-                    GraphTerm::NewAcc { .. } | GraphTerm::SMEM
-                )
+                && !matches!(graph.node_weight(node).unwrap().0, GraphTerm::SMEM)
             {
                 if *curr_level != 0 {
                     display_graph(graph, &[(node, "yellow".to_string())]);

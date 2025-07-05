@@ -101,9 +101,6 @@ enum GraphTerm {
         stride: Expression,
         marker: String,
     },
-    NewAcc {
-        starting_value: String,
-    },
     Add,
     Mul,
     Max,
@@ -158,6 +155,7 @@ fn main() {
                 &[
                     (0..8 * 16).map(|_| rng.random()).collect_vec(),
                     (0..16 * 32).map(|_| rng.random()).collect_vec(),
+                    vec![0.0],
                 ],
             );
         }
@@ -193,7 +191,6 @@ fn render_egglog(graph: StableGraph<GraphTerm, (), Directed>) -> (String, String
                 format!("(GMEM \"{}\")", label.clone().unwrap_or_default())
             }
             GraphTerm::SMEM => "(SMEM)".into(),
-            GraphTerm::NewAcc { starting_value } => format!("(NewAcc {})", starting_value),
 
             GraphTerm::LoopIn {
                 range,
@@ -279,7 +276,7 @@ fn make_sum_reduce() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
     });
-    a = pad_in(a, &mut graph, 2);
+    a = pad_in(a, &mut graph, 3);
     a = loop_in(a, m, Expression::from('z') * k, 'm', &mut graph);
     a = loop_in(a, n, 0, 'n', &mut graph);
     a = loop_in(a, k, 'z', 'k', &mut graph);
@@ -287,15 +284,15 @@ fn make_sum_reduce() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
     let mut b = graph.add_node(GraphTerm::GMEM {
         label: Some("B".to_string()),
     });
-    b = pad_in(b, &mut graph, 2);
+    b = pad_in(b, &mut graph, 3);
     b = loop_in(b, m, 0, 'm', &mut graph);
     b = loop_in(b, n, 'z', 'n', &mut graph);
     b = loop_in(b, k, Expression::from('z') * n, 'k', &mut graph);
 
-    let mut acc = graph.add_node(GraphTerm::NewAcc {
-        starting_value: "0".to_string(),
+    let mut acc = graph.add_node(GraphTerm::GMEM {
+        label: Some("Acc".to_string()),
     });
-    acc = pad_in(acc, &mut graph, 2);
+    acc = pad_in(acc, &mut graph, 3);
     acc = loop_in(acc, m, Expression::from('z') * n, 'm', &mut graph);
     acc = loop_in(acc, n, 'z', 'n', &mut graph);
     acc = loop_in(acc, k, Term::Acc('a'), 'k', &mut graph);
@@ -310,7 +307,7 @@ fn make_sum_reduce() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
     out = loop_out(out, k, Term::Acc('a'), 'k', &mut graph);
     out = loop_out(out, n, 'z', 'n', &mut graph);
     out = loop_out(out, m, Expression::from('z') * n, 'm', &mut graph);
-    out = pad_out(out, &mut graph, 2);
+    out = pad_out(out, &mut graph, 3);
     (graph, out)
 }
 

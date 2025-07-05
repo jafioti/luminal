@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     GMEMBuffer, GPUArch, GraphTerm, Kernel,
-    symbolic::Expression,
+    symbolic::{Expression, Term},
     utils::{display_graph, validate_graph},
 };
 
@@ -67,9 +67,9 @@ pub fn codegen(
             .chain(outputs.iter().map(|(_, i)| *i))
             .chain(smem_buffers.iter().map(|(_, i, _)| *i))
             .enumerate()
-            .map(|(v, n)| (n, (v, true, None)))
+            .map(|(v, n)| (n, (v, true)))
             .collect::<HashMap<_, _>>();
-        for (_, (n, _, _)) in &node_to_var {
+        for (_, (n, _)) in &node_to_var {
             arch.add_metal_buffer_type(*n, "device ");
         }
         for (n, _, _) in &smem_buffers {
@@ -201,6 +201,17 @@ kernel void kernel{}(
                 )
             }
         };
+        if option_env!("PRINT_ALL_KERNELS")
+            .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
+            .unwrap_or_default()
+        {
+            println!(
+                "Grid: {grid:?} Threadblock: {threadblock:?} Smem: {:?}",
+                smem_buffers.iter().map(|(_, _, a)| *a).sum::<Expression>()
+            );
+            println!("{kernel}");
+            println!("Outputs: {:?}", outputs);
+        }
         *meta_graph.node_weight_mut(node).unwrap() = Kernel {
             code: kernel,
             grid: (grid[0], grid[1], grid[2]),
@@ -223,7 +234,7 @@ fn var_to_char(var: usize) -> String {
 fn make_kernel(
     kernel_graph: &StableGraph<(GraphTerm, usize), (), Directed>,
     include_nodes: HashSet<NodeIndex>,
-    node_to_var: &mut HashMap<NodeIndex, (usize, bool, Option<Expression>)>,
+    node_to_var: &mut HashMap<NodeIndex, (usize, bool)>,
     prev_max_var: &mut usize, // contains the char last used
     loop_levels: &mut Vec<Expression>,
     loop_indexes: &mut HashMap<NodeIndex, usize>,
@@ -309,6 +320,70 @@ fn make_kernel(
                     format!("{spacing}\t")
                 };
 
+                // Make accumulators
+                let mut accs = vec![];
+                for (input, stride) in &loop_inputs {
+                    if stride.is_acc() {
+                        if *loop_level < GRID_DIMS + THREADBLOCK_DIMS {
+                            return None;
+                        }
+                        let Term::Acc(acc_symbol) = stride.terms.read()[0] else {
+                            panic!("Acc is not acc");
+                        };
+                        // Create a new accumulator
+                        // Work out the size needed by taking the max stride of the loopins and loopouts
+                        let mut size = Expression::from(0);
+                        let mut curr = *input;
+                        loop {
+                            match kernel_graph.node_weight(curr).unwrap().0 {
+                                GraphTerm::LoopIn { range, stride, .. } => {
+                                    size = size.max(stride.substitute('z', range));
+                                }
+                                _ => break,
+                            }
+                            curr = kernel_graph
+                                .neighbors_directed(curr, Direction::Outgoing)
+                                .next()
+                                .unwrap();
+                        }
+                        let cooresponding_output = loop_outputs
+                            .iter()
+                            .find(|(_, v)| v.terms.read()[0] == Term::Acc(acc_symbol))
+                            .unwrap()
+                            .0;
+                        curr = cooresponding_output;
+                        loop {
+                            match kernel_graph.node_weight(curr).unwrap().0 {
+                                GraphTerm::LoopOut { range, stride, .. } => {
+                                    size = size.max(stride.substitute('z', range));
+                                }
+                                _ => break,
+                            }
+                            curr = kernel_graph
+                                .neighbors_directed(curr, Direction::Incoming)
+                                .next()
+                                .unwrap();
+                        }
+                        // Make accumulator
+                        *prev_max_var += 1;
+                        arch.add_metal_buffer_type(*prev_max_var, "thread ");
+                        println!("size: {:?}", size);
+                        kernel_lines.push(format!(
+                            "{spacing}{}float {}[{}] = {{0.0}};",
+                            arch.metal_buffer_type(*prev_max_var),
+                            var_to_char(*prev_max_var),
+                            size.to_usize().unwrap()
+                        ));
+
+                        // Copy from source to accumulator
+                        // TODO (for now we always initialize to 0, this is wrong, need to copy from input buffer, respecting input strides)
+
+                        node_to_var.insert(*input, (*prev_max_var, true));
+                        node_to_var.insert(cooresponding_output, (*prev_max_var, true));
+                        accs.push((*input, cooresponding_output, size));
+                    }
+                }
+
                 // Make new loop
                 if *loop_level < GRID_DIMS + THREADBLOCK_DIMS {
                     if current_loop_level >= loop_levels.len() {
@@ -340,28 +415,19 @@ fn make_kernel(
                 let loop_var_int = *prev_max_var;
 
                 // Move input pointers (allocate new variables)
-                let mut new_vars = vec![];
                 for (input, stride) in &loop_inputs {
                     let src = kernel_graph
                         .neighbors_directed(*input, Direction::Incoming)
                         .next()
                         .unwrap();
-                    let (real_input, is_ptr, real_size) = node_to_var[&src].clone();
-                    if stride.is_acc() {
-                        if *loop_level < GRID_DIMS + THREADBLOCK_DIMS {
-                            return None;
-                        }
-                        // assert!(
-                        //     *loop_level >= GRID_DIMS + THREADBLOCK_DIMS,
-                        //     "No accumulations allowed on grid or threadblock levels!"
-                        // );
-                        new_vars.push(real_input);
-                        node_to_var.insert(*input, (real_input, is_ptr, real_size));
-                    } else {
-                        if **stride != 0 && *range != 1 {
-                            if !is_ptr {
-                                return None; // We can't handle thread-level buffers yet!
-                            }
+                    let (real_input, is_ptr) = node_to_var[&src].clone();
+                    if !stride.is_acc() {
+                        if **stride == 0
+                            || (*range == 1 && stride.substitute('z', 0).simplify() == 0)
+                        {
+                            // Either the range is 1 or the stride is zero, so no offset needs to happen
+                            node_to_var.insert(*input, (real_input, is_ptr));
+                        } else {
                             *prev_max_var += 1;
                             arch.add_metal_buffer_type(
                                 *prev_max_var,
@@ -374,11 +440,7 @@ fn make_kernel(
                                 var_to_char(real_input),
                                 stride.to_string().replace('z', &format!("loop_{loop_var}"))
                             ));
-                            new_vars.push(*prev_max_var);
-                            node_to_var.insert(*input, (*prev_max_var, is_ptr, None));
-                        } else {
-                            new_vars.push(real_input);
-                            node_to_var.insert(*input, (real_input, is_ptr, real_size));
+                            node_to_var.insert(*input, (*prev_max_var, is_ptr));
                         }
                     }
                 }
@@ -386,39 +448,19 @@ fn make_kernel(
                 let mut new_output_vars = vec![];
                 for (output, stride) in &loop_outputs {
                     if stride.is_acc() {
-                        if *loop_level < GRID_DIMS + THREADBLOCK_DIMS {
-                            return None;
-                        }
-                        // assert!(
-                        //     *loop_level >= GRID_DIMS + THREADBLOCK_DIMS,
-                        //     "No accumulations allowed on grid or threadblock levels!"
-                        // );
-                        // Re-use accumulator
-                        let (input, _) = loop_inputs
-                            .iter()
-                            .find(|(_, s)| **s == **stride)
-                            .unwrap_or_else(|| {
-                                display_graph(
-                                    &kernel_graph,
-                                    &loop_inputs
-                                        .iter()
-                                        .map(|(i, _)| (*i, "yellow".to_string()))
-                                        .collect_vec(),
-                                );
-                                panic!("Cannot find accumulator {stride}");
-                            });
-                        let (input_var, is_ptr, input_size) = node_to_var[input].clone();
-                        new_output_vars.push(input_var);
-                        node_to_var.insert(*output, (input_var, is_ptr, input_size));
-                        continue;
+                        continue; // Accumulators are set up in input handling (above) and results are copied back to output after body (below)
                     }
                     let dest = kernel_graph
                         .neighbors_directed(*output, Direction::Outgoing)
                         .next()
                         .unwrap();
-                    if let Some((real_output, is_ptr, real_size)) = node_to_var.get(&dest).copied()
-                    {
-                        if **stride != 0 && *range != 1 {
+                    if let Some((real_output, is_ptr)) = node_to_var.get(&dest).copied() {
+                        if **stride == 0
+                            || (*range == 1 && stride.substitute('z', 0).simplify() == 0)
+                        {
+                            new_output_vars.push(real_output);
+                            node_to_var.insert(*output, (real_output, is_ptr));
+                        } else {
                             assert!(is_ptr, "Only pointers can be offset!");
                             *prev_max_var += 1;
                             arch.add_metal_buffer_type(
@@ -433,10 +475,7 @@ fn make_kernel(
                                 stride.to_string().replace('z', &format!("loop_{loop_var}"))
                             ));
                             new_output_vars.push(*prev_max_var);
-                            node_to_var.insert(*output, (*prev_max_var, is_ptr, None));
-                        } else {
-                            new_output_vars.push(real_output);
-                            node_to_var.insert(*output, (real_output, is_ptr, real_size));
+                            node_to_var.insert(*output, (*prev_max_var, is_ptr));
                         }
                     } else {
                         // Handle the case where the dest is not the real loop output
@@ -457,12 +496,13 @@ fn make_kernel(
                     arch,
                 )?;
 
+                // Handle no-op copy (empty body)
                 if loop_body.is_empty() && loop_inputs.len() == 1 && loop_outputs.len() == 1 {
-                    // Need to copy inputs to outputs
-                    let (src, src_ptr, _) = node_to_var[&loop_inputs.iter().next().unwrap().0];
-                    let (dest, _, _) = node_to_var[&loop_outputs.iter().next().unwrap().0];
+                    let (src, src_ptr) = node_to_var[&loop_inputs.iter().next().unwrap().0];
+                    let (dest, dest_ptr) = node_to_var[&loop_outputs.iter().next().unwrap().0];
                     kernel_lines.push(format!(
-                        "{inner_spacing}*{} = {}{};",
+                        "{inner_spacing}{}{} = {}{};",
+                        if dest_ptr { "*" } else { "" },
                         var_to_char(dest),
                         if src_ptr { "*" } else { "" },
                         var_to_char(src)
@@ -471,94 +511,66 @@ fn make_kernel(
                 kernel_lines.extend(loop_body);
 
                 // Set outputs if nessecary
-                for (output, _) in loop_outputs {
+                for (output_node, _) in &loop_outputs {
                     let body_out = kernel_graph
-                        .neighbors_directed(output, Direction::Incoming)
+                        .neighbors_directed(*output_node, Direction::Incoming)
                         .next()
                         .unwrap();
-                    let is_acc = if let GraphTerm::LoopOut { stride, .. } =
-                        &kernel_graph.node_weight(body_out).unwrap().0
-                    {
-                        stride.is_acc()
-                    } else {
-                        false
-                    };
-                    let (body_out, body_out_ptr, body_out_size) = node_to_var[&body_out];
-                    if let Some((output, output_ptr, _)) = node_to_var.get(&output).copied() {
-                        if output != body_out && (!body_out_ptr || is_acc) {
-                            if let Some(size) = &body_out_size {
-                                if *size == 1 {
-                                    kernel_lines.push(format!(
-                                        "{inner_spacing}{}{} = {}{};",
-                                        if output_ptr { "*" } else { "" },
-                                        var_to_char(output),
-                                        if body_out_ptr { "*" } else { "" },
-                                        var_to_char(body_out),
-                                    ));
-                                } else {
-                                    // Save size numbers
-                                    kernel_lines.push(format!(
-                                    "{inner_spacing}for (int save = 0; save < {size}; save++) {{",
-                                ));
-                                    assert!(
-                                        output_ptr && body_out_ptr,
-                                        "Both src and dest must be pointers when saving a block"
-                                    );
-                                    kernel_lines.push(format!(
-                                        "{inner_spacing}\t{}[save] = {}[save];",
-                                        var_to_char(output),
-                                        var_to_char(body_out),
-                                    ));
-                                    kernel_lines.push(format!("{inner_spacing}}}"));
-                                }
-                            } else {
-                                kernel_lines.push(format!(
-                                    "{inner_spacing}{}{} = {}{};",
-                                    if output_ptr { "*" } else { "" },
-                                    var_to_char(output),
-                                    if body_out_ptr { "*" } else { "" },
-                                    var_to_char(body_out),
-                                ));
-                            }
+                    let (body_out, body_out_ptr) = node_to_var[&body_out];
+                    if let Some((output, output_ptr)) = node_to_var.get(&output_node).copied() {
+                        if output != body_out && !body_out_ptr {
+                            kernel_lines.push(format!(
+                                "{inner_spacing}{}{} = {}{};",
+                                if output_ptr { "*" } else { "" },
+                                var_to_char(output),
+                                if body_out_ptr { "*" } else { "" },
+                                var_to_char(body_out),
+                            ));
                         }
                     } else {
-                        assert!(body_out_size.is_none());
-                        node_to_var.insert(output, (body_out, false, None));
+                        node_to_var.insert(*output_node, (body_out, false));
                     }
                 }
 
                 if *loop_level >= GRID_DIMS + THREADBLOCK_DIMS {
                     kernel_lines.push(format!("{spacing}}}"));
                 }
-            }
-            GraphTerm::NewAcc { starting_value } => {
-                // Go through all loopins after this to figure out how many accumulators we need
-                let mut curr = node;
-                let mut size = Expression::from(1);
-                loop {
-                    curr = kernel_graph
-                        .neighbors_directed(curr, Direction::Outgoing)
+
+                // Save accumulators
+                for (output, _) in loop_outputs.into_iter().filter(|(_, st)| st.is_acc()) {
+                    let (_, _, size) = accs.iter().find(|(_, o, _)| *o == output).unwrap();
+                    let outer_out = kernel_graph
+                        .neighbors_directed(output, Direction::Outgoing)
                         .next()
                         .unwrap();
-                    if let GraphTerm::LoopIn { range, stride, .. } =
-                        &kernel_graph.node_weight(curr).unwrap().0
-                    {
-                        if !stride.is_acc() && *stride != 0 {
-                            size *= range;
-                        }
+                    let (outer_out, outer_out_ptr) = node_to_var[&outer_out];
+                    let (output, output_ptr) = node_to_var[&output];
+                    assert!(output_ptr);
+                    assert!(outer_out_ptr || size.to_usize().unwrap() == 1);
+
+                    // Copy register buffer to output
+                    if size.to_usize().unwrap() == 1 {
+                        // Copy single number to output
+                        kernel_lines.push(format!(
+                            "{spacing}{}{} = *{};",
+                            if outer_out_ptr { "*" } else { "" },
+                            var_to_char(outer_out),
+                            var_to_char(output)
+                        ));
                     } else {
-                        break;
+                        assert!(outer_out_ptr);
+                        kernel_lines.push(format!(
+                            "{spacing}for (int save_loop = 0; save_loop < {}; save_loop++) {{",
+                            size.to_usize().unwrap()
+                        ));
+                        kernel_lines.push(format!(
+                            "{inner_spacing}{}[save_loop] = {}[save_loop];",
+                            var_to_char(outer_out),
+                            var_to_char(output),
+                        ));
+                        kernel_lines.push(format!("{spacing}}}"));
                     }
                 }
-                // Create accumulator
-                *prev_max_var += 1;
-                arch.add_metal_buffer_type(*prev_max_var, "thread ");
-                kernel_lines.push(format!(
-                    "{spacing}{}float {}[{size}] = {{{starting_value}}};",
-                    arch.metal_buffer_type(*prev_max_var),
-                    var_to_char(*prev_max_var)
-                ));
-                node_to_var.insert(node, (*prev_max_var, true, Some(size)));
             }
             GraphTerm::LoopOut { range, stride, .. } => {
                 panic!("found loopout range: {range} stride: {stride}")
@@ -590,8 +602,8 @@ fn make_kernel(
                     assert!(search_for_smem(inputs[1])); // ensure the other input is an smem ptr
                     (inputs[1], inputs[0])
                 };
-                let (gmem, gmem_ptr, _) = node_to_var[&gmem];
-                let (smem, smem_ptr, _) = node_to_var[&smem];
+                let (gmem, gmem_ptr) = node_to_var[&gmem];
+                let (smem, smem_ptr) = node_to_var[&smem];
                 assert!(smem_ptr);
                 let sync_barrier = match arch {
                     GPUArch::CUDA => "__syncthreads()",
@@ -606,12 +618,12 @@ fn make_kernel(
                             if gmem_ptr { "*" } else { "" },
                             var_to_char(gmem),
                         ));
-                        node_to_var.insert(node, (smem, true, None));
+                        node_to_var.insert(node, (smem, true));
                     }
                     GraphTerm::SMEMRead => {
                         // gmem ptr isn't actually gmem, it should be pointing to the smem copy
                         kernel_lines.push(format!("{spacing}{sync_barrier};"));
-                        node_to_var.insert(node, (smem, true, None));
+                        node_to_var.insert(node, (smem, true));
                     }
                     _ => panic!(),
                 }
@@ -620,11 +632,11 @@ fn make_kernel(
             GraphTerm::SMEM => {}
             GraphTerm::Sin | GraphTerm::Exp | GraphTerm::Neg | GraphTerm::Recip => {
                 *prev_max_var += 1;
-                let (src, src_ptr, _) = node_to_var[&kernel_graph
+                let (src, src_ptr) = node_to_var[&kernel_graph
                     .neighbors_directed(node, Direction::Incoming)
                     .next()
                     .unwrap()];
-                node_to_var.insert(node, (*prev_max_var, false, None));
+                node_to_var.insert(node, (*prev_max_var, false));
                 let inp = format!("{}{}", if src_ptr { "*" } else { "" }, var_to_char(src));
                 let expr = match term {
                     GraphTerm::Sin => format!("sin({inp})"),
@@ -641,9 +653,9 @@ fn make_kernel(
             GraphTerm::Mul | GraphTerm::Add | GraphTerm::Max => {
                 *prev_max_var += 1;
                 let mut srcs = kernel_graph.neighbors_directed(node, Direction::Incoming);
-                let (src_a, src_a_ptr, _) = node_to_var[&srcs.next().unwrap()];
-                let (src_b, src_b_ptr, _) = node_to_var[&srcs.next().unwrap()];
-                node_to_var.insert(node, (*prev_max_var, false, None));
+                let (src_a, src_a_ptr) = node_to_var[&srcs.next().unwrap()];
+                let (src_b, src_b_ptr) = node_to_var[&srcs.next().unwrap()];
+                node_to_var.insert(node, (*prev_max_var, false));
                 let inp_a = format!("{}{}", if src_a_ptr { "*" } else { "" }, var_to_char(src_a));
                 let inp_b = format!("{}{}", if src_b_ptr { "*" } else { "" }, var_to_char(src_b));
                 let expr = match &term {
@@ -711,7 +723,7 @@ fn toposort_subset<N, E>(
 fn split_kernels(
     graph: StableGraph<GraphTerm, (), Directed>,
     mut root: NodeIndex,
-    n_graph: usize,
+    _n_graph: usize,
 ) -> (
     Vec<(
         StableGraph<(GraphTerm, usize), (), Directed>,
@@ -1021,13 +1033,8 @@ fn split_kernels(
                 .next()
                 .is_none()
         })
-        // Must not be a NewAcc
-        .filter(|n| {
-            !matches!(
-                marked_graph.node_weight(*n).unwrap().0,
-                GraphTerm::NewAcc { .. } | GraphTerm::SMEM
-            )
-        })
+        // Must not be an SMEM
+        .filter(|n| !matches!(marked_graph.node_weight(*n).unwrap().0, GraphTerm::SMEM))
         .enumerate()
     {
         let (term, _, kernels) = marked_graph.node_weight(input).unwrap();
