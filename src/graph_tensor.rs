@@ -199,24 +199,24 @@ fn pretty_print_tensor_recursive(
 
     if shape.len() == 1 {
         // If this is the innermost dimension, print the raw data in a single line
-        write!(f, "{}[", indent)?;
+        write!(f, "{indent}[")?;
         if data.len() > 10 {
             for (i, value) in data.iter().take(5).enumerate() {
-                write!(f, "{:.6}", value)?;
+                write!(f, "{value:.6}")?;
                 if i < data.len() - 1 {
                     write!(f, ", ")?;
                 }
             }
             write!(f, "..., ")?;
             for (i, value) in data.iter().skip(data.len() - 5).enumerate() {
-                write!(f, "{:.6}", value)?;
+                write!(f, "{value:.6}")?;
                 if i < data.len() - 1 {
                     write!(f, ", ")?;
                 }
             }
         } else {
             for (i, value) in data.iter().enumerate() {
-                write!(f, "{:.6}", value)?;
+                write!(f, "{value:.6}")?;
                 if i < data.len() - 1 {
                     write!(f, ", ")?;
                 }
@@ -271,7 +271,7 @@ impl Debug for GraphTensor {
         let mut shape = self.shape;
         shape.resolve_global_dyn_dims(&self.graph().dyn_map);
         let shape = shape.shape_usize();
-        writeln!(f, "Tensor with Shape: {:?}", shape)?;
+        writeln!(f, "Tensor with Shape: {shape:?}")?;
 
         // Print the data by going dimension by dimension, recursively
         pretty_print_tensor_recursive(f, &self.data(), &shape, 0)

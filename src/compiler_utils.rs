@@ -534,7 +534,7 @@ pub fn display_graph(
         urlencoding::encode(&graph_string)
     );
     if let Err(e) = webbrowser::open(&url) {
-        panic!("Error displaying graph: {:?}", e);
+        panic!("Error displaying graph: {e:?}");
     }
 }
 

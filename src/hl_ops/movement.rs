@@ -11,10 +11,7 @@ impl GraphTensor {
         let num_dims = self.shape.len();
         assert!(
             dim0 < num_dims && dim1 < num_dims,
-            "transpose dimensions ({}, {}) out of bounds for tensor with {} dimensions",
-            dim0,
-            dim1,
-            num_dims
+            "transpose dimensions ({dim0}, {dim1}) out of bounds for tensor with {num_dims} dimensions"
         );
 
         // Create identity permutation, then swap the two specified dimensions

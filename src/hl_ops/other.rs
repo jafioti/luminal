@@ -156,7 +156,7 @@ impl GraphTensor {
                                 ..(d.len().saturating_div(2) + 5).min(d.len())],
                             &d[d.len().saturating_sub(5)..]
                         );
-                        println!("Shape: {:?}", tracker);
+                        println!("Shape: {tracker:?}");
                     }
                     vec![]
                 }),
@@ -411,7 +411,7 @@ mod tests {
         // Floating point comparison with tolerance:
         assert_eq!(tensor.data().len(), expected.len());
         for (v, e) in tensor.data().iter().zip(expected.iter()) {
-            assert!((v - e).abs() < 1e-5, "Expected {}, got {}", e, v);
+            assert!((v - e).abs() < 1e-5, "Expected {e}, got {v}");
         }
     }
 
