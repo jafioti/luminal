@@ -88,6 +88,119 @@ impl std::fmt::Display for GraphTerm {
     }
 }
 
+fn calculate_broadcast_shape(shape1: &ShapeTracker, shape2: &ShapeTracker) -> ShapeTracker {
+    let dims1 = shape1.dims();
+    let dims2 = shape2.dims();
+
+    // Get the maximum number of dimensions
+    let max_dims = dims1.len().max(dims2.len());
+    let mut result_dims = Vec::with_capacity(max_dims);
+
+    // Pad the shorter shape with 1s at the beginning (numpy-style broadcasting)
+    let padded_dims1: Vec<_> = if dims1.len() < max_dims {
+        std::iter::repeat(Expression::from(1))
+            .take(max_dims - dims1.len())
+            .chain(dims1.iter().cloned())
+            .collect()
+    } else {
+        dims1
+    };
+
+    let padded_dims2: Vec<_> = if dims2.len() < max_dims {
+        std::iter::repeat(Expression::from(1))
+            .take(max_dims - dims2.len())
+            .chain(dims2.iter().cloned())
+            .collect()
+    } else {
+        dims2
+    };
+
+    // Calculate broadcast dimensions
+    for i in 0..max_dims {
+        let dim1 = &padded_dims1[i];
+        let dim2 = &padded_dims2[i];
+
+        // Try to convert to usize for comparison
+        let dim1_usize = dim1.to_usize();
+        let dim2_usize = dim2.to_usize();
+
+        match (dim1_usize, dim2_usize) {
+            (Some(d1), Some(d2)) => {
+                if d1 == d2 {
+                    result_dims.push(dim1.clone());
+                } else if d1 == 1 {
+                    result_dims.push(dim2.clone());
+                } else if d2 == 1 {
+                    result_dims.push(dim1.clone());
+                } else {
+                    // Broadcasting error - incompatible dimensions
+                    panic!(
+                        "Cannot broadcast shapes: dimension {} has size {} vs {}",
+                        i, d1, d2
+                    );
+                }
+            }
+            // If we can't convert to usize (dynamic dimensions), we need to handle symbolically
+            (None, Some(d2)) if d2 == 1 => {
+                result_dims.push(dim1.clone());
+            }
+            (Some(d1), None) if d1 == 1 => {
+                result_dims.push(dim2.clone());
+            }
+            (None, None) => {
+                // Both are symbolic - assume they're compatible and take the first one
+                // In a more sophisticated implementation, you might want to create a max() expression
+                result_dims.push(dim1.clone());
+            }
+            _ => {
+                // One is symbolic, one is not 1 - assume compatible and take the non-1 dimension
+                if dim1_usize == Some(1) {
+                    result_dims.push(dim2.clone());
+                } else if dim2_usize == Some(1) {
+                    result_dims.push(dim1.clone());
+                } else {
+                    // Both are non-1, take the first one and hope for the best
+                    result_dims.push(dim1.clone());
+                }
+            }
+        }
+    }
+
+    // Create a new ShapeTracker from the result dimensions
+    ShapeTracker::new(result_dims)
+}
+
+fn calculate_strides(dims: &[Expression], indexes: &[usize]) -> Vec<expression_two> {
+    if dims.is_empty() || indexes.len() != dims.len() {
+        return vec![expression_two::from(1); dims.len()];
+    }
+
+    // Step 1: Calculate physical strides based on physical dimension order
+    // This is the "unordered_strides" equivalent from ShapeTracker
+    let mut physical_strides = vec![expression_two::from(1); dims.len()];
+
+    // Calculate strides in reverse order (rightmost dimension has stride 1)
+    let mut current_stride = expression_two::from(1);
+    for i in (0..dims.len()).rev() {
+        physical_strides[i] = current_stride.clone();
+        // Update stride for next dimension (multiply by current dimension size)
+        current_stride = current_stride * dims[i].to_usize().unwrap_or(1);
+    }
+
+    // Step 2: Reorder physical strides to logical order using indexes
+    // indexes[i] tells us which physical dimension corresponds to logical dimension i
+    let mut logical_strides = vec![expression_two::from(1); dims.len()];
+    for (logical_dim, &physical_dim) in indexes.iter().enumerate() {
+        if physical_dim < dims.len() {
+            logical_strides[logical_dim] = physical_strides[physical_dim].clone();
+        }
+    }
+
+    println!("{:?} | {:?} = {:?}", dims, indexes, logical_strides);
+
+    logical_strides
+}
+
 pub trait ToIdsMut {
     fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex>;
 }
@@ -577,7 +690,32 @@ impl Graph {
                     .map(|(_, _, _, shape)| shape.clone())
                     .collect();
 
+                let outgoing_edges: Vec<_> = self
+                    .graph
+                    .edges_directed(node_idx, Direction::Outgoing)
+                    .filter_map(|e| {
+                        e.weight()
+                            .as_data()
+                            .map(|data| (e.source(), data.0, data.1, data.2.clone()))
+                    })
+                    .collect();
+
+                let output_shapes: Vec<ShapeTracker> = outgoing_edges
+                    .iter()
+                    .sorted_by_key(|&(_, output_order, _, _)| output_order)
+                    .map(|(_, _, _, shape)| shape.clone())
+                    .collect();
+
+                println!("{:?} | {:?} => {:?}", op, input_shapes, output_shapes);
+
                 let new_node_idx = match op {
+                    s if s.ends_with("Load") => {
+                        manually_handled_nodes.insert(node_idx);
+                        let gmem_node = new_graph.add_node(GraphTerm::GMEM {
+                            label: Some(format!("{}", s)),
+                        });
+                        gmem_node
+                    }
                     "Add" => {
                         manually_handled_nodes.insert(node_idx);
                         let mut loop_in_nodes = Vec::new();
@@ -587,13 +725,19 @@ impl Graph {
                             let dims = shape.dims();
                             let input_node = incoming_edges[input_idx].0;
 
-                            for &dim_size in dims.iter() {
+                            let indexes = shape.indexes;
+                            let strides = calculate_strides(&dims, &indexes);
+                            // need to check if the striding indexes is off here
+
+                            for (i, &dim_size) in dims.iter().enumerate() {
                                 let range_expr =
                                     expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
 
                                 let loop_in = new_graph.add_node(GraphTerm::LoopIn {
                                     range: range_expr,
-                                    stride: expression_two::from(1),
+                                    stride: stride,
                                 });
 
                                 input_loop_chain.push(loop_in);
@@ -628,32 +772,61 @@ impl Graph {
                             }
                         }
 
-                        // Create output loop chain
-                        let output_dims =
-                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
-                        let mut output_loop_chain = Vec::new();
+                        // --- Output loop chains ---
+                        let mut last_output_node = add_node;
 
-                        for &dim_size in output_dims.iter() {
-                            let range_expr =
-                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                        for (output_idx, shape) in output_shapes.iter().enumerate() {
+                            let mut output_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let output_node = outgoing_edges.get(output_idx).map(|(n, _, _, _)| *n);
+                            let indexes = shape.indexes;
+                            let strides = calculate_strides(&dims, &indexes);
 
-                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
-                                range: range_expr,
-                                stride: expression_two::from(1),
-                            });
+                            for (i, &dim_size) in dims.iter().enumerate() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
 
-                            output_loop_chain.push(loop_out);
+                                let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                    range: range_expr,
+                                    stride,
+                                });
+
+                                output_loop_chain.push(loop_out);
+                            }
+
+                            // Connect add node to first output loop
+                            if let Some(&first_loop_out) = output_loop_chain.first() {
+                                new_graph.add_edge(add_node, first_loop_out, 0);
+                            }
+
+                            // Chain the output loops
+                            for i in 0..output_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(
+                                    output_loop_chain[i],
+                                    output_loop_chain[i + 1],
+                                    0,
+                                );
+                            }
+
+                            // Track last node for return
+                            if let Some(&final_loop_node) = output_loop_chain.last() {
+                                last_output_node = final_loop_node;
+
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, final_loop_node);
+                                }
+                            } else {
+                                // If no loops, map directly to add_node
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, add_node);
+                                }
+                            }
                         }
 
-                        if let Some(&first_loop_out) = output_loop_chain.first() {
-                            new_graph.add_edge(add_node, first_loop_out, 0);
-                        }
-
-                        for i in 0..output_loop_chain.len().saturating_sub(1) {
-                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
-                        }
-
-                        output_loop_chain.last().copied().unwrap_or(add_node)
+                        // Return the last output node to chain further
+                        last_output_node
                     }
                     "Exp2" => {
                         manually_handled_nodes.insert(node_idx);
@@ -664,13 +837,18 @@ impl Graph {
                             let dims = shape.dims();
                             let input_node = incoming_edges[input_idx].0;
 
-                            for &dim_size in dims.iter() {
+                            let indexes = shape.indexes;
+                            let strides = calculate_strides(&dims, &indexes);
+
+                            for (i, &dim_size) in dims.iter().enumerate() {
                                 let range_expr =
                                     expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
 
                                 let loop_in = new_graph.add_node(GraphTerm::LoopIn {
                                     range: range_expr,
-                                    stride: expression_two::from(1),
+                                    stride: stride,
                                 });
 
                                 input_loop_chain.push(loop_in);
@@ -706,31 +884,62 @@ impl Graph {
                         }
 
                         // Create output loop chain
-                        let output_dims =
-                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
-                        let mut output_loop_chain = Vec::new();
+                        // --- Output loop chains ---
+                        let mut last_output_node = add_node;
 
-                        for &dim_size in output_dims.iter() {
-                            let range_expr =
-                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                        for (output_idx, shape) in output_shapes.iter().enumerate() {
+                            let mut output_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let indexes = shape.indexes;
+                            let output_node = outgoing_edges.get(output_idx).map(|(n, _, _, _)| *n);
 
-                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
-                                range: range_expr,
-                                stride: expression_two::from(1),
-                            });
+                            let strides = calculate_strides(&dims, &indexes);
 
-                            output_loop_chain.push(loop_out);
+                            for (i, &dim_size) in dims.iter().enumerate() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
+
+                                let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                    range: range_expr,
+                                    stride,
+                                });
+
+                                output_loop_chain.push(loop_out);
+                            }
+
+                            // Connect add node to first output loop
+                            if let Some(&first_loop_out) = output_loop_chain.first() {
+                                new_graph.add_edge(add_node, first_loop_out, 0);
+                            }
+
+                            // Chain the output loops
+                            for i in 0..output_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(
+                                    output_loop_chain[i],
+                                    output_loop_chain[i + 1],
+                                    0,
+                                );
+                            }
+
+                            // Track last node for return
+                            if let Some(&final_loop_node) = output_loop_chain.last() {
+                                last_output_node = final_loop_node;
+
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, final_loop_node);
+                                }
+                            } else {
+                                // If no loops, map directly to add_node
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, add_node);
+                                }
+                            }
                         }
 
-                        if let Some(&first_loop_out) = output_loop_chain.first() {
-                            new_graph.add_edge(add_node, first_loop_out, 0);
-                        }
-
-                        for i in 0..output_loop_chain.len().saturating_sub(1) {
-                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
-                        }
-
-                        output_loop_chain.last().copied().unwrap_or(add_node)
+                        // Return the last output node to chain further
+                        last_output_node
                     }
                     "Sqrt" => {
                         manually_handled_nodes.insert(node_idx);
@@ -741,18 +950,22 @@ impl Graph {
                             let dims = shape.dims();
                             let input_node = incoming_edges[input_idx].0;
 
-                            for &dim_size in dims.iter() {
+                            let indexes = shape.indexes;
+                            let strides = calculate_strides(&dims, &indexes);
+
+                            for (i, &dim_size) in dims.iter().enumerate() {
                                 let range_expr =
                                     expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
 
                                 let loop_in = new_graph.add_node(GraphTerm::LoopIn {
                                     range: range_expr,
-                                    stride: expression_two::from(1),
+                                    stride: stride,
                                 });
 
                                 input_loop_chain.push(loop_in);
                             }
-
                             // Connect to the mapped input node (the output of the previous operation)
                             if let Some(&mapped_input_node) = node_mapping.get(&input_node) {
                                 if let Some(&first_loop_in) = input_loop_chain.first() {
@@ -783,31 +996,62 @@ impl Graph {
                         }
 
                         // Create output loop chain
-                        let output_dims =
-                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
-                        let mut output_loop_chain = Vec::new();
+                        // --- Output loop chains ---
+                        let mut last_output_node = add_node;
 
-                        for &dim_size in output_dims.iter() {
-                            let range_expr =
-                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                        for (output_idx, shape) in output_shapes.iter().enumerate() {
+                            let mut output_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let indexes = shape.indexes;
+                            let output_node = outgoing_edges.get(output_idx).map(|(n, _, _, _)| *n);
 
-                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
-                                range: range_expr,
-                                stride: expression_two::from(1),
-                            });
+                            let strides = calculate_strides(&dims, &indexes);
 
-                            output_loop_chain.push(loop_out);
+                            for (i, &dim_size) in dims.iter().enumerate() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
+
+                                let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                    range: range_expr,
+                                    stride,
+                                });
+
+                                output_loop_chain.push(loop_out);
+                            }
+
+                            // Connect add node to first output loop
+                            if let Some(&first_loop_out) = output_loop_chain.first() {
+                                new_graph.add_edge(add_node, first_loop_out, 0);
+                            }
+
+                            // Chain the output loops
+                            for i in 0..output_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(
+                                    output_loop_chain[i],
+                                    output_loop_chain[i + 1],
+                                    0,
+                                );
+                            }
+
+                            // Track last node for return
+                            if let Some(&final_loop_node) = output_loop_chain.last() {
+                                last_output_node = final_loop_node;
+
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, final_loop_node);
+                                }
+                            } else {
+                                // If no loops, map directly to add_node
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, add_node);
+                                }
+                            }
                         }
 
-                        if let Some(&first_loop_out) = output_loop_chain.first() {
-                            new_graph.add_edge(add_node, first_loop_out, 0);
-                        }
-
-                        for i in 0..output_loop_chain.len().saturating_sub(1) {
-                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
-                        }
-
-                        output_loop_chain.last().copied().unwrap_or(add_node)
+                        // Return the last output node to chain further
+                        last_output_node
                     }
                     "LessThan" => {
                         manually_handled_nodes.insert(node_idx);
@@ -818,13 +1062,18 @@ impl Graph {
                             let dims = shape.dims();
                             let input_node = incoming_edges[input_idx].0;
 
-                            for &dim_size in dims.iter() {
+                            let indexes = shape.indexes;
+                            let strides = calculate_strides(&dims, &indexes);
+
+                            for (i, &dim_size) in dims.iter().enumerate() {
                                 let range_expr =
                                     expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
 
                                 let loop_in = new_graph.add_node(GraphTerm::LoopIn {
                                     range: range_expr,
-                                    stride: expression_two::from(1),
+                                    stride: stride,
                                 });
 
                                 input_loop_chain.push(loop_in);
@@ -859,32 +1108,62 @@ impl Graph {
                             }
                         }
 
-                        // Create output loop chain
-                        let output_dims =
-                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
-                        let mut output_loop_chain = Vec::new();
+                        // --- Output loop chains ---
+                        let mut last_output_node = add_node;
 
-                        for &dim_size in output_dims.iter() {
-                            let range_expr =
-                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                        for (output_idx, shape) in output_shapes.iter().enumerate() {
+                            let mut output_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let indexes = shape.indexes;
+                            let output_node = outgoing_edges.get(output_idx).map(|(n, _, _, _)| *n);
 
-                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
-                                range: range_expr,
-                                stride: expression_two::from(1),
-                            });
+                            let strides = calculate_strides(&dims, &indexes);
 
-                            output_loop_chain.push(loop_out);
+                            for (i, &dim_size) in dims.iter().enumerate() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
+
+                                let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                    range: range_expr,
+                                    stride,
+                                });
+
+                                output_loop_chain.push(loop_out);
+                            }
+
+                            // Connect add node to first output loop
+                            if let Some(&first_loop_out) = output_loop_chain.first() {
+                                new_graph.add_edge(add_node, first_loop_out, 0);
+                            }
+
+                            // Chain the output loops
+                            for i in 0..output_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(
+                                    output_loop_chain[i],
+                                    output_loop_chain[i + 1],
+                                    0,
+                                );
+                            }
+
+                            // Track last node for return
+                            if let Some(&final_loop_node) = output_loop_chain.last() {
+                                last_output_node = final_loop_node;
+
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, final_loop_node);
+                                }
+                            } else {
+                                // If no loops, map directly to add_node
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, add_node);
+                                }
+                            }
                         }
 
-                        if let Some(&first_loop_out) = output_loop_chain.first() {
-                            new_graph.add_edge(add_node, first_loop_out, 0);
-                        }
-
-                        for i in 0..output_loop_chain.len().saturating_sub(1) {
-                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
-                        }
-
-                        output_loop_chain.last().copied().unwrap_or(add_node)
+                        // Return the last output node to chain further
+                        last_output_node
                     }
                     "Mul" => {
                         manually_handled_nodes.insert(node_idx);
@@ -895,13 +1174,18 @@ impl Graph {
                             let dims = shape.dims();
                             let input_node = incoming_edges[input_idx].0;
 
-                            for &dim_size in dims.iter() {
+                            let indexes = shape.indexes;
+                            let strides = calculate_strides(&dims, &indexes);
+
+                            for (i, &dim_size) in dims.iter().enumerate() {
                                 let range_expr =
                                     expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
 
                                 let loop_in = new_graph.add_node(GraphTerm::LoopIn {
                                     range: range_expr,
-                                    stride: expression_two::from(1),
+                                    stride: stride,
                                 });
 
                                 input_loop_chain.push(loop_in);
@@ -931,32 +1215,71 @@ impl Graph {
                             }
                         }
 
-                        // Create output loop chain
-                        let output_dims =
-                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
-                        let mut output_loop_chain = Vec::new();
+                        // --- Output loop chains ---
+                        let mut last_output_node = mul_node;
 
-                        for &dim_size in output_dims.iter() {
-                            let range_expr =
-                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                        let shapes_to_process = if output_shapes.is_empty() {
+                            // Calculate result shape for multiplication
+                            let result_shape =
+                                calculate_broadcast_shape(&input_shapes[0], &input_shapes[1]);
+                            vec![result_shape]
+                        } else {
+                            output_shapes.clone()
+                        };
 
-                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
-                                range: range_expr,
-                                stride: expression_two::from(1),
-                            });
+                        for (output_idx, shape) in shapes_to_process.iter().enumerate() {
+                            let mut output_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let indexes = shape.indexes;
+                            let output_node = outgoing_edges.get(output_idx).map(|(n, _, _, _)| *n);
 
-                            output_loop_chain.push(loop_out);
+                            let strides = calculate_strides(&dims, &indexes);
+
+                            for (i, &dim_size) in dims.iter().enumerate() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
+
+                                let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                    range: range_expr,
+                                    stride,
+                                });
+
+                                output_loop_chain.push(loop_out);
+                            }
+
+                            // Connect add node to first output loop
+                            if let Some(&first_loop_out) = output_loop_chain.first() {
+                                new_graph.add_edge(mul_node, first_loop_out, 0);
+                            }
+
+                            // Chain the output loops
+                            for i in 0..output_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(
+                                    output_loop_chain[i],
+                                    output_loop_chain[i + 1],
+                                    0,
+                                );
+                            }
+
+                            // Track last node for return
+                            if let Some(&final_loop_node) = output_loop_chain.last() {
+                                last_output_node = final_loop_node;
+
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, final_loop_node);
+                                }
+                            } else {
+                                // If no loops, map directly to add_node
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, mul_node);
+                                }
+                            }
                         }
 
-                        if let Some(&first_loop_out) = output_loop_chain.first() {
-                            new_graph.add_edge(mul_node, first_loop_out, 0);
-                        }
-
-                        for i in 0..output_loop_chain.len().saturating_sub(1) {
-                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
-                        }
-
-                        output_loop_chain.last().copied().unwrap_or(mul_node)
+                        // Return the last output node to chain further
+                        last_output_node
                     }
                     "Sin" => {
                         manually_handled_nodes.insert(node_idx);
@@ -968,18 +1291,22 @@ impl Graph {
                             let dims = shape.dims();
                             let input_node = incoming_edges[input_idx].0;
 
-                            for &dim_size in dims.iter() {
+                            let indexes = shape.indexes;
+                            let strides = calculate_strides(&dims, &indexes);
+
+                            for (i, &dim_size) in dims.iter().enumerate() {
                                 let range_expr =
                                     expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
 
                                 let loop_in = new_graph.add_node(GraphTerm::LoopIn {
                                     range: range_expr,
-                                    stride: expression_two::from(1),
+                                    stride: stride,
                                 });
 
                                 input_loop_chain.push(loop_in);
                             }
-
                             // Connect to the mapped input node (which should be the output of the previous operation)
                             if let Some(&mapped_input_node) = node_mapping.get(&input_node) {
                                 if let Some(&first_loop_in) = input_loop_chain.first() {
@@ -1003,32 +1330,62 @@ impl Graph {
                             }
                         }
 
-                        // Output loops (same shape as input for unary operations)
-                        let output_dims =
-                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
-                        let mut output_loop_chain = Vec::new();
+                        // --- Output loop chains ---
+                        let mut last_output_node = sin_node;
 
-                        for &dim_size in output_dims.iter() {
-                            let range_expr =
-                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                        for (output_idx, shape) in output_shapes.iter().enumerate() {
+                            let mut output_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let indexes = shape.indexes;
+                            let output_node = outgoing_edges.get(output_idx).map(|(n, _, _, _)| *n);
 
-                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
-                                range: range_expr,
-                                stride: expression_two::from(1),
-                            });
+                            let strides = calculate_strides(&dims, &indexes);
 
-                            output_loop_chain.push(loop_out);
+                            for (i, &dim_size) in dims.iter().enumerate() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
+
+                                let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                    range: range_expr,
+                                    stride,
+                                });
+
+                                output_loop_chain.push(loop_out);
+                            }
+
+                            // Connect add node to first output loop
+                            if let Some(&first_loop_out) = output_loop_chain.first() {
+                                new_graph.add_edge(sin_node, first_loop_out, 0);
+                            }
+
+                            // Chain the output loops
+                            for i in 0..output_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(
+                                    output_loop_chain[i],
+                                    output_loop_chain[i + 1],
+                                    0,
+                                );
+                            }
+
+                            // Track last node for return
+                            if let Some(&final_loop_node) = output_loop_chain.last() {
+                                last_output_node = final_loop_node;
+
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, final_loop_node);
+                                }
+                            } else {
+                                // If no loops, map directly to add_node
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, sin_node);
+                                }
+                            }
                         }
 
-                        if let Some(&first_loop_out) = output_loop_chain.first() {
-                            new_graph.add_edge(sin_node, first_loop_out, 0);
-                        }
-
-                        for i in 0..output_loop_chain.len().saturating_sub(1) {
-                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
-                        }
-
-                        output_loop_chain.last().copied().unwrap_or(sin_node)
+                        // Return the last output node to chain further
+                        last_output_node
                     }
                     "Max" => {
                         manually_handled_nodes.insert(node_idx);
@@ -1040,13 +1397,18 @@ impl Graph {
                             let dims = shape.dims();
                             let input_node = incoming_edges[input_idx].0;
 
-                            for &dim_size in dims.iter() {
+                            let indexes = shape.indexes;
+                            let strides = calculate_strides(&dims, &indexes);
+
+                            for (i, &dim_size) in dims.iter().enumerate() {
                                 let range_expr =
                                     expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
 
                                 let loop_in = new_graph.add_node(GraphTerm::LoopIn {
                                     range: range_expr,
-                                    stride: expression_two::from(1),
+                                    stride: stride,
                                 });
 
                                 input_loop_chain.push(loop_in);
@@ -1076,31 +1438,62 @@ impl Graph {
                         }
 
                         // Output loops (same shape as input for unary operations)
-                        let output_dims =
-                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
-                        let mut output_loop_chain = Vec::new();
+                        // --- Output loop chains ---
+                        let mut last_output_node = sin_node;
 
-                        for &dim_size in output_dims.iter() {
-                            let range_expr =
-                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                        for (output_idx, shape) in output_shapes.iter().enumerate() {
+                            let mut output_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let indexes = shape.indexes;
+                            let output_node = outgoing_edges.get(output_idx).map(|(n, _, _, _)| *n);
 
-                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
-                                range: range_expr,
-                                stride: expression_two::from(1),
-                            });
+                            let strides = calculate_strides(&dims, &indexes);
 
-                            output_loop_chain.push(loop_out);
+                            for (i, &dim_size) in dims.iter().enumerate() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
+
+                                let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                    range: range_expr,
+                                    stride,
+                                });
+
+                                output_loop_chain.push(loop_out);
+                            }
+
+                            // Connect add node to first output loop
+                            if let Some(&first_loop_out) = output_loop_chain.first() {
+                                new_graph.add_edge(sin_node, first_loop_out, 0);
+                            }
+
+                            // Chain the output loops
+                            for i in 0..output_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(
+                                    output_loop_chain[i],
+                                    output_loop_chain[i + 1],
+                                    0,
+                                );
+                            }
+
+                            // Track last node for return
+                            if let Some(&final_loop_node) = output_loop_chain.last() {
+                                last_output_node = final_loop_node;
+
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, final_loop_node);
+                                }
+                            } else {
+                                // If no loops, map directly to add_node
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, sin_node);
+                                }
+                            }
                         }
 
-                        if let Some(&first_loop_out) = output_loop_chain.first() {
-                            new_graph.add_edge(sin_node, first_loop_out, 0);
-                        }
-
-                        for i in 0..output_loop_chain.len().saturating_sub(1) {
-                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
-                        }
-
-                        output_loop_chain.last().copied().unwrap_or(sin_node)
+                        // Return the last output node to chain further
+                        last_output_node
                     }
                     "Exp" => {
                         manually_handled_nodes.insert(node_idx);
@@ -1112,18 +1505,22 @@ impl Graph {
                             let dims = shape.dims();
                             let input_node = incoming_edges[input_idx].0;
 
-                            for &dim_size in dims.iter() {
+                            let indexes = shape.indexes;
+                            let strides = calculate_strides(&dims, &indexes);
+
+                            for (i, &dim_size) in dims.iter().enumerate() {
                                 let range_expr =
                                     expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
 
                                 let loop_in = new_graph.add_node(GraphTerm::LoopIn {
                                     range: range_expr,
-                                    stride: expression_two::from(1),
+                                    stride: stride,
                                 });
 
                                 input_loop_chain.push(loop_in);
                             }
-
                             // Connect to the mapped input node (which should be the output of the previous operation)
                             if let Some(&mapped_input_node) = node_mapping.get(&input_node) {
                                 if let Some(&first_loop_in) = input_loop_chain.first() {
@@ -1148,31 +1545,62 @@ impl Graph {
                         }
 
                         // Output loops (same shape as input for unary operations)
-                        let output_dims =
-                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
-                        let mut output_loop_chain = Vec::new();
+                        // --- Output loop chains ---
+                        let mut last_output_node = sin_node;
 
-                        for &dim_size in output_dims.iter() {
-                            let range_expr =
-                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                        for (output_idx, shape) in output_shapes.iter().enumerate() {
+                            let mut output_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let indexes = shape.indexes;
+                            let output_node = outgoing_edges.get(output_idx).map(|(n, _, _, _)| *n);
 
-                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
-                                range: range_expr,
-                                stride: expression_two::from(1),
-                            });
+                            let strides = calculate_strides(&dims, &indexes);
 
-                            output_loop_chain.push(loop_out);
+                            for (i, &dim_size) in dims.iter().enumerate() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
+
+                                let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                    range: range_expr,
+                                    stride,
+                                });
+
+                                output_loop_chain.push(loop_out);
+                            }
+
+                            // Connect add node to first output loop
+                            if let Some(&first_loop_out) = output_loop_chain.first() {
+                                new_graph.add_edge(sin_node, first_loop_out, 0);
+                            }
+
+                            // Chain the output loops
+                            for i in 0..output_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(
+                                    output_loop_chain[i],
+                                    output_loop_chain[i + 1],
+                                    0,
+                                );
+                            }
+
+                            // Track last node for return
+                            if let Some(&final_loop_node) = output_loop_chain.last() {
+                                last_output_node = final_loop_node;
+
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, final_loop_node);
+                                }
+                            } else {
+                                // If no loops, map directly to add_node
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, sin_node);
+                                }
+                            }
                         }
 
-                        if let Some(&first_loop_out) = output_loop_chain.first() {
-                            new_graph.add_edge(sin_node, first_loop_out, 0);
-                        }
-
-                        for i in 0..output_loop_chain.len().saturating_sub(1) {
-                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
-                        }
-
-                        output_loop_chain.last().copied().unwrap_or(sin_node)
+                        // Return the last output node to chain further
+                        last_output_node
                     }
                     "Recip" => {
                         manually_handled_nodes.insert(node_idx);
@@ -1184,13 +1612,18 @@ impl Graph {
                             let dims = shape.dims();
                             let input_node = incoming_edges[input_idx].0;
 
-                            for &dim_size in dims.iter() {
+                            let indexes = shape.indexes;
+                            let strides = calculate_strides(&dims, &indexes);
+
+                            for (i, &dim_size) in dims.iter().enumerate() {
                                 let range_expr =
                                     expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
 
                                 let loop_in = new_graph.add_node(GraphTerm::LoopIn {
                                     range: range_expr,
-                                    stride: expression_two::from(1),
+                                    stride: stride,
                                 });
 
                                 input_loop_chain.push(loop_in);
@@ -1219,32 +1652,62 @@ impl Graph {
                             }
                         }
 
-                        // Output loops (same shape as input for unary operations)
-                        let output_dims =
-                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
-                        let mut output_loop_chain = Vec::new();
+                        // --- Output loop chains ---
+                        let mut last_output_node = sin_node;
 
-                        for &dim_size in output_dims.iter() {
-                            let range_expr =
-                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                        for (output_idx, shape) in output_shapes.iter().enumerate() {
+                            let mut output_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let indexes = shape.indexes;
+                            let output_node = outgoing_edges.get(output_idx).map(|(n, _, _, _)| *n);
 
-                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
-                                range: range_expr,
-                                stride: expression_two::from(1),
-                            });
+                            let strides = calculate_strides(&dims, &indexes);
 
-                            output_loop_chain.push(loop_out);
+                            for (i, &dim_size) in dims.iter().enumerate() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
+
+                                let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                    range: range_expr,
+                                    stride,
+                                });
+
+                                output_loop_chain.push(loop_out);
+                            }
+
+                            // Connect add node to first output loop
+                            if let Some(&first_loop_out) = output_loop_chain.first() {
+                                new_graph.add_edge(sin_node, first_loop_out, 0);
+                            }
+
+                            // Chain the output loops
+                            for i in 0..output_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(
+                                    output_loop_chain[i],
+                                    output_loop_chain[i + 1],
+                                    0,
+                                );
+                            }
+
+                            // Track last node for return
+                            if let Some(&final_loop_node) = output_loop_chain.last() {
+                                last_output_node = final_loop_node;
+
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, final_loop_node);
+                                }
+                            } else {
+                                // If no loops, map directly to add_node
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, sin_node);
+                                }
+                            }
                         }
 
-                        if let Some(&first_loop_out) = output_loop_chain.first() {
-                            new_graph.add_edge(sin_node, first_loop_out, 0);
-                        }
-
-                        for i in 0..output_loop_chain.len().saturating_sub(1) {
-                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
-                        }
-
-                        output_loop_chain.last().copied().unwrap_or(sin_node)
+                        // Return the last output node to chain further
+                        last_output_node
                     }
                     "Neg" => {
                         manually_handled_nodes.insert(node_idx);
@@ -1256,13 +1719,18 @@ impl Graph {
                             let dims = shape.dims();
                             let input_node = incoming_edges[input_idx].0;
 
-                            for &dim_size in dims.iter() {
+                            let indexes = shape.indexes;
+                            let strides = calculate_strides(&dims, &indexes);
+
+                            for (i, &dim_size) in dims.iter().enumerate() {
                                 let range_expr =
                                     expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
 
                                 let loop_in = new_graph.add_node(GraphTerm::LoopIn {
                                     range: range_expr,
-                                    stride: expression_two::from(1),
+                                    stride: stride,
                                 });
 
                                 input_loop_chain.push(loop_in);
@@ -1291,32 +1759,62 @@ impl Graph {
                             }
                         }
 
-                        // Output loops (same shape as input for unary operations)
-                        let output_dims =
-                            input_shapes.first().map(|s| s.dims()).unwrap_or_default();
-                        let mut output_loop_chain = Vec::new();
+                        // --- Output loop chains ---
+                        let mut last_output_node = sin_node;
 
-                        for &dim_size in output_dims.iter() {
-                            let range_expr =
-                                expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                        for (output_idx, shape) in output_shapes.iter().enumerate() {
+                            let mut output_loop_chain = Vec::new();
+                            let dims = shape.dims();
+                            let indexes = shape.indexes;
+                            let output_node = outgoing_edges.get(output_idx).map(|(n, _, _, _)| *n);
 
-                            let loop_out = new_graph.add_node(GraphTerm::LoopOut {
-                                range: range_expr,
-                                stride: expression_two::from(1),
-                            });
+                            let strides = calculate_strides(&dims, &indexes);
 
-                            output_loop_chain.push(loop_out);
+                            for (i, &dim_size) in dims.iter().enumerate() {
+                                let range_expr =
+                                    expression_two::from(dim_size.to_usize().unwrap_or(1) as i32);
+                                let stride =
+                                    strides.get(i).cloned().unwrap_or(expression_two::from(1));
+
+                                let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                    range: range_expr,
+                                    stride,
+                                });
+
+                                output_loop_chain.push(loop_out);
+                            }
+
+                            // Connect add node to first output loop
+                            if let Some(&first_loop_out) = output_loop_chain.first() {
+                                new_graph.add_edge(sin_node, first_loop_out, 0);
+                            }
+
+                            // Chain the output loops
+                            for i in 0..output_loop_chain.len().saturating_sub(1) {
+                                new_graph.add_edge(
+                                    output_loop_chain[i],
+                                    output_loop_chain[i + 1],
+                                    0,
+                                );
+                            }
+
+                            // Track last node for return
+                            if let Some(&final_loop_node) = output_loop_chain.last() {
+                                last_output_node = final_loop_node;
+
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, final_loop_node);
+                                }
+                            } else {
+                                // If no loops, map directly to add_node
+                                if let Some(output_node) = output_node {
+                                    node_mapping.insert(output_node, sin_node);
+                                }
+                            }
                         }
 
-                        if let Some(&first_loop_out) = output_loop_chain.first() {
-                            new_graph.add_edge(sin_node, first_loop_out, 0);
-                        }
-
-                        for i in 0..output_loop_chain.len().saturating_sub(1) {
-                            new_graph.add_edge(output_loop_chain[i], output_loop_chain[i + 1], 0);
-                        }
-
-                        output_loop_chain.last().copied().unwrap_or(sin_node)
+                        // Return the last output node to chain further
+                        last_output_node
                     }
                     // Add this case to your match statement where you handle "Add"
                     // REDUCTIONS likely need to have their loopouts rewritten to handle this kind of stuff
