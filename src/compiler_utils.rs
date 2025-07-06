@@ -196,7 +196,7 @@ fn calculate_strides(dims: &[Expression], indexes: &[usize]) -> Vec<expression_t
         }
     }
 
-    println!("{:?} | {:?} = {:?}", dims, indexes, logical_strides);
+    // println!("{:?} | {:?} = {:?}", dims, indexes, logical_strides);
 
     logical_strides
 }
@@ -706,7 +706,7 @@ impl Graph {
                     .map(|(_, _, _, shape)| shape.clone())
                     .collect();
 
-                println!("{:?} | {:?} => {:?}", op, input_shapes, output_shapes);
+                // println!("{:?} | {:?} => {:?}", op, input_shapes, output_shapes);
 
                 let new_node_idx = match op {
                     s if s.ends_with("Load") => {
@@ -715,6 +715,48 @@ impl Graph {
                             label: Some(format!("{}", s)),
                         });
                         gmem_node
+                    }
+                    "Contiguous" => {
+                        manually_handled_nodes.insert(node_idx);
+
+                        // For a no-op, we just need to pass through the input to the output
+                        // without creating any intermediate nodes
+
+                        // Get the input node from the first (and likely only) incoming edge
+                        if let Some(&(input_node, _, _, _)) = incoming_edges.first() {
+                            // Get the mapped input node
+                            if let Some(&mapped_input_node) = node_mapping.get(&input_node) {
+                                // Map all output nodes directly to the input node (pass-through)
+                                for &(output_node, _, _, _) in &outgoing_edges {
+                                    node_mapping.insert(output_node, mapped_input_node);
+                                }
+
+                                // Return the mapped input node to maintain continuity
+                                mapped_input_node
+                            } else {
+                                // Fallback: create a no-op node if input mapping doesn't exist
+                                let noop_node = new_graph.add_node(GraphTerm::GMEM {
+                                    label: Some(format!("ERROR")),
+                                }); // or whatever no-op node type you have
+
+                                for &(output_node, _, _, _) in &outgoing_edges {
+                                    node_mapping.insert(output_node, noop_node);
+                                }
+
+                                noop_node
+                            }
+                        } else {
+                            // No incoming edges - this shouldn't happen for Contiguous, but handle gracefully
+                            let noop_node = new_graph.add_node(GraphTerm::GMEM {
+                                label: Some(format!("ERROR")),
+                            });
+
+                            for &(output_node, _, _, _) in &outgoing_edges {
+                                node_mapping.insert(output_node, noop_node);
+                            }
+
+                            noop_node
+                        }
                     }
                     "Add" => {
                         manually_handled_nodes.insert(node_idx);
@@ -1832,6 +1874,11 @@ impl Graph {
                         let input_node = incoming_edges[0].0;
                         let dims = input_shape.dims();
 
+                        // Calculate strides for the input tensor
+                        // Assuming you have access to the indexes - you might need to get this from the shape
+                        let indexes: Vec<usize> = (0..dims.len()).collect(); // Default sequential indexing
+                        let strides = calculate_strides(&dims, &indexes);
+
                         // Create accumulator node with starting value of 0
                         let acc_node = new_graph.add_node(GraphTerm::NewAcc {
                             starting_value: "0".to_string(),
@@ -1845,7 +1892,7 @@ impl Graph {
 
                             let loop_in = new_graph.add_node(GraphTerm::LoopIn {
                                 range: range_expr,
-                                stride: expression_two::from('a'),
+                                stride: strides[dim_idx].clone(), // Use calculated stride
                             });
 
                             input_loop_chain.push(loop_in);
@@ -1853,6 +1900,10 @@ impl Graph {
 
                         // Create accumulator loop chain (same structure as input but will be connected differently)
                         let mut acc_loop_chain = Vec::new();
+
+                        // Get the size of the dimension we're reducing over
+                        let reduce_dim_size = dims[reduce_dim_idx].to_usize().unwrap_or(1);
+
                         for (dim_idx, &dim_size) in dims.iter().enumerate() {
                             let range_expr = if dim_idx == reduce_dim_idx {
                                 // For reduced dimension, set range to 1
@@ -1861,9 +1912,21 @@ impl Graph {
                                 expression_two::from(dim_size.to_usize().unwrap_or(1) as i32)
                             };
 
+                            // For accumulator strides:
+                            // - The reduced dimension gets stride 'z'
+                            // - Dimensions to the left of reduced dimension get 'z' multiplied by the size of the reduced dimension
+                            // - Dimensions to the right keep their original stride
+                            let stride = if dim_idx == reduce_dim_idx {
+                                expression_two::from('z')
+                            } else if dim_idx < reduce_dim_idx {
+                                expression_two::from('z') * reduce_dim_size
+                            } else {
+                                strides[dim_idx].clone()
+                            };
+
                             let loop_in = new_graph.add_node(GraphTerm::LoopIn {
                                 range: range_expr,
-                                stride: expression_two::from('a'),
+                                stride: stride,
                             });
 
                             acc_loop_chain.push(loop_in);
@@ -1917,9 +1980,21 @@ impl Graph {
                                 expression_two::from(dim_size.to_usize().unwrap_or(1) as i32)
                             };
 
+                            // For output strides, use the same logic as accumulator:
+                            // - The reduced dimension gets stride 'z'
+                            // - Dimensions to the left of reduced dimension get 'z' multiplied by the size of the reduced dimension
+                            // - Dimensions to the right keep their original stride
+                            let stride = if dim_idx == reduce_dim_idx {
+                                expression_two::from('z')
+                            } else if dim_idx < reduce_dim_idx {
+                                expression_two::from('z') * reduce_dim_size
+                            } else {
+                                strides[dim_idx].clone()
+                            };
+
                             let loop_out = new_graph.add_node(GraphTerm::LoopOut {
                                 range: range_expr,
-                                stride: expression_two::from('a'),
+                                stride: stride,
                             });
 
                             output_loop_chain.push(loop_out);
