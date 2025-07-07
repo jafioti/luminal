@@ -138,11 +138,11 @@ fn main() {
     // println!("tiled {}ms", avgs.into_iter().sum::<u128>() / 10);
     // expression_cleanup();
     let start = std::time::Instant::now();
-    let (g, r) = make_sum_reduce();
+    let (g, _) = make_sum_reduce();
     let (rendered, root) = render_egglog(g);
     let code = include_str!("code.lisp");
+    println!("{rendered}");
     let final_code = code.replace("{code}", &rendered);
-    println!("{final_code}");
     match run_egglog_program(&final_code, &root) {
         Ok((_egglog_messages, serialized)) => {
             println!(

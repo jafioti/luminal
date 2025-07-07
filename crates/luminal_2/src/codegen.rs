@@ -367,7 +367,6 @@ fn make_kernel(
                         // Make accumulator
                         *prev_max_var += 1;
                         arch.add_metal_buffer_type(*prev_max_var, "thread ");
-                        println!("size: {:?}", size);
                         kernel_lines.push(format!(
                             "{spacing}{}float {}[{}] = {{0.0}};",
                             arch.metal_buffer_type(*prev_max_var),

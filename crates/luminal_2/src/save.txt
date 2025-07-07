@@ -1,0 +1,77 @@
+(rewrite
+ 	(LoopOut (Binary ?finbin (Binary ?spbin (LoopIn ?a (Loop ?loopL (MNum ?loop)) ?strideA) (LoopIn ?b (Loop ?loopL (MNum ?loop)) ?strideB)) (LoopIn ?c (Loop ?loopL (MNum ?loop)) ?strideC)) (Loop ?loopL (MNum ?loop)) ?stride)
+ 	(LoopOut
+     	(LoopOut
+      		(Binary ?finbin
+	         	(Binary ?spbin
+	            	(LoopIn
+	                 	(LoopIn
+	                     	?a
+	                     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+	                     	(MReplace ?strideA (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+	                    )
+	                 	(Loop (+ ?loopL "Split") (MNum tileFactor))
+	                 	?strideA
+	                )
+	                (LoopIn
+	                 	(LoopIn
+	                     	?b
+	                     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+	                     	(MReplace ?strideB (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+	                    )
+	                 	(Loop (+ ?loopL "Split") (MNum tileFactor))
+	                 	?strideB
+	                )
+	            )
+	            (LoopIn
+                 	(LoopIn
+                     	?c
+                     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+                     	(MReplace ?strideC (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+                    )
+                 	(Loop (+ ?loopL "Split") (MNum tileFactor))
+                 	?strideC
+                )
+            )
+         	(Loop (+ ?loopL "Split") (MNum tileFactor))
+         	?stride
+        )
+     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+    	(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+    )
+ 	:when ((> ?loop tileFactor) (= (% ?loop tileFactor) 0))
+)
+
+
+
+(let mt0 (GMEM "Acc"))
+(let mt1 (LoopIn mt0 (Loop "pad0" (MNum 1)) (MNum 0)))
+(let mt2 (LoopIn mt1 (Loop "pad1" (MNum 1)) (MNum 0)))
+(let mt3 (LoopIn mt2 (Loop "m" (MNum 8)) (MMul (MVar "z") (MNum 32))))
+(let mt4 (LoopIn mt3 (Loop "k" (MNum 16)) (MAccum "a")))
+(let mt5 (LoopIn mt4 (Loop "n" (MNum 32)) (MVar "z")))
+
+(let mt6 (GMEM "B"))
+(let mt7 (LoopIn mt6 (Loop "pad0" (MNum 1)) (MNum 0)))
+(let mt8 (LoopIn mt7 (Loop "pad1" (MNum 1)) (MNum 0)))
+(let mt9 (LoopIn mt8 (Loop "m" (MNum 8)) (MNum 0)))
+(let mt10 (LoopIn mt9 (Loop "k" (MNum 16)) (MMul (MVar "z") (MNum 32))))
+(let mt11 (LoopIn mt10 (Loop "n" (MNum 32)) (MVar "z")))
+
+(let mt12 (GMEM "A"))
+(let mt13 (LoopIn mt12 (Loop "pad0" (MNum 1)) (MNum 0)))
+(let mt14 (LoopIn mt13 (Loop "pad1" (MNum 1)) (MNum 0)))
+(let mt15 (LoopIn mt14 (Loop "m" (MNum 8)) (MMul (MVar "z") (MNum 16))))
+(let mt16 (LoopIn mt15 (Loop "k" (MNum 16)) (MVar "z")))
+(let mt17 (LoopIn mt16 (Loop "n" (MNum 32)) (MNum 0)))
+
+(let mt18 (Mul mt11 mt17))
+(let mt19 (Add mt5 mt18))
+
+(let mt20 (LoopOut mt19 (Loop "n" (MNum 32)) (MVar "z")))
+(let mt21 (LoopOut mt20 (Loop "k" (MNum 16)) (MAccum "a")))
+(let mt22 (LoopOut mt21 (Loop "m" (MNum 8)) (MMul (MVar "z") (MNum 32))))
+(let mt23 (LoopOut mt22 (Loop "pad1" (MNum 1)) (MNum 0)))
+(let mt24 (LoopOut mt23 (Loop "pad0" (MNum 1)) (MNum 0)))
+
+(check (= mt24 t24))
