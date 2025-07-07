@@ -1484,7 +1484,8 @@ mod tests {
             } {
                 strides.push(stride);
             } else {
-                panic!("Traversal started on a non-loop node");
+                // Traversal has reached a non-loop node, which terminates the chain.
+                break;
             }
 
             // Find the next node in the chain
@@ -1524,8 +1525,8 @@ mod tests {
             } {
                 ranges.push(range);
             } else {
-                // We started on a non-loop node, which is an error in the test logic
-                panic!("Started traversal on a non-loop node");
+                // Traversal has reached a non-loop node, which terminates the chain.
+                break;
             }
 
             // Find the next node in the chain
@@ -1729,149 +1730,149 @@ mod tests {
         ));
     }
 
-    // #[test]
-    // fn test_reduction_loop_in_ranges_match() {
-    //     // 1. Setup: Create a 3D tensor and reduce it on the middle dimension.
-    //     let mut cx = Graph::new();
-    //     let a = cx.tensor((2, 5, 4)); // Shape (2, 5, 4)
-    //     let b = a.sum_reduce(1); // Reduce dim 1, output shape should be (2, 1, 4)
-    //     b.retrieve();
+    #[test]
+    fn test_reduction_loop_in_ranges_match() {
+        // 1. Setup: Create a 3D tensor and reduce it on the middle dimension.
+        let mut cx = Graph::new();
+        let a = cx.tensor((2, 5, 4)); // Shape (2, 5, 4)
+        let b = a.sum(1); // Reduce dim 1, output shape should be (2, 1, 4)
+        b.retrieve();
 
-    //     // 2. Translate
-    //     let graph2 = cx.translate_to_2();
+        // 2. Translate
+        let graph2 = cx.translate_to_2();
 
-    //     // 3. Assert: The LoopIn chains for both inputs to the Add node must have the same ranges,
-    //     // matching the *original* tensor shape.
-    //     let add_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Add));
-    //     let parents: Vec<_> = graph2
-    //         .edges_directed(add_node, Direction::Incoming)
-    //         .map(|e| e.source())
-    //         .collect();
-    //     assert_eq!(parents.len(), 2, "Add node should have two parents");
+        // 3. Assert: The LoopIn chains for both inputs to the Add node must have the same ranges,
+        // matching the *original* tensor shape.
+        let add_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Add));
+        let parents: Vec<_> = graph2
+            .edges_directed(add_node, Direction::Incoming)
+            .map(|e| e.source())
+            .collect();
+        assert_eq!(parents.len(), 2, "Add node should have two parents");
 
-    //     // The parents are the last `LoopIn` nodes of their respective chains.
-    //     let input_loop_ranges = get_loop_chain_ranges(&graph2, parents[0], Direction::Incoming);
-    //     let acc_loop_ranges = get_loop_chain_ranges(&graph2, parents[1], Direction::Incoming);
+        // The parents are the last `LoopIn` nodes of their respective chains.
+        let input_loop_ranges = get_loop_chain_ranges(&graph2, parents[0], Direction::Incoming);
+        let acc_loop_ranges = get_loop_chain_ranges(&graph2, parents[1], Direction::Incoming);
 
-    //     let expected_ranges: Vec<expression_two> = vec![2.into(), 5.into(), 4.into()];
+        let expected_ranges: Vec<expression_two> = vec![2.into(), 5.into(), 4.into()];
 
-    //     assert_eq!(
-    //         input_loop_ranges, expected_ranges,
-    //         "Input data loop ranges are incorrect"
-    //     );
-    //     assert_eq!(
-    //         acc_loop_ranges, expected_ranges,
-    //         "Accumulator loop ranges are incorrect"
-    //     );
-    // }
+        assert_eq!(
+            input_loop_ranges, expected_ranges,
+            "Input data loop ranges are incorrect"
+        );
+        assert_eq!(
+            acc_loop_ranges, expected_ranges,
+            "Accumulator loop ranges are incorrect"
+        );
+    }
 
-    // #[test]
-    // fn test_reduction_loop_out_ranges_adjusted() {
-    //     // 1. Setup: Create a 3D tensor and reduce it on the middle dimension.
-    //     let mut cx = Graph::new();
-    //     let a = cx.tensor((2, 5, 4)); // Shape (2, 5, 4)
-    //     let b = a.sum_reduce(1); // Reduce dim 1, output shape is (2, 1, 4)
-    //     b.retrieve();
+    #[test]
+    fn test_reduction_loop_out_ranges_adjusted() {
+        // 1. Setup: Create a 3D tensor and reduce it on the middle dimension.
+        let mut cx = Graph::new();
+        let a = cx.tensor((2, 5, 4)); // Shape (2, 5, 4)
+        let b = a.sum(1); // Reduce dim 1, output shape is (2, 1, 4)
+        b.retrieve();
 
-    //     // 2. Translate
-    //     let graph2 = cx.translate_to_2();
+        // 2. Translate
+        let graph2 = cx.translate_to_2();
 
-    //     // 3. Assert: The LoopOut chain must have ranges matching the *new, reduced* tensor shape.
-    //     let add_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Add));
-    //     let children: Vec<_> = graph2
-    //         .edges_directed(add_node, Direction::Outgoing)
-    //         .map(|e| e.target())
-    //         .collect();
-    //     assert_eq!(children.len(), 1, "Add node should have one child");
+        // 3. Assert: The LoopOut chain must have ranges matching the *new, reduced* tensor shape.
+        let add_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Add));
+        let children: Vec<_> = graph2
+            .edges_directed(add_node, Direction::Outgoing)
+            .map(|e| e.target())
+            .collect();
+        assert_eq!(children.len(), 1, "Add node should have one child");
 
-    //     // The child is the first `LoopOut` node of the output chain.
-    //     let output_loop_ranges = get_loop_chain_ranges(&graph2, children[0], Direction::Outgoing);
+        // The child is the first `LoopOut` node of the output chain.
+        let output_loop_ranges = get_loop_chain_ranges(&graph2, children[0], Direction::Outgoing);
 
-    //     let expected_ranges: Vec<expression_two> = vec![2.into(), 1.into(), 4.into()];
+        let expected_ranges: Vec<expression_two> = vec![2.into(), 1.into(), 4.into()];
 
-    //     assert_eq!(
-    //         output_loop_ranges, expected_ranges,
-    //         "Output loop ranges are incorrect and were not adjusted for reduction"
-    //     );
-    // }
+        assert_eq!(
+            output_loop_ranges, expected_ranges,
+            "Output loop ranges are incorrect and were not adjusted for reduction"
+        );
+    }
 
-    // #[test]
-    // fn test_reduction_acc_input_strides_correct() {
-    //     // 1. Arrange: Create a 3D tensor and reduce it on the middle dimension.
-    //     let mut cx = Graph::new();
-    //     let a = cx.tensor((5, 4, 3)); // Shape (5, 4, 3)
-    //     let b = a.sum_reduce(1); // Reduce dim 1
-    //     b.retrieve();
+    #[test]
+    fn test_reduction_acc_input_strides_correct() {
+        // 1. Arrange: Create a 3D tensor and reduce it on the middle dimension.
+        let mut cx = Graph::new();
+        let a = cx.tensor((5, 4, 3)); // Shape (5, 4, 3)
+        let b = a.sum(1); // Reduce dim 1
+        b.retrieve();
 
-    //     // 2. Act: Translate the graph.
-    //     let graph2 = cx.translate_to_2();
+        // 2. Act: Translate the graph.
+        let graph2 = cx.translate_to_2();
 
-    //     // 3. Assert: The accumulator's LoopIn chain should have strides based on the *original*
-    //     // input shape (5, 4, 3), with 'z' propagating correctly.
-    //     let add_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Add));
-    //     let new_acc_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::NewAcc { .. }));
+        // 3. Assert: The accumulator's LoopIn chain should have strides based on the *original*
+        // input shape (5, 4, 3), with 'z' propagating correctly.
+        let add_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Add));
+        let new_acc_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::NewAcc { .. }));
 
-    //     // Find the start of the accumulator's loop chain (the child of NewAcc)
-    //     let acc_loop_start = graph2
-    //         .edges_directed(new_acc_node, Direction::Outgoing)
-    //         .next()
-    //         .unwrap()
-    //         .target();
-    //     let acc_loop_strides = get_loop_chain_strides(&graph2, acc_loop_start, Direction::Outgoing);
+        // Find the start of the accumulator's loop chain (the child of NewAcc)
+        let acc_loop_start = graph2
+            .edges_directed(new_acc_node, Direction::Outgoing)
+            .next()
+            .unwrap()
+            .target();
+        let acc_loop_strides = get_loop_chain_strides(&graph2, acc_loop_start, Direction::Outgoing);
 
-    //     // Expected strides for reducing (5, 4, 3) on dim 1:
-    //     // dim 2 (size 3): Stride is 1
-    //     // dim 1 (size 4, reduced): Stride is z
-    //     // dim 0 (size 5): Stride is z * 4
-    //     // The `calculate_reduction_strides` function produces [(z*4), z, 1].
-    //     let z = expression_two::from('z');
-    //     let expected_strides: Vec<expression_two> = vec![z.clone() * 4, z.clone(), 1.into()];
+        // Expected strides for reducing (5, 4, 3) on dim 1:
+        // dim 2 (size 3): Stride is 1
+        // dim 1 (size 4, reduced): Stride is z
+        // dim 0 (size 5): Stride is z * 4
+        // The `calculate_reduction_strides` function produces [(z*4), z, 1].
+        let z = expression_two::from('z');
+        let expected_strides: Vec<expression_two> = vec![z.clone() * 4, z.clone(), 1.into()];
 
-    //     assert_eq!(
-    //         acc_loop_strides, expected_strides,
-    //         "Accumulator loop strides are incorrect"
-    //     );
-    // }
+        assert_eq!(
+            acc_loop_strides, expected_strides,
+            "Accumulator loop strides are incorrect"
+        );
+    }
 
-    // #[test]
-    // fn test_reduction_output_strides_correct() {
-    //     // 1. Arrange: Create a 3D tensor and reduce it on the middle dimension.
-    //     let mut cx = Graph::new();
-    //     let a = cx.tensor((5, 4, 3)); // Shape (5, 4, 3)
-    //     let b = a.sum_reduce(1); // Reduce dim 1, output shape is (5, 1, 3)
-    //     b.retrieve();
+    #[test]
+    fn test_reduction_output_strides_correct() {
+        // 1. Arrange: Create a 3D tensor and reduce it on the middle dimension.
+        let mut cx = Graph::new();
+        let a = cx.tensor((5, 4, 3)); // Shape (5, 4, 3)
+        let b = a.sum(1); // Reduce dim 1, output shape is (5, 1, 3)
+        b.retrieve();
 
-    //     // 2. Act: Translate the graph.
-    //     let graph2 = cx.translate_to_2();
+        // 2. Act: Translate the graph.
+        let graph2 = cx.translate_to_2();
 
-    //     // 3. Assert: The LoopOut chain must have strides calculated from the *final, smaller*
-    //     // output shape (5, 1, 3).
-    //     let add_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Add));
+        // 3. Assert: The LoopOut chain must have strides calculated from the *final, smaller*
+        // output shape (5, 1, 3).
+        let add_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Add));
 
-    //     // The child of the Add op is the start of the LoopOut chain.
-    //     let output_loop_start = graph2
-    //         .edges_directed(add_node, Direction::Outgoing)
-    //         .next()
-    //         .unwrap()
-    //         .target();
-    //     let output_loop_strides =
-    //         get_loop_chain_strides(&graph2, output_loop_start, Direction::Outgoing);
+        // The child of the Add op is the start of the LoopOut chain.
+        let output_loop_start = graph2
+            .edges_directed(add_node, Direction::Outgoing)
+            .next()
+            .unwrap()
+            .target();
+        let output_loop_strides =
+            get_loop_chain_strides(&graph2, output_loop_start, Direction::Outgoing);
 
-    //     // Expected strides for output shape (5, 1, 3) reduced on dim 1:
-    //     // dim 2 (size 3): Stride is 1
-    //     // dim 1 (size 1, reduced): Stride is z
-    //     // dim 0 (size 5): Stride is z * 1
-    //     // The `calculate_reduction_strides` function produces [(z*1), z, 1].
-    //     let z = expression_two::from('z');
-    //     let expected_strides: Vec<expression_two> = vec![
-    //         z.clone(), // This is z * 1
-    //         z.clone(),
-    //         1.into(),
-    //     ];
+        // Expected strides for output shape (5, 1, 3) reduced on dim 1:
+        // dim 2 (size 3): Stride is 1
+        // dim 1 (size 1, reduced): Stride is z
+        // dim 0 (size 5): Stride is z * 1
+        // The `calculate_reduction_strides` function produces [(z*1), z, 1].
+        let z = expression_two::from('z');
+        let expected_strides: Vec<expression_two> = vec![
+            z.clone(), // This is z * 1
+            z.clone(),
+            1.into(),
+        ];
 
-    //     assert_eq!(
-    //         output_loop_strides, expected_strides,
-    //         "Output loop strides are incorrect"
-    //     );
-    // }
+        assert_eq!(
+            output_loop_strides, expected_strides,
+            "Output loop strides are incorrect"
+        );
+    }
 }
