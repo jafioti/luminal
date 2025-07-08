@@ -138,11 +138,11 @@ fn main() {
     // println!("tiled {}ms", avgs.into_iter().sum::<u128>() / 10);
     // expression_cleanup();
     let start = std::time::Instant::now();
-    let (g, r) = make_sum_reduce();
+    let (g, _) = make_sum_reduce();
     let (rendered, root) = render_egglog(g);
     let code = include_str!("code.lisp");
+    println!("{rendered}");
     let final_code = code.replace("{code}", &rendered);
-    println!("{final_code}");
     match run_egglog_program(&final_code, &root) {
         Ok((_egglog_messages, serialized)) => {
             println!(
@@ -153,8 +153,8 @@ fn main() {
             search(
                 &serialized,
                 &[
-                    (0..8 * 16).map(|_| rng.random()).collect_vec(),
-                    (0..16 * 32).map(|_| rng.random()).collect_vec(),
+                    (0..64 * 64).map(|_| rng.random()).collect_vec(),
+                    (0..64 * 64).map(|_| rng.random()).collect_vec(),
                     vec![0.0],
                 ],
             );
@@ -270,7 +270,7 @@ fn render_egglog(graph: StableGraph<GraphTerm, (), Directed>) -> (String, String
 }
 
 fn make_sum_reduce() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
-    let (m, k, n) = (8, 16, 32);
+    let (m, k, n) = (64, 64, 64);
     let mut graph = StableGraph::new();
 
     let mut a = graph.add_node(GraphTerm::GMEM {
