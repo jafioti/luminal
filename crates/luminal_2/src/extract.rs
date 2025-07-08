@@ -17,9 +17,10 @@ const INVALID_IR: &[&str] = &["SwapLoops", "Unary", "Binary"];
 type Cost = u128; // Execution time in microseconds
 
 use std::collections::HashMap;
+use std::u128;
 
 /// Enumerate every possible extraction and get the runtime cost for each
-pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
+pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) -> Option<StableGraph<Kernel, (u8, u8)>> {
     // ───────────────────────── 1. class → valid nodes
     let mut class_nodes: FxHashMap<ClassId, Vec<NodeId>> = FxHashMap::default();
     for (nid, node) in &egraph.nodes {
@@ -34,7 +35,7 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
     class_nodes.retain(|_, v| !v.is_empty());
     if class_nodes.is_empty() {
         println!("No legal nodes after applying INVALID_IR.");
-        return;
+        return None;
     }
 
     // ───────────────────────── helper: fingerprint to dedup expressions
@@ -59,6 +60,8 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
         seen: &mut FxHashSet<String>,     // already timed signatures
         tmp_memo: &mut FxHashSet<String>, // memo passed to cost()
         prev_outputs: &mut Vec<Vec<f32>>,
+        best_graph: &mut StableGraph<Kernel, (u8, u8)>,
+        best_time: &mut u128,
     ) {
         if *printed >= MAX_SEARCHED_GRAPHS {
             return;
@@ -73,7 +76,28 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
             if !seen.insert(signature(&er)) {
                 return; // duplicate expression
             }
-            if let Some((us, outputs)) = cost(&er, egraph, inputs, tmp_memo, *printed) {
+            // Convert to a petgraph and find the root node
+            let Some(graph) = extraction_to_graph(egraph, &er, &egraph.root_eclasses) else {
+                return;
+            };
+            let key = serde_json::to_string(&graph).unwrap();
+            if tmp_memo.contains(&key) {
+                return;
+            }
+            tmp_memo.insert(key);
+            let root = graph.externals(Direction::Outgoing).next().unwrap();
+
+            // Codegen
+            let Some(kernels) = crate::codegen::codegen(
+                graph.clone(),
+                root,
+                GPUArch::Metal(HashMap::new()),
+                *printed,
+            ) else {
+                return;
+            };
+
+            if let Some((us, outputs)) = cost(&kernels, inputs) {
                 println!(
                     "{}{}",
                     format!("Graph {printed} ").bold(),
@@ -92,6 +116,10 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
                     println!("{}", "Outputs Validated".on_bright_green());
                 }
                 *printed += 1;
+                if us < *best_time {
+                    *best_time = us;
+                    *best_graph = kernels;
+                }
             }
             return;
         }
@@ -112,6 +140,8 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
                 seen,
                 tmp_memo,
                 prev_outputs,
+                best_graph,
+                best_time,
             );
             return;
         }
@@ -144,6 +174,8 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
                 seen,
                 tmp_memo,
                 prev_outputs,
+                best_graph,
+                best_time,
             );
             current.remove(&cid);
         }
@@ -158,9 +190,10 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
 
     if initial_stack.is_empty() {
         println!("Roots contain no legal nodes.");
-        return;
+        return None;
     }
 
+    let mut graph = StableGraph::default();
     dfs(
         initial_stack,
         &class_nodes,
@@ -171,7 +204,11 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) {
         &mut FxHashSet::default(), // seen signatures
         &mut FxHashSet::default(), // memo for cost()
         &mut vec![],
+        &mut graph,
+        #[allow(const_item_mutation)]
+        &mut u128::MAX,
     );
+    Some(graph)
 }
 
 #[derive(Default, Clone)]
@@ -180,24 +217,9 @@ pub struct ExtractionResult<'a> {
 }
 
 fn cost<'a>(
-    extraction: &'a ExtractionResult<'a>,
-    egraph: &'a EGraph,
+    kernels: &StableGraph<Kernel, (u8, u8), Directed>,
     inputs: &[Vec<f32>],
-    memo: &mut FxHashSet<String>,
-    n_graph: usize,
 ) -> Option<(Cost, Vec<Vec<f32>>)> {
-    // Convert to a petgraph and find the root node
-    let graph = extraction_to_graph(egraph, extraction, &egraph.root_eclasses)?;
-    let key = serde_json::to_string(&graph).unwrap();
-    if memo.contains(&key) {
-        return None;
-    }
-    memo.insert(key);
-    let root = graph.externals(Direction::Outgoing).next().unwrap();
-
-    // Codegen
-    let kernels =
-        crate::codegen::codegen(graph.clone(), root, GPUArch::Metal(HashMap::new()), n_graph)?;
     // Print kernels
     if option_env!("PRINT_KERNELS")
         .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
