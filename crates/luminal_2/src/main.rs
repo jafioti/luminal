@@ -35,17 +35,17 @@ mod utils;
 mod tests;
 
 use colored::Colorize;
-use egglog::{EGraph, Error, var};
+use egglog::{var, EGraph, Error};
 use itertools::Itertools;
-use petgraph::{Directed, graph::NodeIndex, prelude::StableGraph, visit::Topo};
-use rand::{Rng, rng};
+use petgraph::{graph::NodeIndex, prelude::StableGraph, visit::Topo, Directed};
+use rand::{rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Debug};
 use utils::*;
 
 use crate::{
     extract::search,
-    symbolic::{Expression, Term, expression_cleanup},
+    symbolic::{expression_cleanup, Expression, Term},
 };
 
 #[derive(Clone, PartialEq, Eq)]
@@ -138,7 +138,9 @@ fn main() {
     // println!("tiled {}ms", avgs.into_iter().sum::<u128>() / 10);
     // expression_cleanup();
     let start = std::time::Instant::now();
-    let (g, _) = make_sum_reduce();
+    let (g, _) = make_nonsquare_matmul();
+    // let (g, _) = make_square_matmul();
+    // let (g, _) = make_gelu(64);
     let (rendered, root) = render_egglog(g);
     let code = include_str!("code.lisp");
     println!("{rendered}");
@@ -155,7 +157,10 @@ fn main() {
                 &[
                     (0..64 * 64).map(|_| rng.random()).collect_vec(),
                     (0..64 * 64).map(|_| rng.random()).collect_vec(),
-                    vec![0.0],
+                    vec![0.0], // vec![1.702],
+                               // vector.clone(),
+                               // vec![1.0],
+                               // vector,
                 ],
             );
         }
@@ -269,7 +274,103 @@ fn render_egglog(graph: StableGraph<GraphTerm, (), Directed>) -> (String, String
     (out, root)
 }
 
-fn make_sum_reduce() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
+//sigmoid approximation = x * sigmoid (-1.702 * x)
+fn make_gelu(size: usize) -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
+    let mut graph = StableGraph::new();
+
+    // Input tensor
+    let mut input = graph.add_node(GraphTerm::GMEM {
+        label: Some("A".to_string()),
+    });
+    input = loop_in(input, size, 'z', 'i', &mut graph);
+
+    let mut constant = graph.add_node(GraphTerm::GMEM {
+        label: Some("1.702".to_string()),
+    });
+    constant = loop_in(constant, size, 0, 'i', &mut graph);
+
+    // First loop: Calculate 1.702 * x
+    let scaled_input = binary(input, constant, GraphTerm::Mul, &mut graph);
+    let scaled_input = loop_out(scaled_input, size, 'z', 'i', &mut graph);
+
+    // Second loop: Calculate -1.702 * x for exp(-1.702 * x)
+    let mut scaled_input_looped = loop_in(scaled_input, size, 'z', 'i', &mut graph);
+    let neg_scaled = unary(scaled_input_looped, GraphTerm::Neg, &mut graph);
+    let neg_scaled = loop_out(neg_scaled, size, 'z', 'i', &mut graph);
+
+    // Third loop: Calculate exp(-1.702 * x)
+    let mut neg_scaled_looped = loop_in(neg_scaled, size, 'z', 'i', &mut graph);
+    let exp_neg_scaled = unary(neg_scaled_looped, GraphTerm::Exp, &mut graph);
+    let exp_neg_scaled = loop_out(exp_neg_scaled, size, 'z', 'i', &mut graph);
+
+    // Fourth loop: Calculate 1 + exp(-1.702 * x)
+    let mut one = graph.add_node(GraphTerm::GMEM {
+        label: Some("1.0".to_string()),
+    });
+    one = loop_in(one, size, 0, 'i', &mut graph);
+
+    let mut exp_neg_scaled_looped = loop_in(exp_neg_scaled, size, 'z', 'i', &mut graph);
+    let one_plus_exp = binary(one, exp_neg_scaled_looped, GraphTerm::Add, &mut graph);
+    let one_plus_exp = loop_out(one_plus_exp, size, 'z', 'i', &mut graph);
+
+    // Fifth loop: Calculate sigmoid = 1 / (1 + exp(-1.702 * x))
+    let mut one_plus_exp_looped = loop_in(one_plus_exp, size, 'z', 'i', &mut graph);
+    let sigmoid = unary(one_plus_exp_looped, GraphTerm::Recip, &mut graph);
+    let sigmoid = loop_out(sigmoid, size, 'z', 'i', &mut graph);
+
+    // Sixth loop: Calculate GELU = x * sigmoid(1.702 * x)
+    let mut sigmoid_final = loop_in(sigmoid, size, 'z', 'i', &mut graph);
+    let mut output = binary(input, sigmoid_final, GraphTerm::Mul, &mut graph);
+    output = loop_out(output, size, 'z', 'i', &mut graph);
+
+    display_graph(&graph, &[]);
+
+    (graph, output)
+}
+
+fn make_nonsquare_matmul() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
+    let (m, k, n) = (64, 64, 64);
+    let mut graph = StableGraph::new();
+
+    let mut a = graph.add_node(GraphTerm::GMEM {
+        label: Some("A".to_string()),
+    });
+    a = pad_in(a, &mut graph, 3);
+    a = loop_in(a, m, Expression::from('z') * k, 'm', &mut graph);
+    a = loop_in(a, n, 0, 'n', &mut graph);
+    a = loop_in(a, k, 'z', 'k', &mut graph);
+
+    let mut b = graph.add_node(GraphTerm::GMEM {
+        label: Some("B".to_string()),
+    });
+    b = pad_in(b, &mut graph, 3);
+    b = loop_in(b, m, 0, 'm', &mut graph);
+    b = loop_in(b, n, 'z', 'n', &mut graph);
+    b = loop_in(b, k, Expression::from('z') * n, 'k', &mut graph);
+
+    let mut acc = graph.add_node(GraphTerm::GMEM {
+        label: Some("Acc".to_string()),
+    });
+    acc = pad_in(acc, &mut graph, 3);
+    acc = loop_in(acc, m, Expression::from('z') * n, 'm', &mut graph);
+    acc = loop_in(acc, n, 'z', 'n', &mut graph);
+    acc = loop_in(acc, k, Term::Acc('a'), 'k', &mut graph);
+
+    let mut out = binary(
+        binary(a, b, GraphTerm::Mul, &mut graph),
+        acc,
+        GraphTerm::Add,
+        &mut graph,
+    );
+
+    out = loop_out(out, k, Term::Acc('a'), 'k', &mut graph);
+    out = loop_out(out, n, 'z', 'n', &mut graph);
+    out = loop_out(out, m, Expression::from('z') * n, 'm', &mut graph);
+    out = pad_out(out, &mut graph, 3);
+    (graph, out)
+}
+
+fn make_square_matmul() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
     let (m, k, n) = (64, 64, 64);
     let mut graph = StableGraph::new();
 
