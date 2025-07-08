@@ -153,8 +153,8 @@ fn main() {
             search(
                 &serialized,
                 &[
-                    (0..8 * 16).map(|_| rng.random()).collect_vec(),
-                    (0..16 * 32).map(|_| rng.random()).collect_vec(),
+                    (0..64 * 64).map(|_| rng.random()).collect_vec(),
+                    (0..64 * 64).map(|_| rng.random()).collect_vec(),
                     vec![0.0],
                 ],
             );
@@ -270,7 +270,7 @@ fn render_egglog(graph: StableGraph<GraphTerm, (), Directed>) -> (String, String
 }
 
 fn make_sum_reduce() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
-    let (m, k, n) = (8, 16, 32);
+    let (m, k, n) = (64, 64, 64);
     let mut graph = StableGraph::new();
 
     let mut a = graph.add_node(GraphTerm::GMEM {
