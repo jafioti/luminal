@@ -19,9 +19,11 @@ type Cost = u128; // Execution time in microseconds
 use std::collections::HashMap;
 use std::u128;
 
-/// Enumerate every possible extraction and get the runtime cost for each
+/// Enumerate every valid extraction, measure its runtime, and keep the fastest.
+/// Cycles in the e-graph are handled by refusing to revisit a class already
+/// on the current DFS path.
 pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) -> Option<StableGraph<Kernel, (u8, u8)>> {
-    // ───────────────────────── 1. class → valid nodes
+    // ───────────────────────── classes → legal node lists
     let mut class_nodes: FxHashMap<ClassId, Vec<NodeId>> = FxHashMap::default();
     for (nid, node) in &egraph.nodes {
         if INVALID_IR.contains(&node.op.as_str()) {
@@ -38,8 +40,8 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) -> Option<StableGraph<Kernel
         return None;
     }
 
-    // ───────────────────────── helper: fingerprint to dedup expressions
-    fn signature(er: &ExtractionResult) -> String {
+    // ───────────────────────── fingerprint helpers
+    fn sig(er: &ExtractionResult) -> String {
         let mut v: Vec<_> = er
             .choices
             .iter()
@@ -49,45 +51,39 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) -> Option<StableGraph<Kernel
         v.join("|")
     }
 
-    // ───────────────────────── 2. DFS that grows the sub-DAG lazily
+    // ───────────────────────── DFS
     fn dfs<'a>(
-        stack: Vec<&'a ClassId>, // classes still needing a choice
+        stack: Vec<&'a ClassId>,
         class_nodes: &'a FxHashMap<ClassId, Vec<NodeId>>,
-        current: &mut FxHashMap<&'a ClassId, &'a NodeId>, // building extraction
+        current: &mut FxHashMap<&'a ClassId, &'a NodeId>,
+        on_path: &mut FxHashSet<&'a ClassId>, // cycle guard
         printed: &mut usize,
         egraph: &'a EGraph,
         inputs: &[Vec<f32>],
-        seen: &mut FxHashSet<String>,     // already timed signatures
-        tmp_memo: &mut FxHashSet<String>, // memo passed to cost()
-        prev_outputs: &mut Vec<Vec<f32>>,
+        seen: &mut FxHashSet<String>, // dedup graphs
+        ref_outputs: &mut Vec<Vec<f32>>,
         best_graph: &mut StableGraph<Kernel, (u8, u8)>,
         best_time: &mut u128,
     ) {
         if *printed >= MAX_SEARCHED_GRAPHS {
             return;
         }
-
         if stack.is_empty() {
-            // Complete extraction → evaluate cost
             let er = ExtractionResult {
                 choices: current.clone(),
                 ..Default::default()
             };
-            if !seen.insert(signature(&er)) {
-                return; // duplicate expression
+            if !seen.insert(sig(&er)) {
+                return;
             }
-            // Convert to a petgraph and find the root node
             let Some(graph) = extraction_to_graph(egraph, &er, &egraph.root_eclasses) else {
                 return;
             };
             let key = serde_json::to_string(&graph).unwrap();
-            if tmp_memo.contains(&key) {
+            if !seen.insert(key) {
                 return;
             }
-            tmp_memo.insert(key);
             let root = graph.externals(Direction::Outgoing).next().unwrap();
-
-            // Codegen
             let Some(kernels) = crate::codegen::codegen(
                 graph.clone(),
                 root,
@@ -96,21 +92,18 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) -> Option<StableGraph<Kernel
             ) else {
                 return;
             };
-
-            if let Some((us, outputs)) = cost(&kernels, inputs) {
+            if let Some((us, outs)) = cost(&kernels, inputs) {
                 println!(
                     "{}{}",
                     format!("Graph {printed} ").bold(),
                     format!("{us}µs").bright_green().bold()
                 );
-                if prev_outputs.is_empty() {
-                    *prev_outputs = outputs;
+                if ref_outputs.is_empty() {
+                    *ref_outputs = outs;
                 } else {
-                    for (a, b) in prev_outputs.iter().zip(&outputs) {
-                        for (a, b) in a.iter().zip(b) {
-                            if (*a - *b).abs() > 1e-3 {
-                                panic!("{a} | {b}");
-                            }
+                    for (a, b) in ref_outputs.iter().zip(&outs) {
+                        for (x, y) in a.iter().zip(b) {
+                            assert!((x - y).abs() <= 1e-3, "{x} | {y}");
                         }
                     }
                     println!("{}", "Outputs Validated".on_bright_green());
@@ -124,91 +117,76 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) -> Option<StableGraph<Kernel
             return;
         }
 
-        // Pick the next class (LIFO for small stack, cheap heuristic)
         let mut stack = stack;
         let cid = stack.pop().unwrap();
 
-        // If this class already has a node chosen, just continue
-        if current.contains_key(&cid) {
-            dfs(
-                stack,
-                class_nodes,
-                current,
-                printed,
-                egraph,
-                inputs,
-                seen,
-                tmp_memo,
-                prev_outputs,
-                best_graph,
-                best_time,
-            );
+        // cycle breaker: skip if this class is already on the current path
+        if !on_path.insert(cid) {
             return;
         }
 
-        // No legal node? – dead branch
-        let Some(nodes) = class_nodes.get(&cid) else {
-            return;
-        };
+        if let Some(nodes) = class_nodes.get(&cid) {
+            for nid in nodes {
+                current.insert(cid, nid);
 
-        // Branch over every legal node in this class
-        for nid in nodes {
-            current.insert(cid, nid);
-
-            // Push the children classes of this chosen node
-            let mut next_stack = stack.clone();
-            for child in &egraph.nodes[nid].children {
-                let ccid = egraph.nid_to_cid(child);
-                if class_nodes.contains_key(&ccid) && !current.contains_key(&ccid) {
-                    next_stack.push(ccid);
+                // push child classes not yet decided and not already on path
+                let mut next = stack.clone();
+                for child in &egraph.nodes[nid].children {
+                    let ccid = egraph.nid_to_cid(child);
+                    if class_nodes.contains_key(&ccid)
+                        && !current.contains_key(&ccid)
+                        && !on_path.contains(&ccid)
+                    {
+                        next.push(ccid);
+                    }
                 }
-            }
 
-            dfs(
-                next_stack,
-                class_nodes,
-                current,
-                printed,
-                egraph,
-                inputs,
-                seen,
-                tmp_memo,
-                prev_outputs,
-                best_graph,
-                best_time,
-            );
-            current.remove(&cid);
+                dfs(
+                    next,
+                    class_nodes,
+                    current,
+                    on_path,
+                    printed,
+                    egraph,
+                    inputs,
+                    seen,
+                    ref_outputs,
+                    best_graph,
+                    best_time,
+                );
+                current.remove(&cid);
+            }
         }
+
+        on_path.remove(&cid); // pop when unwinding
     }
 
-    // ───────────────────────── 3. kick it off from the roots
-    let initial_stack: Vec<&ClassId> = egraph
+    // ───────────────────────── kick off from roots
+    let init: Vec<&ClassId> = egraph
         .root_eclasses
         .iter()
         .filter(|cid| class_nodes.contains_key(*cid))
         .collect();
-
-    if initial_stack.is_empty() {
+    if init.is_empty() {
         println!("Roots contain no legal nodes.");
         return None;
     }
 
-    let mut graph = StableGraph::default();
+    let mut best_graph = StableGraph::default();
     dfs(
-        initial_stack,
+        init,
         &class_nodes,
         &mut FxHashMap::default(),
+        &mut FxHashSet::default(), // on_path
         &mut 0,
         egraph,
         inputs,
-        &mut FxHashSet::default(), // seen signatures
-        &mut FxHashSet::default(), // memo for cost()
+        &mut FxHashSet::default(), // seen
         &mut vec![],
-        &mut graph,
-        #[allow(const_item_mutation)]
+        &mut best_graph,
         &mut u128::MAX,
     );
-    Some(graph)
+    Some(best_graph)
 }
 
 #[derive(Default, Clone)]
@@ -290,11 +268,14 @@ pub fn extraction_to_graph(
                 .unwrap_or_default()
             {
                 // Pick another one we haven't seen more tha max cycles (THIS SHOULD BE PART OF EXTRACTION)
-                child_nid = egraph.classes()[child_cid]
+                let Some(c) = egraph.classes()[child_cid]
                     .nodes
                     .iter()
                     .find(|n| seen.get(*n).map(|s| *s <= MAX_CYCLES).unwrap_or(true))
-                    .expect(&format!("{:?}", child_cid));
+                else {
+                    return None;
+                };
+                child_nid = c;
             }
             *seen.entry(child_nid).or_default() += 1;
             let r = emit(child_nid, egraph, extraction, g, seen);
@@ -503,6 +484,9 @@ fn convert_math(
         Some(term)
     }
 
+    if !extraction.choices.contains_key(cid) {
+        return None;
+    }
     let nid = &extraction.choices[cid];
     build(nid, egraph, extraction, &mut HashMap::new())
 }
