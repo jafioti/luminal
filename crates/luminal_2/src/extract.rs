@@ -294,9 +294,6 @@ pub fn extraction_to_graph(
             "SMEM" => Some(g.add_node(GraphTerm::SMEM)),
             "SMEMLoad" => Some(g.add_node(GraphTerm::SMEMLoad)),
             "SMEMRead" => Some(g.add_node(GraphTerm::SMEMRead)),
-            "NewAcc" => Some(g.add_node(GraphTerm::NewAcc {
-                starting_value: "0.0".into(),
-            })),
 
             // LoopIn  = (LoopIn <expr> <LoopType> <Math>)
             "LoopIn" => {
