@@ -46,11 +46,22 @@ pub fn codegen(
                     NodeIndex::new(n_kernel),
                     (*output as u8, n_input as u8),
                 ),
-                GMEMBuffer::Input { index: g_inp, .. } => meta_graph.add_edge(
-                    global_input,
-                    NodeIndex::new(n_kernel),
-                    (*g_inp as u8, n_input as u8),
-                ),
+                GMEMBuffer::Input {
+                    index: g_inp,
+                    label,
+                } => {
+                    if option_env!("PRINT_ALL_KERNELS")
+                        .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
+                        .unwrap_or_default()
+                    {
+                        println!("Input {g_inp}: {label:?}");
+                    }
+                    meta_graph.add_edge(
+                        global_input,
+                        NodeIndex::new(n_kernel),
+                        (*g_inp as u8, n_input as u8),
+                    )
+                }
             };
         }
     }
@@ -1043,6 +1054,7 @@ fn split_kernels(
         })
         // Must not be an SMEM
         .filter(|n| !matches!(marked_graph.node_weight(*n).unwrap().0, GraphTerm::SMEM))
+        .sorted()
         .enumerate()
     {
         let (term, _, kernels) = marked_graph.node_weight(input).unwrap();

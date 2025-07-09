@@ -39,7 +39,7 @@ use egglog::{EGraph, Error, var};
 use itertools::Itertools;
 use petgraph::{Directed, graph::NodeIndex, prelude::StableGraph, visit::Topo};
 use rand::{Rng, rng};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{collections::HashMap, fmt::Debug};
 use utils::*;
 
@@ -138,36 +138,48 @@ fn main() {
     // println!("tiled {}ms", avgs.into_iter().sum::<u128>() / 10);
     // expression_cleanup();
     let start = std::time::Instant::now();
-    let (g, _) = make_transposed_matmul();
+    let (g, _) = make_naive_attention();
     // let (g, _) = make_square_matmul();
     // let (g, _) = make_gelu(64);
     let (rendered, root) = render_egglog(g);
     let code = include_str!("code.lisp");
     println!("{rendered}");
     let final_code = code.replace("{code}", &rendered);
-    match run_egglog_program(&final_code, &root) {
-        Ok((_egglog_messages, serialized)) => {
-            println!(
-                "Search space built in {}",
-                format!("{}ms", start.elapsed().as_millis()).bold()
-            );
-            let mut rng = rng();
-            // let vector = (0..64).map(|_| rng.random()).collect_vec();
-            search(
-                &serialized,
-                &[
-                    (0..64 * 64).map(|_| rng.random()).collect_vec(),
-                    (0..64 * 64).map(|_| rng.random()).collect_vec(),
-                    vec![0.0],
-                    // vec![1.702],
-                    // vector.clone(),
-                    // vec![1.0],
-                    // vector,
-                ],
-            );
-        }
-        Err(e) => println!("{e}"),
-    }
+    let (_egglog_messages, serialized) = run_egglog_program(&final_code, &root).unwrap();
+    println!(
+        "Search space built in {}",
+        format!("{}ms", start.elapsed().as_millis()).bold()
+    );
+    let mut rng = rng();
+    search(
+        &serialized,
+        &[
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            (0..64 * 64).map(|_| rng.random()).collect_vec(),
+            // vec![1.702],
+            // vector.clone(),
+            // vec![1.0],
+            // vector,
+        ],
+    );
     expression_cleanup();
 }
 
@@ -274,6 +286,159 @@ fn render_egglog(graph: StableGraph<GraphTerm, (), Directed>) -> (String, String
         .cloned()
         .unwrap_or_else(|| "t0".into());
     (out, root)
+}
+
+fn make_naive_attention() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
+    let mut graph = StableGraph::new();
+
+    let n_qkv = 4;
+    let d = 5;
+
+    // dot products ---------------------------------------------------------
+    let mut q = graph.add_node(GraphTerm::GMEM {
+        label: Some("Q".to_string()),
+    });
+    q = loop_in(q, n_qkv, Expression::from('z') * d, 'q', &mut graph);
+    q = loop_in(q, n_qkv, 0, 'k', &mut graph);
+    q = pad_in(q, &mut graph, 2);
+    q = loop_in(q, d, 'z', "dot", &mut graph);
+    let mut k = graph.add_node(GraphTerm::GMEM {
+        label: Some("K".to_string()),
+    });
+    k = loop_in(k, n_qkv, 0, 'q', &mut graph);
+    k = loop_in(k, n_qkv, Expression::from('z') * d, 'k', &mut graph);
+    k = pad_in(k, &mut graph, 2);
+    k = loop_in(k, d, 'z', "dot", &mut graph);
+    let mut dot_acc = graph.add_node(GraphTerm::GMEM {
+        label: Some("DOT_ACC".to_string()),
+    });
+    dot_acc = loop_in(dot_acc, n_qkv, 0, 'q', &mut graph);
+    dot_acc = loop_in(dot_acc, n_qkv, 0, 'k', &mut graph);
+    dot_acc = pad_in(dot_acc, &mut graph, 2); // CHANGED depth 3 → 2
+    dot_acc = loop_in(dot_acc, d, Term::Acc('d'), "dot", &mut graph);
+    let mut dots = binary(
+        binary(q, k, GraphTerm::Mul, &mut graph),
+        dot_acc,
+        GraphTerm::Add,
+        &mut graph,
+    );
+    dots = loop_out(dots, d, Term::Acc('d'), "dot", &mut graph);
+    dots = pad_out(dots, &mut graph, 2); // depth matches pads above
+    dots = loop_out(dots, n_qkv, 'z', 'k', &mut graph);
+    dots = loop_out(dots, n_qkv, Expression::from('z') * n_qkv, 'q', &mut graph);
+
+    // max ---------------------------------------------------------
+    let mut dots_in = loop_in(dots, n_qkv, Expression::from('z') * n_qkv, 'q', &mut graph);
+    dots_in = pad_in(dots_in, &mut graph, 3);
+    dots_in = loop_in(dots_in, n_qkv, 'z', 'k', &mut graph);
+    let mut max_acc = graph.add_node(GraphTerm::GMEM {
+        label: Some("MAX_ACC".to_string()),
+    });
+    max_acc = loop_in(max_acc, n_qkv, 0, 'q', &mut graph);
+    max_acc = pad_in(max_acc, &mut graph, 3);
+    max_acc = loop_in(max_acc, n_qkv, Term::Acc('m'), "k", &mut graph);
+    let mut max = binary(max_acc, dots_in, GraphTerm::Max, &mut graph);
+    max = loop_out(max, n_qkv, Term::Acc('m'), 'k', &mut graph);
+    max = pad_out(max, &mut graph, 3);
+    max = loop_out(max, n_qkv, 'z', 'q', &mut graph);
+
+    // exp sum ------------------------------------------------------
+    let mut max_in = loop_in(max, n_qkv, 'z', 'q', &mut graph);
+    max_in = pad_in(max_in, &mut graph, 3);
+    max_in = loop_in(max_in, n_qkv, 0, 'k', &mut graph);
+    let mut exp_sum_acc = graph.add_node(GraphTerm::GMEM {
+        label: Some("EXP_SUM_ACC".to_string()),
+    });
+    exp_sum_acc = loop_in(exp_sum_acc, n_qkv, 0, 'q', &mut graph);
+    exp_sum_acc = pad_in(exp_sum_acc, &mut graph, 3);
+    exp_sum_acc = loop_in(exp_sum_acc, n_qkv, Term::Acc('e'), "k", &mut graph);
+    let mut exp_sum = binary(
+        unary(
+            binary(
+                dots_in,
+                unary(max_in, GraphTerm::Neg, &mut graph),
+                GraphTerm::Add,
+                &mut graph,
+            ),
+            GraphTerm::Exp,
+            &mut graph,
+        ),
+        exp_sum_acc,
+        GraphTerm::Add,
+        &mut graph,
+    );
+    exp_sum = loop_out(exp_sum, n_qkv, Term::Acc('e'), 'k', &mut graph);
+    exp_sum = pad_out(exp_sum, &mut graph, 3);
+    exp_sum = loop_out(exp_sum, n_qkv, 'z', 'q', &mut graph);
+
+    // final scores -------------------------------------------------
+    let mut exp_sum_in = loop_in(exp_sum, n_qkv, 'z', 'q', &mut graph);
+    exp_sum_in = pad_in(exp_sum_in, &mut graph, 3);
+    exp_sum_in = loop_in(exp_sum_in, n_qkv, 0, 'k', &mut graph);
+    let mut final_scores = binary(
+        unary(
+            binary(
+                dots_in,
+                unary(max_in, GraphTerm::Neg, &mut graph),
+                GraphTerm::Add,
+                &mut graph,
+            ),
+            GraphTerm::Exp,
+            &mut graph,
+        ),
+        unary(exp_sum_in, GraphTerm::Recip, &mut graph),
+        GraphTerm::Mul,
+        &mut graph,
+    );
+    final_scores = loop_out(final_scores, n_qkv, 'z', 'k', &mut graph);
+    final_scores = pad_out(final_scores, &mut graph, 3);
+    final_scores = loop_out(
+        final_scores,
+        n_qkv,
+        Expression::from('z') * n_qkv,
+        'q',
+        &mut graph,
+    );
+
+    // output --------------------------------------------------------
+    let mut final_scores_in = loop_in(
+        final_scores,
+        n_qkv,
+        Expression::from('z') * n_qkv,
+        'q',
+        &mut graph,
+    );
+    final_scores_in = pad_in(final_scores_in, &mut graph, 3);
+    final_scores_in = loop_in(final_scores_in, n_qkv, 'z', 'k', &mut graph);
+    final_scores_in = loop_in(final_scores_in, d, 0, 'd', &mut graph);
+    let mut v = graph.add_node(GraphTerm::GMEM {
+        label: Some("V".to_string()),
+    });
+    v = loop_in(v, n_qkv, 0, 'q', &mut graph);
+    v = pad_in(v, &mut graph, 3);
+    v = loop_in(v, n_qkv, Expression::from('z') * d, 'k', &mut graph);
+    v = loop_in(v, d, 'z', "dot", &mut graph);
+
+    let mut output_acc = graph.add_node(GraphTerm::GMEM {
+        label: Some("OUTPUT_ACC".to_string()),
+    });
+    output_acc = loop_in(output_acc, n_qkv, 0, 'q', &mut graph);
+    output_acc = pad_in(output_acc, &mut graph, 3);
+    output_acc = loop_in(output_acc, n_qkv, Term::Acc('o'), "k", &mut graph);
+    output_acc = loop_in(output_acc, d, 'z', "d", &mut graph);
+
+    let mut output = binary(
+        binary(v, final_scores_in, GraphTerm::Mul, &mut graph),
+        output_acc,
+        GraphTerm::Add,
+        &mut graph,
+    );
+    output = loop_out(output, d, 'z', 'd', &mut graph);
+    output = loop_out(output, n_qkv, Term::Acc('o'), 'k', &mut graph);
+    output = pad_out(output, &mut graph, 3);
+    output = loop_out(output, n_qkv, Expression::from('z') * d, 'q', &mut graph);
+
+    (graph, output)
 }
 
 //sigmoid approximation = x * sigmoid (-1.702 * x)
