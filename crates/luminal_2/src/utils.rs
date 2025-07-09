@@ -71,7 +71,7 @@ pub fn pad_in(
     levels: usize,
 ) -> NodeIndex {
     for i in 0..levels {
-        node = loop_in(node, 1, 0, format!("pad{i}"), graph);
+        node = loop_in(node, 1, 0, "pad".to_string(), graph);
     }
     node
 }
@@ -82,7 +82,7 @@ pub fn pad_out(
     levels: usize,
 ) -> NodeIndex {
     for i in (0..levels).rev() {
-        node = loop_out(node, 1, 0, format!("pad{i}"), graph);
+        node = loop_out(node, 1, 0, "pad".to_string(), graph);
     }
     node
 }

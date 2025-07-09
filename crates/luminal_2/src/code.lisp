@@ -122,55 +122,7 @@
 (rewrite (LoopIn (LoopOut ?x ?loop ?st) ?loop ?st) ?x) ; this is causing infinite loops in the e-graph!
 
 ; Loop Fission
-(rewrite
-	(LoopOut (Unary ?second (Unary ?first (LoopIn ?x ?loop ?inSt))) ?loop ?outSt)
-	(LoopOut (Unary ?second (LoopIn (LoopOut (Unary ?first (LoopIn ?x ?loop ?inSt)) ?loop  (MVar "z")) ?loop (MVar "z"))) ?loop ?outSt)
-)
-(rewrite
-	(Unary ?second (Binary ?first (LoopIn ?a ?loop ?inASt) (LoopIn ?b ?loop ?inBSt)))
-	(Unary ?second (LoopIn (LoopOut (Binary ?first (LoopIn ?a ?loop ?inASt) (LoopIn ?b ?loop ?inBSt)) ?loop  (MVar "z")) ?loop (MVar "z")))
-)
-(rewrite
-	(Binary ?second (Unary ?first (LoopIn ?a ?loop ?inASt)) (LoopIn ?b ?loop ?inBSt))
-	(Binary ?second (LoopIn (LoopOut (Unary ?first (LoopIn ?a ?loop ?inASt)) ?loop  ?inASt) ?loop ?inASt) (LoopIn ?b ?loop ?inBSt))
-)
-(rewrite
-	(Binary ?second (Binary ?first (LoopIn ?a ?loop ?inASt) (LoopIn ?c ?loop ?inCSt)) (LoopIn ?b ?loop ?inBSt))
-	(Binary ?second (LoopIn (LoopOut (Binary ?first (LoopIn ?a ?loop ?inASt) (LoopIn ?c ?loop ?inCSt)) ?loop  (MVar "z")) ?loop (MVar "z")) (LoopIn ?b ?loop ?inBSt))
-)
-(rewrite
-	(LoopOut (Binary ?second (Unary ?first ?a) ?b) ?loop ?outSt)
-	(LoopOut (Binary ?second (LoopIn (LoopOut (Unary ?first ?a) ?loop  ?outSt) ?loop ?outSt) (LoopIn (LoopOut ?b ?loop  ?outSt) ?loop ?outSt)) ?loop ?outSt)
-)
-; PROBLEM HERE (NOT CALCULATING STRIDES CORRECTLY)
-(rewrite (LoopOut (LoopOut
-	(Unary
-		?unHere
-		(LoopIn (LoopOut ?inpA (Loop ?f ?first) ?firstStA) ?n ?inASt)
-	) ?n ?st) ?lower ?lowerSt)
-	(LoopOut (LoopOut
-		(Unary
-			?unHere
-	       	(LoopIn	(LoopIn
-	           	(LoopOut (LoopOut ?inpA (Loop ?f ?first) ?firstStA) ?lower (MMul ?first ?firstStA))
-	       	?lower (MMul ?first ?firstStA)) ?n ?inASt)
-		)
-	?n ?st) ?lower ?lowerSt)
-)
-(rewrite (LoopOut (LoopOut
-    (Binary ?binHereA
-    	(LoopIn (LoopOut ?inpB (Loop ?f ?first) ?firstStB) ?n ?inBSt)
-        ?a
-    ) ?n  ?st) ?lower ?lowerSt)
-  	(LoopOut (LoopOut
-        (Binary ?binHereA
-        	(LoopIn (LoopIn
-                (LoopOut (LoopOut ?inpB (Loop ?f ?first) ?firstStB) ?lower (MMul ?first ?firstStB))
-            ?lower (MMul ?first ?firstStB)) ?n ?inBSt)
-            ?a
-        )
-    ?n  ?st) ?lower ?lowerSt)
-)
+
 
 ; Loop merging
 (rewrite
@@ -275,7 +227,15 @@
 )
 
 (rewrite
- 	(LoopOut (Binary ?finbin (LoopIn ?c (Loop ?loopL (MNum ?loop)) ?strideC) (Binary ?spbin (LoopIn ?a (Loop ?loopL (MNum ?loop)) ?strideA) (LoopIn ?b (Loop ?loopL (MNum ?loop)) ?strideB))) (Loop ?loopL (MNum ?loop)) ?stride)
+ 	(LoopOut
+  		(Binary ?finbin
+    		(LoopIn ?c (Loop ?loopL (MNum ?loop)) ?strideC)
+      		(Binary ?spbin
+        		(LoopIn ?a (Loop ?loopL (MNum ?loop)) ?strideA)
+          		(LoopIn ?b (Loop ?loopL (MNum ?loop)) ?strideB)
+            )
+        ) (Loop ?loopL (MNum ?loop)) ?stride
+    )
  	(LoopOut
      	(LoopOut
       		(Binary ?finbin
@@ -322,7 +282,7 @@
 (rewrite  ; 0-1
 	(LoopOut (LoopOut ?body (Loop ?innerLoop ?innerLoopAmt) ?innerSt) (Loop ?outerLoop ?outerLoopAmt) ?outerSt)
 	(LoopOut (LoopOut (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?outerLoop ?outerLoopAmt) ?outerSt) (Loop ?innerLoop ?innerLoopAmt) ?innerSt)
-	:when ((!= ?innerLoop ?outerLoop) (!= ?innerLoopAmt ?outerLoopAmt))
+	:when ((!= ?innerLoop ?outerLoop))
 )
 (rewrite ; 0-1
 	(SwapLoops (LoopIn (LoopIn ?body (Loop ?outerLoop ?outerLoopAmt) ?outerSt) (Loop ?innerLoop ?innerLoopAmt) ?innerSt) ?innerLoop ?outerLoop)
@@ -354,4 +314,4 @@
 ;(rewrite (Unary ?s ?x) (LoopOut (Unary ?s (LoopIn ?x (Loop "_" (MNum 1)) (MVar "z"))) (Loop "_" (MNum 1)) (MVar "z"))) ; add one-level loop
 
 {code}
-(run 5)
+(run 15)

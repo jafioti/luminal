@@ -138,7 +138,7 @@ fn main() {
     // println!("tiled {}ms", avgs.into_iter().sum::<u128>() / 10);
     // expression_cleanup();
     let start = std::time::Instant::now();
-    let (g, _) = make_gelu(64);
+    let (g, _) = make_square_matmul();
     // let (g, _) = make_square_matmul();
     // let (g, _) = make_gelu(64);
     let (rendered, root) = render_egglog(g);
@@ -152,17 +152,17 @@ fn main() {
                 format!("{}ms", start.elapsed().as_millis()).bold()
             );
             let mut rng = rng();
-            let vector = (0..64).map(|_| rng.random()).collect_vec();
+            // let vector = (0..64).map(|_| rng.random()).collect_vec();
             search(
                 &serialized,
                 &[
-                    // (0..64 * 64).map(|_| rng.random()).collect_vec(),
-                    // (0..64 * 64).map(|_| rng.random()).collect_vec(),
-                    // vec![0.0],
-                    vec![1.702],
-                    vector.clone(),
-                    vec![1.0],
-                    vector,
+                    (0..64 * 64).map(|_| rng.random()).collect_vec(),
+                    (0..64 * 64).map(|_| rng.random()).collect_vec(),
+                    vec![0.0],
+                    // vec![1.702],
+                    // vector.clone(),
+                    // vec![1.0],
+                    // vector,
                 ],
             );
         }
@@ -334,7 +334,7 @@ fn make_nonsquare_matmul() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) 
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
     });
-    a = pad_in(a, &mut graph, 3);
+    a = pad_in(a, &mut graph, 2);
     a = loop_in(a, m, Expression::from('z') * k, 'm', &mut graph);
     a = loop_in(a, n, 0, 'n', &mut graph);
     a = loop_in(a, k, 'z', 'k', &mut graph);
@@ -342,7 +342,7 @@ fn make_nonsquare_matmul() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) 
     let mut b = graph.add_node(GraphTerm::GMEM {
         label: Some("B".to_string()),
     });
-    b = pad_in(b, &mut graph, 3);
+    b = pad_in(b, &mut graph, 2);
     b = loop_in(b, m, 0, 'm', &mut graph);
     b = loop_in(b, n, 'z', 'n', &mut graph);
     b = loop_in(b, k, Expression::from('z') * n, 'k', &mut graph);
@@ -350,7 +350,7 @@ fn make_nonsquare_matmul() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) 
     let mut acc = graph.add_node(GraphTerm::GMEM {
         label: Some("Acc".to_string()),
     });
-    acc = pad_in(acc, &mut graph, 3);
+    acc = pad_in(acc, &mut graph, 2);
     acc = loop_in(acc, m, Expression::from('z') * n, 'm', &mut graph);
     acc = loop_in(acc, n, 'z', 'n', &mut graph);
     acc = loop_in(acc, k, Term::Acc('a'), 'k', &mut graph);
@@ -365,7 +365,49 @@ fn make_nonsquare_matmul() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) 
     out = loop_out(out, k, Term::Acc('a'), 'k', &mut graph);
     out = loop_out(out, n, 'z', 'n', &mut graph);
     out = loop_out(out, m, Expression::from('z') * n, 'm', &mut graph);
-    out = pad_out(out, &mut graph, 3);
+    out = pad_out(out, &mut graph, 2);
+    (graph, out)
+}
+
+fn make_sum_reduce() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
+    let (m, k, n) = (64, 64, 64);
+    let mut graph = StableGraph::new();
+
+    let mut a = graph.add_node(GraphTerm::GMEM {
+        label: Some("A".to_string()),
+    });
+    a = pad_in(a, &mut graph, 5);
+    a = loop_in(a, m, Expression::from('z') * k, 'm', &mut graph);
+    a = loop_in(a, n, 0, 'n', &mut graph);
+    a = loop_in(a, k, 'z', 'k', &mut graph);
+
+    let mut b = graph.add_node(GraphTerm::GMEM {
+        label: Some("B".to_string()),
+    });
+    b = pad_in(b, &mut graph, 5);
+    b = loop_in(b, m, 0, 'm', &mut graph);
+    b = loop_in(b, n, 'z', 'n', &mut graph);
+    b = loop_in(b, k, Expression::from('z') * n, 'k', &mut graph);
+
+    let mut acc = graph.add_node(GraphTerm::GMEM {
+        label: Some("Acc".to_string()),
+    });
+    acc = pad_in(acc, &mut graph, 5);
+    acc = loop_in(acc, m, Expression::from('z') * n, 'm', &mut graph);
+    acc = loop_in(acc, n, 'z', 'n', &mut graph);
+    acc = loop_in(acc, k, Term::Acc('a'), 'k', &mut graph);
+
+    let mut out = binary(
+        binary(a, b, GraphTerm::Mul, &mut graph),
+        acc,
+        GraphTerm::Add,
+        &mut graph,
+    );
+
+    out = loop_out(out, k, Term::Acc('a'), 'k', &mut graph);
+    out = loop_out(out, n, 'z', 'n', &mut graph);
+    out = loop_out(out, m, Expression::from('z') * n, 'm', &mut graph);
+    out = pad_out(out, &mut graph, 5);
     (graph, out)
 }
 

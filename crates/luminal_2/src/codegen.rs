@@ -15,6 +15,7 @@ use crate::{
 
 const GRID_DIMS: usize = 2;
 const THREADBLOCK_DIMS: usize = 2;
+const MAX_THREADBLOCK_SIZE: usize = 1024; // this is max on mac
 
 pub fn codegen(
     graph: StableGraph<GraphTerm, (), Directed>,
@@ -211,6 +212,14 @@ kernel void kernel{}(
             );
             println!("{kernel}");
             println!("Outputs: {:?}", outputs);
+        }
+        if (threadblock[0] * threadblock[1] * threadblock[2])
+            .to_usize()
+            .unwrap()
+            > MAX_THREADBLOCK_SIZE
+        {
+            // Threadblock size is too large for device
+            return None;
         }
         *meta_graph.node_weight_mut(node).unwrap() = Kernel {
             code: kernel,

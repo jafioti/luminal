@@ -184,6 +184,7 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) -> Option<StableGraph<Kernel
         &mut FxHashSet::default(), // seen
         &mut vec![],
         &mut best_graph,
+        #[allow(const_item_mutation)]
         &mut u128::MAX,
     );
     Some(best_graph)
