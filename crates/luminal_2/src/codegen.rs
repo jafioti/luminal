@@ -38,6 +38,7 @@ pub fn codegen(
         code: "Outputs".to_string(),
         ..Default::default()
     });
+    let mut gmem_mapping = HashMap::new();
     for (n_kernel, (_, inputs, _, _)) in kernels.iter().enumerate() {
         for (n_input, (input_kernel, _)) in inputs.into_iter().enumerate() {
             match input_kernel {
@@ -46,25 +47,30 @@ pub fn codegen(
                     NodeIndex::new(n_kernel),
                     (*output as u8, n_input as u8),
                 ),
-                GMEMBuffer::Input {
-                    index: g_inp,
-                    label,
-                } => {
+                GMEMBuffer::Input { label, .. } => {
                     if option_env!("PRINT_ALL_KERNELS")
                         .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
                         .unwrap_or_default()
                     {
-                        println!("Input {g_inp}: {label:?}");
+                        println!("Input {label:?}");
                     }
+                    let index = if let Some(index) = gmem_mapping.get(label.as_ref().unwrap()) {
+                        *index
+                    } else {
+                        gmem_mapping.insert(label.clone().unwrap(), gmem_mapping.len());
+                        gmem_mapping.len() - 1
+                    };
                     meta_graph.add_edge(
                         global_input,
                         NodeIndex::new(n_kernel),
-                        (*g_inp as u8, n_input as u8),
+                        (index as u8, n_input as u8),
                     )
                 }
             };
         }
     }
+    meta_graph.node_weight_mut(global_input).unwrap().code =
+        format!("Inputs{}", serde_json::to_string(&gmem_mapping).unwrap());
     meta_graph.add_edge(NodeIndex::new(root_kernel), global_output, (0, 0));
     for node in toposort(&meta_graph, None).unwrap() {
         if kernels.len() <= node.index() {

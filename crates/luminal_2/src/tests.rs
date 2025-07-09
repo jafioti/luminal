@@ -77,6 +77,7 @@ fn test_sum_reduce() {
     let mut acc = graph.add_node(GraphTerm::GMEM {
         label: Some("acc".to_string()),
     });
+    acc = pad_in(acc, &mut graph, 6);
     acc = loop_in(acc, 5, Term::Acc('z'), 'a', &mut graph);
 
     let mut out = binary(a, acc, GraphTerm::Add, &mut graph);
@@ -86,7 +87,7 @@ fn test_sum_reduce() {
 
     let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new()), 0).unwrap();
     let input = vec![0., 1., 2., 3., 4.];
-    let outputs = run_graph(&[input, vec![]], &kernels).0;
+    let outputs = run_graph(&[("A", input), ("acc", vec![0.0])], &kernels).0;
     assert_eq!(outputs[0], vec![10.0]);
     expression_cleanup();
 }
@@ -149,7 +150,10 @@ fn test_matmul() {
         [1.7066, -0.4462, 0.7440, 1.5210, 3.4105],
     ]
     .into_flattened();
-    let outputs = run_graph(&[a, b, vec![0.0]], &kernels).0.pop().unwrap();
+    let outputs = run_graph(&[("A", a), ("B", b), ("Acc", vec![0.0])], &kernels)
+        .0
+        .pop()
+        .unwrap();
     let pt_output = vec![
         [-0.4088, -1.1595, 3.6329, 2.1403, 4.8591],
         [2.2975, -1.4434, -1.8349, 1.8038, 1.1883],
@@ -473,7 +477,10 @@ fn test_tiled_matmul_basic() {
         ],
     ]
     .into_flattened();
-    let outputs = run_graph(&[a, b, vec![0.0]], &kernels).0.pop().unwrap();
+    let outputs = run_graph(&[("A", a), ("B", b), ("acc", vec![0.0])], &kernels)
+        .0
+        .pop()
+        .unwrap();
     let pt_output = vec![
         [
             -5.8128e-01,
@@ -1086,7 +1093,7 @@ fn test_tiled_matmul_smem() {
         'n',
         &mut graph,
     );
-    b = loop_in(b, 8, Expression::from('z') * k, "tiled_m", &mut graph);
+    b = loop_in(b, 8, Expression::from('z') * n, "tiled_m", &mut graph);
     b = loop_in(b, 8, 'z', "tiled_n", &mut graph);
     b = loop_in(
         b,
@@ -1160,7 +1167,6 @@ fn test_tiled_matmul_smem() {
         'm',
         &mut graph,
     );
-    out = unary(out, GraphTerm::GMEM { label: None }, &mut graph);
     let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new()), 0).unwrap();
     let a = vec![
         [
@@ -1376,7 +1382,10 @@ fn test_tiled_matmul_smem() {
         ],
     ]
     .into_flattened();
-    let outputs = run_graph(&[a, b, vec![0.0]], &kernels).0.pop().unwrap();
+    let outputs = run_graph(&[("A", a), ("B", b), ("acc", vec![0.0])], &kernels)
+        .0
+        .pop()
+        .unwrap();
     let pt_output = vec![
         [
             -5.8128e-01,
@@ -2106,13 +2115,13 @@ fn test_naive_attention() {
     .into_flattened();
     let mut outputs = run_graph(
         &[
-            q.clone(),
-            k,
-            vec![0.0],
-            vec![f32::NEG_INFINITY],
-            vec![0.0],
-            v,
-            vec![0.0],
+            ("Q", q),
+            ("K", k),
+            ("V", v),
+            ("DOT_ACC", vec![0.0]),
+            ("EXP_SUM_ACC", vec![0.0]),
+            ("MAX_ACC", vec![0.0]),
+            ("OUTPUT_ACC", vec![0.0]),
         ],
         &kernels,
     )

@@ -22,7 +22,10 @@ use std::u128;
 /// Enumerate every valid extraction, measure its runtime, and keep the fastest.
 /// Cycles in the e-graph are handled by refusing to revisit a class already
 /// on the current DFS path.
-pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) -> Option<StableGraph<Kernel, (u8, u8)>> {
+pub fn search(
+    egraph: &EGraph,
+    inputs: &[(&'static str, Vec<f32>)],
+) -> Option<StableGraph<Kernel, (u8, u8)>> {
     // ───────────────────────── classes → legal node lists
     let mut class_nodes: FxHashMap<ClassId, Vec<NodeId>> = FxHashMap::default();
     for (nid, node) in &egraph.nodes {
@@ -59,7 +62,7 @@ pub fn search(egraph: &EGraph, inputs: &[Vec<f32>]) -> Option<StableGraph<Kernel
         on_path: &mut FxHashSet<&'a ClassId>, // cycle guard
         printed: &mut usize,
         egraph: &'a EGraph,
-        inputs: &[Vec<f32>],
+        inputs: &[(&'static str, Vec<f32>)],
         seen: &mut FxHashSet<String>, // dedup graphs
         ref_outputs: &mut Vec<Vec<f32>>,
         best_graph: &mut StableGraph<Kernel, (u8, u8)>,
@@ -197,7 +200,7 @@ pub struct ExtractionResult<'a> {
 
 fn cost<'a>(
     kernels: &StableGraph<Kernel, (u8, u8), Directed>,
-    inputs: &[Vec<f32>],
+    inputs: &[(&'static str, Vec<f32>)],
 ) -> Option<(Cost, Vec<Vec<f32>>)> {
     // Print kernels
     if option_env!("PRINT_KERNELS")

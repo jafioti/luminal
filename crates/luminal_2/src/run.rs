@@ -7,7 +7,7 @@ use petgraph::{Direction, algo::toposort, prelude::StableGraph, visit::EdgeRef};
 use crate::Kernel;
 
 pub fn run_graph(
-    inputs: &[Vec<f32>],
+    inputs: &[(&'static str, Vec<f32>)],
     kernels: &StableGraph<Kernel, (u8, u8)>,
 ) -> (Vec<Vec<f32>>, u128) {
     use metal_rs::{
@@ -22,12 +22,15 @@ pub fn run_graph(
         let mut buffers = HashMap::new();
         for node in toposort(kernels, None).unwrap() {
             let kernel = kernels.node_weight(node).unwrap();
-            if kernel.code == "Inputs" {
+            if kernel.code.starts_with("Inputs") {
+                let mapping: HashMap<String, usize> =
+                    serde_json::from_str(&kernel.code.replace("Inputs", "")).unwrap();
                 buffers.insert(
                     node,
                     inputs
                         .iter()
-                        .map(|buf| {
+                        .sorted_by_key(|(name, _)| mapping[*name])
+                        .map(|(_, buf)| {
                             device.new_buffer_with_data(
                                 buf.as_ptr() as *mut _,
                                 (buf.len() * std::mem::size_of::<f32>()) as u64,
