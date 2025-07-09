@@ -138,7 +138,7 @@ fn main() {
     // println!("tiled {}ms", avgs.into_iter().sum::<u128>() / 10);
     // expression_cleanup();
     let start = std::time::Instant::now();
-    let (g, _) = make_square_matmul();
+    let (g, _) = make_transposed_matmul();
     // let (g, _) = make_square_matmul();
     // let (g, _) = make_gelu(64);
     let (rendered, root) = render_egglog(g);
@@ -369,14 +369,14 @@ fn make_nonsquare_matmul() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) 
     (graph, out)
 }
 
-fn make_sum_reduce() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
-    let (m, k, n) = (64, 64, 64);
+fn make_transposed_matmul() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
+    let (m, k, n) = (64, 32, 128);
     let mut graph = StableGraph::new();
 
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
     });
-    a = pad_in(a, &mut graph, 5);
+    a = pad_in(a, &mut graph, 2);
     a = loop_in(a, m, Expression::from('z') * k, 'm', &mut graph);
     a = loop_in(a, n, 0, 'n', &mut graph);
     a = loop_in(a, k, 'z', 'k', &mut graph);
@@ -384,15 +384,15 @@ fn make_sum_reduce() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
     let mut b = graph.add_node(GraphTerm::GMEM {
         label: Some("B".to_string()),
     });
-    b = pad_in(b, &mut graph, 5);
+    b = pad_in(b, &mut graph, 2);
     b = loop_in(b, m, 0, 'm', &mut graph);
-    b = loop_in(b, n, 'z', 'n', &mut graph);
-    b = loop_in(b, k, Expression::from('z') * n, 'k', &mut graph);
+    b = loop_in(b, n, Expression::from('z') * n, 'n', &mut graph);
+    b = loop_in(b, k, 'z', 'k', &mut graph);
 
     let mut acc = graph.add_node(GraphTerm::GMEM {
         label: Some("Acc".to_string()),
     });
-    acc = pad_in(acc, &mut graph, 5);
+    acc = pad_in(acc, &mut graph, 2);
     acc = loop_in(acc, m, Expression::from('z') * n, 'm', &mut graph);
     acc = loop_in(acc, n, 'z', 'n', &mut graph);
     acc = loop_in(acc, k, Term::Acc('a'), 'k', &mut graph);
@@ -407,7 +407,7 @@ fn make_sum_reduce() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
     out = loop_out(out, k, Term::Acc('a'), 'k', &mut graph);
     out = loop_out(out, n, 'z', 'n', &mut graph);
     out = loop_out(out, m, Expression::from('z') * n, 'm', &mut graph);
-    out = pad_out(out, &mut graph, 5);
+    out = pad_out(out, &mut graph, 2);
     (graph, out)
 }
 
