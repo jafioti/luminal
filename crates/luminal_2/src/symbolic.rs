@@ -184,7 +184,7 @@ impl Debug for Expression {
             let new_symbol = match term {
                 Term::Num(n) => n.to_string(),
                 Term::Var(c) => c.to_string(),
-                Term::Acc(s) => format!("Acc({s})"),
+                Term::Acc(s) => "1".to_string(), // super jank, exists so that we can max(Acc, x)
                 Term::Max => format!(
                     "max({}, {})",
                     symbols.pop().unwrap(),
@@ -873,6 +873,7 @@ fn luminal_to_egg(expr: &Expression) -> RecExpr<Math> {
             Term::Num(_) | Term::Var(_) => {
                 stack.push(symbolic_expressions::Sexp::String(format!("{term:?}")))
             }
+            Term::Acc(_) => stack.push(symbolic_expressions::Sexp::String("1".to_string())),
             _ => {
                 let left = stack.pop().unwrap();
                 let right = stack.pop().unwrap();

@@ -59,7 +59,6 @@ pub fn run_graph(
                         curr_data
                     })
                     .collect();
-
                 // Copy outputs back
                 return (outputs, time_taken_micros);
             } else {
@@ -75,6 +74,8 @@ pub fn run_graph(
                     })
                     .collect_vec();
                 buffers.insert(node, outputs);
+
+                // println!("Compiling {}", kernel.code);
 
                 // compile kernel
                 let encoder = command_buffer

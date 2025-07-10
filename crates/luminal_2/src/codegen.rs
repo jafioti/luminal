@@ -23,7 +23,6 @@ pub fn codegen(
     mut arch: GPUArch,
     n_graph: usize,
 ) -> Option<StableGraph<Kernel, (u8, u8), Directed>> {
-    // display_graph(&graph, &[]);
     let (kernels, root_kernel) = split_kernels(graph, root, n_graph);
     // Create kernel meta graph to toposort
     let mut meta_graph = StableGraph::new();
@@ -123,6 +122,9 @@ pub fn codegen(
             .take(3) // Hardware always expects 3 dims
             .collect_vec();
         let kernel_lines = kernel.into_iter().map(|s| format!("\t{s}")).join("\n");
+        // if node.index() == 0 {
+        //     display_graph(&kernel_graph, &[]);
+        // }
         let kernel = match &arch {
             GPUArch::CUDA => {
                 let inputs = inputs
@@ -408,6 +410,33 @@ fn make_kernel(
                         accs.push((*input, cooresponding_output, size));
                     }
                 }
+                // Make thread-level buffers
+                for (output, stride) in &loop_outputs {
+                    let dest = kernel_graph
+                        .neighbors_directed(*output, Direction::Outgoing)
+                        .next()
+                        .unwrap();
+                    if !stride.is_acc() && !node_to_var.contains_key(&dest) {
+                        // Handle the case where the dest is not the real loop output
+                        let size = stride.substitute('z', range);
+                        if current_loop_level < THREADBLOCK_DIMS + GRID_DIMS {
+                            return None;
+                        }
+                        // assert!(
+                        //     current_loop_level >= THREADBLOCK_DIMS + GRID_DIMS,
+                        //     "Grid / Threadblock intermediate buffers not supported yet!"
+                        // );
+                        // We don't have a place to save this accumulator to. Need to allocate a register buffer
+                        *prev_max_var += 1;
+                        kernel_lines.push(format!(
+                            "{spacing}thread float {}[{size}] = {{0.0}};",
+                            var_to_char(*prev_max_var)
+                        ));
+                        node_to_var.insert(*output, (*prev_max_var, true));
+                        arch.add_metal_buffer_type(*prev_max_var, "thread ");
+                        println!("Added for {:?}", output);
+                    }
+                }
 
                 // Make new loop
                 if *loop_level < GRID_DIMS + THREADBLOCK_DIMS {
@@ -502,8 +531,6 @@ fn make_kernel(
                             new_output_vars.push(*prev_max_var);
                             node_to_var.insert(*output, (*prev_max_var, is_ptr));
                         }
-                    } else {
-                        // Handle the case where the dest is not the real loop output
                     }
                 }
                 for (inp, _) in &loop_inputs {
@@ -568,8 +595,12 @@ fn make_kernel(
                         .neighbors_directed(output, Direction::Outgoing)
                         .next()
                         .unwrap();
-                    let (outer_out, outer_out_ptr) = node_to_var[&outer_out];
                     let (output, output_ptr) = node_to_var[&output];
+                    if !node_to_var.contains_key(&outer_out) {
+                        continue;
+                        // display_graph(&kernel_graph, &[(outer_out, "yellow".to_string())]);
+                    }
+                    let (outer_out, outer_out_ptr) = node_to_var[&outer_out];
                     assert!(output_ptr);
                     assert!(outer_out_ptr || size.to_usize().unwrap() == 1);
 
@@ -977,6 +1008,7 @@ fn split_kernels(
         }
     }
     n_kernels = next_kernel;
+    // display_graph(&marked_graph, &[]);
 
     // Add kernel barriers
     for edge in marked_graph.edge_indices().collect_vec() {
@@ -1072,7 +1104,6 @@ fn split_kernels(
         for kernel in kernels {
             kernel_graphs[*kernel].1.push((
                 GMEMBuffer::Input {
-                    index: n,
                     label: label.clone(),
                 },
                 node_maps[*kernel][&input],

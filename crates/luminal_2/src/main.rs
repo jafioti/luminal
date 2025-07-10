@@ -36,9 +36,7 @@ mod tests;
 
 use colored::Colorize;
 use egglog::{EGraph, Error, var};
-use itertools::Itertools;
 use petgraph::{Directed, graph::NodeIndex, prelude::StableGraph, visit::Topo};
-use rand::{Rng, rng};
 use serde::Serialize;
 use std::{collections::HashMap, fmt::Debug};
 use utils::*;
@@ -82,7 +80,7 @@ struct Kernel {
 #[derive(Clone)]
 enum GMEMBuffer {
     PrevKernel { kernel: usize, output: usize },
-    Input { index: usize, label: Option<String> },
+    Input { label: Option<String> },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -138,7 +136,7 @@ fn main() {
     // println!("tiled {}ms", avgs.into_iter().sum::<u128>() / 10);
     // expression_cleanup();
     let start = std::time::Instant::now();
-    let (g, _) = make_naive_attention();
+    let (g, _) = make_gelu(64);
     // let (g, _) = make_square_matmul();
     // let (g, _) = make_gelu(64);
     let (rendered, root) = render_egglog(g);
@@ -174,13 +172,16 @@ fn main() {
     search(
         &serialized,
         &[
-            ("Q", q),
-            ("K", k),
-            ("V", v),
-            ("DOT_ACC", vec![0.0]),
-            ("EXP_SUM_ACC", vec![0.0]),
-            ("MAX_ACC", vec![0.0]),
-            ("OUTPUT_ACC", vec![0.0]),
+            ("A", q),
+            ("1.702", vec![1.702]),
+            ("1.0", vec![1.0]),
+            // ("Q", q),
+            // ("K", k),
+            // ("V", v),
+            // ("DOT_ACC", vec![0.0]),
+            // ("EXP_SUM_ACC", vec![0.0]),
+            // ("MAX_ACC", vec![0.0]),
+            // ("OUTPUT_ACC", vec![0.0]),
         ],
     );
     expression_cleanup();
@@ -291,6 +292,20 @@ fn render_egglog(graph: StableGraph<GraphTerm, (), Directed>) -> (String, String
     (out, root)
 }
 
+fn fusion_test() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
+    let mut graph = StableGraph::new();
+    let mut a = graph.add_node(GraphTerm::GMEM {
+        label: Some("A".to_string()),
+    });
+    a = loop_in(a, 10, 'z', 'a', &mut graph);
+    a = unary(a, GraphTerm::Exp, &mut graph);
+    a = loop_out(a, 10, 'z', 'a', &mut graph);
+    a = loop_in(a, 10, 'z', 'a', &mut graph);
+    a = unary(a, GraphTerm::Sin, &mut graph);
+    a = loop_out(a, 10, 'z', 'a', &mut graph);
+    (graph, a)
+}
+
 fn make_naive_attention() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
     let mut graph = StableGraph::new();
 
@@ -345,10 +360,35 @@ fn make_naive_attention() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
     max = pad_out(max, &mut graph, 3);
     max = loop_out(max, n_qkv, 'z', 'q', &mut graph);
 
+    // neg max
+    let max_in = loop_in(max, n_qkv, 'z', 'q', &mut graph);
+    let mut neg_max = unary(max_in, GraphTerm::Neg, &mut graph);
+    neg_max = loop_out(neg_max, n_qkv, 'z', 'q', &mut graph);
+    let mut neg_max_in = loop_in(neg_max, n_qkv, 'z', 'q', &mut graph);
+    neg_max_in = loop_in(neg_max_in, n_qkv, 0, "k", &mut graph);
+    // sub
+    let mut t_dots_in = loop_in(dots, n_qkv, Expression::from('z') * n_qkv, 'q', &mut graph);
+    t_dots_in = loop_in(t_dots_in, n_qkv, 'z', 'k', &mut graph);
+    let mut normed_dots_in = binary(t_dots_in, neg_max_in, GraphTerm::Add, &mut graph);
+    normed_dots_in = loop_out(normed_dots_in, n_qkv, 'z', 'k', &mut graph);
+    normed_dots_in = loop_out(
+        normed_dots_in,
+        n_qkv,
+        Expression::from('z') * n_qkv,
+        'q',
+        &mut graph,
+    );
+    normed_dots_in = loop_in(
+        normed_dots_in,
+        n_qkv,
+        Expression::from('z') * n_qkv,
+        'q',
+        &mut graph,
+    );
+    normed_dots_in = pad_in(normed_dots_in, &mut graph, 3);
+    normed_dots_in = loop_in(normed_dots_in, n_qkv, 'z', 'k', &mut graph);
+
     // exp sum ------------------------------------------------------
-    let mut max_in = loop_in(max, n_qkv, 'z', 'q', &mut graph);
-    max_in = pad_in(max_in, &mut graph, 3);
-    max_in = loop_in(max_in, n_qkv, 0, 'k', &mut graph);
     let mut exp_sum_acc = graph.add_node(GraphTerm::GMEM {
         label: Some("EXP_SUM_ACC".to_string()),
     });
@@ -356,16 +396,7 @@ fn make_naive_attention() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
     exp_sum_acc = pad_in(exp_sum_acc, &mut graph, 3);
     exp_sum_acc = loop_in(exp_sum_acc, n_qkv, Term::Acc('e'), "k", &mut graph);
     let mut exp_sum = binary(
-        unary(
-            binary(
-                dots_in,
-                unary(max_in, GraphTerm::Neg, &mut graph),
-                GraphTerm::Add,
-                &mut graph,
-            ),
-            GraphTerm::Exp,
-            &mut graph,
-        ),
+        unary(normed_dots_in, GraphTerm::Exp, &mut graph),
         exp_sum_acc,
         GraphTerm::Add,
         &mut graph,
@@ -379,16 +410,7 @@ fn make_naive_attention() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
     exp_sum_in = pad_in(exp_sum_in, &mut graph, 3);
     exp_sum_in = loop_in(exp_sum_in, n_qkv, 0, 'k', &mut graph);
     let mut final_scores = binary(
-        unary(
-            binary(
-                dots_in,
-                unary(max_in, GraphTerm::Neg, &mut graph),
-                GraphTerm::Add,
-                &mut graph,
-            ),
-            GraphTerm::Exp,
-            &mut graph,
-        ),
+        unary(normed_dots_in, GraphTerm::Exp, &mut graph),
         unary(exp_sum_in, GraphTerm::Recip, &mut graph),
         GraphTerm::Mul,
         &mut graph,
