@@ -36,7 +36,9 @@ mod tests;
 
 use colored::Colorize;
 use egglog::{EGraph, Error, var};
+use itertools::Itertools;
 use petgraph::{Directed, graph::NodeIndex, prelude::StableGraph, visit::Topo};
+use rand::{Rng, rng};
 use serde::Serialize;
 use std::{collections::HashMap, fmt::Debug};
 use utils::*;
@@ -136,7 +138,7 @@ fn main() {
     // println!("tiled {}ms", avgs.into_iter().sum::<u128>() / 10);
     // expression_cleanup();
     let start = std::time::Instant::now();
-    let (g, _) = make_gelu(64);
+    let (g, _) = make_square_matmul();
     // let (g, _) = make_square_matmul();
     // let (g, _) = make_gelu(64);
     let (rendered, root) = render_egglog(g);
@@ -169,12 +171,15 @@ fn main() {
         [0.4418, 0.2469, 0.0769, 0.3380, 0.4544],
     ]
     .into_flattened();
+    let mut rng = rng();
     search(
         &serialized,
         &[
-            ("A", q),
-            ("1.702", vec![1.702]),
-            ("1.0", vec![1.0]),
+            ("A", (0..(64 * 64)).map(|_| rng.random()).collect_vec()),
+            ("B", (0..(64 * 64)).map(|_| rng.random()).collect_vec()),
+            ("Acc", vec![0.0]),
+            // ("1.702", vec![1.702]),
+            // ("1.0", vec![1.0]),
             // ("Q", q),
             // ("K", k),
             // ("V", v),

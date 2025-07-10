@@ -18,7 +18,7 @@ const WARMUP_TRIALS: usize = 1;
 const TRIALS: usize = 1;
 const MAX_SEARCHED_GRAPHS: usize = 10_000;
 const MAX_CYCLES: usize = 3;
-const INVALID_IR: &[&str] = &["SwapLoops", "Unary", "Binary"];
+const INVALID_IR: &[&str] = &["SwapLoops", "Unary", "Binary", "MReplace"];
 
 type Cost = u128; // Execution time in microseconds
 
@@ -32,7 +32,7 @@ pub fn search(
         seen: &mut FxHashMap<(&'a ClassId, &'a NodeId), usize>,
     ) -> Vec<Vec<(&'a ClassId, &'a NodeId, bool)>> {
         let mut trajectories = vec![];
-        for enode in &egraph.classes()[current_class].nodes {
+        'enode_loop: for enode in &egraph.classes()[current_class].nodes {
             if INVALID_IR.contains(&egraph.nodes[enode].op.as_str())
                 || seen
                     .get(&(current_class, enode))
@@ -43,11 +43,19 @@ pub fn search(
                 continue;
             }
             let mut enode_trajectories = vec![];
+            let mut empty = false;
             for child in &egraph.nodes[enode].children {
                 // Ask what's the child's trajectories
                 *seen.entry((current_class, enode)).or_insert(0) += 1;
                 let child_trajectories = recurse(egraph, egraph.nid_to_cid(child), seen);
                 *seen.get_mut(&(current_class, enode)).unwrap() -= 1;
+
+                // if we are getting no trajectories out of this child, this whole enode is bad
+                empty |= child_trajectories.is_empty();
+                if empty {
+                    continue 'enode_loop;
+                }
+
                 if enode_trajectories.is_empty() {
                     for mut child_trajectory in child_trajectories {
                         child_trajectory.insert(0, (current_class, enode, true));
@@ -81,19 +89,28 @@ pub fn search(
     let mut ref_outputs: Vec<Vec<f32>> = vec![];
     let mut best_time = u128::MAX;
     let mut best_graph = StableGraph::default();
-    for (i, trajectory) in trajectories.into_iter().enumerate() {
+    let mut valid_graphs = 0;
+    for trajectory in trajectories {
+        // println!(
+        //     "{:?}",
+        //     trajectory
+        //         .iter()
+        //         .map(|(_, n, _)| &egraph.nodes[*n].op)
+        //         .collect_vec()
+        // );
         // Build termdag
         let graph = extraction_to_graph(egraph, &trajectory);
         let root = graph.externals(Direction::Outgoing).next().unwrap();
         let Some(kernels) =
             crate::codegen::codegen(graph.clone(), root, GPUArch::Metal(HashMap::default()), 0)
         else {
-            panic!()
+            continue;
         };
         if let Some((us, outs)) = cost(&kernels, inputs) {
+            valid_graphs += 1;
             println!(
                 "{}{}",
-                format!("Graph {i} ").bold(),
+                format!("Graph {valid_graphs} ").bold(),
                 format!("{us}µs").bright_green().bold()
             );
             if ref_outputs.is_empty() {
@@ -115,47 +132,6 @@ pub fn search(
     None
 }
 
-fn cost<'a>(
-    kernels: &StableGraph<Kernel, (u8, u8), Directed>,
-    inputs: &[(&'static str, Vec<f32>)],
-) -> Option<(Cost, Vec<Vec<f32>>)> {
-    // Print kernels
-    if option_env!("PRINT_KERNELS")
-        .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
-        .unwrap_or_default()
-    {
-        println!("Kernels: {}", kernels.node_count() - 2);
-        for (i, node) in toposort(&kernels, None).unwrap().into_iter().enumerate() {
-            let Kernel {
-                code,
-                grid,
-                threadblock,
-                smem,
-                outputs,
-            } = kernels.node_weight(node).unwrap();
-            if !code.starts_with("Inputs") && code != "Outputs" {
-                println!("Kernel {i} Grid: {grid:?} Threadblock: {threadblock:?} Smem: {smem}");
-                println!("{code}");
-                println!("Outputs: {:?}", outputs);
-            }
-        }
-    }
-
-    // Warm up resources (buffer allocation, kernel compiler, etc.)
-    for _ in 0..WARMUP_TRIALS {
-        run_graph(inputs, &kernels);
-    }
-    // Test runtime
-    let mut micros = vec![];
-    let mut outputs = vec![];
-    let mut m;
-    for _ in 0..TRIALS {
-        (outputs, m) = run_graph(inputs, &kernels);
-        micros.push(m);
-    }
-    Some((micros.into_iter().sum::<u128>() / TRIALS as u128, outputs))
-}
-
 pub fn extraction_to_graph(
     egraph: &EGraph,
     trajectory: &[(&ClassId, &NodeId, bool)],
@@ -175,6 +151,7 @@ pub fn extraction_to_graph(
     ) -> Ret {
         let (_, node_choice, _) = trajectory[*current];
         let enode = &egraph.nodes[node_choice];
+        // println!("{}", enode.op);
         match enode.op.as_str() {
             "GMEM" => {
                 *current += 1;
@@ -205,7 +182,6 @@ pub fn extraction_to_graph(
                 let Ret::Math(stride) = recurse(egraph, trajectory, current, g) else {
                     panic!()
                 };
-                println!("Range: {range} Stride: {stride}");
                 let r = g.add_node(match enode.op.as_str() {
                     "LoopIn" => GraphTerm::LoopIn {
                         range,
@@ -229,6 +205,7 @@ pub fn extraction_to_graph(
                     panic!()
                 };
                 *current += 1;
+                // println!("bin: {}", enode.op);
                 let Ret::Expr(child_two) = recurse(egraph, trajectory, current, g) else {
                     panic!()
                 };
@@ -312,12 +289,8 @@ pub fn extraction_to_graph(
                 })
             }
             "MAccum" => {
-                let name = if enode.children.is_empty() {
-                    "<acc>".to_owned()
-                } else {
-                    "<acc>".to_owned()
-                };
-                Ret::Math(Expression::from(Term::Acc(name.chars().next().unwrap())))
+                *current += 1;
+                Ret::Math(Expression::from(Term::Acc('a')))
             }
             "Loop" => {
                 *current += 2; // skip loop label
@@ -331,13 +304,53 @@ pub fn extraction_to_graph(
                 if let Ok(n) = enode.op.parse::<usize>() {
                     Ret::Math(Expression::from(n))
                 } else {
-                    panic!("unsupported Math op '{}'", enode.op)
+                    panic!("unsupported op '{}'", enode.op)
                 }
             }
-            _ => unreachable!("unsupported op {}", enode.op),
         }
     }
 
     recurse(egraph, trajectory, &mut 0, &mut g);
     g
+}
+
+fn cost<'a>(
+    kernels: &StableGraph<Kernel, (u8, u8), Directed>,
+    inputs: &[(&'static str, Vec<f32>)],
+) -> Option<(Cost, Vec<Vec<f32>>)> {
+    // Print kernels
+    if option_env!("PRINT_KERNELS")
+        .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
+        .unwrap_or_default()
+    {
+        println!("Kernels: {}", kernels.node_count() - 2);
+        for (i, node) in toposort(&kernels, None).unwrap().into_iter().enumerate() {
+            let Kernel {
+                code,
+                grid,
+                threadblock,
+                smem,
+                outputs,
+            } = kernels.node_weight(node).unwrap();
+            if !code.starts_with("Inputs") && code != "Outputs" {
+                println!("Kernel {i} Grid: {grid:?} Threadblock: {threadblock:?} Smem: {smem}");
+                println!("{code}");
+                println!("Outputs: {:?}", outputs);
+            }
+        }
+    }
+
+    // Warm up resources (buffer allocation, kernel compiler, etc.)
+    for _ in 0..WARMUP_TRIALS {
+        run_graph(inputs, &kernels);
+    }
+    // Test runtime
+    let mut micros = vec![];
+    let mut outputs = vec![];
+    let mut m;
+    for _ in 0..TRIALS {
+        (outputs, m) = run_graph(inputs, &kernels);
+        micros.push(m);
+    }
+    Some((micros.into_iter().sum::<u128>() / TRIALS as u128, outputs))
 }

@@ -2,6 +2,7 @@ use itertools::Itertools;
 use petgraph::{
     Directed, Direction, algo::toposort, graph::NodeIndex, prelude::StableGraph, visit::EdgeRef,
 };
+use rand::seq::index;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     iter::repeat,
@@ -360,12 +361,18 @@ fn make_kernel(
                         };
                         // Create a new accumulator
                         // Work out the size needed by taking the max stride of the loopins and loopouts
-                        let mut size = Expression::from(0);
+                        let mut size = Expression::from(1);
+                        let mut loads = Expression::from(1);
+                        let mut in_loops = vec![];
                         let mut curr = *input;
                         loop {
                             match kernel_graph.node_weight(curr).unwrap().0 {
                                 GraphTerm::LoopIn { range, stride, .. } => {
-                                    size = size.max(stride.substitute('z', range));
+                                    if !stride.is_acc() {
+                                        size = size.max(stride.substitute('z', range));
+                                        loads *= range;
+                                        in_loops.push((range, stride));
+                                    }
                                 }
                                 _ => break,
                             }
@@ -374,16 +381,27 @@ fn make_kernel(
                                 .next()
                                 .unwrap();
                         }
+                        let mut indexing_expression = Expression::from(0);
+                        let mut current_elem_size = Expression::from(1);
+                        for (range, stride) in in_loops.into_iter().rev() {
+                            indexing_expression +=
+                                ((Expression::from('z') / current_elem_size) % range) * stride;
+                            current_elem_size *= range;
+                        }
                         let cooresponding_output = loop_outputs
                             .iter()
                             .find(|(_, v)| v.terms.read()[0] == Term::Acc(acc_symbol))
                             .unwrap()
                             .0;
                         curr = cooresponding_output;
+                        let mut out_loops = vec![];
                         loop {
                             match kernel_graph.node_weight(curr).unwrap().0 {
                                 GraphTerm::LoopOut { range, stride, .. } => {
-                                    size = size.max(stride.substitute('z', range));
+                                    if !stride.is_acc() {
+                                        size = size.max(stride.substitute('z', range));
+                                        out_loops.push((range, stride));
+                                    }
                                 }
                                 _ => break,
                             }
@@ -403,11 +421,27 @@ fn make_kernel(
                         ));
 
                         // Copy from source to accumulator
-                        // TODO (for now we always initialize to 0, this is wrong, need to copy from input buffer, respecting input strides)
-
+                        let outer_input = kernel_graph
+                            .neighbors_directed(*input, Direction::Incoming)
+                            .next()
+                            .unwrap();
+                        // Use a single loop with correct striding from the input
+                        kernel_lines.push(format!(
+                            "{spacing}for (int load = 0; load < {loads}; load++) {{"
+                        ));
+                        let indexing_expression = indexing_expression
+                            .simplify()
+                            .to_string()
+                            .replace("z", "load");
+                        kernel_lines.push(format!(
+                            "{inner_spacing}{}[{indexing_expression}] = *({} + {indexing_expression});",
+                            var_to_char(*prev_max_var),
+                            var_to_char(node_to_var[&outer_input].0),
+                        ));
+                        kernel_lines.push(format!("{spacing}}}"));
                         node_to_var.insert(*input, (*prev_max_var, true));
                         node_to_var.insert(cooresponding_output, (*prev_max_var, true));
-                        accs.push((*input, cooresponding_output, size));
+                        accs.push((*input, cooresponding_output, size, out_loops));
                     }
                 }
                 // Make thread-level buffers
@@ -434,7 +468,6 @@ fn make_kernel(
                         ));
                         node_to_var.insert(*output, (*prev_max_var, true));
                         arch.add_metal_buffer_type(*prev_max_var, "thread ");
-                        println!("Added for {:?}", output);
                     }
                 }
 
@@ -589,13 +622,14 @@ fn make_kernel(
                 }
 
                 // Save accumulators
-                for (output, _) in loop_outputs.into_iter().filter(|(_, st)| st.is_acc()) {
-                    let (_, _, size) = accs.iter().find(|(_, o, _)| *o == output).unwrap();
+                for (output_node, _) in loop_outputs.into_iter().filter(|(_, st)| st.is_acc()) {
+                    let (_, _, size, out_loops) =
+                        accs.iter().find(|(_, o, _, _)| *o == output_node).unwrap();
                     let outer_out = kernel_graph
-                        .neighbors_directed(output, Direction::Outgoing)
+                        .neighbors_directed(output_node, Direction::Outgoing)
                         .next()
                         .unwrap();
-                    let (output, output_ptr) = node_to_var[&output];
+                    let (output, output_ptr) = node_to_var[&output_node];
                     if !node_to_var.contains_key(&outer_out) {
                         continue;
                         // display_graph(&kernel_graph, &[(outer_out, "yellow".to_string())]);
@@ -615,12 +649,23 @@ fn make_kernel(
                         ));
                     } else {
                         assert!(outer_out_ptr);
+                        // Work out indexing expression to save it by
+                        let mut indexing_expression = Expression::from(0);
+                        let mut current_elem_size = Expression::from(1);
+                        for (range, stride) in out_loops.into_iter().rev() {
+                            indexing_expression +=
+                                ((Expression::from('z') / current_elem_size) % range) * stride;
+                            current_elem_size *= range;
+                        }
                         kernel_lines.push(format!(
-                            "{spacing}for (int save_loop = 0; save_loop < {}; save_loop++) {{",
-                            size.to_usize().unwrap()
+                            "{spacing}for (int save_loop = 0; save_loop < {size}; save_loop++) {{"
                         ));
+                        let indexing_expression = indexing_expression
+                            .simplify()
+                            .to_string()
+                            .replace("z", "load");
                         kernel_lines.push(format!(
-                            "{inner_spacing}{}[save_loop] = {}[save_loop];",
+                            "{inner_spacing}{}[{indexing_expression}] = *({} + {indexing_expression});",
                             var_to_char(outer_out),
                             var_to_char(output),
                         ));

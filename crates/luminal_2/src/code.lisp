@@ -170,6 +170,115 @@
     )
 )
 
+; Split loops
+(let tileFactor 8)
+(rewrite
+ 	(LoopOut (Unary ?spun (LoopIn ?x (Loop ?loopL (MNum ?loop)) ?stride)) (Loop ?loopL (MNum ?loop)) ?stride)
+ 	(LoopOut
+     	(LoopOut
+         	(Unary ?spun
+            	(LoopIn
+                 	(LoopIn
+                     	?x
+                     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+                     	(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+                     )
+                 	(Loop (+ ?loopL "Split") (MNum tileFactor))
+                 	?stride
+                )
+            )
+         	(Loop (+ ?loopL "Split") (MNum tileFactor))
+         	?stride
+        )
+     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+    	(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+    )
+ 	:when ((> ?loop tileFactor) (= (% ?loop tileFactor) 0))
+)
+(rewrite
+ 	(LoopOut (Binary ?spbin (LoopIn ?a (Loop ?loopL (MNum ?loop)) ?strideA) (LoopIn ?b (Loop ?loopL (MNum ?loop)) ?strideB)) (Loop ?loopL (MNum ?loop)) ?stride)
+ 	(LoopOut
+     	(LoopOut
+         	(Binary ?spbin
+            	(LoopIn
+                 	(LoopIn
+                     	?a
+                     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+                     	(MReplace ?strideA (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+                    )
+                 	(Loop (+ ?loopL "Split") (MNum tileFactor))
+                 	?strideA
+                )
+                (LoopIn
+                 	(LoopIn
+                     	?b
+                     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+                     	(MReplace ?strideB (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+                    )
+                 	(Loop (+ ?loopL "Split") (MNum tileFactor))
+                 	?strideB
+                )
+            )
+         	(Loop (+ ?loopL "Split") (MNum tileFactor))
+         	?stride
+        )
+     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+    	(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+    )
+ 	:when ((> ?loop tileFactor) (= (% ?loop tileFactor) 0))
+)
+
+(rewrite
+ 	(LoopOut
+  		(Binary ?finbin
+    		(LoopIn ?c (Loop ?loopL (MNum ?loop)) ?strideC)
+      		(Binary ?spbin
+        		(LoopIn ?a (Loop ?loopL (MNum ?loop)) ?strideA)
+          		(LoopIn ?b (Loop ?loopL (MNum ?loop)) ?strideB)
+            )
+        ) (Loop ?loopL (MNum ?loop)) ?stride
+    )
+ 	(LoopOut
+     	(LoopOut
+      		(Binary ?finbin
+        		(LoopIn
+                 	(LoopIn
+                     	?c
+                     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+                     	(MReplace ?strideC (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+                    )
+                 	(Loop (+ ?loopL "Split") (MNum tileFactor))
+                 	?strideC
+                )
+	         	(Binary ?spbin
+	            	(LoopIn
+	                 	(LoopIn
+	                     	?a
+	                     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+	                     	(MReplace ?strideA (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+	                    )
+	                 	(Loop (+ ?loopL "Split") (MNum tileFactor))
+	                 	?strideA
+	                )
+	                (LoopIn
+	                 	(LoopIn
+	                     	?b
+	                     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+	                     	(MReplace ?strideB (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+	                    )
+	                 	(Loop (+ ?loopL "Split") (MNum tileFactor))
+	                 	?strideB
+	                )
+	            )
+            )
+         	(Loop (+ ?loopL "Split") (MNum tileFactor))
+         	?stride
+        )
+     	(Loop ?loopL (MNum (/ ?loop tileFactor)))
+    	(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
+    )
+ 	:when ((> ?loop tileFactor) (= (% ?loop tileFactor) 0))
+)
 
 ; Loop swapping
 (rewrite  ; 0-1
