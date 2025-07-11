@@ -118,10 +118,10 @@ fn main() {
     // make_square_matmul();
     // make_nonsquare_matmul();
     // make_gelu();
-    // make_single_head_attention();
+    make_single_head_attention();
     // make_multi_head_attention();
     // make_softmax();
-    make_layernorm();
+    // make_layernorm();
     // fusion_test();
     // let (g, _) = make_square_matmul();
     // let (g, _) = make_gelu(64);
@@ -146,6 +146,7 @@ fn fusion_test() {
     search(
         &egraph,
         &[("A", (0..10).map(|_| rng.random()).collect_vec())],
+        GPUArch::Metal(HashMap::default()),
     );
 }
 
@@ -339,6 +340,7 @@ fn make_single_head_attention() {
             ("EXP_SUM_ACC", vec![0.0]),
             ("OUTPUT_ACC", vec![0.0]),
         ],
+        GPUArch::Metal(HashMap::default()),
     );
 }
 
@@ -641,6 +643,7 @@ fn make_multi_head_attention() {
             ("EXP_SUM_ACC", vec![0.0]),
             ("OUTPUT_ACC", vec![0.0]),
         ],
+        GPUArch::Metal(HashMap::default()),
     );
 }
 
@@ -732,6 +735,7 @@ fn make_softmax() {
             ("max_val", vec![f32::NEG_INFINITY]),
             ("sum_val", vec![0.0]),
         ],
+        GPUArch::Metal(HashMap::default()),
     );
 }
 
@@ -856,6 +860,7 @@ fn make_layernorm() {
             ("Epsilon", vec![1e-5]),
             ("0", vec![0.0]),
         ],
+        GPUArch::Metal(HashMap::default()),
     );
 }
 
@@ -918,6 +923,7 @@ fn make_gelu() {
             ("1.702", vec![1.702]),
             ("1.0", vec![1.0]),
         ],
+        GPUArch::Metal(HashMap::default()),
     );
 }
 
@@ -970,6 +976,7 @@ fn make_nonsquare_matmul() {
             ("B", (0..(k * n)).map(|_| rng.random()).collect_vec()),
             ("Acc", vec![0.0]),
         ],
+        GPUArch::Metal(HashMap::default()),
     );
 }
 
@@ -1064,5 +1071,6 @@ fn make_square_matmul() {
             ("B", (0..(k * n)).map(|_| rng.random()).collect_vec()),
             ("Acc", vec![0.0]),
         ],
+        GPUArch::Metal(HashMap::default()),
     );
 }

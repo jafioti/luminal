@@ -422,7 +422,7 @@ fn make_kernel(
                             .unwrap();
                         // Use a single loop with correct striding from the input
                         kernel_lines.push(format!(
-                            "{spacing}for (int load = 0; load < {loads}; load++) {{"
+                            "{spacing}for (int load = 0; load < {loads}; ++load) {{"
                         ));
                         let indexing_expression = indexing_expression
                             .simplify()
@@ -491,7 +491,7 @@ fn make_kernel(
                 } else {
                     *prev_max_var += 1;
                     let loop_var = var_to_char(*prev_max_var);
-                    kernel_lines.push(format!("{spacing}for (int loop_{loop_var} = 0; loop_{loop_var} < {range}; loop_{loop_var} += 1) {{"));
+                    kernel_lines.push(format!("{spacing}for (int loop_{loop_var} = 0; loop_{loop_var} < {range}; ++loop_{loop_var}) {{"));
                 };
                 let loop_var = var_to_char(*prev_max_var);
                 let loop_var_int = *prev_max_var;
@@ -655,7 +655,7 @@ fn make_kernel(
                             current_elem_size *= range;
                         }
                         kernel_lines.push(format!(
-                            "{spacing}for (int save = 0; save < {size}; save++) {{"
+                            "{spacing}for (int save = 0; save < {size}; ++save) {{"
                         ));
                         let indexing_expression = indexing_expression
                             .simplify()

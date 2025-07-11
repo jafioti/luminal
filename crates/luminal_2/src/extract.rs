@@ -23,6 +23,7 @@ type Cost = u128; // Execution time in microseconds
 pub fn search(
     egraph: &EGraph,
     inputs: &[(&'static str, Vec<f32>)],
+    arch: GPUArch,
 ) -> Option<StableGraph<Kernel, (u8, u8)>> {
     fn recurse<'a>(
         egraph: &'a EGraph,
@@ -97,38 +98,72 @@ pub fn search(
         // Build termdag
         let graph = extraction_to_graph(egraph, &trajectory);
         let root = graph.externals(Direction::Outgoing).next().unwrap();
-        let Some(kernels) =
-            crate::codegen::codegen(graph.clone(), root, GPUArch::Metal(HashMap::default()), 0)
-        else {
+        let Some(kernels) = crate::codegen::codegen(graph.clone(), root, arch.clone(), 0) else {
             continue;
         };
-        if let Some((us, outs)) = cost(&kernels, inputs) {
-            valid_graphs += 1;
-            println!(
-                "{}{}",
-                format!(
-                    "Graph {valid_graphs} ({:.1}%) ",
-                    (n as f32 / total_trajectories as f32) * 100.0
-                )
-                .bold(),
-                format!("{us}µs").bright_green().bold()
-            );
-            if ref_outputs.is_empty() {
-                ref_outputs = outs;
-            } else {
-                for (a, b) in ref_outputs.iter().zip(&outs) {
-                    for (x, y) in a.iter().zip(b) {
-                        if (x - y).abs() >= 1e-3 {
-                            println!("{} {x} != {y}", "Output Mismatch".on_bright_red());
-                            continue 'trajectory_loop;
+        // Print kernels
+        if option_env!("PRINT_KERNELS")
+            .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
+            .unwrap_or_default()
+        {
+            println!("Kernels: {}", kernels.node_count() - 2);
+            for (i, node) in toposort(&kernels, None).unwrap().into_iter().enumerate() {
+                let Kernel {
+                    code,
+                    grid,
+                    threadblock,
+                    smem,
+                    outputs,
+                } = kernels.node_weight(node).unwrap();
+                if !code.starts_with("Inputs") && code != "Outputs" {
+                    println!("Kernel {i} Grid: {grid:?} Threadblock: {threadblock:?} Smem: {smem}");
+                    println!("{code}");
+                    println!("Outputs: {:?}", outputs);
+                }
+            }
+        }
+        match &arch {
+            GPUArch::CUDA => {
+                valid_graphs += 1;
+                println!(
+                    "{}",
+                    format!(
+                        "Graph {valid_graphs} ({:.1}%) ",
+                        (n as f32 / total_trajectories as f32) * 100.0
+                    )
+                    .bold()
+                );
+            }
+            GPUArch::Metal(_) => {
+                if let Some((us, outs)) = cost(&kernels, inputs) {
+                    valid_graphs += 1;
+                    println!(
+                        "{}{}",
+                        format!(
+                            "Graph {valid_graphs} ({:.1}%) ",
+                            (n as f32 / total_trajectories as f32) * 100.0
+                        )
+                        .bold(),
+                        format!("{us}µs").bright_green().bold()
+                    );
+                    if ref_outputs.is_empty() {
+                        ref_outputs = outs;
+                    } else {
+                        for (a, b) in ref_outputs.iter().zip(&outs) {
+                            for (x, y) in a.iter().zip(b) {
+                                if (x - y).abs() >= 1e-3 {
+                                    println!("{} {x} != {y}", "Output Mismatch".on_bright_red());
+                                    continue 'trajectory_loop;
+                                }
+                            }
                         }
+                        println!("{}", "Outputs Validated".on_bright_green());
+                    }
+                    if us < best_time {
+                        best_time = us;
+                        best_graph = Some(kernels);
                     }
                 }
-                println!("{}", "Outputs Validated".on_bright_green());
-            }
-            if us < best_time {
-                best_time = us;
-                best_graph = Some(kernels);
             }
         }
     }
@@ -322,28 +357,6 @@ fn cost<'a>(
     kernels: &StableGraph<Kernel, (u8, u8), Directed>,
     inputs: &[(&'static str, Vec<f32>)],
 ) -> Option<(Cost, Vec<Vec<f32>>)> {
-    // Print kernels
-    if option_env!("PRINT_KERNELS")
-        .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
-        .unwrap_or_default()
-    {
-        println!("Kernels: {}", kernels.node_count() - 2);
-        for (i, node) in toposort(&kernels, None).unwrap().into_iter().enumerate() {
-            let Kernel {
-                code,
-                grid,
-                threadblock,
-                smem,
-                outputs,
-            } = kernels.node_weight(node).unwrap();
-            if !code.starts_with("Inputs") && code != "Outputs" {
-                println!("Kernel {i} Grid: {grid:?} Threadblock: {threadblock:?} Smem: {smem}");
-                println!("{code}");
-                println!("Outputs: {:?}", outputs);
-            }
-        }
-    }
-
     // Warm up resources (buffer allocation, kernel compiler, etc.)
     for _ in 0..WARMUP_TRIALS {
         run_graph(inputs, &kernels);

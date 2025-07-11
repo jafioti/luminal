@@ -1948,24 +1948,24 @@ fn test_tiled_matmul_smem() {
 //     let mut q = graph.add_node(GraphTerm::GMEM {
 //         label: Some("Q".to_string()),
 //     });
-//     q = loop_in(q, n_qkv, Expression::from('z') * d, &mut graph);
+//     q = loop_in(q, n_qkv, Expression::from('z') * d, 'q', &mut graph);
 //     q = pad_in(q, &mut graph, 5);
-//     q = loop_in(q, n_qkv, 0, &mut graph);
-//     q = loop_in(q, d, 'z', &mut graph);
+//     q = loop_in(q, n_qkv, 0, 'k', &mut graph);
+//     q = loop_in(q, d, 'z', 'd', &mut graph);
 //     let mut k = graph.add_node(GraphTerm::GMEM {
 //         label: Some("K".to_string()),
 //     });
-//     k = loop_in(k, n_qkv, 0, &mut graph);
+//     k = loop_in(k, n_qkv, 0, 'q', &mut graph);
 //     k = pad_in(k, &mut graph, 5);
-//     k = loop_in(k, n_qkv, Expression::from('z') * d, &mut graph);
-//     k = loop_in(k, d, 'z', &mut graph);
+//     k = loop_in(k, n_qkv, Expression::from('z') * d, 'k', &mut graph);
+//     k = loop_in(k, d, 'z', 'd', &mut graph);
 //     let mut v = graph.add_node(GraphTerm::GMEM {
 //         label: Some("V".to_string()),
 //     });
-//     v = loop_in(v, n_qkv, 0, &mut graph);
+//     v = loop_in(v, n_qkv, 0, 'q', &mut graph);
 //     v = pad_in(v, &mut graph, 5);
-//     v = loop_in(v, n_qkv, Expression::from('z') * d, &mut graph);
-//     v = loop_in(v, d, 'z', &mut graph);
+//     v = loop_in(v, n_qkv, Expression::from('z') * d, 'k', &mut graph);
+//     v = loop_in(v, d, 'z', 'd', &mut graph);
 
 //     // accumulators
 //     let mut dot_acc = graph.add_node(GraphTerm::NewAcc {
@@ -2072,7 +2072,10 @@ fn test_tiled_matmul_smem() {
 //         [0.4418, 0.2469, 0.0769, 0.3380, 0.4544],
 //     ]
 //     .into_flattened();
-//     let outputs = run_graph(&[q, k, v], &kernels).0.pop().unwrap();
+//     let outputs = run_graph(&[("Q", q), ("K", k), ("V", v)], &kernels)
+//         .0
+//         .pop()
+//         .unwrap();
 //     let pt_output = vec![
 //         [0.5441, 0.2194, -0.0533, 0.6271, -0.0108],
 //         [0.8770, 0.8527, 0.5614, 1.2643, 0.6696],
