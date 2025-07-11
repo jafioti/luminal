@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use egglog::Term;
-use petgraph::{Directed, Direction, graph::NodeIndex, prelude::StableGraph};
+use egglog::{EGraph, Error, Term, prelude::exprs::var};
+use petgraph::{Directed, Direction, graph::NodeIndex, prelude::StableGraph, visit::Topo};
 use regex::Regex;
 
 pub fn unary(
@@ -176,6 +176,7 @@ impl TermToString for GraphTerm {
             GraphTerm::Sin => "Sin".to_string(),
             GraphTerm::Recip => "Recip".to_string(),
             GraphTerm::Neg => "Neg".to_string(),
+            GraphTerm::Sqrt => "Sqrt".to_string(),
             GraphTerm::LoopIn {
                 range,
                 stride,
@@ -336,4 +337,180 @@ pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), (), Directed>) {
             }
         }
     }
+}
+
+pub fn build_search_space(
+    graph: &StableGraph<GraphTerm, (), Directed>,
+    iters: usize,
+    remove_tiling: bool,
+) -> egraph_serialize::EGraph {
+    let (rendered, root) = render_egglog(graph);
+    let code = include_str!("code.lisp");
+
+    let mut final_code = code
+        .replace("{code}", &rendered)
+        .replace("{iters}", &iters.to_string());
+    if remove_tiling {
+        final_code = final_code.replace(
+            r#"(rewrite
+	(LoopOut ?body (Loop ?loop (MNum ?range)) ?stride)
+	(LoopOut
+		(LoopOut
+			(TileLoop ?body ?loop)
+			(Loop (+ ?loop "_tile") (MNum 8))
+			?stride
+		)
+		(Loop ?loop (MNum (/ ?range 8)))
+		(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum 8)))
+	)
+	:when ((> ?range 8) (= (% ?range 8) 0))
+)"#,
+            "",
+        ); // tiling rule is causing an egglog bug!
+    }
+    let (_egglog_messages, serialized) = run_egglog_program(&final_code, &root).unwrap();
+    serialized
+}
+
+fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>) -> (String, String) {
+    // 1.  Topo-order so operands are rendered before users
+    let mut topo = Topo::new(&graph);
+
+    // 2.  Map <node-id> → <egglog var name>
+    let mut names: HashMap<NodeIndex, String> = HashMap::new();
+    let mut next_id = 0usize;
+    let mut out = String::new();
+
+    // helper to fetch operand text (there are up-edges from user → operand)
+    let operand = |n: NodeIndex,
+                   names: &HashMap<NodeIndex, String>,
+                   g: &StableGraph<GraphTerm, (), Directed>|
+     -> Vec<String> {
+        g.neighbors_directed(n, petgraph::Incoming)
+            .map(|child| names[&child].clone())
+            .collect()
+    };
+
+    while let Some(n) = topo.next(&graph) {
+        let var = format!("t{next_id}");
+        next_id += 1;
+        let code = match &graph[n] {
+            GraphTerm::GMEM { label } => {
+                format!("(GMEM \"{}\")", label.clone().unwrap_or_default())
+            }
+            GraphTerm::SMEM => "(SMEM)".into(),
+
+            GraphTerm::LoopIn {
+                range,
+                stride,
+                marker,
+            } => {
+                let [ref src] = operand(n, &names, &graph)[..] else {
+                    panic!("LoopIn expects 1 child");
+                };
+                format!(
+                    "(LoopIn {src} (Loop \"{marker}\" {}) {})",
+                    range.to_egglog(),
+                    stride.to_egglog()
+                )
+            }
+            GraphTerm::LoopOut {
+                range,
+                stride,
+                marker,
+            } => {
+                let [ref body] = operand(n, &names, &graph)[..] else {
+                    panic!("LoopOut expects 1 child");
+                };
+                format!(
+                    "(LoopOut {body} (Loop \"{marker}\" {}) {})",
+                    range.to_egglog(),
+                    stride.to_egglog()
+                )
+            }
+
+            GraphTerm::Add
+            | GraphTerm::Mul
+            | GraphTerm::Max
+            | GraphTerm::Exp
+            | GraphTerm::Recip
+            | GraphTerm::Sin
+            | GraphTerm::Neg
+            | GraphTerm::Sqrt
+            | GraphTerm::SMEMLoad
+            | GraphTerm::SMEMRead => {
+                let mut ops = operand(n, &names, &graph);
+                let op = match &graph[n] {
+                    GraphTerm::Add => "Add",
+                    GraphTerm::Mul => "Mul",
+                    GraphTerm::Max => "Max",
+                    GraphTerm::Exp => "Exp",
+                    GraphTerm::Recip => "Recip",
+                    GraphTerm::Sin => "Sin",
+                    GraphTerm::Neg => "Neg",
+                    GraphTerm::Sqrt => "Sqrt",
+                    GraphTerm::SMEMLoad => "SMEMLoad",
+                    GraphTerm::SMEMRead => "SMEMRead",
+                    _ => unreachable!(),
+                };
+                if ops.len() == 1 {
+                    format!("({op} {})", ops.pop().unwrap())
+                } else {
+                    format!("({op} {})", ops.join(" "))
+                }
+            }
+        };
+
+        out.push_str(&format!("(let {var} {code})\n"));
+        names.insert(n, var);
+    }
+
+    let root = graph
+        .node_indices()
+        .find(|&idx| {
+            graph
+                .neighbors_directed(idx, petgraph::Outgoing)
+                .next()
+                .is_none()
+        })
+        .and_then(|idx| names.get(&idx))
+        .cloned()
+        .unwrap_or_else(|| "t0".into());
+    (out, root)
+}
+
+/// Runs an Egglog program from a string and returns its output messages.
+fn run_egglog_program(
+    code: &str,
+    root: &str,
+) -> Result<(Vec<String>, egraph_serialize::EGraph), Error> {
+    // Create a fresh EGraph with all the defaults
+    let mut egraph = EGraph::default();
+    egraph.enable_messages();
+    let commands = egraph.parser.get_program_from_string(None, code)?;
+    let msgs = egraph.run_program(commands)?;
+    if option_env!("PRINT_KERNELS")
+        .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
+        .unwrap_or_default()
+    {
+        println!("Run Report:  {}", egraph.get_run_report().as_ref().unwrap());
+    }
+    let (sort, value) = egraph.eval_expr(&egglog::var!(root))?;
+    // let (_petgraph, _root_idx) = dag_to_petgraph(&termdag, termdag.lookup(&root));
+    let s = egraph.serialize(egglog::SerializeConfig {
+        root_eclasses: vec![(sort, value)],
+        ..Default::default()
+    });
+    if option_env!("PRINT_KERNELS")
+        .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
+        .unwrap_or_default()
+    {
+        println!(
+            "Nodes: {} Roots: {} Class Data: {}",
+            s.nodes.len(),
+            s.root_eclasses.len(),
+            s.class_data.len()
+        );
+    }
+    Ok((msgs, s))
 }

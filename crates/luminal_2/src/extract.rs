@@ -6,6 +6,7 @@ use crate::symbolic::{Expression, Term};
 use crate::{GPUArch, GraphTerm, run::run_graph};
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
+use itertools::Itertools;
 use petgraph::algo::toposort;
 use petgraph::prelude::{NodeIndex, StableGraph};
 use petgraph::{Directed, Direction};
@@ -13,7 +14,7 @@ use rustc_hash::FxHashMap;
 
 const WARMUP_TRIALS: usize = 1;
 const TRIALS: usize = 1;
-const MAX_SEARCHED_GRAPHS: usize = 10_000;
+const MAX_SEARCHED_GRAPHS: usize = 1_000;
 const MAX_CYCLES: usize = 1;
 const INVALID_IR: &[&str] = &["SwapLoops", "TileLoop", "Unary", "Binary", "MReplace"];
 
@@ -85,17 +86,14 @@ pub fn search(
     // Now we have DFS trajectories
     let mut ref_outputs: Vec<Vec<f32>> = vec![];
     let mut best_time = u128::MAX;
-    let mut best_graph = StableGraph::default();
+    let mut best_graph = None;
     let mut valid_graphs = 0;
-    let total_trajectories = trajectories.len();
-    for (n, trajectory) in trajectories.into_iter().enumerate() {
-        // println!(
-        //     "{:?}",
-        //     trajectory
-        //         .iter()
-        //         .map(|(_, n, _)| &egraph.nodes[*n].op)
-        //         .collect_vec()
-        // );
+    let total_trajectories = trajectories.len().min(MAX_SEARCHED_GRAPHS);
+    'trajectory_loop: for (n, trajectory) in trajectories
+        .into_iter()
+        .take(MAX_SEARCHED_GRAPHS)
+        .enumerate()
+    {
         // Build termdag
         let graph = extraction_to_graph(egraph, &trajectory);
         let root = graph.externals(Direction::Outgoing).next().unwrap();
@@ -120,18 +118,21 @@ pub fn search(
             } else {
                 for (a, b) in ref_outputs.iter().zip(&outs) {
                     for (x, y) in a.iter().zip(b) {
-                        assert!((x - y).abs() <= 1e-3, "{x} | {y}");
+                        if (x - y).abs() >= 1e-3 {
+                            println!("{} {x} != {y}", "Output Mismatch".on_bright_red());
+                            continue 'trajectory_loop;
+                        }
                     }
                 }
                 println!("{}", "Outputs Validated".on_bright_green());
             }
             if us < best_time {
                 best_time = us;
-                best_graph = kernels;
+                best_graph = Some(kernels);
             }
         }
     }
-    None
+    best_graph
 }
 
 pub fn extraction_to_graph(
@@ -223,7 +224,7 @@ pub fn extraction_to_graph(
                 g.add_edge(child_two, r, ());
                 Ret::Expr(r)
             }
-            "Exp" | "Sin" | "Recip" | "Neg" => {
+            "Exp" | "Sin" | "Recip" | "Neg" | "Sqrt" => {
                 *current += 1;
                 let Ret::Expr(child_one) = recurse(egraph, trajectory, current, g) else {
                     panic!()
@@ -233,6 +234,7 @@ pub fn extraction_to_graph(
                     "Sin" => GraphTerm::Sin,
                     "Recip" => GraphTerm::Recip,
                     "Neg" => GraphTerm::Neg,
+                    "Sqrt" => GraphTerm::Sqrt,
                     _ => panic!(),
                 });
                 g.add_edge(child_one, r, ());

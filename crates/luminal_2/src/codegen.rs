@@ -2,7 +2,6 @@ use itertools::Itertools;
 use petgraph::{
     Directed, Direction, algo::toposort, graph::NodeIndex, prelude::StableGraph, visit::EdgeRef,
 };
-use rand::seq::index;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     iter::repeat,
@@ -48,12 +47,6 @@ pub fn codegen(
                     (*output as u8, n_input as u8),
                 ),
                 GMEMBuffer::Input { label, .. } => {
-                    if option_env!("PRINT_ALL_KERNELS")
-                        .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
-                        .unwrap_or_default()
-                    {
-                        println!("Input {label:?}");
-                    }
                     let index = if let Some(index) = gmem_mapping.get(label.as_ref().unwrap()) {
                         *index
                     } else {
@@ -94,7 +87,6 @@ pub fn codegen(
             arch.add_metal_buffer_type(*n, "threadgroup ");
         }
         let mut loop_levels = vec![];
-        let mut max_loop_level = 0;
         let kernel = make_kernel(
             &kernel_graph,
             kernel_graph.node_indices().collect(),
@@ -108,7 +100,6 @@ pub fn codegen(
                 .collect(),
             0,
             &mut arch,
-            &mut max_loop_level,
         )?;
         let grid = loop_levels
             .clone()
@@ -227,7 +218,6 @@ kernel void kernel{}(
         if option_env!("PRINT_ALL_KERNELS")
             .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
             .unwrap_or_default()
-            && max_loop_level > 7
         {
             println!(
                 "Grid: {grid:?} Threadblock: {threadblock:?} Smem: {:?}",
@@ -273,9 +263,7 @@ fn make_kernel(
     smem_buffers: &HashMap<NodeIndex, usize>,
     current_loop_level: usize,
     arch: &mut GPUArch,
-    max_loop_level: &mut usize,
 ) -> Option<Vec<String>> {
-    *max_loop_level = current_loop_level.max(*max_loop_level);
     let mut kernel_lines = vec![];
     let spacing = (0..current_loop_level.saturating_sub(GRID_DIMS + THREADBLOCK_DIMS))
         .map(|_| "\t")
@@ -586,7 +574,6 @@ fn make_kernel(
                     smem_buffers,
                     current_loop_level + 1,
                     arch,
-                    max_loop_level,
                 )?;
 
                 // Handle no-op copy (empty body)
@@ -741,7 +728,11 @@ fn make_kernel(
             }
             GraphTerm::GMEM { .. } => {}
             GraphTerm::SMEM => {}
-            GraphTerm::Sin | GraphTerm::Exp | GraphTerm::Neg | GraphTerm::Recip => {
+            GraphTerm::Sin
+            | GraphTerm::Exp
+            | GraphTerm::Neg
+            | GraphTerm::Recip
+            | GraphTerm::Sqrt => {
                 *prev_max_var += 1;
                 let (src, src_ptr) = node_to_var[&kernel_graph
                     .neighbors_directed(node, Direction::Incoming)
@@ -753,6 +744,7 @@ fn make_kernel(
                     GraphTerm::Sin => format!("sin({inp})"),
                     GraphTerm::Exp => format!("exp({inp})"),
                     GraphTerm::Neg => format!("-{inp}"),
+                    GraphTerm::Sqrt => format!("sqrt({inp})"),
                     GraphTerm::Recip => format!("1.0 / {inp}"),
                     _ => panic!(),
                 };
@@ -1136,7 +1128,7 @@ fn split_kernels(
         }
     }
     // Go through graph inputs and add them to the kernel hashmap as inputs
-    for (n, input) in marked_graph
+    for input in marked_graph
         .node_indices()
         // Must not have any input nodes
         .filter(|n| {
@@ -1148,7 +1140,6 @@ fn split_kernels(
         // Must not be an SMEM
         .filter(|n| !matches!(marked_graph.node_weight(*n).unwrap().0, GraphTerm::SMEM))
         .sorted()
-        .enumerate()
     {
         let (term, _, kernels) = marked_graph.node_weight(input).unwrap();
         let label = if let GraphTerm::GMEM { label } = term {
