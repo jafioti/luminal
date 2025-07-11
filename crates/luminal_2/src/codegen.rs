@@ -94,6 +94,7 @@ pub fn codegen(
             arch.add_metal_buffer_type(*n, "threadgroup ");
         }
         let mut loop_levels = vec![];
+        let mut max_loop_level = 0;
         let kernel = make_kernel(
             &kernel_graph,
             kernel_graph.node_indices().collect(),
@@ -107,6 +108,7 @@ pub fn codegen(
                 .collect(),
             0,
             &mut arch,
+            &mut max_loop_level,
         )?;
         let grid = loop_levels
             .clone()
@@ -225,6 +227,7 @@ kernel void kernel{}(
         if option_env!("PRINT_ALL_KERNELS")
             .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
             .unwrap_or_default()
+            && max_loop_level > 7
         {
             println!(
                 "Grid: {grid:?} Threadblock: {threadblock:?} Smem: {:?}",
@@ -270,7 +273,9 @@ fn make_kernel(
     smem_buffers: &HashMap<NodeIndex, usize>,
     current_loop_level: usize,
     arch: &mut GPUArch,
+    max_loop_level: &mut usize,
 ) -> Option<Vec<String>> {
+    *max_loop_level = current_loop_level.max(*max_loop_level);
     let mut kernel_lines = vec![];
     let spacing = (0..current_loop_level.saturating_sub(GRID_DIMS + THREADBLOCK_DIMS))
         .map(|_| "\t")
@@ -384,8 +389,10 @@ fn make_kernel(
                         let mut indexing_expression = Expression::from(0);
                         let mut current_elem_size = Expression::from(1);
                         for (range, stride) in in_loops.into_iter().rev() {
-                            indexing_expression +=
-                                ((Expression::from('z') / current_elem_size) % range) * stride;
+                            indexing_expression += stride.substitute(
+                                'z',
+                                (Expression::from('z') / current_elem_size) % range,
+                            );
                             current_elem_size *= range;
                         }
                         let cooresponding_output = loop_outputs
@@ -579,6 +586,7 @@ fn make_kernel(
                     smem_buffers,
                     current_loop_level + 1,
                     arch,
+                    max_loop_level,
                 )?;
 
                 // Handle no-op copy (empty body)
@@ -653,17 +661,19 @@ fn make_kernel(
                         let mut indexing_expression = Expression::from(0);
                         let mut current_elem_size = Expression::from(1);
                         for (range, stride) in out_loops.into_iter().rev() {
-                            indexing_expression +=
-                                ((Expression::from('z') / current_elem_size) % range) * stride;
+                            indexing_expression += stride.substitute(
+                                'z',
+                                (Expression::from('z') / current_elem_size) % range,
+                            );
                             current_elem_size *= range;
                         }
                         kernel_lines.push(format!(
-                            "{spacing}for (int save_loop = 0; save_loop < {size}; save_loop++) {{"
+                            "{spacing}for (int save = 0; save < {size}; save++) {{"
                         ));
                         let indexing_expression = indexing_expression
                             .simplify()
                             .to_string()
-                            .replace("z", "load");
+                            .replace("z", "save");
                         kernel_lines.push(format!(
                             "{inner_spacing}{}[{indexing_expression}] = *({} + {indexing_expression});",
                             var_to_char(outer_out),

@@ -3,12 +3,9 @@ use std::u128;
 
 use crate::Kernel;
 use crate::symbolic::{Expression, Term};
-use crate::utils::display_graph;
 use crate::{GPUArch, GraphTerm, run::run_graph};
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
-use indexmap::IndexMap;
-use itertools::Itertools;
 use petgraph::algo::toposort;
 use petgraph::prelude::{NodeIndex, StableGraph};
 use petgraph::{Directed, Direction};
@@ -17,8 +14,8 @@ use rustc_hash::FxHashMap;
 const WARMUP_TRIALS: usize = 1;
 const TRIALS: usize = 1;
 const MAX_SEARCHED_GRAPHS: usize = 10_000;
-const MAX_CYCLES: usize = 3;
-const INVALID_IR: &[&str] = &["SwapLoops", "Unary", "Binary", "MReplace"];
+const MAX_CYCLES: usize = 1;
+const INVALID_IR: &[&str] = &["SwapLoops", "TileLoop", "Unary", "Binary", "MReplace"];
 
 type Cost = u128; // Execution time in microseconds
 
@@ -90,7 +87,8 @@ pub fn search(
     let mut best_time = u128::MAX;
     let mut best_graph = StableGraph::default();
     let mut valid_graphs = 0;
-    for trajectory in trajectories {
+    let total_trajectories = trajectories.len();
+    for (n, trajectory) in trajectories.into_iter().enumerate() {
         // println!(
         //     "{:?}",
         //     trajectory
@@ -110,7 +108,11 @@ pub fn search(
             valid_graphs += 1;
             println!(
                 "{}{}",
-                format!("Graph {valid_graphs} ").bold(),
+                format!(
+                    "Graph {valid_graphs} ({:.1}%) ",
+                    (n as f32 / total_trajectories as f32) * 100.0
+                )
+                .bold(),
                 format!("{us}µs").bright_green().bold()
             );
             if ref_outputs.is_empty() {
