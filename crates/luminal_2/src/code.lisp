@@ -156,6 +156,15 @@
 	(LoopOut (TileLoop ?body ?loop) (Loop ?other ?range) ?stride)
 )
 (rewrite
+	(TileLoop (LoopIn (LoopIn ?body (Loop ?otherOther ?rangeOther) ?strideOther) (Loop ?other ?range) ?stride) ?loop)
+	(LoopIn (LoopIn (TileLoop ?body ?loop) (Loop ?otherOther ?rangeOther) ?strideOther) (Loop ?other ?range) ?stride)
+	:when ((!= ?loop ?other) (!= ?loop ?otherOther))
+)
+(rewrite
+	(TileLoop (LoopOut (LoopOut ?body (Loop ?otherOther ?rangeOther) ?strideOther) (Loop ?other ?range) ?stride) ?loop)
+	(LoopOut (LoopOut (TileLoop ?body ?loop)  (Loop ?otherOther ?rangeOther) ?strideOther) (Loop ?other ?range) ?stride)
+)
+(rewrite
 	(TileLoop (Unary ?un ?body) ?loop)
 	(Unary ?un (TileLoop ?body ?loop))
 )
@@ -185,6 +194,15 @@
 	(LoopOut (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?otherLoop ?otherLoopAmt) ?otherSt)
 )
 (rewrite
+	(SwapLoops (LoopIn (LoopIn ?body (Loop ?otherOtherLoop ?otherOtherLoopAmt) ?otherOtherSt) (Loop ?otherLoop ?otherLoopAmt) ?otherSt) ?innerLoop ?outerLoop)
+	(LoopIn (LoopIn (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?otherOtherLoop ?otherOtherLoopAmt) ?otherOtherSt) (Loop ?otherLoop ?otherLoopAmt) ?otherSt)
+	:when ((!= ?innerLoop ?otherLoop) (!= ?innerLoop ?otherOtherLoop))
+)
+(rewrite
+	(SwapLoops (LoopOut (LoopOut ?body (Loop ?otherOtherLoop ?otherOtherLoopAmt) ?otherOtherSt) (Loop ?otherLoop ?otherLoopAmt) ?otherSt) ?innerLoop ?outerLoop)
+	(LoopOut (LoopOut (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?otherOtherLoop ?otherOtherLoopAmt) ?otherOtherSt) (Loop ?otherLoop ?otherLoopAmt) ?otherSt)
+)
+(rewrite
 	(SwapLoops (Unary ?un ?body) ?innerLoop ?outerLoop)
 	(Unary ?un (SwapLoops ?body ?innerLoop ?outerLoop))
 )
@@ -202,9 +220,9 @@
 (let acc_pad0 (LoopIn acc_gmem (Loop "pad" (MNum 1)) (MNum 0)))
 (let acc_pad1 (LoopIn acc_pad0 (Loop "pad" (MNum 1)) (MNum 0)))
 (let acc_m (LoopIn acc_pad1 (Loop "m" (MNum 8)) (MMul (MMul (MVar "z") (MNum 8)) (MNum 64))))
-(let acc_m_tiled (LoopIn acc_m (Loop "m_tile" (MNum 8)) (MMul (MVar "z") (MNum 64))))
-(let acc_n (LoopIn acc_m_tiled (Loop "n" (MNum 8)) (MMul (MVar "z") (MNum 8))))
-(let acc_n_tiled (LoopIn acc_n (Loop "n_tile" (MNum 8)) (MVar "z")))
+(let acc_n (LoopIn acc_m (Loop "n" (MNum 8)) (MMul (MVar "z") (MNum 8))))
+(let acc_m_tiled (LoopIn acc_n (Loop "m_tile" (MNum 8)) (MMul (MVar "z") (MNum 64))))
+(let acc_n_tiled (LoopIn acc_m_tiled (Loop "n_tile" (MNum 8)) (MVar "z")))
 (let acc_k (LoopIn acc_n_tiled (Loop "k" (MNum 8)) (MAccum "a")))
 (let acc_k_tiled (LoopIn acc_k (Loop "k_tile" (MNum 8)) (MAccum "a")))
 
@@ -212,9 +230,9 @@
 (let b_pad0 (LoopIn b_gmem (Loop "pad" (MNum 1)) (MNum 0)))
 (let b_pad1 (LoopIn b_pad0 (Loop "pad" (MNum 1)) (MNum 0)))
 (let b_m (LoopIn b_pad1 (Loop "m" (MNum 8)) (MNum 0)))
-(let b_m_tiled (LoopIn b_m (Loop "m_tile" (MNum 8)) (MNum 0)))
-(let b_n (LoopIn b_m_tiled (Loop "n" (MNum 8)) (MMul (MVar "z") (MNum 8))))
-(let b_n_tiled (LoopIn b_n (Loop "n_tile" (MNum 8)) (MVar "z")))
+(let b_n (LoopIn b_m (Loop "n" (MNum 8)) (MMul (MVar "z") (MNum 8))))
+(let b_m_tiled (LoopIn b_n (Loop "m_tile" (MNum 8)) (MNum 0)))
+(let b_n_tiled (LoopIn b_m_tiled (Loop "n_tile" (MNum 8)) (MVar "z")))
 (let b_k (LoopIn b_n_tiled (Loop "k" (MNum 8)) (MMul (MMul (MVar "z") (MNum 8)) (MNum 64))))
 (let b_k_tiled (LoopIn b_k (Loop "k_tile" (MNum 8)) (MMul (MVar "z") (MNum 64))))
 
@@ -222,9 +240,9 @@
 (let a_pad0 (LoopIn a_gmem (Loop "pad" (MNum 1)) (MNum 0)))
 (let a_pad1 (LoopIn a_pad0 (Loop "pad" (MNum 1)) (MNum 0)))
 (let a_m (LoopIn a_pad1 (Loop "m" (MNum 8)) (MMul (MMul (MVar "z") (MNum 8)) (MNum 64))))
-(let a_m_tiled (LoopIn a_m (Loop "m_tile" (MNum 8)) (MMul (MVar "z") (MNum 64))))
-(let a_n (LoopIn a_m_tiled (Loop "n" (MNum 8)) (MNum 0)))
-(let a_n_tiled (LoopIn a_n (Loop "n_tile" (MNum 8)) (MNum 0)))
+(let a_n (LoopIn a_m (Loop "n" (MNum 8)) (MNum 0)))
+(let a_m_tiled (LoopIn a_n (Loop "m_tile" (MNum 8)) (MMul (MVar "z") (MNum 64))))
+(let a_n_tiled (LoopIn a_m_tiled (Loop "n_tile" (MNum 8)) (MNum 0)))
 (let a_k (LoopIn a_n_tiled (Loop "k" (MNum 8)) (MMul (MVar "z") (MNum 8))))
 (let a_k_tiled (LoopIn a_k (Loop "k_tile" (MNum 8)) (MVar "z")))
 
@@ -233,9 +251,9 @@
 (let out_k_tiled (LoopOut out (Loop "k_tile" (MNum 8)) (MAccum "a")))
 (let out_k (LoopOut out_k_tiled (Loop "k" (MNum 8)) (MAccum "a")))
 (let out_n_tiled (LoopOut out_k (Loop "n_tile" (MNum 8)) (MVar "z")))
-(let out_n (LoopOut out_n_tiled (Loop "n" (MNum 8)) (MMul (MVar "z") (MNum 8))))
-(let out_mtiled (LoopOut out_n (Loop "m_tile" (MNum 8)) (MMul (MVar "z") (MNum 64))))
-(let out_m (LoopOut out_mtiled (Loop "m" (MNum 8)) (MMul (MMul (MVar "z") (MNum 8)) (MNum 64))))
+(let out_mtiled (LoopOut out_n_tiled (Loop "m_tile" (MNum 8)) (MMul (MVar "z") (MNum 64))))
+(let out_n (LoopOut out_mtiled (Loop "n" (MNum 8)) (MMul (MVar "z") (MNum 8))))
+(let out_m (LoopOut out_n (Loop "m" (MNum 8)) (MMul (MMul (MVar "z") (MNum 8)) (MNum 64))))
 (let out_pad0 (LoopOut out_m (Loop "pad" (MNum 1)) (MNum 0)))
 (let out_pad1 (LoopOut out_pad0 (Loop "pad" (MNum 1)) (MNum 0)))
 
