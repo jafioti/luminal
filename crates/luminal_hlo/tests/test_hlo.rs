@@ -24,5 +24,5 @@ fn test_stablehlo_unary_ops() {
     cx.execute();
 
     let expected = [7., 8., 5., 6.];
-    assert_close(&inputs["2"].data(), &expected);
+    assert_close(&inputs["4"].data(), &expected);
 }

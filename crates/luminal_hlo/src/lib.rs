@@ -89,6 +89,8 @@ fn parse_unary_op(op: &str, args: &[String], tensor_map: &HashMap<String, GraphT
         "stablehlo.abs" => tensor.abs(),
         "stablehlo.negate" => -tensor,
         "stablehlo.sqrt" => tensor.sqrt(),
+        "stablehlo.log" => tensor.log(),
+        "stablehlo.exponential" => tensor.exp(),
         _ => panic!("Unsupported unary op: {}", op),
     }
 }

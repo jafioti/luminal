@@ -17,9 +17,9 @@ pub fn is_unary_op(op: &str) -> bool {
     matches!(op,
         "stablehlo.abs" |
         "stablehlo.negate" |
-        "stablehlo.sqrt"
-        // "stablehlo.log" - not supported
-        // "stablehlo.exponential" - not supported
+        "stablehlo.sqrt" |
+        "stablehlo.log" |
+        "stablehlo.exponential" 
         // "stablehlo.logistic" - not supported
         // "stablehlo.reciprocal" - not supported
         // "stablehlo.sin" - not supported
