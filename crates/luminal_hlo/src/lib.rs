@@ -68,7 +68,11 @@ fn parse_func_args(line: &str, cx: &mut Graph, tensor_map: &mut HashMap<String, 
     }
 }
 
-fn parse_binary_op(op: &str, args: &[String], tensor_map: &HashMap<String, GraphTensor>) -> GraphTensor {
+fn parse_binary_op(
+    op: &str,
+    args: &[String],
+    tensor_map: &HashMap<String, GraphTensor>,
+) -> GraphTensor {
     let lhs = tensor_map[&args[0]];
     let rhs = tensor_map[&args[1]];
     match op {
@@ -83,7 +87,11 @@ fn parse_binary_op(op: &str, args: &[String], tensor_map: &HashMap<String, Graph
     }
 }
 
-fn parse_unary_op(op: &str, args: &[String], tensor_map: &HashMap<String, GraphTensor>) -> GraphTensor {
+fn parse_unary_op(
+    op: &str,
+    args: &[String],
+    tensor_map: &HashMap<String, GraphTensor>,
+) -> GraphTensor {
     let tensor = tensor_map[&args[0]];
     match op {
         "stablehlo.abs" => tensor.abs(),
