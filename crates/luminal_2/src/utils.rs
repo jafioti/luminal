@@ -489,7 +489,7 @@ fn run_egglog_program(
     egraph.enable_messages();
     let commands = egraph.parser.get_program_from_string(None, code)?;
     let msgs = egraph.run_program(commands)?;
-    if option_env!("PRINT_KERNELS")
+    if option_env!("PRINT_EGGLOG")
         .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
         .unwrap_or_default()
     {
@@ -501,7 +501,7 @@ fn run_egglog_program(
         root_eclasses: vec![(sort, value)],
         ..Default::default()
     });
-    if option_env!("PRINT_KERNELS")
+    if option_env!("PRINT_EGGLOG")
         .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
         .unwrap_or_default()
     {

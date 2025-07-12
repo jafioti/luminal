@@ -34,10 +34,8 @@ mod utils;
 #[cfg(test)]
 mod tests;
 
-use colored::Colorize;
-use egglog::{EGraph, Error, var};
 use itertools::Itertools;
-use petgraph::{Directed, graph::NodeIndex, prelude::StableGraph, visit::Topo};
+use petgraph::prelude::StableGraph;
 use rand::{Rng, rng};
 use serde::Serialize;
 use std::{collections::HashMap, fmt::Debug};
@@ -117,12 +115,13 @@ enum GraphTerm {
 fn main() {
     // make_square_matmul();
     // make_nonsquare_matmul();
+    // make_transposed_matmul();
     // make_gelu();
-    make_single_head_attention();
+    // make_single_head_attention();
     // make_multi_head_attention();
     // make_softmax();
     // make_layernorm();
-    // fusion_test();
+    fusion_test();
     // let (g, _) = make_square_matmul();
     // let (g, _) = make_gelu(64);
 
@@ -146,7 +145,7 @@ fn fusion_test() {
     search(
         &egraph,
         &[("A", (0..10).map(|_| rng.random()).collect_vec())],
-        GPUArch::Metal(HashMap::default()),
+        GPUArch::CUDA,
     );
 }
 
@@ -340,7 +339,7 @@ fn make_single_head_attention() {
             ("EXP_SUM_ACC", vec![0.0]),
             ("OUTPUT_ACC", vec![0.0]),
         ],
-        GPUArch::Metal(HashMap::default()),
+        GPUArch::CUDA,
     );
 }
 
@@ -726,7 +725,7 @@ fn make_softmax() {
     let output = loop_out(mul_op, size, 'z', 'i', &mut graph);
     pad_out(output, &mut graph, 4);
 
-    let egraph = build_search_space(&graph, 10, true);
+    let egraph = build_search_space(&graph, 0, true);
     let mut rng = rng();
     search(
         &egraph,
@@ -735,7 +734,7 @@ fn make_softmax() {
             ("max_val", vec![f32::NEG_INFINITY]),
             ("sum_val", vec![0.0]),
         ],
-        GPUArch::Metal(HashMap::default()),
+        GPUArch::CUDA,
     );
 }
 
@@ -923,7 +922,7 @@ fn make_gelu() {
             ("1.702", vec![1.702]),
             ("1.0", vec![1.0]),
         ],
-        GPUArch::Metal(HashMap::default()),
+        GPUArch::CUDA,
     );
 }
 
@@ -934,25 +933,25 @@ fn make_nonsquare_matmul() {
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
     });
-    a = pad_in(a, &mut graph, 2);
     a = loop_in(a, m, Expression::from('z') * k, 'm', &mut graph);
     a = loop_in(a, n, 0, 'n', &mut graph);
+    a = pad_in(a, &mut graph, 2);
     a = loop_in(a, k, 'z', 'k', &mut graph);
 
     let mut b = graph.add_node(GraphTerm::GMEM {
         label: Some("B".to_string()),
     });
-    b = pad_in(b, &mut graph, 2);
     b = loop_in(b, m, 0, 'm', &mut graph);
     b = loop_in(b, n, 'z', 'n', &mut graph);
+    b = pad_in(b, &mut graph, 2);
     b = loop_in(b, k, Expression::from('z') * n, 'k', &mut graph);
 
     let mut acc = graph.add_node(GraphTerm::GMEM {
         label: Some("Acc".to_string()),
     });
-    acc = pad_in(acc, &mut graph, 2);
     acc = loop_in(acc, m, Expression::from('z') * n, 'm', &mut graph);
     acc = loop_in(acc, n, 'z', 'n', &mut graph);
+    acc = pad_in(acc, &mut graph, 2);
     acc = loop_in(acc, k, Term::Acc('a'), 'k', &mut graph);
 
     let mut out = binary(
@@ -963,9 +962,9 @@ fn make_nonsquare_matmul() {
     );
 
     out = loop_out(out, k, Term::Acc('a'), 'k', &mut graph);
+    out = pad_out(out, &mut graph, 2);
     out = loop_out(out, n, 'z', 'n', &mut graph);
-    out = loop_out(out, m, Expression::from('z') * n, 'm', &mut graph);
-    pad_out(out, &mut graph, 2);
+    loop_out(out, m, Expression::from('z') * n, 'm', &mut graph);
 
     let egraph = build_search_space(&graph, 10, false);
     let mut rng = rng();
@@ -976,36 +975,36 @@ fn make_nonsquare_matmul() {
             ("B", (0..(k * n)).map(|_| rng.random()).collect_vec()),
             ("Acc", vec![0.0]),
         ],
-        GPUArch::Metal(HashMap::default()),
+        GPUArch::CUDA,
     );
 }
 
-fn make_transposed_matmul() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
+fn make_transposed_matmul() {
     let (m, k, n) = (64, 32, 128);
     let mut graph = StableGraph::new();
 
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
     });
-    a = pad_in(a, &mut graph, 2);
     a = loop_in(a, m, Expression::from('z') * k, 'm', &mut graph);
     a = loop_in(a, n, 0, 'n', &mut graph);
+    a = pad_in(a, &mut graph, 2);
     a = loop_in(a, k, 'z', 'k', &mut graph);
 
     let mut b = graph.add_node(GraphTerm::GMEM {
         label: Some("B".to_string()),
     });
-    b = pad_in(b, &mut graph, 2);
     b = loop_in(b, m, 0, 'm', &mut graph);
     b = loop_in(b, n, Expression::from('z') * n, 'n', &mut graph);
+    b = pad_in(b, &mut graph, 2);
     b = loop_in(b, k, 'z', 'k', &mut graph);
 
     let mut acc = graph.add_node(GraphTerm::GMEM {
         label: Some("Acc".to_string()),
     });
-    acc = pad_in(acc, &mut graph, 2);
     acc = loop_in(acc, m, Expression::from('z') * n, 'm', &mut graph);
     acc = loop_in(acc, n, 'z', 'n', &mut graph);
+    acc = pad_in(acc, &mut graph, 2);
     acc = loop_in(acc, k, Term::Acc('a'), 'k', &mut graph);
 
     let mut out = binary(
@@ -1016,10 +1015,20 @@ fn make_transposed_matmul() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex)
     );
 
     out = loop_out(out, k, Term::Acc('a'), 'k', &mut graph);
-    out = loop_out(out, n, 'z', 'n', &mut graph);
-    out = loop_out(out, m, Expression::from('z') * n, 'm', &mut graph);
     out = pad_out(out, &mut graph, 2);
-    (graph, out)
+    out = loop_out(out, n, 'z', 'n', &mut graph);
+    loop_out(out, m, Expression::from('z') * n, 'm', &mut graph);
+    let egraph = build_search_space(&graph, 9, false);
+    let mut rng = rng();
+    search(
+        &egraph,
+        &[
+            ("A", (0..(m * k)).map(|_| rng.random()).collect_vec()),
+            ("B", (0..(k * n)).map(|_| rng.random()).collect_vec()),
+            ("Acc", vec![0.0]),
+        ],
+        GPUArch::CUDA,
+    );
 }
 
 fn make_square_matmul() {
@@ -1029,25 +1038,25 @@ fn make_square_matmul() {
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
     });
-    a = pad_in(a, &mut graph, 2);
     a = loop_in(a, m, Expression::from('z') * k, 'm', &mut graph);
     a = loop_in(a, n, 0, 'n', &mut graph);
+    a = pad_in(a, &mut graph, 2);
     a = loop_in(a, k, 'z', 'k', &mut graph);
 
     let mut b = graph.add_node(GraphTerm::GMEM {
         label: Some("B".to_string()),
     });
-    b = pad_in(b, &mut graph, 2);
     b = loop_in(b, m, 0, 'm', &mut graph);
     b = loop_in(b, n, 'z', 'n', &mut graph);
+    b = pad_in(b, &mut graph, 2);
     b = loop_in(b, k, Expression::from('z') * n, 'k', &mut graph);
 
     let mut acc = graph.add_node(GraphTerm::GMEM {
         label: Some("Acc".to_string()),
     });
-    acc = pad_in(acc, &mut graph, 2);
     acc = loop_in(acc, m, Expression::from('z') * n, 'm', &mut graph);
     acc = loop_in(acc, n, 'z', 'n', &mut graph);
+    acc = pad_in(acc, &mut graph, 2);
     acc = loop_in(acc, k, Term::Acc('a'), 'k', &mut graph);
 
     let mut out = binary(
@@ -1058,9 +1067,9 @@ fn make_square_matmul() {
     );
 
     out = loop_out(out, k, Term::Acc('a'), 'k', &mut graph);
+    out = pad_out(out, &mut graph, 2);
     out = loop_out(out, n, 'z', 'n', &mut graph);
-    out = loop_out(out, m, Expression::from('z') * n, 'm', &mut graph);
-    pad_out(out, &mut graph, 2);
+    loop_out(out, m, Expression::from('z') * n, 'm', &mut graph);
 
     let egraph = build_search_space(&graph, 10, false);
     let mut rng = rng();
