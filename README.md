@@ -1,13 +1,14 @@
 # [luminal](https://luminalai.com)
 ![image](https://github.com/jafioti/luminal/blob/main/docs/images/dag.jpeg)
-[![Website](https://img.shields.io/badge/Docs-Website-blue?style=for-the-badge&color=0D9373)](https://luminalai.com)
+[![Website](https://img.shields.io/badge/Luminal-Website-blue?style=for-the-badge&color=0D9373)](https://luminalai.com)
 [![CI Status](https://img.shields.io/github/actions/workflow/status/jafioti/luminal/test.yml?style=for-the-badge&logo=github-actions&logoColor=white&branch=main)](https://github.com/Sidekick-AI/dataflow/actions)
+[![Docs](https://img.shields.io/badge/Documentation-green?style=for-the-badge&color=fc9700)](https://docs.luminalai.com)
 [![Current Crates.io Version](https://img.shields.io/crates/v/luminal.svg?style=for-the-badge&logo=rust)](https://crates.io/crates/luminal)
-[![discord](https://dcbadge.vercel.app/api/server/VQf3j8WWNd)](https://discord.gg/VQf3j8WWNd)
+[![discord](https://dcbadge.limes.pink/api/server/PcVsjKHZ)](https://discord.gg/PcVsjKHZ)
 
 **Deep learning at the speed of light.**
 
-Luminal is a deep learning library that uses **composable compilers** to achieve high performance.
+Luminal is a deep learning library that **generates optimized code** to achieve high performance.
 
 > [!IMPORTANT]  
 > Recently significant work is happening to focus much more on a search-first compiler with the goal of discovering advanced kernels like FlashAttention automatically. See progress on the `next` branch.

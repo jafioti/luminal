@@ -8,13 +8,162 @@ use petgraph::{
     algo::toposort,
     stable_graph::{EdgeIndex, EdgeReference, StableGraph},
     visit::EdgeRef,
-    Direction,
+    Directed, Direction,
 };
 use regex::Regex;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use uuid::Uuid;
 
 use crate::prelude::*;
+
+#[derive(Clone, Debug)]
+pub enum GraphTerm {
+    GMEM {
+        // Signifies global memory
+        label: Option<String>,
+    },
+    LoopIn {
+        range: Expression,
+        stride: Expression,
+    },
+    LoopOut {
+        range: Expression,
+        stride: Expression,
+    },
+    NewAcc {
+        starting_value: String,
+    },
+    Add,
+    Mul,
+    Max,
+    Exp,
+    Recip,
+    Sin,
+    Neg,
+    SMEM,     // Signifies shared memory
+    SMEMLoad, // Takes in an smem pointer and a gmem pointer, copies the gmem element to smem and returns the smem pointer
+    SMEMRead, // Takes in an smem pointer and an smemload, returns the smem pointer
+    Constant {
+        val: Expression,
+    },
+    Sqrt,
+    LessThan,
+}
+
+impl std::fmt::Display for GraphTerm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GraphTerm::GMEM { label } => {
+                if let Some(label) = label {
+                    write!(f, "GMEM({label})")
+                } else {
+                    write!(f, "GMEM")
+                }
+            }
+            GraphTerm::LoopIn { range, stride } => {
+                write!(f, "LoopIn(range: {range:?}, stride: {stride:?})")
+            }
+            GraphTerm::LoopOut { range, stride } => {
+                write!(f, "LoopOut(range: {range:?}, stride: {stride:?})")
+            }
+            GraphTerm::NewAcc { starting_value } => write!(f, "NewAcc({starting_value})"),
+            GraphTerm::Add => write!(f, "Add"),
+            GraphTerm::Mul => write!(f, "Mul"),
+            GraphTerm::Max => write!(f, "Max"),
+            GraphTerm::Exp => write!(f, "Exp"),
+            GraphTerm::Recip => write!(f, "Recip"),
+            GraphTerm::Sin => write!(f, "Sin"),
+            GraphTerm::Neg => write!(f, "Neg"),
+            GraphTerm::SMEM => write!(f, "SMEM"),
+            GraphTerm::SMEMLoad => write!(f, "SMEMLoad"),
+            GraphTerm::SMEMRead => write!(f, "SMEMRead"),
+            GraphTerm::Constant { val } => {
+                write!(f, "Constant(val: {val:?})")
+            }
+            GraphTerm::Sqrt => write!(f, "Sqrt"),
+            GraphTerm::LessThan => write!(f, "LessThan"),
+        }
+    }
+}
+
+fn calculate_broadcast_shape(shape1: &ShapeTracker, shape2: &ShapeTracker) -> ShapeTracker {
+    let dims1 = shape1.dims();
+    let dims2 = shape2.dims();
+
+    // Get the maximum number of dimensions
+    let max_dims = dims1.len().max(dims2.len());
+    let mut result_dims = Vec::with_capacity(max_dims);
+
+    // Pad the shorter shape with 1s at the beginning (numpy-style broadcasting)
+    let padded_dims1: Vec<_> = if dims1.len() < max_dims {
+        std::iter::repeat(Expression::from(1))
+            .take(max_dims - dims1.len())
+            .chain(dims1.iter().cloned())
+            .collect()
+    } else {
+        dims1
+    };
+
+    let padded_dims2: Vec<_> = if dims2.len() < max_dims {
+        std::iter::repeat(Expression::from(1))
+            .take(max_dims - dims2.len())
+            .chain(dims2.iter().cloned())
+            .collect()
+    } else {
+        dims2
+    };
+
+    // Calculate broadcast dimensions
+    for i in 0..max_dims {
+        let dim1 = &padded_dims1[i];
+        let dim2 = &padded_dims2[i];
+
+        // Try to convert to usize for comparison
+        let dim1_usize = dim1.to_usize();
+        let dim2_usize = dim2.to_usize();
+
+        match (dim1_usize, dim2_usize) {
+            (Some(d1), Some(d2)) => {
+                if d1 == d2 {
+                    result_dims.push(*dim1);
+                } else if d1 == 1 {
+                    result_dims.push(*dim2);
+                } else if d2 == 1 {
+                    result_dims.push(*dim1);
+                } else {
+                    // Broadcasting error - incompatible dimensions
+                    panic!("Cannot broadcast shapes: dimension {i} has size {d1} vs {d2}");
+                }
+            }
+            // If we can't convert to usize (dynamic dimensions), we need to handle symbolically
+            (None, Some(1)) => {
+                result_dims.push(*dim1);
+            }
+            (Some(1), None) => {
+                result_dims.push(*dim2);
+            }
+            (None, None) => {
+                // Both are symbolic - assume they're compatible and take the first one
+                // In a more sophisticated implementation, you might want to create a max() expression
+                result_dims.push(*dim1);
+            }
+            _ => {
+                // One is symbolic, one is not 1 - assume compatible and take the non-1 dimension
+                if dim1_usize == Some(1) {
+                    result_dims.push(*dim2);
+                } else if dim2_usize == Some(1) {
+                    result_dims.push(*dim1);
+                } else {
+                    // Both are non-1, take the first one and hope for the best
+                    result_dims.push(*dim1);
+                }
+            }
+        }
+    }
+
+    // Create a new ShapeTracker from the result dimensions
+    ShapeTracker::new(result_dims)
+}
 
 pub trait ToIdsMut {
     fn to_ids_mut(&mut self) -> Vec<&mut NodeIndex>;
@@ -439,6 +588,254 @@ impl Graph {
         display_graph(&g, &e, &[]);
     }
 
+    pub fn translate_to_2(&self) -> StableGraph<GraphTerm, u8, Directed> {
+        let mut new_graph: StableGraph<GraphTerm, u8, Directed> = StableGraph::new();
+        let mut node_mapping: FxHashMap<NodeIndex, NodeIndex> = FxHashMap::default();
+        let mut manually_handled_nodes: FxHashSet<NodeIndex> = FxHashSet::default();
+
+        let topo_order =
+            toposort(&self.graph, None).expect("Graph has a cycle, cannot be translated");
+
+        for node_idx in topo_order {
+            if manually_handled_nodes.contains(&node_idx) {
+                continue;
+            }
+
+            let node_weight = self.graph.node_weight(node_idx).unwrap();
+            let op_name_full = format!("{node_weight:?}");
+            let op = op_name_full
+                .split('|')
+                .next()
+                .unwrap_or(&op_name_full)
+                .trim();
+
+            let sources = self.get_sources(node_idx);
+            let incoming_source_ids: Vec<_> = sources.iter().map(|(id, _, _)| *id).collect();
+            let incoming_edges: Vec<_> = sources.iter().map(|(_, _, shape)| *shape).collect();
+
+            manually_handled_nodes.insert(node_idx);
+
+            let new_final_node = match op {
+                s if s.ends_with("Load") => new_graph.add_node(GraphTerm::GMEM {
+                    label: Some(s.to_string()),
+                }),
+
+                "Contiguous" => *node_mapping.get(&incoming_source_ids[0]).unwrap(),
+
+                s if s.starts_with("SumReduce") || s.starts_with("MaxReduce") => {
+                    let is_sum = s.starts_with("SumReduce");
+                    let (op_term, acc_val) = if is_sum {
+                        (GraphTerm::Add, "0.0")
+                    } else {
+                        (GraphTerm::Max, "-inf")
+                    };
+
+                    let dim_str = &s[s.find('(').unwrap() + 1..s.find(')').unwrap()];
+                    let reduce_dim_idx = dim_str
+                        .parse::<usize>()
+                        .expect("Failed to parse reduction dimension");
+
+                    let input_shape = &incoming_edges[0];
+                    let mapped_input_node = *node_mapping.get(&incoming_source_ids[0]).unwrap();
+                    let input_dims = input_shape.dims();
+
+                    // --- Strides for the main input loop chain (normal traversal) ---
+                    let input_strides = calculate_strides(&input_dims, &input_shape.indexes);
+
+                    // --- Strides for the accumulator loop chain ---
+                    // These are based on the INPUT dimensions, with 'z' propagation.
+                    let acc_strides = calculate_reduction_strides(&input_dims, reduce_dim_idx);
+
+                    // --- Strides for the output loop chain ---
+                    // First, define the output dimensions (reduced dim is size 1).
+                    let mut output_dims = input_dims.to_vec();
+                    if reduce_dim_idx < output_dims.len() {
+                        output_dims[reduce_dim_idx] = Expression::from(1);
+                    }
+                    // Now, calculate strides based on these new OUTPUT dimensions.
+                    let loop_out_strides =
+                        calculate_reduction_strides(&output_dims, reduce_dim_idx);
+
+                    let acc_node = new_graph.add_node(GraphTerm::NewAcc {
+                        starting_value: acc_val.to_string(),
+                    });
+                    let reduce_op_node = new_graph.add_node(op_term);
+
+                    // Create loop chain for the full-shaped input
+                    let mut last_node = mapped_input_node;
+                    for i in 0..input_dims.len() {
+                        let range = Expression::from(input_dims[i].to_usize().unwrap_or(1) as i32);
+                        let loop_in = new_graph.add_node(GraphTerm::LoopIn {
+                            range,
+                            stride: input_strides[i],
+                        });
+                        new_graph.add_edge(last_node, loop_in, 0);
+                        last_node = loop_in;
+                    }
+                    new_graph.add_edge(last_node, reduce_op_node, 0);
+
+                    // Create loop chain for the accumulator, iterating over the full input space
+                    last_node = acc_node;
+                    for i in 0..input_dims.len() {
+                        let range = Expression::from(input_dims[i].to_usize().unwrap_or(1) as i32);
+                        let loop_in = new_graph.add_node(GraphTerm::LoopIn {
+                            range,
+                            stride: acc_strides[i],
+                        });
+                        new_graph.add_edge(last_node, loop_in, 0);
+                        last_node = loop_in;
+                    }
+                    new_graph.add_edge(last_node, reduce_op_node, 1);
+
+                    // Create output loop chain with correct ranges and strides
+                    last_node = reduce_op_node;
+                    for i in 0..output_dims.len() {
+                        let range = Expression::from(output_dims[i].to_usize().unwrap_or(1) as i32);
+                        let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                            range,
+                            // Use the new strides calculated from the output dimensions
+                            stride: loop_out_strides[i],
+                        });
+                        new_graph.add_edge(last_node, loop_out, 0);
+                        last_node = loop_out;
+                    }
+                    last_node
+                }
+
+                s if s.starts_with("Constant") => {
+                    let val_str = &s[s.find('(').unwrap() + 1..s.find(')').unwrap()];
+                    let value = val_str.parse::<f32>().unwrap_or(0.0);
+                    new_graph.add_node(GraphTerm::Constant {
+                        val: Expression::from(value as i32),
+                    })
+                }
+
+                _ => {
+                    // Fallback for Unary, Binary, etc.
+                    match op {
+                        s if s.starts_with("Exp")
+                            || matches!(s, "Recip" | "Sin" | "Neg" | "Sqrt") =>
+                        {
+                            let op_term = if s.starts_with("Exp") {
+                                GraphTerm::Exp
+                            } else {
+                                match s {
+                                    "Recip" => GraphTerm::Recip,
+                                    "Sin" => GraphTerm::Sin,
+                                    "Neg" => GraphTerm::Neg,
+                                    "Sqrt" => GraphTerm::Sqrt,
+                                    _ => unreachable!(),
+                                }
+                            };
+                            let shape = &incoming_edges[0];
+                            let dims = shape.dims();
+                            let strides = calculate_strides(&dims, &shape.indexes);
+                            let mut last_node = *node_mapping.get(&incoming_source_ids[0]).unwrap();
+                            for i in 0..dims.len() {
+                                let loop_in = new_graph.add_node(GraphTerm::LoopIn {
+                                    range: (dims[i].to_usize().unwrap_or(1) as i32).into(),
+                                    stride: strides[i],
+                                });
+                                new_graph.add_edge(last_node, loop_in, 0);
+                                last_node = loop_in;
+                            }
+                            let op_node = new_graph.add_node(op_term);
+                            new_graph.add_edge(last_node, op_node, 0);
+                            last_node = op_node;
+                            for i in 0..dims.len() {
+                                let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                    range: (dims[i].to_usize().unwrap_or(1) as i32).into(),
+                                    stride: strides[i],
+                                });
+                                new_graph.add_edge(last_node, loop_out, 0);
+                                last_node = loop_out;
+                            }
+                            last_node
+                        }
+                        "Add" | "Mul" | "Max" | "LessThan" => {
+                            let op_term = match op {
+                                "Add" => GraphTerm::Add,
+                                "Mul" => GraphTerm::Mul,
+                                "Max" => GraphTerm::Max,
+                                "LessThan" => GraphTerm::LessThan,
+                                _ => unreachable!(),
+                            };
+                            let mut op_inputs = Vec::new();
+                            for (i, shape) in incoming_edges.iter().enumerate() {
+                                let dims = shape.dims();
+                                let strides = calculate_strides(&dims, &shape.indexes);
+                                let mut last_node =
+                                    *node_mapping.get(&incoming_source_ids[i]).unwrap();
+                                for i in 0..dims.len() {
+                                    let loop_in = new_graph.add_node(GraphTerm::LoopIn {
+                                        range: (dims[i].to_usize().unwrap_or(1) as i32).into(),
+                                        stride: strides[i],
+                                    });
+                                    new_graph.add_edge(last_node, loop_in, 0);
+                                    last_node = loop_in;
+                                }
+                                op_inputs.push(last_node);
+                            }
+                            let binary_op_node = new_graph.add_node(op_term);
+                            for (i, &loop_node) in op_inputs.iter().enumerate() {
+                                new_graph.add_edge(loop_node, binary_op_node, i as u8);
+                            }
+                            let mut last_node = binary_op_node;
+                            let mut output_shape = incoming_edges
+                                .first()
+                                .copied()
+                                .unwrap_or_else(|| ShapeTracker::new(Vec::<Expression>::new()));
+                            for shape in incoming_edges.iter().skip(1) {
+                                output_shape = calculate_broadcast_shape(&output_shape, shape);
+                            }
+                            let dims = output_shape.dims();
+                            let strides = calculate_strides(&dims, &output_shape.indexes);
+                            for i in 0..dims.len() {
+                                let loop_out = new_graph.add_node(GraphTerm::LoopOut {
+                                    range: (dims[i].to_usize().unwrap_or(1) as i32).into(),
+                                    stride: strides[i],
+                                });
+                                new_graph.add_edge(last_node, loop_out, 0);
+                                last_node = loop_out;
+                            }
+                            last_node
+                        }
+                        _ => new_graph.add_node(GraphTerm::GMEM {
+                            label: Some(format!("Unhandled Op: {op}")),
+                        }),
+                    }
+                }
+            };
+            node_mapping.insert(node_idx, new_final_node);
+        }
+
+        let mut graph_to_display: StableGraph<String, u8, Directed> = StableGraph::new();
+        let mut display_node_mapping: FxHashMap<NodeIndex, NodeIndex> = FxHashMap::default();
+
+        for node_idx in new_graph.node_indices() {
+            if let Some(graph_term) = new_graph.node_weight(node_idx) {
+                let display_node = graph_to_display.add_node(graph_term.to_string());
+                display_node_mapping.insert(node_idx, display_node);
+            }
+        }
+
+        for edge in new_graph.edge_indices() {
+            if let Some((source, target)) = new_graph.edge_endpoints(edge) {
+                if let Some(weight) = new_graph.edge_weight(edge) {
+                    if let (Some(&display_source), Some(&display_target)) = (
+                        display_node_mapping.get(&source),
+                        display_node_mapping.get(&target),
+                    ) {
+                        graph_to_display.add_edge(display_source, display_target, *weight);
+                    }
+                }
+            }
+        }
+
+        display_graph(&graph_to_display, &[], &[]);
+        new_graph
+    }
+
     pub fn display_shapes(&self) {
         let (g, e, _) = self.debug_graph(true);
         display_graph(&g, &e, &[]);
@@ -504,6 +901,68 @@ impl Graph {
     }
 }
 
+/// Calculates strides for a reduction accumulator, propagating 'z' symbolically.
+/// For a tensor (5,4,3) reduced on dim 1, it produces strides (4*z, z, 1).
+fn calculate_reduction_strides(dims: &[Expression], reduce_dim_idx: usize) -> Vec<Expression> {
+    let n = dims.len();
+    let mut strides = vec![Expression::from(1); n];
+    if n == 0 {
+        return strides;
+    }
+
+    // Phase 1: Handle the reduction axis and all axes to its left.
+    // Start with 'z' for the reduction dim, then multiply by dimension sizes moving left.
+    let mut current_stride = Expression::from('z');
+    for i in (0..=reduce_dim_idx).rev() {
+        strides[i] = current_stride;
+        if let Some(dim_size) = dims[i].to_usize() {
+            current_stride *= dim_size;
+        }
+    }
+
+    // Phase 2: Handle all axes to the right of the reduction axis (these are standard numeric strides).
+    // Start with a stride of 1 for the rightmost dimension.
+    let mut current_stride = Expression::from(1);
+    for i in (reduce_dim_idx + 1..n).rev() {
+        strides[i] = current_stride;
+        if let Some(dim_size) = dims[i].to_usize() {
+            current_stride *= dim_size;
+        }
+    }
+
+    strides
+}
+
+// Place this helper function back in your file, for example, before `translate_to_2`.
+fn calculate_strides(dims: &[Expression], indexes: &[usize]) -> Vec<Expression> {
+    if dims.is_empty() || indexes.len() != dims.len() {
+        return vec![Expression::from(1); dims.len()];
+    }
+
+    // Step 1: Calculate physical strides based on physical dimension order
+    let mut physical_strides = vec![Expression::from(1); dims.len()];
+    let mut current_stride = Expression::from(1);
+    for i in (0..dims.len()).rev() {
+        physical_strides[i] = current_stride;
+        // Update stride for next dimension (multiply by current dimension size)
+        if let Some(d) = dims[i].to_usize() {
+            if d > 1 {
+                current_stride *= d;
+            }
+        }
+    }
+
+    // Step 2: Reorder physical strides to logical order using indexes
+    let mut logical_strides = vec![Expression::from(1); dims.len()];
+    for (logical_dim, &physical_dim) in indexes.iter().enumerate() {
+        if physical_dim < dims.len() {
+            logical_strides[logical_dim] = physical_strides[physical_dim];
+        }
+    }
+
+    logical_strides
+}
+
 /// View a debug graph in the browser
 pub fn display_graph(
     graph: &petgraph::stable_graph::StableGraph<String, u8, petgraph::Directed, u32>,
@@ -534,7 +993,7 @@ pub fn display_graph(
         urlencoding::encode(&graph_string)
     );
     if let Err(e) = webbrowser::open(&url) {
-        panic!("Error displaying graph: {:?}", e);
+        panic!("Error displaying graph: {e:?}");
     }
 }
 
@@ -957,4 +1416,436 @@ pub fn debug() -> bool {
         .parse::<i32>()
         .map(|i| i == 1)
         .unwrap_or_default()
+}
+
+// Add the following test module to the end of your file.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Helper to find a single node of a specific type. Panics if not found or multiple found.
+    fn find_unique_node(
+        graph: &StableGraph<GraphTerm, u8, Directed>,
+        predicate: impl Fn(&GraphTerm) -> bool,
+    ) -> NodeIndex {
+        let nodes: Vec<_> = graph
+            .node_indices()
+            .filter(|&n| predicate(graph.node_weight(n).unwrap()))
+            .collect();
+        assert_eq!(
+            nodes.len(),
+            1,
+            "Expected 1 matching node, found {}",
+            nodes.len()
+        );
+        nodes[0]
+    }
+
+    // Helper to count nodes of a specific type.
+    fn count_nodes(
+        graph: &StableGraph<GraphTerm, u8, Directed>,
+        predicate: impl Fn(&GraphTerm) -> bool,
+    ) -> usize {
+        graph
+            .node_indices()
+            .filter(|&n| predicate(graph.node_weight(n).unwrap()))
+            .count()
+    }
+
+    fn get_loop_chain_strides(
+        graph: &StableGraph<GraphTerm, u8, Directed>,
+        start_node: NodeIndex,
+        direction: Direction,
+    ) -> Vec<Expression> {
+        let mut strides = vec![];
+        let mut current_node = start_node;
+        while let Some(stride) = match graph.node_weight(current_node).unwrap() {
+            GraphTerm::LoopIn { stride, .. } => Some(*stride),
+            GraphTerm::LoopOut { stride, .. } => Some(*stride),
+            _ => None,
+        } {
+            strides.push(stride);
+
+            // Find the next node in the chain
+            let neighbors: Vec<_> = graph
+                .edges_directed(current_node, direction)
+                .map(|e| match direction {
+                    Direction::Incoming => e.source(),
+                    Direction::Outgoing => e.target(),
+                })
+                .collect();
+
+            if neighbors.len() != 1 {
+                break;
+            }
+            current_node = neighbors[0];
+        }
+
+        if direction == Direction::Incoming {
+            strides.reverse();
+        }
+
+        strides
+    }
+
+    fn get_loop_chain_ranges(
+        graph: &StableGraph<GraphTerm, u8, Directed>,
+        mut current_node: NodeIndex,
+        direction: Direction,
+    ) -> Vec<Expression> {
+        let mut ranges = vec![];
+        while let Some(range) = match graph.node_weight(current_node).unwrap() {
+            GraphTerm::LoopIn { range, .. } => Some(*range),
+            GraphTerm::LoopOut { range, .. } => Some(*range),
+            _ => None,
+        } {
+            ranges.push(range);
+
+            // Find the next node in the chain
+            let neighbors: Vec<_> = graph
+                .edges_directed(current_node, direction)
+                .map(|e| match direction {
+                    Direction::Incoming => e.source(),
+                    Direction::Outgoing => e.target(),
+                })
+                .collect();
+
+            // If there's not exactly one connection, the chain ends here
+            if neighbors.len() != 1 {
+                break;
+            }
+            current_node = neighbors[0];
+        }
+
+        // Incoming traversal builds the list in reverse order (from op to source), so fix it
+        if direction == Direction::Incoming {
+            ranges.reverse();
+        }
+
+        ranges
+    }
+
+    #[test]
+    fn test_calculate_strides_contiguous() {
+        // Test a standard, row-major tensor shape
+        let _cx = Graph::new(); // to initialize thread-local storage
+        let dims = vec![10.into(), 5.into(), 2.into()];
+        let indexes = vec![0, 1, 2]; // Contiguous, no permutation
+        let strides = calculate_strides(&dims, &indexes);
+
+        // Expected strides:
+        // Dim 0 (size 10): Stride should be 5 * 2 = 10
+        // Dim 1 (size 5): Stride should be 2
+        // Dim 2 (size 2): Stride should be 1
+        let expected_strides: Vec<Expression> = vec![10.into(), 2.into(), 1.into()];
+
+        assert_eq!(strides, expected_strides);
+    }
+
+    #[test]
+    fn test_calculate_strides_permuted() {
+        // Test a permuted tensor shape. Logical shape is [2, 10, 5]
+        let _cx = Graph::new(); // to initialize thread-local storage
+        let dims = vec![10.into(), 5.into(), 2.into()]; // Physical shape
+        let indexes = vec![2, 0, 1]; // Permutation: (d0, d1, d2) -> (d2, d0, d1)
+
+        let strides = calculate_strides(&dims, &indexes);
+
+        // Physical strides (based on dims [10, 5, 2]) are [10, 2, 1]
+        // The function should reorder these based on `indexes`.
+        // Expected logical strides:
+        // Logical Dim 0 (Physical Dim 2): Stride is physical_strides[2] = 1
+        // Logical Dim 1 (Physical Dim 0): Stride is physical_strides[0] = 10
+        // Logical Dim 2 (Physical Dim 1): Stride is physical_strides[1] = 2
+        let expected_strides: Vec<Expression> = vec![1.into(), 10.into(), 2.into()];
+
+        assert_eq!(strides, expected_strides);
+    }
+
+    // ensures our loopins and loopouts are done correctly
+    #[test]
+    fn test_simple_add_translation() {
+        // Setup Graph 1
+        let mut cx = Graph::new();
+        // The actual values set don't affect the translated structure, only the shape does.
+        let a = cx.tensor(4).set(vec![1., 2., 3., 4.]);
+        let b = cx.tensor(4).set(vec![5., 6., 7., 8.]);
+        let c = a + b;
+        c.retrieve(); // Mark as output
+
+        // Translate
+        let graph2 = cx.translate_to_2();
+
+        // Assertions on Graph 2
+        assert_eq!(
+            count_nodes(&graph2, |n| matches!(n, GraphTerm::GMEM { .. })),
+            2
+        );
+        assert_eq!(count_nodes(&graph2, |n| matches!(n, GraphTerm::Add)), 1);
+        // 2 inputs * 1 dim/input = 2 LoopIn's
+        assert_eq!(
+            count_nodes(&graph2, |n| matches!(n, GraphTerm::LoopIn { .. })),
+            2
+        );
+        // 1 output * 1 dim/output = 1 LoopOut
+        assert_eq!(
+            count_nodes(&graph2, |n| matches!(n, GraphTerm::LoopOut { .. })),
+            1
+        );
+
+        // Check structure
+        let add_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Add));
+
+        // Check Add inputs
+        let add_parents: Vec<_> = graph2
+            .edges_directed(add_node, Direction::Incoming)
+            .map(|e| e.source())
+            .collect();
+        assert_eq!(add_parents.len(), 2);
+        for parent_idx in add_parents {
+            let parent_node = graph2.node_weight(parent_idx).unwrap();
+            assert!(matches!(parent_node, GraphTerm::LoopIn { .. }));
+        }
+
+        // Check Add output
+        let add_children: Vec<_> = graph2
+            .edges_directed(add_node, Direction::Outgoing)
+            .map(|e| e.target())
+            .collect();
+        assert_eq!(add_children.len(), 1);
+        let child_node = graph2.node_weight(add_children[0]).unwrap();
+        assert!(matches!(child_node, GraphTerm::LoopOut { .. }));
+    }
+
+    #[test]
+    fn test_unary_op_translation() {
+        // Setup Graph 1
+        let mut cx = Graph::new();
+        let a = cx.tensor((2, 3)).set(vec![1., 2., 3., 4., 5., 6.]);
+        let b = a.exp2();
+        b.retrieve();
+
+        // Translate
+        let graph2 = cx.translate_to_2();
+
+        // Assertions
+        assert_eq!(
+            count_nodes(&graph2, |n| matches!(n, GraphTerm::GMEM { .. })),
+            1
+        );
+        assert_eq!(count_nodes(&graph2, |n| matches!(n, GraphTerm::Exp)), 1);
+        // 1 input * 2 dims = 2 LoopIn's
+        assert_eq!(
+            count_nodes(&graph2, |n| matches!(n, GraphTerm::LoopIn { .. })),
+            2
+        );
+        // 1 output * 2 dims = 2 LoopOut's
+        assert_eq!(
+            count_nodes(&graph2, |n| matches!(n, GraphTerm::LoopOut { .. })),
+            2
+        );
+
+        let exp_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Exp));
+        let gmem_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::GMEM { .. }));
+
+        // Check that a path from GMEM to Exp exists
+        assert!(
+            petgraph::algo::has_path_connecting(&graph2, gmem_node, exp_node, None),
+            "Path from GMEM to Exp could not be found"
+        );
+    }
+
+    #[test]
+    fn test_contiguous_elimination_translation() {
+        // Setup Graph 1
+        let mut cx = Graph::new();
+        let a = cx.tensor(4).set(vec![1., 2., 3., 4.]);
+        let b = a.contiguous(); // This op should be eliminated
+        let c = b.exp2();
+        c.retrieve();
+
+        // Translate
+        let graph2 = cx.translate_to_2();
+
+        // The 'Contiguous' op in Graph 1 should not produce any node in Graph 2.
+        // It has a fallback to an ERROR GMEM node, so we check for that.
+        assert_eq!(
+            count_nodes(&graph2, |n| {
+                if let GraphTerm::GMEM { label } = n {
+                    label.as_deref() == Some("ERROR")
+                } else {
+                    false
+                }
+            }),
+            0
+        );
+
+        // Check that GMEM is connected to the Exp chain
+        let gmem_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::GMEM { .. }));
+        let exp_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Exp));
+
+        // Very basic path check: is there a path from GMEM to Exp?
+        assert!(
+            petgraph::algo::has_path_connecting(&graph2, gmem_node, exp_node, None),
+            "Path from GMEM to Exp could not be found"
+        );
+
+        // More specific: the child of GMEM should be a LoopIn
+        let gmem_children: Vec<_> = graph2
+            .edges_directed(gmem_node, Direction::Outgoing)
+            .map(|e| e.target())
+            .collect();
+        assert_eq!(gmem_children.len(), 1);
+        assert!(matches!(
+            graph2.node_weight(gmem_children[0]).unwrap(),
+            GraphTerm::LoopIn { .. }
+        ));
+    }
+
+    #[test]
+    fn test_reduction_loop_in_ranges_match() {
+        // 1. Setup: Create a 3D tensor and reduce it on the middle dimension.
+        let mut cx = Graph::new();
+        let a = cx.tensor((2, 5, 4)); // Shape (2, 5, 4)
+        let b = a.sum(1); // Reduce dim 1, output shape should be (2, 1, 4)
+        b.retrieve();
+
+        // 2. Translate
+        let graph2 = cx.translate_to_2();
+
+        // 3. Assert: The LoopIn chains for both inputs to the Add node must have the same ranges,
+        // matching the *original* tensor shape.
+        let add_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Add));
+        let parents: Vec<_> = graph2
+            .edges_directed(add_node, Direction::Incoming)
+            .map(|e| e.source())
+            .collect();
+        assert_eq!(parents.len(), 2, "Add node should have two parents");
+
+        // The parents are the last `LoopIn` nodes of their respective chains.
+        let input_loop_ranges = get_loop_chain_ranges(&graph2, parents[0], Direction::Incoming);
+        let acc_loop_ranges = get_loop_chain_ranges(&graph2, parents[1], Direction::Incoming);
+
+        let expected_ranges: Vec<Expression> = vec![2.into(), 5.into(), 4.into()];
+
+        assert_eq!(
+            input_loop_ranges, expected_ranges,
+            "Input data loop ranges are incorrect"
+        );
+        assert_eq!(
+            acc_loop_ranges, expected_ranges,
+            "Accumulator loop ranges are incorrect"
+        );
+    }
+
+    #[test]
+    fn test_reduction_loop_out_ranges_adjusted() {
+        // 1. Setup: Create a 3D tensor and reduce it on the middle dimension.
+        let mut cx = Graph::new();
+        let a = cx.tensor((2, 5, 4)); // Shape (2, 5, 4)
+        let b = a.sum(1); // Reduce dim 1, output shape is (2, 1, 4)
+        b.retrieve();
+
+        // 2. Translate
+        let graph2 = cx.translate_to_2();
+
+        // 3. Assert: The LoopOut chain must have ranges matching the *new, reduced* tensor shape.
+        let add_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Add));
+        let children: Vec<_> = graph2
+            .edges_directed(add_node, Direction::Outgoing)
+            .map(|e| e.target())
+            .collect();
+        assert_eq!(children.len(), 1, "Add node should have one child");
+
+        // The child is the first `LoopOut` node of the output chain.
+        let output_loop_ranges = get_loop_chain_ranges(&graph2, children[0], Direction::Outgoing);
+
+        let expected_ranges: Vec<Expression> = vec![2.into(), 1.into(), 4.into()];
+
+        assert_eq!(
+            output_loop_ranges, expected_ranges,
+            "Output loop ranges are incorrect and were not adjusted for reduction"
+        );
+    }
+
+    #[test]
+    fn test_reduction_acc_input_strides_correct() {
+        // 1. Arrange: Create a 3D tensor and reduce it on the middle dimension.
+        let mut cx = Graph::new();
+        let a = cx.tensor((5, 4, 3)); // Shape (5, 4, 3)
+        let b = a.sum(1); // Reduce dim 1
+        b.retrieve();
+
+        // 2. Act: Translate the graph.
+        let graph2 = cx.translate_to_2();
+
+        // 3. Assert: The accumulator's LoopIn chain should have strides based on the *original*
+        // input shape (5, 4, 3), with 'z' propagating correctly.
+        let _add_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Add));
+        let new_acc_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::NewAcc { .. }));
+
+        // Find the start of the accumulator's loop chain (the child of NewAcc)
+        let acc_loop_start = graph2
+            .edges_directed(new_acc_node, Direction::Outgoing)
+            .next()
+            .unwrap()
+            .target();
+        let acc_loop_strides = get_loop_chain_strides(&graph2, acc_loop_start, Direction::Outgoing);
+
+        // Expected strides for reducing (5, 4, 3) on dim 1:
+        // dim 2 (size 3): Stride is 1
+        // dim 1 (size 4, reduced): Stride is z
+        // dim 0 (size 5): Stride is z * 4
+        // The `calculate_reduction_strides` function produces [(z*4), z, 1].
+        let z = Expression::from('z');
+        let expected_strides: Vec<Expression> = vec![z * 4, z, 1.into()];
+
+        assert_eq!(
+            acc_loop_strides, expected_strides,
+            "Accumulator loop strides are incorrect"
+        );
+    }
+
+    #[test]
+    fn test_reduction_output_strides_correct() {
+        // 1. Arrange: Create a 3D tensor and reduce it on the middle dimension.
+        let mut cx = Graph::new();
+        let a = cx.tensor((5, 4, 3)); // Shape (5, 4, 3)
+        let b = a.sum(1); // Reduce dim 1, output shape is (5, 1, 3)
+        b.retrieve();
+
+        // 2. Act: Translate the graph.
+        let graph2 = cx.translate_to_2();
+
+        // 3. Assert: The LoopOut chain must have strides calculated from the *final, smaller*
+        // output shape (5, 1, 3).
+        let add_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Add));
+
+        // The child of the Add op is the start of the LoopOut chain.
+        let output_loop_start = graph2
+            .edges_directed(add_node, Direction::Outgoing)
+            .next()
+            .unwrap()
+            .target();
+        let output_loop_strides =
+            get_loop_chain_strides(&graph2, output_loop_start, Direction::Outgoing);
+
+        // Expected strides for output shape (5, 1, 3) reduced on dim 1:
+        // dim 2 (size 3): Stride is 1
+        // dim 1 (size 1, reduced): Stride is z
+        // dim 0 (size 5): Stride is z * 1
+        // The `calculate_reduction_strides` function produces [(z*1), z, 1].
+        let z = Expression::from('z');
+        let expected_strides: Vec<Expression> = vec![
+            z, // This is z * 1
+            z,
+            1.into(),
+        ];
+
+        assert_eq!(
+            output_loop_strides, expected_strides,
+            "Output loop strides are incorrect"
+        );
+    }
 }

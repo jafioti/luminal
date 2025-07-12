@@ -7,17 +7,31 @@ impl GraphTensor {
         self
     }
 
-    /// Broadcast tensor along new dimensions
-    pub fn expand(mut self, axis: usize, size: impl Into<Expression>) -> GraphTensor {
-        self.shape.expand(axis, size);
+    pub fn transpose(self, dim0: usize, dim1: usize) -> GraphTensor {
+        let num_dims = self.shape.len();
+        assert!(
+            dim0 < num_dims && dim1 < num_dims,
+            "transpose dimensions ({dim0}, {dim1}) out of bounds for tensor with {num_dims} dimensions"
+        );
+
+        // Create identity permutation, then swap the two specified dimensions
+        let mut perm_axes: Vec<usize> = (0..num_dims).collect();
+        perm_axes.swap(dim0, dim1);
+
+        self.permute(perm_axes)
+    }
+
+    /// Broadcast tensor along a new dimension
+    pub fn expand_dim(mut self, axis: usize, size: impl Into<Expression>) -> GraphTensor {
+        self.shape.expand_dim(axis, size);
         self
     }
 
     /// Broadcast tensor along new dimensions (with explicitly given dest shape)
-    pub fn expand_to(mut self, shape: impl ToShape) -> GraphTensor {
+    pub fn expand(mut self, shape: impl ToShape) -> GraphTensor {
         for (i, s) in shape.to_shape().into_iter().enumerate() {
             if self.shape.len() <= i || self.shape.dims[self.shape.indexes[i]] != s {
-                self.shape.expand(i, s);
+                self.shape.expand_dim(i, s);
             }
         }
 
@@ -29,6 +43,16 @@ impl GraphTensor {
         // Insert contiguous call
         self = self.contiguous();
         self.shape = ShapeTracker::new(new_shape);
+        self
+    }
+
+    /// add a new dimension of size 1 at the specified place
+    pub fn unsqueeze(mut self, dim: usize) -> GraphTensor {
+        // Insert contiguous call
+        self = self.contiguous();
+        let last_shape = self.shape.dims();
+        assert!(last_shape.len() < 6, "Shape is maxed out at 6 dimensions");
+        self.shape.expand_dim(dim, 1);
         self
     }
 
@@ -79,7 +103,7 @@ impl GraphTensor {
         self = self.contiguous();
         // Expand a new dimension to do the slicing on
         let n_rows = total_size / (spacing + size);
-        self.shape.expand(n_dims, spacing + size);
+        self.shape.expand_dim(n_dims, spacing + size);
         // self = self.contiguous();
         self.shape.dims[self.shape.indexes[n_dims - 1]] = n_rows;
         self.shape.fake[self.shape.indexes[n_dims]] = false;
@@ -106,7 +130,7 @@ impl GraphTensor {
         let dim_size = self.dims().pop().unwrap().simplify();
         let number_of_windows = (((dim_size - full_kernel) / stride) + 1).simplify();
         // Expand new dimension
-        self.shape.expand(n_dims - 1, number_of_windows);
+        self.shape.expand_dim(n_dims - 1, number_of_windows);
         self = self.contiguous();
         if n_dims > 1 {
             // View as single dimension of matrix with wider width
@@ -179,6 +203,92 @@ mod tests {
     };
 
     crate::test_imports!();
+
+    #[test]
+    fn test_unsqueeze_at_start() {
+        let mut cx = Graph::new();
+
+        let inp = cx.tensor((2, 2)).set(vec![1., 2., 3., 4.]);
+        let out = inp.unsqueeze(0).retrieve();
+
+        cx.execute();
+
+        assert_eq!(out.dims(), &[1, 2, 2]);
+        assert_exact(&out.data(), &[1., 2., 3., 4.]);
+    }
+
+    #[test]
+    fn test_unsqueeze_in_middle() {
+        let mut cx = Graph::new();
+
+        let inp = cx.tensor((2, 2)).set(vec![1., 2., 3., 4.]);
+        let out = inp.unsqueeze(1).retrieve();
+
+        cx.execute();
+
+        assert_eq!(out.dims(), &[2, 1, 2]);
+        assert_exact(&out.data(), &[1., 2., 3., 4.]);
+    }
+
+    #[test]
+    fn test_unsqueeze_at_end() {
+        let mut cx = Graph::new();
+
+        let inp = cx.tensor((2, 2)).set(vec![1., 2., 3., 4.]);
+        let out = inp.unsqueeze(2).retrieve();
+
+        cx.execute();
+
+        assert_eq!(out.dims(), &[2, 2, 1]);
+        assert_exact(&out.data(), &[1., 2., 3., 4.]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Shape is maxed out at 6 dimensions")]
+    fn test_unsqueeze_panics_when_shape_exceeds_max() {
+        let mut cx = Graph::new();
+
+        let inp = cx.tensor((2, 2, 2, 2, 2, 2)).set(vec![0.; 64]);
+        let _out = inp.unsqueeze(6).retrieve();
+
+        cx.execute();
+    }
+
+    #[test]
+    fn test_transpose_simple_2d() {
+        let mut cx = Graph::new();
+
+        let inp1 = cx.tensor((4, 4)).set(vec![
+            1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
+        ]);
+        // 3x3 kernel
+        let out1 = inp1
+            // Pool first dim first by moving it to end
+            .transpose(1, 0)
+            .retrieve();
+
+        cx.execute();
+
+        assert_exact(
+            &out1.data(),
+            &[
+                1., 5., 9., 13., 2., 6., 10., 14., 3., 7., 11., 15., 4., 8., 12., 16.,
+            ],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "transpose dimensions")]
+    fn test_transpose_out_of_bounds() {
+        let mut cx = Graph::new();
+
+        let inp1 = cx.tensor((4, 4)).set(vec![
+            1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
+        ]);
+
+        // This should panic because dims 6 and 5 are out of bounds for a 2D tensor
+        let _out1 = inp1.transpose(6, 5);
+    }
 
     #[test]
     fn test_concat_1d() {
@@ -301,10 +411,10 @@ mod tests {
     #[test]
     fn test_cumsum() {
         let mut cx = Graph::new();
-        let a = cx.constant(1.).expand(0, 3);
+        let a = cx.constant(1.).expand_dim(0, 3);
         let b = a.cumsum_last_dim().retrieve();
         let c = a
-            .expand(1, 3)
+            .expand_dim(1, 3)
             .permute((1, 0))
             .cumsum_last_dim()
             .permute((1, 0))

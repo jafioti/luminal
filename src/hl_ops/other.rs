@@ -57,7 +57,7 @@ impl GraphTensor {
 
     /// Cumulative product last dimension
     pub fn cumprod_last_dim(self) -> Self {
-        self.ln().cumsum_last_dim().exp()
+        self.log().cumsum_last_dim().exp()
     }
 }
 
@@ -76,10 +76,29 @@ impl Graph {
         let to = to.into();
         if to.to_usize().map(|i| i == 1).unwrap_or_default() {
             // Single number ARange is just 0
-            self.constant(0.).expand(0, to)
+            self.constant(0.).expand_dim(0, to)
         } else {
-            self.constant(1.).expand(0, to).cumsum_last_dim() - 1.
+            self.constant(1.).expand_dim(0, to).cumsum_last_dim() - 1.
         }
+    }
+
+    /// ARange from beg to end
+    pub fn arange_in_range(&mut self, beg: usize, end: usize) -> GraphTensor {
+        let range = end - beg;
+        let mut tensor = self.arange(range);
+        tensor = tensor + beg;
+        tensor
+    }
+
+    /// ARange from beg to end
+    pub fn arange_step(&mut self, beg: f32, end: f32, step: f32) -> GraphTensor {
+        assert!(step > 0.0, "step must be positive");
+
+        let num_steps = ((end - beg) / step).ceil() as usize;
+
+        let mut tensor = self.arange(num_steps);
+        tensor = tensor * step + beg;
+        tensor
     }
 
     /// Lower left-hand triangle of 1s. Currently required to be square
@@ -87,10 +106,10 @@ impl Graph {
     /// Same API as https://pytorch.org/docs/stable/generated/torch.tril
     pub fn tril(&mut self, size: impl Into<Expression>, diagonal: i32) -> GraphTensor {
         let size = size.into();
-        let horizontal = self.arange(size).expand(0, size);
-        let vertical = self.arange(size).expand(1, size);
+        let horizontal = self.arange(size).expand_dim(0, size);
+        let vertical = self.arange(size).expand_dim(1, size);
 
-        (horizontal - (diagonal as f32 + 1.)).less_than(vertical)
+        (horizontal - (diagonal as f32 + 1.)).lt(vertical)
     }
 
     /// Upper right-hand triangle of 1s
@@ -98,10 +117,10 @@ impl Graph {
     /// Same API as https://pytorch.org/docs/stable/generated/torch.triu
     pub fn triu(&mut self, size: impl Into<Expression>, diagonal: i32) -> GraphTensor {
         let size = size.into();
-        let horizontal = self.arange(size).expand(0, size);
-        let vertical = self.arange(size).expand(1, size);
+        let horizontal = self.arange(size).expand_dim(0, size);
+        let vertical = self.arange(size).expand_dim(1, size);
 
-        (horizontal - (diagonal as f32 - 1.)).greater_than(vertical)
+        (horizontal - (diagonal as f32 - 1.)).gt(vertical)
     }
 }
 
@@ -113,9 +132,9 @@ impl GraphTensor {
         let one_hot = indexes
             .graph()
             .arange(vocab)
-            .expand(0, batch)
-            .equals(indexes.expand(1, vocab));
-        (one_hot.expand(2, dim) * self.expand(0, batch)).sum_reduce(1)
+            .expand_dim(0, batch)
+            .eq(indexes.expand_dim(1, vocab));
+        (one_hot.expand_dim(2, dim) * self.expand_dim(0, batch)).sum(1)
     }
 
     /// Print the value of this tensor when the graph is ran
@@ -137,7 +156,7 @@ impl GraphTensor {
                                 ..(d.len().saturating_div(2) + 5).min(d.len())],
                             &d[d.len().saturating_sub(5)..]
                         );
-                        println!("Shape: {:?}", tracker);
+                        println!("Shape: {tracker:?}");
                     }
                     vec![]
                 }),
@@ -350,6 +369,62 @@ mod tests {
     }
 
     #[test]
+    fn test_arange_from_zero() {
+        let mut cx = Graph::new();
+
+        let tensor = cx.arange(5).retrieve();
+        cx.execute();
+
+        assert_eq!(tensor.data(), vec![0., 1., 2., 3., 4.]);
+    }
+
+    #[test]
+    fn test_arange_in_range() {
+        let mut cx = Graph::new();
+
+        let tensor = cx.arange_in_range(3, 8).retrieve();
+        cx.execute();
+
+        assert_eq!(tensor.data(), vec![3., 4., 5., 6., 7.]);
+    }
+
+    #[test]
+    fn test_arange_step_simple() {
+        let mut cx = Graph::new();
+
+        let tensor = cx.arange_step(1.0, 5.0, 1.0).retrieve();
+        cx.execute();
+
+        assert_eq!(tensor.data(), vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_arange_step_fractional() {
+        let mut cx = Graph::new();
+
+        let tensor = cx.arange_step(0.0, 1.0, 0.3).retrieve();
+        cx.execute();
+
+        // Should produce [0.0, 0.3, 0.6, 0.9] — note that 1.2 would be >= 1.0 so we stop before that.
+        let expected = &[0.0, 0.3, 0.6, 0.9];
+
+        // Floating point comparison with tolerance:
+        assert_eq!(tensor.data().len(), expected.len());
+        for (v, e) in tensor.data().iter().zip(expected.iter()) {
+            assert!((v - e).abs() < 1e-5, "Expected {e}, got {v}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "step must be positive")]
+    fn test_arange_step_zero_step_panics() {
+        let mut cx = Graph::new();
+
+        // Should panic because step is zero
+        cx.arange_step(0.0, 5.0, 0.0);
+    }
+
+    #[test]
     fn test_cumprod() {
         let mut cx = Graph::new();
 
@@ -358,6 +433,19 @@ mod tests {
         cx.execute();
 
         assert_close(&b.data(), &[3., 6., 30.]);
+    }
+
+    #[test]
+    fn test_gather() {
+        let mut cx = Graph::new();
+
+        let matrix = cx.tensor((3, 2)).set(vec![1., 2., 3., 4., 5., 6.]);
+        let indexes = cx.tensor(2).set(vec![2., 0.]);
+        let result = matrix.gather(indexes).retrieve();
+
+        cx.execute();
+
+        assert_exact(&result.data(), &[5., 6., 1., 2.]);
     }
 
     #[test]
