@@ -1460,18 +1460,12 @@ mod tests {
     ) -> Vec<Expression> {
         let mut strides = vec![];
         let mut current_node = start_node;
-        loop {
-            // Add the stride of the current node if it's a loop
-            if let Some(stride) = match graph.node_weight(current_node).unwrap() {
-                GraphTerm::LoopIn { stride, .. } => Some(*stride),
-                GraphTerm::LoopOut { stride, .. } => Some(*stride),
-                _ => None,
-            } {
-                strides.push(stride);
-            } else {
-                // Traversal has reached a non-loop node, which terminates the chain.
-                break;
-            }
+        while let Some(stride) = match graph.node_weight(current_node).unwrap() {
+            GraphTerm::LoopIn { stride, .. } => Some(*stride),
+            GraphTerm::LoopOut { stride, .. } => Some(*stride),
+            _ => None,
+        } {
+            strides.push(stride);
 
             // Find the next node in the chain
             let neighbors: Vec<_> = graph
@@ -1501,18 +1495,12 @@ mod tests {
         direction: Direction,
     ) -> Vec<Expression> {
         let mut ranges = vec![];
-        loop {
-            // Add the range of the current node if it's a loop
-            if let Some(range) = match graph.node_weight(current_node).unwrap() {
-                GraphTerm::LoopIn { range, .. } => Some(*range),
-                GraphTerm::LoopOut { range, .. } => Some(*range),
-                _ => None,
-            } {
-                ranges.push(range);
-            } else {
-                // Traversal has reached a non-loop node, which terminates the chain.
-                break;
-            }
+        while let Some(range) = match graph.node_weight(current_node).unwrap() {
+            GraphTerm::LoopIn { range, .. } => Some(*range),
+            GraphTerm::LoopOut { range, .. } => Some(*range),
+            _ => None,
+        } {
+            ranges.push(range);
 
             // Find the next node in the chain
             let neighbors: Vec<_> = graph
