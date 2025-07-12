@@ -7,14 +7,12 @@ use itertools::Itertools;
 use petgraph::{
     algo::toposort,
     stable_graph::{EdgeIndex, EdgeReference, StableGraph},
-    visit::{EdgeRef, IntoEdgeReferences},
+    visit::EdgeRef,
     Directed, Direction,
 };
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 use uuid::Uuid;
-
-use crate::symbolic::Expression as expression_two;
 
 use crate::prelude::*;
 
@@ -25,12 +23,12 @@ pub enum GraphTerm {
         label: Option<String>,
     },
     LoopIn {
-        range: expression_two,
-        stride: expression_two,
+        range: Expression,
+        stride: Expression,
     },
     LoopOut {
-        range: expression_two,
-        stride: expression_two,
+        range: Expression,
+        stride: Expression,
     },
     NewAcc {
         starting_value: String,
@@ -46,7 +44,7 @@ pub enum GraphTerm {
     SMEMLoad, // Takes in an smem pointer and a gmem pointer, copies the gmem element to smem and returns the smem pointer
     SMEMRead, // Takes in an smem pointer and an smemload, returns the smem pointer
     Constant {
-        val: expression_two,
+        val: Expression,
     },
     Sqrt,
     LessThan,
@@ -57,18 +55,18 @@ impl std::fmt::Display for GraphTerm {
         match self {
             GraphTerm::GMEM { label } => {
                 if let Some(label) = label {
-                    write!(f, "GMEM({})", label)
+                    write!(f, "GMEM({label})")
                 } else {
                     write!(f, "GMEM")
                 }
             }
             GraphTerm::LoopIn { range, stride } => {
-                write!(f, "LoopIn(range: {:?}, stride: {:?})", range, stride)
+                write!(f, "LoopIn(range: {range:?}, stride: {stride:?})")
             }
             GraphTerm::LoopOut { range, stride } => {
-                write!(f, "LoopOut(range: {:?}, stride: {:?})", range, stride)
+                write!(f, "LoopOut(range: {range:?}, stride: {stride:?})")
             }
-            GraphTerm::NewAcc { starting_value } => write!(f, "NewAcc({})", starting_value),
+            GraphTerm::NewAcc { starting_value } => write!(f, "NewAcc({starting_value})"),
             GraphTerm::Add => write!(f, "Add"),
             GraphTerm::Mul => write!(f, "Mul"),
             GraphTerm::Max => write!(f, "Max"),
@@ -80,7 +78,7 @@ impl std::fmt::Display for GraphTerm {
             GraphTerm::SMEMLoad => write!(f, "SMEMLoad"),
             GraphTerm::SMEMRead => write!(f, "SMEMRead"),
             GraphTerm::Constant { val } => {
-                write!(f, "Constant(val: {:?})", val)
+                write!(f, "Constant(val: {val:?})")
             }
             GraphTerm::Sqrt => write!(f, "Sqrt"),
             GraphTerm::LessThan => write!(f, "LessThan"),
@@ -127,40 +125,37 @@ fn calculate_broadcast_shape(shape1: &ShapeTracker, shape2: &ShapeTracker) -> Sh
         match (dim1_usize, dim2_usize) {
             (Some(d1), Some(d2)) => {
                 if d1 == d2 {
-                    result_dims.push(dim1.clone());
+                    result_dims.push(*dim1);
                 } else if d1 == 1 {
-                    result_dims.push(dim2.clone());
+                    result_dims.push(*dim2);
                 } else if d2 == 1 {
-                    result_dims.push(dim1.clone());
+                    result_dims.push(*dim1);
                 } else {
                     // Broadcasting error - incompatible dimensions
-                    panic!(
-                        "Cannot broadcast shapes: dimension {} has size {} vs {}",
-                        i, d1, d2
-                    );
+                    panic!("Cannot broadcast shapes: dimension {i} has size {d1} vs {d2}");
                 }
             }
             // If we can't convert to usize (dynamic dimensions), we need to handle symbolically
-            (None, Some(d2)) if d2 == 1 => {
-                result_dims.push(dim1.clone());
+            (None, Some(1)) => {
+                result_dims.push(*dim1);
             }
-            (Some(d1), None) if d1 == 1 => {
-                result_dims.push(dim2.clone());
+            (Some(1), None) => {
+                result_dims.push(*dim2);
             }
             (None, None) => {
                 // Both are symbolic - assume they're compatible and take the first one
                 // In a more sophisticated implementation, you might want to create a max() expression
-                result_dims.push(dim1.clone());
+                result_dims.push(*dim1);
             }
             _ => {
                 // One is symbolic, one is not 1 - assume compatible and take the non-1 dimension
                 if dim1_usize == Some(1) {
-                    result_dims.push(dim2.clone());
+                    result_dims.push(*dim2);
                 } else if dim2_usize == Some(1) {
-                    result_dims.push(dim1.clone());
+                    result_dims.push(*dim1);
                 } else {
                     // Both are non-1, take the first one and hope for the best
-                    result_dims.push(dim1.clone());
+                    result_dims.push(*dim1);
                 }
             }
         }
@@ -593,71 +588,6 @@ impl Graph {
         display_graph(&g, &e, &[]);
     }
 
-    /// Calculates strides for a reduction accumulator, propagating 'z' symbolically.
-    /// For a tensor (5,4,3) reduced on dim 1, it produces strides (4*z, z, 1).
-    fn calculate_reduction_strides(
-        dims: &[Expression],
-        reduce_dim_idx: usize,
-    ) -> Vec<expression_two> {
-        let n = dims.len();
-        let mut strides = vec![expression_two::from(1); n];
-        if n == 0 {
-            return strides;
-        }
-
-        // Phase 1: Handle the reduction axis and all axes to its left.
-        // Start with 'z' for the reduction dim, then multiply by dimension sizes moving left.
-        let mut current_stride = expression_two::from('z');
-        for i in (0..=reduce_dim_idx).rev() {
-            strides[i] = current_stride.clone();
-            if let Some(dim_size) = dims[i].to_usize() {
-                current_stride = current_stride * dim_size;
-            }
-        }
-
-        // Phase 2: Handle all axes to the right of the reduction axis (these are standard numeric strides).
-        // Start with a stride of 1 for the rightmost dimension.
-        let mut current_stride = expression_two::from(1);
-        for i in (reduce_dim_idx + 1..n).rev() {
-            strides[i] = current_stride.clone();
-            if let Some(dim_size) = dims[i].to_usize() {
-                current_stride = current_stride * dim_size;
-            }
-        }
-
-        strides
-    }
-
-    // Place this helper function back in your file, for example, before `translate_to_2`.
-    fn calculate_strides(dims: &[Expression], indexes: &[usize]) -> Vec<expression_two> {
-        if dims.is_empty() || indexes.len() != dims.len() {
-            return vec![expression_two::from(1); dims.len()];
-        }
-
-        // Step 1: Calculate physical strides based on physical dimension order
-        let mut physical_strides = vec![expression_two::from(1); dims.len()];
-        let mut current_stride = expression_two::from(1);
-        for i in (0..dims.len()).rev() {
-            physical_strides[i] = current_stride.clone();
-            // Update stride for next dimension (multiply by current dimension size)
-            if let Some(d) = dims[i].to_usize() {
-                if d > 1 {
-                    current_stride = current_stride * d;
-                }
-            }
-        }
-
-        // Step 2: Reorder physical strides to logical order using indexes
-        let mut logical_strides = vec![expression_two::from(1); dims.len()];
-        for (logical_dim, &physical_dim) in indexes.iter().enumerate() {
-            if physical_dim < dims.len() {
-                logical_strides[logical_dim] = physical_strides[physical_dim].clone();
-            }
-        }
-
-        logical_strides
-    }
-
     pub fn translate_to_2(&self) -> StableGraph<GraphTerm, u8, Directed> {
         let mut new_graph: StableGraph<GraphTerm, u8, Directed> = StableGraph::new();
         let mut node_mapping: FxHashMap<NodeIndex, NodeIndex> = FxHashMap::default();
@@ -672,7 +602,7 @@ impl Graph {
             }
 
             let node_weight = self.graph.node_weight(node_idx).unwrap();
-            let op_name_full = format!("{:?}", node_weight);
+            let op_name_full = format!("{node_weight:?}");
             let op = op_name_full
                 .split('|')
                 .next()
@@ -681,8 +611,7 @@ impl Graph {
 
             let sources = self.get_sources(node_idx);
             let incoming_source_ids: Vec<_> = sources.iter().map(|(id, _, _)| *id).collect();
-            let incoming_edges: Vec<_> =
-                sources.iter().map(|(_, _, shape)| shape.clone()).collect();
+            let incoming_edges: Vec<_> = sources.iter().map(|(_, _, shape)| *shape).collect();
 
             manually_handled_nodes.insert(node_idx);
 
@@ -711,12 +640,11 @@ impl Graph {
                     let input_dims = input_shape.dims();
 
                     // --- Strides for the main input loop chain (normal traversal) ---
-                    let input_strides = Graph::calculate_strides(&input_dims, &input_shape.indexes);
+                    let input_strides = calculate_strides(&input_dims, &input_shape.indexes);
 
                     // --- Strides for the accumulator loop chain ---
                     // These are based on the INPUT dimensions, with 'z' propagation.
-                    let acc_strides =
-                        Graph::calculate_reduction_strides(&input_dims, reduce_dim_idx);
+                    let acc_strides = calculate_reduction_strides(&input_dims, reduce_dim_idx);
 
                     // --- Strides for the output loop chain ---
                     // First, define the output dimensions (reduced dim is size 1).
@@ -726,7 +654,7 @@ impl Graph {
                     }
                     // Now, calculate strides based on these new OUTPUT dimensions.
                     let loop_out_strides =
-                        Graph::calculate_reduction_strides(&output_dims, reduce_dim_idx);
+                        calculate_reduction_strides(&output_dims, reduce_dim_idx);
 
                     let acc_node = new_graph.add_node(GraphTerm::NewAcc {
                         starting_value: acc_val.to_string(),
@@ -736,11 +664,10 @@ impl Graph {
                     // Create loop chain for the full-shaped input
                     let mut last_node = mapped_input_node;
                     for i in 0..input_dims.len() {
-                        let range =
-                            expression_two::from(input_dims[i].to_usize().unwrap_or(1) as i32);
+                        let range = Expression::from(input_dims[i].to_usize().unwrap_or(1) as i32);
                         let loop_in = new_graph.add_node(GraphTerm::LoopIn {
                             range,
-                            stride: input_strides[i].clone(),
+                            stride: input_strides[i],
                         });
                         new_graph.add_edge(last_node, loop_in, 0);
                         last_node = loop_in;
@@ -750,11 +677,10 @@ impl Graph {
                     // Create loop chain for the accumulator, iterating over the full input space
                     last_node = acc_node;
                     for i in 0..input_dims.len() {
-                        let range =
-                            expression_two::from(input_dims[i].to_usize().unwrap_or(1) as i32);
+                        let range = Expression::from(input_dims[i].to_usize().unwrap_or(1) as i32);
                         let loop_in = new_graph.add_node(GraphTerm::LoopIn {
                             range,
-                            stride: acc_strides[i].clone(),
+                            stride: acc_strides[i],
                         });
                         new_graph.add_edge(last_node, loop_in, 0);
                         last_node = loop_in;
@@ -764,12 +690,11 @@ impl Graph {
                     // Create output loop chain with correct ranges and strides
                     last_node = reduce_op_node;
                     for i in 0..output_dims.len() {
-                        let range =
-                            expression_two::from(output_dims[i].to_usize().unwrap_or(1) as i32);
+                        let range = Expression::from(output_dims[i].to_usize().unwrap_or(1) as i32);
                         let loop_out = new_graph.add_node(GraphTerm::LoopOut {
                             range,
                             // Use the new strides calculated from the output dimensions
-                            stride: loop_out_strides[i].clone(),
+                            stride: loop_out_strides[i],
                         });
                         new_graph.add_edge(last_node, loop_out, 0);
                         last_node = loop_out;
@@ -781,7 +706,7 @@ impl Graph {
                     let val_str = &s[s.find('(').unwrap() + 1..s.find(')').unwrap()];
                     let value = val_str.parse::<f32>().unwrap_or(0.0);
                     new_graph.add_node(GraphTerm::Constant {
-                        val: expression_two::from(value as i32),
+                        val: Expression::from(value as i32),
                     })
                 }
 
@@ -804,12 +729,12 @@ impl Graph {
                             };
                             let shape = &incoming_edges[0];
                             let dims = shape.dims();
-                            let strides = Graph::calculate_strides(&dims, &shape.indexes);
+                            let strides = calculate_strides(&dims, &shape.indexes);
                             let mut last_node = *node_mapping.get(&incoming_source_ids[0]).unwrap();
                             for i in 0..dims.len() {
                                 let loop_in = new_graph.add_node(GraphTerm::LoopIn {
                                     range: (dims[i].to_usize().unwrap_or(1) as i32).into(),
-                                    stride: strides[i].clone(),
+                                    stride: strides[i],
                                 });
                                 new_graph.add_edge(last_node, loop_in, 0);
                                 last_node = loop_in;
@@ -820,7 +745,7 @@ impl Graph {
                             for i in 0..dims.len() {
                                 let loop_out = new_graph.add_node(GraphTerm::LoopOut {
                                     range: (dims[i].to_usize().unwrap_or(1) as i32).into(),
-                                    stride: strides[i].clone(),
+                                    stride: strides[i],
                                 });
                                 new_graph.add_edge(last_node, loop_out, 0);
                                 last_node = loop_out;
@@ -838,13 +763,13 @@ impl Graph {
                             let mut op_inputs = Vec::new();
                             for (i, shape) in incoming_edges.iter().enumerate() {
                                 let dims = shape.dims();
-                                let strides = Graph::calculate_strides(&dims, &shape.indexes);
+                                let strides = calculate_strides(&dims, &shape.indexes);
                                 let mut last_node =
                                     *node_mapping.get(&incoming_source_ids[i]).unwrap();
                                 for i in 0..dims.len() {
                                     let loop_in = new_graph.add_node(GraphTerm::LoopIn {
                                         range: (dims[i].to_usize().unwrap_or(1) as i32).into(),
-                                        stride: strides[i].clone(),
+                                        stride: strides[i],
                                     });
                                     new_graph.add_edge(last_node, loop_in, 0);
                                     last_node = loop_in;
@@ -858,17 +783,17 @@ impl Graph {
                             let mut last_node = binary_op_node;
                             let mut output_shape = incoming_edges
                                 .first()
-                                .map(|s| s.clone())
+                                .copied()
                                 .unwrap_or_else(|| ShapeTracker::new(Vec::<Expression>::new()));
                             for shape in incoming_edges.iter().skip(1) {
                                 output_shape = calculate_broadcast_shape(&output_shape, shape);
                             }
                             let dims = output_shape.dims();
-                            let strides = Graph::calculate_strides(&dims, &output_shape.indexes);
+                            let strides = calculate_strides(&dims, &output_shape.indexes);
                             for i in 0..dims.len() {
                                 let loop_out = new_graph.add_node(GraphTerm::LoopOut {
                                     range: (dims[i].to_usize().unwrap_or(1) as i32).into(),
-                                    stride: strides[i].clone(),
+                                    stride: strides[i],
                                 });
                                 new_graph.add_edge(last_node, loop_out, 0);
                                 last_node = loop_out;
@@ -876,7 +801,7 @@ impl Graph {
                             last_node
                         }
                         _ => new_graph.add_node(GraphTerm::GMEM {
-                            label: Some(format!("Unhandled Op: {}", op)),
+                            label: Some(format!("Unhandled Op: {op}")),
                         }),
                     }
                 }
@@ -974,6 +899,68 @@ impl Graph {
     pub fn get_op_mut<T: Operator + 'static>(&mut self, node: NodeIndex) -> &mut T {
         self.try_get_op_mut(node).unwrap()
     }
+}
+
+/// Calculates strides for a reduction accumulator, propagating 'z' symbolically.
+/// For a tensor (5,4,3) reduced on dim 1, it produces strides (4*z, z, 1).
+fn calculate_reduction_strides(dims: &[Expression], reduce_dim_idx: usize) -> Vec<Expression> {
+    let n = dims.len();
+    let mut strides = vec![Expression::from(1); n];
+    if n == 0 {
+        return strides;
+    }
+
+    // Phase 1: Handle the reduction axis and all axes to its left.
+    // Start with 'z' for the reduction dim, then multiply by dimension sizes moving left.
+    let mut current_stride = Expression::from('z');
+    for i in (0..=reduce_dim_idx).rev() {
+        strides[i] = current_stride;
+        if let Some(dim_size) = dims[i].to_usize() {
+            current_stride *= dim_size;
+        }
+    }
+
+    // Phase 2: Handle all axes to the right of the reduction axis (these are standard numeric strides).
+    // Start with a stride of 1 for the rightmost dimension.
+    let mut current_stride = Expression::from(1);
+    for i in (reduce_dim_idx + 1..n).rev() {
+        strides[i] = current_stride;
+        if let Some(dim_size) = dims[i].to_usize() {
+            current_stride *= dim_size;
+        }
+    }
+
+    strides
+}
+
+// Place this helper function back in your file, for example, before `translate_to_2`.
+fn calculate_strides(dims: &[Expression], indexes: &[usize]) -> Vec<Expression> {
+    if dims.is_empty() || indexes.len() != dims.len() {
+        return vec![Expression::from(1); dims.len()];
+    }
+
+    // Step 1: Calculate physical strides based on physical dimension order
+    let mut physical_strides = vec![Expression::from(1); dims.len()];
+    let mut current_stride = Expression::from(1);
+    for i in (0..dims.len()).rev() {
+        physical_strides[i] = current_stride;
+        // Update stride for next dimension (multiply by current dimension size)
+        if let Some(d) = dims[i].to_usize() {
+            if d > 1 {
+                current_stride *= d;
+            }
+        }
+    }
+
+    // Step 2: Reorder physical strides to logical order using indexes
+    let mut logical_strides = vec![Expression::from(1); dims.len()];
+    for (logical_dim, &physical_dim) in indexes.iter().enumerate() {
+        if physical_dim < dims.len() {
+            logical_strides[logical_dim] = physical_strides[physical_dim];
+        }
+    }
+
+    logical_strides
 }
 
 /// View a debug graph in the browser
@@ -1436,8 +1423,6 @@ pub fn debug() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{op, prelude::*};
-    use petgraph::visit::Bfs;
 
     // Helper to find a single node of a specific type. Panics if not found or multiple found.
     fn find_unique_node(
@@ -1472,14 +1457,14 @@ mod tests {
         graph: &StableGraph<GraphTerm, u8, Directed>,
         start_node: NodeIndex,
         direction: Direction,
-    ) -> Vec<expression_two> {
+    ) -> Vec<Expression> {
         let mut strides = vec![];
         let mut current_node = start_node;
         loop {
             // Add the stride of the current node if it's a loop
             if let Some(stride) = match graph.node_weight(current_node).unwrap() {
-                GraphTerm::LoopIn { stride, .. } => Some(stride.clone()),
-                GraphTerm::LoopOut { stride, .. } => Some(stride.clone()),
+                GraphTerm::LoopIn { stride, .. } => Some(*stride),
+                GraphTerm::LoopOut { stride, .. } => Some(*stride),
                 _ => None,
             } {
                 strides.push(stride);
@@ -1514,13 +1499,13 @@ mod tests {
         graph: &StableGraph<GraphTerm, u8, Directed>,
         mut current_node: NodeIndex,
         direction: Direction,
-    ) -> Vec<expression_two> {
+    ) -> Vec<Expression> {
         let mut ranges = vec![];
         loop {
             // Add the range of the current node if it's a loop
             if let Some(range) = match graph.node_weight(current_node).unwrap() {
-                GraphTerm::LoopIn { range, .. } => Some(range.clone()),
-                GraphTerm::LoopOut { range, .. } => Some(range.clone()),
+                GraphTerm::LoopIn { range, .. } => Some(*range),
+                GraphTerm::LoopOut { range, .. } => Some(*range),
                 _ => None,
             } {
                 ranges.push(range);
@@ -1559,13 +1544,13 @@ mod tests {
         let _cx = Graph::new(); // to initialize thread-local storage
         let dims = vec![10.into(), 5.into(), 2.into()];
         let indexes = vec![0, 1, 2]; // Contiguous, no permutation
-        let strides = Graph::calculate_strides(&dims, &indexes);
+        let strides = calculate_strides(&dims, &indexes);
 
         // Expected strides:
         // Dim 0 (size 10): Stride should be 5 * 2 = 10
         // Dim 1 (size 5): Stride should be 2
         // Dim 2 (size 2): Stride should be 1
-        let expected_strides: Vec<expression_two> = vec![10.into(), 2.into(), 1.into()];
+        let expected_strides: Vec<Expression> = vec![10.into(), 2.into(), 1.into()];
 
         assert_eq!(strides, expected_strides);
     }
@@ -1577,7 +1562,7 @@ mod tests {
         let dims = vec![10.into(), 5.into(), 2.into()]; // Physical shape
         let indexes = vec![2, 0, 1]; // Permutation: (d0, d1, d2) -> (d2, d0, d1)
 
-        let strides = Graph::calculate_strides(&dims, &indexes);
+        let strides = calculate_strides(&dims, &indexes);
 
         // Physical strides (based on dims [10, 5, 2]) are [10, 2, 1]
         // The function should reorder these based on `indexes`.
@@ -1585,7 +1570,7 @@ mod tests {
         // Logical Dim 0 (Physical Dim 2): Stride is physical_strides[2] = 1
         // Logical Dim 1 (Physical Dim 0): Stride is physical_strides[0] = 10
         // Logical Dim 2 (Physical Dim 1): Stride is physical_strides[1] = 2
-        let expected_strides: Vec<expression_two> = vec![1.into(), 10.into(), 2.into()];
+        let expected_strides: Vec<Expression> = vec![1.into(), 10.into(), 2.into()];
 
         assert_eq!(strides, expected_strides);
     }
@@ -1754,7 +1739,7 @@ mod tests {
         let input_loop_ranges = get_loop_chain_ranges(&graph2, parents[0], Direction::Incoming);
         let acc_loop_ranges = get_loop_chain_ranges(&graph2, parents[1], Direction::Incoming);
 
-        let expected_ranges: Vec<expression_two> = vec![2.into(), 5.into(), 4.into()];
+        let expected_ranges: Vec<Expression> = vec![2.into(), 5.into(), 4.into()];
 
         assert_eq!(
             input_loop_ranges, expected_ranges,
@@ -1788,7 +1773,7 @@ mod tests {
         // The child is the first `LoopOut` node of the output chain.
         let output_loop_ranges = get_loop_chain_ranges(&graph2, children[0], Direction::Outgoing);
 
-        let expected_ranges: Vec<expression_two> = vec![2.into(), 1.into(), 4.into()];
+        let expected_ranges: Vec<Expression> = vec![2.into(), 1.into(), 4.into()];
 
         assert_eq!(
             output_loop_ranges, expected_ranges,
@@ -1809,7 +1794,7 @@ mod tests {
 
         // 3. Assert: The accumulator's LoopIn chain should have strides based on the *original*
         // input shape (5, 4, 3), with 'z' propagating correctly.
-        let add_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Add));
+        let _add_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::Add));
         let new_acc_node = find_unique_node(&graph2, |n| matches!(n, GraphTerm::NewAcc { .. }));
 
         // Find the start of the accumulator's loop chain (the child of NewAcc)
@@ -1825,8 +1810,8 @@ mod tests {
         // dim 1 (size 4, reduced): Stride is z
         // dim 0 (size 5): Stride is z * 4
         // The `calculate_reduction_strides` function produces [(z*4), z, 1].
-        let z = expression_two::from('z');
-        let expected_strides: Vec<expression_two> = vec![z.clone() * 4, z.clone(), 1.into()];
+        let z = Expression::from('z');
+        let expected_strides: Vec<Expression> = vec![z * 4, z, 1.into()];
 
         assert_eq!(
             acc_loop_strides, expected_strides,
@@ -1863,10 +1848,10 @@ mod tests {
         // dim 1 (size 1, reduced): Stride is z
         // dim 0 (size 5): Stride is z * 1
         // The `calculate_reduction_strides` function produces [(z*1), z, 1].
-        let z = expression_two::from('z');
-        let expected_strides: Vec<expression_two> = vec![
-            z.clone(), // This is z * 1
-            z.clone(),
+        let z = Expression::from('z');
+        let expected_strides: Vec<Expression> = vec![
+            z, // This is z * 1
+            z,
             1.into(),
         ];
 
