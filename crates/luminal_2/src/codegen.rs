@@ -215,17 +215,6 @@ kernel void kernel{}(
                 )
             }
         };
-        if option_env!("PRINT_ALL_KERNELS")
-            .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
-            .unwrap_or_default()
-        {
-            println!(
-                "Grid: {grid:?} Threadblock: {threadblock:?} Smem: {:?}",
-                smem_buffers.iter().map(|(_, _, a)| *a).sum::<Expression>()
-            );
-            println!("{kernel}");
-            println!("Outputs: {:?}", outputs);
-        }
         if (threadblock[0] * threadblock[1] * threadblock[2])
             .to_usize()
             .unwrap()
@@ -239,7 +228,7 @@ kernel void kernel{}(
             grid: (grid[0], grid[1], grid[2]),
             threadblock: (threadblock[0], threadblock[1], threadblock[2]),
             smem: smem_buffers.into_iter().map(|(_, _, a)| a).sum(),
-            outputs: outputs.into_iter().map(|(o, _)| o).collect(),
+            outputs: outputs.into_iter().map(|(o, _)| o.simplify()).collect(),
         };
     }
     Some(meta_graph)
