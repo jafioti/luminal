@@ -2,6 +2,9 @@ use std::collections::HashMap;
 
 use luminal::prelude::*;
 
+mod utils;
+use utils::is_binary_op;
+
 pub fn import_hlo(path: &str) -> (Box<Graph>, HashMap<String, GraphTensor>) {
     let contents = std::fs::read_to_string(path).expect("Failed to read file.");
 
@@ -65,11 +68,26 @@ fn parse_func_args(line: &str, cx: &mut Graph, tensor_map: &mut HashMap<String, 
     }
 }
 
+fn parse_binary_op(op: &str, args: &[String], tensor_map: &HashMap<String, GraphTensor>) -> GraphTensor {
+    let lhs = tensor_map[&args[0]];
+    let rhs = tensor_map[&args[1]];
+    match op {
+        "stablehlo.add" => lhs + rhs,
+        "stablehlo.subtract" => lhs - rhs,
+        "stablehlo.multiply" => lhs * rhs,
+        "stablehlo.divide" => lhs / rhs,
+        "stablehlo.remainder" => lhs % rhs,
+        // "stablehlo.maximum" => lhs.maximum(rhs),
+        // "stablehlo.minimum" => lhs.minimum(rhs),
+        _ => panic!("Unsupported binary op: {}", op),
+    }
+}
+
 fn parse_hlo_op(op_line: &str, tensor_map: &mut HashMap<String, GraphTensor>) {
     let op_line = op_line.trim().trim_start_matches('%');
     if let Some((lhs, rest)) = op_line.split_once(" = ") {
         if let Some((op, args)) = rest.split_once(' ') {
-            // Parse arguments from args_str
+            // Parse arguments from args
             let args: Vec<_> = args
                 .split(&[',', ' '][..])
                 .filter(|s| s.starts_with('%'))
@@ -77,12 +95,8 @@ fn parse_hlo_op(op_line: &str, tensor_map: &mut HashMap<String, GraphTensor>) {
                 .collect();
 
             let result = match op {
-                // Arithmetic ops
-                "stablehlo.add" => tensor_map[&args[0]] + tensor_map[&args[1]],
-                "stablehlo.multiply" => tensor_map[&args[0]] * tensor_map[&args[1]],
-                "stablehlo.subtract" => tensor_map[&args[0]] - tensor_map[&args[1]],
-                "stablehlo.divide" => tensor_map[&args[0]] / tensor_map[&args[1]],
-                _ => panic!("Unsupported op: {}", op),
+                op if is_binary_op(op) => parse_binary_op(op, &args, tensor_map),
+                _ => panic!("Unsupported binary op: {}", op),
             };
 
             tensor_map.insert(lhs.to_string(), result);
