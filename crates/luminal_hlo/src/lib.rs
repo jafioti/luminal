@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use luminal::prelude::*;
 
 mod utils;
-use utils::is_binary_op;
+use utils::{is_binary_op, is_unary_op};
 
 pub fn import_hlo(path: &str) -> (Box<Graph>, HashMap<String, GraphTensor>) {
     let contents = std::fs::read_to_string(path).expect("Failed to read file.");
@@ -83,6 +83,16 @@ fn parse_binary_op(op: &str, args: &[String], tensor_map: &HashMap<String, Graph
     }
 }
 
+fn parse_unary_op(op: &str, args: &[String], tensor_map: &HashMap<String, GraphTensor>) -> GraphTensor {
+    let tensor = tensor_map[&args[0]];
+    match op {
+        "stablehlo.abs" => tensor.abs(),
+        "stablehlo.negate" => -tensor,
+        "stablehlo.sqrt" => tensor.sqrt(),
+        _ => panic!("Unsupported unary op: {}", op),
+    }
+}
+
 fn parse_hlo_op(op_line: &str, tensor_map: &mut HashMap<String, GraphTensor>) {
     let op_line = op_line.trim().trim_start_matches('%');
     if let Some((lhs, rest)) = op_line.split_once(" = ") {
@@ -96,7 +106,8 @@ fn parse_hlo_op(op_line: &str, tensor_map: &mut HashMap<String, GraphTensor>) {
 
             let result = match op {
                 op if is_binary_op(op) => parse_binary_op(op, &args, tensor_map),
-                _ => panic!("Unsupported binary op: {}", op),
+                op if is_unary_op(op) => parse_unary_op(op, &args, tensor_map),
+                _ => panic!("Unsupported op: {}", op),
             };
 
             tensor_map.insert(lhs.to_string(), result);
