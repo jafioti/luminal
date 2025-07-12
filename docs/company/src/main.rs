@@ -8,6 +8,10 @@ async fn index() -> Html<String> {
     Html(include_str!("../static/index.html").to_string())
 }
 
+async fn intro_quiz() -> Html<String> {
+    Html(include_str!("../static/intro_quiz.html").to_string())
+}
+
 async fn redirect() -> Redirect {
     Redirect::to("https://luminalai.com")
 }
@@ -17,6 +21,7 @@ async fn main() {
     // single route for “/”
     let app = Router::new()
         .route("/", get(index))
+        .route("/intro_quiz", get(intro_quiz))
         .route("/docs/introduction", get(redirect));
 
     println!("Running on port 3000...");

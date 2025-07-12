@@ -74,8 +74,8 @@ fn main() {
             GenericCompiler::default(),
             #[cfg(feature = "metal")]
             (
-                luminal_metal::MetalCompilerPreBuffer::<f32>::default(),
-                luminal_metal::quantized::MetalQuantizedCompiler::<f32>::new(q_weights),
+                luminal_metal::MetalCompilerPreBuffer::<f16>::default(),
+                luminal_metal::quantized::MetalQuantizedCompiler::<f16>::new(q_weights),
                 luminal_metal::BufferCompilers::default(),
             ),
             #[cfg(feature = "cuda")]
