@@ -36,7 +36,6 @@ dfdx = { version = "0.13", features = ["f16"] }
 members = [
 	"examples/*",
 	"crates/luminal_cpu",
-	"crates/luminal_2",
 	"crates/luminal_nn",
 	"crates/luminal_training", "docs/company",
 ]
