@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use luminal::prelude::petgraph::{Direction, algo::toposort, prelude::StableGraph, visit::EdgeRef};
 use metal_rs::objc::rc::autoreleasepool;
+use petgraph::{algo::toposort, prelude::StableGraph, visit::EdgeRef, Direction};
 
 use crate::Kernel;
 
 pub fn run_graph(
-    inputs: &[(String, Vec<f32>)],
+    inputs: &[(&'static str, Vec<f32>)],
     kernels: &StableGraph<Kernel, (u8, u8)>,
 ) -> (Vec<Vec<f32>>, u128) {
     use metal_rs::{
@@ -29,7 +29,7 @@ pub fn run_graph(
                     node,
                     inputs
                         .iter()
-                        .sorted_by_key(|(name, _)| mapping[name])
+                        .sorted_by_key(|(name, _)| mapping[*name])
                         .map(|(_, buf)| {
                             device.new_buffer_with_data(
                                 buf.as_ptr() as *mut _,

@@ -25,95 +25,11 @@
 // 		return kernel_graphs;
 // }
 
-mod codegen;
-mod extract;
-mod run;
-mod symbolic;
-mod utils;
-
 #[cfg(test)]
 mod tests;
 
-use itertools::Itertools;
-use petgraph::prelude::StableGraph;
-use rand::{Rng, rng};
-use serde::Serialize;
-use std::{collections::HashMap, fmt::Debug};
-use utils::*;
-
-use crate::{
-    extract::search,
-    symbolic::{Expression, Term, expression_cleanup},
-};
-
-#[derive(Clone, PartialEq, Eq)]
-enum GPUArch {
-    CUDA,
-    Metal(HashMap<usize, &'static str>),
-}
-
-impl GPUArch {
-    fn metal_buffer_type(&self, var: usize) -> &'static str {
-        match self {
-            Self::Metal(m) => m.get(&var).copied().unwrap_or(""),
-            _ => "",
-        }
-    }
-
-    fn add_metal_buffer_type(&mut self, var: usize, buf_type: &'static str) {
-        if let Self::Metal(m) = self {
-            m.insert(var, buf_type);
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-struct Kernel {
-    code: String,
-    // launch params
-    grid: (Expression, Expression, Expression),
-    threadblock: (Expression, Expression, Expression),
-    smem: Expression, // sizes of required shared memory buffers
-    outputs: Vec<Expression>,
-}
-
-#[derive(Clone)]
-enum GMEMBuffer {
-    PrevKernel { kernel: usize, output: usize },
-    Input { label: Option<String> },
-}
-
-#[derive(Clone, Debug, Serialize)]
-enum GraphTerm {
-    GMEM {
-        // Signifies global memory
-        label: Option<String>,
-    },
-    LoopIn {
-        range: Expression,
-        stride: Expression,
-        marker: String,
-    },
-    LoopOut {
-        range: Expression,
-        stride: Expression,
-        marker: String,
-    },
-    Add,
-    Mul,
-    Max,
-    Exp,
-    Recip,
-    Sin,
-    Neg,
-    Sqrt,
-    SMEM,     // Signifies shared memory
-    SMEMLoad, // Takes in an smem pointer and a gmem pointer, copies the gmem element to smem and returns the smem pointer
-    SMEMRead, // Takes in an smem pointer and an smemload, returns the smem pointer
-}
-
 fn main() {
-    // make_square_matmul();
+    make_square_matmul();
     // make_nonsquare_matmul();
     // make_transposed_matmul();
     // make_gelu();
@@ -121,7 +37,7 @@ fn main() {
     // make_multi_head_attention();
     // make_softmax();
     // make_layernorm();
-    fusion_test();
+    // fusion_test();
     // let (g, _) = make_square_matmul();
     // let (g, _) = make_gelu(64);
 

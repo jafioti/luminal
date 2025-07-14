@@ -1,12 +1,15 @@
-use crate::{GPUArch, codegen::codegen, run::run_graph, symbolic::expression_cleanup};
-use petgraph::{Directed, graph::NodeIndex, prelude::StableGraph};
+use luminal::{
+    prelude::{
+        NodeIndex,
+        petgraph::{Directed, prelude::StableGraph},
+    },
+    shape::{Expression, Term, expression_cleanup},
+};
+
+use crate::{GPUArch, codegen::codegen, run::run_graph};
 use std::collections::HashMap;
 
-use crate::{
-    GraphTerm,
-    symbolic::{Expression, Term},
-    utils::*,
-};
+use crate::{GraphTerm, utils::*};
 
 pub fn make_complex_kernel() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
     let mut graph = StableGraph::new();
@@ -85,7 +88,11 @@ fn test_sum_reduce() {
 
     let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new()), 0).unwrap();
     let input = vec![0., 1., 2., 3., 4.];
-    let outputs = run_graph(&[("A", input), ("acc", vec![0.0])], &kernels).0;
+    let outputs = run_graph(
+        &[("A".to_string(), input), ("acc".to_string(), vec![0.0])],
+        &kernels,
+    )
+    .0;
     assert_eq!(outputs[0], vec![10.0]);
     expression_cleanup();
 }
@@ -148,10 +155,17 @@ fn test_matmul() {
         [1.7066, -0.4462, 0.7440, 1.5210, 3.4105],
     ]
     .into_flattened();
-    let outputs = run_graph(&[("A", a), ("B", b), ("Acc", vec![0.0])], &kernels)
-        .0
-        .pop()
-        .unwrap();
+    let outputs = run_graph(
+        &[
+            ("A".to_string(), a),
+            ("B".to_string(), b),
+            ("Acc".to_string(), vec![0.0]),
+        ],
+        &kernels,
+    )
+    .0
+    .pop()
+    .unwrap();
     let pt_output = vec![
         [-0.4088, -1.1595, 3.6329, 2.1403, 4.8591],
         [2.2975, -1.4434, -1.8349, 1.8038, 1.1883],
@@ -475,10 +489,17 @@ fn test_tiled_matmul_basic() {
         ],
     ]
     .into_flattened();
-    let outputs = run_graph(&[("A", a), ("B", b), ("acc", vec![0.0])], &kernels)
-        .0
-        .pop()
-        .unwrap();
+    let outputs = run_graph(
+        &[
+            ("A".to_string(), a),
+            ("B".to_string(), b),
+            ("acc".to_string(), vec![0.0]),
+        ],
+        &kernels,
+    )
+    .0
+    .pop()
+    .unwrap();
     let pt_output = vec![
         [
             -5.8128e-01,
@@ -1380,10 +1401,17 @@ fn test_tiled_matmul_smem() {
         ],
     ]
     .into_flattened();
-    let outputs = run_graph(&[("A", a), ("B", b), ("acc", vec![0.0])], &kernels)
-        .0
-        .pop()
-        .unwrap();
+    let outputs = run_graph(
+        &[
+            ("A".to_string(), a),
+            ("B".to_string(), b),
+            ("acc".to_string(), vec![0.0]),
+        ],
+        &kernels,
+    )
+    .0
+    .pop()
+    .unwrap();
     let pt_output = vec![
         [
             -5.8128e-01,

@@ -3,12 +3,11 @@ name = "luminal_2"
 version = "0.1.0"
 edition = "2024"
 
-[workspace]
 
 [dependencies]
+luminal = {path="../../"}
 itertools = "0.14.0"
 egglog = { git = "https://github.com/egraphs-good/egglog", rev="d2fa5b733de0796fb187dc5a27e570d5644aa75a" }
-petgraph = {version="0.8.1", features=["serde-1"]}
 metal-rs = { version = "0.28.0", package = "metal" }
 urlencoding = "2.1.3"
 webbrowser = "1.0.4"

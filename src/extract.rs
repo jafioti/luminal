@@ -1,74 +1,59 @@
-use std::usize;
+use std::u128;
 
-use crate::Kernel;
-use crate::utils::display_graph;
-use crate::{GPUArch, GraphTerm, run::run_graph};
+use crate::prelude::*;
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
-use luminal::prelude::NodeIndex;
-use luminal::prelude::petgraph::algo::toposort;
-use luminal::prelude::petgraph::prelude::StableGraph;
-use luminal::prelude::petgraph::{Directed, Direction};
-use luminal::shape::{Expression, Term};
+use petgraph::algo::toposort;
+use petgraph::prelude::{NodeIndex, StableGraph};
+use petgraph::{Directed, Direction};
 use rustc_hash::FxHashMap;
 
 const WARMUP_TRIALS: usize = 1;
-const TRIALS: usize = 10;
-const MAX_SEARCHED_GRAPHS: usize = 600_000;
+const TRIALS: usize = 1;
+const MAX_SEARCHED_GRAPHS: usize = 1_000;
 const MAX_CYCLES: usize = 1;
-const INVALID_IR: &[&str] = &[
-    "SwapLoops",
-    "TileLoop",
-    "UnpadLoop",
-    "Unary",
-    "Binary",
-    "MReplace",
-];
+const INVALID_IR: &[&str] = &["SwapLoops", "TileLoop", "Unary", "Binary", "MReplace"];
 
 type Cost = u128; // Execution time in microseconds
 
 pub fn search(
     egraph: &EGraph,
-    inputs: &[(String, Vec<f32>)],
+    inputs: &[(&'static str, Vec<f32>)],
     arch: GPUArch,
 ) -> Option<StableGraph<Kernel, (u8, u8)>> {
     fn recurse<'a>(
         egraph: &'a EGraph,
         current_class: &'a ClassId,
-        seen: &mut FxHashMap<&'a NodeId, usize>,
-    ) -> (Vec<Vec<&'a NodeId>>, usize) {
+        seen: &mut FxHashMap<(&'a ClassId, &'a NodeId), usize>,
+    ) -> Vec<Vec<(&'a ClassId, &'a NodeId, bool)>> {
         let mut trajectories = vec![];
-        let mut total_completed = 0;
         'enode_loop: for enode in &egraph.classes()[current_class].nodes {
-            if total_completed >= MAX_SEARCHED_GRAPHS {
-                break;
-            }
             if INVALID_IR.contains(&egraph.nodes[enode].op.as_str())
-                || seen.get(&enode).copied().unwrap_or_default() >= MAX_CYCLES
+                || seen
+                    .get(&(current_class, enode))
+                    .map(|i| *i >= MAX_CYCLES)
+                    .unwrap_or_default()
             {
                 // Either this is an invalid enode or we've cycled too many times
                 continue;
             }
             let mut enode_trajectories = vec![];
-            let mut completed = 0;
+            let mut empty = false;
             for child in &egraph.nodes[enode].children {
                 // Ask what's the child's trajectories
-                *seen.entry(enode).or_insert(0) += 1;
-                let (child_trajectories, child_completed) =
-                    recurse(egraph, egraph.nid_to_cid(child), seen);
-                *seen.get_mut(&enode).unwrap() -= 1;
-                completed = completed
-                    .max(child_completed.min(1))
-                    .saturating_mul(child_completed);
+                *seen.entry((current_class, enode)).or_insert(0) += 1;
+                let child_trajectories = recurse(egraph, egraph.nid_to_cid(child), seen);
+                *seen.get_mut(&(current_class, enode)).unwrap() -= 1;
 
                 // if we are getting no trajectories out of this child, this whole enode is bad
-                if child_trajectories.is_empty() {
+                empty |= child_trajectories.is_empty();
+                if empty {
                     continue 'enode_loop;
                 }
 
                 if enode_trajectories.is_empty() {
                     for mut child_trajectory in child_trajectories {
-                        child_trajectory.insert(0, enode);
+                        child_trajectory.insert(0, (current_class, enode, true));
                         enode_trajectories.push(child_trajectory);
                     }
                 } else {
@@ -85,28 +70,22 @@ pub fn search(
                     }
                 }
             }
-
             if egraph.nodes[enode].children.is_empty() {
-                // Leaf node → single-element trajectory
-                trajectories.push(vec![enode]);
-                completed += 1;
-            } else {
-                // Add combined trajectories
-                trajectories.extend(enode_trajectories);
+                // No children
+                trajectories.push(vec![(current_class, enode, false)]);
             }
-            total_completed += completed;
+            trajectories.extend(enode_trajectories);
         }
-        (trajectories, total_completed)
+        trajectories
     }
 
-    let (trajectories, _) = recurse(egraph, &egraph.root_eclasses[0], &mut FxHashMap::default());
+    let trajectories = recurse(egraph, &egraph.root_eclasses[0], &mut FxHashMap::default());
     // Now we have DFS trajectories
     let mut ref_outputs: Vec<Vec<f32>> = vec![];
     let mut best_time = u128::MAX;
     let mut best_graph = None;
     let mut valid_graphs = 0;
     let total_trajectories = trajectories.len().min(MAX_SEARCHED_GRAPHS);
-    let mut min_kernels = usize::MAX;
     'trajectory_loop: for (n, trajectory) in trajectories
         .into_iter()
         .take(MAX_SEARCHED_GRAPHS)
@@ -119,12 +98,11 @@ pub fn search(
         let Some(kernels) = crate::codegen::codegen(graph.clone(), root, arch.clone(), 0) else {
             continue;
         };
-        if kernels.node_count() == 1 {
-            display_graph(&graph, &[]);
-            panic!();
-        }
         // Print kernels
-        if option_env!("PRINT_KERNELS").is_some() {
+        if option_env!("PRINT_KERNELS")
+            .map(|s| s.parse::<i32>().map(|i| i == 1).unwrap_or_default())
+            .unwrap_or_default()
+        {
             println!("Kernels: {}", kernels.node_count() - 2);
             for (i, node) in toposort(&kernels, None).unwrap().into_iter().enumerate() {
                 let Kernel {
@@ -144,74 +122,54 @@ pub fn search(
         match &arch {
             GPUArch::CUDA => {
                 valid_graphs += 1;
-                if option_env!("PRINT_KERNELS").is_some() {
+                println!(
+                    "{}",
+                    format!(
+                        "Graph {valid_graphs} ({:.1}%) ",
+                        (n as f32 / total_trajectories as f32) * 100.0
+                    )
+                    .bold()
+                );
+            }
+            GPUArch::Metal(_) => {
+                if let Some((us, outs)) = cost(&kernels, inputs) {
+                    valid_graphs += 1;
                     println!(
-                        "{}",
+                        "{}{}",
                         format!(
                             "Graph {valid_graphs} ({:.1}%) ",
                             (n as f32 / total_trajectories as f32) * 100.0
                         )
-                        .bold()
+                        .bold(),
+                        format!("{us}µs").bright_green().bold()
                     );
-                }
-            }
-            GPUArch::Metal(_) => {
-                // if kernels.node_count() - 2 > 1 || graph.node_count() >= 27 {
-                //     continue;
-                // }
-                // println!("KERNEL NUMBER {n}");
-                // display_graph(&graph, &[]);
-                if let Some((us, outs)) = cost(&kernels, inputs) {
-                    valid_graphs += 1;
-                    if option_env!("PRINT_KERNELS").is_some() {
-                        println!(
-                            "{}{}",
-                            format!(
-                                "Graph {valid_graphs} ({:.1}%) ",
-                                (n as f32 / total_trajectories as f32) * 100.0
-                            )
-                            .bold(),
-                            format!("{us}µs").bright_green().bold()
-                        );
-                    }
                     if ref_outputs.is_empty() {
                         ref_outputs = outs;
                     } else {
                         for (a, b) in ref_outputs.iter().zip(&outs) {
                             for (x, y) in a.iter().zip(b) {
                                 if (x - y).abs() >= 1e-3 {
-                                    if option_env!("PRINT_KERNELS").is_some() {
-                                        println!(
-                                            "{} {x} != {y}",
-                                            "Output Mismatch".on_bright_red()
-                                        );
-                                    }
+                                    println!("{} {x} != {y}", "Output Mismatch".on_bright_red());
                                     continue 'trajectory_loop;
                                 }
                             }
                         }
-                        if option_env!("PRINT_KERNELS").is_some() {
-                            println!("{}", "Outputs Validated".on_bright_green());
-                        }
+                        println!("{}", "Outputs Validated".on_bright_green());
                     }
-                    if kernels.node_count() - 2 < min_kernels {
-                        min_kernels = kernels.node_count() - 2;
+                    if us < best_time {
+                        best_time = us;
                         best_graph = Some(kernels);
                     }
                 }
             }
         }
-        // if min_kernels == 1 {
-        //     break;
-        // }
     }
-    println!("MIN: {min_kernels}");
     best_graph
 }
 
 pub fn extraction_to_graph(
     egraph: &EGraph,
-    trajectory: &[&NodeId],
+    trajectory: &[(&ClassId, &NodeId, bool)],
 ) -> StableGraph<GraphTerm, (), Directed> {
     let mut g: StableGraph<GraphTerm, (), Directed> = StableGraph::new();
 
@@ -222,11 +180,11 @@ pub fn extraction_to_graph(
 
     fn recurse(
         egraph: &EGraph,
-        trajectory: &[&NodeId],
+        trajectory: &[(&ClassId, &NodeId, bool)],
         current: &mut usize,
         g: &mut StableGraph<GraphTerm, (), Directed>,
     ) -> Ret {
-        let node_choice = trajectory[*current];
+        let (_, node_choice, _) = trajectory[*current];
         let enode = &egraph.nodes[node_choice];
         // println!("{}", enode.op);
         match enode.op.as_str() {
@@ -394,7 +352,7 @@ pub fn extraction_to_graph(
 
 fn cost<'a>(
     kernels: &StableGraph<Kernel, (u8, u8), Directed>,
-    inputs: &[(String, Vec<f32>)],
+    inputs: &[(&'static str, Vec<f32>)],
 ) -> Option<(Cost, Vec<Vec<f32>>)> {
     // Warm up resources (buffer allocation, kernel compiler, etc.)
     for _ in 0..WARMUP_TRIALS {

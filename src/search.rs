@@ -1,24 +1,394 @@
-use itertools::Itertools;
-use luminal::{
-    prelude::{
-        NodeIndex,
-        petgraph::{Directed, Direction, algo::toposort, prelude::StableGraph, visit::EdgeRef},
-    },
-    shape::{Expression, Term},
-};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     iter::repeat,
 };
 
-use crate::{
-    GMEMBuffer, GPUArch, GraphTerm, Kernel,
-    utils::{display_graph, validate_graph},
-};
+use itertools::Itertools;
+use petgraph::{algo::toposort, prelude::StableGraph, visit::EdgeRef, Directed, Direction};
+use regex::Regex;
+use rustc_hash::FxHashMap;
 
-pub const GRID_DIMS: usize = 2;
-pub const THREADBLOCK_DIMS: usize = 2;
-pub const MAX_THREADBLOCK_SIZE: usize = 1024; // this is max on mac
+use crate::prelude::*;
+
+const GRID_DIMS: usize = 2;
+const THREADBLOCK_DIMS: usize = 2;
+const MAX_THREADBLOCK_SIZE: usize = 1024; // this is max on mac
+
+#[derive(Clone)]
+enum GMEMBuffer {
+    PrevKernel { kernel: usize, output: usize },
+    Input { label: Option<String> },
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum GPUArch {
+    CUDA,
+    Metal(HashMap<usize, &'static str>),
+}
+
+impl GPUArch {
+    fn metal_buffer_type(&self, var: usize) -> &'static str {
+        match self {
+            Self::Metal(m) => m.get(&var).copied().unwrap_or(""),
+            _ => "",
+        }
+    }
+
+    fn add_metal_buffer_type(&mut self, var: usize, buf_type: &'static str) {
+        if let Self::Metal(m) = self {
+            m.insert(var, buf_type);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct Kernel {
+    pub code: String,
+    // launch params
+    pub grid: (Expression, Expression, Expression),
+    pub threadblock: (Expression, Expression, Expression),
+    pub smem: Expression, // sizes of required shared memory buffers
+    pub outputs: Vec<Expression>,
+}
+
+pub fn translate_graph(
+    graph: &Graph,
+) -> (StableGraph<GraphTerm, (), Directed>, Vec<(String, f32)>) {
+    let mut new_graph = StableGraph::new();
+    let mut node_mapping = FxHashMap::default();
+    let mut accumulators = vec![];
+    for node in toposort(&graph.graph, None).unwrap() {
+        let node_weight = graph.node_weight(node).unwrap();
+        let op_name_full = format!("{node_weight:?}");
+        let op = op_name_full
+            .split('|')
+            .next()
+            .unwrap_or(&op_name_full)
+            .trim();
+        let mut sources = graph.get_sources(node);
+        match op {
+            "Sqrt" | "Exp2" | "Sin" | "Contiguous" => {
+                // walk through input ranges and strides, making new loopins as we go
+                let (source, output_index, shape) = sources.pop().unwrap();
+                let mut new_source = node_mapping[&(source, output_index)];
+                for (i, (range, stride)) in
+                    shape.dims().into_iter().zip(shape.strides()).enumerate()
+                {
+                    let loopin = new_graph.add_node(GraphTerm::LoopIn {
+                        range,
+                        stride: Expression::from('z') * stride,
+                        marker: i.to_string(),
+                    });
+                    new_graph.add_edge(new_source, loopin, ());
+                    new_source = loopin;
+                }
+                let mut op = if op == "Contiguous" {
+                    new_source
+                } else {
+                    let r = new_graph.add_node(match op {
+                        "Sqrt" => GraphTerm::Sqrt,
+                        "Exp2" => GraphTerm::Exp,
+                        "Sin" => GraphTerm::Sin,
+                        _ => unreachable!(),
+                    });
+                    new_graph.add_edge(new_source, r, ());
+                    r
+                };
+                // walk through output and place loopouts
+                for (i, (stride, range)) in shape
+                    .dims()
+                    .into_iter()
+                    .rev()
+                    .scan(Expression::from(1), |i, s| {
+                        let r = *i;
+                        *i *= s;
+                        Some(r)
+                    })
+                    .zip(shape.dims())
+                    .enumerate()
+                {
+                    let loopout = new_graph.add_node(GraphTerm::LoopOut {
+                        range,
+                        stride: Expression::from('z') * stride,
+                        marker: (shape.dims().len() - i - 1).to_string(),
+                    });
+                    new_graph.add_edge(op, loopout, ());
+                    op = loopout;
+                }
+                node_mapping.insert((node, 0), op);
+            }
+            "Add" | "Mul" | "Mod" | "LessThan" => {
+                // walk through input ranges and strides, making new loopins as we go
+                let (source_a, output_index_a, shape_a) = sources.pop().unwrap();
+                let mut new_source_a = node_mapping[&(source_a, output_index_a)];
+                for (i, (range, stride)) in shape_a
+                    .dims()
+                    .into_iter()
+                    .zip(shape_a.strides())
+                    .enumerate()
+                {
+                    let loopin = new_graph.add_node(GraphTerm::LoopIn {
+                        range,
+                        stride: Expression::from('z') * stride,
+                        marker: i.to_string(),
+                    });
+                    new_graph.add_edge(new_source_a, loopin, ());
+                    new_source_a = loopin;
+                }
+                let (source_b, output_index_b, shape_b) = sources.pop().unwrap();
+                let mut new_source_b = node_mapping[&(source_b, output_index_b)];
+                for (i, (range, stride)) in shape_b
+                    .dims()
+                    .into_iter()
+                    .zip(shape_b.strides())
+                    .enumerate()
+                {
+                    let loopin = new_graph.add_node(GraphTerm::LoopIn {
+                        range,
+                        stride: Expression::from('z') * stride,
+                        marker: i.to_string(),
+                    });
+                    new_graph.add_edge(new_source_b, loopin, ());
+                    new_source_b = loopin;
+                }
+                let mut op = new_graph.add_node(match op {
+                    "Add" => GraphTerm::Add,
+                    "Mul" => GraphTerm::Mul,
+                    "Mod" => GraphTerm::Mod,
+                    "LessThan" => GraphTerm::LessThan,
+                    _ => unreachable!(),
+                });
+                new_graph.add_edge(new_source_a, op, ());
+                new_graph.add_edge(new_source_b, op, ());
+                // walk through output and place loopouts
+                for (i, (stride, range)) in shape_a
+                    .dims()
+                    .into_iter()
+                    .rev()
+                    .scan(Expression::from(1), |i, s| {
+                        let r = *i;
+                        *i *= s;
+                        Some(r)
+                    })
+                    .zip(shape_a.dims().into_iter().rev())
+                    .enumerate()
+                {
+                    let loopout = new_graph.add_node(GraphTerm::LoopOut {
+                        range,
+                        stride: Expression::from('z') * stride,
+                        marker: (shape_a.dims().len() - i - 1).to_string(),
+                    });
+                    new_graph.add_edge(op, loopout, ());
+                    op = loopout;
+                }
+                node_mapping.insert((node, 0), op);
+            }
+            s if s.starts_with("SumReduce") || s.starts_with("MaxReduce") => {
+                // make accumulator
+                let acc_label = format!("acc_{}", accumulators.len());
+                let (start_val, term, reduce_dim) = match op {
+                    s if s.starts_with("SumReduce") => {
+                        (0.0, GraphTerm::Add, graph.get_op::<SumReduce>(node).0)
+                    }
+                    s if s.starts_with("MaxReduce") => (
+                        f32::NEG_INFINITY,
+                        GraphTerm::Max,
+                        graph.get_op::<MaxReduce>(node).0,
+                    ),
+                    _ => unreachable!(),
+                };
+                accumulators.push((acc_label.clone(), start_val));
+                let mut acc = new_graph.add_node(GraphTerm::GMEM {
+                    label: Some(acc_label),
+                });
+                // walk through input ranges and strides, making new loopins as we go
+                let (source, output_index, shape) = sources.pop().unwrap();
+                let mut new_source = node_mapping[&(source, output_index)];
+                let mut rm_strides = shape
+                    .dims()
+                    .into_iter()
+                    .rev()
+                    .scan(Expression::from(1), |i, s| {
+                        let r = *i;
+                        *i *= s;
+                        Some(r)
+                    })
+                    .collect::<Vec<_>>();
+                rm_strides.reverse();
+                let mut after_acc = false;
+                for (i, ((range, stride), acc_stride)) in shape
+                    .dims()
+                    .into_iter()
+                    .zip(shape.strides())
+                    .zip(rm_strides)
+                    .enumerate()
+                {
+                    if i == reduce_dim {
+                        for z in i..THREADBLOCK_DIMS + GRID_DIMS + 1 {
+                            let loopin = new_graph.add_node(GraphTerm::LoopIn {
+                                range: 1.into(),
+                                stride: 0.into(),
+                                marker: format!("pad{z}"),
+                            });
+                            new_graph.add_edge(new_source, loopin, ());
+                            new_source = loopin;
+                            let new_acc = new_graph.add_node(GraphTerm::LoopIn {
+                                range: 1.into(),
+                                stride: 0.into(),
+                                marker: format!("pad{z}"),
+                            });
+                            new_graph.add_edge(acc, new_acc, ());
+                            acc = new_acc;
+                        }
+                    }
+                    let loopin = new_graph.add_node(GraphTerm::LoopIn {
+                        range,
+                        stride: Expression::from('z') * stride,
+                        marker: i.to_string(),
+                    });
+                    new_graph.add_edge(new_source, loopin, ());
+                    new_source = loopin;
+                    let stride = if i == reduce_dim {
+                        after_acc = true;
+                        Expression::from(Term::Acc('a'))
+                    } else if after_acc {
+                        Expression::from('z') * acc_stride
+                    } else {
+                        Expression::from(0)
+                    };
+                    let new_acc = new_graph.add_node(GraphTerm::LoopIn {
+                        range,
+                        stride,
+                        marker: i.to_string(),
+                    });
+                    new_graph.add_edge(acc, new_acc, ());
+                    acc = new_acc;
+                }
+                // Insert op
+                let mut op = new_graph.add_node(term);
+                new_graph.add_edge(new_source, op, ());
+                new_graph.add_edge(acc, op, ());
+                // walk through output and place loopouts
+                for ((stride, i), range) in shape
+                    .dims()
+                    .into_iter()
+                    .enumerate()
+                    .rev()
+                    .scan(Expression::from(1), |i, (ind, s)| {
+                        if ind == reduce_dim {
+                            Some((Expression::from(Term::Acc('a')), ind))
+                        } else {
+                            let r = *i;
+                            *i *= s;
+                            Some((r, ind))
+                        }
+                    })
+                    .zip(shape.dims().into_iter().rev())
+                {
+                    let loopout = new_graph.add_node(GraphTerm::LoopOut {
+                        range,
+                        stride: if i == reduce_dim {
+                            stride
+                        } else {
+                            Expression::from('z') * stride
+                        },
+                        marker: i.to_string(),
+                    });
+                    new_graph.add_edge(op, loopout, ());
+                    op = loopout;
+                    if i == reduce_dim {
+                        for z in (i..THREADBLOCK_DIMS + GRID_DIMS + 1).rev() {
+                            let loopout = new_graph.add_node(GraphTerm::LoopOut {
+                                range: 1.into(),
+                                stride: 0.into(),
+                                marker: format!("pad{z}"),
+                            });
+                            new_graph.add_edge(op, loopout, ());
+                            op = loopout;
+                        }
+                    }
+                }
+                node_mapping.insert((node, 0), op);
+            }
+            _ => {
+                // Assume a load
+                node_mapping.insert(
+                    (node, 0),
+                    new_graph.add_node(GraphTerm::GMEM {
+                        label: Some(op.to_string()),
+                    }),
+                );
+            }
+        }
+    }
+
+    (new_graph, accumulators)
+}
+
+#[derive(Clone, Debug)]
+pub enum GraphTerm {
+    GMEM {
+        // Signifies global memory
+        label: Option<String>,
+    },
+    LoopIn {
+        range: Expression,
+        stride: Expression,
+        marker: String,
+    },
+    LoopOut {
+        range: Expression,
+        stride: Expression,
+        marker: String,
+    },
+    Add,
+    Mul,
+    Mod,
+    Max,
+    Exp,
+    Recip,
+    Sin,
+    Neg,
+    SMEM,     // Signifies shared memory
+    SMEMLoad, // Takes in an smem pointer and a gmem pointer, copies the gmem element to smem and returns the smem pointer
+    SMEMRead, // Takes in an smem pointer and an smemload, returns the smem pointer
+    Sqrt,
+    LessThan,
+}
+
+impl std::fmt::Display for GraphTerm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GraphTerm::GMEM { label } => {
+                if let Some(label) = label {
+                    write!(f, "GMEM({label})")
+                } else {
+                    write!(f, "GMEM")
+                }
+            }
+            GraphTerm::LoopIn { range, stride, .. } => {
+                write!(f, "LoopIn(range: {range:?}, stride: {stride:?})")
+            }
+            GraphTerm::LoopOut { range, stride, .. } => {
+                write!(f, "LoopOut(range: {range:?}, stride: {stride:?})")
+            }
+            GraphTerm::Add => write!(f, "Add"),
+            GraphTerm::Mul => write!(f, "Mul"),
+            GraphTerm::Mod => write!(f, "Mod"),
+            GraphTerm::Max => write!(f, "Max"),
+            GraphTerm::Exp => write!(f, "Exp"),
+            GraphTerm::Recip => write!(f, "Recip"),
+            GraphTerm::Sin => write!(f, "Sin"),
+            GraphTerm::Neg => write!(f, "Neg"),
+            GraphTerm::SMEM => write!(f, "SMEM"),
+            GraphTerm::SMEMLoad => write!(f, "SMEMLoad"),
+            GraphTerm::SMEMRead => write!(f, "SMEMRead"),
+
+            GraphTerm::Sqrt => write!(f, "Sqrt"),
+            GraphTerm::LessThan => write!(f, "LessThan"),
+        }
+    }
+}
 
 pub fn codegen(
     graph: StableGraph<GraphTerm, (), Directed>,
@@ -26,7 +396,6 @@ pub fn codegen(
     mut arch: GPUArch,
     n_graph: usize,
 ) -> Option<StableGraph<Kernel, (u8, u8), Directed>> {
-    // display_graph(&graph, &[]);
     let (kernels, root_kernel) = split_kernels(graph, root, n_graph);
     // Create kernel meta graph to toposort
     let mut meta_graph = StableGraph::new();
@@ -74,8 +443,6 @@ pub fn codegen(
             continue; // Either input node or output node
         }
         let (kernel_graph, inputs, outputs, smem_buffers) = kernels[node.index()].clone();
-        validate_graph(&kernel_graph);
-        // display_graph(&kernel_graph, &[]);
         let mut node_to_var = inputs
             .iter()
             .map(|(_, n)| *n)
@@ -227,6 +594,8 @@ kernel void kernel{}(
             // Threadblock size is too large for device
             return None;
         }
+        // println!("{kernel}");
+        // println!("{:?}", outputs);
         *meta_graph.node_weight_mut(node).unwrap() = Kernel {
             code: kernel,
             grid: (grid[0], grid[1], grid[2]),
@@ -376,14 +745,11 @@ fn make_kernel(
                             );
                             current_elem_size *= range;
                         }
-                        let Some(cooresponding_output) = loop_outputs
+                        let cooresponding_output = loop_outputs
                             .iter()
                             .find(|(_, v)| v.terms.read()[0] == Term::Acc(acc_symbol))
-                        else {
-                            display_graph(&kernel_graph, &[]);
-                            panic!();
-                        };
-                        let cooresponding_output = cooresponding_output.0;
+                            .unwrap()
+                            .0;
                         curr = cooresponding_output;
                         let mut out_loops = vec![];
                         loop {
@@ -443,7 +809,7 @@ fn make_kernel(
                         .unwrap();
                     if !stride.is_acc() && !node_to_var.contains_key(&dest) {
                         // Handle the case where the dest is not the real loop output
-                        let size = stride.substitute('z', range).max(1);
+                        let size = stride.substitute('z', range);
                         if current_loop_level < THREADBLOCK_DIMS + GRID_DIMS {
                             return None;
                         }
@@ -862,7 +1228,6 @@ fn split_kernels(
     }
     root = map[&root];
 
-    // Assign loop levels
     let mut dfs = marked_graph.neighbors_undirected(root).collect_vec();
     let mut seen = HashSet::new();
     seen.insert(root);
@@ -901,7 +1266,7 @@ fn split_kernels(
             }
             marked_graph.node_weight_mut(n).unwrap().1 = neighbor_levels;
         } else {
-            display_graph(&marked_graph, &[(n, "yellow".to_string())]);
+            // display_graph(&marked_graph, &[(n, "yellow".to_string())]);
             panic!("No seen neighbors when building loop levels!");
         }
         dfs.extend(marked_graph.neighbors_undirected(n));
@@ -1292,4 +1657,184 @@ fn split_kernels(
     }
     let root_kernel = marked_graph.node_weight(root).unwrap().2[0];
     (kernel_graphs, root_kernel)
+}
+
+pub trait TermToString {
+    fn term_to_string(&self) -> String;
+}
+
+pub trait EdgeToString {
+    fn edge_to_string(&self) -> String;
+}
+
+impl EdgeToString for u8 {
+    fn edge_to_string(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl EdgeToString for () {
+    fn edge_to_string(&self) -> String {
+        "".to_string()
+    }
+}
+
+impl EdgeToString for (u8, u8) {
+    fn edge_to_string(&self) -> String {
+        format!("{}, {}", self.0, self.1)
+    }
+}
+
+// impl TermToString for Term {
+//     fn term_to_string(&self) -> String {
+//         match self {
+//             Term::App(a, _) => a.to_string(),
+//             Term::Lit(l) => l.to_string(),
+//             Term::Var(v) => v.to_string(),
+//         }
+//     }
+// }
+
+impl TermToString for usize {
+    fn term_to_string(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl TermToString for String {
+    fn term_to_string(&self) -> String {
+        self.clone()
+    }
+}
+
+// impl TermToString for (Term, usize) {
+//     fn term_to_string(&self) -> String {
+//         let s = match &self.0 {
+//             Term::App(a, _) => a.to_string(),
+//             Term::Lit(l) => l.to_string(),
+//             Term::Var(v) => v.to_string(),
+//         };
+//         format!("{s}[{}]", self.1)
+//     }
+// }
+
+impl TermToString for Kernel {
+    fn term_to_string(&self) -> String {
+        if self.code == "Inputs" || self.code == "Outputs" {
+            return self.code.clone();
+        } else {
+            format!(
+                "Kernel ({}, {}, {}), ({}, {}, {}) -> {:?}",
+                self.grid.0,
+                self.grid.1,
+                self.grid.2,
+                self.threadblock.0,
+                self.threadblock.1,
+                self.threadblock.2,
+                self.outputs
+            )
+        }
+    }
+}
+
+impl TermToString for GraphTerm {
+    fn term_to_string(&self) -> String {
+        match self {
+            GraphTerm::Add => "Add".to_string(),
+            GraphTerm::Mul => "Mul".to_string(),
+            GraphTerm::Max => "Max".to_string(),
+            GraphTerm::Exp => "Exp".to_string(),
+            GraphTerm::Sin => "Sin".to_string(),
+            GraphTerm::Recip => "Recip".to_string(),
+            GraphTerm::Neg => "Neg".to_string(),
+            GraphTerm::Sqrt => "Sqrt".to_string(),
+            GraphTerm::Mod => "Mod".to_string(),
+            GraphTerm::LessThan => "LessThan".to_string(),
+            GraphTerm::LoopIn {
+                range,
+                stride,
+                marker,
+            } => format!("LoopIn ({range}; {stride}; -{marker}-)"),
+            GraphTerm::LoopOut {
+                range,
+                stride,
+                marker,
+            } => format!("LoopOut ({range}; {stride}; -{marker}-)"),
+            GraphTerm::GMEM { label } => {
+                if let Some(label) = label {
+                    format!("GMEM ({label})")
+                } else {
+                    "GMEM".to_string()
+                }
+            }
+            GraphTerm::SMEM => "SMEM".to_string(),
+            GraphTerm::SMEMLoad => "SMEMLoad".to_string(),
+            GraphTerm::SMEMRead => "SMEMRead".to_string(),
+        }
+    }
+}
+
+impl TermToString for (GraphTerm, usize) {
+    fn term_to_string(&self) -> String {
+        format!("{} [{}]", self.0.term_to_string(), self.1)
+    }
+}
+
+impl TermToString for (GraphTerm, Vec<Expression>, Vec<usize>) {
+    fn term_to_string(&self) -> String {
+        format!("{} {:?} {{{:?}}}", self.0.term_to_string(), self.1, self.2)
+    }
+}
+
+impl TermToString for (GraphTerm, Vec<String>, Vec<usize>) {
+    fn term_to_string(&self) -> String {
+        format!(
+            "{} [{}] {{{:?}}}",
+            self.0.term_to_string(),
+            self.1.len(),
+            self.2
+        )
+    }
+}
+
+/// View a debug graph in the browser
+pub fn display_graph_2<G: TermToString, E: EdgeToString>(
+    graph: &petgraph::stable_graph::StableGraph<G, E, petgraph::Directed, u32>,
+    mark_nodes: &[(NodeIndex, String)],
+) {
+    let mut new_graph = StableGraph::new();
+    let mut map = HashMap::new();
+    for node in graph.node_indices() {
+        map.insert(
+            node,
+            new_graph.add_node(graph.node_weight(node).unwrap().term_to_string()),
+        );
+    }
+    for edge in graph.edge_indices() {
+        let weight = graph.edge_weight(edge).unwrap();
+        let (src, dest) = graph.edge_endpoints(edge).unwrap();
+        new_graph.add_edge(map[&src], map[&dest], weight.edge_to_string());
+    }
+    let mut graph_string =
+        petgraph::dot::Dot::with_config(&new_graph, &[petgraph::dot::Config::EdgeIndexLabel])
+            .to_string();
+    let re = Regex::new(r#"label\s*=\s*"\d+""#).unwrap();
+    graph_string = re.replace_all(&graph_string, "").to_string();
+    for (n, color) in mark_nodes {
+        graph_string = graph_string.replace(
+            &format!("    {} [ label =", n.index()),
+            &format!(
+                "    {} [ style=\"filled\" fillcolor=\"{color}\" label =",
+                n.index()
+            ),
+        );
+    }
+
+    let url = format!(
+        "https://dreampuf.github.io/GraphvizOnline/#{}",
+        urlencoding::encode(&graph_string)
+    );
+    if let Err(e) = webbrowser::open(&url) {
+        panic!("Error displaying graph: {:?}", e);
+    }
 }

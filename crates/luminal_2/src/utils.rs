@@ -3,7 +3,18 @@
 use std::collections::HashMap;
 
 use egglog::{EGraph, Error, Term, prelude::exprs::var};
-use petgraph::{Directed, Direction, graph::NodeIndex, prelude::StableGraph, visit::Topo};
+use luminal::{
+    prelude::{
+        NodeIndex,
+        petgraph::{
+            Directed, Direction,
+            dot::{Config, Dot},
+            prelude::StableGraph,
+            visit::Topo,
+        },
+    },
+    shape::Expression,
+};
 use regex::Regex;
 
 pub fn unary(
@@ -86,7 +97,7 @@ pub fn pad_out(
     node
 }
 
-use crate::{GraphTerm, Kernel, symbolic::Expression};
+use crate::{GraphTerm, Kernel};
 
 pub trait TermToString {
     fn term_to_string(&self) -> String;
@@ -177,6 +188,8 @@ impl TermToString for GraphTerm {
             GraphTerm::Recip => "Recip".to_string(),
             GraphTerm::Neg => "Neg".to_string(),
             GraphTerm::Sqrt => "Sqrt".to_string(),
+            GraphTerm::Mod => "Mod".to_string(),
+            GraphTerm::LessThan => "LessThan".to_string(),
             GraphTerm::LoopIn {
                 range,
                 stride,
@@ -226,7 +239,7 @@ impl TermToString for (GraphTerm, Vec<String>, Vec<usize>) {
 
 /// View a debug graph in the browser
 pub fn display_graph<G: TermToString, E: EdgeToString>(
-    graph: &petgraph::stable_graph::StableGraph<G, E, petgraph::Directed, u32>,
+    graph: &StableGraph<G, E, Directed, u32>,
     mark_nodes: &[(NodeIndex, String)],
 ) {
     let mut new_graph = StableGraph::new();
@@ -242,9 +255,7 @@ pub fn display_graph<G: TermToString, E: EdgeToString>(
         let (src, dest) = graph.edge_endpoints(edge).unwrap();
         new_graph.add_edge(map[&src], map[&dest], weight.edge_to_string());
     }
-    let mut graph_string =
-        petgraph::dot::Dot::with_config(&new_graph, &[petgraph::dot::Config::EdgeIndexLabel])
-            .to_string();
+    let mut graph_string = Dot::with_config(&new_graph, &[Config::EdgeIndexLabel]).to_string();
     let re = Regex::new(r#"label\s*=\s*"\d+""#).unwrap();
     graph_string = re.replace_all(&graph_string, "").to_string();
     for (n, color) in mark_nodes {
@@ -345,6 +356,9 @@ pub fn build_search_space(
     remove_tiling: bool,
 ) -> egraph_serialize::EGraph {
     let (rendered, root) = render_egglog(graph);
+    if option_env!("PRINT_KERNELS").is_some() {
+        println!("{rendered}");
+    }
     let code = include_str!("code.lisp");
 
     let mut final_code = code
@@ -369,6 +383,7 @@ pub fn build_search_space(
         ); // tiling rule is causing an egglog bug!
     }
     let (_egglog_messages, serialized) = run_egglog_program(&final_code, &root).unwrap();
+    println!("Done");
     serialized
 }
 
@@ -386,7 +401,7 @@ fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>) -> (String, Strin
                    names: &HashMap<NodeIndex, String>,
                    g: &StableGraph<GraphTerm, (), Directed>|
      -> Vec<String> {
-        g.neighbors_directed(n, petgraph::Incoming)
+        g.neighbors_directed(n, Direction::Incoming)
             .map(|child| names[&child].clone())
             .collect()
     };
@@ -433,6 +448,8 @@ fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>) -> (String, Strin
             | GraphTerm::Mul
             | GraphTerm::Max
             | GraphTerm::Exp
+            | GraphTerm::Mod
+            | GraphTerm::LessThan
             | GraphTerm::Recip
             | GraphTerm::Sin
             | GraphTerm::Neg
@@ -449,6 +466,8 @@ fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>) -> (String, Strin
                     GraphTerm::Sin => "Sin",
                     GraphTerm::Neg => "Neg",
                     GraphTerm::Sqrt => "Sqrt",
+                    GraphTerm::Mod => "Mod",
+                    GraphTerm::LessThan => "LessThan",
                     GraphTerm::SMEMLoad => "SMEMLoad",
                     GraphTerm::SMEMRead => "SMEMRead",
                     _ => unreachable!(),
@@ -469,7 +488,7 @@ fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>) -> (String, Strin
         .node_indices()
         .find(|&idx| {
             graph
-                .neighbors_directed(idx, petgraph::Outgoing)
+                .neighbors_directed(idx, Direction::Outgoing)
                 .next()
                 .is_none()
         })

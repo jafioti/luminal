@@ -162,8 +162,10 @@ impl ShapeTracker {
                 let ret = *state;
                 if !self.fake[i] {
                     *state *= self.dims[i];
+                    Some(ret)
+                } else {
+                    Some(Expression::from(0))
                 }
-                Some(ret)
             })
             .collect::<Vec<_>>();
         strides.reverse();

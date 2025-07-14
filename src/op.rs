@@ -179,6 +179,21 @@ impl Operator for Constant {
     }
 }
 
+/// Graph break for chunking search graphs
+#[derive(Clone, PartialEq)]
+pub struct GraphBreak(pub ConstantValue, pub *const FxHashMap<char, usize>);
+impl Debug for GraphBreak {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GraphBreak")
+    }
+}
+
+impl Operator for GraphBreak {
+    fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        unimplemented!()
+    }
+}
+
 // Unary Op (A -> A)
 
 /// Ensure a tensor is contiguously layed out in memory. May involve copying

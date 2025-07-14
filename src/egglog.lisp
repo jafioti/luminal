@@ -84,7 +84,6 @@
      	(Binary String Expr Expr)
       	(SwapLoops Expr String String) ; Swap two loops, identified by their string
        	(TileLoop Expr String) ; Tile a loop, identified by it's string
-        (UnpadLoop Expr String) ; Remove a padding loop, identified by it's string
      )
 )
 
@@ -112,47 +111,23 @@
 ;(rewrite (Add (Add ?a ?b) ?c) (Add ?a (Add ?b ?c)))
 ;(rewrite (Mul (Mul ?a ?b) ?c) (Mul ?a (Mul ?b ?c)))
 
-; remove pad loop
+; remove 1-level loop
 (rewrite
- 	(LoopOut (Unary ?un (LoopIn ?x (Loop ?loop (MNum 1)) (MNum 0))) (Loop ?loop (MNum 1)) (MNum 0))
+ 	(LoopOut (Unary ?un (LoopIn ?x (Loop ?loop (MNum 1)) (MVar "z"))) (Loop ?loop (MNum 1)) (MVar "z"))
 	(Unary ?un ?x)
 )
 (rewrite
- 	(LoopOut (Binary ?bin (LoopIn ?a (Loop ?loop (MNum 1)) (MNum 0)) (LoopIn ?b (Loop ?loop (MNum 1)) (MNum  0))) (Loop ?loop (MNum 1)) (MNum 0))
+ 	(LoopOut (Binary ?bin (LoopIn ?a (Loop ?loop (MNum 1)) (MVar "z")) (LoopIn ?b (Loop ?loop (MNum 1)) (MVar "z"))) (Loop ?loop (MNum 1)) (MVar "z"))
 	(Binary ?bin ?a ?b)
-)
-; add pad loop
-(rewrite
-	(LoopOut (Unary ?un ?x) (Loop ?l ?r) ?s)
-	(LoopOut (LoopOut (Unary ?un (LoopIn ?x (Loop "newpad" (MNum 1)) (MNum 0))) (Loop "newpad" (MNum 1)) (MNum 0)) (Loop ?l ?r) ?s)
-	:when ((!= ?r (MNum 1)) (!= ?s (MNum 0)))
-)
-(rewrite
-	(LoopOut (Binary ?bin ?a ?b) (Loop ?l ?r) ?s)
-	(LoopOut (LoopOut (Binary ?bin (LoopIn ?a (Loop "newpad" (MNum 1)) (MNum 0)) (LoopIn ?b (Loop "newpad" (MNum 1)) (MNum 0))) (Loop "newpad" (MNum 1)) (MNum 0)) (Loop ?l ?r) ?s)
-	:when ((!= ?r (MNum 1)) (!= ?s (MNum 0)))
-)
-(rewrite
-	(LoopOut (Binary ?bin2 (Binary ?bin ?a ?b) ?c) (Loop ?l ?r) ?s)
-	(LoopOut (LoopOut (Binary ?bin2 (Binary ?bin (LoopIn ?a (Loop "newpad" (MNum 1)) (MNum 0)) (LoopIn ?b (Loop "newpad" (MNum 1)) (MNum 0))) (LoopIn ?c (Loop "newpad" (MNum 1)) (MNum 0))) (Loop "newpad" (MNum 1)) (MNum 0)) (Loop ?l ?r) ?s)
-	:when ((!= ?r (MNum 1)) (!= ?s (MNum 0)))
 )
 
 ; Loop Fusion
-(rewrite (LoopIn (LoopOut ?x (Loop ?loopA ?range) ?st) (Loop ?loopB ?range) ?st) ?x)
+(rewrite (LoopIn (LoopOut ?x ?loop ?st) ?loop ?st) ?x
+	;:when ((!= ?st (MAccum ?y))) ; don't fuse if we're accumulating that loop
+) ; this is causing infinite loops in the e-graph!
 
 ; Loop Fission
 
-
-; Specialized swap loops
-(rewrite
-	(LoopOut (LoopOut (Binary ?bin (LoopIn (LoopIn ?a ?outA ?outASt) ?inA ?inASt) (LoopIn (LoopIn ?b ?outB ?outBSt) ?inB ?inBSt)) ?in ?inSt) ?out ?outSt)
-	(LoopOut (LoopOut (Binary ?bin (LoopIn (LoopIn ?a ?inA ?inASt) ?outA ?outASt) (LoopIn (LoopIn ?b ?inB ?inBSt) ?outB ?outBSt)) ?out ?outSt) ?in ?inSt)
-)
-(rewrite
-	(LoopOut (LoopOut (Binary ?bin2 (Binary ?bin (LoopIn (LoopIn ?a ?outA ?outASt) ?inA ?inASt) (LoopIn (LoopIn ?b ?outB ?outBSt) ?inB ?inBSt)) (LoopIn (LoopIn ?c ?outC ?outCSt) ?inC ?inCSt)) ?in ?inSt) ?out ?outSt)
-	(LoopOut (LoopOut (Binary ?bin2 (Binary ?bin (LoopIn (LoopIn ?a ?inA ?inASt) ?outA ?outASt) (LoopIn (LoopIn ?b ?inB ?inBSt) ?outB ?outBSt)) (LoopIn (LoopIn ?c ?inC ?inCSt) ?outC ?outCSt)) ?out ?outSt) ?in ?inSt)
-)
 
 ; Loop tiling
 (rewrite
@@ -201,39 +176,45 @@
 	(Binary ?bin (TileLoop ?bodyA ?loop) (TileLoop ?bodyB ?loop))
 )
 
+; Loop swapping
+(rewrite  ; 0-1
+	(LoopOut (LoopOut ?body (Loop ?innerLoop ?innerLoopAmt) ?innerSt) (Loop ?outerLoop ?outerLoopAmt) ?outerSt)
+	(LoopOut (LoopOut (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?outerLoop ?outerLoopAmt) ?outerSt) (Loop ?innerLoop ?innerLoopAmt) ?innerSt)
+	:when ((!= ?innerLoop ?outerLoop))
+)
+(rewrite ; 0-1
+	(SwapLoops (LoopIn (LoopIn ?body (Loop ?outerLoop ?outerLoopAmt) ?outerSt) (Loop ?innerLoop ?innerLoopAmt) ?innerSt) ?innerLoop ?outerLoop)
+	(LoopIn (LoopIn ?body (Loop ?innerLoop ?innerLoopAmt) ?innerSt) (Loop ?outerLoop ?outerLoopAmt) ?outerSt)
+)
+; propogate
+(rewrite
+	(SwapLoops (LoopIn ?body (Loop ?otherLoop ?otherLoopAmt) ?otherSt) ?innerLoop ?outerLoop)
+	(LoopIn (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?otherLoop ?otherLoopAmt) ?otherSt)
+	:when ((!= ?innerLoop ?otherLoop))
+)
+(rewrite
+	(SwapLoops (LoopOut ?body (Loop ?otherLoop ?otherLoopAmt) ?otherSt) ?innerLoop ?outerLoop)
+	(LoopOut (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?otherLoop ?otherLoopAmt) ?otherSt)
+)
+(rewrite
+	(SwapLoops (LoopIn (LoopIn ?body (Loop ?otherOtherLoop ?otherOtherLoopAmt) ?otherOtherSt) (Loop ?otherLoop ?otherLoopAmt) ?otherSt) ?innerLoop ?outerLoop)
+	(LoopIn (LoopIn (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?otherOtherLoop ?otherOtherLoopAmt) ?otherOtherSt) (Loop ?otherLoop ?otherLoopAmt) ?otherSt)
+	:when ((!= ?innerLoop ?otherLoop) (!= ?innerLoop ?otherOtherLoop))
+)
+(rewrite
+	(SwapLoops (LoopOut (LoopOut ?body (Loop ?otherOtherLoop ?otherOtherLoopAmt) ?otherOtherSt) (Loop ?otherLoop ?otherLoopAmt) ?otherSt) ?innerLoop ?outerLoop)
+	(LoopOut (LoopOut (SwapLoops ?body ?innerLoop ?outerLoop) (Loop ?otherOtherLoop ?otherOtherLoopAmt) ?otherOtherSt) (Loop ?otherLoop ?otherLoopAmt) ?otherSt)
+)
+(rewrite
+	(SwapLoops (Unary ?un ?body) ?innerLoop ?outerLoop)
+	(Unary ?un (SwapLoops ?body ?innerLoop ?outerLoop))
+)
+(rewrite
+	(SwapLoops (Binary ?bin ?bodyA ?bodyB) ?innerLoop ?outerLoop)
+	(Binary ?bin (SwapLoops ?bodyA ?innerLoop ?outerLoop) (SwapLoops ?bodyB ?innerLoop ?outerLoop))
+)
 
 ;(rewrite (Unary ?s ?x) (LoopOut (Unary ?s (LoopIn ?x (Loop "_" (MNum 1)) (MVar "z"))) (Loop "_" (MNum 1)) (MVar "z"))) ; add one-level loop
 
 {code}
 (run {iters})
-
-(let acc_gmem (GMEM "acc_0"))
-(let acc_0 (LoopIn acc_gmem (Loop "0" (MNum 1)) (MNum 0)))
-(let acc_1 (LoopIn acc_0 (Loop "1" (MNum 5)) (MNum 0)))
-(let acc_pad3 (LoopIn acc_1 (Loop "newpad" (MNum 1)) (MNum 0)))
-(let acc_pad2 (LoopIn acc_pad3 (Loop "newpad" (MNum 1)) (MNum 0)))
-(let acc_2 (LoopIn acc_pad2 (Loop "2" (MNum 4)) (MAccum "a")))
-
-(let weight_gmem (GMEM "Weight Load"))
-(let weight_0 (LoopIn weight_gmem (Loop "0" (MNum 1)) (MNum 0)))
-(let weight_1 (LoopIn weight_0 (Loop "1" (MNum 5)) (MVar "z")))
-(let weight_pad3 (LoopIn weight_1 (Loop "newpad" (MNum 1)) (MNum 0)))
-(let weight_pad2 (LoopIn weight_pad3 (Loop "newpad" (MNum 1)) (MNum 0)))
-(let weight_2 (LoopIn weight_pad2 (Loop "2" (MNum 4)) (MMul (MVar "z") (MNum 5))))
-
-(let tensor_gmem (GMEM "Tensor Load"))
-(let tensor_0 (LoopIn tensor_gmem (Loop "0" (MNum 1)) (MNum 0)))
-(let tensor_1 (LoopIn tensor_0 (Loop "1" (MNum 5)) (MNum 0)))
-(let tensor_pad3 (LoopIn tensor_1 (Loop "newpad" (MNum 1)) (MNum 0)))
-(let tensor_pad2 (LoopIn tensor_pad3 (Loop "newpad" (MNum 1)) (MNum 0)))
-(let tensor_2 (LoopIn tensor_pad2 (Loop "2" (MNum 4)) (MVar "z")))
-
-(let add_2 (Add acc_2 (Mul tensor_2 weight_2)))
-
-(let out2_2 (LoopOut add_2 (Loop "2" (MNum 4)) (MAccum "a")))
-(let out2_pad2 (LoopOut out2_2 (Loop "newpad" (MNum 1)) (MNum 0)))
-(let out2_pad3 (LoopOut out2_pad2 (Loop "newpad" (MNum 1)) (MNum 0)))
-(let out2_1 (LoopOut out2_pad3 (Loop "1" (MNum 5)) (MVar "z")))
-(let out2_0 (LoopOut out2_1 (Loop "0" (MNum 1)) (MMul (MVar "z") (MNum 5))))
-
-;(check (= out2_0 t28))

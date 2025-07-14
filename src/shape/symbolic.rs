@@ -1,6 +1,7 @@
 use egg::*;
 use generational_box::{AnyStorage, GenerationalBox, Owner, UnsyncStorage};
 use rustc_hash::FxHashMap;
+use serde::{Serialize, Serializer};
 use std::{
     cell::RefCell,
     fmt::Debug,
@@ -13,7 +14,7 @@ use std::{
 use symbolic_expressions::Sexp;
 
 thread_local! {
-    static EXPRESSION_OWNER: RefCell<Option<Owner<UnsyncStorage>>> = RefCell::new(Some(UnsyncStorage::owner()));
+   static EXPRESSION_OWNER: RefCell<Option<Owner<UnsyncStorage>>> = RefCell::new(Some(UnsyncStorage::owner()));
 }
 
 /// Clean up symbolic expresion storage
@@ -22,7 +23,7 @@ pub fn expression_cleanup() {
 }
 
 /// Get the thread-local owner of expression storage
-fn expression_owner() -> Owner {
+pub fn expression_owner() -> Owner {
     EXPRESSION_OWNER.with(|cell| cell.borrow().clone().unwrap())
 }
 
@@ -31,17 +32,31 @@ pub struct Expression {
     pub terms: GenerationalBox<Vec<Term>>,
 }
 
+impl Serialize for Expression {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Access the Vec<Term> inside the GenerationalBox and serialize it
+        self.terms.read().serialize(serializer)
+    }
+}
+
 impl Expression {
-    fn new(terms: Vec<Term>) -> Self {
+    pub fn new(terms: Vec<Term>) -> Self {
         Self {
             terms: expression_owner().insert(terms),
         }
+    }
+
+    pub fn is_acc(&self) -> bool {
+        self.terms.read().len() == 1 && matches!(self.terms.read()[0], Term::Acc(_))
     }
 }
 
 impl Hash for Expression {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.simplify().terms.read().hash(state);
+        self.terms.read().hash(state);
     }
 }
 
@@ -52,7 +67,7 @@ impl Default for Expression {
 }
 
 /// A single term of a symbolic expression such as a variable, number or operation.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum Term {
     Num(i32),
     Var(char),
@@ -67,6 +82,7 @@ pub enum Term {
     Or,
     Gte,
     Lt,
+    Acc(char),
 }
 
 impl std::fmt::Debug for Term {
@@ -85,6 +101,7 @@ impl std::fmt::Debug for Term {
             Term::Or => write!(f, "||"),
             Term::Gte => write!(f, ">="),
             Term::Lt => write!(f, "<"),
+            Term::Acc(s) => write!(f, "{s}"),
         }
     }
 }
@@ -128,6 +145,19 @@ impl Term {
             _ => None,
         }
     }
+    pub fn to_egglog(self) -> String {
+        match self {
+            Term::Add => "MAdd",
+            Term::Sub => "MSub",
+            Term::Mul => "MMul",
+            Term::Div => "MDiv",
+            Term::Mod => "MMod",
+            Term::Max => "MMax",
+            Term::Min => "MMin",
+            _ => panic!("egglog doesn't implement {self:?}"),
+        }
+        .to_string()
+    }
 }
 
 impl<T> PartialEq<T> for Expression
@@ -136,7 +166,6 @@ where
 {
     fn eq(&self, other: &T) -> bool {
         *self.terms.read() == *other.into().terms.read()
-        // self.equivalent(&other.into()) // For some reason this makes compilation (maybe understandable) and graphs (what?) very slow!
     }
 }
 
@@ -155,6 +184,7 @@ impl Debug for Expression {
             let new_symbol = match term {
                 Term::Num(n) => n.to_string(),
                 Term::Var(c) => c.to_string(),
+                Term::Acc(_) => "1".to_string(), // super jank, exists so that we can max(Acc, x)
                 Term::Max => format!(
                     "max({}, {})",
                     symbols.pop().unwrap(),
@@ -173,7 +203,38 @@ impl Debug for Expression {
             };
             symbols.push(new_symbol);
         }
-        write!(f, "{}", symbols.pop().unwrap())
+        write!(f, "{}", symbols.pop().unwrap_or_default())
+    }
+}
+
+impl Expression {
+    pub fn to_egglog(&self) -> String {
+        let mut symbols = vec![];
+        for term in self.terms.read().iter() {
+            let new_symbol = match term {
+                Term::Num(n) => format!("(MNum {n})"),
+                Term::Var(c) => format!("(MVar \"{c}\")"),
+                Term::Acc(s) => format!("(MAccum \"{s}\")"),
+                Term::Max => format!(
+                    "(MMax {} {})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+                Term::Min => format!(
+                    "(MMin {} {})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+                _ => format!(
+                    "({} {} {})",
+                    term.to_egglog(),
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+            };
+            symbols.push(new_symbol);
+        }
+        symbols.pop().unwrap_or_default()
     }
 }
 
@@ -312,7 +373,9 @@ impl Expression {
         }
         Expression::new(new_terms)
     }
+}
 
+impl Expression {
     /// Evaluate the expression with no variables. Returns Some(value) if no variables are required, otherwise returns None.
     pub fn to_usize(&self) -> Option<usize> {
         self.exec(&FxHashMap::default())
@@ -327,6 +390,7 @@ impl Expression {
         for term in self.terms.read().iter() {
             match term {
                 Term::Num(n) => stack.push(*n as i64),
+                Term::Acc(_) => stack.push(1),
                 Term::Var(_) => stack.push(value as i64),
                 _ => {
                     let a = stack.pop().unwrap();
@@ -350,6 +414,7 @@ impl Expression {
         for term in self.terms.read().iter() {
             match term {
                 Term::Num(n) => stack.push(*n as i64),
+                Term::Acc(_) => stack.push(1),
                 Term::Var(c) =>
                 {
                     #[allow(clippy::needless_borrow)]
@@ -381,6 +446,7 @@ impl Expression {
         for term in self.terms.read().iter() {
             match term {
                 Term::Num(n) => stack.push(*n as f64),
+                Term::Acc(_) => stack.push(1.0),
                 Term::Var(c) =>
                 {
                     #[allow(clippy::needless_borrow)]
@@ -417,31 +483,6 @@ impl Expression {
             .read()
             .iter()
             .any(|t| matches!(t, Term::Var('-')))
-    }
-
-    /// `true` if the two expressions are provably equivalent under `make_rules()`.
-    pub fn equivalent(&self, other: &Self) -> bool {
-        // short‑cuts that cost ~0
-        if std::ptr::eq(self, other) {
-            return true;
-        }
-        if *self.terms.read() == *other.terms.read() {
-            return true;
-        }
-
-        // 1. create an e‑graph and add both expressions
-        let mut egraph: EGraph = Default::default();
-        let id_a = egraph.add_expr(&luminal_to_egg(self));
-        let id_b = egraph.add_expr(&luminal_to_egg(other));
-
-        // 2. saturate with your rewrite rules (reuse the same limit you like)
-        let runner = Runner::default()
-            .with_egraph(egraph)
-            .with_iter_limit(5)
-            .run(&make_rules());
-
-        // 3. equivalent ⇔ their classes are identical
-        runner.egraph.find(id_a) == runner.egraph.find(id_b)
     }
 }
 
@@ -761,6 +802,18 @@ impl std::iter::Product for Expression {
     }
 }
 
+impl std::iter::Sum for Expression {
+    fn sum<I: Iterator<Item = Expression>>(mut iter: I) -> Self {
+        let Some(mut p) = iter.next() else {
+            return 0.into();
+        };
+        for n in iter {
+            p += n;
+        }
+        p
+    }
+}
+
 impl<E: Into<Expression>> AddAssign<E> for Expression {
     fn add_assign(&mut self, rhs: E) {
         *self = *self + rhs;
@@ -820,6 +873,7 @@ fn luminal_to_egg(expr: &Expression) -> RecExpr<Math> {
             Term::Num(_) | Term::Var(_) => {
                 stack.push(symbolic_expressions::Sexp::String(format!("{term:?}")))
             }
+            Term::Acc(_) => stack.push(symbolic_expressions::Sexp::String("1".to_string())),
             _ => {
                 let left = stack.pop().unwrap();
                 let right = stack.pop().unwrap();
@@ -1084,7 +1138,9 @@ fn egg_simplify(e: Expression) -> Expression {
     let expr = luminal_to_egg(&e);
     // Simplify
     let runner = Runner::default()
-        .with_iter_limit(5)
+        // .with_iter_limit(1_000)
+        // .with_time_limit(std::time::Duration::from_secs(30))
+        // .with_node_limit(100_000_000)
         .with_expr(&expr)
         .run(&make_rules());
     // runner.print_report();
@@ -1096,8 +1152,7 @@ fn egg_simplify(e: Expression) -> Expression {
 
 #[cfg(test)]
 mod tests {
-
-    use crate::prelude::*;
+    use super::*;
     #[test]
     fn test_expressions() {
         let n = Expression::from('x') + (256 - (Expression::from('x') % 256));
