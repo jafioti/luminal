@@ -5,7 +5,7 @@
 ## step-by-step instructions:
 1. Download Llama-3 8B weights from Hugging Face
     -  ```bash
-        bash setup.sh
+        bash setup/setup.sh
         ```
 2. Execute a Sample Llama Prompt
     - if you are on a macbook:

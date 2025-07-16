@@ -31,7 +31,8 @@ pub fn run_egglog_program(code: &str) -> Result<(Vec<String>, String, String), E
     let msgs = egraph.run_program(commands)?;
     println!("Run Report:  {}", egraph.get_run_report().as_ref().unwrap());
     let (sort, value) = egraph.eval_expr(&var!("one_output"))?;
-    let (termdag, root) = egraph.extract_value(&sort, value)?;
+    let (termdag, root, _) = egraph.extract_value(&sort, value)?; 
+    // Remove the underscore prefix and uncomment the display_graph call to display the graph in GraphViz.
     let (_petgraph, _root_idx) = dag_to_petgraph(&termdag, root.clone());
     // display_graph(&petgraph, &[root_idx]);
     let s = egraph.serialize(egglog::SerializeConfig {
