@@ -48,7 +48,7 @@ fn main() {
     let outputs = run_graph(&inputs, &kernels);
     println!("{:?}", outputs);
 
-    let egraph = build_search_space(&new_graph, 8, false);
+    let egraph = build_search_space(&new_graph, 5, false);
     let kernels = search(&egraph, &inputs, GPUArch::Metal(HashMap::default())).unwrap();
     println!("kernels : {}", kernels.node_count() - 2);
     let outputs = run_graph(&inputs, &kernels);
