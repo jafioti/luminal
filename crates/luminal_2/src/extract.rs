@@ -1,12 +1,12 @@
 use std::usize;
 
 use crate::Kernel;
-use crate::utils::display_graph;
+use crate::run::produce_buffer_map;
+use crate::utils::{display_graph, print_kernels};
 use crate::{GPUArch, GraphTerm, run::run_graph};
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
 use luminal::prelude::NodeIndex;
-use luminal::prelude::petgraph::algo::toposort;
 use luminal::prelude::petgraph::prelude::StableGraph;
 use luminal::prelude::petgraph::{Directed, Direction};
 use luminal::shape::{Expression, Term};
@@ -29,7 +29,7 @@ type Cost = u128; // Execution time in microseconds
 
 pub fn search(
     egraph: &EGraph,
-    inputs: &[(String, Vec<f32>)],
+    inputs: &[(NodeIndex, Vec<f32>)],
     arch: GPUArch,
 ) -> Option<StableGraph<Kernel, (u8, u8)>> {
     fn recurse<'a>(
@@ -116,7 +116,9 @@ pub fn search(
         let graph = extraction_to_graph(egraph, &trajectory);
         let root = graph.externals(Direction::Outgoing).next().unwrap();
         // display_graph(&graph, &[]);
-        let Some(kernels) = crate::codegen::codegen(graph.clone(), root, arch.clone(), 0) else {
+        let Some((kernels, gmem_mapping)) =
+            crate::codegen::codegen(graph.clone(), root, arch.clone(), 0)
+        else {
             continue;
         };
         if kernels.node_count() == 1 {
@@ -125,21 +127,7 @@ pub fn search(
         }
         // Print kernels
         if option_env!("PRINT_KERNELS").is_some() {
-            println!("Kernels: {}", kernels.node_count() - 2);
-            for (i, node) in toposort(&kernels, None).unwrap().into_iter().enumerate() {
-                let Kernel {
-                    code,
-                    grid,
-                    threadblock,
-                    smem,
-                    outputs,
-                } = kernels.node_weight(node).unwrap();
-                if !code.starts_with("Inputs") && code != "Outputs" {
-                    println!("Kernel {i} Grid: {grid:?} Threadblock: {threadblock:?} Smem: {smem}");
-                    println!("{code}");
-                    println!("Outputs: {:?}", outputs);
-                }
-            }
+            print_kernels(&kernels);
         }
         match &arch {
             GPUArch::CUDA => {
@@ -304,7 +292,8 @@ pub fn extraction_to_graph(
                     panic!()
                 };
                 let r = g.add_node(match enode.op.as_str() {
-                    "Exp" => GraphTerm::Exp,
+                    "Exp2" => GraphTerm::Exp2,
+                    "Log2" => GraphTerm::Log2,
                     "Sin" => GraphTerm::Sin,
                     "Recip" => GraphTerm::Recip,
                     "Neg" => GraphTerm::Neg,
@@ -394,18 +383,32 @@ pub fn extraction_to_graph(
 
 fn cost<'a>(
     kernels: &StableGraph<Kernel, (u8, u8), Directed>,
-    inputs: &[(String, Vec<f32>)],
+    inputs: &[(NodeIndex, Vec<f32>)],
 ) -> Option<(Cost, Vec<Vec<f32>>)> {
+    // Get buffer info
+    let (buffer_sizes, buffer_map) = produce_buffer_map(kernels);
     // Warm up resources (buffer allocation, kernel compiler, etc.)
     for _ in 0..WARMUP_TRIALS {
-        run_graph(inputs, &kernels);
+        run_graph(
+            inputs,
+            &kernels,
+            &buffer_map,
+            &buffer_sizes,
+            &FxHashMap::default(),
+        );
     }
     // Test runtime
     let mut micros = vec![];
     let mut outputs = vec![];
     let mut m;
     for _ in 0..TRIALS {
-        (outputs, m) = run_graph(inputs, &kernels);
+        (outputs, m) = run_graph(
+            inputs,
+            &kernels,
+            &buffer_map,
+            &buffer_sizes,
+            &FxHashMap::default(),
+        );
         micros.push(m);
     }
     Some((micros.into_iter().sum::<u128>() / TRIALS as u128, outputs))

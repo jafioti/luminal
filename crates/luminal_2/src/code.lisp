@@ -68,7 +68,8 @@
         (SMEMRead Expr Expr)
 
         ; Unary Ops
-     	(Exp Expr)
+     	(Exp2 Expr)
+      	(Log2 Expr)
     	(Sqrt Expr)
      	(Sin Expr)
       	(Recip Expr)
@@ -89,8 +90,10 @@
 )
 
 ; Convert to and from generic unary ops
-(rewrite (Exp ?x) (Unary "Exp" ?x))
-(rewrite (Unary "Exp" ?x) (Exp ?x))
+(rewrite (Exp2 ?x) (Unary "Exp2" ?x))
+(rewrite (Unary "Exp2" ?x) (Exp2 ?x))
+(rewrite (Log2 ?x) (Unary "Log2" ?x))
+(rewrite (Unary "Log2" ?x) (Log2 ?x))
 (rewrite (Sqrt ?x) (Unary "Sqrt" ?x))
 (rewrite (Unary "Sqrt" ?x) (Sqrt ?x))
 (rewrite (Sin ?x) (Unary "Sin" ?x))

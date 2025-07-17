@@ -11,9 +11,14 @@ use crate::{
 
 pub fn translate_graph(
     graph: &Graph,
-) -> (StableGraph<GraphTerm, (), Directed>, Vec<(String, f32)>) {
+) -> (
+    StableGraph<GraphTerm, (), Directed>,
+    FxHashMap<NodeIndex, NodeIndex>,
+    Vec<(NodeIndex, f32, Expression)>,
+) {
     let mut new_graph = StableGraph::new();
     let mut node_mapping = FxHashMap::default();
+    let mut old_to_new_mapping = FxHashMap::default();
     let mut accumulators = vec![];
     for node in toposort(&graph.graph, None).unwrap() {
         let node_weight = graph.node_weight(node).unwrap();
@@ -25,7 +30,7 @@ pub fn translate_graph(
             .trim();
         let mut sources = graph.get_sources(node);
         match op {
-            "Sqrt" | "Exp2" | "Sin" | "Contiguous" => {
+            "Sqrt" | "Exp2" | "Log2" | "Sin" | "Contiguous" | "Recip" => {
                 // walk through input ranges and strides, making new loopins as we go
                 let (source, output_index, shape) = sources.pop().unwrap();
                 let mut new_source = node_mapping[&(source, output_index)];
@@ -45,8 +50,10 @@ pub fn translate_graph(
                 } else {
                     let r = new_graph.add_node(match op {
                         "Sqrt" => GraphTerm::Sqrt,
-                        "Exp2" => GraphTerm::Exp,
+                        "Exp2" => GraphTerm::Exp2,
+                        "Log2" => GraphTerm::Log2,
                         "Sin" => GraphTerm::Sin,
+                        "Recip" => GraphTerm::Recip,
                         _ => unreachable!(),
                     });
                     new_graph.add_edge(new_source, r, ());
@@ -143,22 +150,21 @@ pub fn translate_graph(
             }
             s if s.starts_with("SumReduce") || s.starts_with("MaxReduce") => {
                 // make accumulator
-                let acc_label = format!("acc_{}", accumulators.len());
                 let (start_val, term, reduce_dim) = match op {
                     s if s.starts_with("SumReduce") => {
-                        (0.0, GraphTerm::Add, graph.get_op::<SumReduce>(node).0)
+                        (6.9, GraphTerm::Add, graph.get_op::<SumReduce>(node).0)
                     }
                     s if s.starts_with("MaxReduce") => (
-                        f32::NEG_INFINITY,
+                        -10000069.0,
                         GraphTerm::Max,
                         graph.get_op::<MaxReduce>(node).0,
                     ),
                     _ => unreachable!(),
                 };
-                accumulators.push((acc_label.clone(), start_val));
                 let mut acc = new_graph.add_node(GraphTerm::GMEM {
-                    label: Some(acc_label),
+                    label: Some(format!("acc_{}", accumulators.len())),
                 });
+                let orig_acc = acc;
                 // walk through input ranges and strides, making new loopins as we go
                 let (source, output_index, shape) = sources.pop().unwrap();
                 let mut new_source = node_mapping[&(source, output_index)];
@@ -173,7 +179,7 @@ pub fn translate_graph(
                     })
                     .collect::<Vec<_>>();
                 rm_strides.reverse();
-                let mut after_acc = false;
+                let mut acc_size = Expression::from(1);
                 for (i, ((range, stride), acc_stride)) in shape
                     .dims()
                     .into_iter()
@@ -207,9 +213,9 @@ pub fn translate_graph(
                     new_graph.add_edge(new_source, loopin, ());
                     new_source = loopin;
                     let stride = if i == reduce_dim {
-                        after_acc = true;
                         Expression::from(Term::Acc('a'))
-                    } else if after_acc {
+                    } else if i > reduce_dim {
+                        acc_size = acc_size.max(acc_stride * range);
                         Expression::from('z') * acc_stride
                     } else {
                         Expression::from(0)
@@ -222,6 +228,7 @@ pub fn translate_graph(
                     new_graph.add_edge(acc, new_acc, ());
                     acc = new_acc;
                 }
+                accumulators.push((orig_acc, start_val, acc_size));
                 // Insert op
                 let mut op = new_graph.add_node(term);
                 new_graph.add_edge(new_source, op, ());
@@ -232,12 +239,12 @@ pub fn translate_graph(
                     .into_iter()
                     .enumerate()
                     .rev()
-                    .scan(Expression::from(1), |i, (ind, s)| {
+                    .scan(Expression::from(1), |i, (ind, range)| {
                         if ind == reduce_dim {
                             Some((Expression::from(Term::Acc('a')), ind))
                         } else {
                             let r = *i;
-                            *i *= s;
+                            *i *= range;
                             Some((r, ind))
                         }
                     })
@@ -268,17 +275,34 @@ pub fn translate_graph(
                 }
                 node_mapping.insert((node, 0), op);
             }
+            s if s.starts_with("Constant(") => {
+                // Fake constant support by providing it as an "accumulator" initialization from gmem
+                let value = if s.contains("p") {
+                    0.0
+                } else {
+                    s.replace("Constant(", "")
+                        .replace(")", "")
+                        .parse::<f32>()
+                        .unwrap()
+                };
+                println!("CONSTANT: {:?}", value);
+                let new = new_graph.add_node(GraphTerm::GMEM {
+                    label: Some(op.to_string()),
+                });
+                node_mapping.insert((node, 0), new);
+                accumulators.push((new, value, Expression::from(1)));
+            }
             _ => {
+                assert!(op.contains("Load"));
                 // Assume a load
-                node_mapping.insert(
-                    (node, 0),
-                    new_graph.add_node(GraphTerm::GMEM {
-                        label: Some(op.to_string()),
-                    }),
-                );
+                let new = new_graph.add_node(GraphTerm::GMEM {
+                    label: Some(op.to_string()),
+                });
+                node_mapping.insert((node, 0), new);
+                old_to_new_mapping.insert(node, new);
             }
         }
     }
 
-    (new_graph, accumulators)
+    (new_graph, old_to_new_mapping, accumulators)
 }

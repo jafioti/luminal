@@ -42,10 +42,10 @@ pub struct Kernel {
     outputs: Vec<Expression>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum GMEMBuffer {
     PrevKernel { kernel: usize, output: usize },
-    Input { label: Option<String> },
+    Input { node: NodeIndex },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -67,7 +67,8 @@ pub enum GraphTerm {
     Add,
     Mul,
     Max,
-    Exp,
+    Exp2,
+    Log2,
     Recip,
     Sin,
     Neg,

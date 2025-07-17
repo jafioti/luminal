@@ -8,6 +8,7 @@ use luminal::{
         NodeIndex,
         petgraph::{
             Directed, Direction,
+            algo::toposort,
             dot::{Config, Dot},
             prelude::StableGraph,
             visit::Topo,
@@ -183,7 +184,8 @@ impl TermToString for GraphTerm {
             GraphTerm::Add => "Add".to_string(),
             GraphTerm::Mul => "Mul".to_string(),
             GraphTerm::Max => "Max".to_string(),
-            GraphTerm::Exp => "Exp".to_string(),
+            GraphTerm::Exp2 => "Exp".to_string(),
+            GraphTerm::Log2 => "Log2".to_string(),
             GraphTerm::Sin => "Sin".to_string(),
             GraphTerm::Recip => "Recip".to_string(),
             GraphTerm::Neg => "Neg".to_string(),
@@ -447,7 +449,8 @@ fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>) -> (String, Strin
             GraphTerm::Add
             | GraphTerm::Mul
             | GraphTerm::Max
-            | GraphTerm::Exp
+            | GraphTerm::Exp2
+            | GraphTerm::Log2
             | GraphTerm::Mod
             | GraphTerm::LessThan
             | GraphTerm::Recip
@@ -461,7 +464,8 @@ fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>) -> (String, Strin
                     GraphTerm::Add => "Add",
                     GraphTerm::Mul => "Mul",
                     GraphTerm::Max => "Max",
-                    GraphTerm::Exp => "Exp",
+                    GraphTerm::Exp2 => "Exp2",
+                    GraphTerm::Log2 => "Log2",
                     GraphTerm::Recip => "Recip",
                     GraphTerm::Sin => "Sin",
                     GraphTerm::Neg => "Neg",
@@ -532,4 +536,22 @@ fn run_egglog_program(
         );
     }
     Ok((msgs, s))
+}
+
+pub fn print_kernels(kernels: &StableGraph<Kernel, (u8, u8), Directed>) {
+    println!("Kernels: {}", kernels.node_count() - 2);
+    for (i, node) in toposort(&kernels, None).unwrap().into_iter().enumerate() {
+        let Kernel {
+            code,
+            grid,
+            threadblock,
+            smem,
+            outputs,
+        } = kernels.node_weight(node).unwrap();
+        if !code.starts_with("Inputs") && code != "Outputs" {
+            println!("Kernel {i} Grid: {grid:?} Threadblock: {threadblock:?} Smem: {smem}");
+            println!("{code}");
+            println!("Outputs: {:?}", outputs);
+        }
+    }
 }

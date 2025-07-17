@@ -9,7 +9,7 @@ edition = "2021"
 itertools = "0.12.1"
 luminal = {path="../.."}
 matrixmultiply = "0.3.8"
-rustc-hash = "1.1.0"
+rustc-hash = "2.1.1"
 
 [dev-dependencies]
 rand = "0.8.5"

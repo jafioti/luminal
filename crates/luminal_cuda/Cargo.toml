@@ -14,7 +14,7 @@ cudarc = { version = "0.16.1", features = [
 	"cuda-version-from-build-system",
 ] }
 itertools = "0.12.1"
-rustc-hash = "1.1.0"
+rustc-hash = "2.1.1"
 num-traits = "0.2.18"
 regex = "1.10.4"
 indicatif = "0.17.8"
