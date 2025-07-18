@@ -152,10 +152,10 @@ pub fn translate_graph(
                 // make accumulator
                 let (start_val, term, reduce_dim) = match op {
                     s if s.starts_with("SumReduce") => {
-                        (6.9, GraphTerm::Add, graph.get_op::<SumReduce>(node).0)
+                        (0.0, GraphTerm::Add, graph.get_op::<SumReduce>(node).0)
                     }
                     s if s.starts_with("MaxReduce") => (
-                        -10000069.0,
+                        f32::NEG_INFINITY,
                         GraphTerm::Max,
                         graph.get_op::<MaxReduce>(node).0,
                     ),

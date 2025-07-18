@@ -538,7 +538,7 @@ fn run_egglog_program(
     Ok((msgs, s))
 }
 
-pub fn print_kernels(kernels: &StableGraph<Kernel, (u8, u8), Directed>) {
+pub fn print_kernels(kernels: &StableGraph<Kernel, (usize, usize), Directed>) {
     println!("Kernels: {}", kernels.node_count() - 2);
     for (i, node) in toposort(&kernels, None).unwrap().into_iter().enumerate() {
         let Kernel {

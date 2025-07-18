@@ -2,7 +2,7 @@ use itertools::Itertools;
 use luminal::{
     prelude::{
         NodeIndex,
-        petgraph::{Directed, Direction, algo::toposort, prelude::StableGraph, visit::EdgeRef},
+        petgraph::{Directed, Direction, algo::toposort, prelude::StableGraph},
     },
     shape::{Expression, Term},
 };
@@ -26,10 +26,7 @@ pub fn codegen(
     root: NodeIndex,
     mut arch: GPUArch,
     n_graph: usize,
-) -> Option<(
-    StableGraph<Kernel, (u8, u8), Directed>,
-    FxHashMap<NodeIndex, usize>,
-)> {
+) -> Option<StableGraph<Kernel, (usize, usize), Directed>> {
     let gmems = graph
         .node_weights()
         .filter(|w| matches!(w, GraphTerm::GMEM { .. }))
@@ -52,31 +49,29 @@ pub fn codegen(
         code: "Outputs".to_string(),
         ..Default::default()
     });
-    let mut gmem_mapping = FxHashMap::default();
+    let mut gmem_mapping = HashMap::new();
     for (n_kernel, (_, inputs, _, _)) in kernels.iter().enumerate() {
         for (n_input, (input_kernel, _)) in inputs.into_iter().enumerate() {
             match input_kernel {
                 GMEMBuffer::PrevKernel { kernel, output } => meta_graph.add_edge(
                     NodeIndex::new(*kernel),
                     NodeIndex::new(n_kernel),
-                    (*output as u8, n_input as u8),
+                    (*output, n_input),
                 ),
                 GMEMBuffer::Input { node } => {
-                    let index = if let Some(index) = gmem_mapping.get(node) {
+                    let index = if let Some(index) = gmem_mapping.get(&node.index()) {
                         *index
                     } else {
-                        gmem_mapping.insert(*node, gmem_mapping.len());
+                        gmem_mapping.insert(node.index(), gmem_mapping.len());
                         gmem_mapping.len() - 1
                     };
-                    meta_graph.add_edge(
-                        global_input,
-                        NodeIndex::new(n_kernel),
-                        (index as u8, n_input as u8),
-                    )
+                    meta_graph.add_edge(global_input, NodeIndex::new(n_kernel), (index, n_input))
                 }
             };
         }
     }
+    meta_graph.node_weight_mut(global_input).unwrap().code =
+        format!("Inputs{}", serde_json::to_string(&gmem_mapping).unwrap());
     meta_graph.add_edge(NodeIndex::new(root_kernel), global_output, (0, 0));
     for node in toposort(&meta_graph, None).unwrap() {
         if kernels.len() <= node.index() {
@@ -273,7 +268,7 @@ kernel void kernel405(
             outputs: outputs.into_iter().map(|(o, _)| o.simplify()).collect(),
         };
     }
-    Some((meta_graph, gmem_mapping))
+    Some(meta_graph)
 }
 
 fn var_to_char(var: usize) -> String {

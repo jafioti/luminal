@@ -324,6 +324,11 @@ impl Operator for AllocateMetalBuffers {
                     )
                 })
                 .collect();
+            println!(
+                "ALLOCATED {} bytes in {} buffers",
+                buffers.iter().map(|b| b.length()).sum::<u64>(),
+                buffers.len()
+            );
         } else {
             for (size, buffer) in self.buffer_sizes.iter().zip(buffers) {
                 let size = size.exec(dyn_map).unwrap() as u64;

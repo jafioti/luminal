@@ -215,6 +215,18 @@ macro_rules! metal_unary_op {
                     // Run the command buffer
                     command_buffer.commit();
                     command_buffer.wait_until_completed();
+                    let mut curr_data = vec![
+                        0.0;
+                        out.length()
+                            as usize
+                            / std::mem::size_of::<f32>()
+                    ];
+                    let ptr =
+                        out.contents() as *mut f32;
+                    for (i, d) in curr_data.iter_mut().enumerate() {
+                        *d = unsafe { *ptr.add(i) };
+                    }
+                    println!("{:?}", &curr_data[..10.min(curr_data.len())]);
 
                     vec![Tensor::new(MetalBuffer(out))]
                 })
@@ -339,6 +351,18 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
 
                     command_buffer.commit();
                     command_buffer.wait_until_completed();
+                    let mut curr_data = vec![
+                        0.0;
+                        out.length()
+                            as usize
+                            / std::mem::size_of::<f32>()
+                    ];
+                    let ptr =
+                        out.contents() as *mut f32;
+                    for (i, d) in curr_data.iter_mut().enumerate() {
+                        *d = unsafe { *ptr.add(i) };
+                    }
+                    println!("{:?}", &curr_data[..10.min(curr_data.len())]);
 
                     vec![Tensor::new(MetalBuffer(out))]
                 })
@@ -501,7 +525,14 @@ impl<T: MetalFloat> Operator for MetalSumReduce<T> {
 
             command_buffer.commit();
             command_buffer.wait_until_completed();
-
+            let mut curr_data = vec![0.0; out.length() as usize / std::mem::size_of::<f32>()];
+            let ptr = out.contents() as *mut f32;
+            for (i, d) in curr_data.iter_mut().enumerate() {
+                *d = unsafe { *ptr.add(i) };
+                if d.is_nan() || d.is_infinite() {
+                    panic!("normal {d} {i}");
+                }
+            }
             vec![Tensor::new(MetalBuffer(out))]
         })
     }
@@ -553,7 +584,7 @@ kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *o
     if (i_ < n_elements) {{
         int a_ = i_ / back_size;
         int b_ = i_ % back_size;
-        float reduce_value = -0x7f800000;
+        float reduce_value = -inf;
         for (int c_ = 0; c_ < dim_size; c_++) {{
             uint idx = a_ * dim_size * back_size + c_ * back_size + b_;
             if (({valid_exp}) != 0) {{

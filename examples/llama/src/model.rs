@@ -50,8 +50,8 @@ impl SerializeModule for Mlp {
 }
 
 fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> GraphTensor {
-    assert_eq!(input.shape.len(), 4); // batch, n_heads, seq, head_dim
-    let (batch, n_heads, seq, head_dim) = input.dims4();
+    assert_eq!(input.shape.len(), 3); // batch, n_heads, seq, head_dim
+    let (n_heads, seq, head_dim) = input.dims3();
     // Get freqs
     let freqs = (input.graph().arange(head_dim / 2) * 2.0) / (head_dim.to_usize().unwrap() as f32);
     let inv_freqs = 500_000_f32.pow(freqs).reciprocal();
@@ -59,16 +59,16 @@ fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> Gra
     let emb = pos.expand_dim(1, 1).matmul(inv_freqs.expand_dim(0, 1));
 
     // Split input into evens and odds
-    let split = input.reshape((batch, n_heads, seq, head_dim / 2, 2));
-    let x0 = split.slice((.., .., .., .., ..1));
-    let x1 = split.slice((.., .., .., .., 1..));
+    let split = input.reshape((n_heads, seq, head_dim / 2, 2));
+    let x0 = split.slice((.., .., .., ..1));
+    let x1 = split.slice((.., .., .., 1..));
 
     // Apply sin and cos embeddings
     let x0_out = x0 * emb.cos().expand(x0.shape) - x1 * emb.sin().expand(x1.shape);
     let x1_out = x0 * emb.sin().expand(x0.shape) + x1 * emb.cos().expand(x1.shape);
 
     // Combine back into output
-    x0_out.concat_along(x1_out, 4).reshape(input.shape)
+    x0_out.concat_along(x1_out, 3).reshape(input.shape)
 }
 
 pub struct SelfAttention {
@@ -78,63 +78,64 @@ pub struct SelfAttention {
     pub o_proj: GraphTensor, // Hidden -> hidden
 }
 
+// impl Module<(GraphTensor)> for SelfAttention {
+//     type Output = (GraphTensor);
+//     fn forward(&self, (x): (GraphTensor)) -> Self::Output {
 impl Module<(GraphTensor, KVCache)> for SelfAttention {
     type Output = (GraphTensor, KVCache);
     fn forward(&self, (x, (k_cache, v_cache)): (GraphTensor, KVCache)) -> Self::Output {
         // x: batch, seq, hidden
         // cache: batch, kv_heads, prev_seq, head_dim
-        let (batch, seq, _) = x.dims3();
-        let (_, _, prev_seq, _) = k_cache.dims4();
+        let (seq, _) = x.dims2();
+        let (_, prev_seq, _) = k_cache.dims3();
         // Apply the Projections
         let queries = x
             .matmul(self.q_proj.permute((1, 0)))
-            .reshape((batch, seq, N_HEADS, HEAD_DIM))
-            .permute((0, 2, 1, 3));
+            .reshape((seq, N_HEADS, HEAD_DIM))
+            .permute((1, 0, 2));
 
         let keys = x
             .matmul(self.k_proj.permute((1, 0)))
-            .reshape((batch, seq, N_KV_HEADS, HEAD_DIM))
-            .permute((0, 2, 1, 3));
+            .reshape((seq, N_KV_HEADS, HEAD_DIM))
+            .permute((1, 0, 2));
 
         let values = x
             .matmul(self.v_proj.permute((1, 0)))
-            .reshape((batch, seq, N_KV_HEADS, HEAD_DIM))
-            .permute((0, 2, 1, 3));
+            .reshape((seq, N_KV_HEADS, HEAD_DIM))
+            .permute((1, 0, 2));
 
         // Rotary embed queries and keys
         let queries = apply_rotary_embeddings_ggml(queries, prev_seq);
         let keys = apply_rotary_embeddings_ggml(keys, prev_seq);
 
         // Add KV cache
-        let keys = k_cache.concat_along(keys, 2);
-        let values = v_cache.concat_along(values, 2);
+        let keys = k_cache.concat_along(keys, 1);
+        let values = v_cache.concat_along(values, 1);
 
         // Repeat the KV States for Grouped-Query Attention
-        let repeated_keys = keys.expand_dim(2, N_ATTENTION_GROUPS);
-        let repeated_values = values.expand_dim(2, N_ATTENTION_GROUPS);
+        let repeated_keys = keys.expand_dim(1, N_ATTENTION_GROUPS);
+        let repeated_values = values.expand_dim(1, N_ATTENTION_GROUPS);
 
         // Calculate attention weights
         let mut attention_weights = queries
-            .reshape((batch, N_KV_HEADS, N_ATTENTION_GROUPS, seq, HEAD_DIM)) // Split query heads into groups
-            .matmul(repeated_keys.permute((0, 1, 2, 4, 3)))
+            .reshape((N_KV_HEADS, N_ATTENTION_GROUPS, seq, HEAD_DIM)) // Split query heads into groups
+            .matmul(repeated_keys.permute((0, 1, 3, 2)))
             / (HEAD_DIM as f32).sqrt();
 
         let attention_mask = self.k_proj.graph().triu(seq, 1) * f16::MIN.to_f32();
         attention_weights += attention_mask
-            .pad(((0, 0), (prev_seq, 0)))
-            .expand_dim(0, batch)
-            .expand_dim(1, N_KV_HEADS)
-            .expand_dim(2, N_ATTENTION_GROUPS);
+            .pad((prev_seq, 0))
+            .expand_dim(0, N_KV_HEADS)
+            .expand_dim(1, N_ATTENTION_GROUPS);
 
         // Calculate final outputs
         let output = attention_weights
-            .softmax(4)
+            .softmax(3)
             // Apply distribution to values
             .matmul(repeated_values)
             // Merge heads
-            .permute((0, 3, 1, 2, 4))
-            .reshape((batch, seq, HIDDEN_DIM));
-        let output = output
+            .permute((2, 0, 1, 3))
+            .reshape((seq, HIDDEN_DIM))
             // Apply output projection
             .matmul(self.o_proj.permute((1, 0)));
         (output, (keys.contiguous(), values.contiguous())) // Cache needs to be contiguous for transferring to another graph
@@ -167,7 +168,9 @@ pub struct TransformerBlock {
     pub feed_forward: Mlp,
     pub feed_forward_norm: LayerNorm,
 }
-
+// impl Module<(GraphTensor)> for TransformerBlock {
+//     type Output = (GraphTensor);
+//     fn forward(&self, (mut x): (GraphTensor)) -> Self::Output {
 impl Module<(GraphTensor, KVCache)> for TransformerBlock {
     type Output = (GraphTensor, KVCache);
     fn forward(&self, (mut x, cache): (GraphTensor, KVCache)) -> Self::Output {
@@ -209,7 +212,7 @@ impl SerializeModule for TransformerBlock {
 
 pub struct Llama {
     // Token embeddings
-    pub embedding: Embedding,
+    // pub embedding: GraphTensor,
     // Transformer layers
     pub layers: Vec<TransformerBlock>,
     // Norm + LM head
@@ -220,7 +223,8 @@ impl Module<(GraphTensor, &[KVCache])> for Llama {
     type Output = (GraphTensor, Vec<KVCache>);
     fn forward(&self, (input, cache): (GraphTensor, &[KVCache])) -> Self::Output {
         // Embed tokens
-        let mut x = self.embedding.forward(input);
+        // let mut x = self.embedding.forward(input);
+        let mut x = input;
 
         // Run through layers and collect new caches
         let mut new_caches = vec![];
@@ -237,7 +241,7 @@ impl Module<(GraphTensor, &[KVCache])> for Llama {
 impl Llama {
     pub fn new(cx: &mut Graph) -> Self {
         Self {
-            embedding: Embedding::new(VOCAB_SIZE, HIDDEN_DIM, cx),
+            // embedding: cx.tensor((VOCAB_SIZE, HIDDEN_DIM)),
             head: (
                 LayerNorm::new(HIDDEN_DIM, true, false, false, 1e-5, cx),
                 Linear::new_permuted(HIDDEN_DIM, VOCAB_SIZE, false, cx),
@@ -249,7 +253,7 @@ impl Llama {
 
 impl SerializeModule for Llama {
     fn serialize(&self, s: &mut Serializer) {
-        s.module("token_embd", &self.embedding);
+        // s.tensor("token_embd/weight", self.embedding);
         s.module("output_norm", &self.head.0);
         s.module("output", &self.head.1);
         for (i, layer) in self.layers.iter().enumerate() {

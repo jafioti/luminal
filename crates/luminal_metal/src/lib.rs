@@ -34,9 +34,9 @@ pub type MetalCompiler<T> = (MetalCompilerPreBuffer<T>, BufferCompilers);
 /// All metal compilers coming before buffer compilers
 pub type MetalCompilerPreBuffer<T> = (
     prim::PrimitiveCompiler<T>,
-    SpecialOpsCompiler<T>,
+    // SpecialOpsCompiler<T>,
     other::CopyCompiler<T>,
-    elementwise_fusion::ElementwiseFusionCompiler<T>,
+    // elementwise_fusion::ElementwiseFusionCompiler<T>,
 );
 
 /// Compilers to share command and storage buffers

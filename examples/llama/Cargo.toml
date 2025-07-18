@@ -4,11 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
+default = ["metal"]
 metal = ["dep:luminal_metal"]
 cuda = ["dep:luminal_cuda"]
 
 [dependencies]
 luminal = { path = "../.." }
+luminal_2 = {path="../../crates/luminal_2"}
 luminal_nn = { path = "../../crates/luminal_nn" }
 luminal_cpu = { path = "../../crates/luminal_cpu"}
 luminal_metal = { path = "../../crates/luminal_metal", optional = true }
@@ -19,3 +21,5 @@ memmap2 = "0.9.4"
 colored = "2.1.0"
 itertools = "0.12.1"
 tokenizers = "0.15.2"
+rustc-hash = "2.1.1"
+rand = "0.9.1"

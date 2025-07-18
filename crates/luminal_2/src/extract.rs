@@ -31,7 +31,7 @@ pub fn search(
     egraph: &EGraph,
     inputs: &[(NodeIndex, Vec<f32>)],
     arch: GPUArch,
-) -> Option<StableGraph<Kernel, (u8, u8)>> {
+) -> Option<StableGraph<Kernel, (usize, usize)>> {
     fn recurse<'a>(
         egraph: &'a EGraph,
         current_class: &'a ClassId,
@@ -116,9 +116,7 @@ pub fn search(
         let graph = extraction_to_graph(egraph, &trajectory);
         let root = graph.externals(Direction::Outgoing).next().unwrap();
         // display_graph(&graph, &[]);
-        let Some((kernels, gmem_mapping)) =
-            crate::codegen::codegen(graph.clone(), root, arch.clone(), 0)
-        else {
+        let Some(kernels) = crate::codegen::codegen(graph.clone(), root, arch.clone(), 0) else {
             continue;
         };
         if kernels.node_count() == 1 {
@@ -382,34 +380,23 @@ pub fn extraction_to_graph(
 }
 
 fn cost<'a>(
-    kernels: &StableGraph<Kernel, (u8, u8), Directed>,
+    kernels: &StableGraph<Kernel, (usize, usize), Directed>,
     inputs: &[(NodeIndex, Vec<f32>)],
 ) -> Option<(Cost, Vec<Vec<f32>>)> {
-    // Get buffer info
-    let (buffer_sizes, buffer_map) = produce_buffer_map(kernels);
-    // Warm up resources (buffer allocation, kernel compiler, etc.)
-    for _ in 0..WARMUP_TRIALS {
-        run_graph(
-            inputs,
-            &kernels,
-            &buffer_map,
-            &buffer_sizes,
-            &FxHashMap::default(),
-        );
-    }
-    // Test runtime
-    let mut micros = vec![];
-    let mut outputs = vec![];
-    let mut m;
-    for _ in 0..TRIALS {
-        (outputs, m) = run_graph(
-            inputs,
-            &kernels,
-            &buffer_map,
-            &buffer_sizes,
-            &FxHashMap::default(),
-        );
-        micros.push(m);
-    }
-    Some((micros.into_iter().sum::<u128>() / TRIALS as u128, outputs))
+    todo!()
+    // // Get buffer info
+    // // let (buffer_sizes, buffer_map) = produce_buffer_map(kernels);
+    // // Warm up resources (buffer allocation, kernel compiler, etc.)
+    // for _ in 0..WARMUP_TRIALS {
+    //     run_graph(inputs, &kernels, &FxHashMap::default());
+    // }
+    // // Test runtime
+    // let mut micros = vec![];
+    // let mut outputs = vec![];
+    // let mut m;
+    // for _ in 0..TRIALS {
+    //     (outputs, m) = run_graph(inputs, &kernels, &FxHashMap::default());
+    //     micros.push(m);
+    // }
+    // Some((micros.into_iter().sum::<u128>() / TRIALS as u128, outputs))
 }

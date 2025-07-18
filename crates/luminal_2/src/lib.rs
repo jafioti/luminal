@@ -79,3 +79,27 @@ pub enum GraphTerm {
     SMEMLoad, // Takes in an smem pointer and a gmem pointer, copies the gmem element to smem and returns the smem pointer
     SMEMRead, // Takes in an smem pointer and an smemload, returns the smem pointer
 }
+
+impl Operator for Kernel {
+    fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        unimplemented!("This shouldn't be ran directly. run_graph runs this!");
+    }
+}
+
+pub fn custom_kernel<const O: usize>(
+    inputs: &[GraphTensor],
+    kernel: Kernel,
+    output_shapes: [impl ToShape; O],
+    cx: &mut Graph,
+) -> [GraphTensor; O] {
+    let mut kernel_op = cx.add_op(kernel);
+    for input in inputs {
+        kernel_op = kernel_op.input(input.id, 0, input.shape);
+    }
+    let kernel_op = kernel_op.finish();
+    let mut outputs = [GraphTensor::from_id(kernel_op, ShapeTracker::new(()), cx); O];
+    for (i, output_shape) in output_shapes.into_iter().enumerate() {
+        outputs[i].shape = ShapeTracker::new(output_shape);
+    }
+    outputs
+}

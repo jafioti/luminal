@@ -1,22 +1,17 @@
 use itertools::Itertools;
 use std::fs::File;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use luminal::{op::Function, prelude::*};
 
-#[cfg(feature = "cuda")]
-use luminal_cuda::{CudaContext, CudaData};
-
 use crate::gguf::*;
 
-#[cfg(feature = "metal")]
 use {
     luminal_metal::{Device, MTLResourceOptions, MetalBuffer},
     memmap2::Mmap,
 };
 
-#[cfg(feature = "metal")]
 pub fn q8_load<P: AsRef<Path>, M: SerializeModule>(
     path: P,
     model: &M,
@@ -43,65 +38,70 @@ pub fn q8_load<P: AsRef<Path>, M: SerializeModule>(
                 tensor_infos.remove(&weight_name.replace('/', ".")).unwrap();
             let n_bytes = match data_type {
                 GgmlDType::F32 => n_elements * 4,
-                GgmlDType::Q8_0 => {
-                    q8_weights.push(node_index);
-                    n_elements + (n_elements / 16)
-                }
+                GgmlDType::Q8_0 => n_elements * 4,
                 _ => panic!("Unsupported dtype: {data_type:?}"),
             };
-            if let GgmlDType::F32 = data_type {
-                loading_node.1 = Box::new(move |_| {
-                    // Read bytes
-                    let mut bytes = vec![0; n_bytes];
-                    let mut file = File::open(&file_path).unwrap();
-                    file.seek(std::io::SeekFrom::Start(
-                        buffer_offset as u64 + tensor_data_offset,
-                    ))
-                    .unwrap();
-                    file.read_exact(&mut bytes).unwrap();
-                    vec![Tensor::new(
-                        bytes
-                            .into_iter()
-                            .chunks(4)
-                            .into_iter()
-                            .map(|c| {
-                                let c = c.collect::<Vec<_>>();
-                                f32::from_le_bytes([c[0], c[1], c[2], c[3]])
-                            })
-                            .collect::<Vec<_>>(),
-                    )]
-                });
-            } else {
-                loading_node.1 = Box::new(move |_| {
-                    let mmap_buffer =
-                        unsafe { Mmap::map(&File::open(&file_path).unwrap()).unwrap() };
-                    let buffer = Device::system_default()
-                        .unwrap()
-                        .new_buffer_with_bytes_no_copy(
-                            unsafe {
-                                mmap_buffer
-                                    .as_ptr()
-                                    .add(buffer_offset + tensor_data_offset as usize)
-                                    as *const _
-                            },
-                            n_bytes as u64,
-                            MTLResourceOptions::StorageModeShared,
-                            None,
-                        );
-                    vec![Tensor::new(MetalBuffer(buffer))]
-                });
+            match data_type {
+                GgmlDType::F32 => {
+                    loading_node.1 = Box::new(move |_| {
+                        // Read bytes
+                        let mut bytes = vec![0; n_bytes];
+                        let mut file = File::open(&file_path).unwrap();
+                        file.seek(std::io::SeekFrom::Start(
+                            buffer_offset as u64 + tensor_data_offset,
+                        ))
+                        .unwrap();
+                        file.read_exact(&mut bytes).unwrap();
+                        vec![Tensor::new(
+                            bytes
+                                .into_iter()
+                                .chunks(4)
+                                .into_iter()
+                                .map(|c| {
+                                    let c = c.collect::<Vec<_>>();
+                                    f32::from_le_bytes([c[0], c[1], c[2], c[3]])
+                                })
+                                .collect::<Vec<_>>(),
+                        )]
+                    });
+                }
+                GgmlDType::Q8_0 => {
+                    loading_node.1 = Box::new(move |_| {
+                        // Read bytes
+                        let mut bytes = vec![0; (n_elements / 32) * 34];
+                        let mut file = File::open(&file_path).unwrap();
+                        file.seek(std::io::SeekFrom::Start(
+                            buffer_offset as u64 + tensor_data_offset,
+                        ))
+                        .unwrap();
+                        file.read_exact(&mut bytes).unwrap();
+                        vec![Tensor::new(
+                            bytes
+                                .chunks_exact(32 + 2)
+                                .into_iter()
+                                .flat_map(|bytes| {
+                                    let delta = f16::from_ne_bytes([bytes[0], bytes[1]]).to_f32();
+                                    bytes
+                                        .iter()
+                                        .skip(2)
+                                        .take(32)
+                                        .map(move |b| i8::from_ne_bytes([*b]) as f32 * delta)
+                                })
+                                .collect::<Vec<_>>(),
+                        )]
+                    });
+                }
+                _ => panic!("unrecognized dtype {:?}", data_type),
             }
         }
     }
     q8_weights
 }
 
-#[cfg(feature = "cuda")]
-pub fn q8_load<P: AsRef<Path>, M: SerializeModule>(
+pub fn q8_load_new<P: AsRef<Path>, M: SerializeModule>(
     path: P,
     model: &M,
-    graph: &mut Graph,
-) -> Vec<NodeIndex> {
+) -> Vec<(NodeIndex, Box<dyn FnOnce() -> Vec<f32>>)> {
     // Read metadata from file
     let mut reader = File::open(&path).unwrap();
     let Content {
@@ -111,38 +111,29 @@ pub fn q8_load<P: AsRef<Path>, M: SerializeModule>(
     } = Content::read(&mut reader).unwrap();
 
     // Create weight loading closures
-    let mut q8_weights = vec![];
+    let mut weights = vec![];
     for (weight_name, node_index) in param_dict(model) {
-        if let Some(loading_node) = graph
-            .graph
-            .node_weight_mut(node_index)
-            .and_then(|op| op.as_any_mut().downcast_mut::<Function>())
-        {
-            let file_path = path.as_ref().to_owned();
-            let (n_elements, buffer_offset, data_type) =
-                tensor_infos.remove(&weight_name.replace('/', ".")).unwrap();
-            let n_bytes = match data_type {
-                GgmlDType::F32 => n_elements * 4,
-                GgmlDType::Q8_0 => {
-                    q8_weights.push(node_index);
-                    n_elements + (n_elements / 16)
-                }
-                _ => panic!("Unsupported dtype: {data_type:?}"),
-            };
-            loading_node.1 = Box::new(move |_| {
-                // Read bytes
-                let mut bytes = vec![0; n_bytes];
-                let mut file = File::open(&file_path).unwrap();
-                file.seek(std::io::SeekFrom::Start(
-                    buffer_offset as u64 + tensor_data_offset,
-                ))
-                .unwrap();
-                file.read_exact(&mut bytes).unwrap();
-                // Copy buffer over to cuda slice
-                let device = CudaContext::new(0).unwrap();
-                let stream = device.default_stream();
-                match data_type {
-                    GgmlDType::F32 => vec![Tensor::new(
+        let file_path = path.as_ref().to_owned();
+        let (n_elements, buffer_offset, data_type) =
+            tensor_infos.remove(&weight_name.replace('/', ".")).unwrap();
+        let n_bytes = match data_type {
+            GgmlDType::F32 => n_elements * 4,
+            GgmlDType::Q8_0 => n_elements * 4,
+            _ => panic!("Unsupported dtype: {data_type:?}"),
+        };
+        match data_type {
+            GgmlDType::F32 => {
+                weights.push((
+                    node_index,
+                    Box::new(move || {
+                        // Read bytes
+                        let mut bytes = vec![0; n_bytes];
+                        let mut file = File::open(&file_path).unwrap();
+                        file.seek(std::io::SeekFrom::Start(
+                            buffer_offset as u64 + tensor_data_offset,
+                        ))
+                        .unwrap();
+                        file.read_exact(&mut bytes).unwrap();
                         bytes
                             .into_iter()
                             .chunks(4)
@@ -151,99 +142,94 @@ pub fn q8_load<P: AsRef<Path>, M: SerializeModule>(
                                 let c = c.collect::<Vec<_>>();
                                 f32::from_le_bytes([c[0], c[1], c[2], c[3]])
                             })
-                            .collect::<Vec<_>>(),
-                    )],
-                    GgmlDType::Q8_0 => {
-                        vec![Tensor::new(CudaData(stream.memcpy_stod(&bytes).unwrap()))]
-                    }
-                    _ => unimplemented!(),
-                }
-            });
+                            .collect::<Vec<_>>()
+                    }) as Box<dyn FnOnce() -> Vec<f32>>,
+                ));
+            }
+            GgmlDType::Q8_0 => {
+                weights.push((
+                    node_index,
+                    Box::new(move || {
+                        // Read bytes
+                        let mut bytes = vec![0; (n_elements / 32) * 34];
+                        let mut file = File::open(&file_path).unwrap();
+                        file.seek(std::io::SeekFrom::Start(
+                            buffer_offset as u64 + tensor_data_offset,
+                        ))
+                        .unwrap();
+                        file.read_exact(&mut bytes).unwrap();
+                        bytes
+                            .chunks_exact(32 + 2)
+                            .into_iter()
+                            .flat_map(|bytes| {
+                                let delta = f16::from_ne_bytes([bytes[0], bytes[1]]).to_f32();
+                                bytes
+                                    .iter()
+                                    .skip(2)
+                                    .take(32)
+                                    .map(move |b| i8::from_ne_bytes([*b]) as f32 * delta)
+                            })
+                            .collect::<Vec<_>>()
+                    }),
+                ));
+            }
+            _ => panic!("unrecognized dtype {:?}", data_type),
         }
     }
-    q8_weights
+    weights
 }
 
-#[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
-pub fn q8_load<P: AsRef<Path>, M: SerializeModule>(
-    path: P,
-    model: &M,
-    graph: &mut Graph,
-) -> Vec<NodeIndex> {
-    #[repr(C, packed)]
-    #[derive(Clone, Copy)]
-    struct Q8Block {
-        delta: f16,
-        weights: [i8; 32],
-    }
-
-    // Read metadata from file
-    let mut reader = File::open(&path).unwrap();
+pub fn load_param_f32<P: AsRef<Path>>(path: P, param_name: &str) -> Vec<f32> {
+    // Open the file and read content metadata
+    let mut file = File::open(&path).unwrap();
     let Content {
         mut tensor_infos,
         tensor_data_offset,
         ..
-    } = Content::read(&mut reader).unwrap();
+    } = Content::read(&mut file).unwrap();
 
-    // Create weight loading closures
-    let mut q8_weights = vec![];
-    for (weight_name, node_index) in param_dict(model) {
-        if let Some(loading_node) = graph
-            .graph
-            .node_weight_mut(node_index)
-            .and_then(|op| op.as_any_mut().downcast_mut::<Function>())
-        {
-            let file_path = path.as_ref().to_owned();
-            let (n_elements, buffer_offset, data_type) =
-                tensor_infos.remove(&weight_name.replace('/', ".")).unwrap();
-            let n_bytes = match data_type {
-                GgmlDType::F32 => n_elements * 4,
-                GgmlDType::Q8_0 => {
-                    q8_weights.push(node_index);
-                    n_elements + (n_elements / 16)
-                }
-                _ => panic!("Unsupported dtype: {data_type:?}"),
-            };
-            loading_node.1 = Box::new(move |_| {
-                // Load all bytes
-                let mut bytes = vec![0; n_bytes];
-                let mut file = File::open(&file_path).unwrap();
-                file.seek(std::io::SeekFrom::Start(
-                    buffer_offset as u64 + tensor_data_offset,
-                ))
-                .unwrap();
-                file.read_exact(&mut bytes).unwrap();
-                // Dequantize into f32
-                let data: Vec<f32> = match data_type {
-                    GgmlDType::F32 => bytes
-                        .into_iter()
-                        .chunks(4)
-                        .into_iter()
-                        .map(|c| {
-                            let c = c.collect::<Vec<_>>();
-                            f32::from_le_bytes([c[0], c[1], c[2], c[3]])
-                        })
-                        .collect(),
-                    GgmlDType::Q8_0 => bytes
-                        .into_iter()
-                        .chunks(34)
-                        .into_iter()
-                        .map(|c| {
-                            let chunk = c.collect::<Vec<_>>();
-                            unsafe { chunk.align_to::<Q8Block>().1[0] }
-                        })
-                        .flat_map(|chunk| {
-                            chunk
-                                .weights
-                                .into_iter()
-                                .map(move |i| i as f32 * chunk.delta.to_f32())
-                        })
-                        .collect(),
-                    _ => panic!("Unsupported dtype: {data_type:?}"),
-                };
-                vec![Tensor::new(data)]
-            });
+    // Map parameter name to file format (dot vs slash etc)
+    let key = param_name.replace('/', ".");
+
+    // Get (n_elements, buffer_offset, dtype)
+    let (n_elements, buffer_offset, dtype) = tensor_infos
+        .remove(&key)
+        .expect("Parameter not found in file");
+
+    // Read appropriate number of bytes
+    let n_bytes = match dtype {
+        GgmlDType::F32 => n_elements * 4,
+        GgmlDType::Q8_0 => n_elements / 32 * 34, // Each 16 i8 + f32 = 20 bytes for 16 values
+        _ => panic!("Unsupported dtype: {:?}", dtype),
+    };
+
+    // Seek to the parameter's data
+    file.seek(SeekFrom::Start(buffer_offset as u64 + tensor_data_offset))
+        .unwrap();
+
+    let mut bytes = vec![0u8; n_bytes];
+    file.read_exact(&mut bytes).unwrap();
+
+    match dtype {
+        GgmlDType::F32 => {
+            // Just convert chunks of 4 bytes to f32
+            bytes
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect()
         }
+        GgmlDType::Q8_0 => bytes
+            .chunks_exact(32 + 2)
+            .into_iter()
+            .flat_map(|bytes| {
+                let delta = f16::from_ne_bytes([bytes[0], bytes[1]]).to_f32();
+                bytes
+                    .iter()
+                    .skip(2)
+                    .take(32)
+                    .map(move |b| i8::from_ne_bytes([*b]) as f32 * delta)
+            })
+            .collect(),
+        _ => panic!("Unsupported dtype: {:?}", dtype),
     }
-    q8_weights
 }
