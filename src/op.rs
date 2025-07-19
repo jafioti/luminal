@@ -50,6 +50,15 @@ impl Data for Vec<f32> {
     }
 }
 
+impl Data for Vec<f16> {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
 /// Either an owned or borrowed tensor that gets consumed by ops
 pub enum InputTensor<'a> {
     /// An owned tensor

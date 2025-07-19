@@ -59,7 +59,8 @@ pub fn q8_load<P: AsRef<Path>, M: SerializeModule>(
                                 .into_iter()
                                 .map(|c| {
                                     let c = c.collect::<Vec<_>>();
-                                    f32::from_le_bytes([c[0], c[1], c[2], c[3]])
+                                    let d = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+                                    f16::from_f32(d)
                                 })
                                 .collect::<Vec<_>>(),
                         )]
@@ -86,6 +87,7 @@ pub fn q8_load<P: AsRef<Path>, M: SerializeModule>(
                                         .skip(2)
                                         .take(32)
                                         .map(move |b| i8::from_ne_bytes([*b]) as f32 * delta)
+                                        .map(f16::from_f32)
                                 })
                                 .collect::<Vec<_>>(),
                         )]
@@ -101,7 +103,7 @@ pub fn q8_load<P: AsRef<Path>, M: SerializeModule>(
 pub fn q8_load_new<P: AsRef<Path>, M: SerializeModule>(
     path: P,
     model: &M,
-) -> Vec<(NodeIndex, Box<dyn FnOnce() -> Vec<f32>>)> {
+) -> Vec<(NodeIndex, Box<dyn FnOnce() -> Vec<f16>>)> {
     // Read metadata from file
     let mut reader = File::open(&path).unwrap();
     let Content {
@@ -140,10 +142,11 @@ pub fn q8_load_new<P: AsRef<Path>, M: SerializeModule>(
                             .into_iter()
                             .map(|c| {
                                 let c = c.collect::<Vec<_>>();
-                                f32::from_le_bytes([c[0], c[1], c[2], c[3]])
+                                let d = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+                                f16::from_f32(d)
                             })
                             .collect::<Vec<_>>()
-                    }) as Box<dyn FnOnce() -> Vec<f32>>,
+                    }) as Box<dyn FnOnce() -> Vec<f16>>,
                 ));
             }
             GgmlDType::Q8_0 => {
@@ -168,6 +171,8 @@ pub fn q8_load_new<P: AsRef<Path>, M: SerializeModule>(
                                     .skip(2)
                                     .take(32)
                                     .map(move |b| i8::from_ne_bytes([*b]) as f32 * delta)
+                                    //broken
+                                    .map(f16::from_f32)
                             })
                             .collect::<Vec<_>>()
                     }),

@@ -5,6 +5,7 @@ use luminal::{
     },
     shape::{Expression, Term, expression_cleanup},
 };
+use rustc_hash::FxHashMap;
 
 use crate::{GPUArch, codegen::codegen, run::run_graph};
 use std::collections::HashMap;
@@ -43,7 +44,7 @@ pub fn make_complex_kernel() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex
     );
 
     // Exp-acc
-    let exp = unary(in_a, GraphTerm::Exp, &mut graph);
+    let exp = unary(in_a, GraphTerm::Exp2, &mut graph);
     let add_acc = binary(exp, in_exp_acc, GraphTerm::Add, &mut graph);
     let add_acc_out = loop_out(add_acc, 5, Term::Acc('z'), 'b', &mut graph);
 
@@ -72,12 +73,14 @@ fn test_sum_reduce() {
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
     });
+    let orig_a = a;
     a = pad_in(a, &mut graph, 6);
     a = loop_in(a, 5, 'z', 'a', &mut graph);
 
     let mut acc = graph.add_node(GraphTerm::GMEM {
         label: Some("acc".to_string()),
     });
+    let orig_acc = acc;
     acc = pad_in(acc, &mut graph, 6);
     acc = loop_in(acc, 5, Term::Acc('z'), 'a', &mut graph);
 
@@ -89,8 +92,12 @@ fn test_sum_reduce() {
     let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new()), 0).unwrap();
     let input = vec![0., 1., 2., 3., 4.];
     let outputs = run_graph(
-        &[("A".to_string(), input), ("acc".to_string(), vec![0.0])],
+        vec![
+            (orig_a, Box::new(move || input)),
+            (orig_acc, Box::new(move || vec![0.0])),
+        ],
         &kernels,
+        &FxHashMap::default(),
     )
     .0;
     assert_eq!(outputs[0], vec![10.0]);
@@ -105,6 +112,7 @@ fn test_matmul() {
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
     });
+    let orig_a = a;
     a = loop_in(a, m, Expression::from('z') * k, 'm', &mut graph);
     a = loop_in(a, n, 0, 'n', &mut graph);
     a = pad_in(a, &mut graph, 2);
@@ -113,6 +121,7 @@ fn test_matmul() {
     let mut b = graph.add_node(GraphTerm::GMEM {
         label: Some("B".to_string()),
     });
+    let orig_b = b;
     b = loop_in(b, m, 0, 'm', &mut graph);
     b = loop_in(b, n, 'z', 'n', &mut graph);
     b = pad_in(b, &mut graph, 2);
@@ -121,6 +130,7 @@ fn test_matmul() {
     let mut acc = graph.add_node(GraphTerm::GMEM {
         label: Some("Acc".to_string()),
     });
+    let orig_acc = acc;
     acc = pad_in(acc, &mut graph, 2);
     acc = loop_in(acc, m, Expression::from('z') * n, 'm', &mut graph);
     acc = loop_in(acc, n, 'z', 'n', &mut graph);
@@ -156,12 +166,13 @@ fn test_matmul() {
     ]
     .into_flattened();
     let outputs = run_graph(
-        &[
-            ("A".to_string(), a),
-            ("B".to_string(), b),
-            ("Acc".to_string(), vec![0.0]),
+        vec![
+            (orig_a, Box::new(move || a)),
+            (orig_b, Box::new(move || b)),
+            (orig_acc, Box::new(move || vec![0.0])),
         ],
         &kernels,
+        &FxHashMap::default(),
     )
     .0
     .pop()
@@ -185,6 +196,7 @@ fn test_tiled_matmul_basic() {
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
     });
+    let orig_a = a;
     a = loop_in(
         a,
         Expression::from(m) / 8,
@@ -207,6 +219,7 @@ fn test_tiled_matmul_basic() {
     let mut b = graph.add_node(GraphTerm::GMEM {
         label: Some("B".to_string()),
     });
+    let orig_b = b;
     b = loop_in(b, Expression::from(m) / 8, 0, 'm', &mut graph);
     b = loop_in(
         b,
@@ -229,6 +242,7 @@ fn test_tiled_matmul_basic() {
     let mut acc = graph.add_node(GraphTerm::GMEM {
         label: Some("acc".to_string()),
     });
+    let orig_acc = acc;
     acc = loop_in(acc, Expression::from(m) / 8, 0, 'm', &mut graph);
     acc = loop_in(acc, Expression::from(n) / 8, 0, 'n', &mut graph);
     acc = loop_in(acc, 8, 0, "tiled_m", &mut graph);
@@ -490,12 +504,13 @@ fn test_tiled_matmul_basic() {
     ]
     .into_flattened();
     let outputs = run_graph(
-        &[
-            ("A".to_string(), a),
-            ("B".to_string(), b),
-            ("acc".to_string(), vec![0.0]),
+        vec![
+            (orig_a, Box::new(move || a)),
+            (orig_b, Box::new(move || b)),
+            (orig_acc, Box::new(move || vec![0.0])),
         ],
         &kernels,
+        &FxHashMap::default(),
     )
     .0
     .pop()
@@ -1059,6 +1074,7 @@ fn test_tiled_matmul_smem() {
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
     });
+    let orig_a = a;
     a = loop_in(
         a,
         Expression::from(m) / 8,
@@ -1104,6 +1120,7 @@ fn test_tiled_matmul_smem() {
     let mut b = graph.add_node(GraphTerm::GMEM {
         label: Some("B".to_string()),
     });
+    let orig_b = b;
     b = loop_in(b, Expression::from(m) / 8, 0, 'm', &mut graph);
     b = loop_in(
         b,
@@ -1142,6 +1159,7 @@ fn test_tiled_matmul_smem() {
     let mut acc = graph.add_node(GraphTerm::GMEM {
         label: Some("acc".to_string()),
     });
+    let orig_acc = acc;
     acc = loop_in(acc, Expression::from(m) / 8, 0, 'm', &mut graph);
     acc = loop_in(acc, Expression::from(n) / 8, 0, 'n', &mut graph);
     acc = loop_in(acc, 8, 0, "tiled_m", &mut graph);
@@ -1402,12 +1420,13 @@ fn test_tiled_matmul_smem() {
     ]
     .into_flattened();
     let outputs = run_graph(
-        &[
-            ("A".to_string(), a),
-            ("B".to_string(), b),
-            ("acc".to_string(), vec![0.0]),
+        vec![
+            (orig_a, Box::new(move || a)),
+            (orig_b, Box::new(move || b)),
+            (orig_acc, Box::new(move || vec![0.0])),
         ],
         &kernels,
+        &FxHashMap::default(),
     )
     .0
     .pop()

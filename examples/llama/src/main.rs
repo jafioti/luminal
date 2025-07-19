@@ -59,7 +59,8 @@ fn main() {
             )
         })
         .collect();
-    cache_src.set_dyn(vec![], (model::N_KV_HEADS, 0, model::HEAD_DIM));
+    let empty: Vec<f16> = vec![];
+    cache_src.set_dyn(empty, (model::N_KV_HEADS, 0, model::HEAD_DIM));
     let model = model::Llama::new(&mut cx);
     let mut model_weights = params(&model);
     // cx.keep_tensors(&model_weights);
@@ -92,7 +93,9 @@ fn main() {
         ),
     );
     let mut rng = rng();
-    let input_data = (0..HIDDEN_DIM).map(|_| rng.random()).collect_vec();
+    let input_data = (0..HIDDEN_DIM)
+        .map(|_| f16::from_f32(rng.random()))
+        .collect_vec();
     input.set(input_data.clone());
     cx.set_dyn_dim('s', 1);
     cx.execute();
@@ -142,7 +145,7 @@ fn main() {
     let device = Device::system_default().unwrap();
     let mut inps = vec![(
         old_to_new_mapping[&input.id],
-        Box::new(move || input_data) as Box<dyn FnOnce() -> Vec<f32>>,
+        Box::new(move || input_data) as Box<dyn FnOnce() -> Vec<f16>>,
     )];
     for (k, v) in &cache_src {
         inps.push((old_to_new_mapping[&k.id], Box::new(|| vec![])));
@@ -152,7 +155,7 @@ fn main() {
         inps.push((old_to_new_mapping[&node], val));
     }
     for (label, val, size) in accs {
-        inps.push((label, Box::new(move || vec![val])));
+        inps.push((label, Box::new(move || vec![f16::from_f32(val)])));
     }
 
     // let (buf_sizes, buf_map) = produce_buffer_map(&kernels);
