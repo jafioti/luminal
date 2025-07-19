@@ -1,4 +1,5 @@
 use luminal::prelude::{binary::F32Pow, *};
+use luminal_2::{custom_kernel, Kernel};
 use luminal_nn::{Embedding, LayerNorm, Linear};
 
 // Llama3 8B Config
@@ -212,7 +213,7 @@ impl SerializeModule for TransformerBlock {
 
 pub struct Llama {
     // Token embeddings
-    // pub embedding: GraphTensor,
+    pub embedding: GraphTensor,
     // Transformer layers
     pub layers: Vec<TransformerBlock>,
     // Norm + LM head
@@ -223,8 +224,33 @@ impl Module<(GraphTensor, &[KVCache])> for Llama {
     type Output = (GraphTensor, Vec<KVCache>);
     fn forward(&self, (input, cache): (GraphTensor, &[KVCache])) -> Self::Output {
         // Embed tokens
-        // let mut x = self.embedding.forward(input);
-        let mut x = input;
+        let sequence_length = input.dims1();
+        let [mut x] = custom_kernel(
+            &[input, self.embedding],
+            Kernel {
+                code: "#include <metal_stdlib>
+using namespace metal;
+kernel void kernel(device float *inp [[buffer(0)]], device float *weights [[buffer(1)]], device float *out [[buffer(2)]], device int& n_embeddings [[buffer(3)]], device int& embedding_dim [[buffer(4)]], uint2 i_ [[thread_position_in_grid]]) {
+    if (i_.x < n_embeddings && i_.y < embedding_dim) {
+        out[i_.x * embedding_dim + i_.y] = weights[(int)inp[i_.x] * embedding_dim + i_.y];
+    }
+}".to_string(),
+                grid: (
+                    sequence_length,
+                    Expression::from(HIDDEN_DIM),
+                    Expression::from(1),
+                ),
+                threadblock: (
+                    Expression::from(16),
+                    Expression::from(16),
+                    Expression::from(1),
+                ),
+                smem: Expression::from(0),
+                outputs: vec![sequence_length * HIDDEN_DIM],
+            },
+            [(sequence_length, HIDDEN_DIM)],
+            input.graph(),
+        );
 
         // Run through layers and collect new caches
         let mut new_caches = vec![];
@@ -241,7 +267,7 @@ impl Module<(GraphTensor, &[KVCache])> for Llama {
 impl Llama {
     pub fn new(cx: &mut Graph) -> Self {
         Self {
-            // embedding: cx.tensor((VOCAB_SIZE, HIDDEN_DIM)),
+            embedding: cx.tensor((VOCAB_SIZE, HIDDEN_DIM)),
             head: (
                 LayerNorm::new(HIDDEN_DIM, true, false, false, 1e-5, cx),
                 Linear::new_permuted(HIDDEN_DIM, VOCAB_SIZE, false, cx),
@@ -253,7 +279,7 @@ impl Llama {
 
 impl SerializeModule for Llama {
     fn serialize(&self, s: &mut Serializer) {
-        // s.tensor("token_embd/weight", self.embedding);
+        s.tensor("token_embd/weight", self.embedding);
         s.module("output_norm", &self.head.0);
         s.module("output", &self.head.1);
         for (i, layer) in self.layers.iter().enumerate() {
