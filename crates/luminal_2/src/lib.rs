@@ -34,12 +34,12 @@ impl GPUArch {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Kernel {
-    code: String,
+    pub code: String,
     // launch params
-    grid: (Expression, Expression, Expression),
-    threadblock: (Expression, Expression, Expression),
-    smem: Expression, // sizes of required shared memory buffers
-    outputs: Vec<Expression>,
+    pub grid: (Expression, Expression, Expression),
+    pub threadblock: (Expression, Expression, Expression),
+    pub smem: Expression, // sizes of required shared memory buffers
+    pub outputs: Vec<Expression>,
 }
 
 #[derive(Clone, Debug)]

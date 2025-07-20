@@ -39,7 +39,7 @@ use crate::Kernel;
 // }
 
 pub fn run_graph(
-    mut inputs: Vec<(NodeIndex, Box<dyn FnOnce() -> Vec<f32>>)>,
+    mut inputs: Vec<(NodeIndex, Box<dyn FnOnce() -> Vec<luminal::prelude::f16>>)>,
     kernels: &StableGraph<Kernel, (usize, usize)>,
     dyn_vars: &FxHashMap<char, usize>,
 ) -> (Vec<Vec<f32>>, u128) {
@@ -140,8 +140,8 @@ pub fn run_graph(
                             .iter_mut()
                             .find(|(n, _)| mapping[&n.index()] == input_index)
                             .unwrap();
-                        let mut other =
-                            Box::new(|| vec![]) as Box<dyn FnOnce() -> Vec<f32> + 'static>;
+                        let mut other = Box::new(|| vec![])
+                            as Box<dyn FnOnce() -> Vec<luminal::prelude::f16> + 'static>;
                         std::mem::swap(&mut entry.1, &mut other);
                         let buf = other();
                         let buffer = device.new_buffer_with_data(

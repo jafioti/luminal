@@ -463,3 +463,71 @@ impl<const A: usize, const B: usize, const C: usize, const D: usize, const E: us
         )
     }
 }
+
+// f16
+impl ToData<Vec<f16>> for Vec<f16> {
+    fn to_data_vec(self) -> (Vec<f16>, Vec<usize>) {
+        let l = self.len();
+        (self, vec![l])
+    }
+}
+impl ToData<Vec<f16>> for f16 {
+    fn to_data_vec(self) -> (Vec<f16>, Vec<usize>) {
+        (vec![self], vec![1])
+    }
+}
+impl<const A: usize> ToData<Vec<f16>> for [f16; A] {
+    fn to_data_vec(self) -> (Vec<f16>, Vec<usize>) {
+        (self.to_vec(), vec![A])
+    }
+}
+impl<const A: usize, const B: usize> ToData<Vec<f16>> for [[f16; B]; A] {
+    fn to_data_vec(self) -> (Vec<f16>, Vec<usize>) {
+        (
+            self.into_iter().flat_map(|i| i.to_vec()).collect(),
+            vec![A, B],
+        )
+    }
+}
+impl<const A: usize, const B: usize, const C: usize> ToData<Vec<f16>> for [[[f16; C]; B]; A] {
+    fn to_data_vec(self) -> (Vec<f16>, Vec<usize>) {
+        (
+            self.into_iter()
+                .flat_map(|i| i.into_iter().flat_map(|i| i.to_vec()))
+                .collect(),
+            vec![A, B, C],
+        )
+    }
+}
+impl<const A: usize, const B: usize, const C: usize, const D: usize> ToData<Vec<f16>>
+    for [[[[f16; D]; C]; B]; A]
+{
+    fn to_data_vec(self) -> (Vec<f16>, Vec<usize>) {
+        (
+            self.into_iter()
+                .flat_map(|i| {
+                    i.into_iter()
+                        .flat_map(|i| i.into_iter().flat_map(|i| i.to_vec()))
+                })
+                .collect(),
+            vec![A, B, C, D],
+        )
+    }
+}
+impl<const A: usize, const B: usize, const C: usize, const D: usize, const E: usize>
+    ToData<Vec<f16>> for [[[[[f16; E]; D]; C]; B]; A]
+{
+    fn to_data_vec(self) -> (Vec<f16>, Vec<usize>) {
+        (
+            self.into_iter()
+                .flat_map(|i| {
+                    i.into_iter().flat_map(|i| {
+                        i.into_iter()
+                            .flat_map(|i| i.into_iter().flat_map(|i| i.to_vec()))
+                    })
+                })
+                .collect(),
+            vec![A, B, C, D, E],
+        )
+    }
+}

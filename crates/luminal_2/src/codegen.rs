@@ -12,14 +12,33 @@ use std::{
     iter::repeat,
 };
 
+use std::fmt;
+
 use crate::{
     GMEMBuffer, GPUArch, GraphTerm, Kernel,
     utils::{display_graph, validate_graph},
 };
 
-pub const GRID_DIMS: usize = 3;
+pub const GRID_DIMS: usize = 2;
 pub const THREADBLOCK_DIMS: usize = 2;
 pub const MAX_THREADBLOCK_SIZE: usize = 1024; // this is max on mac
+
+#[derive(Debug, Clone, Copy)]
+enum DType {
+    Half,
+    Float,
+}
+
+impl fmt::Display for DType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DType::Half => write!(f, "half"),
+            DType::Float => write!(f, "float"),
+        }
+    }
+}
+
+const CODEGEN_TYPE: DType = DType::Half;
 
 pub fn codegen(
     graph: StableGraph<GraphTerm, (), Directed>,
@@ -133,18 +152,20 @@ pub fn codegen(
                     .into_iter()
                     .map(|(_, a)| a)
                     .chain(outputs.iter().map(|(_, i)| *i))
-                    .map(|a| format!("float* {}", var_to_char(node_to_var[&a].0)))
+                    .map(|a| format!("{CODEGEN_TYPE}* {}", var_to_char(node_to_var[&a].0)))
                     .join(", ");
                 let smem_setup = if smem_buffers.is_empty() {
                     "".to_string()
                 } else {
                     format!(
-                        "\textern __shared__ float sm[];\n{}",
+                        "\textern __shared__ {CODEGEN_TYPE} sm[];\n{}",
                         smem_buffers
                             .iter()
                             .scan("".to_string(), |prev_buffers, (n, _, size)| {
-                                let r =
-                                    format!("\tfloat* {} = sm{prev_buffers};\n", var_to_char(*n));
+                                let r = format!(
+                                    "\t{CODEGEN_TYPE}* {} = sm{prev_buffers};\n",
+                                    var_to_char(*n)
+                                );
                                 prev_buffers.push_str(&format!(" + {size}"));
                                 Some(r)
                             })
@@ -182,7 +203,7 @@ pub fn codegen(
                     .enumerate()
                     .map(|(i, a)| {
                         format!(
-                            "device float* {} [[buffer({i})]]",
+                            "device {CODEGEN_TYPE}* {} [[buffer({i})]]",
                             var_to_char(node_to_var[&a].0)
                         )
                     })
@@ -195,14 +216,14 @@ pub fn codegen(
                             .iter()
                             .scan("".to_string(), |prev_buffers, (n, _, size)| {
                                 let r = format!(
-                                    "\tthreadgroup float* {} = sm{prev_buffers};\n",
+                                    "\tthreadgroup {CODEGEN_TYPE}* {} = sm{prev_buffers};\n",
                                     var_to_char(*n)
                                 );
                                 prev_buffers.push_str(&format!(" + {size}"));
                                 Some(r)
                             })
                             .join(""),
-                        ", threadgroup float* sm [[threadgroup(0)]]".to_string(),
+                        ", threadgroup {CODEGEN_TYPE}* sm [[threadgroup(0)]]".to_string(),
                     )
                 };
 
@@ -226,21 +247,21 @@ using namespace metal;
 kernel void kernel405(
 	uint3 blockIdx [[threadgroup_position_in_grid]],
 	uint3 threadIdx [[thread_position_in_threadgroup]],
-	device float* a [[buffer(0)]],
-	device float* b [[buffer(1)]],
-	device float* c [[buffer(2)]]
+	device {CODEGEN_TYPE}* a [[buffer(0)]],
+	device {CODEGEN_TYPE}* b [[buffer(1)]],
+	device {CODEGEN_TYPE}* c [[buffer(2)]]
         ) {
 	// Inputs
 	// NodeIndex(52) = a
 	int loop_e = blockIdx.x;
 	int loop_f = blockIdx.y;
-	device float* g = a + (loop_f*4096);
-	device float* h = c + (loop_f*4096);
+	device {CODEGEN_TYPE}* g = a + (loop_f*4096);
+	device {CODEGEN_TYPE}* h = c + (loop_f*4096);
 	int loop_i = blockIdx.z;
-	device float* j = g + loop_i;
-	device float* k = b + loop_i;
-	device float* l = h + loop_i;
-	float m = *k * *j;
+	device {CODEGEN_TYPE}* j = g + loop_i;
+	device {CODEGEN_TYPE}* k = b + loop_i;
+	device {CODEGEN_TYPE}* l = h + loop_i;
+	{CODEGEN_TYPE} m = *k * *j;
 	*l = m;
 }"
         {
@@ -442,7 +463,7 @@ fn make_kernel(
                         map.insert('s', 1);
                         map.insert('p', 0);
                         kernel_lines.push(format!(
-                            "{spacing}{}float {}[{}] = {{0.0}};",
+                            "{spacing}{}{CODEGEN_TYPE} {}[{}] = {{0.0}};",
                             arch.metal_buffer_type(*prev_max_var),
                             var_to_char(*prev_max_var),
                             size.exec(&map).unwrap()
@@ -492,7 +513,7 @@ fn make_kernel(
                         // We don't have a place to save this accumulator to. Need to allocate a register buffer
                         *prev_max_var += 1;
                         kernel_lines.push(format!(
-                            "{spacing}thread float {}[{size}] = {{0.0}};",
+                            "{spacing}thread {CODEGEN_TYPE} {}[{size}] = {{0.0}};",
                             var_to_char(*prev_max_var)
                         ));
                         node_to_var.insert(*output, (*prev_max_var, true));
@@ -550,7 +571,7 @@ fn make_kernel(
                                 arch.metal_buffer_type(real_input),
                             );
                             kernel_lines.push(format!(
-                                "{inner_spacing}{}float* {} = {} + {};",
+                                "{inner_spacing}{}{CODEGEN_TYPE}* {} = {} + {};",
                                 arch.metal_buffer_type(*prev_max_var),
                                 var_to_char(*prev_max_var),
                                 var_to_char(real_input),
@@ -584,7 +605,7 @@ fn make_kernel(
                                 arch.metal_buffer_type(real_output),
                             );
                             kernel_lines.push(format!(
-                                "{inner_spacing}{}float* {} = {} + {};",
+                                "{inner_spacing}{}{CODEGEN_TYPE}* {} = {} + {};",
                                 arch.metal_buffer_type(*prev_max_var),
                                 var_to_char(*prev_max_var),
                                 var_to_char(real_output),
@@ -785,7 +806,7 @@ fn make_kernel(
                     _ => panic!(),
                 };
                 kernel_lines.push(format!(
-                    "{spacing}float {} = {expr};",
+                    "{spacing}{CODEGEN_TYPE} {} = {expr};",
                     var_to_char(*prev_max_var),
                 ));
             }
@@ -824,7 +845,7 @@ fn make_kernel(
                     _ => panic!(),
                 };
                 kernel_lines.push(format!(
-                    "{spacing}float {} = {expr};",
+                    "{spacing}{CODEGEN_TYPE} {} = {expr};",
                     var_to_char(*prev_max_var)
                 ));
             }
@@ -1340,3 +1361,176 @@ fn split_kernels(
     let root_kernel = marked_graph.node_weight(root).unwrap().2[0];
     (kernel_graphs, root_kernel)
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::{DType, GPUArch, GraphTerm, codegen};
+//     use luminal::{
+//         prelude::{
+//             NodeIndex,
+//             petgraph::{Directed, prelude::StableGraph},
+//         },
+//         shape::Expression,
+//     };
+//     use std::fmt;
+
+//     /// A helper module to create common graph structures for tests.
+//     /// This is now modified to use 'z' for stride to ensure correct logic generation.
+//     mod helpers {
+//         use super::*;
+
+//         /// Creates a graph for a simple element-wise addition: C = A + B.
+//         /// The operation is wrapped in a loop, representing a typical kernel workload.
+//         pub fn create_add_loop_graph() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
+//             let mut graph = StableGraph::new();
+//             let a = graph.add_node(GraphTerm::GMEM { label: None });
+//             let b = graph.add_node(GraphTerm::GMEM { label: None });
+//             let c = graph.add_node(GraphTerm::GMEM { label: None });
+
+//             let range: Expression = 1024.into();
+//             // CRITICAL FIX: Use 'z' as the placeholder for the loop variable.
+//             let stride: Expression = 'z'.into();
+//             let marker = "i".to_string();
+
+//             // Create loop structure
+//             let loop_in_a = graph.add_node(GraphTerm::LoopIn {
+//                 range: range.clone(),
+//                 stride: stride.clone(),
+//                 marker: marker.clone(),
+//             });
+//             let loop_in_b = graph.add_node(GraphTerm::LoopIn {
+//                 range: range.clone(),
+//                 stride: stride.clone(),
+//                 marker: marker.clone(),
+//             });
+//             let add = graph.add_node(GraphTerm::Add);
+//             let loop_out = graph.add_node(GraphTerm::LoopOut {
+//                 range,
+//                 stride,
+//                 marker,
+//             });
+
+//             // Connect the graph
+//             graph.add_edge(a, loop_in_a, ());
+//             graph.add_edge(b, loop_in_b, ());
+//             graph.add_edge(loop_in_a, add, ());
+//             graph.add_edge(loop_in_b, add, ());
+//             graph.add_edge(add, loop_out, ());
+//             graph.add_edge(loop_out, c, ());
+
+//             (graph, c)
+//         }
+
+//         /// Creates a graph that uses shared memory (SMEM).
+//         /// It models a simple load from global memory into shared memory.
+//         pub fn create_smem_loop_graph() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex) {
+//             let mut graph = StableGraph::new();
+//             let gmem_in = graph.add_node(GraphTerm::GMEM { label: None });
+//             let smem = graph.add_node(GraphTerm::SMEM);
+//             let gmem_out = graph.add_node(GraphTerm::GMEM { label: None });
+
+//             let range: Expression = 64.into();
+//             let stride: Expression = 'z'.into();
+//             let marker = "i".to_string();
+
+//             // Create loop structure for loading into SMEM
+//             let loop_in_gmem = graph.add_node(GraphTerm::LoopIn {
+//                 range: range.clone(),
+//                 stride: stride.clone(),
+//                 marker: marker.clone(),
+//             });
+//             let loop_in_smem = graph.add_node(GraphTerm::LoopIn {
+//                 range: range.clone(),
+//                 stride: stride.clone(),
+//                 marker: marker.clone(),
+//             });
+//             let load = graph.add_node(GraphTerm::SMEMLoad);
+//             let loop_out = graph.add_node(GraphTerm::LoopOut {
+//                 range,
+//                 stride,
+//                 marker,
+//             });
+
+//             // Connect the graph
+//             graph.add_edge(gmem_in, loop_in_gmem, ());
+//             graph.add_edge(smem, loop_in_smem, ());
+//             graph.add_edge(loop_in_gmem, load, ());
+//             graph.add_edge(loop_in_smem, load, ());
+//             graph.add_edge(load, loop_out, ());
+//             graph.add_edge(loop_out, gmem_out, ());
+
+//             (graph, gmem_out)
+//         }
+//     }
+
+//     /// This test module verifies codegen for DType::Half.
+//     mod test_half {
+//         use super::{DType, GPUArch, codegen, helpers};
+
+//         #[test]
+//         fn test_add_loop_cuda_half() {
+//             let (graph, root) = helpers::create_add_loop_graph();
+//             let arch = GPUArch::CUDA;
+//             let kernel_graph = codegen(graph, root, arch, 0).unwrap();
+//             let kernel = &kernel_graph
+//                 .node_weights()
+//                 .find(|k| k.code.starts_with("extern"))
+//                 .unwrap()
+//                 .code;
+
+//             // Check that function parameters and local variables use the 'half' type.
+//             assert!(kernel.contains("void kernel0(half* a, half* b, half* c)"));
+//             assert!(kernel.contains("half i ="));
+//         }
+
+//         #[test]
+//         fn test_add_loop_metal_half() {
+//             let (graph, root) = helpers::create_add_loop_graph();
+//             let arch = GPUArch::Metal(Default::default());
+//             let kernel_graph = codegen(graph, root, arch, 0).unwrap();
+//             let kernel = &kernel_graph
+//                 .node_weights()
+//                 .find(|k| k.code.starts_with("#include"))
+//                 .unwrap()
+//                 .code;
+
+//             // Check for Metal's specific type declarations.
+//             assert!(kernel.contains("device half* a"));
+//             assert!(kernel.contains("device half* b"));
+//             assert!(kernel.contains("device half* c"));
+//             assert!(kernel.contains("half i ="));
+//         }
+
+//         #[test]
+//         fn test_smem_loop_cuda_half() {
+//             let (graph, root) = helpers::create_smem_loop_graph();
+//             let arch = GPUArch::CUDA;
+//             let kernel_graph = codegen(graph, root, arch, 0).unwrap();
+//             let kernel = &kernel_graph
+//                 .node_weights()
+//                 .find(|k| k.code.starts_with("extern"))
+//                 .unwrap()
+//                 .code;
+
+//             // Check shared memory declarations for 'half'.
+//             assert!(kernel.contains("extern __shared__ half sm[];"));
+//             assert!(kernel.contains("half* c = sm;"));
+//         }
+
+//         #[test]
+//         fn test_smem_loop_metal_half() {
+//             let (graph, root) = helpers::create_smem_loop_graph();
+//             let arch = GPUArch::Metal(Default::default());
+//             let kernel_graph = codegen(graph, root, arch, 0).unwrap();
+//             let kernel = &kernel_graph
+//                 .node_weights()
+//                 .find(|k| k.code.starts_with("#include"))
+//                 .unwrap()
+//                 .code;
+
+//             // Check threadgroup memory declarations for 'half'.
+//             assert!(kernel.contains("threadgroup half* sm"));
+//             assert!(kernel.contains("threadgroup half* c = sm;"));
+//         }
+//     }
+// }
