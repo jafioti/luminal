@@ -297,6 +297,14 @@ impl Operator for Sqrt {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Chunk;
+impl Operator for Chunk {
+    fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        inp.into_iter().map(|(i, _)| i.cloned()).collect()
+    }
+}
+
 // Binary Ops (A x A -> A)
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -432,5 +440,66 @@ fn get_index(
         data[i]
     } else {
         0.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::prelude::*;
+    // Import our new test harness
+
+    #[test]
+    fn test_chunk_in_graph_context_1d() {
+        // 1. Arrange: Setup a graph with a single input tensor.
+        let mut cx = Graph::new();
+        let a = cx.tensor(4).set(vec![1., 2., 3., 4.]);
+
+        // 2. Act: Add a Chunk op that takes the input tensor.
+        let chunk_node_id = cx
+            .add_op(Chunk)
+            .input(a.id, 0, a.shape) // Input from node `input_id`, its 0th output
+            .finish();
+
+        let res = GraphTensor::from_id(chunk_node_id, a.shape, &mut cx).retrieve();
+        cx.execute();
+
+        // 3. Assert: Check the output tensor stored in the graph.
+        let output_tensor = cx
+            .get_tensor(chunk_node_id, 0)
+            .expect("Output tensor should exist");
+        let output_data = output_tensor.downcast_ref::<Vec<f32>>().unwrap();
+
+        assert_eq!(output_data.len(), 4);
+        assert_eq!(*output_data, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_chunk_in_graph_context_empty_tensor() {
+        let mut cx = Graph::new();
+        let data: Vec<f32> = vec![];
+        let a = cx.tensor(4).set(data);
+
+        // 2. Act: Add a Chunk op that takes the input tensor.
+        let chunk_node_id = cx
+            .add_op(Chunk)
+            .input(a.id, 0, a.shape) // Input from node `input_id`, its 0th output
+            .finish();
+
+        let res = GraphTensor::from_id(chunk_node_id, a.shape, &mut cx).retrieve();
+        cx.execute();
+
+        // 3. Assert: Verify the output is an empty tensor.
+        let output_tensor = cx
+            .get_tensor(chunk_node_id, 0)
+            .expect("Output tensor should exist");
+        let output_data = output_tensor.downcast_ref::<Vec<f32>>().unwrap();
+
+        println!("{:?}", output_data);
+
+        assert!(
+            output_data.is_empty(),
+            "Output for a zero-element tensor should be empty."
+        );
     }
 }
