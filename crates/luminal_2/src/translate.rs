@@ -1,5 +1,3 @@
-use std::cell::Cell;
-
 use luminal::prelude::{
     petgraph::{Directed, algo::toposort, prelude::StableGraph},
     *,
@@ -74,6 +72,7 @@ pub fn translate_graph(
                     new_graph.add_edge(op, loopout, ());
                     op = loopout;
                 }
+                old_to_new_mapping.insert(node, op);
                 node_mapping.insert((node, 0), op);
             }
             "Add" | "Mul" | "Mod" | "LessThan" => {
@@ -115,6 +114,7 @@ pub fn translate_graph(
                     new_graph.add_edge(op, loopout, ());
                     op = loopout;
                 }
+                old_to_new_mapping.insert(node, op);
                 node_mapping.insert((node, 0), op);
             }
             s if s.starts_with("SumReduce") || s.starts_with("MaxReduce") => {
@@ -155,12 +155,7 @@ pub fn translate_graph(
                     &mut new_graph,
                     &mut inits,
                 );
-                for (i, ((range, stride), acc_stride)) in shape
-                    .dims()
-                    .into_iter()
-                    .zip(shape.strides())
-                    .zip(rm_strides)
-                    .enumerate()
+                for (i, (range, acc_stride)) in shape.dims().into_iter().zip(rm_strides).enumerate()
                 {
                     if i == reduce_dim {
                         for z in i..THREADBLOCK_DIMS + GRID_DIMS {
@@ -234,6 +229,7 @@ pub fn translate_graph(
                         }
                     }
                 }
+                old_to_new_mapping.insert(node, op);
                 node_mapping.insert((node, 0), op);
             }
             s if s.starts_with("Constant(") => {
@@ -249,6 +245,7 @@ pub fn translate_graph(
                 let new = new_graph.add_node(GraphTerm::GMEM {
                     label: Some(op.to_string()),
                 });
+                old_to_new_mapping.insert(node, new);
                 node_mapping.insert((node, 0), new);
                 inits.push((new, vec![value]));
             }
@@ -274,6 +271,15 @@ pub fn translate_graph(
                 }
             }
         }
+    }
+
+    // Add gmems for to_retrieve
+    for (t, _) in &graph.to_retrieve {
+        let gmem = new_graph.add_node(GraphTerm::GMEM {
+            label: Some("Output".to_string()),
+        });
+        new_graph.add_edge(old_to_new_mapping[t], gmem, ());
+        old_to_new_mapping.insert(*t, gmem);
     }
 
     (new_graph, old_to_new_mapping, inits)

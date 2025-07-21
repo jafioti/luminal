@@ -101,8 +101,8 @@ pub fn run_graph(
                 // Copy outputs back
                 return (outputs, time_taken_micros);
             } else {
-                println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
-                println!("{}", kernel.code);
+                // println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
+                // println!("{}", kernel.code);
 
                 // compile kernel
                 let command_buffer = queue.new_command_buffer();

@@ -116,7 +116,8 @@ pub fn search(
         let graph = extraction_to_graph(egraph, &trajectory);
         let root = graph.externals(Direction::Outgoing).next().unwrap();
         // display_graph(&graph, &[]);
-        let Some(kernels) = crate::codegen::codegen(graph.clone(), root, arch.clone(), 0) else {
+        let Some(kernels) = crate::codegen::codegen(graph.clone(), vec![root], arch.clone(), 0)
+        else {
             continue;
         };
         if kernels.node_count() == 1 {

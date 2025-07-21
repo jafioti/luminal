@@ -120,7 +120,7 @@ fn main() {
     println!("generatin g");
     let kernels = codegen(
         new_graph,
-        root,
+        vec![root],
         luminal_2::GPUArch::Metal(HashMap::default()),
         0,
     )

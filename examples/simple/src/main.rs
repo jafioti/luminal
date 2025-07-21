@@ -35,16 +35,15 @@ fn main() {
 
     // Execute the graph
     cx.execute_debug();
-    // cx.display();
     let (new_graph, old_to_new_mapping, accs) = translate_graph(&cx);
+
     // luminal_2::utils::display_graph(&new_graph, &[]);
     // Print the results
     println!("{:?}", accs);
     println!("B: {:?}", triu.data());
-    let root = new_graph.externals(Direction::Outgoing).next().unwrap();
     let kernels = codegen(
         new_graph.clone(),
-        root,
+        vec![old_to_new_mapping[&triu.id]],
         GPUArch::Metal(HashMap::default()),
         0,
     )
