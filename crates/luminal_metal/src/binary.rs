@@ -208,8 +208,8 @@ impl<T: MetalFloat> Operator for MetalGather<T> {
             // Execute
             encoder.dispatch_threads(
                 MTLSize {
-                    width: indexes.len() as u64,
-                    height: self.embed_dim as u64,
+                    width: (indexes.len() / 16 + 1) as u64,
+                    height: (self.embed_dim / 16 + 1) as u64,
                     depth: 1,
                 },
                 MTLSize {
