@@ -5,6 +5,7 @@ use luminal::{
     },
     shape::{Expression, Term, expression_cleanup},
 };
+use rustc_hash::FxHashMap;
 
 use crate::{GPUArch, codegen::codegen, run::run_graph};
 use std::collections::HashMap;
@@ -72,12 +73,14 @@ fn test_sum_reduce() {
     let mut a = graph.add_node(GraphTerm::GMEM {
         label: Some("A".to_string()),
     });
+    let orig_a = a;
     a = pad_in(a, &mut graph, 6);
     a = loop_in(a, 5, 'z', 'a', &mut graph);
 
     let mut acc = graph.add_node(GraphTerm::GMEM {
         label: Some("acc".to_string()),
     });
+    let orig_acc = acc;
     acc = pad_in(acc, &mut graph, 6);
     acc = loop_in(acc, 5, Term::Acc('z'), 'a', &mut graph);
 
@@ -89,8 +92,9 @@ fn test_sum_reduce() {
     let kernels = codegen(graph, out, GPUArch::Metal(HashMap::new()), 0).unwrap();
     let input = vec![0., 1., 2., 3., 4.];
     let outputs = run_graph(
-        &[("A".to_string(), input), ("acc".to_string(), vec![0.0])],
+        &[(orig_a, input), (orig_acc, vec![0.0])],
         &kernels,
+        &FxHashMap::default(),
     )
     .0;
     assert_eq!(outputs[0], vec![10.0]);

@@ -2,7 +2,7 @@ use itertools::Itertools;
 use luminal::{
     prelude::{
         NodeIndex,
-        petgraph::{Directed, Direction, algo::toposort, prelude::StableGraph},
+        petgraph::{Directed, Direction, algo::toposort, prelude::StableGraph, visit::EdgeRef},
     },
     shape::{Expression, Term},
 };
@@ -32,9 +32,8 @@ pub fn codegen(
         .filter(|w| matches!(w, GraphTerm::GMEM { .. }))
         .count();
     // display_graph(&graph, &[]);
-    println!("Splitting");
     let (kernels, root_kernel) = split_kernels(graph, root, n_graph);
-    println!("Split");
+    println!("split");
     // Create kernel meta graph to toposort
     let mut meta_graph = StableGraph::new();
     for _ in 0..kernels.len() {
@@ -78,6 +77,32 @@ pub fn codegen(
             continue; // Either input node or output node
         }
         let (kernel_graph, inputs, outputs, smem_buffers) = kernels[node.index()].clone();
+        // if node.index() == 2 {
+        //     display_graph(&kernel_graph, &[]);
+        // }
+        // Handle custom kernels
+        if kernel_graph
+            .node_weights()
+            .all(|(n, _)| matches!(n, GraphTerm::GMEM { .. } | GraphTerm::Custom(_)))
+        {
+            let (GraphTerm::Custom(custom_kernel), _) = kernel_graph
+                .node_weights()
+                .find(|(n, _)| matches!(n, GraphTerm::Custom(_)))
+                .unwrap()
+            else {
+                panic!("invalid kernel!")
+            };
+            // Would the input ordering be valid? lets assume it is for now
+            let mut kernel = custom_kernel.clone();
+            kernel.code = kernel
+                .code
+                .replace("kernel_name", &format!("kernel{}", node.index()));
+            println!("{}", kernel.code);
+            println!("{:?}", inputs);
+            *meta_graph.node_weight_mut(node).unwrap() = kernel;
+            continue;
+        }
+
         validate_graph(&kernel_graph);
         // display_graph(&kernel_graph, &[]);
         let mut node_to_var = inputs
@@ -220,34 +245,6 @@ kernel void kernel{}(
                 )
             }
         };
-        if kernel
-            == "#include <metal_stdlib>
-using namespace metal;
-kernel void kernel405(
-	uint3 blockIdx [[threadgroup_position_in_grid]],
-	uint3 threadIdx [[thread_position_in_threadgroup]],
-	device float* a [[buffer(0)]],
-	device float* b [[buffer(1)]],
-	device float* c [[buffer(2)]]
-        ) {
-	// Inputs
-	// NodeIndex(52) = a
-	int loop_e = blockIdx.x;
-	int loop_f = blockIdx.y;
-	device float* g = a + (loop_f*4096);
-	device float* h = c + (loop_f*4096);
-	int loop_i = blockIdx.z;
-	device float* j = g + loop_i;
-	device float* k = b + loop_i;
-	device float* l = h + loop_i;
-	float m = *k * *j;
-	*l = m;
-}"
-        {
-            display_graph(&kernel_graph, &[]);
-            panic!();
-        }
-        // println!("{kernel}");
         let mut map = FxHashMap::default();
         map.insert('s', 1);
         map.insert('p', 0);
@@ -709,6 +706,7 @@ fn make_kernel(
             GraphTerm::LoopOut { range, stride, .. } => {
                 panic!("found loopout range: {range} stride: {stride}")
             }
+            GraphTerm::Custom(_) => unreachable!("this should be handled directly in codegen!"),
             GraphTerm::SMEMLoad | GraphTerm::SMEMRead => {
                 // Find the gmem input and smem input
                 let inputs = kernel_graph
@@ -804,7 +802,7 @@ fn make_kernel(
                 let expr = match &term {
                     GraphTerm::Add => format!("{inp_a} + {inp_b}"),
                     GraphTerm::Mul => format!("{inp_a} * {inp_b}"),
-                    GraphTerm::LessThan => format!("{inp_a} < {inp_b} ? 1.0 : 0.0"),
+                    GraphTerm::LessThan => format!("(float)({inp_a} < {inp_b})"),
                     GraphTerm::Mod => format!(
                         "{}({inp_a}, {inp_b})",
                         if matches!(arch, GPUArch::Metal(_)) {
@@ -948,12 +946,14 @@ fn split_kernels(
         }
         dfs.extend(marked_graph.neighbors_undirected(n));
     }
+    println!("D");
 
     // Assign kernel numbers
     let mut dfs_stack = vec![root];
     let mut n_kernels = 1;
     let mut seen = FxHashSet::default();
     while let Some(node) = dfs_stack.pop() {
+        // println!("{:?}", node);
         let (term, curr_level, curr_kernel) = marked_graph.node_weight(node).unwrap().clone();
         for source in marked_graph
             .neighbors_directed(node, Direction::Incoming)
@@ -961,14 +961,24 @@ fn split_kernels(
         {
             let (src_term, src_level, src_kernel) = marked_graph.node_weight_mut(source).unwrap();
             let mut changed = false;
-            if matches!(term, GraphTerm::LoopIn { .. })
+            if (matches!(term, GraphTerm::LoopIn { .. })
                 && matches!(src_term, GraphTerm::LoopOut { .. })
-                && curr_level.len() < GRID_DIMS + THREADBLOCK_DIMS
+                && curr_level.len() < GRID_DIMS + THREADBLOCK_DIMS)
+                || matches!(src_term, GraphTerm::Custom(_))
             {
-                let max_kernel = *curr_kernel.iter().max().unwrap();
-                n_kernels = n_kernels.max(max_kernel + 2);
-                *src_kernel = vec![max_kernel + 1];
-                changed = true;
+                let min_src = *src_kernel.iter().min().unwrap_or(&0);
+                let max_curr = *curr_kernel.iter().max().unwrap_or(&0);
+                if min_src <= max_curr {
+                    let max_kernel = curr_kernel
+                        .iter()
+                        .max()
+                        .map(|i| *i + 1)
+                        .unwrap()
+                        .max(*src_kernel.iter().max().unwrap_or(&0));
+                    n_kernels = n_kernels.max(max_kernel + 2);
+                    *src_kernel = vec![max_kernel + 1];
+                    changed = true;
+                }
             } else {
                 for k in &curr_kernel {
                     if !src_kernel.contains(k) {
@@ -991,6 +1001,7 @@ fn split_kernels(
             }
         }
     }
+    println!("Z");
     // // Run forward from all inputs to catch any nodes we didn't hit already
     // dfs_stack = marked_graph.externals(Direction::Incoming).collect_vec();
     // while let Some(node) = dfs_stack.pop() {
@@ -1040,16 +1051,17 @@ fn split_kernels(
         let split_cond = curr_level.len() < GRID_DIMS + THREADBLOCK_DIMS
             && matches!(term, GraphTerm::LoopOut { .. });
         curr_kernel.retain(|k| {
-            marked_graph
-                .neighbors_directed(node, Direction::Outgoing)
-                .any(|n| {
-                    (split_cond
-                        && matches!(
-                            marked_graph.node_weight(n).unwrap().0,
-                            GraphTerm::LoopIn { .. }
-                        ))
-                        || marked_graph.node_weight(n).unwrap().2.contains(k)
-                })
+            matches!(term, GraphTerm::Custom(_))
+                || marked_graph
+                    .neighbors_directed(node, Direction::Outgoing)
+                    .any(|n| {
+                        (split_cond
+                            && matches!(
+                                marked_graph.node_weight(n).unwrap().0,
+                                GraphTerm::LoopIn { .. }
+                            ))
+                            || marked_graph.node_weight(n).unwrap().2.contains(k)
+                    })
         });
         if marked_graph.node_weight_mut(node).unwrap().2.len() != curr_kernel.len()
             || !seen.contains(&node)
@@ -1059,6 +1071,7 @@ fn split_kernels(
         }
         marked_graph.node_weight_mut(node).unwrap().2 = curr_kernel;
     }
+    println!("A");
 
     // Disallow disjoint nodes to be in the same kernel
     let mut by_kernel: HashMap<usize, Vec<NodeIndex>> = HashMap::new();
@@ -1129,6 +1142,7 @@ fn split_kernels(
             n_kernels -= 1;
         }
     }
+    println!("B");
 
     // Add kernel barriers
     for edge in marked_graph.edge_indices().collect_vec() {
@@ -1181,7 +1195,7 @@ fn split_kernels(
             marked_graph.add_edge(src, dest, ());
         }
     }
-
+    println!("C");
     // Place nodes in kernel graphs
     let mut kernel_graphs = (0..n_kernels)
         .map(|_| (StableGraph::new(), vec![], vec![], vec![]))
@@ -1205,7 +1219,13 @@ fn split_kernels(
         .externals(Direction::Incoming)
         // Must not be an SMEM
         .filter(|n| !matches!(marked_graph.node_weight(*n).unwrap().0, GraphTerm::SMEM))
-        .sorted()
+        .sorted_by_key(|n| {
+            marked_graph
+                .edges_directed(*n, Direction::Outgoing)
+                .next()
+                .unwrap()
+                .id()
+        })
     {
         let (_, _, kernels) = marked_graph.node_weight(input).unwrap();
         for kernel in kernels {

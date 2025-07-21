@@ -1,6 +1,6 @@
 use luminal::prelude::{binary::F32Pow, *};
 use luminal_2::{custom_kernel, Kernel};
-use luminal_nn::{Embedding, LayerNorm, Linear};
+use luminal_nn::{LayerNorm, Linear};
 
 // Llama3 8B Config
 pub const VOCAB_SIZE: usize = 128256;
@@ -79,9 +79,6 @@ pub struct SelfAttention {
     pub o_proj: GraphTensor, // Hidden -> hidden
 }
 
-// impl Module<(GraphTensor)> for SelfAttention {
-//     type Output = (GraphTensor);
-//     fn forward(&self, (x): (GraphTensor)) -> Self::Output {
 impl Module<(GraphTensor, KVCache)> for SelfAttention {
     type Output = (GraphTensor, KVCache);
     fn forward(&self, (x, (k_cache, v_cache)): (GraphTensor, KVCache)) -> Self::Output {
@@ -104,7 +101,6 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
             .matmul(self.v_proj.permute((1, 0)))
             .reshape((seq, N_KV_HEADS, HEAD_DIM))
             .permute((1, 0, 2));
-
         // Rotary embed queries and keys
         let queries = apply_rotary_embeddings_ggml(queries, prev_seq);
         let keys = apply_rotary_embeddings_ggml(keys, prev_seq);
@@ -169,9 +165,7 @@ pub struct TransformerBlock {
     pub feed_forward: Mlp,
     pub feed_forward_norm: LayerNorm,
 }
-// impl Module<(GraphTensor)> for TransformerBlock {
-//     type Output = (GraphTensor);
-//     fn forward(&self, (mut x): (GraphTensor)) -> Self::Output {
+
 impl Module<(GraphTensor, KVCache)> for TransformerBlock {
     type Output = (GraphTensor, KVCache);
     fn forward(&self, (mut x, cache): (GraphTensor, KVCache)) -> Self::Output {
@@ -179,7 +173,6 @@ impl Module<(GraphTensor, KVCache)> for TransformerBlock {
         let (y, cache) = self
             .attention
             .forward((self.attention_norm.forward(x), cache));
-
         // Residual
         x += y;
 
@@ -228,21 +221,28 @@ impl Module<(GraphTensor, &[KVCache])> for Llama {
         let [mut x] = custom_kernel(
             &[input, self.embedding],
             Kernel {
-                code: "#include <metal_stdlib>
+                code: format!(
+                    "#include <metal_stdlib>
 using namespace metal;
-kernel void kernel(device float *inp [[buffer(0)]], device float *weights [[buffer(1)]], device float *out [[buffer(2)]], device int& n_embeddings [[buffer(3)]], device int& embedding_dim [[buffer(4)]], uint2 i_ [[thread_position_in_grid]]) {
-    if (i_.x < n_embeddings && i_.y < embedding_dim) {
-        out[i_.x * embedding_dim + i_.y] = weights[(int)inp[i_.x] * embedding_dim + i_.y];
-    }
-}".to_string(),
+kernel void kernel_name(
+	device float *inp [[buffer(0)]],
+	device float *weights [[buffer(1)]],
+	device float *out [[buffer(2)]],
+	uint2 i_ [[thread_position_in_grid]]
+) {{
+    if (i_.x < {VOCAB_SIZE} && i_.y < {HIDDEN_DIM}) {{
+        out[i_.x * {HIDDEN_DIM} + i_.y] = weights[(int)inp[i_.x] * {HIDDEN_DIM} + i_.y];
+    }}
+}}"
+                ),
                 grid: (
                     sequence_length,
                     Expression::from(HIDDEN_DIM),
                     Expression::from(1),
                 ),
                 threadblock: (
-                    Expression::from(16),
-                    Expression::from(16),
+                    Expression::from(1),
+                    Expression::from(1),
                     Expression::from(1),
                 ),
                 smem: Expression::from(0),

@@ -117,7 +117,7 @@ impl GraphTensor {
     pub fn softmax(self, axes: impl ToAxes) -> GraphTensor {
         let m = self - self.max(axes.to_axes()).expand(self.shape);
         let exp = m.exp();
-        exp / exp.sum(axes).expand(exp.shape)
+        exp / exp.sum(axes).expand(self.shape)
     }
 
     /// Applies a log softmax function along an axis

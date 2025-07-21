@@ -50,7 +50,7 @@ fn main() {
 
     // Set up graph
     let mut cx = Graph::new();
-    let mut input = cx.named_tensor("Input", (1, HIDDEN_DIM));
+    let mut input = cx.named_tensor("Input", 2);
     let mut cache_src: Vec<KVCache> = (0..model::NUM_LAYERS)
         .map(|_| {
             (
@@ -65,7 +65,7 @@ fn main() {
     // cx.keep_tensors(&model_weights);
     // let logits = model.forward(input);
     let (logits, mut cache_dest) = model.forward((input, &cache_src));
-    let mut logits = logits.slice((0.., ..)).retrieve();
+    let mut logits = logits.retrieve();
     // cache_dest.keep();
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
@@ -92,10 +92,10 @@ fn main() {
         ),
     );
     let mut rng = rng();
-    let input_data = (0..HIDDEN_DIM).map(|_| rng.random()).collect_vec();
+    let input_data = vec![0.0, 1.0];
     input.set(input_data.clone());
-    cx.set_dyn_dim('s', 1);
-    cx.execute();
+    cx.set_dyn_dim('s', 2);
+    cx.execute_debug();
     // cx.display();
     println!(
         "1.0 kernels: {}",
@@ -110,7 +110,6 @@ fn main() {
             })
             .count()
     );
-    // cx.display();
 
     // luminal_2::utils::display_graph(&new_graph, &[]);
 
@@ -126,6 +125,7 @@ fn main() {
         0,
     )
     .unwrap();
+    // luminal_2::utils::display_graph(&kernels, &[]);
     println!("2.0 kernels: {}", kernels.node_count() - 2);
     // println!(
     //     "{:?}",
@@ -138,8 +138,7 @@ fn main() {
     // luminal_2::utils::display_graph(&kernels, &[]);
     // luminal_2::utils::print_kernels(&kernels);
     let mut dyn_map = FxHashMap::default();
-    dyn_map.insert('s', 1);
-    let device = Device::system_default().unwrap();
+    dyn_map.insert('s', 2);
     let mut inps = vec![(
         old_to_new_mapping[&input.id],
         Box::new(move || input_data) as Box<dyn FnOnce() -> Vec<f32>>,
@@ -151,16 +150,16 @@ fn main() {
     for (node, val) in q8_load_new("setup/llama3-8b.gguf", &model) {
         inps.push((old_to_new_mapping[&node], val));
     }
-    for (label, val, size) in accs {
-        inps.push((label, Box::new(move || vec![val])));
+    for (label, val) in accs {
+        inps.push((label, Box::new(move || val)));
     }
 
     // let (buf_sizes, buf_map) = produce_buffer_map(&kernels);
     // println!("bufs: {:?}", buf_sizes);
     let (mut outputs, runtime) = run_graph(inps, &kernels, &dyn_map);
     let logits = logits.data();
-    println!("Logits: {:?}", &logits[..10]);
-    println!("{:?}", &outputs[0][..10]);
+    println!("Old: {:?}", &logits[..10]);
+    println!("New: {:?}", &outputs[0][..10]);
     for (i, (a, b)) in logits.into_iter().zip(outputs.remove(0)).enumerate() {
         if (a - b).abs() > 1e-5 || a.is_nan() || b.is_nan() {
             panic!("Index {i} : {a} != {b}");

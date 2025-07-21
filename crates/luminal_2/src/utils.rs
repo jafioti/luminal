@@ -108,7 +108,7 @@ pub trait EdgeToString {
     fn edge_to_string(&self) -> String;
 }
 
-impl EdgeToString for u8 {
+impl EdgeToString for usize {
     fn edge_to_string(&self) -> String {
         self.to_string()
     }
@@ -120,7 +120,7 @@ impl EdgeToString for () {
     }
 }
 
-impl EdgeToString for (u8, u8) {
+impl EdgeToString for (usize, usize) {
     fn edge_to_string(&self) -> String {
         format!("{}, {}", self.0, self.1)
     }
@@ -161,18 +161,14 @@ impl TermToString for (Term, usize) {
 
 impl TermToString for Kernel {
     fn term_to_string(&self) -> String {
-        if self.code == "Inputs" || self.code == "Outputs" {
-            return self.code.clone();
+        if self.code.starts_with("Inputs") {
+            "Inputs".to_string()
+        } else if self.code.starts_with("Outputs") {
+            "Outputs".to_string()
         } else {
             format!(
-                "Kernel ({}, {}, {}), ({}, {}, {}) -> {:?}",
-                self.grid.0,
-                self.grid.1,
-                self.grid.2,
-                self.threadblock.0,
-                self.threadblock.1,
-                self.threadblock.2,
-                self.outputs
+                "Kernel {:?} {:?} -> {:?}",
+                self.grid, self.threadblock, self.outputs
             )
         }
     }
@@ -210,6 +206,7 @@ impl TermToString for GraphTerm {
                 }
             }
             GraphTerm::SMEM => "SMEM".to_string(),
+            GraphTerm::Custom(_) => "CustomKernel".to_string(),
             GraphTerm::SMEMLoad => "SMEMLoad".to_string(),
             GraphTerm::SMEMRead => "SMEMRead".to_string(),
         }
@@ -445,6 +442,7 @@ fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>) -> (String, Strin
                     stride.to_egglog()
                 )
             }
+            GraphTerm::Custom(_) => "(Custom)".into(),
 
             GraphTerm::Add
             | GraphTerm::Mul

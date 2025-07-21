@@ -6,6 +6,7 @@ edition = "2024"
 
 [dependencies]
 luminal = {path="../../"}
+luminal_metal = {path="../luminal_metal"}
 itertools = "0.14.0"
 egglog = { git = "https://github.com/egraphs-good/egglog", rev="d2fa5b733de0796fb187dc5a27e570d5644aa75a" }
 metal-rs = { version = "0.28.0", package = "metal" }

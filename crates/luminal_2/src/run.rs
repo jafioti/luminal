@@ -101,8 +101,8 @@ pub fn run_graph(
                 // Copy outputs back
                 return (outputs, time_taken_micros);
             } else {
-                // println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
-                // println!("{}", kernel.code);
+                println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
+                println!("{}", kernel.code);
 
                 // compile kernel
                 let command_buffer = queue.new_command_buffer();
@@ -196,48 +196,48 @@ pub fn run_graph(
                 encoder.end_encoding();
                 command_buffer.commit();
                 command_buffer.wait_until_completed();
-                for (input, input_index) in kernels
-                    .edges_directed(node, Direction::Incoming)
-                    .sorted_by_key(|n| n.weight().1)
-                    .map(|n| (n.source(), n.weight().0))
-                {
-                    // let mut curr_data = vec![
-                    //     0.0;
-                    //     buffers[&(input, input_index)].as_ref().unwrap().length()
-                    //         as usize
-                    //         / std::mem::size_of::<f32>()
-                    // ];
-                    // let ptr =
-                    //     buffers[&(input, input_index)].as_ref().unwrap().contents() as *mut f32;
-                    // // if curr_data.is_empty() {
-                    // //     panic!(
-                    // //         "input empty: {} | {}",
-                    // //         buffer_sizes[buffer_map[&input][input_index as usize]],
-                    // //         buffers[buffer_map[&input][input_index as usize]].length()
-                    // //     );
-                    // // }
-                    // for (i, d) in curr_data.iter_mut().enumerate() {
-                    //     *d = unsafe { *ptr.add(i) };
-                    // }
-                    // println!("{:?}", &curr_data[..10.min(curr_data.len())]);
-                }
+                // for (input, input_index) in kernels
+                //     .edges_directed(node, Direction::Incoming)
+                //     .sorted_by_key(|n| n.weight().1)
+                //     .map(|n| (n.source(), n.weight().0))
+                // {
+                //     let mut curr_data = vec![
+                //         0.0;
+                //         buffers[&(input, input_index)].as_ref().unwrap().length()
+                //             as usize
+                //             / std::mem::size_of::<f32>()
+                //     ];
+                //     let ptr =
+                //         buffers[&(input, input_index)].as_ref().unwrap().contents() as *mut f32;
+                //     // if curr_data.is_empty() {
+                //     //     panic!(
+                //     //         "input empty: {} | {}",
+                //     //         buffer_sizes[buffer_map[&input][input_index as usize]],
+                //     //         buffers[buffer_map[&input][input_index as usize]].length()
+                //     //     );
+                //     // }
+                //     for (i, d) in curr_data.iter_mut().enumerate() {
+                //         *d = unsafe { *ptr.add(i) };
+                //     }
+                //     println!("{:?}", &curr_data[..10.min(curr_data.len())]);
+                // }
                 println!("---");
                 for i in 0..kernel.outputs.len() {
-                    // let mut curr_data = vec![
-                    //     0.0;
-                    //     buffers[&(node, i)].as_ref().unwrap().length() as usize
-                    //         / std::mem::size_of::<f32>()
-                    // ];
-                    // let ptr = buffers[&(node, i)].as_ref().unwrap().contents() as *mut f32;
-                    // for (i, d) in curr_data.iter_mut().enumerate() {
-                    //     *d = unsafe { *ptr.add(i) };
-                    // }
-                    // println!("{:?}", &curr_data[..10.min(curr_data.len())]);
-                    // for (i, n) in curr_data.into_iter().enumerate() {
-                    //     if n.is_nan() {
-                    //         panic!("{} | {}", n, i);
-                    //     }
-                    // }
+                    let mut curr_data = vec![
+                        0.0;
+                        buffers[&(node, i)].as_ref().unwrap().length() as usize
+                            / std::mem::size_of::<f32>()
+                    ];
+                    let ptr = buffers[&(node, i)].as_ref().unwrap().contents() as *mut f32;
+                    for (i, d) in curr_data.iter_mut().enumerate() {
+                        *d = unsafe { *ptr.add(i) };
+                    }
+                    println!("{:?}", &curr_data[..10.min(curr_data.len())]);
+                    for (i, n) in curr_data.into_iter().enumerate() {
+                        if n.is_nan() {
+                            panic!("{} | {}", n, i);
+                        }
+                    }
                 }
                 // Go through inputs and free buffers that aren't going to be used again
                 for (in_node, in_ind) in kernels

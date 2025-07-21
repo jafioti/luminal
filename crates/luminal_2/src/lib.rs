@@ -8,6 +8,13 @@ pub mod utils;
 mod tests;
 
 use luminal::prelude::*;
+use luminal_metal::MetalBuffer;
+use metal_rs::{
+    Buffer, CompileOptions, ComputePassDescriptor, ComputePipelineDescriptor, Device,
+    MTLResourceOptions, MTLSize,
+};
+use regex::Regex;
+use rustc_hash::FxHashMap;
 use serde::Serialize;
 use std::{collections::HashMap, fmt::Debug};
 
@@ -34,12 +41,12 @@ impl GPUArch {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Kernel {
-    code: String,
+    pub code: String,
     // launch params
-    grid: (Expression, Expression, Expression),
-    threadblock: (Expression, Expression, Expression),
-    smem: Expression, // sizes of required shared memory buffers
-    outputs: Vec<Expression>,
+    pub grid: (Expression, Expression, Expression),
+    pub threadblock: (Expression, Expression, Expression),
+    pub smem: Expression, // sizes of required shared memory buffers
+    pub outputs: Vec<Expression>,
 }
 
 #[derive(Clone, Debug)]
@@ -48,7 +55,7 @@ pub enum GMEMBuffer {
     Input { node: NodeIndex },
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub enum GraphTerm {
     GMEM {
         // Signifies global memory
@@ -78,11 +85,77 @@ pub enum GraphTerm {
     SMEM,     // Signifies shared memory
     SMEMLoad, // Takes in an smem pointer and a gmem pointer, copies the gmem element to smem and returns the smem pointer
     SMEMRead, // Takes in an smem pointer and an smemload, returns the smem pointer
+    Custom(Kernel),
 }
 
 impl Operator for Kernel {
-    fn process(&mut self, _: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        unimplemented!("This shouldn't be ran directly. run_graph runs this!");
+    fn process(&mut self, inputs: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let device = Device::system_default().unwrap();
+        let queue = device.new_command_queue();
+        let command_buffer = queue.new_command_buffer();
+        let encoder =
+            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
+        let options = CompileOptions::new();
+        // options.set_fast_math_enabled(true);
+        let lib = device
+            .new_library_with_source(&self.code, &options)
+            .unwrap();
+        let pipeline_state_descriptor = ComputePipelineDescriptor::new();
+        pipeline_state_descriptor
+            .set_compute_function(Some(&lib.get_function("kernel_name", None).unwrap()));
+        let pipeline = device
+            .new_compute_pipeline_state_with_function(
+                pipeline_state_descriptor.compute_function().unwrap(),
+            )
+            .unwrap();
+        encoder.set_compute_pipeline_state(&pipeline);
+
+        // set inputs
+        for (i, input) in inputs
+            .iter()
+            .map(|(b, _)| b.borrowed().downcast_ref::<MetalBuffer>().unwrap())
+            .enumerate()
+        {
+            encoder.set_buffer(i as u64, Some(&input.0), 0);
+        }
+        // set output
+        let mut buffers = vec![];
+        for (i, size) in self.outputs.iter().enumerate() {
+            buffers.push(device.new_buffer(
+                (size.exec(&FxHashMap::default()).unwrap() * std::mem::size_of::<f32>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            ));
+            encoder.set_buffer((i + inputs.len()) as u64, Some(buffers.last().unwrap()), 0);
+        }
+        // set smem
+        if !self.smem.is_empty() {
+            encoder.set_threadgroup_memory_length(
+                0,
+                (self.smem.exec(&FxHashMap::default()).unwrap() * std::mem::size_of::<f32>())
+                    as u64,
+            );
+        }
+
+        // Set dispatch
+        encoder.dispatch_thread_groups(
+            MTLSize::new(
+                self.grid.0.exec(&FxHashMap::default()).unwrap() as u64,
+                self.grid.1.exec(&FxHashMap::default()).unwrap() as u64,
+                self.grid.2.exec(&FxHashMap::default()).unwrap() as u64,
+            ),
+            MTLSize::new(
+                self.threadblock.0.exec(&FxHashMap::default()).unwrap() as u64,
+                self.threadblock.1.exec(&FxHashMap::default()).unwrap() as u64,
+                self.threadblock.2.exec(&FxHashMap::default()).unwrap() as u64,
+            ),
+        );
+        encoder.end_encoding();
+        command_buffer.commit();
+        command_buffer.wait_until_completed();
+        buffers
+            .into_iter()
+            .map(|b| Tensor::new(MetalBuffer(b)))
+            .collect()
     }
 }
 
