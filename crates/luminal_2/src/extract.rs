@@ -115,7 +115,6 @@ pub fn search(
         // Build termdag
         let graph = extraction_to_graph(egraph, &trajectory);
         let root = graph.externals(Direction::Outgoing).next().unwrap();
-        // display_graph(&graph, &[]);
         let Some(kernels) = crate::codegen::codegen(graph.clone(), vec![root], arch.clone(), 0)
         else {
             continue;

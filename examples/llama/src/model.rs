@@ -173,6 +173,7 @@ impl Module<(GraphTensor, KVCache)> for TransformerBlock {
         let (y, cache) = self
             .attention
             .forward((self.attention_norm.forward(x), cache));
+        // (y, cache)
         // Residual
         x += y;
 

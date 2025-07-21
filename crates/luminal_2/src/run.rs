@@ -8,7 +8,7 @@ use luminal::{
     },
     shape::Expression,
 };
-use metal_rs::{Buffer, Device, MTLResourceOptions, objc::rc::autoreleasepool};
+use metal_rs::{Buffer, objc::rc::autoreleasepool};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::Kernel;
@@ -55,7 +55,6 @@ pub fn run_graph(
         let mut buffers = HashMap::<(NodeIndex, usize), Option<Buffer>>::default();
         let mut ran = FxHashSet::default();
         let mut mapping: HashMap<usize, usize> = HashMap::default();
-        let mut input = NodeIndex::default();
         for node in toposort(kernels, None).unwrap() {
             ran.insert(node);
             let kernel = kernels.node_weight(node).unwrap();
@@ -65,7 +64,6 @@ pub fn run_graph(
                     .iter()
                     .map(|(name, _)| ((node, mapping[&name.index()]), None))
                     .collect();
-                input = node;
 
                 // buffers.extend(inputs.into_iter().map(|(name, buf)| {
                 //     ((node, mapping[&name.index()]), {

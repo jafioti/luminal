@@ -355,6 +355,7 @@ pub fn build_search_space(
     remove_tiling: bool,
 ) -> egraph_serialize::EGraph {
     let (rendered, root) = render_egglog(graph);
+    println!("{rendered}");
     if option_env!("PRINT_KERNELS").is_some() {
         println!("{rendered}");
     }

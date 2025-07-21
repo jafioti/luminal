@@ -66,14 +66,16 @@ fn main() {
     // let logits = model.forward(input);
     let (logits, mut cache_dest) = model.forward((input, &cache_src));
     let mut logits = logits.retrieve();
-    // cache_dest.keep();
+    cache_dest.retrieve();
     println!("\t\t - {}ms", now.elapsed().as_millis());
 
     println!("Compiling graph");
     // Set up model loading
     loader::q8_load("setup/llama3-8b.gguf", &model, &mut cx);
     let (new_graph, old_to_new_mapping, accs) = translate_graph(&cx);
-
+    let old_logits = logits;
+    let old_cache_src = cache_src.clone();
+    let old_cache_dest = cache_dest.clone();
     cx.compile(
         (
             // GenericCompiler::default(),
@@ -86,8 +88,8 @@ fn main() {
         (
             // &mut input,
             &mut logits,
-            // &mut cache_src,
-            // &mut cache_dest,
+            &mut cache_src,
+            &mut cache_dest,
             // &mut model_weights,
         ),
     );
@@ -111,16 +113,15 @@ fn main() {
             .count()
     );
 
-    // luminal_2::utils::display_graph(&new_graph, &[]);
-
-    let root = new_graph
-        .externals(petgraph::Direction::Outgoing)
-        .next()
-        .unwrap();
+    let mut outputs = vec![old_to_new_mapping[&old_logits.id]];
+    for (k, v) in &old_cache_dest {
+        outputs.push(old_to_new_mapping[&k.id]);
+        outputs.push(old_to_new_mapping[&v.id]);
+    }
     println!("generatin g");
     let kernels = codegen(
         new_graph,
-        vec![root],
+        outputs,
         luminal_2::GPUArch::Metal(HashMap::default()),
         0,
     )
@@ -139,11 +140,16 @@ fn main() {
     // luminal_2::utils::print_kernels(&kernels);
     let mut dyn_map = FxHashMap::default();
     dyn_map.insert('s', 2);
+    println!("input: {:?}", old_to_new_mapping[&input.id]);
     let mut inps = vec![(
         old_to_new_mapping[&input.id],
         Box::new(move || input_data) as Box<dyn FnOnce() -> Vec<f32>>,
     )];
-    for (k, v) in &cache_src {
+    for (k, v) in &old_cache_src {
+        println!(
+            "k {:?} v {:?}",
+            old_to_new_mapping[&k.id], old_to_new_mapping[&v.id]
+        );
         inps.push((old_to_new_mapping[&k.id], Box::new(|| vec![])));
         inps.push((old_to_new_mapping[&v.id], Box::new(|| vec![])));
     }
@@ -158,13 +164,36 @@ fn main() {
     // println!("bufs: {:?}", buf_sizes);
     let (mut outputs, runtime) = run_graph(inps, &kernels, &dyn_map);
     let logits = logits.data();
-    println!("Old: {:?}", &logits[..10]);
-    println!("New: {:?}", &outputs[0][..10]);
+    println!("Old Logits: {:?}", &logits[..10]);
+    println!("New Logits: {:?}", &outputs[0][..10]);
     for (i, (a, b)) in logits.into_iter().zip(outputs.remove(0)).enumerate() {
         if (a - b).abs() > 1e-5 || a.is_nan() || b.is_nan() {
             panic!("Index {i} : {a} != {b}");
         }
     }
+    let mut kv_dest = cache_dest
+        .iter()
+        .rev()
+        .flat_map(|n| [n.0.data(), n.1.data()])
+        .collect_vec();
+    let k = kv_dest.remove(0);
+    println!("Old K: {:?}", &k[..10]);
+    for i in 0..outputs.len() {
+        println!("New K: {:?}", &outputs[i][..10]);
+    }
+    for (i, (a, b)) in k.into_iter().zip(outputs.remove(0)).enumerate() {
+        if (a - b).abs() > 1e-5 || a.is_nan() || b.is_nan() {
+            panic!("Index {i} : {a} != {b}");
+        }
+    }
+    // let v = cache_dest[0].1.data();
+    // println!("Old V: {:?}", &v[..10]);
+    // println!("New V: {:?}", &outputs[0][..10]);
+    // for (i, (a, b)) in v.into_iter().zip(outputs.remove(0)).enumerate() {
+    //     if (a - b).abs() > 1e-5 || a.is_nan() || b.is_nan() {
+    //         panic!("Index {i} : {a} != {b}");
+    //     }
+    // }
     println!("SUCCESS!");
 
     // logits.drop();

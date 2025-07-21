@@ -69,12 +69,7 @@ pub fn codegen(
     }
     meta_graph.node_weight_mut(global_input).unwrap().code =
         format!("Inputs{}", serde_json::to_string(&gmem_mapping).unwrap());
-    for (i, (output_kernel, output_node)) in output_kernels.into_iter().enumerate() {
-        let output_index = kernels[output_kernel]
-            .2
-            .iter()
-            .position(|(_, p)| *p == output_node)
-            .unwrap();
+    for (i, (output_kernel, output_index)) in output_kernels.into_iter().enumerate() {
         meta_graph.add_edge(
             NodeIndex::new(output_kernel),
             global_output,
@@ -885,18 +880,14 @@ fn split_kernels(
         Vec<(Expression, NodeIndex)>, // output node
         Vec<(usize, NodeIndex, Expression)>, // (shared memory buffer name, node, buffer size)
     )>,
-    Vec<(usize, NodeIndex)>, // Output kernels
+    Vec<(usize, usize)>, // Output kernels
 ) {
     // Mark level of ops in graph
     let mut marked_graph = StableGraph::new();
     let mut map = HashMap::<NodeIndex, NodeIndex>::default();
     // Add nodes
-    let chosen_root = graph
-        .externals(Direction::Outgoing)
-        .filter(|n| matches!(graph.node_weight(*n).unwrap(), GraphTerm::GMEM { .. }))
-        .next()
-        .unwrap();
-    for node in graph.node_indices() {
+    let chosen_root = outputs[0];
+    for node in graph.node_indices().sorted() {
         let new_node = marked_graph.add_node((
             graph.node_weight(node).unwrap().clone(),
             vec![],
@@ -904,6 +895,7 @@ fn split_kernels(
         ));
         map.insert(node, new_node);
     }
+    let outputs = outputs.into_iter().map(|n| map[&n]).collect_vec();
     // Add edges
     for edge in graph.edge_indices() {
         let (start, end) = graph.edge_endpoints(edge).unwrap();
@@ -911,15 +903,7 @@ fn split_kernels(
     }
 
     // Assign loop levels
-    let mut seen = marked_graph
-        .externals(Direction::Outgoing)
-        .filter(|n| {
-            matches!(
-                marked_graph.node_weight(*n).unwrap().0,
-                GraphTerm::GMEM { .. }
-            )
-        })
-        .collect::<HashSet<_>>();
+    let mut seen = outputs.iter().copied().collect::<HashSet<_>>();
     let mut dfs = seen
         .iter()
         .flat_map(|n| marked_graph.neighbors_directed(*n, Direction::Incoming))
@@ -970,7 +954,6 @@ fn split_kernels(
     let mut n_kernels = 1;
     let mut seen = FxHashSet::default();
     while let Some(node) = dfs_stack.pop() {
-        // println!("{:?}", node);
         let (term, curr_level, curr_kernel) = marked_graph.node_weight(node).unwrap().clone();
         for source in marked_graph
             .neighbors_directed(node, Direction::Incoming)
@@ -1018,6 +1001,7 @@ fn split_kernels(
             }
         }
     }
+    // display_graph(&marked_graph, &[]);
     // Prune out unnessecary kernel members
     let mut seen = FxHashSet::default();
     let mut dfs_stack = marked_graph
@@ -1170,21 +1154,25 @@ fn split_kernels(
             marked_graph.add_edge(src, dest, ());
         }
     }
+
+    // display_graph(&marked_graph, &[]);
     // Place nodes in kernel graphs
     let mut kernel_graphs = (0..n_kernels)
         .map(|_| (StableGraph::new(), vec![], vec![], vec![]))
         .collect_vec();
     let mut node_maps = (0..n_kernels).map(|_| HashMap::new()).collect_vec();
+    let mut final_outputs = vec![];
     for node in marked_graph.node_indices() {
         let (term, loop_level, kernels) = marked_graph.node_weight(node).unwrap();
         for kernel in kernels {
-            let (kernel_graph, _, outputs, _) = &mut kernel_graphs[*kernel];
+            let (kernel_graph, _, curr_outputs, _) = &mut kernel_graphs[*kernel];
             node_maps[*kernel].insert(
                 node,
                 kernel_graph.add_node((term.clone(), loop_level.len())),
             );
-            if node == chosen_root {
-                outputs.push((Expression::default(), node_maps[*kernel][&node]));
+            if outputs.contains(&node) {
+                final_outputs.push((*kernel, curr_outputs.len()));
+                curr_outputs.push((Expression::default(), node_maps[*kernel][&node]));
             }
         }
     }
@@ -1257,7 +1245,6 @@ fn split_kernels(
 
     // Go through SMEM buffers
     for (kernel_graph, inputs, outputs, smem_buffers) in &mut kernel_graphs {
-        // Get all ZeroStrideLoad ones at thread level 0..3
         for node in kernel_graph.node_indices() {
             if let (GraphTerm::SMEM, _) = kernel_graph.node_weight(node).unwrap() {
                 // Walk forward until load to find the size
@@ -1331,13 +1318,6 @@ fn split_kernels(
             *size = new_size;
         }
     }
-    let new_outputs = outputs
-        .into_iter()
-        .map(|r| {
-            let kernel = marked_graph.node_weight(map[&r]).unwrap().2[0];
-            let node = node_maps[kernel][&map[&r]];
-            (kernel, node)
-        })
-        .collect();
-    (kernel_graphs, new_outputs)
+
+    (kernel_graphs, final_outputs)
 }

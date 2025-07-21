@@ -254,7 +254,6 @@ pub fn translate_graph(
                     // Add a custom kernel
                     let custom = new_graph.add_node(GraphTerm::Custom(kernel.clone()));
                     for (source, ind, _) in sources {
-                        println!("SOURCE: {:?} {}", source, ind);
                         let new_source = node_mapping[&(source, ind)];
                         new_graph.add_edge(new_source, custom, ());
                     }
@@ -273,14 +272,14 @@ pub fn translate_graph(
         }
     }
 
-    // Add gmems for to_retrieve
-    for (t, _) in &graph.to_retrieve {
-        let gmem = new_graph.add_node(GraphTerm::GMEM {
-            label: Some("Output".to_string()),
-        });
-        new_graph.add_edge(old_to_new_mapping[t], gmem, ());
-        old_to_new_mapping.insert(*t, gmem);
-    }
+    // // Add gmems for to_retrieve
+    // for (t, _) in &graph.to_retrieve {
+    //     let gmem = new_graph.add_node(GraphTerm::GMEM {
+    //         label: Some("Output".to_string()),
+    //     });
+    //     new_graph.add_edge(old_to_new_mapping[t], gmem, ());
+    //     old_to_new_mapping.insert(*t, gmem);
+    // }
 
     (new_graph, old_to_new_mapping, inits)
 }
