@@ -236,6 +236,34 @@ impl Expression {
         }
         symbols.pop().unwrap_or_default()
     }
+
+    pub fn to_kernel(&self) -> String {
+        let mut symbols = vec![];
+        for term in self.terms.read().iter() {
+            let new_symbol = match term {
+                Term::Num(n) => n.to_string(),
+                Term::Var(c) => format!("const_{c}"),
+                Term::Acc(_) => "1".to_string(), // super jank, exists so that we can max(Acc, x)
+                Term::Max => format!(
+                    "max((int){}, (int){})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+                Term::Min => format!(
+                    "min((int){}, (int){})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+                _ => format!(
+                    "({}{term:?}{})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+            };
+            symbols.push(new_symbol);
+        }
+        symbols.pop().unwrap_or_default()
+    }
 }
 
 impl std::fmt::Display for Expression {

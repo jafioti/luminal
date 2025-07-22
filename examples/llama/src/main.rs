@@ -50,12 +50,12 @@ fn main() {
 
     // Set up graph
     let mut cx = Graph::new();
-    let mut input = cx.named_tensor("Input", 2);
+    let mut input = cx.named_tensor("Input", 's');
     let mut cache_src: Vec<KVCache> = (0..model::NUM_LAYERS)
         .map(|_| {
             (
-                cx.named_tensor("Key Cache", (N_KV_HEADS, 0, HEAD_DIM)),
-                cx.named_tensor("Value Cache", (N_KV_HEADS, 0, HEAD_DIM)),
+                cx.named_tensor("Key Cache", (N_KV_HEADS, 'p', HEAD_DIM)),
+                cx.named_tensor("Value Cache", (N_KV_HEADS, 'p', HEAD_DIM)),
             )
         })
         .collect();
@@ -97,6 +97,7 @@ fn main() {
     let input_data = vec![0.0, 1.0];
     input.set(input_data.clone());
     cx.set_dyn_dim('s', 2);
+    cx.set_dyn_dim('p', 0);
     cx.execute_debug();
     // cx.display();
     println!(
@@ -124,6 +125,7 @@ fn main() {
         outputs,
         luminal_2::GPUArch::Metal(HashMap::default()),
         0,
+        &cx.dyn_map,
     )
     .unwrap();
     // luminal_2::utils::display_graph(&kernels, &[]);
@@ -138,8 +140,6 @@ fn main() {
     // );
     // luminal_2::utils::display_graph(&kernels, &[]);
     // luminal_2::utils::print_kernels(&kernels);
-    let mut dyn_map = FxHashMap::default();
-    dyn_map.insert('s', 2);
     println!("input: {:?}", old_to_new_mapping[&input.id]);
     let mut inps = vec![(
         old_to_new_mapping[&input.id],
@@ -162,7 +162,7 @@ fn main() {
 
     // let (buf_sizes, buf_map) = produce_buffer_map(&kernels);
     // println!("bufs: {:?}", buf_sizes);
-    let (mut outputs, runtime) = run_graph(inps, &kernels, &dyn_map);
+    let (mut outputs, runtime) = run_graph(inps, &kernels, &cx.dyn_map);
     let logits = logits.data();
     println!("Old Logits: {:?}", &logits[..10]);
     println!("New Logits: {:?}", &outputs[0][..10]);

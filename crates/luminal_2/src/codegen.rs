@@ -26,6 +26,7 @@ pub fn codegen(
     outputs: Vec<NodeIndex>,
     mut arch: GPUArch,
     n_graph: usize,
+    dyn_vars: &FxHashMap<char, usize>,
 ) -> Option<StableGraph<Kernel, (usize, usize), Directed>> {
     let gmems = graph
         .node_weights()
@@ -199,6 +200,7 @@ pub fn codegen(
                 if !input_comment.is_empty() {
                     input_comment = format!("\t// Inputs\n{input_comment}\n");
                 }
+                let n_inputs_outputs = inputs.len() + outputs.len();
                 let input_string = inputs
                     .into_iter()
                     .map(|(_, a)| a)
@@ -210,6 +212,12 @@ pub fn codegen(
                             var_to_char(node_to_var[&a].0)
                         )
                     })
+                    .chain(dyn_vars.iter().sorted().enumerate().map(|(i, (c, _))| {
+                        format!(
+                            "constant uint& const_{c} [[buffer({})]]",
+                            i + n_inputs_outputs
+                        )
+                    }))
                     .join(",\n\t");
                 let (smem_setup, smem_input) = if smem_buffers.is_empty() {
                     ("".to_string(), "".to_string())
@@ -434,14 +442,11 @@ fn make_kernel(
                         // Make accumulator
                         *prev_max_var += 1;
                         arch.add_metal_buffer_type(*prev_max_var, "thread ");
-                        let mut map = FxHashMap::default();
-                        map.insert('s', 1);
-                        map.insert('p', 0);
                         kernel_lines.push(format!(
                             "{spacing}{}float {}[{}] = {{0.0}};",
                             arch.metal_buffer_type(*prev_max_var),
                             var_to_char(*prev_max_var),
-                            size.exec(&map).unwrap()
+                            size.to_kernel()
                         ));
 
                         // Copy from source to accumulator
@@ -451,12 +456,13 @@ fn make_kernel(
                             .unwrap();
                         // Use a single loop with correct striding from the input
                         kernel_lines.push(format!(
-                            "{spacing}for (int load = 0; load < {loads}; ++load) {{"
+                            "{spacing}for (int load = 0; load < {}; ++load) {{",
+                            loads.to_kernel()
                         ));
                         let indexing_expression = indexing_expression
                             .simplify()
-                            .to_string()
-                            .replace("z", "load");
+                            .to_kernel()
+                            .replace("const_z", "load");
                         kernel_lines.push(format!(
                             "{inner_spacing}{}[{indexing_expression}] = *({} + {indexing_expression});",
                             var_to_char(*prev_max_var),
@@ -521,7 +527,7 @@ fn make_kernel(
                 } else {
                     *prev_max_var += 1;
                     let loop_var = var_to_char(*prev_max_var);
-                    kernel_lines.push(format!("{spacing}for (int loop_{loop_var} = 0; loop_{loop_var} < {range}; ++loop_{loop_var}) {{"));
+                    kernel_lines.push(format!("{spacing}for (int loop_{loop_var} = 0; loop_{loop_var} < {}; ++loop_{loop_var}) {{", range.to_kernel()));
                 };
                 let loop_var = var_to_char(*prev_max_var);
                 let loop_var_int = *prev_max_var;
@@ -550,7 +556,9 @@ fn make_kernel(
                                 arch.metal_buffer_type(*prev_max_var),
                                 var_to_char(*prev_max_var),
                                 var_to_char(real_input),
-                                stride.to_string().replace('z', &format!("loop_{loop_var}"))
+                                stride
+                                    .to_kernel()
+                                    .replace("const_z", &format!("loop_{loop_var}"))
                             ));
                             node_to_var.insert(*input, (*prev_max_var, is_ptr));
                         }
@@ -584,7 +592,9 @@ fn make_kernel(
                                 arch.metal_buffer_type(*prev_max_var),
                                 var_to_char(*prev_max_var),
                                 var_to_char(real_output),
-                                stride.to_string().replace('z', &format!("loop_{loop_var}"))
+                                stride
+                                    .to_kernel()
+                                    .replace("const_z", &format!("loop_{loop_var}"))
                             ));
                             new_output_vars.push(*prev_max_var);
                             node_to_var.insert(*output, (*prev_max_var, is_ptr));
@@ -687,12 +697,13 @@ fn make_kernel(
                             current_elem_size *= range;
                         }
                         kernel_lines.push(format!(
-                            "{spacing}for (int save = 0; save < {size}; ++save) {{"
+                            "{spacing}for (int save = 0; save < {}; ++save) {{",
+                            size.to_kernel()
                         ));
                         let indexing_expression = indexing_expression
                             .simplify()
-                            .to_string()
-                            .replace("z", "save");
+                            .to_kernel()
+                            .replace("const_z", "save");
                         kernel_lines.push(format!(
                             "{inner_spacing}{}[{indexing_expression}] = *({} + {indexing_expression});",
                             var_to_char(outer_out),

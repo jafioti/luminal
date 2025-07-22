@@ -13,9 +13,6 @@ use metal_rs::{
     Buffer, CompileOptions, ComputePassDescriptor, ComputePipelineDescriptor, Device,
     MTLResourceOptions, MTLSize,
 };
-use regex::Regex;
-use rustc_hash::FxHashMap;
-use serde::Serialize;
 use std::{collections::HashMap, fmt::Debug};
 
 #[derive(Clone, PartialEq, Eq)]
@@ -88,8 +85,11 @@ pub enum GraphTerm {
     Custom(Kernel),
 }
 
-impl Operator for Kernel {
+#[derive(Debug)]
+pub struct CompatKernel(Kernel, *mut Graph);
+impl Operator for CompatKernel {
     fn process(&mut self, inputs: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let dyn_vars = &unsafe { self.1.as_ref().unwrap() }.dyn_map;
         let device = Device::system_default().unwrap();
         let queue = device.new_command_queue();
         let command_buffer = queue.new_command_buffer();
@@ -98,7 +98,7 @@ impl Operator for Kernel {
         let options = CompileOptions::new();
         // options.set_fast_math_enabled(true);
         let lib = device
-            .new_library_with_source(&self.code, &options)
+            .new_library_with_source(&self.0.code, &options)
             .unwrap();
         let pipeline_state_descriptor = ComputePipelineDescriptor::new();
         pipeline_state_descriptor
@@ -120,33 +120,32 @@ impl Operator for Kernel {
         }
         // set output
         let mut buffers = vec![];
-        for (i, size) in self.outputs.iter().enumerate() {
+        for (i, size) in self.0.outputs.iter().enumerate() {
             buffers.push(device.new_buffer(
-                (size.exec(&FxHashMap::default()).unwrap() * std::mem::size_of::<f32>()) as u64,
+                (size.exec(dyn_vars).unwrap() * std::mem::size_of::<f32>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             ));
             encoder.set_buffer((i + inputs.len()) as u64, Some(buffers.last().unwrap()), 0);
         }
         // set smem
-        if !self.smem.is_empty() {
+        if !self.0.smem.is_empty() {
             encoder.set_threadgroup_memory_length(
                 0,
-                (self.smem.exec(&FxHashMap::default()).unwrap() * std::mem::size_of::<f32>())
-                    as u64,
+                (self.0.smem.exec(dyn_vars).unwrap() * std::mem::size_of::<f32>()) as u64,
             );
         }
 
         // Set dispatch
         encoder.dispatch_thread_groups(
             MTLSize::new(
-                self.grid.0.exec(&FxHashMap::default()).unwrap() as u64,
-                self.grid.1.exec(&FxHashMap::default()).unwrap() as u64,
-                self.grid.2.exec(&FxHashMap::default()).unwrap() as u64,
+                self.0.grid.0.exec(dyn_vars).unwrap() as u64,
+                self.0.grid.1.exec(dyn_vars).unwrap() as u64,
+                self.0.grid.2.exec(dyn_vars).unwrap() as u64,
             ),
             MTLSize::new(
-                self.threadblock.0.exec(&FxHashMap::default()).unwrap() as u64,
-                self.threadblock.1.exec(&FxHashMap::default()).unwrap() as u64,
-                self.threadblock.2.exec(&FxHashMap::default()).unwrap() as u64,
+                self.0.threadblock.0.exec(dyn_vars).unwrap() as u64,
+                self.0.threadblock.1.exec(dyn_vars).unwrap() as u64,
+                self.0.threadblock.2.exec(dyn_vars).unwrap() as u64,
             ),
         );
         encoder.end_encoding();
@@ -165,7 +164,8 @@ pub fn custom_kernel<const O: usize>(
     output_shapes: [impl ToShape; O],
     cx: &mut Graph,
 ) -> [GraphTensor; O] {
-    let mut kernel_op = cx.add_op(kernel);
+    let graph_ref: *mut Graph = cx;
+    let mut kernel_op = cx.add_op(CompatKernel(kernel, graph_ref));
     for input in inputs {
         kernel_op = kernel_op.input(input.id, 0, input.shape);
     }

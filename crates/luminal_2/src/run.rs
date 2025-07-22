@@ -99,10 +99,11 @@ pub fn run_graph(
                 // Copy outputs back
                 return (outputs, time_taken_micros);
             } else {
-                // println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
-                // println!("{}", kernel.code);
+                println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
+                println!("{}", kernel.code);
 
                 // compile kernel
+                let n_inputs = kernels.edges_directed(node, Direction::Incoming).count();
                 let command_buffer = queue.new_command_buffer();
                 let encoder = command_buffer
                     .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
@@ -155,8 +156,9 @@ pub fn run_graph(
                     // println!("Inp {i}: {}", buffers[&(input, input_index)].length());
                 }
                 // set output
-                let n_inputs = kernels.edges_directed(node, Direction::Incoming).count();
                 for (i, size) in kernel.outputs.iter().enumerate() {
+                    println!("{size}");
+                    println!("{:?}", dyn_vars);
                     buffers.insert(
                         (node, i),
                         Some(device.new_buffer(
@@ -168,6 +170,14 @@ pub fn run_graph(
                         (i + n_inputs) as u64,
                         Some(buffers[&(node, i)].as_ref().unwrap()),
                         0,
+                    );
+                }
+                // set dynamic dimensions
+                for (i, (_, v)) in dyn_vars.iter().sorted_by_key(|(k, _)| **k).enumerate() {
+                    encoder.set_bytes(
+                        (i + n_inputs + kernel.outputs.len()) as u64,
+                        std::mem::size_of::<usize>() as u64,
+                        v as *const usize as *const _,
                     );
                 }
                 // set smem

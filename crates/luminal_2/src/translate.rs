@@ -5,7 +5,7 @@ use luminal::prelude::{
 use rustc_hash::FxHashMap;
 
 use crate::{
-    GraphTerm, Kernel,
+    CompatKernel, GraphTerm, Kernel,
     codegen::{GRID_DIMS, THREADBLOCK_DIMS},
     utils::loop_in,
 };
@@ -250,9 +250,9 @@ pub fn translate_graph(
                 inits.push((new, vec![value]));
             }
             _ => {
-                if let Some(kernel) = node_weight.as_any().downcast_ref::<Kernel>() {
+                if let Some(kernel) = node_weight.as_any().downcast_ref::<CompatKernel>() {
                     // Add a custom kernel
-                    let custom = new_graph.add_node(GraphTerm::Custom(kernel.clone()));
+                    let custom = new_graph.add_node(GraphTerm::Custom(kernel.0.clone()));
                     for (source, ind, _) in sources {
                         let new_source = node_mapping[&(source, ind)];
                         new_graph.add_edge(new_source, custom, ());

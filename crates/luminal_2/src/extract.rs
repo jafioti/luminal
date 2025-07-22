@@ -31,6 +31,7 @@ pub fn search(
     egraph: &EGraph,
     inputs: &[(NodeIndex, Vec<f32>)],
     arch: GPUArch,
+    dyn_vars: &FxHashMap<char, usize>,
 ) -> Option<StableGraph<Kernel, (usize, usize)>> {
     fn recurse<'a>(
         egraph: &'a EGraph,
@@ -115,7 +116,8 @@ pub fn search(
         // Build termdag
         let graph = extraction_to_graph(egraph, &trajectory);
         let root = graph.externals(Direction::Outgoing).next().unwrap();
-        let Some(kernels) = crate::codegen::codegen(graph.clone(), vec![root], arch.clone(), 0)
+        let Some(kernels) =
+            crate::codegen::codegen(graph.clone(), vec![root], arch.clone(), 0, dyn_vars)
         else {
             continue;
         };
