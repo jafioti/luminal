@@ -9,7 +9,7 @@ use itertools::Itertools;
 use luminal_2::{
     codegen::codegen,
     run::{produce_buffer_map, run_graph},
-    translate::translate_graph,
+    translate::{translate_graph, InitData},
 };
 use luminal_metal::{Device, MTLResourceOptions};
 use model::{HEAD_DIM, N_KV_HEADS};
@@ -51,15 +51,30 @@ fn main() {
     // Set up graph
     let mut cx = Graph::new();
     let mut input = cx.named_tensor("Input", 's');
-    let mut cache_src: Vec<KVCache> = (0..model::NUM_LAYERS)
+    let mut rng = rng();
+    let mut cache_src_data: Vec<(Vec<f32>, Vec<f32>)> = (0..model::NUM_LAYERS)
         .map(|_| {
             (
-                cx.named_tensor("Key Cache", (N_KV_HEADS, 'p', HEAD_DIM)),
-                cx.named_tensor("Value Cache", (N_KV_HEADS, 'p', HEAD_DIM)),
+                (0..(N_KV_HEADS * 3 * HEAD_DIM))
+                    .map(|_| rng.random())
+                    .collect_vec(),
+                (0..(N_KV_HEADS * 3 * HEAD_DIM))
+                    .map(|_| rng.random())
+                    .collect_vec(),
+            )
+        })
+        .collect_vec();
+    let mut cache_src: Vec<KVCache> = (0..model::NUM_LAYERS)
+        .zip(&cache_src_data)
+        .map(|(_, d)| {
+            (
+                cx.named_tensor("Key Cache", (N_KV_HEADS, 'p', HEAD_DIM))
+                    .set(d.0.clone()),
+                cx.named_tensor("Value Cache", (N_KV_HEADS, 'p', HEAD_DIM))
+                    .set(d.1.clone()),
             )
         })
         .collect();
-    cache_src.set_dyn(vec![], (model::N_KV_HEADS, 0, model::HEAD_DIM));
     let model = model::Llama::new(&mut cx);
     let mut model_weights = params(&model);
     // cx.keep_tensors(&model_weights);
@@ -93,33 +108,17 @@ fn main() {
             // &mut model_weights,
         ),
     );
-    let mut rng = rng();
     let input_data = vec![0.0, 1.0];
     input.set(input_data.clone());
     cx.set_dyn_dim('s', 2);
-    cx.set_dyn_dim('p', 0);
+    cx.set_dyn_dim('p', 3);
     cx.execute_debug();
-    // cx.display();
-    println!(
-        "1.0 kernels: {}",
-        cx.node_weights()
-            .filter(|n| {
-                let s = format!("{:?}", n);
-                !s.contains("Load")
-                    && !s.contains("Allocate")
-                    && !s.contains("Copy")
-                    && !s.contains("Execute")
-                    && !s.contains("Constant")
-            })
-            .count()
-    );
-
     let mut outputs = vec![old_to_new_mapping[&old_logits.id]];
     for (k, v) in &old_cache_dest {
         outputs.push(old_to_new_mapping[&k.id]);
         outputs.push(old_to_new_mapping[&v.id]);
     }
-    println!("generatin g");
+    println!("codegen");
     let kernels = codegen(
         new_graph,
         outputs,
@@ -128,36 +127,25 @@ fn main() {
         &cx.dyn_map,
     )
     .unwrap();
-    // luminal_2::utils::display_graph(&kernels, &[]);
-    println!("2.0 kernels: {}", kernels.node_count() - 2);
-    // println!(
-    //     "{:?}",
-    //     toposort(&cx.graph, None)
-    //         .unwrap()
-    //         .into_iter()
-    //         .map(|n| format!("{:?}", cx.node_weight(n).unwrap()))
-    //         .collect_vec()
-    // );
-    // luminal_2::utils::display_graph(&kernels, &[]);
-    // luminal_2::utils::print_kernels(&kernels);
-    println!("input: {:?}", old_to_new_mapping[&input.id]);
     let mut inps = vec![(
         old_to_new_mapping[&input.id],
         Box::new(move || input_data) as Box<dyn FnOnce() -> Vec<f32>>,
     )];
-    for (k, v) in &old_cache_src {
-        println!(
-            "k {:?} v {:?}",
-            old_to_new_mapping[&k.id], old_to_new_mapping[&v.id]
-        );
-        inps.push((old_to_new_mapping[&k.id], Box::new(|| vec![])));
-        inps.push((old_to_new_mapping[&v.id], Box::new(|| vec![])));
+    for (d, (k, v)) in cache_src_data.into_iter().zip(&old_cache_src) {
+        inps.push((old_to_new_mapping[&k.id], Box::new(|| d.0)));
+        inps.push((old_to_new_mapping[&v.id], Box::new(|| d.1)));
     }
     for (node, val) in q8_load_new("setup/llama3-8b.gguf", &model) {
         inps.push((old_to_new_mapping[&node], val));
     }
     for (label, val) in accs {
-        inps.push((label, Box::new(move || val)));
+        match val {
+            InitData::Expr(e) => {
+                let val = e.exec(&cx.dyn_map).unwrap();
+                inps.push((label, Box::new(move || vec![val as f32])));
+            }
+            InitData::Data(d) => inps.push((label, Box::new(move || d))),
+        }
     }
 
     // let (buf_sizes, buf_map) = produce_buffer_map(&kernels);

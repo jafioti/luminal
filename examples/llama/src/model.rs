@@ -1,5 +1,5 @@
 use luminal::prelude::{binary::F32Pow, *};
-use luminal_2::{custom_kernel, Kernel};
+use luminal_2::{custom_kernel, GTDiff, Kernel};
 use luminal_nn::{LayerNorm, Linear};
 
 // Llama3 8B Config
@@ -82,10 +82,9 @@ pub struct SelfAttention {
 impl Module<(GraphTensor, KVCache)> for SelfAttention {
     type Output = (GraphTensor, KVCache);
     fn forward(&self, (x, (k_cache, v_cache)): (GraphTensor, KVCache)) -> Self::Output {
-        // x: batch, seq, hidden
-        // cache: batch, kv_heads, prev_seq, head_dim
-        let (seq, _) = x.dims2();
-        let (_, prev_seq, _) = k_cache.dims3();
+        let (seq, _hidden) = x.dims2();
+        let (_kv_heads, prev_seq, _head_dim) = k_cache.dims3();
+
         // Apply the Projections
         let queries = x
             .matmul(self.q_proj.permute((1, 0)))
@@ -101,6 +100,7 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
             .matmul(self.v_proj.permute((1, 0)))
             .reshape((seq, N_KV_HEADS, HEAD_DIM))
             .permute((1, 0, 2));
+
         // Rotary embed queries and keys
         let queries = apply_rotary_embeddings_ggml(queries, prev_seq);
         let keys = apply_rotary_embeddings_ggml(keys, prev_seq);
@@ -119,9 +119,10 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
             .matmul(repeated_keys.permute((0, 1, 3, 2)))
             / (HEAD_DIM as f32).sqrt();
 
+        // Causal mask
         let attention_mask = self.k_proj.graph().triu(seq, 1) * f16::MIN.to_f32();
         attention_weights += attention_mask
-            .pad((prev_seq, 0))
+            .pad_along(prev_seq, 0, 1)
             .expand_dim(0, N_KV_HEADS)
             .expand_dim(1, N_ATTENTION_GROUPS);
 
@@ -173,7 +174,7 @@ impl Module<(GraphTensor, KVCache)> for TransformerBlock {
         let (y, cache) = self
             .attention
             .forward((self.attention_norm.forward(x), cache));
-        // (y, cache)
+
         // Residual
         x += y;
 

@@ -5,17 +5,22 @@ use luminal::prelude::{
 use rustc_hash::FxHashMap;
 
 use crate::{
-    CompatKernel, GraphTerm, Kernel,
+    CompatKernel, Diff, GraphTerm, Kernel,
     codegen::{GRID_DIMS, THREADBLOCK_DIMS},
     utils::loop_in,
 };
+
+pub enum InitData {
+    Expr(Expression),
+    Data(Vec<f32>),
+}
 
 pub fn translate_graph(
     graph: &Graph,
 ) -> (
     StableGraph<GraphTerm, (), Directed>,
     FxHashMap<NodeIndex, NodeIndex>,
-    Vec<(NodeIndex, Vec<f32>)>,
+    Vec<(NodeIndex, InitData)>,
 ) {
     let mut new_graph = StableGraph::new();
     let mut node_mapping = FxHashMap::default();
@@ -183,7 +188,7 @@ pub fn translate_graph(
                     new_graph.add_edge(acc, new_acc, ());
                     acc = new_acc;
                 }
-                inits.push((orig_acc, vec![start_val]));
+                inits.push((orig_acc, InitData::Data(vec![start_val])));
                 // Insert op
                 let mut op = new_graph.add_node(term);
                 new_graph.add_edge(new_source, op, ());
@@ -232,27 +237,33 @@ pub fn translate_graph(
                 old_to_new_mapping.insert(node, op);
                 node_mapping.insert((node, 0), op);
             }
-            s if s.starts_with("Constant(") => {
-                // Fake constant support by providing it as an "accumulator" initialization from gmem
-                let value = if s.contains("p") {
-                    0.0
-                } else {
-                    s.replace("Constant(", "")
-                        .replace(")", "")
-                        .parse::<f32>()
-                        .unwrap()
-                };
-                let new = new_graph.add_node(GraphTerm::GMEM {
-                    label: Some(op.to_string()),
-                });
-                old_to_new_mapping.insert(node, new);
-                node_mapping.insert((node, 0), new);
-                inits.push((new, vec![value]));
-            }
             _ => {
-                if let Some(kernel) = node_weight.as_any().downcast_ref::<CompatKernel>() {
+                if let Some(constant) = node_weight.as_any().downcast_ref::<Constant>() {
+                    // Init constants in GMEM
+                    let new = new_graph.add_node(GraphTerm::GMEM {
+                        label: Some(op.to_string()),
+                    });
+                    old_to_new_mapping.insert(node, new);
+                    node_mapping.insert((node, 0), new);
+                    inits.push((
+                        new,
+                        match constant.0 {
+                            ConstantValue::Expression(e) => InitData::Expr(e),
+                            ConstantValue::Float(f) => InitData::Data(vec![f]),
+                        },
+                    ));
+                } else if let Some(kernel) = node_weight.as_any().downcast_ref::<CompatKernel>() {
                     // Add a custom kernel
                     let custom = new_graph.add_node(GraphTerm::Custom(kernel.0.clone()));
+                    for (source, ind, _) in sources {
+                        let new_source = node_mapping[&(source, ind)];
+                        new_graph.add_edge(new_source, custom, ());
+                    }
+                    node_mapping.insert((node, 0), custom);
+                    old_to_new_mapping.insert(node, custom);
+                } else if let Some(diff) = node_weight.as_any().downcast_ref::<Diff>() {
+                    // Add a custom kernel
+                    let custom = new_graph.add_node(GraphTerm::Diff(diff.name.clone()));
                     for (source, ind, _) in sources {
                         let new_source = node_mapping[&(source, ind)];
                         new_graph.add_edge(new_source, custom, ());
@@ -289,7 +300,7 @@ fn scope_in(
     shape: ShapeTracker,
     reduce_dim: Option<usize>,
     graph: &mut StableGraph<GraphTerm, (), Directed>,
-    inits: &mut Vec<(NodeIndex, Vec<f32>)>,
+    inits: &mut Vec<(NodeIndex, InitData)>,
 ) -> NodeIndex {
     // Loop in through all dimensions, handle padding
     let strides = shape.strides();
@@ -309,13 +320,14 @@ fn scope_in(
             }
             src = loop_in(src, range, stride, i, graph); // Problem: acc stride only is ever 'a', which doesn't work if there is multiple accs!
         } else if left_pad != 0 {
+            assert!(right_pad == 0);
             // Pad left
             stride = stride.substitute('z', (Expression::from('z') - left_pad).max(0));
             // Bring in mask
             let mut mask = graph.add_node(GraphTerm::GMEM {
                 label: Some("Mask".to_string()),
             });
-            inits.push((mask, vec![0., 1.]));
+            inits.push((mask, InitData::Data(vec![0., 1.])));
             // Loop mask in
             for level in 0..i {
                 mask = loop_in(mask, shape.dims()[level], 0, level, graph);
@@ -327,19 +339,28 @@ fn scope_in(
             pad_mask = Some(mask);
             src = loop_in(src, range, stride, i, graph);
         } else if right_pad != 0 {
+            assert!(left_pad == 0);
             // Pad right
-            stride =
-                stride.substitute('z', Expression::from('z').min(shape.dims[shape.indexes[i]]));
+            stride = stride.substitute(
+                'z',
+                Expression::from('z').min(shape.dims[shape.indexes[i]] - 1),
+            );
             // Bring in mask
             let mut mask = graph.add_node(GraphTerm::GMEM {
                 label: Some("Mask".to_string()),
             });
-            inits.push((mask, vec![0., 1.]));
+            inits.push((mask, InitData::Data(vec![0., 1.])));
             // Loop mask in
             for level in 0..i {
                 mask = loop_in(mask, shape.dims()[level], 0, level, graph);
             }
-            mask = loop_in(mask, range, Expression::from('z').lt(right_pad), i, graph);
+            mask = loop_in(
+                mask,
+                range,
+                Expression::from('z').lt(shape.dims[shape.indexes[i]]),
+                i,
+                graph,
+            );
             for level in (i + 1)..shape.len() {
                 mask = loop_in(mask, shape.dims()[level], 0, level, graph);
             }

@@ -184,7 +184,7 @@ impl Debug for Expression {
             let new_symbol = match term {
                 Term::Num(n) => n.to_string(),
                 Term::Var(c) => c.to_string(),
-                Term::Acc(_) => "1".to_string(), // super jank, exists so that we can max(Acc, x)
+                Term::Acc(c) => format!("Acc({c})"),
                 Term::Max => format!(
                     "max({}, {})",
                     symbols.pop().unwrap(),
@@ -243,7 +243,7 @@ impl Expression {
             let new_symbol = match term {
                 Term::Num(n) => n.to_string(),
                 Term::Var(c) => format!("const_{c}"),
-                Term::Acc(_) => "1".to_string(), // super jank, exists so that we can max(Acc, x)
+                Term::Acc(_) => "1".to_string(),
                 Term::Max => format!(
                     "max((int){}, (int){})",
                     symbols.pop().unwrap(),

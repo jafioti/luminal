@@ -13,7 +13,7 @@ use metal_rs::{
     Buffer, CompileOptions, ComputePassDescriptor, ComputePipelineDescriptor, Device,
     MTLResourceOptions, MTLSize,
 };
-use std::{collections::HashMap, fmt::Debug};
+use std::{collections::HashMap, fmt::Debug, fs::File, io::Write};
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum GPUArch {
@@ -83,6 +83,7 @@ pub enum GraphTerm {
     SMEMLoad, // Takes in an smem pointer and a gmem pointer, copies the gmem element to smem and returns the smem pointer
     SMEMRead, // Takes in an smem pointer and an smemload, returns the smem pointer
     Custom(Kernel),
+    Diff(String), // Diff a buffer
 }
 
 #[derive(Debug)]
@@ -175,4 +176,47 @@ pub fn custom_kernel<const O: usize>(
         outputs[i].shape = ShapeTracker::new(output_shape);
     }
     outputs
+}
+
+#[derive(Debug)]
+pub struct Diff {
+    name: String,
+}
+
+impl Operator for Diff {
+    fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        // Dump
+        let buffer = inp[0].0.borrowed().downcast_ref::<MetalBuffer>().unwrap();
+        let mut data = vec![0.0; buffer.length() as usize / std::mem::size_of::<f32>()];
+        let ptr = buffer.contents() as *mut f32;
+        for (i, d) in data.iter_mut().enumerate() {
+            *d = unsafe { *ptr.add(i) };
+        }
+        let mut file = File::create(format!("{}.bin", self.name)).unwrap();
+        let bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                data.as_ptr() as *const u8,
+                data.len() * std::mem::size_of::<f32>(),
+            )
+        };
+        file.write_all(bytes).unwrap();
+        vec![Tensor::new(buffer.clone())]
+    }
+}
+
+pub trait GTDiff {
+    fn diff2(self, name: impl ToString) -> Self;
+}
+
+impl GTDiff for GraphTensor {
+    fn diff2(self, name: impl ToString) -> Self {
+        let id = self
+            .graph()
+            .add_op(Diff {
+                name: name.to_string(),
+            })
+            .input(self.id, 0, self.shape)
+            .finish();
+        GraphTensor::from_id(id, self.shape, self.graph_ref)
+    }
 }

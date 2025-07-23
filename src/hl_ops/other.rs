@@ -172,8 +172,10 @@ impl GraphTensor {
                             *r = d[ind.exec_single_var_stack(i, &mut stack)];
                         }
                     }
-                    let bin_data = std::fs::read(&path)
-                        .unwrap()
+                    let Ok(bytes) = std::fs::read(&path) else {
+                        return vec![];
+                    };
+                    let bin_data = bytes
                         .chunks(4)
                         .map(|i| {
                             f32::from_ne_bytes([i[0], i[1], i[2], i[3]]).clamp(f32::MIN, f32::MAX)

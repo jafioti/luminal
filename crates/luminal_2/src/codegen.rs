@@ -103,6 +103,22 @@ pub fn codegen(
             continue;
         }
 
+        // Handle diffs
+        if kernel_graph
+            .node_weights()
+            .all(|(n, _)| matches!(n, GraphTerm::GMEM { .. } | GraphTerm::Diff(_)))
+        {
+            let (GraphTerm::Diff(diff), _) = kernel_graph
+                .node_weights()
+                .find(|(n, _)| matches!(n, GraphTerm::Diff(_)))
+                .unwrap()
+            else {
+                panic!("invalid kernel!")
+            };
+            meta_graph.node_weight_mut(node).unwrap().code = format!("Diff{diff}");
+            continue;
+        }
+
         validate_graph(&kernel_graph);
         // display_graph(&kernel_graph, &[]);
         let mut node_to_var = inputs
@@ -716,7 +732,9 @@ fn make_kernel(
             GraphTerm::LoopOut { range, stride, .. } => {
                 panic!("found loopout range: {range} stride: {stride}")
             }
-            GraphTerm::Custom(_) => unreachable!("this should be handled directly in codegen!"),
+            GraphTerm::Custom(_) | GraphTerm::Diff(_) => {
+                unreachable!("this should be handled directly in codegen!")
+            }
             GraphTerm::SMEMLoad | GraphTerm::SMEMRead => {
                 // Find the gmem input and smem input
                 let inputs = kernel_graph
@@ -975,7 +993,8 @@ fn split_kernels(
             if (matches!(term, GraphTerm::LoopIn { .. })
                 && matches!(src_term, GraphTerm::LoopOut { .. })
                 && curr_level.len() < GRID_DIMS + THREADBLOCK_DIMS)
-                || matches!(src_term, GraphTerm::Custom(_))
+                || matches!(src_term, GraphTerm::Custom(_) | GraphTerm::Diff(_))
+                || matches!(term, GraphTerm::Diff(_))
             {
                 let min_src = *src_kernel.iter().min().unwrap_or(&0);
                 let max_curr = *curr_kernel.iter().max().unwrap_or(&0);
@@ -1012,7 +1031,6 @@ fn split_kernels(
             }
         }
     }
-    // display_graph(&marked_graph, &[]);
     // Prune out unnessecary kernel members
     let mut seen = FxHashSet::default();
     let mut dfs_stack = marked_graph
@@ -1023,14 +1041,20 @@ fn split_kernels(
         let split_cond = curr_level.len() < GRID_DIMS + THREADBLOCK_DIMS
             && matches!(term, GraphTerm::LoopOut { .. });
         curr_kernel.retain(|k| {
-            matches!(term, GraphTerm::Custom(_))
+            matches!(term, GraphTerm::Custom(_) | GraphTerm::Diff(_))
                 || marked_graph
                     .neighbors_directed(node, Direction::Outgoing)
                     .any(|n| {
-                        (split_cond
+                        ((split_cond
+                            || matches!(
+                                marked_graph.node_weight(n).unwrap().0,
+                                GraphTerm::Diff(_)
+                            ))
                             && matches!(
                                 marked_graph.node_weight(n).unwrap().0,
                                 GraphTerm::LoopIn { .. }
+                                    | GraphTerm::Diff(_)
+                                    | GraphTerm::Custom(_)
                             ))
                             || marked_graph.node_weight(n).unwrap().2.contains(k)
                     })
@@ -1166,7 +1190,6 @@ fn split_kernels(
         }
     }
 
-    // display_graph(&marked_graph, &[]);
     // Place nodes in kernel graphs
     let mut kernel_graphs = (0..n_kernels)
         .map(|_| (StableGraph::new(), vec![], vec![], vec![]))
@@ -1208,6 +1231,7 @@ fn split_kernels(
             ));
         }
     }
+
     // Mark cross kernel dependencies in the kernel inputs / outputs
     for edge in marked_graph.edge_indices() {
         let (start, end) = marked_graph.edge_endpoints(edge).unwrap();

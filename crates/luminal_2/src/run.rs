@@ -1,4 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    fs::File,
+    io::Read,
+};
 
 use itertools::Itertools;
 use luminal::{
@@ -98,9 +102,49 @@ pub fn run_graph(
                     .collect();
                 // Copy outputs back
                 return (outputs, time_taken_micros);
+            } else if kernel.code.starts_with("Diff") {
+                // Load file and diff numbers
+                let diff_name = kernel.code.replace("Diff", "");
+
+                let (input, input_index) = kernels
+                    .edges_directed(node, Direction::Incoming)
+                    .sorted_by_key(|n| n.weight().1)
+                    .map(|n| (n.source(), n.weight().0))
+                    .next()
+                    .unwrap();
+                let buffer = buffers.remove(&(input, input_index)).unwrap().unwrap();
+                let mut data = vec![0.0; buffer.length() as usize / std::mem::size_of::<f32>()];
+                let ptr = buffer.contents() as *mut f32;
+                for (i, d) in data.iter_mut().enumerate() {
+                    *d = unsafe { *ptr.add(i) };
+                }
+                let mut file = File::open(format!("{diff_name}.bin")).unwrap();
+                let mut file_buffer = Vec::new();
+                file.read_to_end(&mut file_buffer).unwrap();
+                assert_eq!(file_buffer.len() % std::mem::size_of::<f32>(), 0);
+
+                let num_floats = file_buffer.len() / std::mem::size_of::<f32>();
+                let floats: Vec<f32> = unsafe {
+                    let ptr = file_buffer.as_ptr() as *const f32;
+                    Vec::from_raw_parts(ptr as *mut f32, num_floats, num_floats)
+                };
+                assert_eq!(
+                    floats.len(),
+                    data.len(),
+                    "Diff {diff_name} failed: Buffer lengths mismatch",
+                );
+                for (ind, (i, j)) in data.into_iter().zip(floats).enumerate() {
+                    if (i - j).abs() > 1e-5 {
+                        std::mem::forget(file_buffer);
+                        panic!("Diff {diff_name} failed: {i} != {j}, index {ind}");
+                    }
+                }
+                std::mem::forget(file_buffer);
+                println!("DIFF {diff_name} MATCHED");
+                buffers.insert((node, 0), Some(buffer));
             } else {
-                println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
-                println!("{}", kernel.code);
+                // println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
+                // println!("{}", kernel.code);
 
                 // compile kernel
                 let n_inputs = kernels.edges_directed(node, Direction::Incoming).count();
@@ -131,7 +175,6 @@ pub fn run_graph(
                     .map(|n| (n.source(), n.weight().0))
                     .enumerate()
                 {
-                    println!("inp");
                     if let Some(b) = &buffers[&(input, input_index)] {
                         encoder.set_buffer(i as u64, Some(b), 0);
                     } else {
@@ -151,14 +194,10 @@ pub fn run_graph(
                         encoder.set_buffer(i as u64, Some(&buffer), 0);
                         let k = (input, input_index);
                         *buffers.get_mut(&k).unwrap() = Some(buffer);
-                        // assert!(buffers[&k].is_some());
                     };
-                    // println!("Inp {i}: {}", buffers[&(input, input_index)].length());
                 }
                 // set output
                 for (i, size) in kernel.outputs.iter().enumerate() {
-                    println!("{size}");
-                    println!("{:?}", dyn_vars);
                     buffers.insert(
                         (node, i),
                         Some(device.new_buffer(
@@ -229,7 +268,7 @@ pub fn run_graph(
                 //     }
                 //     println!("{:?}", &curr_data[..10.min(curr_data.len())]);
                 // }
-                println!("---");
+                // println!("---");
                 for i in 0..kernel.outputs.len() {
                     let mut curr_data = vec![
                         0.0;
@@ -240,7 +279,7 @@ pub fn run_graph(
                     for (i, d) in curr_data.iter_mut().enumerate() {
                         *d = unsafe { *ptr.add(i) };
                     }
-                    println!("{:?}", &curr_data[..10.min(curr_data.len())]);
+                    // println!("{:?}", &curr_data[..10.min(curr_data.len())]);
                     for (i, n) in curr_data.into_iter().enumerate() {
                         if n.is_nan() {
                             panic!("{} | {}", n, i);
@@ -258,7 +297,10 @@ pub fn run_graph(
                     {
                         // All consumers have already ran, deallocate
                         if let Some(buf) = buffers.remove(&(in_node, in_ind)) {
-                            println!("Freeing {:?}", buf.as_ref().unwrap().length());
+                            // println!(
+                            //     "Freeing {in_node:?} {in_ind} {:?}",
+                            //     buf.as_ref().unwrap().length()
+                            // );
                             buf.unwrap()
                                 .set_purgeable_state(metal_rs::MTLPurgeableState::Empty);
                         }
