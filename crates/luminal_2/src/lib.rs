@@ -209,7 +209,10 @@ pub trait GTDiff {
 }
 
 impl GTDiff for GraphTensor {
-    fn diff2(self, name: impl ToString) -> Self {
+    fn diff2(mut self, name: impl ToString) -> Self {
+        if !self.shape.is_contiguous() {
+            self = self.contiguous();
+        }
         let id = self
             .graph()
             .add_op(Diff {

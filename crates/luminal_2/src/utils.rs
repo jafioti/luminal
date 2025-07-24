@@ -180,7 +180,7 @@ impl TermToString for GraphTerm {
             GraphTerm::Add => "Add".to_string(),
             GraphTerm::Mul => "Mul".to_string(),
             GraphTerm::Max => "Max".to_string(),
-            GraphTerm::Exp2 => "Exp".to_string(),
+            GraphTerm::Exp2 => "Exp2".to_string(),
             GraphTerm::Log2 => "Log2".to_string(),
             GraphTerm::Sin => "Sin".to_string(),
             GraphTerm::Recip => "Recip".to_string(),

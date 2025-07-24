@@ -6,13 +6,11 @@ use luminal_2::{
     codegen::codegen,
     extract::search,
     run::run_graph,
-    translate::translate_graph,
+    translate::{translate_graph, InitData},
     utils::{build_search_space, print_kernels},
     GPUArch,
 };
-use luminal_nn::Linear;
-use rand::{rng, Rng};
-use rustc_hash::FxHashMap;
+use rand::rng;
 
 fn main() {
     let mut rng = rng();
@@ -23,22 +21,20 @@ fn main() {
     // let model = Linear::new(4, 5, false, &mut cx);
     // model.weight.set(weight.clone());
     // Make an input tensor
-    let a = cx.tensor(('a', 'b')).set(vec![1., 2., 3., 4.]);
-    // let b = cx.tensor('b').set(vec![0., 1., 0.]);
-    let c = a.pad_along(0, 2, 1);
-    println!("{:?}", c.shape.padding);
-    let c = c.contiguous().retrieve();
+    let a = cx.tensor((2, 2)).set(vec![1., 2., 3., 4.]);
+    // let b = cx.tensor((2, 2)).set(vec![0., 1., 18., 1.2]);
+    // let c = a.pad_along(0, 2, 1);
+    let c = a.slice((.., ..1)).contiguous().retrieve();
     // let c = cx.triu(5, 1);
     // Feed tensor through model
     // let b = model.forward(a).retrieve();
-
     // Execute the graph
-    cx.set_dyn_dim('a', 2);
-    cx.set_dyn_dim('b', 2);
+    cx.set_dyn_dim('a', 4);
+    cx.set_dyn_dim('b', 3);
     cx.execute_debug();
     let (new_graph, old_to_new_mapping, accs) = translate_graph(&cx);
 
-    // luminal_2::utils::display_graph(&new_graph, &[]);
+    luminal_2::utils::display_graph(&new_graph, &[]);
     // Print the results
     let kernels = codegen(
         new_graph.clone(),
@@ -49,7 +45,7 @@ fn main() {
     )
     .unwrap();
     print_kernels(&kernels);
-    // luminal_2::utils::display_graph(&kernels, &[]);
+
     // let w1 = weight.clone();
     let mut inputs = vec![
         (
@@ -58,16 +54,18 @@ fn main() {
         ),
         // (
         //     old_to_new_mapping[&b.id],
-        //     Box::new(move || vec![0_f32, 1., 0.]) as Box<dyn FnOnce() -> Vec<f32> + 'static>,
+        //     Box::new(move || vec![0_f32, 1., 18., 1.2]) as Box<dyn FnOnce() -> Vec<f32> + 'static>,
         // ),
         // (old_to_new_mapping[&model.weight.id], Box::new(move || w1)),
     ];
-    for (label, val) in &accs {
-        let val = val.clone();
-        inputs.push((
-            label.clone(),
-            Box::new(move || val) as Box<dyn FnOnce() -> Vec<f32> + 'static>,
-        ));
+    for (label, val) in accs {
+        match val {
+            InitData::Expr(e) => {
+                let val = e.exec(&cx.dyn_map).unwrap();
+                inputs.push((label, Box::new(move || vec![val as f32])));
+            }
+            InitData::Data(d) => inputs.push((label, Box::new(move || d))),
+        }
     }
 
     let outputs = run_graph(inputs, &kernels, &cx.dyn_map);

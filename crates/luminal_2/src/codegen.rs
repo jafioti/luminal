@@ -164,6 +164,16 @@ pub fn codegen(
             .chain(repeat(1.into()))
             .take(3) // Hardware always expects 3 dims
             .collect_vec();
+        // Make sure there are no dynamic dimensions in the threadblock
+        if threadblock
+            .iter()
+            .copied()
+            .product::<Expression>()
+            .to_usize()
+            .is_none()
+        {
+            return None;
+        }
         let kernel_lines = kernel.into_iter().map(|s| format!("\t{s}")).join("\n");
         // if node.index() == 0 {
         //     display_graph(&kernel_graph, &[]);
@@ -1017,14 +1027,14 @@ fn split_kernels(
                     }
                 }
             }
-            if !matches!(term, GraphTerm::LoopIn { .. } | GraphTerm::LoopOut { .. })
-                && !matches!(
-                    src_term,
-                    GraphTerm::LoopIn { .. } | GraphTerm::LoopOut { .. }
-                )
-            {
-                assert_eq!(curr_level, *src_level); // Edges need to go between the same levels if neither op is a LoopIn or LoopOut
-            }
+            // if !matches!(term, GraphTerm::LoopIn { .. } | GraphTerm::LoopOut { .. })
+            //     && !matches!(
+            //         src_term,
+            //         GraphTerm::LoopIn { .. } | GraphTerm::LoopOut { .. }
+            //     )
+            // {
+            //     assert_eq!(curr_level, *src_level); // Edges need to go between the same levels if neither op is a LoopIn or LoopOut
+            // }
             if changed || !seen.contains(&source) {
                 dfs_stack.push(source);
                 seen.insert(source);

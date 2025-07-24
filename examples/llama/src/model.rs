@@ -113,9 +113,8 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         let repeated_keys = keys.expand_dim(1, N_ATTENTION_GROUPS);
         let repeated_values = values.expand_dim(1, N_ATTENTION_GROUPS);
 
-        // Calculate attention weights
         let mut attention_weights = queries
-            .reshape((N_KV_HEADS, N_ATTENTION_GROUPS, seq, HEAD_DIM)) // Split query heads into groups
+            .reshape((N_KV_HEADS, N_ATTENTION_GROUPS, seq, HEAD_DIM))
             .matmul(repeated_keys.permute((0, 1, 3, 2)))
             / (HEAD_DIM as f32).sqrt();
 

@@ -7,7 +7,7 @@ use rustc_hash::FxHashMap;
 use crate::{
     CompatKernel, Diff, GraphTerm, Kernel,
     codegen::{GRID_DIMS, THREADBLOCK_DIMS},
-    utils::loop_in,
+    utils::{loop_in, loop_out},
 };
 
 pub enum InitData {
@@ -38,9 +38,10 @@ pub fn translate_graph(
         match op {
             "Sqrt" | "Exp2" | "Log2" | "Sin" | "Contiguous" | "Recip" => {
                 // walk through input ranges and strides, making new loopins as we go
-                let (source, output_index, mut shape) = sources.pop().unwrap();
-                let mut new_source = node_mapping[&(source, output_index)];
-                new_source = scope_in(new_source, shape, None, &mut new_graph, &mut inits);
+                let (source, output_index, shape) = sources.pop().unwrap();
+                let new_source = node_mapping[&(source, output_index)];
+                let (new_source, ranges) =
+                    scope_in(new_source, shape, None, &mut new_graph, &mut inits);
                 let mut op = if op == "Contiguous" {
                     new_source
                 } else {
@@ -56,38 +57,21 @@ pub fn translate_graph(
                     r
                 };
                 // walk through output and place loopouts
-                shape = shape.contiguous();
-                for (i, (stride, range)) in shape
-                    .dims()
-                    .into_iter()
-                    .rev()
-                    .scan(Expression::from(1), |i, s| {
-                        let r = *i;
-                        *i *= s;
-                        Some(r)
-                    })
-                    .zip(shape.dims().into_iter().rev())
-                    .enumerate()
-                {
-                    let loopout = new_graph.add_node(GraphTerm::LoopOut {
-                        range,
-                        stride: Expression::from('z') * stride,
-                        marker: (shape.dims().len() - i - 1).to_string(),
-                    });
-                    new_graph.add_edge(op, loopout, ());
-                    op = loopout;
-                }
+                op = scope_out(op, ranges, false, &mut new_graph);
                 old_to_new_mapping.insert(node, op);
                 node_mapping.insert((node, 0), op);
             }
             "Add" | "Mul" | "Mod" | "LessThan" => {
                 // walk through input ranges and strides, making new loopins as we go
-                let (source_a, output_index_a, mut shape_a) = sources.pop().unwrap();
+                let (source_a, output_index_a, shape_a) = sources.pop().unwrap();
                 let mut new_source_a = node_mapping[&(source_a, output_index_a)];
-                new_source_a = scope_in(new_source_a, shape_a, None, &mut new_graph, &mut inits);
+                let (ns, ranges) =
+                    scope_in(new_source_a, shape_a, None, &mut new_graph, &mut inits);
+                new_source_a = ns;
                 let (source_b, output_index_b, shape_b) = sources.pop().unwrap();
                 let mut new_source_b = node_mapping[&(source_b, output_index_b)];
-                new_source_b = scope_in(new_source_b, shape_b, None, &mut new_graph, &mut inits);
+                let (ns, _) = scope_in(new_source_b, shape_b, None, &mut new_graph, &mut inits);
+                new_source_b = ns;
                 let mut op = new_graph.add_node(match op {
                     "Add" => GraphTerm::Add,
                     "Mul" => GraphTerm::Mul,
@@ -98,27 +82,7 @@ pub fn translate_graph(
                 new_graph.add_edge(new_source_a, op, ());
                 new_graph.add_edge(new_source_b, op, ());
                 // walk through output and place loopouts
-                shape_a = shape_a.contiguous();
-                for (i, (stride, range)) in shape_a
-                    .dims()
-                    .into_iter()
-                    .rev()
-                    .scan(Expression::from(1), |i, s| {
-                        let r = *i;
-                        *i *= s;
-                        Some(r)
-                    })
-                    .zip(shape_a.dims().into_iter().rev())
-                    .enumerate()
-                {
-                    let loopout = new_graph.add_node(GraphTerm::LoopOut {
-                        range,
-                        stride: Expression::from('z') * stride,
-                        marker: (shape_a.dims().len() - i - 1).to_string(),
-                    });
-                    new_graph.add_edge(op, loopout, ());
-                    op = loopout;
-                }
+                op = scope_out(op, ranges, false, &mut new_graph);
                 old_to_new_mapping.insert(node, op);
                 node_mapping.insert((node, 0), op);
             }
@@ -142,48 +106,36 @@ pub fn translate_graph(
                 // walk through input ranges and strides, making new loopins as we go
                 let (source, output_index, mut shape) = sources.pop().unwrap();
                 let mut new_source = node_mapping[&(source, output_index)];
-                let mut rm_strides = shape
-                    .dims()
-                    .into_iter()
-                    .rev()
-                    .scan(Expression::from(1), |i, s| {
-                        let r = *i;
-                        *i *= s;
-                        Some(r)
-                    })
-                    .collect::<Vec<_>>();
-                rm_strides.reverse();
-                new_source = scope_in(
+                let (ns, ranges) = scope_in(
                     new_source,
                     shape,
                     Some(reduce_dim),
                     &mut new_graph,
                     &mut inits,
                 );
-                for (i, (range, acc_stride)) in shape.dims().into_iter().zip(rm_strides).enumerate()
-                {
-                    if i == reduce_dim {
-                        for z in i..THREADBLOCK_DIMS + GRID_DIMS {
-                            let new_acc = new_graph.add_node(GraphTerm::LoopIn {
-                                range: 1.into(),
-                                stride: 0.into(),
-                                marker: format!("pad{z}"),
-                            });
-                            new_graph.add_edge(acc, new_acc, ());
-                            acc = new_acc;
-                        }
-                    }
-                    let stride = if i == reduce_dim {
+                new_source = ns;
+                let mut rm_strides = ranges
+                    .iter()
+                    .rev()
+                    .scan(Expression::from(1), |i, (s, _)| {
+                        let r = *i;
+                        *i *= s;
+                        Some(r)
+                    })
+                    .collect::<Vec<_>>();
+                rm_strides.reverse();
+                for (i, ((range, name), acc_stride)) in ranges.iter().zip(rm_strides).enumerate() {
+                    let stride = if i == GRID_DIMS + THREADBLOCK_DIMS {
                         Expression::from(Term::Acc('a'))
-                    } else if i > reduce_dim {
+                    } else if i > GRID_DIMS + THREADBLOCK_DIMS {
                         Expression::from('z') * acc_stride
                     } else {
                         Expression::from(0)
                     };
                     let new_acc = new_graph.add_node(GraphTerm::LoopIn {
-                        range,
+                        range: *range,
                         stride,
-                        marker: i.to_string(),
+                        marker: name.to_string(),
                     });
                     new_graph.add_edge(acc, new_acc, ());
                     acc = new_acc;
@@ -194,46 +146,7 @@ pub fn translate_graph(
                 new_graph.add_edge(new_source, op, ());
                 new_graph.add_edge(acc, op, ());
                 // walk through output and place loopouts
-                shape = shape.contiguous();
-                for ((stride, i), range) in shape
-                    .dims()
-                    .into_iter()
-                    .enumerate()
-                    .rev()
-                    .scan(Expression::from(1), |i, (ind, range)| {
-                        if ind == reduce_dim {
-                            Some((Expression::from(Term::Acc('a')), ind))
-                        } else {
-                            let r = *i;
-                            *i *= range;
-                            Some((r, ind))
-                        }
-                    })
-                    .zip(shape.dims().into_iter().rev())
-                {
-                    let loopout = new_graph.add_node(GraphTerm::LoopOut {
-                        range,
-                        stride: if i == reduce_dim {
-                            stride
-                        } else {
-                            Expression::from('z') * stride
-                        },
-                        marker: i.to_string(),
-                    });
-                    new_graph.add_edge(op, loopout, ());
-                    op = loopout;
-                    if i == reduce_dim {
-                        for z in (i..THREADBLOCK_DIMS + GRID_DIMS).rev() {
-                            let loopout = new_graph.add_node(GraphTerm::LoopOut {
-                                range: 1.into(),
-                                stride: 0.into(),
-                                marker: format!("pad{z}"),
-                            });
-                            new_graph.add_edge(op, loopout, ());
-                            op = loopout;
-                        }
-                    }
-                }
+                op = scope_out(op, ranges, true, &mut new_graph);
                 old_to_new_mapping.insert(node, op);
                 node_mapping.insert((node, 0), op);
             }
@@ -295,89 +208,192 @@ pub fn translate_graph(
     (new_graph, old_to_new_mapping, inits)
 }
 
+fn smart_loop_in(
+    shape: ShapeTracker,
+    shape_index: usize,
+) -> (Expression, Expression, Option<Expression>) {
+    // range, stride, mask stride
+    let mut range = shape.dims()[shape_index];
+    let mut stride = shape.strides()[shape_index] * 'z';
+    let (left_pad, right_pad) = shape.padding[shape.indexes[shape_index]];
+    let (left_slice, right_slice) = shape.mask[shape.indexes[shape_index]];
+    let mut mask_stride = None;
+    if left_pad != 0 {
+        // Pad left
+        assert!(right_pad == 0);
+        stride = stride.substitute('z', (Expression::from('z') - left_pad).max(0));
+        mask_stride = Some(Expression::from('z').gte(left_pad));
+    } else if right_pad != 0 {
+        // Pad right
+        assert!(left_pad == 0);
+        stride = stride.substitute(
+            'z',
+            Expression::from('z').min(shape.dims[shape.indexes[shape_index]] - 1),
+        );
+        mask_stride = Some(Expression::from('z').lt(shape.dims[shape.indexes[shape_index]]));
+    } else if left_slice != 0 || right_slice != i32::MAX {
+        range = (right_slice.min(shape.dims[shape.indexes[shape_index]]) - left_slice).max(0);
+        stride = stride.substitute('z', Expression::from('z') + left_slice);
+    }
+    (range, stride, mask_stride)
+}
+
 fn scope_in(
     mut src: NodeIndex,
     shape: ShapeTracker,
     reduce_dim: Option<usize>,
     graph: &mut StableGraph<GraphTerm, (), Directed>,
     inits: &mut Vec<(NodeIndex, InitData)>,
-) -> NodeIndex {
-    // Loop in through all dimensions, handle padding
-    let strides = shape.strides();
-    let mut pad_mask = None; // mask for pads
-    for i in 0..shape.len() {
-        let mut range = shape.dims()[i];
-        let mut stride = strides[i] * 'z';
-        let (left_pad, right_pad) = shape.padding[shape.indexes[i]];
-        let (left_slice, right_slice) = shape.mask[shape.indexes[i]];
-        if reduce_dim.map(|d| d == i).unwrap_or_default() {
-            assert!(
-                left_pad == 0 && right_pad == 0,
-                "pad on a reduce dim not implemented!"
-            );
-            for z in i..THREADBLOCK_DIMS + GRID_DIMS {
-                src = loop_in(src, 1, 0, format!("pad{z}"), graph);
-            }
-            src = loop_in(src, range, stride, i, graph); // Problem: acc stride only is ever 'a', which doesn't work if there is multiple accs!
-        } else if left_pad != 0 {
-            assert!(right_pad == 0);
-            // Pad left
-            stride = stride.substitute('z', (Expression::from('z') - left_pad).max(0));
+) -> (NodeIndex, Vec<(Expression, String)>) {
+    let mut masks = vec![];
+    let mut ranges = vec![];
+
+    // Go through all dims up to the reduce and put in first grid dimension (super inefficient!)
+    let mut range = Expression::from(1);
+    let mut stride = Expression::from(0);
+    let n_squeezed_dims = reduce_dim.unwrap_or(shape.len());
+    for i in 0..n_squeezed_dims {
+        let (curr_range, curr_stride, mask_stride) = smart_loop_in(shape, i);
+        let element_size = shape
+            .dims()
+            .iter()
+            .take(n_squeezed_dims)
+            .skip(i + 1)
+            .copied()
+            .product::<Expression>()
+            .max(1);
+        if let Some(mask_stride) = mask_stride {
             // Bring in mask
-            let mut mask = graph.add_node(GraphTerm::GMEM {
+            let mask = graph.add_node(GraphTerm::GMEM {
                 label: Some("Mask".to_string()),
             });
             inits.push((mask, InitData::Data(vec![0., 1.])));
             // Loop mask in
+            let mut mask_range = curr_range;
             for level in 0..i {
-                mask = loop_in(mask, shape.dims()[level], 0, level, graph);
+                mask_range *= shape.dims()[level];
             }
-            mask = loop_in(mask, range, Expression::from('z').gte(left_pad), i, graph);
+            let mask_stride =
+                mask_stride.substitute('z', Expression::from('z') / element_size % curr_range);
             for level in (i + 1)..shape.len() {
-                mask = loop_in(mask, shape.dims()[level], 0, level, graph);
+                mask_range *= shape.dims()[level];
             }
-            pad_mask = Some(mask);
-            src = loop_in(src, range, stride, i, graph);
-        } else if right_pad != 0 {
-            assert!(left_pad == 0);
-            // Pad right
-            stride = stride.substitute(
-                'z',
-                Expression::from('z').min(shape.dims[shape.indexes[i]] - 1),
-            );
-            // Bring in mask
-            let mut mask = graph.add_node(GraphTerm::GMEM {
-                label: Some("Mask".to_string()),
-            });
-            inits.push((mask, InitData::Data(vec![0., 1.])));
-            // Loop mask in
-            for level in 0..i {
-                mask = loop_in(mask, shape.dims()[level], 0, level, graph);
-            }
-            mask = loop_in(
+            masks.push(loop_in(
                 mask,
-                range,
-                Expression::from('z').lt(shape.dims[shape.indexes[i]]),
-                i,
+                mask_range.simplify(),
+                mask_stride.simplify(),
+                0,
+                graph,
+            ));
+        };
+        range *= curr_range;
+        stride += if i == shape.len() - 1 {
+            curr_stride.substitute('z', Expression::from('z') % curr_range)
+        } else {
+            curr_stride.substitute('z', (Expression::from('z') / element_size) % curr_range)
+        };
+    }
+    ranges.push((range, "0".to_string()));
+    src = loop_in(src, range.simplify(), stride.simplify(), 0, graph);
+
+    if let Some(reduce_dim) = reduce_dim {
+        // Go through rest of grid and threadblock as pads
+        for i in 1..(GRID_DIMS + THREADBLOCK_DIMS) {
+            ranges.push((Expression::from(1), format!("-pad{i}-")));
+            src = loop_in(src, 1, 0, format!("-pad{i}-"), graph);
+            for mask in &mut masks {
+                *mask = loop_in(*mask, 1, 0, format!("-pad{i}-"), graph);
+            }
+        }
+        // Do reduction
+        let (left_pad, right_pad) = shape.padding[shape.indexes[reduce_dim]];
+        let (left_slice, right_slice) = shape.mask[shape.indexes[reduce_dim]];
+        assert!(left_pad == 0 && right_pad == 0 && left_slice == 0 && right_slice == i32::MAX);
+        ranges.push((shape.dims()[reduce_dim], reduce_dim.to_string()));
+        src = loop_in(
+            src,
+            shape.dims()[reduce_dim],
+            shape.strides()[reduce_dim] * 'z',
+            reduce_dim,
+            graph,
+        );
+        for mask in &mut masks {
+            *mask = loop_in(
+                *mask,
+                shape.dims()[reduce_dim],
+                0,
+                THREADBLOCK_DIMS + GRID_DIMS,
                 graph,
             );
-            for level in (i + 1)..shape.len() {
-                mask = loop_in(mask, shape.dims()[level], 0, level, graph);
-            }
-            pad_mask = Some(mask);
-            src = loop_in(src, range, stride, i, graph);
-        } else if left_slice != 0 || right_slice != i32::MAX {
-            range = (right_slice.min(shape.dims[shape.indexes[i]]) - left_slice).max(0);
-            stride = stride.substitute('z', Expression::from('z') + left_slice);
-            src = loop_in(src, range, stride, i, graph);
-        } else {
-            // No pads or reduces
-            src = loop_in(src, range, stride, i, graph);
         }
     }
-    if let Some(mask) = pad_mask {
-        crate::utils::binary(src, mask, GraphTerm::Mul, graph)
-    } else {
-        src
+    // Go through thread dims
+    let mut thread_range = Expression::from(1);
+    let mut thread_stride = Expression::from(0);
+    let mut thread_dims = false;
+    for i in reduce_dim.map(|r| r + 1).unwrap_or(shape.len())..shape.len() {
+        thread_dims = true;
+        let (curr_range, curr_stride, mask_stride) = smart_loop_in(shape, i);
+        assert!(mask_stride.is_none());
+        let element_size = shape
+            .dims()
+            .iter()
+            .skip(i + 1)
+            .copied()
+            .product::<Expression>()
+            .max(1);
+        thread_range *= curr_range;
+        thread_stride += if i == shape.len() - 1 {
+            curr_stride.substitute('z', Expression::from('z') % curr_range)
+        } else {
+            curr_stride.substitute('z', (Expression::from('z') / element_size) % curr_range)
+        };
     }
+    if thread_dims {
+        ranges.push((thread_range, 0.to_string()));
+        src = loop_in(
+            src,
+            thread_range.simplify(),
+            thread_stride.simplify(),
+            0,
+            graph,
+        );
+        for mask in &mut masks {
+            *mask = loop_in(
+                *mask,
+                thread_range.simplify(),
+                0,
+                GRID_DIMS + THREADBLOCK_DIMS,
+                graph,
+            );
+        }
+    }
+    // Multiply masks
+    for mask in masks {
+        src = crate::utils::binary(src, mask, GraphTerm::Mul, graph);
+    }
+    (src, ranges)
+}
+
+fn scope_out(
+    mut src: NodeIndex,
+    ranges: Vec<(Expression, String)>,
+    reduce: bool,
+    graph: &mut StableGraph<GraphTerm, (), Directed>,
+) -> NodeIndex {
+    for (stride, range, loop_name) in ranges.into_iter().enumerate().rev().scan(
+        Expression::from('z'),
+        |i, (ind, (range, loop_name))| {
+            if reduce && ind == THREADBLOCK_DIMS + GRID_DIMS {
+                Some((Expression::from(Term::Acc('a')), range, loop_name)) // THIS IS WRONG, IT SHOULD MIRROR THE INCOMING ACC AND BE RANDOMLY GENERATED
+            } else {
+                let r = *i;
+                *i *= range;
+                Some((r, range, loop_name))
+            }
+        },
+    ) {
+        src = loop_out(src, range, stride, loop_name, graph);
+    }
+    src
 }

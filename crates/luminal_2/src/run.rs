@@ -136,15 +136,15 @@ pub fn run_graph(
                 for (ind, (i, j)) in data.into_iter().zip(floats).enumerate() {
                     if (i - j).abs() > 1e-5 {
                         std::mem::forget(file_buffer);
-                        panic!("Diff {diff_name} failed: {i} != {j}, index {ind}");
+                        panic!("Diff {diff_name} failed: curr: {i} != file: {j}, index {ind}");
                     }
                 }
                 std::mem::forget(file_buffer);
                 println!("DIFF {diff_name} MATCHED");
                 buffers.insert((node, 0), Some(buffer));
             } else {
-                // println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
-                // println!("{}", kernel.code);
+                println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
+                println!("{}", kernel.code);
 
                 // compile kernel
                 let n_inputs = kernels.edges_directed(node, Direction::Incoming).count();
@@ -175,6 +175,9 @@ pub fn run_graph(
                     .map(|n| (n.source(), n.weight().0))
                     .enumerate()
                 {
+                    if !buffers.contains_key(&(input, input_index)) {
+                        panic!("Couldn't find buffer, possibly missing input");
+                    }
                     if let Some(b) = &buffers[&(input, input_index)] {
                         encoder.set_buffer(i as u64, Some(b), 0);
                     } else {
@@ -228,17 +231,23 @@ pub fn run_graph(
                 }
 
                 // Set dispatch
+                let grid = (
+                    kernel.grid.0.exec(dyn_vars).unwrap() as u64,
+                    kernel.grid.1.exec(dyn_vars).unwrap() as u64,
+                    kernel.grid.2.exec(dyn_vars).unwrap() as u64,
+                );
+                let tb = (
+                    kernel.threadblock.0.exec(dyn_vars).unwrap() as u64,
+                    kernel.threadblock.1.exec(dyn_vars).unwrap() as u64,
+                    kernel.threadblock.2.exec(dyn_vars).unwrap() as u64,
+                );
+                assert!(
+                    tb.0 * tb.1 * tb.2 < 1024,
+                    "threadblock is too big: {tb:?} > 1024"
+                );
                 encoder.dispatch_thread_groups(
-                    MTLSize::new(
-                        kernel.grid.0.exec(dyn_vars).unwrap() as u64,
-                        kernel.grid.1.exec(dyn_vars).unwrap() as u64,
-                        kernel.grid.2.exec(dyn_vars).unwrap() as u64,
-                    ),
-                    MTLSize::new(
-                        kernel.threadblock.0.exec(dyn_vars).unwrap() as u64,
-                        kernel.threadblock.1.exec(dyn_vars).unwrap() as u64,
-                        kernel.threadblock.2.exec(dyn_vars).unwrap() as u64,
-                    ),
+                    MTLSize::new(grid.0, grid.1, grid.2),
+                    MTLSize::new(tb.0, tb.1, tb.2),
                 );
                 encoder.end_encoding();
                 command_buffer.commit();

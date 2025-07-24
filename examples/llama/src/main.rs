@@ -55,10 +55,10 @@ fn main() {
     let mut cache_src_data: Vec<(Vec<f32>, Vec<f32>)> = (0..model::NUM_LAYERS)
         .map(|_| {
             (
-                (0..(N_KV_HEADS * 3 * HEAD_DIM))
+                (0..(N_KV_HEADS * 13 * HEAD_DIM))
                     .map(|_| rng.random())
                     .collect_vec(),
-                (0..(N_KV_HEADS * 3 * HEAD_DIM))
+                (0..(N_KV_HEADS * 13 * HEAD_DIM))
                     .map(|_| rng.random())
                     .collect_vec(),
             )
@@ -111,7 +111,7 @@ fn main() {
     let input_data = vec![0.0, 1.0];
     input.set(input_data.clone());
     cx.set_dyn_dim('s', 2);
-    cx.set_dyn_dim('p', 3);
+    cx.set_dyn_dim('p', 13);
     cx.execute_debug();
     let mut outputs = vec![old_to_new_mapping[&old_logits.id]];
     for (k, v) in &old_cache_dest {
