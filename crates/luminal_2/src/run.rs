@@ -56,7 +56,7 @@ pub fn run_graph(
         let queue = device.new_command_queue();
         // let command_buffer = queue.new_command_buffer();
         // Allocate buffers
-        let mut buffers = HashMap::<(NodeIndex, usize), Option<Buffer>>::default();
+        let mut buffers = HashMap::<(usize, usize), Option<Buffer>>::default();
         let mut ran = FxHashSet::default();
         let mut mapping: HashMap<usize, usize> = HashMap::default();
         for node in toposort(kernels, None).unwrap() {
@@ -66,7 +66,7 @@ pub fn run_graph(
                 mapping = serde_json::from_str(&kernel.code.replace("Inputs", "")).unwrap();
                 buffers = inputs
                     .iter()
-                    .map(|(name, _)| ((node, mapping[&name.index()]), None))
+                    .map(|(name, _)| ((node.index(), mapping[&name.index()]), None))
                     .collect();
 
                 // buffers.extend(inputs.into_iter().map(|(name, buf)| {
@@ -90,7 +90,9 @@ pub fn run_graph(
                 let outputs = kernels
                     .edges_directed(node, Direction::Incoming)
                     .map(|e| {
-                        let buffer = buffers[&(e.source(), e.weight().0)].as_ref().unwrap();
+                        let buffer = buffers[&(e.source().index(), e.weight().0)]
+                            .as_ref()
+                            .unwrap();
                         let mut curr_data =
                             vec![0.0; buffer.length() as usize / std::mem::size_of::<f32>()];
                         let ptr = buffer.contents() as *mut f32;
@@ -112,7 +114,10 @@ pub fn run_graph(
                     .map(|n| (n.source(), n.weight().0))
                     .next()
                     .unwrap();
-                let buffer = buffers.remove(&(input, input_index)).unwrap().unwrap();
+                let buffer = buffers
+                    .remove(&(input.index(), input_index))
+                    .unwrap()
+                    .unwrap();
                 let mut data = vec![0.0; buffer.length() as usize / std::mem::size_of::<f32>()];
                 let ptr = buffer.contents() as *mut f32;
                 for (i, d) in data.iter_mut().enumerate() {
@@ -141,7 +146,7 @@ pub fn run_graph(
                 }
                 std::mem::forget(file_buffer);
                 println!("DIFF {diff_name} MATCHED");
-                buffers.insert((node, 0), Some(buffer));
+                buffers.insert((node.index(), 0), Some(buffer));
             } else {
                 println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
                 println!("{}", kernel.code);
@@ -175,10 +180,10 @@ pub fn run_graph(
                     .map(|n| (n.source(), n.weight().0))
                     .enumerate()
                 {
-                    if !buffers.contains_key(&(input, input_index)) {
+                    if !buffers.contains_key(&(input.index(), input_index)) {
                         panic!("Couldn't find buffer, possibly missing input");
                     }
-                    if let Some(b) = &buffers[&(input, input_index)] {
+                    if let Some(b) = &buffers[&(input.index(), input_index)] {
                         encoder.set_buffer(i as u64, Some(b), 0);
                     } else {
                         let entry = inputs
@@ -195,24 +200,19 @@ pub fn run_graph(
                             MTLResourceOptions::StorageModeShared,
                         );
                         encoder.set_buffer(i as u64, Some(&buffer), 0);
-                        let k = (input, input_index);
+                        let k = (input.index(), input_index);
                         *buffers.get_mut(&k).unwrap() = Some(buffer);
                     };
                 }
                 // set output
                 for (i, size) in kernel.outputs.iter().enumerate() {
-                    buffers.insert(
-                        (node, i),
-                        Some(device.new_buffer(
-                            (size.exec(&dyn_vars).unwrap() * std::mem::size_of::<f32>()) as u64,
-                            MTLResourceOptions::StorageModeShared,
-                        )),
+                    let buffer = device.new_buffer(
+                        (size.exec(&dyn_vars).unwrap() * std::mem::size_of::<f32>()) as u64,
+                        MTLResourceOptions::StorageModeShared,
                     );
-                    encoder.set_buffer(
-                        (i + n_inputs) as u64,
-                        Some(buffers[&(node, i)].as_ref().unwrap()),
-                        0,
-                    );
+                    encoder.set_buffer((i + n_inputs) as u64, Some(&buffer), 0);
+                    buffers.insert((node.index(), i), Some(buffer));
+                    assert!(buffers.contains_key(&(node.index(), i)))
                 }
                 // set dynamic dimensions
                 for (i, (_, v)) in dyn_vars.iter().sorted_by_key(|(k, _)| **k).enumerate() {
@@ -278,23 +278,24 @@ pub fn run_graph(
                 //     println!("{:?}", &curr_data[..10.min(curr_data.len())]);
                 // }
                 // println!("---");
-                for i in 0..kernel.outputs.len() {
-                    let mut curr_data = vec![
-                        0.0;
-                        buffers[&(node, i)].as_ref().unwrap().length() as usize
-                            / std::mem::size_of::<f32>()
-                    ];
-                    let ptr = buffers[&(node, i)].as_ref().unwrap().contents() as *mut f32;
-                    for (i, d) in curr_data.iter_mut().enumerate() {
-                        *d = unsafe { *ptr.add(i) };
-                    }
-                    // println!("{:?}", &curr_data[..10.min(curr_data.len())]);
-                    for (i, n) in curr_data.into_iter().enumerate() {
-                        if n.is_nan() {
-                            panic!("{} | {}", n, i);
-                        }
-                    }
-                }
+                // for i in 0..kernel.outputs.len() {
+                //     let mut curr_data = vec![
+                //         0.0;
+                //         buffers[&(node.index(), i)].as_ref().unwrap().length()
+                //             as usize
+                //             / std::mem::size_of::<f32>()
+                //     ];
+                //     let ptr = buffers[&(node.index(), i)].as_ref().unwrap().contents() as *mut f32;
+                //     for (i, d) in curr_data.iter_mut().enumerate() {
+                //         *d = unsafe { *ptr.add(i) };
+                //     }
+                //     // println!("{:?}", &curr_data[..10.min(curr_data.len())]);
+                //     for (i, n) in curr_data.into_iter().enumerate() {
+                //         if n.is_nan() {
+                //             panic!("{} | {}", n, i);
+                //         }
+                //     }
+                // }
                 // Go through inputs and free buffers that aren't going to be used again
                 for (in_node, in_ind) in kernels
                     .edges_directed(node, Direction::Incoming)
@@ -305,13 +306,14 @@ pub fn run_graph(
                         .all(|e| e.weight().0 == in_ind && ran.contains(&e.target()))
                     {
                         // All consumers have already ran, deallocate
-                        if let Some(buf) = buffers.remove(&(in_node, in_ind)) {
+                        if let Some(buf) = buffers.remove(&(in_node.index(), in_ind)) {
                             // println!(
                             //     "Freeing {in_node:?} {in_ind} {:?}",
                             //     buf.as_ref().unwrap().length()
                             // );
-                            buf.unwrap()
-                                .set_purgeable_state(metal_rs::MTLPurgeableState::Empty);
+                            if let Some(buf) = buf {
+                                buf.set_purgeable_state(metal_rs::MTLPurgeableState::Empty);
+                            }
                         }
                     }
                 }

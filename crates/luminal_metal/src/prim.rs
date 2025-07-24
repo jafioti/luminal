@@ -215,18 +215,6 @@ macro_rules! metal_unary_op {
                     // Run the command buffer
                     command_buffer.commit();
                     command_buffer.wait_until_completed();
-                    let mut curr_data = vec![
-                        0.0;
-                        out.length()
-                            as usize
-                            / std::mem::size_of::<f32>()
-                    ];
-                    let ptr =
-                        out.contents() as *mut f32;
-                    for (i, d) in curr_data.iter_mut().enumerate() {
-                        *d = unsafe { *ptr.add(i) };
-                    }
-                    println!("{:?}", &curr_data[..10.min(curr_data.len())]);
 
                     vec![Tensor::new(MetalBuffer(out))]
                 })
@@ -351,18 +339,6 @@ kernel void mkernel(device {type_name} *inp_a [[buffer(0)]], device {type_name} 
 
                     command_buffer.commit();
                     command_buffer.wait_until_completed();
-                    let mut curr_data = vec![
-                        0.0;
-                        out.length()
-                            as usize
-                            / std::mem::size_of::<f32>()
-                    ];
-                    let ptr =
-                        out.contents() as *mut f32;
-                    for (i, d) in curr_data.iter_mut().enumerate() {
-                        *d = unsafe { *ptr.add(i) };
-                    }
-                    println!("{:?}", &curr_data[..10.min(curr_data.len())]);
 
                     vec![Tensor::new(MetalBuffer(out))]
                 })

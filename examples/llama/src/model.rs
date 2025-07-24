@@ -1,5 +1,5 @@
 use luminal::prelude::{binary::F32Pow, *};
-use luminal_2::{custom_kernel, GTDiff, Kernel};
+use luminal_2::{custom_kernel, Kernel};
 use luminal_nn::{LayerNorm, Linear};
 
 // Llama3 8B Config

@@ -52,17 +52,21 @@ pub fn q8_load<P: AsRef<Path>, M: SerializeModule>(
                         ))
                         .unwrap();
                         file.read_exact(&mut bytes).unwrap();
-                        vec![Tensor::new(
-                            bytes
-                                .into_iter()
-                                .chunks(4)
-                                .into_iter()
-                                .map(|c| {
-                                    let c = c.collect::<Vec<_>>();
-                                    f32::from_le_bytes([c[0], c[1], c[2], c[3]])
-                                })
-                                .collect::<Vec<_>>(),
-                        )]
+                        let data = bytes
+                            .into_iter()
+                            .chunks(4)
+                            .into_iter()
+                            .map(|c| {
+                                let c = c.collect::<Vec<_>>();
+                                f32::from_le_bytes([c[0], c[1], c[2], c[3]])
+                            })
+                            .collect::<Vec<_>>();
+                        let buffer = Device::system_default().unwrap().new_buffer_with_data(
+                            data.as_ptr() as *mut _,
+                            (data.len() * std::mem::size_of::<f32>()) as u64,
+                            MTLResourceOptions::StorageModeShared,
+                        );
+                        vec![Tensor::new(MetalBuffer(buffer))]
                     });
                 }
                 GgmlDType::Q8_0 => {
@@ -75,20 +79,24 @@ pub fn q8_load<P: AsRef<Path>, M: SerializeModule>(
                         ))
                         .unwrap();
                         file.read_exact(&mut bytes).unwrap();
-                        vec![Tensor::new(
-                            bytes
-                                .chunks_exact(32 + 2)
-                                .into_iter()
-                                .flat_map(|bytes| {
-                                    let delta = f16::from_ne_bytes([bytes[0], bytes[1]]).to_f32();
-                                    bytes
-                                        .iter()
-                                        .skip(2)
-                                        .take(32)
-                                        .map(move |b| i8::from_ne_bytes([*b]) as f32 * delta)
-                                })
-                                .collect::<Vec<_>>(),
-                        )]
+                        let data = bytes
+                            .chunks_exact(32 + 2)
+                            .into_iter()
+                            .flat_map(|bytes| {
+                                let delta = f16::from_ne_bytes([bytes[0], bytes[1]]).to_f32();
+                                bytes
+                                    .iter()
+                                    .skip(2)
+                                    .take(32)
+                                    .map(move |b| i8::from_ne_bytes([*b]) as f32 * delta)
+                            })
+                            .collect::<Vec<_>>();
+                        let buffer = Device::system_default().unwrap().new_buffer_with_data(
+                            data.as_ptr() as *mut _,
+                            (data.len() * std::mem::size_of::<f32>()) as u64,
+                            MTLResourceOptions::StorageModeShared,
+                        );
+                        vec![Tensor::new(MetalBuffer(buffer))]
                     });
                 }
                 _ => panic!("unrecognized dtype {:?}", data_type),
