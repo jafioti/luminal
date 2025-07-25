@@ -1,0 +1,10 @@
+[package]
+name = "luminal_hlo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+luminal = { path = "../.." }
+
+[dev-dependencies]
+dfdx = { version = "0.13", features = ["f16"] }
