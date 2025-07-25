@@ -15,3 +15,6 @@ dfdx = { version = "0.13", features = ["f16"] }
 paste = "1.0.14"
 rand = "0.8.5"
 luminal_nn = { path = "../luminal_nn" }
+
+[features]
+legacy_prims = []

@@ -1,7 +1,5 @@
-use std::collections::HashMap;
-
 use itertools::Itertools;
-use luminal::prelude::{petgraph::Direction, *};
+use luminal::prelude::*;
 //use luminal_2::{
 // codegen::codegen, extract::search, run::run_graph, translate::translate_graph,
 // utils::build_search_space, GPUArch,

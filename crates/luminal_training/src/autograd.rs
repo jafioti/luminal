@@ -5,9 +5,7 @@ use petgraph::{algo::toposort, visit::EdgeRef, Direction};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use luminal::{
-    op::{
-        Add, Contiguous, Exp2, Function, LessThan, Log2, MaxReduce, Mod, Sin, SumReduce,
-    },
+    op::{Add, Contiguous, Exp2, Function, LessThan, Log2, MaxReduce, Mod, Sin, SumReduce},
     prelude::{tinyvec::ArrayVec, *},
 };
 
@@ -18,12 +16,15 @@ use luminal::op::{Mul, Recip, Sqrt};
 // disabled. They are never instantiated or used, just referenced for `TypeId` comparison. Using
 // the same names avoids having to cfg-guard every match branch.
 #[cfg(not(feature = "legacy_prims"))]
+#[allow(dead_code)]
 #[derive(Debug)]
 struct Mul;
 #[cfg(not(feature = "legacy_prims"))]
+#[allow(dead_code)]
 #[derive(Debug)]
 struct Recip;
 #[cfg(not(feature = "legacy_prims"))]
+#[allow(dead_code)]
 #[derive(Debug)]
 struct Sqrt;
 
@@ -135,28 +136,30 @@ impl Compiler for Autograd {
                         add_grad(inps[0] * prev_grad, inps[1], graph, &mut grads);
                     }
                 }
-                _ if let Some(reduce_op) = unsafe { graph_ref.as_ref().unwrap() }
-                    .try_get_op::<SumReduce>(fwd_node)
-                    .cloned() => {
+                _ if op == TypeId::of::<SumReduce>() => {
                     // f(x) = sum_reduce(x)
                     // f'(x) = 1
                     if valid_set.contains(&inps[0].id) {
-                        prev_grad
-                            .shape
-                            .expand_dim(reduce_op.0, inps[0].shape.dims[inps[0].shape.indexes[reduce_op.0]]);
+                        let reduce_op =
+                            unsafe { graph_ref.as_ref().unwrap() }.get_op::<SumReduce>(fwd_node);
+                        prev_grad.shape.expand_dim(
+                            reduce_op.0,
+                            inps[0].shape.dims[inps[0].shape.indexes[reduce_op.0]],
+                        );
                         add_grad(prev_grad, inps[0], graph, &mut grads);
                     }
                 }
-                _ if let Some(reduce_op) = unsafe { graph_ref.as_ref().unwrap() }
-                    .try_get_op::<MaxReduce>(fwd_node)
-                    .cloned() => {
+                _ if op == TypeId::of::<MaxReduce>() => {
                     // f(x) = max_reduce(x)
                     // f'(x) = x == max_reduce(x)
                     if valid_set.contains(&inps[0].id) {
-                        // fwd_nod is already max_reduce(x)
-                        prev_grad
-                            .shape
-                            .expand_dim(reduce_op.0, inps[0].shape.dims[inps[0].shape.indexes[reduce_op.0]]);
+                        let reduce_op =
+                            unsafe { graph_ref.as_ref().unwrap() }.get_op::<MaxReduce>(fwd_node);
+                        // fwd_node is already max_reduce(x)
+                        prev_grad.shape.expand_dim(
+                            reduce_op.0,
+                            inps[0].shape.dims[inps[0].shape.indexes[reduce_op.0]],
+                        );
                         let reduced = GraphTensor::from_id(fwd_node, prev_grad.shape, graph_ref);
                         let grad = inps[0].eq(reduced) * prev_grad;
                         add_grad(grad, inps[0], graph, &mut grads);
