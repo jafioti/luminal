@@ -71,19 +71,11 @@ impl SubAssign for GraphTensor {
 impl Mul for GraphTensor {
     type Output = GraphTensor;
 
+    /// Element-wise multiplication implemented without the `Mul` primitive.
+    /// Uses the identity `a * b = 2^{log2(a) + log2(b)}`.
     fn mul(self, rhs: GraphTensor) -> Self::Output {
-        // assert_eq!(
-        //     self.dims(),
-        //     rhs.dims(),
-        //     "Dims must match to multiply tensors."
-        // );
-        let new_id = self
-            .graph()
-            .add_op(op::Mul)
-            .input(self.id, 0, self.shape)
-            .input(rhs.id, 0, rhs.shape)
-            .finish();
-        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
+        assert_eq!(self.dims(), rhs.dims(), "Dims must match to multiply tensors.");
+        (self.log2() + rhs.log2()).exp2()
     }
 }
 
@@ -106,7 +98,8 @@ impl Div<GraphTensor> for GraphTensor {
     type Output = GraphTensor;
 
     fn div(self, rhs: GraphTensor) -> Self::Output {
-        self * rhs.reciprocal()
+        assert_eq!(self.dims(), rhs.dims(), "Dims must match to divide tensors.");
+        (self.log2() - rhs.log2()).exp2()
     }
 }
 
@@ -115,7 +108,7 @@ impl Div<GraphTensor> for f32 {
     type Output = GraphTensor;
 
     fn div(self, rhs: GraphTensor) -> Self::Output {
-        self * rhs.reciprocal()
+        (self.log2() - rhs.log2()).exp2()
     }
 }
 
@@ -199,7 +192,7 @@ impl Div<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn div(self, rhs: f32) -> Self::Output {
-        self * self.graph().constant(rhs.recip()).expand(self.shape)
+        (self.log2() - self.graph().constant(rhs).expand(self.shape).log2()).exp2()
     }
 }
 
@@ -207,7 +200,13 @@ impl<S: Into<Expression>> Div<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn div(self, rhs: S) -> Self::Output {
-        self / self.graph().constant(rhs).expand(self.shape)
+        (self.log2()
+            - self
+                .graph()
+                .constant(rhs)
+                .expand(self.shape)
+                .log2())
+        .exp2()
     }
 }
 

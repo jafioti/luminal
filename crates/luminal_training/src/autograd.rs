@@ -6,11 +6,26 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use luminal::{
     op::{
-        Add, Contiguous, Exp2, Function, LessThan, Log2, MaxReduce, Mod, Mul, Recip, Sin, Sqrt,
-        SumReduce,
+        Add, Contiguous, Exp2, Function, LessThan, Log2, MaxReduce, Mod, Sin, SumReduce,
     },
     prelude::{tinyvec::ArrayVec, *},
 };
+
+#[cfg(feature = "legacy_prims")]
+use luminal::op::{Mul, Recip, Sqrt};
+
+// Provide dummy zero-sized types to satisfy `TypeId::of::<Mul>()` etc. when legacy primitives are
+// disabled. They are never instantiated or used, just referenced for `TypeId` comparison. Using
+// the same names avoids having to cfg-guard every match branch.
+#[cfg(not(feature = "legacy_prims"))]
+#[derive(Debug)]
+struct Mul;
+#[cfg(not(feature = "legacy_prims"))]
+#[derive(Debug)]
+struct Recip;
+#[cfg(not(feature = "legacy_prims"))]
+#[derive(Debug)]
+struct Sqrt;
 
 #[derive(Clone, Debug)]
 pub struct Autograd(Vec<NodeIndex>, NodeIndex);
@@ -84,8 +99,7 @@ impl Compiler for Autograd {
                 continue;
             }
 
-            // Differentiate through fwd_node to get gradients for it's sources
-            // Get input tensors
+            // Get input tensors (required for differentiation rules)
             let inps = graph
                 .edges_directed(fwd_node, Direction::Incoming)
                 .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i)))
@@ -96,17 +110,9 @@ impl Compiler for Autograd {
                 let (id, sh) = grads[&fwd_node];
                 GraphTensor::from_id(id, sh, graph_ref)
             };
-            if op == TypeId::of::<Add>() {
-                // f(a, b) = a + b
-                // df/da = 1
-                if valid_set.contains(&inps[0].id) {
-                    add_grad(prev_grad, inps[0], graph, &mut grads);
-                }
-                // df/db = 1
-                if valid_set.contains(&inps[1].id) {
-                    add_grad(prev_grad, inps[1], graph, &mut grads);
-                }
-            } else if op == TypeId::of::<Mul>() {
+
+            #[cfg(feature = "legacy_prims")]
+            if op == TypeId::of::<Mul>() {
                 // f(a, b) = a * b
                 // df/da = b
                 if valid_set.contains(&inps[0].id) {

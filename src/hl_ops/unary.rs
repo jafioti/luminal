@@ -40,14 +40,10 @@ impl GraphTensor {
         self.log2() * f32::ln(2.)
     }
 
-    /// Take the reciprocal of each element
+    /// Take the reciprocal of each element without using the `Recip` primitive.
+    /// We use the identity `1/x = 2^{-log2(x)}` -> `(-log2(x)).exp2()`.
     pub fn reciprocal(self) -> GraphTensor {
-        let new_id = self
-            .graph()
-            .add_op(op::Recip)
-            .input(self.id, 0, self.shape)
-            .finish();
-        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
+        (-self.log2()).exp2()
     }
 
     /// The sin(x) function
@@ -70,14 +66,12 @@ impl GraphTensor {
         self * self
     }
 
-    /// The square root function
+    /// The square root function implemented without the primitive `Sqrt`
+    /// Uses the identity `sqrt(x) = x^(1/2)` which is implemented through
+    /// `pow` -> `log` / `exp` composite ops already available.
+    /// This removes the need for the `Sqrt` primitive op.
     pub fn sqrt(self) -> GraphTensor {
-        let new_id = self
-            .graph()
-            .add_op(op::Sqrt)
-            .input(self.id, 0, self.shape)
-            .finish();
-        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
+        self.pow(0.5f32)
     }
 
     /// Scale so std is 1.0

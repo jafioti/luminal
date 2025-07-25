@@ -258,33 +258,25 @@ impl Operator for Sin {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+/// Take the reciprocal of each element (legacy primitive)
+#[cfg(feature = "legacy_prims")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Recip;
+#[cfg(feature = "legacy_prims")]
 impl Operator for Recip {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut out_data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
-        let inp_data = get_vec(&inp[0].0);
-        let expr = (inp[0].1.index_expression(), inp[0].1.valid_expression());
-        let mut stack = vec![];
-        for (i, out) in out_data.iter_mut().enumerate() {
-            *out = get_index(inp_data, &expr, &mut stack, i).recip();
-        }
-        vec![Tensor::new(out_data)]
+        vec![Tensor::new(get_vec(&inp[0].0).iter().map(|&a| a.recip()).collect())]
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+/// The square root function (legacy primitive)
+#[cfg(feature = "legacy_prims")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Sqrt;
+#[cfg(feature = "legacy_prims")]
 impl Operator for Sqrt {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let mut out_data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
-        let inp_data = get_vec(&inp[0].0);
-        let expr = (inp[0].1.index_expression(), inp[0].1.valid_expression());
-        let mut stack = vec![];
-        for (i, out) in out_data.iter_mut().enumerate() {
-            *out = get_index(inp_data, &expr, &mut stack, i).sqrt();
-        }
-        vec![Tensor::new(out_data)]
+        vec![Tensor::new(get_vec(&inp[0].0).iter().map(|&a| a.sqrt()).collect())]
     }
 }
 
@@ -306,19 +298,20 @@ impl Operator for Add {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+/// Multiply two tensors together (legacy primitive)
+#[cfg(feature = "legacy_prims")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Mul;
+#[cfg(feature = "legacy_prims")]
 impl Operator for Mul {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        let (lhs, rhs) = (get_vec(&inp[0].0), get_vec(&inp[1].0));
-        let mut out_data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
-        let lexpr = (inp[0].1.index_expression(), inp[0].1.valid_expression());
-        let rexpr = (inp[1].1.index_expression(), inp[1].1.valid_expression());
-        let mut stack = vec![];
-        for (i, out) in out_data.iter_mut().enumerate() {
-            *out = get_index(lhs, &lexpr, &mut stack, i) * get_index(rhs, &rexpr, &mut stack, i);
-        }
-        vec![Tensor::new(out_data)]
+        vec![Tensor::new(
+            get_vec(&inp[0].0)
+                .iter()
+                .zip(get_vec(&inp[1].0).iter())
+                .map(|(&a, &b)| a * b)
+                .collect(),
+        )]
     }
 }
 

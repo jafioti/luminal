@@ -37,6 +37,10 @@ members = [
 	"examples/*",
 	"crates/luminal_cpu",
 	"crates/luminal_nn",
-	"crates/luminal_training", "docs/company",
+	"crates/luminal_training",
 ]
-exclude = ["examples/yolo_v8", "crates/luminal_cuda", "crates/luminal_metal", "crates/luminal_2", "flash_attention_demo"]
+exclude = ["examples/yolo_v8", "crates/luminal_cuda", "crates/luminal_metal", "crates/luminal_2", "flash_attention_demo", "docs/company"]
+
+[features]
+default = ["legacy_prims"]
+legacy_prims = []
