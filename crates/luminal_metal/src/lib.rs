@@ -47,14 +47,14 @@ pub type BufferCompilers = (
 
 /// Compiler to replace metal ops with specialized variants
 pub type SpecialOpsCompiler<T> = (
-    binary::MetalSubtractionCompiler<T>,
-    binary::MetalEqualCompiler<T>,
-    other::ARangeCompiler<T>,
-    binary::MetalGatherCompiler<T>,
-    unary::MetalExpCompiler<T>,
-    unary::MetalCosCompiler<T>,
-    unary::MeanReduceCompiler<T>,
-    unary::StdNormCompiler<T>,
+    // binary::MetalSubtractionCompiler<T>,
+    // binary::MetalEqualCompiler<T>,
+    // other::ARangeCompiler<T>,
+    // binary::MetalGatherCompiler<T>,
+    // unary::MetalExpCompiler<T>,
+    // unary::MetalCosCompiler<T>,
+    // unary::MeanReduceCompiler<T>,
+    // unary::StdNormCompiler<T>,
     matmul::MetalMatMulCompiler<T>,
 );
 

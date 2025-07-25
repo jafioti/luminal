@@ -399,14 +399,14 @@ kernel void mkernel(device {type_name} *inp [[buffer(0)]], device {type_name} *o
     if (i_ < n_elements) {{
         int a_ = i_ / back_size;
         int b_ = i_ % back_size;
-        {type_name} reduce_value = 0.0;
+        float reduce_value = 0.0;
         for (int c_ = 0; c_ < dim_size; c_++) {{
             uint idx = a_ * dim_size * back_size + c_ * back_size + b_;
             if (({valid_exp}) != 0) {{
-                reduce_value += inp[{idx_exp}];
+                reduce_value += (float)inp[{idx_exp}];
             }}
         }}
-        out[i_] = reduce_value;
+        out[i_] = ({type_name})reduce_value;
     }}
 }}
 ");

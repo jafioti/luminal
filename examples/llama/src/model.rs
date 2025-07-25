@@ -1,6 +1,6 @@
 use luminal::prelude::{binary::F32Pow, *};
 use luminal_2::{custom_kernel, Kernel};
-use luminal_nn::{LayerNorm, Linear};
+use luminal_nn::{Embedding, LayerNorm, Linear};
 
 // Llama3 8B Config
 pub const VOCAB_SIZE: usize = 128256;
@@ -51,8 +51,8 @@ impl SerializeModule for Mlp {
 }
 
 fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> GraphTensor {
-    assert_eq!(input.shape.len(), 3); // batch, n_heads, seq, head_dim
-    let (n_heads, seq, head_dim) = input.dims3();
+    assert_eq!(input.shape.len(), 4); // batch, n_heads, seq, head_dim
+    let (batch, n_heads, seq, head_dim) = input.dims4();
     // Get freqs
     let freqs = (input.graph().arange(head_dim / 2) * 2.0) / (head_dim.to_usize().unwrap() as f32);
     let inv_freqs = 500_000_f32.pow(freqs).reciprocal();
@@ -60,16 +60,16 @@ fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> Gra
     let emb = pos.expand_dim(1, 1).matmul(inv_freqs.expand_dim(0, 1));
 
     // Split input into evens and odds
-    let split = input.reshape((n_heads, seq, head_dim / 2, 2));
-    let x0 = split.slice((.., .., .., ..1));
-    let x1 = split.slice((.., .., .., 1..));
+    let split = input.reshape((batch, n_heads, seq, head_dim / 2, 2));
+    let x0 = split.slice((.., .., .., .., ..1));
+    let x1 = split.slice((.., .., .., .., 1..));
 
     // Apply sin and cos embeddings
     let x0_out = x0 * emb.cos().expand(x0.shape) - x1 * emb.sin().expand(x1.shape);
     let x1_out = x0 * emb.sin().expand(x0.shape) + x1 * emb.cos().expand(x1.shape);
 
     // Combine back into output
-    x0_out.concat_along(x1_out, 3).reshape(input.shape)
+    x0_out.concat_along(x1_out, 4).reshape(input.shape)
 }
 
 pub struct SelfAttention {
@@ -82,57 +82,58 @@ pub struct SelfAttention {
 impl Module<(GraphTensor, KVCache)> for SelfAttention {
     type Output = (GraphTensor, KVCache);
     fn forward(&self, (x, (k_cache, v_cache)): (GraphTensor, KVCache)) -> Self::Output {
-        let (seq, _hidden) = x.dims2();
-        let (_kv_heads, prev_seq, _head_dim) = k_cache.dims3();
+        let (batch, seq, _hidden) = x.dims3();
+        let (_, _kv_heads, prev_seq, _head_dim) = k_cache.dims4();
 
         // Apply the Projections
         let queries = x
             .matmul(self.q_proj.permute((1, 0)))
-            .reshape((seq, N_HEADS, HEAD_DIM))
-            .permute((1, 0, 2));
+            .reshape((batch, seq, N_HEADS, HEAD_DIM))
+            .permute((0, 2, 1, 3));
 
         let keys = x
             .matmul(self.k_proj.permute((1, 0)))
-            .reshape((seq, N_KV_HEADS, HEAD_DIM))
-            .permute((1, 0, 2));
+            .reshape((batch, seq, N_KV_HEADS, HEAD_DIM))
+            .permute((0, 2, 1, 3));
 
         let values = x
             .matmul(self.v_proj.permute((1, 0)))
-            .reshape((seq, N_KV_HEADS, HEAD_DIM))
-            .permute((1, 0, 2));
+            .reshape((batch, seq, N_KV_HEADS, HEAD_DIM))
+            .permute((0, 2, 1, 3));
 
         // Rotary embed queries and keys
         let queries = apply_rotary_embeddings_ggml(queries, prev_seq);
         let keys = apply_rotary_embeddings_ggml(keys, prev_seq);
 
         // Add KV cache
-        let keys = k_cache.concat_along(keys, 1);
-        let values = v_cache.concat_along(values, 1);
+        let keys = k_cache.concat_along(keys, 2);
+        let values = v_cache.concat_along(values, 2);
 
         // Repeat the KV States for Grouped-Query Attention
-        let repeated_keys = keys.expand_dim(1, N_ATTENTION_GROUPS);
-        let repeated_values = values.expand_dim(1, N_ATTENTION_GROUPS);
+        let repeated_keys = keys.expand_dim(2, N_ATTENTION_GROUPS);
+        let repeated_values = values.expand_dim(2, N_ATTENTION_GROUPS);
 
         let mut attention_weights = queries
-            .reshape((N_KV_HEADS, N_ATTENTION_GROUPS, seq, HEAD_DIM))
-            .matmul(repeated_keys.permute((0, 1, 3, 2)))
+            .reshape((batch, N_KV_HEADS, N_ATTENTION_GROUPS, seq, HEAD_DIM))
+            .matmul(repeated_keys.permute((0, 1, 2, 4, 3)))
             / (HEAD_DIM as f32).sqrt();
 
         // Causal mask
         let attention_mask = self.k_proj.graph().triu(seq, 1) * f16::MIN.to_f32();
         attention_weights += attention_mask
             .pad_along(prev_seq, 0, 1)
-            .expand_dim(0, N_KV_HEADS)
-            .expand_dim(1, N_ATTENTION_GROUPS);
+            .expand_dim(0, batch)
+            .expand_dim(1, N_KV_HEADS)
+            .expand_dim(2, N_ATTENTION_GROUPS);
 
         // Calculate final outputs
         let output = attention_weights
-            .softmax(3)
+            .softmax(4)
             // Apply distribution to values
             .matmul(repeated_values)
             // Merge heads
-            .permute((2, 0, 1, 3))
-            .reshape((seq, HIDDEN_DIM))
+            .permute((0, 3, 1, 2, 4))
+            .reshape((batch, seq, HIDDEN_DIM))
             // Apply output projection
             .matmul(self.o_proj.permute((1, 0)));
         (output, (keys.contiguous(), values.contiguous())) // Cache needs to be contiguous for transferring to another graph
@@ -207,6 +208,7 @@ impl SerializeModule for TransformerBlock {
 
 pub struct Llama {
     // Token embeddings
+    // pub embedding: Embedding,
     pub embedding: GraphTensor,
     // Transformer layers
     pub layers: Vec<TransformerBlock>,
@@ -218,23 +220,24 @@ impl Module<(GraphTensor, &[KVCache])> for Llama {
     type Output = (GraphTensor, Vec<KVCache>);
     fn forward(&self, (input, cache): (GraphTensor, &[KVCache])) -> Self::Output {
         // Embed tokens
-        let sequence_length = input.dims1();
+        let (batch, sequence_length) = input.dims2();
+
         let [mut x] = custom_kernel(
             &[input, self.embedding],
             Kernel {
                 code: format!(
                     "#include <metal_stdlib>
-using namespace metal;
-kernel void kernel_name(
-	device float *inp [[buffer(0)]],
-	device float *weights [[buffer(1)]],
-	device float *out [[buffer(2)]],
-	uint2 i_ [[thread_position_in_grid]]
-) {{
-    if (i_.x < {VOCAB_SIZE} && i_.y < {HIDDEN_DIM}) {{
-        out[i_.x * {HIDDEN_DIM} + i_.y] = weights[(int)inp[i_.x] * {HIDDEN_DIM} + i_.y];
-    }}
-}}"
+        using namespace metal;
+        kernel void kernel_name(
+        	device float *inp [[buffer(0)]],
+        	device float *weights [[buffer(1)]],
+        	device float *out [[buffer(2)]],
+        	uint2 i_ [[thread_position_in_grid]]
+        ) {{
+            if (i_.x < {VOCAB_SIZE} && i_.y < {HIDDEN_DIM}) {{
+                out[i_.x * {HIDDEN_DIM} + i_.y] = weights[(int)inp[i_.x] * {HIDDEN_DIM} + i_.y];
+            }}
+        }}"
                 ),
                 grid: (
                     sequence_length,
@@ -249,10 +252,10 @@ kernel void kernel_name(
                 smem: Expression::from(0),
                 outputs: vec![sequence_length * HIDDEN_DIM],
             },
-            [(sequence_length, HIDDEN_DIM)],
+            [(batch, sequence_length, HIDDEN_DIM)],
             input.graph(),
         );
-
+        // let mut x = self.embedding.forward(input);
         // Run through layers and collect new caches
         let mut new_caches = vec![];
         let mut new_cache;
@@ -268,6 +271,7 @@ kernel void kernel_name(
 impl Llama {
     pub fn new(cx: &mut Graph) -> Self {
         Self {
+            // embedding: Embedding::new(VOCAB_SIZE, HIDDEN_DIM, cx),
             embedding: cx.tensor((VOCAB_SIZE, HIDDEN_DIM)),
             head: (
                 LayerNorm::new(HIDDEN_DIM, true, false, false, 1e-5, cx),
@@ -280,6 +284,7 @@ impl Llama {
 
 impl SerializeModule for Llama {
     fn serialize(&self, s: &mut Serializer) {
+        // s.module("token_embd", &self.embedding);
         s.tensor("token_embd/weight", self.embedding);
         s.module("output_norm", &self.head.0);
         s.module("output", &self.head.1);
