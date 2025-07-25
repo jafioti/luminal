@@ -99,7 +99,7 @@ impl Compiler for Autograd {
                 continue;
             }
 
-            // Get input tensors (required for differentiation rules)
+            // Get input tensors and prev_grad (unconditionally, for all branches)
             let inps = graph
                 .edges_directed(fwd_node, Direction::Incoming)
                 .filter_map(|e| e.weight().as_data().map(|i| (e.source(), i)))
@@ -111,76 +111,98 @@ impl Compiler for Autograd {
                 GraphTensor::from_id(id, sh, graph_ref)
             };
 
-            #[cfg(feature = "legacy_prims")]
-            if op == TypeId::of::<Mul>() {
-                // f(a, b) = a * b
-                // df/da = b
-                if valid_set.contains(&inps[0].id) {
-                    add_grad(inps[1] * prev_grad, inps[0], graph, &mut grads);
+            match op {
+                _ if op == TypeId::of::<Add>() => {
+                    // f(a, b) = a + b
+                    // df/da = 1
+                    if valid_set.contains(&inps[0].id) {
+                        add_grad(prev_grad, inps[0], graph, &mut grads);
+                    }
+                    // df/db = 1
+                    if valid_set.contains(&inps[1].id) {
+                        add_grad(prev_grad, inps[1], graph, &mut grads);
+                    }
                 }
-                // df/db = a
-                if valid_set.contains(&inps[1].id) {
-                    add_grad(inps[0] * prev_grad, inps[1], graph, &mut grads);
+                #[cfg(feature = "legacy_prims")]
+                _ if op == TypeId::of::<Mul>() => {
+                    // f(a, b) = a * b
+                    // df/da = b
+                    if valid_set.contains(&inps[0].id) {
+                        add_grad(inps[1] * prev_grad, inps[0], graph, &mut grads);
+                    }
+                    // df/db = a
+                    if valid_set.contains(&inps[1].id) {
+                        add_grad(inps[0] * prev_grad, inps[1], graph, &mut grads);
+                    }
                 }
-            } else if let Some(op) = unsafe { graph_ref.as_ref().unwrap() } // Needed to get around multiple borrows
-                .try_get_op::<SumReduce>(fwd_node)
-                .cloned()
-            {
-                // f(x) = sum_reduce(x)
-                // f'(x) = 1
-                if valid_set.contains(&inps[0].id) {
-                    prev_grad
-                        .shape
-                        .expand_dim(op.0, inps[0].shape.dims[inps[0].shape.indexes[op.0]]);
-                    add_grad(prev_grad, inps[0], graph, &mut grads);
+                _ if let Some(reduce_op) = unsafe { graph_ref.as_ref().unwrap() }
+                    .try_get_op::<SumReduce>(fwd_node)
+                    .cloned() => {
+                    // f(x) = sum_reduce(x)
+                    // f'(x) = 1
+                    if valid_set.contains(&inps[0].id) {
+                        prev_grad
+                            .shape
+                            .expand_dim(reduce_op.0, inps[0].shape.dims[inps[0].shape.indexes[reduce_op.0]]);
+                        add_grad(prev_grad, inps[0], graph, &mut grads);
+                    }
                 }
-            } else if let Some(op) = unsafe { graph_ref.as_ref().unwrap() } // Needed to get around multiple borrows
-                .try_get_op::<MaxReduce>(fwd_node)
-                .cloned()
-            {
-                // f(x) = max_reduce(x)
-                // f'(x) = x == max_reduce(x)
-                if valid_set.contains(&inps[0].id) {
-                    // fwd_nod is already max_reduce(x)
-                    prev_grad
-                        .shape
-                        .expand_dim(op.0, inps[0].shape.dims[inps[0].shape.indexes[op.0]]);
-                    let reduced = GraphTensor::from_id(fwd_node, prev_grad.shape, graph_ref);
-                    let grad = inps[0].eq(reduced) * prev_grad;
-                    add_grad(grad, inps[0], graph, &mut grads);
+                _ if let Some(reduce_op) = unsafe { graph_ref.as_ref().unwrap() }
+                    .try_get_op::<MaxReduce>(fwd_node)
+                    .cloned() => {
+                    // f(x) = max_reduce(x)
+                    // f'(x) = x == max_reduce(x)
+                    if valid_set.contains(&inps[0].id) {
+                        // fwd_nod is already max_reduce(x)
+                        prev_grad
+                            .shape
+                            .expand_dim(reduce_op.0, inps[0].shape.dims[inps[0].shape.indexes[reduce_op.0]]);
+                        let reduced = GraphTensor::from_id(fwd_node, prev_grad.shape, graph_ref);
+                        let grad = inps[0].eq(reduced) * prev_grad;
+                        add_grad(grad, inps[0], graph, &mut grads);
+                    }
                 }
-            } else if op == TypeId::of::<Contiguous>() {
-                if valid_set.contains(&inps[0].id) {
-                    add_grad(prev_grad, inps[0], graph, &mut grads);
+                _ if op == TypeId::of::<Contiguous>() => {
+                    if valid_set.contains(&inps[0].id) {
+                        add_grad(prev_grad, inps[0], graph, &mut grads);
+                    }
                 }
-            } else {
-                if !valid_set.contains(&inps[0].id) {
-                    continue;
+                _ => {
+                    if !valid_set.contains(&inps[0].id) {
+                        continue;
+                    }
+                    let local_grad = match op {
+                        _ if op == TypeId::of::<Log2>() => {
+                            // f(x) = log2(x)
+                            // f'(x) = 1 / (x * ln(2))
+                            1.0 / (inps[0] * 2_f32.ln())
+                        }
+                        _ if op == TypeId::of::<Exp2>() => {
+                            // f(x) = exp2(x)
+                            // f'(x) = exp2(x) * ln(2)
+                            inps[0].exp2() * 2_f32.ln()
+                        }
+                        _ if op == TypeId::of::<Sin>() => {
+                            // f(x) = sin(x)
+                            // f'(x) = cos(x)
+                            inps[0].cos()
+                        }
+                        #[cfg(feature = "legacy_prims")]
+                        _ if op == TypeId::of::<Sqrt>() => {
+                            // f(x) = sqrt(x)
+                            // f'(x) = 1 / (2 * sqrt(x))
+                            1.0 / (2.0 * inps[0].sqrt())
+                        }
+                        #[cfg(feature = "legacy_prims")]
+                        _ if op == TypeId::of::<Recip>() => {
+                            // f(x) = 1 / x
+                            // f'(x) = -1 / x**2
+                            -1.0 / (inps[0] * inps[0])
+                        }
+                        _ => unreachable!(),
+                    };
+                    add_grad(local_grad * prev_grad, inps[0], graph, &mut grads);
                 }
-                let local_grad = if op == TypeId::of::<Log2>() {
-                    // f(x) = log2(x)
-                    // f'(x) = 1 / (x * ln(2))
-                    1.0 / (inps[0] * 2_f32.ln())
-                } else if op == TypeId::of::<Exp2>() {
-                    // f(x) = exp2(x)
-                    // f'(x) = exp2(x) * ln(2)
-                    inps[0].exp2() * 2_f32.ln()
-                } else if op == TypeId::of::<Sin>() {
-                    // f(x) = sin(x)
-                    // f'(x) = cos(x)
-                    inps[0].cos()
-                } else if op == TypeId::of::<Sqrt>() {
-                    // f(x) = sqrt(x)
-                    // f'(x) = 1 / (2 * sqrt(x))
-                    1.0 / (2.0 * inps[0].sqrt())
-                } else if op == TypeId::of::<Recip>() {
-                    // f(x) = 1 / x
-                    // f'(x) = -1 / x**2
-                    -1.0 / (inps[0] * inps[0])
-                } else {
-                    unreachable!()
-                };
-                add_grad(local_grad * prev_grad, inps[0], graph, &mut grads);
             }
         }
 
