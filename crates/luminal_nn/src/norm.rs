@@ -1,5 +1,5 @@
 use luminal::{prelude::*, tests::random_vec_rng};
-use rand::rng;
+use rand::thread_rng;
 
 /// A simple layer norm with an optional weight and bias
 #[derive(Default)]
@@ -36,7 +36,7 @@ impl LayerNorm {
     }
     pub fn initialize(self) -> Self {
         // Init weight as uniform(-1, 1)
-        let mut rng = rng();
+                    let mut rng = thread_rng();
         if let Some(w) = self.weight {
             w.set(random_vec_rng(
                 w.shape.n_elements().to_usize().unwrap(),

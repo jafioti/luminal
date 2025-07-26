@@ -1,4 +1,4 @@
-use rand::{rng, Rng};
+use rand::Rng;
 
 use luminal::prelude::*;
 
