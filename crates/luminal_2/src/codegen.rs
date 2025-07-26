@@ -70,7 +70,7 @@ pub fn codegen(
     }
     meta_graph.node_weight_mut(global_input).unwrap().code =
         format!("Inputs{}", serde_json::to_string(&gmem_mapping).unwrap());
-    for (i, (output_kernel, output_index)) in output_kernels.into_iter().enumerate() {
+    for (i, (output_kernel, output_index)) in output_kernels.clone().into_iter().enumerate() {
         meta_graph.add_edge(
             NodeIndex::new(output_kernel),
             global_output,
@@ -278,15 +278,11 @@ kernel void kernel{}(
                 )
             }
         };
-        let mut map = FxHashMap::default();
-        map.insert('s', 1);
-        map.insert('p', 0);
         if (threadblock[0] * threadblock[1] * threadblock[2])
-            .exec(&map)
+            .exec(dyn_vars)
             .unwrap()
             > MAX_THREADBLOCK_SIZE
         {
-            println!("too large {:?}", threadblock);
             // Threadblock size is too large for device
             return None;
         }
@@ -998,7 +994,7 @@ fn split_kernels(
             .neighbors_directed(node, Direction::Incoming)
             .collect_vec()
         {
-            let (src_term, src_level, src_kernel) = marked_graph.node_weight_mut(source).unwrap();
+            let (src_term, _, src_kernel) = marked_graph.node_weight_mut(source).unwrap();
             let mut changed = false;
             if (matches!(term, GraphTerm::LoopIn { .. })
                 && matches!(src_term, GraphTerm::LoopOut { .. })
@@ -1205,7 +1201,7 @@ fn split_kernels(
         .map(|_| (StableGraph::new(), vec![], vec![], vec![]))
         .collect_vec();
     let mut node_maps = (0..n_kernels).map(|_| HashMap::new()).collect_vec();
-    let mut final_outputs = vec![];
+    let mut final_outputs = HashMap::new();
     for node in marked_graph.node_indices() {
         let (term, loop_level, kernels) = marked_graph.node_weight(node).unwrap();
         for kernel in kernels {
@@ -1214,12 +1210,17 @@ fn split_kernels(
                 node,
                 kernel_graph.add_node((term.clone(), loop_level.len())),
             );
-            if outputs.contains(&node) {
-                final_outputs.push((*kernel, curr_outputs.len()));
+            if let Some(ind) = outputs.iter().position(|n| *n == node) {
+                final_outputs.insert(ind, (*kernel, curr_outputs.len()));
                 curr_outputs.push((Expression::default(), node_maps[*kernel][&node]));
             }
         }
     }
+    let final_outputs = final_outputs
+        .into_iter()
+        .sorted_by_key(|(k, _)| *k)
+        .map(|(_, v)| v)
+        .collect_vec();
     // Go through graph inputs and add them to the kernel hashmap as inputs
     for input in marked_graph
         .externals(Direction::Incoming)

@@ -10,6 +10,7 @@ use luminal_2::{
     utils::{build_search_space, print_kernels},
     GPUArch,
 };
+use luminal_metal::{Buffer, Device, MTLResourceOptions};
 use rand::rng;
 
 fn main() {
@@ -21,20 +22,26 @@ fn main() {
     // let model = Linear::new(4, 5, false, &mut cx);
     // model.weight.set(weight.clone());
     // Make an input tensor
-    let a = cx.tensor((2, 2)).set(vec![1., 2., 3., 4.]);
-    // let b = cx.tensor((2, 2)).set(vec![0., 1., 18., 1.2]);
-    // let c = a.pad_along(0, 2, 1);
-    let c = a.slice((.., ..1)).contiguous().retrieve();
+    let a = cx
+        .tensor((1, 'a', 2, 2))
+        .set(vec![
+            1.1, 2.1, 3.1, 4.1, 5.1, 3.1, 1.2, 2.2, 3.2, 4.2, 5.2, 3.2,
+        ])
+        .permute((0, 2, 1, 3));
+    let b = cx
+        .tensor((1, 2, 'b', 2))
+        .set(vec![0.1, 1.1, 18.1, 1.1, 3.1, 2.1, 0.2, 1.2]);
+    let c = a.concat_along(b, 2).retrieve();
     // let c = cx.triu(5, 1);
     // Feed tensor through model
     // let b = model.forward(a).retrieve();
     // Execute the graph
-    cx.set_dyn_dim('a', 4);
-    cx.set_dyn_dim('b', 3);
+    cx.set_dyn_dim('a', 3);
+    cx.set_dyn_dim('b', 2);
     cx.execute_debug();
     let (new_graph, old_to_new_mapping, accs) = translate_graph(&cx);
 
-    luminal_2::utils::display_graph(&new_graph, &[]);
+    // luminal_2::utils::display_graph(&new_graph, &[]);
     // Print the results
     let kernels = codegen(
         new_graph.clone(),
@@ -47,24 +54,64 @@ fn main() {
     print_kernels(&kernels);
 
     // let w1 = weight.clone();
+    let a_data = vec![
+        1.1_f32, 2.1, 3.1, 4.1, 5.1, 3.1, 1.2, 2.2, 3.2, 4.2, 5.2, 3.2,
+    ];
+    let b_data = vec![
+        0.1_f32, 1.1, 18.1, 1.1, 3.1, 2.1, 0.2, 1.2, 18.2, 1.2, 3.2, 2.2,
+    ];
     let mut inputs = vec![
         (
             old_to_new_mapping[&a.id],
-            Box::new(move || vec![1_f32, 2., 3., 4.]) as Box<dyn FnOnce() -> Vec<f32> + 'static>,
+            Box::new(move || {
+                Device::system_default().unwrap().new_buffer_with_data(
+                    a_data.as_ptr() as *const _,
+                    (a_data.len() * size_of::<f32>()) as u64,
+                    MTLResourceOptions::StorageModeShared,
+                )
+            }) as Box<dyn FnOnce() -> Buffer + 'static>,
         ),
-        // (
-        //     old_to_new_mapping[&b.id],
-        //     Box::new(move || vec![0_f32, 1., 18., 1.2]) as Box<dyn FnOnce() -> Vec<f32> + 'static>,
-        // ),
+        (
+            old_to_new_mapping[&b.id],
+            Box::new(move || {
+                Device::system_default().unwrap().new_buffer_with_data(
+                    b_data.as_ptr() as *const _,
+                    (b_data.len() * size_of::<f32>()) as u64,
+                    MTLResourceOptions::StorageModeShared,
+                )
+            }) as Box<dyn FnOnce() -> Buffer + 'static>,
+        ),
         // (old_to_new_mapping[&model.weight.id], Box::new(move || w1)),
     ];
-    for (label, val) in accs {
+    for (label, val) in &accs {
         match val {
             InitData::Expr(e) => {
                 let val = e.exec(&cx.dyn_map).unwrap();
-                inputs.push((label, Box::new(move || vec![val as f32])));
+                inputs.push((
+                    *label,
+                    Box::new(move || {
+                        let v = vec![val as f32];
+                        Device::system_default().unwrap().new_buffer_with_data(
+                            v.as_ptr() as *const _,
+                            size_of::<f32>() as u64,
+                            MTLResourceOptions::StorageModeShared,
+                        )
+                    }),
+                ));
             }
-            InitData::Data(d) => inputs.push((label, Box::new(move || d))),
+            InitData::Data(d) => {
+                let d = d.clone();
+                inputs.push((
+                    *label,
+                    Box::new(move || {
+                        Device::system_default().unwrap().new_buffer_with_data(
+                            d.as_ptr() as *const _,
+                            (d.len() * size_of::<f32>()) as u64,
+                            MTLResourceOptions::StorageModeShared,
+                        )
+                    }),
+                ))
+            }
         }
     }
 

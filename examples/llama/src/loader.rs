@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use luminal_metal::Buffer;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
@@ -109,7 +110,7 @@ pub fn load<P: AsRef<Path>, M: SerializeModule>(
 pub fn load_new<P: AsRef<Path>, M: SerializeModule>(
     path: P,
     model: &M,
-) -> Vec<(NodeIndex, Box<dyn FnOnce() -> Vec<f32>>)> {
+) -> Vec<(NodeIndex, Box<dyn FnOnce() -> Buffer>)> {
     // Read metadata from file
     let mut reader = File::open(&path).unwrap();
     let Content {
@@ -124,25 +125,20 @@ pub fn load_new<P: AsRef<Path>, M: SerializeModule>(
         let file_path = path.as_ref().to_owned();
         let (n_elements, buffer_offset, data_type) =
             tensor_infos.remove(&weight_name.replace('/', ".")).unwrap();
-        let n_bytes = match data_type {
-            GgmlDType::F32 => n_elements * 4,
-            GgmlDType::Q8_0 => n_elements * 4,
-            _ => panic!("Unsupported dtype: {data_type:?}"),
-        };
         match data_type {
             GgmlDType::F32 => {
                 weights.push((
                     node_index,
                     Box::new(move || {
                         // Read bytes
-                        let mut bytes = vec![0; n_bytes];
+                        let mut bytes = vec![0; n_elements * 4];
                         let mut file = File::open(&file_path).unwrap();
                         file.seek(std::io::SeekFrom::Start(
                             buffer_offset as u64 + tensor_data_offset,
                         ))
                         .unwrap();
                         file.read_exact(&mut bytes).unwrap();
-                        bytes
+                        let data = bytes
                             .into_iter()
                             .chunks(4)
                             .into_iter()
@@ -150,8 +146,14 @@ pub fn load_new<P: AsRef<Path>, M: SerializeModule>(
                                 let c = c.collect::<Vec<_>>();
                                 f32::from_le_bytes([c[0], c[1], c[2], c[3]])
                             })
-                            .collect::<Vec<_>>()
-                    }) as Box<dyn FnOnce() -> Vec<f32>>,
+                            .collect::<Vec<_>>();
+                        let buffer = Device::system_default().unwrap().new_buffer_with_data(
+                            data.as_ptr() as *mut _,
+                            (data.len() * std::mem::size_of::<f32>()) as u64,
+                            MTLResourceOptions::StorageModeShared,
+                        );
+                        buffer
+                    }) as Box<dyn FnOnce() -> Buffer>,
                 ));
             }
             GgmlDType::Q8_0 => {
@@ -166,7 +168,7 @@ pub fn load_new<P: AsRef<Path>, M: SerializeModule>(
                         ))
                         .unwrap();
                         file.read_exact(&mut bytes).unwrap();
-                        bytes
+                        let data = bytes
                             .chunks_exact(32 + 2)
                             .into_iter()
                             .flat_map(|bytes| {
@@ -177,7 +179,13 @@ pub fn load_new<P: AsRef<Path>, M: SerializeModule>(
                                     .take(32)
                                     .map(move |b| i8::from_ne_bytes([*b]) as f32 * delta)
                             })
-                            .collect::<Vec<_>>()
+                            .collect::<Vec<_>>();
+                        let buffer = Device::system_default().unwrap().new_buffer_with_data(
+                            data.as_ptr() as *mut _,
+                            (data.len() * std::mem::size_of::<f32>()) as u64,
+                            MTLResourceOptions::StorageModeShared,
+                        );
+                        buffer
                     }),
                 ));
             }

@@ -122,7 +122,9 @@ impl Operator for CompatKernel {
         // set output
         let mut buffers = vec![];
         for (i, size) in self.0.outputs.iter().enumerate() {
-            buffers.push(device.new_buffer(
+            let buff = vec![0.0_f32; size.exec(dyn_vars).unwrap()];
+            buffers.push(device.new_buffer_with_data(
+                buff.as_ptr() as *const _,
                 (size.exec(dyn_vars).unwrap() * std::mem::size_of::<f32>()) as u64,
                 MTLResourceOptions::StorageModeShared,
             ));

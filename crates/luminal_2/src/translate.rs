@@ -175,7 +175,7 @@ pub fn translate_graph(
                     node_mapping.insert((node, 0), custom);
                     old_to_new_mapping.insert(node, custom);
                 } else if let Some(diff) = node_weight.as_any().downcast_ref::<Diff>() {
-                    // Add a custom kernel
+                    // Add a diff
                     let custom = new_graph.add_node(GraphTerm::Diff(diff.name.clone()));
                     for (source, ind, _) in sources {
                         let new_source = node_mapping[&(source, ind)];

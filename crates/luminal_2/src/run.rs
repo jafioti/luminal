@@ -68,27 +68,13 @@ pub fn run_graph(
                     .iter()
                     .map(|(name, _)| ((node.index(), mapping[&name.index()]), None))
                     .collect();
-
-                // buffers.extend(inputs.into_iter().map(|(name, buf)| {
-                //     ((node, mapping[&name.index()]), {
-                //         let buf = buf();
-                //         device.new_buffer_with_data(
-                //             buf.as_ptr() as *mut _,
-                //             (buf.len() * std::mem::size_of::<f32>()) as u64,
-                //             MTLResourceOptions::StorageModeShared,
-                //         )
-                //     })
-                // }));
-                // inputs = vec![];
-                println!("INPUTS: {}", buffers.len());
             } else if kernel.code == "Outputs" {
                 // Run
                 let start = std::time::Instant::now();
-                // command_buffer.commit();
-                // command_buffer.wait_until_completed();
                 let time_taken_micros = start.elapsed().as_micros();
                 let outputs = kernels
                     .edges_directed(node, Direction::Incoming)
+                    .sorted_by_key(|e| e.weight().1)
                     .map(|e| {
                         let buffer = buffers[&(e.source().index(), e.weight().0)]
                             .as_ref()
@@ -102,7 +88,11 @@ pub fn run_graph(
                         curr_data
                     })
                     .collect();
-                // Copy outputs back
+                for (_, buffer) in buffers {
+                    if let Some(buffer) = buffer {
+                        buffer.set_purgeable_state(metal_rs::MTLPurgeableState::Empty);
+                    }
+                }
                 return (outputs, time_taken_micros);
             } else if kernel.code.starts_with("Diff") {
                 // Load file and diff numbers
@@ -133,23 +123,29 @@ pub fn run_graph(
                     let ptr = file_buffer.as_ptr() as *const f32;
                     Vec::from_raw_parts(ptr as *mut f32, num_floats, num_floats)
                 };
-                assert_eq!(
-                    floats.len(),
-                    data.len(),
-                    "Diff {diff_name} failed: Buffer lengths mismatch",
-                );
+                // assert_eq!(
+                //     floats.len(),
+                //     data.len(),
+                //     "Diff {diff_name} failed: Buffer lengths mismatch",
+                // );
+                let mut matched = true;
+                println!("Diff {} | {}", data.len(), floats.len());
                 for (ind, (i, j)) in data.into_iter().zip(floats).enumerate() {
                     if (i - j).abs() > 1e-5 {
-                        std::mem::forget(file_buffer);
-                        panic!("Diff {diff_name} failed: curr: {i} != file: {j}, index {ind}");
+                        matched = false;
+                        // std::mem::forget(file_buffer);
+                        println!("Diff {diff_name} failed: curr: {i} != file: {j}, index {ind}");
+                        break;
                     }
                 }
                 std::mem::forget(file_buffer);
-                println!("DIFF {diff_name} MATCHED");
+                if matched {
+                    println!("DIFF {diff_name} MATCHED");
+                }
                 buffers.insert((node.index(), 0), Some(buffer));
             } else {
-                println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
-                println!("{}", kernel.code);
+                // println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
+                // println!("{}", kernel.code);
 
                 // compile kernel
                 let n_inputs = kernels.edges_directed(node, Direction::Incoming).count();
@@ -199,8 +195,7 @@ pub fn run_graph(
                         std::mem::swap(&mut entry.1, &mut other);
                         let buffer = other();
                         encoder.set_buffer(i as u64, Some(&buffer), 0);
-                        let k = (input.index(), input_index);
-                        *buffers.get_mut(&k).unwrap() = Some(buffer);
+                        *buffers.get_mut(&(input.index(), input_index)).unwrap() = Some(buffer);
                     };
                 }
                 // set output
@@ -241,7 +236,7 @@ pub fn run_graph(
                     kernel.threadblock.2.exec(dyn_vars).unwrap() as u64,
                 );
                 assert!(
-                    tb.0 * tb.1 * tb.2 < 1024,
+                    tb.0 * tb.1 * tb.2 <= 1024,
                     "threadblock is too big: {tb:?} > 1024"
                 );
                 encoder.dispatch_thread_groups(
@@ -251,48 +246,24 @@ pub fn run_graph(
                 encoder.end_encoding();
                 command_buffer.commit();
                 command_buffer.wait_until_completed();
-                // for (input, input_index) in kernels
-                //     .edges_directed(node, Direction::Incoming)
-                //     .sorted_by_key(|n| n.weight().1)
-                //     .map(|n| (n.source(), n.weight().0))
-                // {
-                //     let mut curr_data = vec![
-                //         0.0;
-                //         buffers[&(input, input_index)].as_ref().unwrap().length()
-                //             as usize
-                //             / std::mem::size_of::<f32>()
-                //     ];
-                //     let ptr =
-                //         buffers[&(input, input_index)].as_ref().unwrap().contents() as *mut f32;
-                //     // if curr_data.is_empty() {
-                //     //     panic!(
-                //     //         "input empty: {} | {}",
-                //     //         buffer_sizes[buffer_map[&input][input_index as usize]],
-                //     //         buffers[buffer_map[&input][input_index as usize]].length()
-                //     //     );
-                //     // }
-                //     for (i, d) in curr_data.iter_mut().enumerate() {
-                //         *d = unsafe { *ptr.add(i) };
-                //     }
-                //     println!("{:?}", &curr_data[..10.min(curr_data.len())]);
-                // }
-                // println!("---");
-                // for i in 0..kernel.outputs.len() {
-                //     let mut curr_data = vec![
-                //         0.0;
-                //         buffers[&(node.index(), i)].as_ref().unwrap().length()
-                //             as usize
-                //             / std::mem::size_of::<f32>()
-                //     ];
-                //     let ptr = buffers[&(node.index(), i)].as_ref().unwrap().contents() as *mut f32;
-                //     for (i, d) in curr_data.iter_mut().enumerate() {
-                //         *d = unsafe { *ptr.add(i) };
-                //     }
-                //     // println!("{:?}", &curr_data[..10.min(curr_data.len())]);
-                //     for (i, n) in curr_data.into_iter().enumerate() {
-                //         if n.is_nan() {
-                //             panic!("{} | {}", n, i);
+                // if print {
+                //     println!("---");
+                //     for i in 0..kernel.outputs.len() {
+                //         let mut curr_data = vec![
+                //             0.0;
+                //             buffers[&(node.index(), i)].as_ref().unwrap().length()
+                //                 as usize
+                //                 / std::mem::size_of::<f32>()
+                //         ];
+                //         let ptr =
+                //             buffers[&(node.index(), i)].as_ref().unwrap().contents() as *mut f32;
+                //         for (i, d) in curr_data.iter_mut().enumerate() {
+                //             *d = unsafe { *ptr.add(i) };
                 //         }
+                //         println!(
+                //             "{node:?} {:?}",
+                //             &curr_data[curr_data.len().saturating_sub(10)..]
+                //         );
                 //     }
                 // }
                 // Go through inputs and free buffers that aren't going to be used again

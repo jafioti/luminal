@@ -18,7 +18,7 @@ pub mod quantized;
 pub mod storage_buffer;
 pub mod unary;
 
-pub use metal_rs::{Device, MTLResourceOptions};
+pub use metal_rs::{Buffer, Device, MTLResourceOptions};
 pub use objc::rc::autoreleasepool;
 
 use itertools::Itertools;
@@ -35,7 +35,7 @@ pub type MetalCompiler<T> = (MetalCompilerPreBuffer<T>, BufferCompilers);
 pub type MetalCompilerPreBuffer<T> = (
     prim::PrimitiveCompiler<T>,
     // SpecialOpsCompiler<T>,
-    other::CopyCompiler<T>,
+    // other::CopyCompiler<T>,
     // elementwise_fusion::ElementwiseFusionCompiler<T>,
 );
 

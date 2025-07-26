@@ -1,5 +1,5 @@
 use luminal::prelude::{binary::F32Pow, *};
-use luminal_2::{custom_kernel, Kernel};
+use luminal_2::{custom_kernel, GTDiff, Kernel};
 use luminal_nn::{Embedding, LayerNorm, Linear};
 
 // Llama3 8B Config
@@ -79,9 +79,9 @@ pub struct SelfAttention {
     pub o_proj: GraphTensor, // Hidden -> hidden
 }
 
-impl Module<(GraphTensor, KVCache)> for SelfAttention {
+impl Module<(GraphTensor, KVCache, usize)> for SelfAttention {
     type Output = (GraphTensor, KVCache);
-    fn forward(&self, (x, (k_cache, v_cache)): (GraphTensor, KVCache)) -> Self::Output {
+    fn forward(&self, (x, (k_cache, v_cache), i): (GraphTensor, KVCache, usize)) -> Self::Output {
         let (batch, seq, _hidden) = x.dims3();
         let (_, _kv_heads, prev_seq, _head_dim) = k_cache.dims4();
 
@@ -136,7 +136,7 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
             .reshape((batch, seq, HIDDEN_DIM))
             // Apply output projection
             .matmul(self.o_proj.permute((1, 0)));
-        (output, (keys.contiguous(), values.contiguous())) // Cache needs to be contiguous for transferring to another graph
+        (output, (keys, values))
     }
 }
 
@@ -167,13 +167,13 @@ pub struct TransformerBlock {
     pub feed_forward_norm: LayerNorm,
 }
 
-impl Module<(GraphTensor, KVCache)> for TransformerBlock {
+impl Module<(GraphTensor, KVCache, usize)> for TransformerBlock {
     type Output = (GraphTensor, KVCache);
-    fn forward(&self, (mut x, cache): (GraphTensor, KVCache)) -> Self::Output {
+    fn forward(&self, (mut x, cache, i): (GraphTensor, KVCache, usize)) -> Self::Output {
         // Attention
         let (y, cache) = self
             .attention
-            .forward((self.attention_norm.forward(x), cache));
+            .forward((self.attention_norm.forward(x), cache, i));
 
         // Residual
         x += y;
@@ -221,7 +221,6 @@ impl Module<(GraphTensor, &[KVCache])> for Llama {
     fn forward(&self, (input, cache): (GraphTensor, &[KVCache])) -> Self::Output {
         // Embed tokens
         let (batch, sequence_length) = input.dims2();
-
         let [mut x] = custom_kernel(
             &[input, self.embedding],
             Kernel {
@@ -235,7 +234,7 @@ impl Module<(GraphTensor, &[KVCache])> for Llama {
         	uint2 i_ [[thread_position_in_grid]]
         ) {{
             if (i_.x < {VOCAB_SIZE} && i_.y < {HIDDEN_DIM}) {{
-                out[i_.x * {HIDDEN_DIM} + i_.y] = weights[(int)inp[i_.x] * {HIDDEN_DIM} + i_.y];
+            	out[i_.x * {HIDDEN_DIM} + i_.y] = weights[(int)inp[i_.x] * {HIDDEN_DIM} + i_.y];
             }}
         }}"
                 ),
@@ -255,12 +254,13 @@ impl Module<(GraphTensor, &[KVCache])> for Llama {
             [(batch, sequence_length, HIDDEN_DIM)],
             input.graph(),
         );
+        // x = x.diff2("x");
         // let mut x = self.embedding.forward(input);
         // Run through layers and collect new caches
         let mut new_caches = vec![];
         let mut new_cache;
-        for (i, layer) in self.layers.iter().enumerate() {
-            (x, new_cache) = layer.forward((x, cache[i]));
+        for (i, (layer, cache)) in self.layers.iter().zip(cache).enumerate() {
+            (x, new_cache) = layer.forward((x, *cache, i));
             new_caches.push(new_cache);
         }
         // Run through last norm and output projection
