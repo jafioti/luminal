@@ -5,11 +5,11 @@ use luminal::prelude::*;
 // utils::build_search_space, GPUArch,
 //};
 use luminal_nn::Linear;
-use rand::{rng, Rng};
+use rand::{thread_rng, Rng};
 
 fn main() {
-    let mut rng = rng();
-    let weight = (0..4 * 5).map(|_| rng.random()).collect_vec();
+    let mut rng = thread_rng();
+    let weight = (0..4 * 5).map(|_| rng.gen::<f32>()).collect_vec();
     // Create a new graph
     let mut cx = Graph::new();
     // Randomly initialize a linear layer with an input size of 4 and an output size of 5
