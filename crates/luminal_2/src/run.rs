@@ -54,7 +54,6 @@ pub fn run_graph(
     autoreleasepool(|| {
         let device = Device::system_default().unwrap();
         let queue = device.new_command_queue();
-        // let command_buffer = queue.new_command_buffer();
         // Allocate buffers
         let mut buffers = HashMap::<(usize, usize), Option<Buffer>>::default();
         let mut ran = FxHashSet::default();
@@ -123,17 +122,11 @@ pub fn run_graph(
                     let ptr = file_buffer.as_ptr() as *const f32;
                     Vec::from_raw_parts(ptr as *mut f32, num_floats, num_floats)
                 };
-                // assert_eq!(
-                //     floats.len(),
-                //     data.len(),
-                //     "Diff {diff_name} failed: Buffer lengths mismatch",
-                // );
                 let mut matched = true;
                 println!("Diff {} | {}", data.len(), floats.len());
                 for (ind, (i, j)) in data.into_iter().zip(floats).enumerate() {
                     if (i - j).abs() > 1e-5 {
                         matched = false;
-                        // std::mem::forget(file_buffer);
                         println!("Diff {diff_name} failed: curr: {i} != file: {j}, index {ind}");
                         break;
                     }
@@ -246,26 +239,6 @@ pub fn run_graph(
                 encoder.end_encoding();
                 command_buffer.commit();
                 command_buffer.wait_until_completed();
-                // if print {
-                //     println!("---");
-                //     for i in 0..kernel.outputs.len() {
-                //         let mut curr_data = vec![
-                //             0.0;
-                //             buffers[&(node.index(), i)].as_ref().unwrap().length()
-                //                 as usize
-                //                 / std::mem::size_of::<f32>()
-                //         ];
-                //         let ptr =
-                //             buffers[&(node.index(), i)].as_ref().unwrap().contents() as *mut f32;
-                //         for (i, d) in curr_data.iter_mut().enumerate() {
-                //             *d = unsafe { *ptr.add(i) };
-                //         }
-                //         println!(
-                //             "{node:?} {:?}",
-                //             &curr_data[curr_data.len().saturating_sub(10)..]
-                //         );
-                //     }
-                // }
                 // Go through inputs and free buffers that aren't going to be used again
                 for (in_node, in_ind) in kernels
                     .edges_directed(node, Direction::Incoming)
@@ -277,10 +250,6 @@ pub fn run_graph(
                     {
                         // All consumers have already ran, deallocate
                         if let Some(buf) = buffers.remove(&(in_node.index(), in_ind)) {
-                            // println!(
-                            //     "Freeing {in_node:?} {in_ind} {:?}",
-                            //     buf.as_ref().unwrap().length()
-                            // );
                             if let Some(buf) = buf {
                                 buf.set_purgeable_state(metal_rs::MTLPurgeableState::Empty);
                             }

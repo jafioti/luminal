@@ -131,28 +131,21 @@ pub fn load_new<P: AsRef<Path>, M: SerializeModule>(
                     node_index,
                     Box::new(move || {
                         // Read bytes
-                        let mut bytes = vec![0; n_elements * 4];
-                        let mut file = File::open(&file_path).unwrap();
-                        file.seek(std::io::SeekFrom::Start(
-                            buffer_offset as u64 + tensor_data_offset,
-                        ))
-                        .unwrap();
-                        file.read_exact(&mut bytes).unwrap();
-                        let data = bytes
-                            .into_iter()
-                            .chunks(4)
-                            .into_iter()
-                            .map(|c| {
-                                let c = c.collect::<Vec<_>>();
-                                f32::from_le_bytes([c[0], c[1], c[2], c[3]])
-                            })
-                            .collect::<Vec<_>>();
-                        let buffer = Device::system_default().unwrap().new_buffer_with_data(
-                            data.as_ptr() as *mut _,
-                            (data.len() * std::mem::size_of::<f32>()) as u64,
-                            MTLResourceOptions::StorageModeShared,
-                        );
-                        buffer
+                        let mmap_buffer =
+                            unsafe { Mmap::map(&File::open(&file_path).unwrap()).unwrap() };
+                        Device::system_default()
+                            .unwrap()
+                            .new_buffer_with_bytes_no_copy(
+                                unsafe {
+                                    mmap_buffer
+                                        .as_ptr()
+                                        .add(buffer_offset + tensor_data_offset as usize)
+                                        as *const _
+                                },
+                                (n_elements * 4) as u64,
+                                MTLResourceOptions::StorageModeShared,
+                                None,
+                            )
                     }) as Box<dyn FnOnce() -> Buffer>,
                 ));
             }
