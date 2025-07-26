@@ -185,6 +185,12 @@ pub fn codegen(
                     .map(|(_, a)| a)
                     .chain(outputs.iter().map(|(_, i)| *i))
                     .map(|a| format!("float* {}", var_to_char(node_to_var[&a].0)))
+                    .chain(
+                        dyn_vars
+                            .iter()
+                            .sorted_by_key(|(k, _)| **k)
+                            .map(|(c, _)| format!("const size_t const_{c}")),
+                    )
                     .join(", ");
                 let smem_setup = if smem_buffers.is_empty() {
                     "".to_string()
@@ -845,14 +851,13 @@ fn make_kernel(
                             "__mod"
                         }
                     ),
-                    GraphTerm::Max => format!(
-                        "{}({inp_a}, {inp_b})",
+                    GraphTerm::Max => {
                         if matches!(arch, GPUArch::Metal(_)) {
-                            "fmax"
+                            format!("fmax({inp_a}, {inp_b})")
                         } else {
-                            "__max"
+                            format!("{inp_a} > {inp_b} ? {inp_a} : {inp_b}")
                         }
-                    ),
+                    }
                     _ => panic!(),
                 };
                 kernel_lines.push(format!(

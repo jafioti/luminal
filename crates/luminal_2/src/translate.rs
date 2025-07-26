@@ -228,7 +228,7 @@ fn smart_loop_in(
         assert!(left_pad == 0);
         stride = stride.substitute(
             'z',
-            Expression::from('z').min(shape.dims[shape.indexes[shape_index]] - 1),
+            Expression::from('z').min((shape.dims[shape.indexes[shape_index]] - 1).max(0)),
         );
         mask_stride = Some(Expression::from('z').lt(shape.dims[shape.indexes[shape_index]]));
     } else if left_slice != 0 || right_slice != i32::MAX {

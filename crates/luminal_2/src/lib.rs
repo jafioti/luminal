@@ -7,12 +7,10 @@ pub mod utils;
 #[cfg(test)]
 mod tests;
 
+use cudarc::driver::{LaunchConfig, PushKernelArg};
+use itertools::Itertools;
 use luminal::prelude::*;
-use luminal_metal::MetalBuffer;
-use metal_rs::{
-    Buffer, CompileOptions, ComputePassDescriptor, ComputePipelineDescriptor, Device,
-    MTLResourceOptions, MTLSize,
-};
+use luminal_cuda::CudaData;
 use std::{collections::HashMap, fmt::Debug, fs::File, io::Write};
 
 #[derive(Clone, PartialEq, Eq)]
@@ -91,73 +89,56 @@ pub struct CompatKernel(Kernel, *mut Graph);
 impl Operator for CompatKernel {
     fn process(&mut self, inputs: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         let dyn_vars = &unsafe { self.1.as_ref().unwrap() }.dyn_map;
-        let device = Device::system_default().unwrap();
-        let queue = device.new_command_queue();
-        let command_buffer = queue.new_command_buffer();
-        let encoder =
-            command_buffer.compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-        let options = CompileOptions::new();
-        // options.set_fast_math_enabled(true);
-        let lib = device
-            .new_library_with_source(&self.0.code, &options)
-            .unwrap();
-        let pipeline_state_descriptor = ComputePipelineDescriptor::new();
-        pipeline_state_descriptor
-            .set_compute_function(Some(&lib.get_function("kernel_name", None).unwrap()));
-        let pipeline = device
-            .new_compute_pipeline_state_with_function(
-                pipeline_state_descriptor.compute_function().unwrap(),
-            )
-            .unwrap();
-        encoder.set_compute_pipeline_state(&pipeline);
+        let ctx = cudarc::driver::CudaContext::new(0).unwrap();
+        let stream = ctx.default_stream();
+
+        let ptx = cudarc::nvrtc::compile_ptx(&self.0.code).unwrap();
+        let module = ctx.load_module(ptx).unwrap();
+        let kernel = module.load_function("kernel_name").unwrap();
+        let mut builder = stream.launch_builder(&kernel);
 
         // set inputs
-        for (i, input) in inputs
+        for input in inputs
             .iter()
-            .map(|(b, _)| b.borrowed().downcast_ref::<MetalBuffer>().unwrap())
-            .enumerate()
+            .map(|(b, _)| b.borrowed().downcast_ref::<CudaData<f32>>().unwrap())
         {
-            encoder.set_buffer(i as u64, Some(&input.0), 0);
+            builder.arg(&input.0);
         }
+
         // set output
-        let mut buffers = vec![];
-        for (i, size) in self.0.outputs.iter().enumerate() {
-            let buff = vec![0.0_f32; size.exec(dyn_vars).unwrap()];
-            buffers.push(device.new_buffer_with_data(
-                buff.as_ptr() as *const _,
-                (size.exec(dyn_vars).unwrap() * std::mem::size_of::<f32>()) as u64,
-                MTLResourceOptions::StorageModeShared,
-            ));
-            encoder.set_buffer((i + inputs.len()) as u64, Some(buffers.last().unwrap()), 0);
-        }
-        // set smem
-        if !self.0.smem.is_empty() {
-            encoder.set_threadgroup_memory_length(
-                0,
-                (self.0.smem.exec(dyn_vars).unwrap() * std::mem::size_of::<f32>()) as u64,
-            );
+        let mut out = self
+            .0
+            .outputs
+            .iter()
+            .map(|s| {
+                stream
+                    .alloc_zeros::<f32>(s.exec(dyn_vars).unwrap())
+                    .unwrap()
+            })
+            .collect_vec();
+        for o in &mut out {
+            builder.arg(o);
         }
 
         // Set dispatch
-        encoder.dispatch_thread_groups(
-            MTLSize::new(
-                self.0.grid.0.exec(dyn_vars).unwrap() as u64,
-                self.0.grid.1.exec(dyn_vars).unwrap() as u64,
-                self.0.grid.2.exec(dyn_vars).unwrap() as u64,
-            ),
-            MTLSize::new(
-                self.0.threadblock.0.exec(dyn_vars).unwrap() as u64,
-                self.0.threadblock.1.exec(dyn_vars).unwrap() as u64,
-                self.0.threadblock.2.exec(dyn_vars).unwrap() as u64,
-            ),
-        );
-        encoder.end_encoding();
-        command_buffer.commit();
-        command_buffer.wait_until_completed();
-        buffers
-            .into_iter()
-            .map(|b| Tensor::new(MetalBuffer(b)))
-            .collect()
+        unsafe {
+            builder.launch(LaunchConfig {
+                grid_dim: (
+                    self.0.grid.0.exec(dyn_vars).unwrap() as u32,
+                    self.0.grid.1.exec(dyn_vars).unwrap() as u32,
+                    self.0.grid.2.exec(dyn_vars).unwrap() as u32,
+                ),
+                block_dim: (
+                    self.0.threadblock.0.exec(dyn_vars).unwrap() as u32,
+                    self.0.threadblock.1.exec(dyn_vars).unwrap() as u32,
+                    self.0.threadblock.2.exec(dyn_vars).unwrap() as u32,
+                ),
+                shared_mem_bytes: self.0.smem.exec(dyn_vars).unwrap() as u32,
+            })
+        }
+        .unwrap();
+
+        out.into_iter().map(|b| Tensor::new(CudaData(b))).collect()
     }
 }
 
@@ -188,12 +169,10 @@ pub struct Diff {
 impl Operator for Diff {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         // Dump
-        let buffer = inp[0].0.borrowed().downcast_ref::<MetalBuffer>().unwrap();
-        let mut data = vec![0.0; buffer.length() as usize / std::mem::size_of::<f32>()];
-        let ptr = buffer.contents() as *mut f32;
-        for (i, d) in data.iter_mut().enumerate() {
-            *d = unsafe { *ptr.add(i) };
-        }
+        let ctx = cudarc::driver::CudaContext::new(0).unwrap();
+        let stream = ctx.default_stream();
+        let buffer = inp[0].0.borrowed().downcast_ref::<CudaData<f32>>().unwrap();
+        let data: Vec<f32> = stream.memcpy_dtov(&buffer.0).unwrap();
         let mut file = File::create(format!("{}.bin", self.name)).unwrap();
         let bytes: &[u8] = unsafe {
             std::slice::from_raw_parts(

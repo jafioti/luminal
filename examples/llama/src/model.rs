@@ -225,18 +225,15 @@ impl Module<(GraphTensor, &[KVCache])> for Llama {
             &[input, self.embedding],
             Kernel {
                 code: format!(
-                    "#include <metal_stdlib>
-        using namespace metal;
-        kernel void kernel_name(
-        	device float *inp [[buffer(0)]],
-        	device float *weights [[buffer(1)]],
-        	device float *out [[buffer(2)]],
-        	uint2 i_ [[thread_position_in_grid]]
-        ) {{
-            if (i_.x < {VOCAB_SIZE} && i_.y < {HIDDEN_DIM}) {{
-            	out[i_.x * {HIDDEN_DIM} + i_.y] = weights[(int)inp[i_.x] * {HIDDEN_DIM} + i_.y];
-            }}
-        }}"
+                    "
+#include \"cuda_fp16.h\"
+extern \"C\" __global__ void kernel_name(const float *inp, const float *weights, float *out) {{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x < {VOCAB_SIZE} && y < {HIDDEN_DIM}) {{
+        out[x * {HIDDEN_DIM} + y] = weights[(int)inp[x] * {HIDDEN_DIM} + y];
+    }}
+}}"
                 ),
                 grid: (
                     sequence_length,

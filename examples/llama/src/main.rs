@@ -2,13 +2,13 @@ use std::collections::HashMap;
 
 use clap::Parser;
 use colored::Colorize;
+use cudarc::driver::CudaSlice;
 use itertools::Itertools;
 use luminal_2::{
     codegen::codegen,
     run::run_graph,
     translate::{translate_graph, InitData},
 };
-use luminal_metal::{Buffer, Device, MTLResourceOptions};
 use model::{HEAD_DIM, N_KV_HEADS};
 use tokenizers::Tokenizer;
 
@@ -73,14 +73,7 @@ fn main() {
         outputs.push(old_to_new_mapping[&k.id]);
         outputs.push(old_to_new_mapping[&v.id]);
     }
-    let kernels = codegen(
-        new_graph,
-        outputs,
-        luminal_2::GPUArch::Metal(HashMap::default()),
-        0,
-        &cx.dyn_map,
-    )
-    .unwrap();
+    let kernels = codegen(new_graph, outputs, luminal_2::GPUArch::CUDA, 0, &cx.dyn_map).unwrap();
     // luminal_2::utils::display_graph(&kernels, &[]);
 
     // Set up inputs
@@ -88,28 +81,28 @@ fn main() {
     let mut inps = vec![(
         old_to_new_mapping[&input.id],
         Box::new(move || {
-            Device::system_default().unwrap().new_buffer_with_data(
-                input_ids_clone.as_ptr() as *const _,
-                (input_ids_clone.len() * size_of::<f32>()) as u64,
-                MTLResourceOptions::StorageModeShared,
-            )
-        }) as Box<dyn FnOnce() -> Buffer>,
+            let ctx = cudarc::driver::CudaContext::new(0).unwrap();
+            let stream = ctx.default_stream();
+            let mut buffer = unsafe { stream.alloc::<f32>(input_ids_clone.len()).unwrap() };
+            stream.memcpy_htod(&input_ids_clone, &mut buffer).unwrap();
+            buffer
+        }) as Box<dyn FnOnce() -> CudaSlice<f32>>,
     )];
     for (k, v) in &cache_src {
         inps.push((
             old_to_new_mapping[&k.id],
             Box::new(|| {
-                Device::system_default()
-                    .unwrap()
-                    .new_buffer(0, MTLResourceOptions::StorageModeShared)
+                let ctx = cudarc::driver::CudaContext::new(0).unwrap();
+                let stream = ctx.default_stream();
+                stream.alloc_zeros(1).unwrap()
             }),
         ));
         inps.push((
             old_to_new_mapping[&v.id],
             Box::new(|| {
-                Device::system_default()
-                    .unwrap()
-                    .new_buffer(0, MTLResourceOptions::StorageModeShared)
+                let ctx = cudarc::driver::CudaContext::new(0).unwrap();
+                let stream = ctx.default_stream();
+                stream.alloc_zeros(1).unwrap()
             }),
         ));
     }
@@ -124,11 +117,11 @@ fn main() {
                     *label,
                     Box::new(move || {
                         let v = vec![val as f32];
-                        Device::system_default().unwrap().new_buffer_with_data(
-                            v.as_ptr() as *const _,
-                            size_of::<f32>() as u64,
-                            MTLResourceOptions::StorageModeShared,
-                        )
+                        let ctx = cudarc::driver::CudaContext::new(0).unwrap();
+                        let stream = ctx.default_stream();
+                        let mut buffer = unsafe { stream.alloc::<f32>(v.len()).unwrap() };
+                        stream.memcpy_htod(&v, &mut buffer).unwrap();
+                        buffer
                     }),
                 ));
             }
@@ -137,11 +130,11 @@ fn main() {
                 inps.push((
                     *label,
                     Box::new(move || {
-                        Device::system_default().unwrap().new_buffer_with_data(
-                            d.as_ptr() as *const _,
-                            (d.len() * size_of::<f32>()) as u64,
-                            MTLResourceOptions::StorageModeShared,
-                        )
+                        let ctx = cudarc::driver::CudaContext::new(0).unwrap();
+                        let stream = ctx.default_stream();
+                        let mut buffer = unsafe { stream.alloc::<f32>(d.len()).unwrap() };
+                        stream.memcpy_htod(&d, &mut buffer).unwrap();
+                        buffer
                     }),
                 ))
             }
@@ -180,32 +173,32 @@ fn main() {
         let mut inps = vec![(
             old_to_new_mapping[&input.id],
             Box::new(move || {
-                Device::system_default().unwrap().new_buffer_with_data(
-                    output_ids_clone.as_ptr() as *const _,
-                    (output_ids_clone.len() * size_of::<f32>()) as u64,
-                    MTLResourceOptions::StorageModeShared,
-                )
-            }) as Box<dyn FnOnce() -> Buffer>,
+                let ctx = cudarc::driver::CudaContext::new(0).unwrap();
+                let stream = ctx.default_stream();
+                let mut buffer = unsafe { stream.alloc::<f32>(output_ids_clone.len()).unwrap() };
+                stream.memcpy_htod(&output_ids_clone, &mut buffer).unwrap();
+                buffer
+            }) as Box<dyn FnOnce() -> CudaSlice<f32>>,
         )];
         for ((k, v), (k_data, v_data)) in cache_src.iter().zip(kv_out) {
             inps.push((
                 old_to_new_mapping[&k.id],
                 Box::new(move || {
-                    Device::system_default().unwrap().new_buffer_with_data(
-                        k_data.as_ptr() as *const _,
-                        (k_data.len() * size_of::<f32>()) as u64,
-                        MTLResourceOptions::StorageModeShared,
-                    )
+                    let ctx = cudarc::driver::CudaContext::new(0).unwrap();
+                    let stream = ctx.default_stream();
+                    let mut buffer = unsafe { stream.alloc::<f32>(k_data.len()).unwrap() };
+                    stream.memcpy_htod(&k_data, &mut buffer).unwrap();
+                    buffer
                 }),
             ));
             inps.push((
                 old_to_new_mapping[&v.id],
                 Box::new(move || {
-                    Device::system_default().unwrap().new_buffer_with_data(
-                        v_data.as_ptr() as *const _,
-                        (v_data.len() * size_of::<f32>()) as u64,
-                        MTLResourceOptions::StorageModeShared,
-                    )
+                    let ctx = cudarc::driver::CudaContext::new(0).unwrap();
+                    let stream = ctx.default_stream();
+                    let mut buffer = unsafe { stream.alloc::<f32>(v_data.len()).unwrap() };
+                    stream.memcpy_htod(&v_data, &mut buffer).unwrap();
+                    buffer
                 }),
             ));
         }
@@ -220,11 +213,11 @@ fn main() {
                         *label,
                         Box::new(move || {
                             let v = vec![val as f32];
-                            Device::system_default().unwrap().new_buffer_with_data(
-                                v.as_ptr() as *const _,
-                                size_of::<f32>() as u64,
-                                MTLResourceOptions::StorageModeShared,
-                            )
+                            let ctx = cudarc::driver::CudaContext::new(0).unwrap();
+                            let stream = ctx.default_stream();
+                            let mut buffer = unsafe { stream.alloc::<f32>(v.len()).unwrap() };
+                            stream.memcpy_htod(&v, &mut buffer).unwrap();
+                            buffer
                         }),
                     ));
                 }
@@ -233,11 +226,11 @@ fn main() {
                     inps.push((
                         *label,
                         Box::new(move || {
-                            Device::system_default().unwrap().new_buffer_with_data(
-                                d.as_ptr() as *const _,
-                                (d.len() * size_of::<f32>()) as u64,
-                                MTLResourceOptions::StorageModeShared,
-                            )
+                            let ctx = cudarc::driver::CudaContext::new(0).unwrap();
+                            let stream = ctx.default_stream();
+                            let mut buffer = unsafe { stream.alloc::<f32>(d.len()).unwrap() };
+                            stream.memcpy_htod(&d, &mut buffer).unwrap();
+                            buffer
                         }),
                     ))
                 }
