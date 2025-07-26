@@ -8,7 +8,7 @@ use std::fmt::Debug;
 
 #[cfg(test)]
 use crate::prelude::*;
-use rand::{thread_rng, Rng};
+use rand::Rng;
 
 // Integration and other tests
 
@@ -97,7 +97,7 @@ pub fn assert_exact<T: PartialEq + Debug>(a_vec: &[T], b_vec: &[T]) {
 }
 
 pub fn random_array<const N: usize>() -> [f32; N] {
-    let mut rng = thread_rng();
+    let mut rng = rand::thread_rng();
     random_array_rng(&mut rng)
 }
 
@@ -110,7 +110,7 @@ pub fn random_array_rng<const N: usize, R: Rng>(rng: &mut R) -> [f32; N] {
 }
 
 pub fn random_vec(n: usize) -> Vec<f32> {
-    let mut rng = thread_rng();
+    let mut rng = rand::thread_rng();
     random_vec_rng(n, &mut rng)
 }
 
