@@ -268,7 +268,7 @@ impl Conv3D {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "candle_tests"))]
 mod tests {
     use super::{Conv1D, Conv2D, Conv3D};
     use candle_core::{Device, Tensor};
