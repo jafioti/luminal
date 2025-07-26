@@ -14,4 +14,4 @@ rand = "0.8.5"
 [dev-dependencies]
 dfdx = { version = "0.13", features = ["f16"] }
 paste = "1.0.14"
-candle-core = "0.8"
+candle-core = "0.5.0"

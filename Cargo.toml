@@ -19,7 +19,7 @@ bimap = "0.6.3"
 hashbrown = "0.12.3"
 lazy_static = "*"
 log = "*"
-half = "2.3"
+half = "*"
 tinyvec = { version = "1.6.0", features = ["serde"] }
 term_size = "0.3.2"
 colored = "*"
