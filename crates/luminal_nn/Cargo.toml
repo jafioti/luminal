@@ -15,3 +15,6 @@ rand = "0.8.5"
 dfdx = { version = "0.13", features = ["f16"] }
 paste = "1.0.14"
 # candle-core = "0.5.0"  # Commented out to avoid rand version conflict
+
+[features]
+candle_tests = []  # Feature flag for tests that require candle-core
