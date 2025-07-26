@@ -243,8 +243,8 @@ fn compile_and_load_kernel(mut code: String, device: &Arc<CudaContext>) -> CudaF
             compile_ptx_with_opts(
                 code,
                 CompileOptions {
-                    arch: Some("sm_75"),
-                    include_paths: vec!["/usr/local/cuda/include".to_string()],
+                    arch: None,
+                    include_paths: vec!["/usr/lib/cuda/include".to_string()],
                     ..Default::default()
                 },
             )
