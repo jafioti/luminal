@@ -73,76 +73,56 @@ fn main() {
         outputs.push(old_to_new_mapping[&k.id]);
         outputs.push(old_to_new_mapping[&v.id]);
     }
-    let kernels = codegen(new_graph, outputs, luminal_2::GPUArch::CUDA, 0, &cx.dyn_map).unwrap();
+    let (kernels, gmem_mapping) =
+        codegen(new_graph, outputs, luminal_2::GPUArch::CUDA, 0, &cx.dyn_map).unwrap();
     // luminal_2::utils::display_graph(&kernels, &[]);
 
     // Set up inputs
     let input_ids_clone = input_ids.clone();
-    let mut inps = vec![(
-        old_to_new_mapping[&input.id],
-        Box::new(move || {
-            let ctx = cudarc::driver::CudaContext::new(0).unwrap();
-            let stream = ctx.default_stream();
-            let mut buffer = unsafe { stream.alloc::<f32>(input_ids_clone.len()).unwrap() };
-            stream.memcpy_htod(&input_ids_clone, &mut buffer).unwrap();
-            buffer
-        }) as Box<dyn FnOnce() -> CudaSlice<f32>>,
-    )];
+    let ctx = cudarc::driver::CudaContext::new(0).unwrap();
+    let stream = ctx.default_stream();
+    let mut inp_buffer = unsafe { stream.alloc::<f32>(input_ids_clone.len()).unwrap() };
+    stream
+        .memcpy_htod(&input_ids_clone, &mut inp_buffer)
+        .unwrap();
+    let mut inps = HashMap::new();
+    inps.insert(
+        gmem_mapping[&old_to_new_mapping[&input.id]],
+        (inp_buffer, true),
+    );
     for (k, v) in &cache_src {
-        inps.push((
-            old_to_new_mapping[&k.id],
-            Box::new(|| {
-                let ctx = cudarc::driver::CudaContext::new(0).unwrap();
-                let stream = ctx.default_stream();
-                stream.alloc_zeros(1).unwrap()
-            }),
-        ));
-        inps.push((
-            old_to_new_mapping[&v.id],
-            Box::new(|| {
-                let ctx = cudarc::driver::CudaContext::new(0).unwrap();
-                let stream = ctx.default_stream();
-                stream.alloc_zeros(1).unwrap()
-            }),
-        ));
+        inps.insert(
+            gmem_mapping[&old_to_new_mapping[&k.id]],
+            (stream.alloc_zeros(1).unwrap(), true),
+        );
+        inps.insert(
+            gmem_mapping[&old_to_new_mapping[&v.id]],
+            (stream.alloc_zeros(1).unwrap(), true),
+        );
     }
     for (node, val) in load_new("setup/llama3-8b.gguf", &model) {
-        inps.push((old_to_new_mapping[&node], val));
+        inps.insert(gmem_mapping[&old_to_new_mapping[&node]], (val(), false));
     }
     for (label, val) in &accs {
         match val {
             InitData::Expr(e) => {
                 let val = e.exec(&cx.dyn_map).unwrap();
-                inps.push((
-                    *label,
-                    Box::new(move || {
-                        let v = vec![val as f32];
-                        let ctx = cudarc::driver::CudaContext::new(0).unwrap();
-                        let stream = ctx.default_stream();
-                        let mut buffer = unsafe { stream.alloc::<f32>(v.len()).unwrap() };
-                        stream.memcpy_htod(&v, &mut buffer).unwrap();
-                        buffer
-                    }),
-                ));
+                let v = vec![val as f32];
+                let mut buffer = unsafe { stream.alloc::<f32>(v.len()).unwrap() };
+                stream.memcpy_htod(&v, &mut buffer).unwrap();
+                inps.insert(gmem_mapping[label], (buffer, true));
             }
             InitData::Data(d) => {
                 let d = d.clone();
-                inps.push((
-                    *label,
-                    Box::new(move || {
-                        let ctx = cudarc::driver::CudaContext::new(0).unwrap();
-                        let stream = ctx.default_stream();
-                        let mut buffer = unsafe { stream.alloc::<f32>(d.len()).unwrap() };
-                        stream.memcpy_htod(&d, &mut buffer).unwrap();
-                        buffer
-                    }),
-                ))
+                let mut buffer = unsafe { stream.alloc::<f32>(d.len()).unwrap() };
+                stream.memcpy_htod(&d, &mut buffer).unwrap();
+                inps.insert(gmem_mapping[label], (buffer, true));
             }
         }
     }
 
     // Run prompt processing pass
-    let (outputs, _) = run_graph(inps, &kernels, &cx.dyn_map);
+    let (outputs, _) = run_graph(&mut inps, &kernels, &cx.dyn_map);
 
     // Process outputs
     let mut output_id = argmax(&outputs[0]);
@@ -170,75 +150,43 @@ fn main() {
 
         // Set up inputs
         let output_ids_clone = vec![output_id as f32];
-        let mut inps = vec![(
-            old_to_new_mapping[&input.id],
-            Box::new(move || {
-                let ctx = cudarc::driver::CudaContext::new(0).unwrap();
-                let stream = ctx.default_stream();
-                let mut buffer = unsafe { stream.alloc::<f32>(output_ids_clone.len()).unwrap() };
-                stream.memcpy_htod(&output_ids_clone, &mut buffer).unwrap();
-                buffer
-            }) as Box<dyn FnOnce() -> CudaSlice<f32>>,
-        )];
+        inps.insert(gmem_mapping[&old_to_new_mapping[&input.id]], {
+            let mut buffer = unsafe { stream.alloc::<f32>(output_ids_clone.len()).unwrap() };
+            stream.memcpy_htod(&output_ids_clone, &mut buffer).unwrap();
+            (buffer, true)
+        });
         for ((k, v), (k_data, v_data)) in cache_src.iter().zip(kv_out) {
-            inps.push((
-                old_to_new_mapping[&k.id],
-                Box::new(move || {
-                    let ctx = cudarc::driver::CudaContext::new(0).unwrap();
-                    let stream = ctx.default_stream();
-                    let mut buffer = unsafe { stream.alloc::<f32>(k_data.len()).unwrap() };
-                    stream.memcpy_htod(&k_data, &mut buffer).unwrap();
-                    buffer
-                }),
-            ));
-            inps.push((
-                old_to_new_mapping[&v.id],
-                Box::new(move || {
-                    let ctx = cudarc::driver::CudaContext::new(0).unwrap();
-                    let stream = ctx.default_stream();
-                    let mut buffer = unsafe { stream.alloc::<f32>(v_data.len()).unwrap() };
-                    stream.memcpy_htod(&v_data, &mut buffer).unwrap();
-                    buffer
-                }),
-            ));
-        }
-        for (node, val) in load_new("setup/llama3-8b.gguf", &model) {
-            inps.push((old_to_new_mapping[&node], val));
+            inps.insert(gmem_mapping[&old_to_new_mapping[&k.id]], {
+                let mut buffer = unsafe { stream.alloc::<f32>(k_data.len()).unwrap() };
+                stream.memcpy_htod(&k_data, &mut buffer).unwrap();
+                (buffer, true)
+            });
+            inps.insert(gmem_mapping[&old_to_new_mapping[&v.id]], {
+                let mut buffer = unsafe { stream.alloc::<f32>(v_data.len()).unwrap() };
+                stream.memcpy_htod(&v_data, &mut buffer).unwrap();
+                (buffer, true)
+            });
         }
         for (label, val) in &accs {
             match val {
                 InitData::Expr(e) => {
                     let val = e.exec(&cx.dyn_map).unwrap();
-                    inps.push((
-                        *label,
-                        Box::new(move || {
-                            let v = vec![val as f32];
-                            let ctx = cudarc::driver::CudaContext::new(0).unwrap();
-                            let stream = ctx.default_stream();
-                            let mut buffer = unsafe { stream.alloc::<f32>(v.len()).unwrap() };
-                            stream.memcpy_htod(&v, &mut buffer).unwrap();
-                            buffer
-                        }),
-                    ));
+                    let v = vec![val as f32];
+                    let mut buffer = unsafe { stream.alloc::<f32>(v.len()).unwrap() };
+                    stream.memcpy_htod(&v, &mut buffer).unwrap();
+                    inps.insert(gmem_mapping[label], (buffer, true));
                 }
                 InitData::Data(d) => {
                     let d = d.clone();
-                    inps.push((
-                        *label,
-                        Box::new(move || {
-                            let ctx = cudarc::driver::CudaContext::new(0).unwrap();
-                            let stream = ctx.default_stream();
-                            let mut buffer = unsafe { stream.alloc::<f32>(d.len()).unwrap() };
-                            stream.memcpy_htod(&d, &mut buffer).unwrap();
-                            buffer
-                        }),
-                    ))
+                    let mut buffer = unsafe { stream.alloc::<f32>(d.len()).unwrap() };
+                    stream.memcpy_htod(&d, &mut buffer).unwrap();
+                    inps.insert(gmem_mapping[label], (buffer, true));
                 }
             }
         }
 
         // Run
-        let (outputs, _) = run_graph(inps, &kernels, &cx.dyn_map);
+        let (outputs, _) = run_graph(&mut inps, &kernels, &cx.dyn_map);
 
         // Get outputs
         output_id = argmax(&outputs[0]);

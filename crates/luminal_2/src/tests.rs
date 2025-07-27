@@ -44,7 +44,7 @@ pub fn make_complex_kernel() -> (StableGraph<GraphTerm, (), Directed>, NodeIndex
     );
 
     // Exp-acc
-    let exp = unary(in_a, GraphTerm::Exp, &mut graph);
+    let exp = unary(in_a, GraphTerm::Exp2, &mut graph);
     let add_acc = binary(exp, in_exp_acc, GraphTerm::Add, &mut graph);
     let add_acc_out = loop_out(add_acc, 5, Term::Acc('z'), 'b', &mut graph);
 

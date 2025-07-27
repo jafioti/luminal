@@ -27,7 +27,10 @@ pub fn codegen(
     mut arch: GPUArch,
     n_graph: usize,
     dyn_vars: &FxHashMap<char, usize>,
-) -> Option<StableGraph<Kernel, (usize, usize), Directed>> {
+) -> Option<(
+    StableGraph<Kernel, (usize, usize), Directed>,
+    HashMap<NodeIndex, (NodeIndex, usize)>,
+)> {
     let gmems = graph
         .node_weights()
         .filter(|w| matches!(w, GraphTerm::GMEM { .. }))
@@ -47,7 +50,7 @@ pub fn codegen(
         code: "Outputs".to_string(),
         ..Default::default()
     });
-    let mut gmem_mapping = HashMap::new();
+    let mut gmem_mapping: HashMap<NodeIndex, (NodeIndex, usize)> = HashMap::new();
     for (n_kernel, (_, inputs, _, _)) in kernels.iter().enumerate() {
         for (n_input, (input_kernel, _)) in inputs.into_iter().enumerate() {
             match input_kernel {
@@ -57,10 +60,10 @@ pub fn codegen(
                     (*output, n_input),
                 ),
                 GMEMBuffer::Input { node } => {
-                    let index = if let Some(index) = gmem_mapping.get(&node.index()) {
-                        *index
+                    let index = if let Some(index) = gmem_mapping.get(node) {
+                        index.1
                     } else {
-                        gmem_mapping.insert(node.index(), gmem_mapping.len());
+                        gmem_mapping.insert(*node, (global_input, gmem_mapping.len()));
                         gmem_mapping.len() - 1
                     };
                     meta_graph.add_edge(global_input, NodeIndex::new(n_kernel), (index, n_input))
@@ -68,8 +71,6 @@ pub fn codegen(
             };
         }
     }
-    meta_graph.node_weight_mut(global_input).unwrap().code =
-        format!("Inputs{}", serde_json::to_string(&gmem_mapping).unwrap());
     for (i, (output_kernel, output_index)) in output_kernels.clone().into_iter().enumerate() {
         meta_graph.add_edge(
             NodeIndex::new(output_kernel),
@@ -300,7 +301,7 @@ kernel void kernel{}(
             outputs: outputs.into_iter().map(|(o, _)| o.simplify()).collect(),
         };
     }
-    Some(meta_graph)
+    Some((meta_graph, gmem_mapping))
 }
 
 fn var_to_char(var: usize) -> String {

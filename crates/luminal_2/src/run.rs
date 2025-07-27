@@ -22,52 +22,21 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::Kernel;
 
-// // Take inputs and buffer maps and create buffer storage to feed into run_graph
-// pub fn setup_buffers(
-//     inputs: &[(NodeIndex, Vec<f32>)],
-//     gmem_map: &FxHashMap<NodeIndex, usize>,
-//     buffer_map: &FxHashMap<NodeIndex, Vec<usize>>,
-//     buffer_sizes: &Vec<Expression>,
-//     inputs_kernel: NodeIndex,
-//     device: Device,
-// ) -> (Vec<Buffer>, FxHashMap<(NodeIndex, u8), Buffer> {
-//     let mut buffers = FxHashMap::default();
-//     for (input_node, input_data) in inputs {
-//         buffers.insert(
-//             (inputs_kernel, gmem_map[input_node]),
-//             device.new_buffer_with_data(
-//                 input_data.as_ptr() as *mut _,
-//                 (input_data.len() * std::mem::size_of::<f32>()) as u64,
-//                 MTLResourceOptions::StorageModeShared,
-//             ),
-//         );
-//     }
-//     for (buffer_sizes)
-
-//     todo!()
-// }
-
 pub fn run_graph(
-    mut inputs: Vec<(NodeIndex, Box<dyn FnOnce() -> CudaSlice<f32>>)>,
+    buffers: &mut HashMap<(NodeIndex, usize), (CudaSlice<f32>, bool)>,
     kernels: &StableGraph<Kernel, (usize, usize)>,
     dyn_vars: &FxHashMap<char, usize>,
 ) -> (Vec<Vec<f32>>, u128) {
     let ctx = cudarc::driver::CudaContext::new(0).unwrap();
     let stream = ctx.default_stream();
     // Allocate buffers
-    let mut buffers = HashMap::<(usize, usize), Option<CudaSlice<f32>>>::default();
     let mut ran = FxHashSet::default();
     let mut mapping: HashMap<usize, usize> = HashMap::default();
     for node in toposort(kernels, None).unwrap() {
         ran.insert(node);
         let kernel = kernels.node_weight(node).unwrap();
         if kernel.code.starts_with("Inputs") {
-            mapping = serde_json::from_str(&kernel.code.replace("Inputs", "")).unwrap();
-
-            buffers = inputs
-                .iter()
-                .map(|(name, _)| ((node.index(), mapping[&name.index()]), None))
-                .collect();
+            // Inputs should already be in the buffer map
         } else if kernel.code == "Outputs" {
             // Run
             let start = std::time::Instant::now();
@@ -76,17 +45,18 @@ pub fn run_graph(
                 .edges_directed(node, Direction::Incoming)
                 .sorted_by_key(|e| e.weight().1)
                 .map(|e| {
-                    let buffer = buffers[&(e.source().index(), e.weight().0)]
-                        .as_ref()
-                        .unwrap();
+                    let (buffer, _) = &buffers[&(e.source(), e.weight().0)];
                     let data: Vec<f32> = stream.memcpy_dtov(buffer).unwrap();
                     data
                 })
                 .collect();
-            for (_, buffer) in buffers {
-                if let Some(_buffer) = buffer {
-                    // Should we explicitly free this?
-                }
+            let to_remove = buffers
+                .iter()
+                .filter(|(_, (_, r))| *r)
+                .map(|(k, _)| *k)
+                .collect_vec();
+            for id in to_remove {
+                buffers.remove(&id).unwrap(); // Should we explicitly free this?
             }
             return (outputs, time_taken_micros);
         } else if kernel.code.starts_with("Diff") {
@@ -99,10 +69,7 @@ pub fn run_graph(
                 .map(|n| (n.source(), n.weight().0))
                 .next()
                 .unwrap();
-            let buffer = buffers
-                .remove(&(input.index(), input_index))
-                .unwrap()
-                .unwrap();
+            let (buffer, to_remove) = buffers.remove(&(input, input_index)).unwrap();
             let data: Vec<f32> = stream.memcpy_dtov(&buffer).unwrap();
             let mut file = File::open(format!("{diff_name}.bin")).unwrap();
             let mut file_buffer = Vec::new();
@@ -127,7 +94,7 @@ pub fn run_graph(
             if matched {
                 println!("DIFF {diff_name} MATCHED");
             }
-            buffers.insert((node.index(), 0), Some(buffer));
+            buffers.insert((node, 0), (buffer, to_remove));
         } else {
             // println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
             // println!("{}", kernel.code);
@@ -158,26 +125,11 @@ pub fn run_graph(
                 .sorted_by_key(|n| n.weight().1)
                 .map(|n| (n.source(), n.weight().0))
             {
-                if !buffers.contains_key(&(input.index(), input_index)) {
+                if !buffers.contains_key(&(input, input_index)) {
                     panic!(
                         "Couldn't find buffer, possibly missing input {:?}",
-                        (input.index(), input_index)
+                        (input, input_index)
                     );
-                }
-                if buffers[&(input.index(), input_index)].is_none() {
-                    let entry = inputs
-                        .iter_mut()
-                        .find(|(n, _)| mapping[&n.index()] == input_index)
-                        .unwrap();
-                    let mut other = Box::new(|| {
-                        let ctx = cudarc::driver::CudaContext::new(0).unwrap();
-                        let stream = ctx.default_stream();
-                        stream.alloc_zeros::<f32>(0).unwrap()
-                    })
-                        as Box<dyn FnOnce() -> CudaSlice<f32> + 'static>;
-                    std::mem::swap(&mut entry.1, &mut other);
-                    let buffer = other();
-                    *buffers.get_mut(&(input.index(), input_index)).unwrap() = Some(buffer);
                 }
             }
             for (i, (input, input_index)) in kernels
@@ -186,7 +138,7 @@ pub fn run_graph(
                 .map(|n| (n.source(), n.weight().0))
                 .enumerate()
             {
-                builder.arg(buffers[&(input.index(), input_index)].as_ref().unwrap());
+                builder.arg(&buffers[&(input, input_index)].0);
             }
             // set output
             let mut out = kernel
@@ -232,7 +184,7 @@ pub fn run_graph(
 
             // Insert outputs into buffers
             for (i, buf) in out.into_iter().enumerate() {
-                buffers.insert((node.index(), i), Some(buf));
+                buffers.insert((node, i), (buf, true));
             }
 
             // Go through inputs and free buffers that aren't going to be used again
@@ -245,10 +197,8 @@ pub fn run_graph(
                     .all(|e| e.weight().0 == in_ind && ran.contains(&e.target()))
                 {
                     // All consumers have already ran, deallocate
-                    if let Some(buf) = buffers.remove(&(in_node.index(), in_ind)) {
-                        if let Some(buf) = buf {
-                            // Should we explicitly free this?
-                        }
+                    if let Some(buf) = buffers.remove(&(in_node, in_ind)) {
+                        // Should we explicitly free this?
                     }
                 }
             }
