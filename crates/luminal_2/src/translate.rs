@@ -26,6 +26,7 @@ pub fn translate_graph(
     let mut node_mapping = FxHashMap::default();
     let mut old_to_new_mapping = FxHashMap::default();
     let mut inits = vec![];
+    let mut simplify_cache = FxHashMap::default();
     for node in toposort(&graph.graph, None).unwrap() {
         let node_weight = graph.node_weight(node).unwrap();
         let op_name_full = format!("{node_weight:?}");
@@ -40,8 +41,14 @@ pub fn translate_graph(
                 // walk through input ranges and strides, making new loopins as we go
                 let (source, output_index, shape) = sources.pop().unwrap();
                 let new_source = node_mapping[&(source, output_index)];
-                let (new_source, ranges) =
-                    scope_in(new_source, shape, None, &mut new_graph, &mut inits);
+                let (new_source, ranges) = scope_in(
+                    new_source,
+                    shape,
+                    None,
+                    &mut new_graph,
+                    &mut inits,
+                    &mut simplify_cache,
+                );
                 let mut op = if op == "Contiguous" {
                     new_source
                 } else {
@@ -64,14 +71,23 @@ pub fn translate_graph(
             "Add" | "Mul" | "Mod" | "LessThan" => {
                 // walk through input ranges and strides, making new loopins as we go
                 let (source_a, output_index_a, shape_a) = sources.pop().unwrap();
-                let mut new_source_a = node_mapping[&(source_a, output_index_a)];
-                let (ns, ranges) =
-                    scope_in(new_source_a, shape_a, None, &mut new_graph, &mut inits);
-                new_source_a = ns;
+                let (new_source_a, ranges) = scope_in(
+                    node_mapping[&(source_a, output_index_a)],
+                    shape_a,
+                    None,
+                    &mut new_graph,
+                    &mut inits,
+                    &mut simplify_cache,
+                );
                 let (source_b, output_index_b, shape_b) = sources.pop().unwrap();
-                let mut new_source_b = node_mapping[&(source_b, output_index_b)];
-                let (ns, _) = scope_in(new_source_b, shape_b, None, &mut new_graph, &mut inits);
-                new_source_b = ns;
+                let (new_source_b, _) = scope_in(
+                    node_mapping[&(source_b, output_index_b)],
+                    shape_b,
+                    None,
+                    &mut new_graph,
+                    &mut inits,
+                    &mut simplify_cache,
+                );
                 let mut op = new_graph.add_node(match op {
                     "Add" => GraphTerm::Add,
                     "Mul" => GraphTerm::Mul,
@@ -104,16 +120,15 @@ pub fn translate_graph(
                 });
                 let orig_acc = acc;
                 // walk through input ranges and strides, making new loopins as we go
-                let (source, output_index, mut shape) = sources.pop().unwrap();
-                let mut new_source = node_mapping[&(source, output_index)];
-                let (ns, ranges) = scope_in(
-                    new_source,
+                let (source, output_index, shape) = sources.pop().unwrap();
+                let (new_source, ranges) = scope_in(
+                    node_mapping[&(source, output_index)],
                     shape,
                     Some(reduce_dim),
                     &mut new_graph,
                     &mut inits,
+                    &mut simplify_cache,
                 );
-                new_source = ns;
                 let mut rm_strides = ranges
                     .iter()
                     .rev()
@@ -244,6 +259,7 @@ fn scope_in(
     reduce_dim: Option<usize>,
     graph: &mut StableGraph<GraphTerm, (), Directed>,
     inits: &mut Vec<(NodeIndex, InitData)>,
+    simplify_cache: &mut FxHashMap<Expression, Expression>,
 ) -> (NodeIndex, Vec<(Expression, String)>) {
     let mut masks = vec![];
     let mut ranges = vec![];
@@ -280,8 +296,8 @@ fn scope_in(
             }
             masks.push(loop_in(
                 mask,
-                mask_range.simplify(),
-                mask_stride.simplify(),
+                mask_range.simplify_cache(simplify_cache),
+                mask_stride.simplify_cache(simplify_cache),
                 0,
                 graph,
             ));
@@ -294,7 +310,13 @@ fn scope_in(
         };
     }
     ranges.push((range, "0".to_string()));
-    src = loop_in(src, range.simplify(), stride.simplify(), 0, graph);
+    src = loop_in(
+        src,
+        range.simplify_cache(simplify_cache),
+        stride.simplify_cache(simplify_cache),
+        0,
+        graph,
+    );
 
     if let Some(reduce_dim) = reduce_dim {
         // Go through rest of grid and threadblock as pads

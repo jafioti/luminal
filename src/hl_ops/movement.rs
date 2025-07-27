@@ -31,9 +31,7 @@ impl GraphTensor {
     pub fn expand(mut self, shape: impl ToShape) -> GraphTensor {
         let s = shape.to_shape();
         for (i, s) in s.into_iter().enumerate() {
-            if self.shape.len() <= i
-                || self.shape.dims[self.shape.indexes[i]].simplify() != s.simplify()
-            {
+            if self.shape.len() <= i || self.shape.dims[self.shape.indexes[i]] != s {
                 self.shape.expand_dim(i, s);
             }
         }

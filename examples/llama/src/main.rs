@@ -64,7 +64,9 @@ fn main() {
     cx.set_dyn_dim('p', 0);
 
     // Convert to 2.0 graph
+    let now = std::time::Instant::now();
     let (new_graph, old_to_new_mapping, accs) = translate_graph(&cx);
+    println!("Translate: {}ms", now.elapsed().as_millis());
 
     // Codegen
     let mut outputs = vec![old_to_new_mapping[&logits.id]];
@@ -72,8 +74,10 @@ fn main() {
         outputs.push(old_to_new_mapping[&k.id]);
         outputs.push(old_to_new_mapping[&v.id]);
     }
+    let now = std::time::Instant::now();
     let (kernels, gmem_mapping) =
         codegen(new_graph, outputs, luminal_2::GPUArch::CUDA, 0, &cx.dyn_map).unwrap();
+    println!("Codegen: {}ms", now.elapsed().as_millis());
     // luminal_2::utils::display_graph(&kernels, &[]);
 
     // Set up inputs
@@ -138,7 +142,7 @@ fn main() {
     );
 
     // Decode loop
-    for _ in 0..10 {
+    for _ in 0..100 {
         cx.set_dyn_dim('s', 1);
         cx.set_dyn_dim('p', input_ids.len() - 1);
 
