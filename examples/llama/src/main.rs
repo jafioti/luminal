@@ -2,11 +2,10 @@ use std::collections::HashMap;
 
 use clap::Parser;
 use colored::Colorize;
-use cudarc::driver::CudaSlice;
 use itertools::Itertools;
 use luminal_2::{
     codegen::codegen,
-    run::run_graph,
+    run::{compile_kernels, run_graph},
     translate::{translate_graph, InitData},
 };
 use model::{HEAD_DIM, N_KV_HEADS};
@@ -16,7 +15,7 @@ mod gguf;
 mod loader;
 mod model;
 
-use crate::{loader::load_new, model::KVCache};
+use crate::{loader::*, model::*};
 use luminal::prelude::*;
 
 // Command args parser
@@ -78,17 +77,12 @@ fn main() {
     // luminal_2::utils::display_graph(&kernels, &[]);
 
     // Set up inputs
-    let input_ids_clone = input_ids.clone();
     let ctx = cudarc::driver::CudaContext::new(0).unwrap();
     let stream = ctx.default_stream();
-    let mut inp_buffer = unsafe { stream.alloc::<f32>(input_ids_clone.len()).unwrap() };
-    stream
-        .memcpy_htod(&input_ids_clone, &mut inp_buffer)
-        .unwrap();
     let mut inps = HashMap::new();
     inps.insert(
         gmem_mapping[&old_to_new_mapping[&input.id]],
-        (inp_buffer, true),
+        (copy_cuda_buffer(&input_ids, &stream), true),
     );
     for (k, v) in &cache_src {
         inps.insert(
@@ -100,29 +94,29 @@ fn main() {
             (stream.alloc_zeros(1).unwrap(), true),
         );
     }
-    for (node, val) in load_new("setup/llama3-8b.gguf", &model) {
-        inps.insert(gmem_mapping[&old_to_new_mapping[&node]], (val(), false));
+    for (node, val) in load("setup/llama3-8b.gguf", &model) {
+        inps.insert(gmem_mapping[&old_to_new_mapping[&node]], (val, false));
     }
     for (label, val) in &accs {
         match val {
             InitData::Expr(e) => {
                 let val = e.exec(&cx.dyn_map).unwrap();
-                let v = vec![val as f32];
-                let mut buffer = unsafe { stream.alloc::<f32>(v.len()).unwrap() };
-                stream.memcpy_htod(&v, &mut buffer).unwrap();
-                inps.insert(gmem_mapping[label], (buffer, true));
+                inps.insert(
+                    gmem_mapping[label],
+                    (copy_cuda_buffer(&vec![val as f32], &stream), true),
+                );
             }
             InitData::Data(d) => {
-                let d = d.clone();
-                let mut buffer = unsafe { stream.alloc::<f32>(d.len()).unwrap() };
-                stream.memcpy_htod(&d, &mut buffer).unwrap();
-                inps.insert(gmem_mapping[label], (buffer, true));
+                inps.insert(gmem_mapping[label], (copy_cuda_buffer(&d, &stream), false));
             }
         }
     }
 
     // Run prompt processing pass
-    let (outputs, _) = run_graph(&mut inps, &kernels, &cx.dyn_map);
+    let now = std::time::Instant::now();
+    let compiled_kernels = compile_kernels(&kernels);
+    println!("Compile: {}ms", now.elapsed().as_millis());
+    let (outputs, _) = run_graph(&mut inps, &kernels, &cx.dyn_map, &compiled_kernels);
 
     // Process outputs
     let mut output_id = argmax(&outputs[0]);
@@ -149,44 +143,34 @@ fn main() {
         cx.set_dyn_dim('p', input_ids.len() - 1);
 
         // Set up inputs
-        let output_ids_clone = vec![output_id as f32];
         inps.insert(gmem_mapping[&old_to_new_mapping[&input.id]], {
-            let mut buffer = unsafe { stream.alloc::<f32>(output_ids_clone.len()).unwrap() };
-            stream.memcpy_htod(&output_ids_clone, &mut buffer).unwrap();
-            (buffer, true)
+            (copy_cuda_buffer(&vec![output_id as f32], &stream), true)
         });
         for ((k, v), (k_data, v_data)) in cache_src.iter().zip(kv_out) {
-            inps.insert(gmem_mapping[&old_to_new_mapping[&k.id]], {
-                let mut buffer = unsafe { stream.alloc::<f32>(k_data.len()).unwrap() };
-                stream.memcpy_htod(&k_data, &mut buffer).unwrap();
-                (buffer, true)
-            });
-            inps.insert(gmem_mapping[&old_to_new_mapping[&v.id]], {
-                let mut buffer = unsafe { stream.alloc::<f32>(v_data.len()).unwrap() };
-                stream.memcpy_htod(&v_data, &mut buffer).unwrap();
-                (buffer, true)
-            });
+            inps.insert(
+                gmem_mapping[&old_to_new_mapping[&k.id]],
+                (copy_cuda_buffer(&k_data, &stream), true),
+            );
+            inps.insert(
+                gmem_mapping[&old_to_new_mapping[&v.id]],
+                (copy_cuda_buffer(&v_data, &stream), true),
+            );
         }
         for (label, val) in &accs {
             match val {
                 InitData::Expr(e) => {
                     let val = e.exec(&cx.dyn_map).unwrap();
-                    let v = vec![val as f32];
-                    let mut buffer = unsafe { stream.alloc::<f32>(v.len()).unwrap() };
-                    stream.memcpy_htod(&v, &mut buffer).unwrap();
-                    inps.insert(gmem_mapping[label], (buffer, true));
+                    inps.insert(
+                        gmem_mapping[label],
+                        (copy_cuda_buffer(&vec![val as f32], &stream), true),
+                    );
                 }
-                InitData::Data(d) => {
-                    let d = d.clone();
-                    let mut buffer = unsafe { stream.alloc::<f32>(d.len()).unwrap() };
-                    stream.memcpy_htod(&d, &mut buffer).unwrap();
-                    inps.insert(gmem_mapping[label], (buffer, true));
-                }
+                InitData::Data(_) => {} // Wasn't deleted, don't need to make new buffer
             }
         }
 
         // Run
-        let (outputs, _) = run_graph(&mut inps, &kernels, &cx.dyn_map);
+        let (outputs, _) = run_graph(&mut inps, &kernels, &cx.dyn_map, &compiled_kernels);
 
         // Get outputs
         output_id = argmax(&outputs[0]);

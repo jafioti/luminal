@@ -96,11 +96,7 @@ pub fn codegen(
                 panic!("invalid kernel!")
             };
             // Would the input ordering be valid? lets assume it is for now
-            let mut kernel = custom_kernel.clone();
-            kernel.code = kernel
-                .code
-                .replace("kernel_name", &format!("kernel{}", node.index()));
-            *meta_graph.node_weight_mut(node).unwrap() = kernel;
+            *meta_graph.node_weight_mut(node).unwrap() = custom_kernel.clone();
             continue;
         }
 
@@ -210,10 +206,9 @@ pub fn codegen(
                     )
                 };
                 format!(
-                    "extern \"C\" __global__ void kernel{}({inputs}) {{
+                    "extern \"C\" __global__ void kernel_name({inputs}) {{
 {smem_setup}{kernel_lines}
-}}",
-                    node.index()
+}}"
                 )
             }
             GPUArch::Metal { .. } => {
@@ -274,14 +269,13 @@ pub fn codegen(
                 format!(
                     "#include <metal_stdlib>
 using namespace metal;
-kernel void kernel{}(
+kernel void kernel_name(
 	uint3 blockIdx [[threadgroup_position_in_grid]],
 	uint3 threadIdx [[thread_position_in_threadgroup]],
 	{input_string}{smem_input}
 ) {{
 {input_comment}{smem_setup}{kernel_lines}
-}}",
-                    node.index(),
+}}"
                 )
             }
         };

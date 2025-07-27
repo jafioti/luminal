@@ -5,16 +5,14 @@ use std::{
 };
 
 use cudarc::{
-    driver::{CudaSlice, LaunchConfig, PushKernelArg},
+    driver::{CudaFunction, CudaSlice, LaunchConfig, PushKernelArg},
     nvrtc::CompileOptions,
 };
 use itertools::Itertools;
 use luminal::{
     prelude::{
         NodeIndex,
-        petgraph::{
-            Direction, algo::toposort, csr::IndexType, prelude::StableGraph, visit::EdgeRef,
-        },
+        petgraph::{Direction, algo::toposort, prelude::StableGraph, visit::EdgeRef},
     },
     shape::Expression,
 };
@@ -22,20 +20,53 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::Kernel;
 
+pub fn compile_kernels(
+    kernels: &StableGraph<Kernel, (usize, usize)>,
+) -> FxHashMap<String, CudaFunction> {
+    let ctx = cudarc::driver::CudaContext::new(0).unwrap();
+    let mut compiled = FxHashMap::default();
+    for kernel in kernels.node_weights() {
+        if !compiled.contains_key(&kernel.code)
+            && kernel.code != "Inputs"
+            && kernel.code != "Outputs"
+        {
+            let ptx = cudarc::nvrtc::compile_ptx_with_opts(
+                &kernel.code,
+                CompileOptions {
+                    include_paths: vec!["/usr/include".into()],
+                    options: vec![
+                        "--gpu-architecture=compute_75".into(),
+                        "--relocatable-device-code=false".into(),
+                        "--std=c++14".into(),
+                    ],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let module = ctx.load_module(ptx).unwrap();
+            let k = module.load_function("kernel_name").unwrap();
+            compiled.insert(kernel.code.clone(), k);
+        }
+    }
+    compiled
+}
+
 pub fn run_graph(
     buffers: &mut HashMap<(NodeIndex, usize), (CudaSlice<f32>, bool)>,
     kernels: &StableGraph<Kernel, (usize, usize)>,
     dyn_vars: &FxHashMap<char, usize>,
+    compiled_kernels: &FxHashMap<String, CudaFunction>,
 ) -> (Vec<Vec<f32>>, u128) {
     let ctx = cudarc::driver::CudaContext::new(0).unwrap();
     let stream = ctx.default_stream();
     // Allocate buffers
     let mut ran = FxHashSet::default();
-    let mut mapping: HashMap<usize, usize> = HashMap::default();
+    let mut exec_time = 0;
+    let mut mem_time = 0;
     for node in toposort(kernels, None).unwrap() {
         ran.insert(node);
         let kernel = kernels.node_weight(node).unwrap();
-        if kernel.code.starts_with("Inputs") {
+        if kernel.code == "Inputs" {
             // Inputs should already be in the buffer map
         } else if kernel.code == "Outputs" {
             // Run
@@ -58,6 +89,8 @@ pub fn run_graph(
             for id in to_remove {
                 buffers.remove(&id).unwrap(); // Should we explicitly free this?
             }
+            println!("Mem Millis: {}", mem_time / 1000);
+            println!("Exec Millis: {}", exec_time / 1000);
             return (outputs, time_taken_micros);
         } else if kernel.code.starts_with("Diff") {
             // Load file and diff numbers
@@ -99,25 +132,7 @@ pub fn run_graph(
             // println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
             // println!("{}", kernel.code);
 
-            // compile kernel
-            let ptx = cudarc::nvrtc::compile_ptx_with_opts(
-                &kernel.code,
-                CompileOptions {
-                    include_paths: vec!["/usr/include".into()],
-                    options: vec![
-                        "--gpu-architecture=compute_75".into(),
-                        "--relocatable-device-code=false".into(),
-                        "--std=c++14".into(),
-                    ],
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-            let module = ctx.load_module(ptx).unwrap();
-            let k = module
-                .load_function(&format!("kernel{}", node.index()))
-                .unwrap();
-            let mut builder = stream.launch_builder(&k);
+            let mut builder = stream.launch_builder(&compiled_kernels[&kernel.code]);
 
             // set inputs
             for (input, input_index) in kernels
@@ -132,15 +147,15 @@ pub fn run_graph(
                     );
                 }
             }
-            for (i, (input, input_index)) in kernels
+            for (input, input_index) in kernels
                 .edges_directed(node, Direction::Incoming)
                 .sorted_by_key(|n| n.weight().1)
                 .map(|n| (n.source(), n.weight().0))
-                .enumerate()
             {
                 builder.arg(&buffers[&(input, input_index)].0);
             }
             // set output
+            let now = std::time::Instant::now();
             let mut out = kernel
                 .outputs
                 .iter()
@@ -150,6 +165,7 @@ pub fn run_graph(
                         .unwrap()
                 })
                 .collect_vec();
+            mem_time += now.elapsed().as_micros();
             for o in &mut out {
                 builder.arg(o);
             }
@@ -173,6 +189,7 @@ pub fn run_graph(
                 tb.0 * tb.1 * tb.2 <= 1024,
                 "threadblock is too big: {tb:?} > 1024"
             );
+            let now = std::time::Instant::now();
             unsafe {
                 builder.launch(LaunchConfig {
                     grid_dim: (grid.0, grid.1, grid.2),
@@ -181,6 +198,7 @@ pub fn run_graph(
                 })
             }
             .unwrap();
+            exec_time += now.elapsed().as_micros();
 
             // Insert outputs into buffers
             for (i, buf) in out.into_iter().enumerate() {
@@ -197,7 +215,7 @@ pub fn run_graph(
                     .all(|e| e.weight().0 == in_ind && ran.contains(&e.target()))
                 {
                     // All consumers have already ran, deallocate
-                    if let Some(buf) = buffers.remove(&(in_node, in_ind)) {
+                    if let Some(_buf) = buffers.remove(&(in_node, in_ind)) {
                         // Should we explicitly free this?
                     }
                 }
