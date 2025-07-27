@@ -308,6 +308,22 @@ impl Operator for Add {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Sub;
+impl Operator for Sub {
+    fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let (lhs, rhs) = (get_vec(&inp[0].0), get_vec(&inp[1].0));
+        let lexpr = (inp[0].1.index_expression(), inp[0].1.valid_expression());
+        let rexpr = (inp[1].1.index_expression(), inp[1].1.valid_expression());
+        let mut stack = vec![];
+        let mut out_data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
+        for (i, out) in out_data.iter_mut().enumerate() {
+            *out = get_index(lhs, &lexpr, &mut stack, i) - get_index(rhs, &rexpr, &mut stack, i);
+        }
+        vec![Tensor::new(out_data)]
+    }
+}
+
 /// Multiply two tensors together (legacy primitive)
 #[cfg(feature = "legacy_prims")]
 #[derive(Debug, Clone, PartialEq)]

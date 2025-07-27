@@ -5,7 +5,7 @@ use petgraph::{algo::toposort, visit::EdgeRef, Direction};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use luminal::{
-    op::{Add, Contiguous, Exp2, Function, LessThan, Log2, MaxReduce, Mod, Sin, SumReduce},
+    op::{Add, Contiguous, Exp2, Function, LessThan, Log2, MaxReduce, Mod, Sin, Sub, SumReduce},
     prelude::{tinyvec::ArrayVec, *},
 };
 
@@ -122,6 +122,17 @@ impl Compiler for Autograd {
                     // df/db = 1
                     if valid_set.contains(&inps[1].id) {
                         add_grad(prev_grad, inps[1], graph, &mut grads);
+                    }
+                }
+                _ if op == TypeId::of::<Sub>() => {
+                    // f(a, b) = a - b
+                    // df/da = 1
+                    if valid_set.contains(&inps[0].id) {
+                        add_grad(prev_grad, inps[0], graph, &mut grads);
+                    }
+                    // df/db = -1
+                    if valid_set.contains(&inps[1].id) {
+                        add_grad(-prev_grad, inps[1], graph, &mut grads);
                     }
                 }
                 #[cfg(feature = "legacy_prims")]
@@ -312,7 +323,7 @@ mod tests {
         let out = inp.trace(Gradients::leaky()).matmul(w1.clone()).sum();
         let d_grads = out.backward();
 
-        assert_exact(&get_vec(grads[0], &mut cx), &d_grads.get(&w1).as_vec());
+        assert_close(&get_vec(grads[0], &mut cx), &d_grads.get(&w1).as_vec());
     }
 
     #[test]

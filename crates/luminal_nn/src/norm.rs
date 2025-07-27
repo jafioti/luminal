@@ -36,7 +36,7 @@ impl LayerNorm {
     }
     pub fn initialize(self) -> Self {
         // Init weight as uniform(-1, 1)
-                    let mut rng = thread_rng();
+        let mut rng = thread_rng();
         if let Some(w) = self.weight {
             w.set(random_vec_rng(
                 w.shape.n_elements().to_usize().unwrap(),

@@ -50,7 +50,14 @@ impl Sub for GraphTensor {
     type Output = GraphTensor;
 
     fn sub(self, rhs: GraphTensor) -> Self::Output {
-        self + -rhs
+        // Use the Sub primitive directly to avoid circular dependency with negation
+        let new_id = self
+            .graph()
+            .add_op(op::Sub)
+            .input(self.id, 0, self.shape)
+            .input(rhs.id, 0, rhs.shape)
+            .finish();
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 }
 
@@ -58,7 +65,7 @@ impl Sub<GraphTensor> for f32 {
     type Output = GraphTensor;
 
     fn sub(self, rhs: GraphTensor) -> Self::Output {
-        self + -rhs
+        rhs.graph().constant(self).expand(rhs.shape) - rhs
     }
 }
 
@@ -79,6 +86,9 @@ impl Mul for GraphTensor {
             rhs.dims(),
             "Dims must match to multiply tensors."
         );
+
+        // For now, just use log2/exp2 for positive numbers
+        // TODO: Add proper handling for negative numbers
         (self.log2() + rhs.log2()).exp2()
     }
 }
@@ -107,6 +117,9 @@ impl Div<GraphTensor> for GraphTensor {
             rhs.dims(),
             "Dims must match to divide tensors."
         );
+
+        // For now, just use log2/exp2 for positive numbers
+        // TODO: Add proper handling for negative numbers
         (self.log2() - rhs.log2()).exp2()
     }
 }
@@ -116,7 +129,7 @@ impl Div<GraphTensor> for f32 {
     type Output = GraphTensor;
 
     fn div(self, rhs: GraphTensor) -> Self::Output {
-        (self.log2() - rhs.log2()).exp2()
+        rhs.graph().constant(self).expand(rhs.shape) / rhs
     }
 }
 
@@ -183,7 +196,11 @@ impl Mul<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn mul(self, rhs: f32) -> Self::Output {
-        self * self.graph().constant(rhs).expand(self.shape)
+        if rhs == 0.0 {
+            self.graph().constant(0.0).expand(self.shape)
+        } else {
+            self * self.graph().constant(rhs).expand(self.shape)
+        }
     }
 }
 
@@ -200,7 +217,10 @@ impl Div<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn div(self, rhs: f32) -> Self::Output {
-        (self.log2() - self.graph().constant(rhs).expand(self.shape).log2()).exp2()
+        if rhs == 0.0 {
+            panic!("Division by zero");
+        }
+        self / self.graph().constant(rhs).expand(self.shape)
     }
 }
 
@@ -209,7 +229,7 @@ impl<S: Into<Expression>> Div<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn div(self, rhs: S) -> Self::Output {
-        (self.log2() - self.graph().constant(rhs).expand(self.shape).log2()).exp2()
+        self / self.graph().constant(rhs).expand(self.shape)
     }
 }
 

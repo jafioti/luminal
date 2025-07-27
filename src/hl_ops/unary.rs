@@ -5,7 +5,9 @@ impl Neg for GraphTensor {
     type Output = GraphTensor;
 
     fn neg(self) -> Self::Output {
-        self * -1.0
+        // Avoid multiplication by -1 to prevent circular dependency
+        // Use subtraction: -x = 0 - x
+        self.graph().constant(0.0).expand(self.shape) - self
     }
 }
 

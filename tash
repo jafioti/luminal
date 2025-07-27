@@ -1,0 +1,20 @@
+[33m4b96dc3[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mremove-legacy-prims[m[33m, [m[1;31morigin/remove-legacy-prims[m[33m)[m fix: Update rand imports for v0.8.5 compatibility
+[33me75d7cb[m fix: Restore rand v0.8.5 in luminal_nn after merge
+[33m47e02bd[m Merge branch 'main' into remove-legacy-prims
+[33m07d33aa[m fix: Remove candle-core dependency to resolve rand version conflict
+[33m1339404[m fix: Remove candle-core dependency to resolve rand version conflict
+[33mcc071f1[m fix: Align candle-core version to resolve rand dependency conflict
+[33m0fefedf[m fix: Pin half crate to v2.3 to resolve rand version conflict
+[33m5a01986[m Fix CI failures: resolve rand version conflicts and formatting issues
+[33m40e2c2c[m fix: update rand imports in tests/mod.rs for rand 0.8 compatibility
+[33mb6fdf5b[m fix(examples): update rand usage to thread_rng / gen for Rand 0.8
+[33m3de3b31[m Fix remaining formatting issues, add type annotations for legacy prims, and resolve CI failures
+[33mc6b06a2[m tried to update cuda version, still failing on lambda
+[33m3e187e4[m Restructure autograd differentiation with match for legacy_prims gating
+[33m7319775[m Fix missing vars, format; legacy_prims gating stable
+[33ma1e752d[m Merge pull request #129 from above-avg/patch-1
+[33m8862e25[m Fix broken PyTorch Dynamo documentation link
+[33m3e566a2[m Merge pull request #128 from MilkBlock/fix-colored-string-panic
+[33m8831676[m Update README.md
+[33mba692ec[m fix panic when printing emoji
+[33meff6a67[m[33m ([m[1;32mmain[m[33m)[m website change
