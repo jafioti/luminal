@@ -83,7 +83,10 @@ fn main() {
     )
     .unwrap();
     println!("Codegen: {}ms", now.elapsed().as_millis());
-    // luminal_2::utils::display_graph(&kernels, &[]);
+    let now = std::time::Instant::now();
+    let compiled_kernels = compile_kernels(&kernels);
+    let (int_buffers, int_buffer_map) = assign_buffers(&kernels);
+    println!("Compile: {}ms", now.elapsed().as_millis());
 
     // Set up inputs
     let ctx = cudarc::driver::CudaContext::new(0).unwrap();
@@ -124,10 +127,6 @@ fn main() {
     }
 
     // Run prompt processing pass
-    let now = std::time::Instant::now();
-    let compiled_kernels = compile_kernels(&kernels);
-    let (int_buffers, int_buffer_map) = assign_buffers(&kernels);
-    println!("Compile: {}ms", now.elapsed().as_millis());
     let (outputs, _) = run_graph(
         &mut inps,
         &kernels,

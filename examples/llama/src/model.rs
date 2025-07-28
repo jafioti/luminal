@@ -26,9 +26,9 @@ impl Module<GraphTensor> for Mlp {
     type Output = GraphTensor;
 
     fn forward(&self, input: GraphTensor) -> Self::Output {
-        let gate = self.gate_proj.forward(input).swish();
-        let up = self.up_proj.forward(input) * gate;
-        self.down_proj.forward(up)
+        let up = bmm_col_major_b(input, self.up_proj.weight)
+            * bmm_col_major_b(input, self.gate_proj.weight).swish();
+        bmm_col_major_b(up, self.down_proj.weight)
     }
 }
 
@@ -86,18 +86,15 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         let (_, _kv_heads, prev_seq, _head_dim) = k_cache.dims4();
 
         // Apply the Projections
-        let queries = x
-            .matmul(self.q_proj.permute((1, 0)))
+        let queries = bmm_col_major_b(x, self.q_proj)
             .reshape((batch, seq, N_HEADS, HEAD_DIM))
             .permute((0, 2, 1, 3));
 
-        let keys = x
-            .matmul(self.k_proj.permute((1, 0)))
+        let keys = bmm_col_major_b(x, self.k_proj)
             .reshape((batch, seq, N_KV_HEADS, HEAD_DIM))
             .permute((0, 2, 1, 3));
 
-        let values = x
-            .matmul(self.v_proj.permute((1, 0)))
+        let values = bmm_col_major_b(x, self.v_proj)
             .reshape((batch, seq, N_KV_HEADS, HEAD_DIM))
             .permute((0, 2, 1, 3));
 
@@ -133,9 +130,9 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
             .matmul(repeated_values)
             // Merge heads
             .permute((0, 3, 1, 2, 4))
-            .reshape((batch, seq, HIDDEN_DIM))
-            // Apply output projection
-            .matmul(self.o_proj.permute((1, 0)));
+            .reshape((batch, seq, HIDDEN_DIM));
+        // Apply output projection
+        let output = bmm_col_major_b(output, self.o_proj);
         (output, (keys, values))
     }
 }
@@ -267,25 +264,30 @@ extern \"C\" __global__ void kernel_name(const float *inp, const float *weights,
             &[x, self.head_proj.weight],
             Kernel {
                 code: format!(
-                    "extern \"C\" __global__ void kernel_name(
-                    	const float* A,
-                        const float* B,
-                        float* C, const size_t const_p, const size_t const_s)
-                    {{
-                        int m = blockIdx.y;
-                        int n = blockIdx.x * blockDim.x + threadIdx.x;
-                        const float* a = A + m * {HIDDEN_DIM};
-                        const float* b = B + n * {HIDDEN_DIM};
-                        float acc = 0.f;
-                        for (int k = 0; k < {HIDDEN_DIM}; ++k) {{
-                        	acc += a[k] * b[k];
-                        }}
+                    "
+extern \"C\" __global__ void kernel_name(
+   	const float* A,
+    const float* B,
+    float* C,
+    const size_t const_p,
+    const size_t const_s
+)
+{{
+    int m = blockIdx.y;
+    int n = blockIdx.x * blockDim.x + threadIdx.x;
+    const float* a = A + m * {HIDDEN_DIM};
+    const float* b = B + n * {HIDDEN_DIM};
+    float acc = 0.f;
+    for (int k = 0; k < {HIDDEN_DIM}; ++k) {{
+       	acc += a[k] * b[k];
+    }}
 
-                        C[m * {VOCAB_SIZE} + n] = acc;
-                    }}"
+    C[m * {VOCAB_SIZE} + n] = acc;
+}}
+"
                 ),
-                grid: ((VOCAB_SIZE / 32).into(), sequence_length, 1.into()),
-                threadblock: (32.into(), 1.into(), 1.into()),
+                grid: ((VOCAB_SIZE / 64).into(), sequence_length, 1.into()),
+                threadblock: (64.into(), 1.into(), 1.into()),
                 smem: 0.into(),
                 outputs: vec![sequence_length * VOCAB_SIZE],
             },
@@ -318,4 +320,93 @@ impl SerializeModule for Llama {
             s.module(&format!("blk/{i}"), layer);
         }
     }
+}
+
+fn bmm_col_major_b(a: GraphTensor, b: GraphTensor) -> GraphTensor {
+    let (batch, m, k) = a.dims3();
+    let (n, _) = b.dims2();
+    let (m, n, k) = (m.to_kernel(), n.to_kernel(), k.to_kernel());
+    let [out] = custom_kernel(
+        &[a, b],
+        Kernel {
+            code: format!(
+                "
+// C[m,n] = sum_k A[m,k] * B[n,k]
+// A: [M,K] row-major, B: [N,K] row-major, C: [M,N] row-major
+__inline__ __device__ float warp_sum(float v, unsigned mask){{
+    for (int o = 16; o > 0; o >>= 1) v += __shfl_down_sync(mask, v, o);
+    return v;
+}}
+
+extern \"C\" __global__ void kernel_name(
+    const float* __restrict__ A,
+    const float* __restrict__ B,
+    float* __restrict__ C,
+    const size_t const_p,
+    const size_t const_s)
+{{
+    const int n = blockIdx.x;                 // one output column per block
+    if (n >= {n}) return;
+
+    const int TM = 8;                         // rows per tile (tune: 8 or 16)
+    const int tid = threadIdx.x;
+    const int lane = tid & 31;
+    const int wid  = tid >> 5;
+    const int nwarps = (blockDim.x + 31) >> 5;
+    const unsigned fullmask = __activemask();
+
+    extern __shared__ float s[];              // size = TM * nwarps floats
+    float* warpbuf = s;
+
+    for (int m0 = 0; m0 < {m}; m0 += TM) {{
+        const int Me = min((int)TM, (int)({m} - m0));
+
+        // Register accumulators for a tile of rows
+        float acc[8];                         // TM=8
+        #pragma unroll
+        for (int i = 0; i < 8; ++i) acc[i] = 0.f;
+
+        // Stride over K
+        for (int k = tid; k < {k}; k += blockDim.x) {{
+            const float x = B[n * {k} + k];     // B[n,k]
+            #pragma unroll
+            for (int i = 0; i < 8; ++i) {{
+                if (i < Me)
+                    acc[i] += A[(m0 + i) * {k} + k] * x;
+            }}
+        }}
+
+        // Reduce within each warp, per row in the tile
+        #pragma unroll
+        for (int i = 0; i < 8; ++i) {{
+            float v = (i < Me) ? acc[i] : 0.f;
+            v = warp_sum(v, fullmask);
+            if (lane == 0 && i < Me) warpbuf[i * nwarps + wid] = v;
+        }}
+        __syncthreads();
+
+        // First warp reduces across warps and writes results
+        if (wid == 0) {{
+            #pragma unroll
+            for (int i = 0; i < 8; ++i) {{
+                if (i >= Me) break;
+                float v = (lane < nwarps) ? warpbuf[i * nwarps + lane] : 0.f;
+                v = warp_sum(v, 0xffffffff);
+                if (lane == 0) C[(m0 + i) * {n} + n] = v;
+            }}
+        }}
+        __syncthreads();
+    }}
+}}
+   "
+            ),
+            grid: (b.dims()[0], 1.into(), 1.into()),
+            threadblock: (256.into(), 1.into(), 1.into()),
+            smem: (8 * ((256 + 31) / 32) * size_of::<f32>()).into(),
+            outputs: vec![batch * a.dims()[1] * b.dims()[0]],
+        },
+        [(batch, a.dims()[1], b.dims()[0])],
+        a.graph(),
+    );
+    out
 }
