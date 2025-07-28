@@ -87,9 +87,14 @@ impl Mul for GraphTensor {
             "Dims must match to multiply tensors."
         );
 
-        // For now, just use log2/exp2 for positive numbers
-        // TODO: Add proper handling for negative numbers
-        (self.log2() + rhs.log2()).exp2()
+        // Use the Mul primitive directly to avoid circular dependency
+        let new_id = self
+            .graph()
+            .add_op(op::Mul)
+            .input(self.id, 0, self.shape)
+            .input(rhs.id, 0, rhs.shape)
+            .finish();
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 }
 
@@ -118,9 +123,14 @@ impl Div<GraphTensor> for GraphTensor {
             "Dims must match to divide tensors."
         );
 
-        // For now, just use log2/exp2 for positive numbers
-        // TODO: Add proper handling for negative numbers
-        (self.log2() - rhs.log2()).exp2()
+        // Use the Div primitive directly to avoid circular dependency
+        let new_id = self
+            .graph()
+            .add_op(op::Div)
+            .input(self.id, 0, self.shape)
+            .input(rhs.id, 0, rhs.shape)
+            .finish();
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 }
 
@@ -263,23 +273,58 @@ impl GraphTensor {
     }
 
     pub fn gt(self, rhs: GraphTensor) -> GraphTensor {
-        rhs.lt(self)
+        assert_eq!(self.dims(), rhs.dims(), "Dims must match to gt tensors.");
+        let new_id = self
+            .graph()
+            .add_op(op::GreaterThan)
+            .input(self.id, 0, self.shape)
+            .input(rhs.id, 0, rhs.shape)
+            .finish();
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 
     pub fn le(self, rhs: GraphTensor) -> GraphTensor {
-        -self.gt(rhs) + 1.0
+        assert_eq!(self.dims(), rhs.dims(), "Dims must match to le tensors.");
+        let new_id = self
+            .graph()
+            .add_op(op::LessEqual)
+            .input(self.id, 0, self.shape)
+            .input(rhs.id, 0, rhs.shape)
+            .finish();
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 
     pub fn ge(self, rhs: GraphTensor) -> GraphTensor {
-        -self.lt(rhs) + 1.0
+        assert_eq!(self.dims(), rhs.dims(), "Dims must match to ge tensors.");
+        let new_id = self
+            .graph()
+            .add_op(op::GreaterEqual)
+            .input(self.id, 0, self.shape)
+            .input(rhs.id, 0, rhs.shape)
+            .finish();
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 
     pub fn ne(self, rhs: GraphTensor) -> GraphTensor {
-        self.lt(rhs) + self.gt(rhs)
+        assert_eq!(self.dims(), rhs.dims(), "Dims must match to ne tensors.");
+        let new_id = self
+            .graph()
+            .add_op(op::NotEqual)
+            .input(self.id, 0, self.shape)
+            .input(rhs.id, 0, rhs.shape)
+            .finish();
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 
     pub fn eq(self, rhs: GraphTensor) -> GraphTensor {
-        -self.ne(rhs) + 1.0
+        assert_eq!(self.dims(), rhs.dims(), "Dims must match to eq tensors.");
+        let new_id = self
+            .graph()
+            .add_op(op::Equal)
+            .input(self.id, 0, self.shape)
+            .input(rhs.id, 0, rhs.shape)
+            .finish();
+        GraphTensor::from_id(new_id, self.shape.contiguous(), self.graph_ref)
     }
 
     /// Raise the tensor to a power
@@ -306,12 +351,12 @@ impl GraphTensor {
 
     /// Take the elementwise minimum of two tensors
     pub fn minimum(self, rhs: GraphTensor) -> GraphTensor {
-        -(-self).maximum(-rhs)
+        (self.gt(rhs) * rhs) + (rhs.ge(self) * self)
     }
 
     /// Take the elementwise minimum of a tensor and a float
     pub fn minimum_f32(self, rhs: f32) -> GraphTensor {
-        -(-self).maximum_f32(-rhs)
+        self.minimum(self.graph().constant(rhs).expand(self.shape))
     }
 
     /// Clip (clamp) a tensor into the range [`min`, `max`]
@@ -341,11 +386,11 @@ mod tests {
         let mut cx = Graph::new();
         let a = cx
             .tensor((3, 2))
-            .set([[[-1.0], [-2.0], [3.0]], [[-1.5], [0.0], [5.0]]]);
+            .set([[-1.0, -2.0], [3.0, -1.5], [0.0, 5.0]]);
         let result = a.clip(-1.5, 3.4).retrieve();
         let expected_result = cx
             .tensor((3, 2))
-            .set([[[-1.0], [-1.5], [3.0]], [[-1.5], [0.0], [3.4]]])
+            .set([[-1.0, -1.5], [3.0, -1.5], [0.0, 3.4]])
             .retrieve();
         cx.execute();
 

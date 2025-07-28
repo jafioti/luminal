@@ -222,7 +222,9 @@ impl Operator for Log2 {
         let expr = (inp[0].1.index_expression(), inp[0].1.valid_expression());
         let mut stack = vec![];
         for (i, out) in out_data.iter_mut().enumerate() {
-            *out = get_index(inp_data, &expr, &mut stack, i).log2();
+            let val = get_index(inp_data, &expr, &mut stack, i);
+            let safe_val = if val <= 0.0 { 1e-12 } else { val };
+            *out = safe_val.log2();
         }
         vec![Tensor::new(out_data)]
     }
@@ -331,13 +333,15 @@ pub struct Mul;
 #[cfg(feature = "legacy_prims")]
 impl Operator for Mul {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
-        vec![Tensor::new(
-            get_vec(&inp[0].0)
-                .iter()
-                .zip(get_vec(&inp[1].0).iter())
-                .map(|(&a, &b)| a * b)
-                .collect::<Vec<_>>(),
-        )]
+        let (lhs, rhs) = (get_vec(&inp[0].0), get_vec(&inp[1].0));
+        let mut out_data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
+        let lexpr = (inp[0].1.index_expression(), inp[0].1.valid_expression());
+        let rexpr = (inp[1].1.index_expression(), inp[1].1.valid_expression());
+        let mut stack = vec![];
+        for (i, out) in out_data.iter_mut().enumerate() {
+            *out = get_index(lhs, &lexpr, &mut stack, i) * get_index(rhs, &rexpr, &mut stack, i);
+        }
+        vec![Tensor::new(out_data)]
     }
 }
 
@@ -358,6 +362,27 @@ impl Operator for Mod {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
+pub struct Div;
+impl Operator for Div {
+    fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let (lhs, rhs) = (get_vec(&inp[0].0), get_vec(&inp[1].0));
+        let mut out_data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
+        let lexpr = (inp[0].1.index_expression(), inp[0].1.valid_expression());
+        let rexpr = (inp[1].1.index_expression(), inp[1].1.valid_expression());
+        let mut stack = vec![];
+        for (i, out) in out_data.iter_mut().enumerate() {
+            let rhs_val = get_index(rhs, &rexpr, &mut stack, i);
+            *out = if rhs_val != 0.0 {
+                get_index(lhs, &lexpr, &mut stack, i) / rhs_val
+            } else {
+                0.0 // Handle division by zero
+            };
+        }
+        vec![Tensor::new(out_data)]
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct LessThan;
 impl Operator for LessThan {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
@@ -368,6 +393,91 @@ impl Operator for LessThan {
         let mut stack = vec![];
         for (i, out) in out_data.iter_mut().enumerate() {
             *out = (get_index(lhs, &lexpr, &mut stack, i) < get_index(rhs, &rexpr, &mut stack, i))
+                as i32 as f32;
+        }
+        vec![Tensor::new(out_data)]
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GreaterThan;
+impl Operator for GreaterThan {
+    fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let (lhs, rhs) = (get_vec(&inp[0].0), get_vec(&inp[1].0));
+        let mut out_data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
+        let lexpr = (inp[0].1.index_expression(), inp[0].1.valid_expression());
+        let rexpr = (inp[1].1.index_expression(), inp[1].1.valid_expression());
+        let mut stack = vec![];
+        for (i, out) in out_data.iter_mut().enumerate() {
+            *out = (get_index(lhs, &lexpr, &mut stack, i) > get_index(rhs, &rexpr, &mut stack, i))
+                as i32 as f32;
+        }
+        vec![Tensor::new(out_data)]
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LessEqual;
+impl Operator for LessEqual {
+    fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let (lhs, rhs) = (get_vec(&inp[0].0), get_vec(&inp[1].0));
+        let mut out_data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
+        let lexpr = (inp[0].1.index_expression(), inp[0].1.valid_expression());
+        let rexpr = (inp[1].1.index_expression(), inp[1].1.valid_expression());
+        let mut stack = vec![];
+        for (i, out) in out_data.iter_mut().enumerate() {
+            *out = (get_index(lhs, &lexpr, &mut stack, i) <= get_index(rhs, &rexpr, &mut stack, i))
+                as i32 as f32;
+        }
+        vec![Tensor::new(out_data)]
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GreaterEqual;
+impl Operator for GreaterEqual {
+    fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let (lhs, rhs) = (get_vec(&inp[0].0), get_vec(&inp[1].0));
+        let mut out_data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
+        let lexpr = (inp[0].1.index_expression(), inp[0].1.valid_expression());
+        let rexpr = (inp[1].1.index_expression(), inp[1].1.valid_expression());
+        let mut stack = vec![];
+        for (i, out) in out_data.iter_mut().enumerate() {
+            *out = (get_index(lhs, &lexpr, &mut stack, i) >= get_index(rhs, &rexpr, &mut stack, i))
+                as i32 as f32;
+        }
+        vec![Tensor::new(out_data)]
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Equal;
+impl Operator for Equal {
+    fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let (lhs, rhs) = (get_vec(&inp[0].0), get_vec(&inp[1].0));
+        let mut out_data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
+        let lexpr = (inp[0].1.index_expression(), inp[0].1.valid_expression());
+        let rexpr = (inp[1].1.index_expression(), inp[1].1.valid_expression());
+        let mut stack = vec![];
+        for (i, out) in out_data.iter_mut().enumerate() {
+            *out = (get_index(lhs, &lexpr, &mut stack, i) == get_index(rhs, &rexpr, &mut stack, i))
+                as i32 as f32;
+        }
+        vec![Tensor::new(out_data)]
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NotEqual;
+impl Operator for NotEqual {
+    fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        let (lhs, rhs) = (get_vec(&inp[0].0), get_vec(&inp[1].0));
+        let mut out_data = vec![0.; inp[0].1.n_elements().to_usize().unwrap()];
+        let lexpr = (inp[0].1.index_expression(), inp[0].1.valid_expression());
+        let rexpr = (inp[1].1.index_expression(), inp[1].1.valid_expression());
+        let mut stack = vec![];
+        for (i, out) in out_data.iter_mut().enumerate() {
+            *out = (get_index(lhs, &lexpr, &mut stack, i) != get_index(rhs, &rexpr, &mut stack, i))
                 as i32 as f32;
         }
         vec![Tensor::new(out_data)]
