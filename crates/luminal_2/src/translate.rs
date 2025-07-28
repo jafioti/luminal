@@ -5,7 +5,7 @@ use luminal::prelude::{
 use rustc_hash::FxHashMap;
 
 use crate::{
-    CompatKernel, Diff, GraphTerm, Kernel,
+    CompatKernel, Diff, GraphTerm,
     codegen::{GRID_DIMS, THREADBLOCK_DIMS},
     utils::{loop_in, loop_out},
 };

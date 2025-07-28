@@ -17,6 +17,7 @@ use luminal::{
     shape::Expression,
 };
 use regex::Regex;
+use rustc_hash::FxHashSet;
 
 pub fn unary(
     a: NodeIndex,
@@ -221,6 +222,12 @@ impl TermToString for (GraphTerm, usize) {
 }
 
 impl TermToString for (GraphTerm, Vec<Expression>, Vec<usize>) {
+    fn term_to_string(&self) -> String {
+        format!("{} {:?} {{{:?}}}", self.0.term_to_string(), self.1, self.2)
+    }
+}
+
+impl TermToString for (GraphTerm, Vec<Expression>, FxHashSet<usize>) {
     fn term_to_string(&self) -> String {
         format!("{} {:?} {{{:?}}}", self.0.term_to_string(), self.1, self.2)
     }

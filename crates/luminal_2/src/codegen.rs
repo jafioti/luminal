@@ -923,11 +923,12 @@ fn split_kernels(
     // Add nodes
     let chosen_root = outputs[0];
     for node in graph.node_indices().sorted() {
-        let new_node = marked_graph.add_node((
-            graph.node_weight(node).unwrap().clone(),
-            vec![],
-            if node == chosen_root { vec![0] } else { vec![] },
-        ));
+        let mut levels = FxHashSet::default();
+        if node == chosen_root {
+            levels.insert(0);
+        }
+        let new_node =
+            marked_graph.add_node((graph.node_weight(node).unwrap().clone(), vec![], levels));
         map.insert(node, new_node);
     }
     let outputs = outputs.into_iter().map(|n| map[&n]).collect_vec();
@@ -983,19 +984,15 @@ fn split_kernels(
         }
         dfs.extend(marked_graph.neighbors_undirected(n));
     }
-
     // Assign kernel numbers
-    let mut dfs_stack = vec![chosen_root];
     let mut n_kernels = 1;
-    let mut seen = FxHashSet::default();
-    while let Some(node) = dfs_stack.pop() {
+    for node in toposort(&marked_graph, None).unwrap().into_iter().rev() {
         let (term, curr_level, curr_kernel) = marked_graph.node_weight(node).unwrap().clone();
         for source in marked_graph
             .neighbors_directed(node, Direction::Incoming)
             .collect_vec()
         {
             let (src_term, _, src_kernel) = marked_graph.node_weight_mut(source).unwrap();
-            let mut changed = false;
             if (matches!(term, GraphTerm::LoopIn { .. })
                 && matches!(src_term, GraphTerm::LoopOut { .. })
                 && curr_level.len() < GRID_DIMS + THREADBLOCK_DIMS)
@@ -1012,31 +1009,19 @@ fn split_kernels(
                         .unwrap()
                         .max(*src_kernel.iter().max().unwrap_or(&0));
                     n_kernels = n_kernels.max(max_kernel + 2);
-                    *src_kernel = vec![max_kernel + 1];
-                    changed = true;
+                    src_kernel.clear();
+                    src_kernel.insert(max_kernel + 1);
                 }
             } else {
                 for k in &curr_kernel {
                     if !src_kernel.contains(k) {
-                        src_kernel.push(*k);
-                        changed = true;
+                        src_kernel.insert(*k);
                     }
                 }
             }
-            // if !matches!(term, GraphTerm::LoopIn { .. } | GraphTerm::LoopOut { .. })
-            //     && !matches!(
-            //         src_term,
-            //         GraphTerm::LoopIn { .. } | GraphTerm::LoopOut { .. }
-            //     )
-            // {
-            //     assert_eq!(curr_level, *src_level); // Edges need to go between the same levels if neither op is a LoopIn or LoopOut
-            // }
-            if changed || !seen.contains(&source) {
-                dfs_stack.push(source);
-                seen.insert(source);
-            }
         }
     }
+
     // Prune out unnessecary kernel members
     let mut seen = FxHashSet::default();
     let mut dfs_stack = marked_graph
@@ -1117,7 +1102,7 @@ fn split_kernels(
                 for v in comp {
                     let kernels = &mut marked_graph.node_weight_mut(v).unwrap().2;
                     kernels.retain(|id| *id != k);
-                    kernels.push(new_k);
+                    kernels.insert(new_k);
                 }
             }
         }
@@ -1134,16 +1119,16 @@ fn split_kernels(
         }
         if !seen {
             for (_, _, kernels) in marked_graph.node_weights_mut() {
-                for k in kernels {
+                for k in kernels.clone().iter() {
                     if *k > kernel {
-                        *k -= 1;
+                        kernels.remove(k);
+                        kernels.insert(*k - 1);
                     }
                 }
             }
             n_kernels -= 1;
         }
     }
-
     // Add kernel barriers
     for edge in marked_graph.edge_indices().collect_vec() {
         let (mut src, mut dest) = marked_graph.edge_endpoints(edge).unwrap();
@@ -1252,7 +1237,7 @@ fn split_kernels(
         for end_kernel in end_kernels {
             if !start_kernels.contains(end_kernel) {
                 // start kernel must be outputted
-                let start_kernel = start_kernels.first().unwrap();
+                let start_kernel = start_kernels.iter().sorted().next().unwrap();
                 // Start and end are in different kernels
                 let src_kernel_node = node_maps[*start_kernel][&start];
                 let dest_kernel_node = node_maps[*end_kernel][&end];
