@@ -1,6 +1,6 @@
 use luminal::prelude::{binary::F32Pow, *};
-use luminal_2::{custom_kernel, GTDiff, Kernel};
-use luminal_nn::{Embedding, LayerNorm, Linear};
+use luminal_2::{custom_kernel, Kernel};
+use luminal_nn::{LayerNorm, Linear};
 
 // Llama3 8B Config
 pub const VOCAB_SIZE: usize = 128256;
@@ -79,9 +79,9 @@ pub struct SelfAttention {
     pub o_proj: GraphTensor, // Hidden -> hidden
 }
 
-impl Module<(GraphTensor, KVCache, usize)> for SelfAttention {
+impl Module<(GraphTensor, KVCache)> for SelfAttention {
     type Output = (GraphTensor, KVCache);
-    fn forward(&self, (x, (k_cache, v_cache), i): (GraphTensor, KVCache, usize)) -> Self::Output {
+    fn forward(&self, (x, (k_cache, v_cache)): (GraphTensor, KVCache)) -> Self::Output {
         let (batch, seq, _hidden) = x.dims3();
         let (_, _kv_heads, prev_seq, _head_dim) = k_cache.dims4();
 
@@ -167,13 +167,13 @@ pub struct TransformerBlock {
     pub feed_forward_norm: LayerNorm,
 }
 
-impl Module<(GraphTensor, KVCache, usize)> for TransformerBlock {
+impl Module<(GraphTensor, KVCache)> for TransformerBlock {
     type Output = (GraphTensor, KVCache);
-    fn forward(&self, (mut x, cache, i): (GraphTensor, KVCache, usize)) -> Self::Output {
+    fn forward(&self, (mut x, cache): (GraphTensor, KVCache)) -> Self::Output {
         // Attention
         let (y, cache) = self
             .attention
-            .forward((self.attention_norm.forward(x), cache, i));
+            .forward((self.attention_norm.forward(x), cache));
 
         // Residual
         x += y;
@@ -213,7 +213,8 @@ pub struct Llama {
     // Transformer layers
     pub layers: Vec<TransformerBlock>,
     // Norm + LM head
-    pub head: (LayerNorm, Linear),
+    pub head_norm: LayerNorm,
+    pub head_proj: Linear,
 }
 
 impl Module<(GraphTensor, &[KVCache])> for Llama {
@@ -251,17 +252,47 @@ extern \"C\" __global__ void kernel_name(const float *inp, const float *weights,
             [(batch, sequence_length, HIDDEN_DIM)],
             input.graph(),
         );
-        // x = x.diff2("x");
-        // let mut x = self.embedding.forward(input);
+
         // Run through layers and collect new caches
         let mut new_caches = vec![];
         let mut new_cache;
-        for (i, (layer, cache)) in self.layers.iter().zip(cache).enumerate() {
-            (x, new_cache) = layer.forward((x, *cache, i));
+        for (layer, cache) in self.layers.iter().zip(cache) {
+            (x, new_cache) = layer.forward((x, *cache));
             new_caches.push(new_cache);
         }
+
         // Run through last norm and output projection
-        (self.head.forward(x), new_caches)
+        x = self.head_norm.forward(x);
+        [x] = custom_kernel(
+            &[x, self.head_proj.weight],
+            Kernel {
+                code: format!(
+                    "extern \"C\" __global__ void kernel_name(
+                        const float* B,
+                        const float* A,
+                        float* C, const size_t const_p, const size_t const_s)
+                    {{
+                        int m = blockIdx.y;
+                        int n = blockIdx.x;
+                        const float* a = A + m * {HIDDEN_DIM};
+                        const float* b = B + n * {HIDDEN_DIM};
+                        float acc = 0.f;
+                        for (int k = 0; k < {HIDDEN_DIM}; ++k) {{
+                        	acc += a[k] * b[k];
+                        }}
+
+                        C[m * {VOCAB_SIZE} + n] = acc;
+                    }}"
+                ),
+                grid: (VOCAB_SIZE.into(), sequence_length, 1.into()),
+                threadblock: (1.into(), 1.into(), 1.into()),
+                smem: 0.into(),
+                outputs: vec![sequence_length * VOCAB_SIZE],
+            },
+            [(batch, sequence_length, VOCAB_SIZE)],
+            input.graph(),
+        );
+        (x, new_caches)
     }
 }
 
@@ -270,10 +301,8 @@ impl Llama {
         Self {
             // embedding: Embedding::new(VOCAB_SIZE, HIDDEN_DIM, cx),
             embedding: cx.tensor((VOCAB_SIZE, HIDDEN_DIM)),
-            head: (
-                LayerNorm::new(HIDDEN_DIM, true, false, false, 1e-5, cx),
-                Linear::new_permuted(HIDDEN_DIM, VOCAB_SIZE, false, cx),
-            ),
+            head_norm: LayerNorm::new(HIDDEN_DIM, true, false, false, 1e-5, cx),
+            head_proj: Linear::new_permuted(HIDDEN_DIM, VOCAB_SIZE, false, cx),
             layers: (0..NUM_LAYERS).map(|_| TransformerBlock::new(cx)).collect(),
         }
     }
@@ -283,8 +312,8 @@ impl SerializeModule for Llama {
     fn serialize(&self, s: &mut Serializer) {
         // s.module("token_embd", &self.embedding);
         s.tensor("token_embd/weight", self.embedding);
-        s.module("output_norm", &self.head.0);
-        s.module("output", &self.head.1);
+        s.module("output_norm", &self.head_norm);
+        s.module("output", &self.head_proj);
         for (i, layer) in self.layers.iter().enumerate() {
             s.module(&format!("blk/{i}"), layer);
         }

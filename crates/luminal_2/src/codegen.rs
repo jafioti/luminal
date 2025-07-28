@@ -989,6 +989,8 @@ fn split_kernels(
                 && curr_level.len() < GRID_DIMS + THREADBLOCK_DIMS)
                 || matches!(src_term, GraphTerm::Custom(_) | GraphTerm::Diff(_))
                 || matches!(term, GraphTerm::Diff(_))
+                || (matches!(term, GraphTerm::Custom(_))
+                    && !matches!(src_term, GraphTerm::GMEM { .. }))
             {
                 let min_src = *src_kernel.iter().min().unwrap_or(&0);
                 let max_curr = *curr_kernel.iter().max().unwrap_or(&0);

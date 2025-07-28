@@ -185,11 +185,12 @@ impl Operator for Diff {
     }
 }
 
-pub trait GTDiff {
+pub trait GT2 {
     fn diff2(self, name: impl ToString) -> Self;
+    fn graph_break(self) -> Self;
 }
 
-impl GTDiff for GraphTensor {
+impl GT2 for GraphTensor {
     fn diff2(mut self, name: impl ToString) -> Self {
         if !self.shape.is_contiguous() {
             self = self.contiguous();
@@ -202,5 +203,26 @@ impl GTDiff for GraphTensor {
             .input(self.id, 0, self.shape)
             .finish();
         GraphTensor::from_id(id, self.shape, self.graph_ref)
+    }
+
+    fn graph_break(mut self) -> Self {
+        if !self.shape.is_contiguous() {
+            self = self.contiguous();
+        }
+        let id = self
+            .graph()
+            .add_op(GraphBreak)
+            .input(self.id, 0, self.shape)
+            .finish();
+        GraphTensor::from_id(id, self.shape, self.graph_ref)
+    }
+}
+
+#[derive(Debug)]
+pub struct GraphBreak;
+
+impl Operator for GraphBreak {
+    fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        inp.into_iter().map(|i| i.0.cloned()).collect()
     }
 }

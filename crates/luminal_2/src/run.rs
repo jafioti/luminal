@@ -1,7 +1,7 @@
 use std::{fs::File, io::Read};
 
 use cudarc::{
-    driver::{CudaFunction, CudaSlice, LaunchConfig, PushKernelArg},
+    driver::{CudaFunction, CudaSlice, DeviceSlice, LaunchConfig, PushKernelArg},
     nvrtc::CompileOptions,
 };
 use itertools::Itertools;
@@ -234,11 +234,14 @@ pub fn run_graph(
                 tb.0 * tb.1 * tb.2 <= 1024,
                 "threadblock is too big: {tb:?} > 1024"
             );
+            assert!(grid.1 <= 65535, "grid.y > 65535");
+            assert!(grid.2 <= 65535, "grid.z > 65535");
+            assert!(grid.0 <= 2147483647, "grid.x > 2147483647");
             let now = std::time::Instant::now();
             unsafe {
                 builder.launch(LaunchConfig {
-                    grid_dim: (grid.0, grid.1, grid.2),
-                    block_dim: (tb.0, tb.1, tb.2),
+                    grid_dim: grid,
+                    block_dim: tb,
                     shared_mem_bytes: kernel.smem.exec(dyn_vars).unwrap() as u32,
                 })
             }
