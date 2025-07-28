@@ -1,8 +1,12 @@
+use std::io::Bytes;
+
 use axum::{
     Router,
-    response::{Html, Redirect},
+    http::header,
+    response::{Html, IntoResponse, Redirect},
     routing::get,
 };
+use tower_http::services::ServeFile;
 
 async fn index() -> Html<String> {
     Html(include_str!("../static/index.html").to_string())
@@ -22,7 +26,8 @@ async fn main() {
     let app = Router::new()
         .route("/", get(index))
         .route("/intro_quiz", get(intro_quiz))
-        .route("/docs/introduction", get(redirect));
+        .route("/docs/introduction", get(redirect))
+        .route_service("/favicon.ico", ServeFile::new("../images/favicon.ico"));
 
     println!("Running on port 3000...");
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
