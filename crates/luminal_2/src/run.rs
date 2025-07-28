@@ -12,13 +12,79 @@ use itertools::Itertools;
 use luminal::{
     prelude::{
         NodeIndex,
-        petgraph::{Direction, algo::toposort, prelude::StableGraph, visit::EdgeRef},
+        petgraph::{
+            Direction,
+            algo::toposort,
+            prelude::StableGraph,
+            visit::{EdgeRef, IntoEdgeReferences},
+        },
     },
     shape::Expression,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::Kernel;
+
+pub fn assign_buffers(
+    graph: &StableGraph<Kernel, (usize, usize)>,
+) -> (Vec<Expression>, HashMap<NodeIndex, Vec<usize>>) {
+    // Count consumers only for producer outputs we manage (exclude "Inputs")
+    let mut use_count: HashMap<(NodeIndex, usize), usize> = HashMap::new();
+    for e in graph.edge_references() {
+        let src = e.source();
+        if graph[src].code != "Inputs" {
+            let (src_out, _) = *e.weight();
+            *use_count.entry((src, src_out)).or_default() += 1;
+        }
+    }
+
+    let mut master = vec![]; // capacities by global buffer index
+    let mut buf_map = HashMap::new(); // node -> output_idx -> buffer_idx
+    let mut free_by_cap = HashMap::<Expression, Vec<usize>>::new(); // exact-size reuse
+
+    for node in toposort(graph, None).unwrap() {
+        let k = &graph[node];
+        if k.code == "Inputs" {
+            continue; // user-provided; ignore
+        }
+
+        // Allocate exact-size buffers for this node's outputs
+        let mut outs = vec![];
+        for &cap in &k.outputs {
+            let buf_idx = if let Some(idx) = free_by_cap.get_mut(&cap).map(|l| l.pop()).flatten() {
+                // reuse
+                idx
+            } else {
+                // allocate new buffer
+                master.push(cap);
+                master.len() - 1
+            };
+            outs.push(buf_idx);
+        }
+        buf_map.insert(node, outs);
+
+        // Free producer buffers whose last consumer just ran (exclude "Inputs")
+        for e in graph.edges_directed(node, Direction::Incoming) {
+            let src = e.source();
+            if graph[src].code == "Inputs" {
+                continue;
+            }
+            let (src_out_idx, _) = *e.weight();
+            if let Some(c) = use_count.get_mut(&(src, src_out_idx)) {
+                *c -= 1;
+                if *c == 0 {
+                    let buf_idx = buf_map[&src][src_out_idx];
+                    free_by_cap
+                        .entry(master[buf_idx])
+                        .or_default()
+                        .push(buf_idx);
+                }
+            }
+        }
+    }
+
+    (master, buf_map)
+}
 
 pub fn compile_kernels(
     kernels: &StableGraph<Kernel, (usize, usize)>,
@@ -52,20 +118,27 @@ pub fn compile_kernels(
 }
 
 pub fn run_graph(
-    buffers: &mut HashMap<(NodeIndex, usize), (CudaSlice<f32>, bool)>,
+    inputs: &mut HashMap<usize, (CudaSlice<f32>, bool)>,
     kernels: &StableGraph<Kernel, (usize, usize)>,
     dyn_vars: &FxHashMap<char, usize>,
     compiled_kernels: &FxHashMap<String, CudaFunction>,
+    intermediate_buffers: &Vec<Expression>,
+    intermediate_buffer_map: &HashMap<NodeIndex, Vec<usize>>,
 ) -> (Vec<Vec<f32>>, u128) {
     let ctx = cudarc::driver::CudaContext::new(0).unwrap();
     let stream = ctx.default_stream();
     // Allocate buffers
-    let mut ran = FxHashSet::default();
+    let mut buffers = intermediate_buffers
+        .iter()
+        .map(|e| unsafe { stream.alloc(e.exec(dyn_vars).unwrap()).unwrap() })
+        .collect_vec();
     let mut exec_time = 0;
-    let mut mem_time = 0;
+    let input_node = kernels
+        .node_indices()
+        .find(|n| kernels[*n].code == "Inputs")
+        .unwrap();
     for node in toposort(kernels, None).unwrap() {
-        ran.insert(node);
-        let kernel = kernels.node_weight(node).unwrap();
+        let kernel = &kernels[node];
         if kernel.code == "Inputs" {
             // Inputs should already be in the buffer map
         } else if kernel.code == "Outputs" {
@@ -76,20 +149,11 @@ pub fn run_graph(
                 .edges_directed(node, Direction::Incoming)
                 .sorted_by_key(|e| e.weight().1)
                 .map(|e| {
-                    let (buffer, _) = &buffers[&(e.source(), e.weight().0)];
-                    let data: Vec<f32> = stream.memcpy_dtov(buffer).unwrap();
-                    data
+                    stream
+                        .memcpy_dtov(&buffers[intermediate_buffer_map[&e.source()][e.weight().0]])
+                        .unwrap()
                 })
                 .collect();
-            let to_remove = buffers
-                .iter()
-                .filter(|(_, (_, r))| *r)
-                .map(|(k, _)| *k)
-                .collect_vec();
-            for id in to_remove {
-                buffers.remove(&id).unwrap(); // Should we explicitly free this?
-            }
-            println!("Mem Millis: {}", mem_time / 1000);
             println!("Exec Millis: {}", exec_time / 1000);
             return (outputs, time_taken_micros);
         } else if kernel.code.starts_with("Diff") {
@@ -102,8 +166,8 @@ pub fn run_graph(
                 .map(|n| (n.source(), n.weight().0))
                 .next()
                 .unwrap();
-            let (buffer, to_remove) = buffers.remove(&(input, input_index)).unwrap();
-            let data: Vec<f32> = stream.memcpy_dtov(&buffer).unwrap();
+            let buffer = &buffers[intermediate_buffer_map[&input][input_index]];
+            let data: Vec<f32> = stream.memcpy_dtov(buffer).unwrap();
             let mut file = File::open(format!("{diff_name}.bin")).unwrap();
             let mut file_buffer = Vec::new();
             file.read_to_end(&mut file_buffer).unwrap();
@@ -116,7 +180,7 @@ pub fn run_graph(
             };
             let mut matched = true;
             println!("Diff {} | {}", data.len(), floats.len());
-            for (ind, (i, j)) in data.into_iter().zip(floats).enumerate() {
+            for (ind, (i, j)) in data.iter().zip(floats).enumerate() {
                 if (i - j).abs() > 1e-5 {
                     matched = false;
                     println!("Diff {diff_name} failed: curr: {i} != file: {j}, index {ind}");
@@ -127,7 +191,8 @@ pub fn run_graph(
             if matched {
                 println!("DIFF {diff_name} MATCHED");
             }
-            buffers.insert((node, 0), (buffer, to_remove));
+            let dest_buffer = &mut buffers[intermediate_buffer_map[&node][0]];
+            stream.memcpy_htod(&data, dest_buffer).unwrap();
         } else {
             // println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
             // println!("{}", kernel.code);
@@ -140,33 +205,17 @@ pub fn run_graph(
                 .sorted_by_key(|n| n.weight().1)
                 .map(|n| (n.source(), n.weight().0))
             {
-                if !buffers.contains_key(&(input, input_index)) {
-                    panic!(
-                        "Couldn't find buffer, possibly missing input {:?}",
-                        (input, input_index)
-                    );
+                if input == input_node {
+                    builder.arg(&inputs[&input_index].0);
+                } else {
+                    builder.arg(&buffers[intermediate_buffer_map[&input][input_index]]);
                 }
             }
-            for (input, input_index) in kernels
-                .edges_directed(node, Direction::Incoming)
-                .sorted_by_key(|n| n.weight().1)
-                .map(|n| (n.source(), n.weight().0))
-            {
-                builder.arg(&buffers[&(input, input_index)].0);
-            }
             // set output
-            let now = std::time::Instant::now();
-            let mut out = kernel
-                .outputs
-                .iter()
-                .map(|s| {
-                    stream
-                        .alloc_zeros::<f32>(s.exec(dyn_vars).unwrap())
-                        .unwrap()
-                })
+            let mut output_views = (0..kernel.outputs.len())
+                .map(|o| buffers[intermediate_buffer_map[&node][o]].as_view_mut())
                 .collect_vec();
-            mem_time += now.elapsed().as_micros();
-            for o in &mut out {
+            for o in &mut output_views {
                 builder.arg(o);
             }
             // set dynamic dimensions
@@ -199,27 +248,6 @@ pub fn run_graph(
             }
             .unwrap();
             exec_time += now.elapsed().as_micros();
-
-            // Insert outputs into buffers
-            for (i, buf) in out.into_iter().enumerate() {
-                buffers.insert((node, i), (buf, true));
-            }
-
-            // Go through inputs and free buffers that aren't going to be used again
-            for (in_node, in_ind) in kernels
-                .edges_directed(node, Direction::Incoming)
-                .map(|e| (e.source(), e.weight().0))
-            {
-                if kernels
-                    .edges_directed(in_node, Direction::Outgoing)
-                    .all(|e| e.weight().0 == in_ind && ran.contains(&e.target()))
-                {
-                    // All consumers have already ran, deallocate
-                    if let Some(_buf) = buffers.remove(&(in_node, in_ind)) {
-                        // Should we explicitly free this?
-                    }
-                }
-            }
         }
     }
     panic!("No output kernel detected in graph!");
@@ -277,7 +305,7 @@ pub fn produce_buffer_map(
     // Second pass - assign buffers
     let available_buffers = graph
         .node_indices()
-        .map(|n| (n, graph.node_weight(n).unwrap().outputs.clone()))
+        .map(|n| (n, graph[n].outputs.clone()))
         .collect::<FxHashMap<_, _>>();
     // Loop through nodes in graph
     let mut buffers = vec![];
@@ -286,7 +314,7 @@ pub fn produce_buffer_map(
     for node in &toposort {
         buffer_map.insert(*node, vec![]);
         // Assign output buffers
-        for required_buffer in &graph.node_weight(*node).unwrap().outputs {
+        for required_buffer in &graph[*node].outputs {
             // println!("required :{}", required_buffer);
             // Find an applicable buffer
             if let Some((buffer_index, source_node, _)) = first_pass[node]

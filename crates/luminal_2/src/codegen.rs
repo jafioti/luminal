@@ -29,7 +29,7 @@ pub fn codegen(
     dyn_vars: &FxHashMap<char, usize>,
 ) -> Option<(
     StableGraph<Kernel, (usize, usize), Directed>,
-    HashMap<NodeIndex, (NodeIndex, usize)>,
+    HashMap<NodeIndex, usize>,
 )> {
     let gmems = graph
         .node_weights()
@@ -50,7 +50,7 @@ pub fn codegen(
         code: "Outputs".to_string(),
         ..Default::default()
     });
-    let mut gmem_mapping: HashMap<NodeIndex, (NodeIndex, usize)> = HashMap::new();
+    let mut gmem_mapping: HashMap<NodeIndex, usize> = HashMap::new();
     for (n_kernel, (_, inputs, _, _)) in kernels.iter().enumerate() {
         for (n_input, (input_kernel, _)) in inputs.into_iter().enumerate() {
             match input_kernel {
@@ -61,9 +61,9 @@ pub fn codegen(
                 ),
                 GMEMBuffer::Input { node } => {
                     let index = if let Some(index) = gmem_mapping.get(node) {
-                        index.1
+                        *index
                     } else {
-                        gmem_mapping.insert(*node, (global_input, gmem_mapping.len()));
+                        gmem_mapping.insert(*node, gmem_mapping.len());
                         gmem_mapping.len() - 1
                     };
                     meta_graph.add_edge(global_input, NodeIndex::new(n_kernel), (index, n_input))
@@ -324,12 +324,10 @@ fn make_kernel(
 
     // Walk through the toposorted nodes
     for node in toposort_subset(kernel_graph, &include_nodes) {
-        if node_to_var.contains_key(&node)
-            || kernel_graph.node_weight(node).unwrap().1 != current_loop_level
-        {
+        if node_to_var.contains_key(&node) || kernel_graph[node].1 != current_loop_level {
             continue;
         }
-        let (term, loop_level) = kernel_graph.node_weight(node).unwrap();
+        let (term, loop_level) = &kernel_graph[node];
         match term {
             GraphTerm::LoopIn { range, stride, .. } => {
                 // go through graph to find inputs and outputs
@@ -346,16 +344,12 @@ fn make_kernel(
                         continue;
                     }
                     body_nodes.insert(n);
-                    if let (GraphTerm::LoopOut { stride, .. }, level) =
-                        &kernel_graph.node_weight(n).unwrap()
-                    {
+                    if let (GraphTerm::LoopOut { stride, .. }, level) = &kernel_graph[n] {
                         if *level == *loop_level {
                             loop_outputs.insert((n, stride));
                             continue;
                         }
-                    } else if let (GraphTerm::LoopIn { stride, .. }, level) =
-                        &kernel_graph.node_weight(n).unwrap()
-                    {
+                    } else if let (GraphTerm::LoopIn { stride, .. }, level) = &kernel_graph[n] {
                         if *level == *loop_level {
                             loop_inputs.insert((n, stride));
                             continue;
@@ -413,7 +407,7 @@ fn make_kernel(
                         let mut in_loops = vec![];
                         let mut curr = *input;
                         loop {
-                            match kernel_graph.node_weight(curr).unwrap().0 {
+                            match kernel_graph[curr].0 {
                                 GraphTerm::LoopIn { range, stride, .. } => {
                                     if !stride.is_acc() {
                                         size = size.max(stride.substitute('z', range));
@@ -448,7 +442,7 @@ fn make_kernel(
                         curr = cooresponding_output;
                         let mut out_loops = vec![];
                         loop {
-                            match kernel_graph.node_weight(curr).unwrap().0 {
+                            match kernel_graph[curr].0 {
                                 GraphTerm::LoopOut { range, stride, .. } => {
                                     if !stride.is_acc() {
                                         size = size.max(stride.substitute('z', range));
@@ -755,7 +749,7 @@ fn make_kernel(
                     else {
                         return false;
                     };
-                    match kernel_graph.node_weight(prev).unwrap().0 {
+                    match kernel_graph[prev].0 {
                         GraphTerm::LoopIn { .. } => node = prev,
                         GraphTerm::SMEM => return true,
                         _ => return false,
@@ -927,8 +921,7 @@ fn split_kernels(
         if node == chosen_root {
             levels.insert(0);
         }
-        let new_node =
-            marked_graph.add_node((graph.node_weight(node).unwrap().clone(), vec![], levels));
+        let new_node = marked_graph.add_node((graph[node].clone(), vec![], levels));
         map.insert(node, new_node);
     }
     let outputs = outputs.into_iter().map(|n| map[&n]).collect_vec();
@@ -949,14 +942,13 @@ fn split_kernels(
             continue;
         }
         seen.insert(n);
-        let curr_term = marked_graph.node_weight(n).unwrap().0.clone();
+        let curr_term = marked_graph[n].0.clone();
         if let Some(outgoing_neighbor) = marked_graph
             .neighbors_directed(n, Direction::Outgoing)
             .find(|n| seen.contains(n))
         {
             // Base level off outgoing neighbor
-            let (neighbor_weight, mut neighbor_levels, _) =
-                marked_graph.node_weight(outgoing_neighbor).unwrap().clone();
+            let (neighbor_weight, mut neighbor_levels, _) = marked_graph[outgoing_neighbor].clone();
             if let GraphTerm::LoopOut { range, .. } = neighbor_weight {
                 neighbor_levels.push(range);
             }
@@ -969,8 +961,7 @@ fn split_kernels(
             .find(|n| seen.contains(n))
         {
             // Base level off incoming neighbor
-            let (neighbor_weight, mut neighbor_levels, _) =
-                marked_graph.node_weight(incoming_neighbor).unwrap().clone();
+            let (neighbor_weight, mut neighbor_levels, _) = marked_graph[incoming_neighbor].clone();
             if let GraphTerm::LoopIn { range, .. } = neighbor_weight {
                 neighbor_levels.push(range);
             }
@@ -987,7 +978,7 @@ fn split_kernels(
     // Assign kernel numbers
     let mut n_kernels = 1;
     for node in toposort(&marked_graph, None).unwrap().into_iter().rev() {
-        let (term, curr_level, curr_kernel) = marked_graph.node_weight(node).unwrap().clone();
+        let (term, curr_level, curr_kernel) = marked_graph[node].clone();
         for source in marked_graph
             .neighbors_directed(node, Direction::Incoming)
             .collect_vec()
@@ -1036,18 +1027,14 @@ fn split_kernels(
                 || marked_graph
                     .neighbors_directed(node, Direction::Outgoing)
                     .any(|n| {
-                        ((split_cond
-                            || matches!(
-                                marked_graph.node_weight(n).unwrap().0,
-                                GraphTerm::Diff(_)
-                            ))
+                        ((split_cond || matches!(marked_graph[n].0, GraphTerm::Diff(_)))
                             && matches!(
-                                marked_graph.node_weight(n).unwrap().0,
+                                marked_graph[n].0,
                                 GraphTerm::LoopIn { .. }
                                     | GraphTerm::Diff(_)
                                     | GraphTerm::Custom(_)
                             ))
-                            || marked_graph.node_weight(n).unwrap().2.contains(k)
+                            || marked_graph[n].2.contains(k)
                     })
         });
         if marked_graph.node_weight_mut(node).unwrap().2.len() != curr_kernel.len()
@@ -1132,15 +1119,15 @@ fn split_kernels(
     // Add kernel barriers
     for edge in marked_graph.edge_indices().collect_vec() {
         let (mut src, mut dest) = marked_graph.edge_endpoints(edge).unwrap();
-        let (_, dest_level, dest_kernel) = marked_graph.node_weight(dest).unwrap().clone();
-        let (_, _, src_kernel) = marked_graph.node_weight(src).unwrap().clone();
+        let (_, dest_level, dest_kernel) = marked_graph[dest].clone();
+        let (_, _, src_kernel) = marked_graph[src].clone();
         if dest_level.len() > 0 && dest_kernel.iter().any(|i| !src_kernel.contains(i)) {
             // Put a barrier here
             // Get buffer size before this loop
             let mut curr = src;
             let mut total_size = Expression::from(0);
             loop {
-                match marked_graph.node_weight(curr).unwrap().0 {
+                match marked_graph[curr].0 {
                     GraphTerm::LoopOut { range, stride, .. } => {
                         total_size = total_size.max(stride.substitute('z', range));
                     }
@@ -1188,7 +1175,7 @@ fn split_kernels(
     let mut node_maps = (0..n_kernels).map(|_| HashMap::new()).collect_vec();
     let mut final_outputs = HashMap::new();
     for node in marked_graph.node_indices() {
-        let (term, loop_level, kernels) = marked_graph.node_weight(node).unwrap();
+        let (term, loop_level, kernels) = &marked_graph[node];
         for kernel in kernels {
             let (kernel_graph, _, curr_outputs, _) = &mut kernel_graphs[*kernel];
             node_maps[*kernel].insert(
@@ -1210,7 +1197,7 @@ fn split_kernels(
     for input in marked_graph
         .externals(Direction::Incoming)
         // Must not be an SMEM
-        .filter(|n| !matches!(marked_graph.node_weight(*n).unwrap().0, GraphTerm::SMEM))
+        .filter(|n| !matches!(marked_graph[*n].0, GraphTerm::SMEM))
         .sorted_by_key(|n| {
             marked_graph
                 .edges_directed(*n, Direction::Outgoing)
@@ -1219,7 +1206,7 @@ fn split_kernels(
                 .id()
         })
     {
-        let (_, _, kernels) = marked_graph.node_weight(input).unwrap();
+        let (_, _, kernels) = &marked_graph[input];
         for kernel in kernels {
             kernel_graphs[*kernel].1.push((
                 GMEMBuffer::Input { node: input },
@@ -1232,8 +1219,8 @@ fn split_kernels(
     for edge in marked_graph.edge_indices() {
         let (start, end) = marked_graph.edge_endpoints(edge).unwrap();
         let weight = marked_graph.edge_weight(edge).unwrap();
-        let (_, _, start_kernels) = marked_graph.node_weight(start).unwrap();
-        let (_, _, end_kernels) = marked_graph.node_weight(end).unwrap();
+        let (_, _, start_kernels) = &marked_graph[start];
+        let (_, _, end_kernels) = &marked_graph[end];
         for end_kernel in end_kernels {
             if !start_kernels.contains(end_kernel) {
                 // start kernel must be outputted
@@ -1277,13 +1264,13 @@ fn split_kernels(
     // Go through SMEM buffers
     for (kernel_graph, inputs, outputs, smem_buffers) in &mut kernel_graphs {
         for node in kernel_graph.node_indices() {
-            if let (GraphTerm::SMEM, _) = kernel_graph.node_weight(node).unwrap() {
+            if let (GraphTerm::SMEM, _) = kernel_graph[node] {
                 // Walk forward until load to find the size
                 for mut curr in kernel_graph.neighbors_directed(node, Direction::Outgoing) {
                     let mut size = Expression::from(1);
                     let mut load = false;
                     loop {
-                        match kernel_graph.node_weight(curr).unwrap().0 {
+                        match kernel_graph[curr].0 {
                             GraphTerm::LoopIn { range, stride, .. } => {
                                 if stride != 0 {
                                     size *= range;
@@ -1311,20 +1298,14 @@ fn split_kernels(
 
         // Ensure GMEM is placed on the graph
         for (_, input) in inputs {
-            if !matches!(
-                kernel_graph.node_weight(*input).unwrap().0,
-                GraphTerm::GMEM { .. }
-            ) {
+            if !matches!(kernel_graph[*input].0, GraphTerm::GMEM { .. }) {
                 let new_input = kernel_graph.add_node((GraphTerm::GMEM { label: None }, 0));
                 kernel_graph.add_edge(new_input, *input, ());
                 *input = new_input;
             }
         }
         for (size, output) in outputs {
-            if !matches!(
-                kernel_graph.node_weight(*output).unwrap().0,
-                GraphTerm::GMEM { .. }
-            ) {
+            if !matches!(kernel_graph[*output].0, GraphTerm::GMEM { .. }) {
                 let new_output = kernel_graph.add_node((GraphTerm::GMEM { label: None }, 0));
                 kernel_graph.add_edge(*output, new_output, ());
                 *output = new_output;
@@ -1333,7 +1314,7 @@ fn split_kernels(
             let mut curr = *output;
             let mut new_size = Expression::from(1);
             loop {
-                let term = &kernel_graph.node_weight(curr).unwrap().0;
+                let term = &kernel_graph[curr].0;
                 if let GraphTerm::LoopOut { range, stride, .. } = term {
                     if !stride.is_acc() && *stride != 0 {
                         new_size = new_size.max(stride.substitute('z', *range));

@@ -5,7 +5,7 @@ use colored::Colorize;
 use itertools::Itertools;
 use luminal_2::{
     codegen::codegen,
-    run::{compile_kernels, run_graph},
+    run::{assign_buffers, compile_kernels, run_graph},
     translate::{translate_graph, InitData},
 };
 use model::{HEAD_DIM, N_KV_HEADS};
@@ -98,9 +98,11 @@ fn main() {
             (stream.alloc_zeros(1).unwrap(), true),
         );
     }
+    let now = std::time::Instant::now();
     for (node, val) in load("setup/llama3-8b.gguf", &model) {
         inps.insert(gmem_mapping[&old_to_new_mapping[&node]], (val, false));
     }
+    println!("Load: {}ms", now.elapsed().as_millis());
     for (label, val) in &accs {
         match val {
             InitData::Expr(e) => {
@@ -119,8 +121,16 @@ fn main() {
     // Run prompt processing pass
     let now = std::time::Instant::now();
     let compiled_kernels = compile_kernels(&kernels);
+    let (int_buffers, int_buffer_map) = assign_buffers(&kernels);
     println!("Compile: {}ms", now.elapsed().as_millis());
-    let (outputs, _) = run_graph(&mut inps, &kernels, &cx.dyn_map, &compiled_kernels);
+    let (outputs, _) = run_graph(
+        &mut inps,
+        &kernels,
+        &cx.dyn_map,
+        &compiled_kernels,
+        &int_buffers,
+        &int_buffer_map,
+    );
 
     // Process outputs
     let mut output_id = argmax(&outputs[0]);
@@ -174,7 +184,14 @@ fn main() {
         }
 
         // Run
-        let (outputs, _) = run_graph(&mut inps, &kernels, &cx.dyn_map, &compiled_kernels);
+        let (outputs, _) = run_graph(
+            &mut inps,
+            &kernels,
+            &cx.dyn_map,
+            &compiled_kernels,
+            &int_buffers,
+            &int_buffer_map,
+        );
 
         // Get outputs
         output_id = argmax(&outputs[0]);
