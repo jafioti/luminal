@@ -1,15 +1,15 @@
-use std::any::TypeId;
 use std::any::Any;
+use std::any::TypeId;
 
 use itertools::Itertools;
 use petgraph::{algo::toposort, visit::EdgeRef, Direction};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use luminal::op;
 use luminal::{
     op::{Add, Contiguous, Exp2, Function, LessThan, Log2, MaxReduce, Mod, Sin, Sub, SumReduce},
     prelude::{tinyvec::ArrayVec, *},
 };
-use luminal::op;
 
 #[cfg(feature = "legacy_prims")]
 use luminal::op::{Mul, Recip, Sqrt};
@@ -159,7 +159,12 @@ impl Compiler for Autograd {
                         add_grad(prev_grad / inps[1].clone(), inps[0], graph, &mut grads);
                     }
                     if valid_set.contains(&inps[1].id) {
-                        add_grad(-inps[0].clone() * prev_grad / (inps[1].clone() * inps[1].clone()), inps[1], graph, &mut grads);
+                        add_grad(
+                            -inps[0].clone() * prev_grad / (inps[1].clone() * inps[1].clone()),
+                            inps[1],
+                            graph,
+                            &mut grads,
+                        );
                     }
                 }
                 // --- NEW: MatMul backward ---
@@ -275,7 +280,8 @@ fn add_grad(
     if fwd.shape.len() == 0 || grad.shape.len() == 0 {
         if let Some((existing_grad_node, existing_grad_shape)) = grad_map.get(&fwd.id).copied() {
             let grad = GraphTensor::from_id(grad.id, grad.shape, graph);
-            let existing_grad = GraphTensor::from_id(existing_grad_node, existing_grad_shape, graph);
+            let existing_grad =
+                GraphTensor::from_id(existing_grad_node, existing_grad_shape, graph);
             let new_grad = grad + existing_grad;
             grad_map.insert(fwd.id, (new_grad.id, new_grad.shape));
         } else {
@@ -288,12 +294,13 @@ fn add_grad(
     // Undo permutes
     let mut new_indexes = ArrayVec::new();
     new_indexes.resize(fwd.shape.len(), 0);
-    
+
     // Ensure both shapes have valid indexes
     if fwd.shape.indexes.len() == 0 || grad.shape.indexes.len() == 0 {
         if let Some((existing_grad_node, existing_grad_shape)) = grad_map.get(&fwd.id).copied() {
             let grad = GraphTensor::from_id(grad.id, grad.shape, graph);
-            let existing_grad = GraphTensor::from_id(existing_grad_node, existing_grad_shape, graph);
+            let existing_grad =
+                GraphTensor::from_id(existing_grad_node, existing_grad_shape, graph);
             let new_grad = grad + existing_grad;
             grad_map.insert(fwd.id, (new_grad.id, new_grad.shape));
         } else {
@@ -301,7 +308,7 @@ fn add_grad(
         }
         return;
     }
-    
+
     for i in 0..fwd.shape.len() {
         if i < fwd.shape.indexes.len() && i < grad.shape.indexes.len() {
             new_indexes[fwd.shape.indexes[i]] = grad.shape.indexes[i];
@@ -356,7 +363,10 @@ fn is_matmul(graph: &Graph, node: NodeIndex) -> bool {
     false
 }
 
-fn get_matmul_inputs(graph: &mut Graph, node: NodeIndex) -> (Option<GraphTensor>, Option<GraphTensor>) {
+fn get_matmul_inputs(
+    graph: &mut Graph,
+    node: NodeIndex,
+) -> (Option<GraphTensor>, Option<GraphTensor>) {
     // For now, return None to avoid complex graph traversal
     // In a full implementation, we'd trace back through the MatMul graph
     (None, None)
