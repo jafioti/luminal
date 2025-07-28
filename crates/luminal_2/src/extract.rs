@@ -1,7 +1,6 @@
 use std::usize;
 
 use crate::Kernel;
-use crate::run::produce_buffer_map;
 use crate::utils::{display_graph, print_kernels};
 use crate::{GPUArch, GraphTerm, run::run_graph};
 use colored::Colorize;

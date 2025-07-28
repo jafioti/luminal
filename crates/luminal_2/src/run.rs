@@ -1,8 +1,4 @@
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
-    fs::File,
-    io::Read,
-};
+use std::{fs::File, io::Read};
 
 use cudarc::{
     driver::{CudaFunction, CudaSlice, LaunchConfig, PushKernelArg},
@@ -21,15 +17,15 @@ use luminal::{
     },
     shape::Expression,
 };
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::Kernel;
 
 pub fn assign_buffers(
     graph: &StableGraph<Kernel, (usize, usize)>,
-) -> (Vec<Expression>, HashMap<NodeIndex, Vec<usize>>) {
+) -> (Vec<Expression>, FxHashMap<NodeIndex, Vec<usize>>) {
     // Count consumers only for producer outputs we manage (exclude "Inputs")
-    let mut use_count: HashMap<(NodeIndex, usize), usize> = HashMap::new();
+    let mut use_count: FxHashMap<(NodeIndex, usize), usize> = FxHashMap::default();
     for e in graph.edge_references() {
         let src = e.source();
         if graph[src].code != "Inputs" {
@@ -39,8 +35,8 @@ pub fn assign_buffers(
     }
 
     let mut master = vec![]; // capacities by global buffer index
-    let mut buf_map = HashMap::new(); // node -> output_idx -> buffer_idx
-    let mut free_by_cap = HashMap::<Expression, Vec<usize>>::new(); // exact-size reuse
+    let mut buf_map = FxHashMap::default(); // node -> output_idx -> buffer_idx
+    let mut free_by_cap = FxHashMap::<Expression, Vec<usize>>::default(); // exact-size reuse
 
     for node in toposort(graph, None).unwrap() {
         let k = &graph[node];
@@ -118,25 +114,25 @@ pub fn compile_kernels(
 }
 
 pub fn run_graph(
-    inputs: &mut HashMap<usize, (CudaSlice<f32>, bool)>,
+    inputs: &mut FxHashMap<usize, (CudaSlice<f32>, bool)>,
     kernels: &StableGraph<Kernel, (usize, usize)>,
     dyn_vars: &FxHashMap<char, usize>,
     compiled_kernels: &FxHashMap<String, CudaFunction>,
     intermediate_buffers: &Vec<Expression>,
-    intermediate_buffer_map: &HashMap<NodeIndex, Vec<usize>>,
+    intermediate_buffer_map: &FxHashMap<NodeIndex, Vec<usize>>,
 ) -> (Vec<Vec<f32>>, u128) {
     let ctx = cudarc::driver::CudaContext::new(0).unwrap();
     let stream = ctx.default_stream();
-    // Allocate buffers
+    // Allocate intermediate buffers
     let mut buffers = intermediate_buffers
         .iter()
         .map(|e| unsafe { stream.alloc(e.exec(dyn_vars).unwrap()).unwrap() })
         .collect_vec();
-    let mut exec_time = 0;
     let input_node = kernels
         .node_indices()
         .find(|n| kernels[*n].code == "Inputs")
         .unwrap();
+    let mut exec_time = 0;
     for node in toposort(kernels, None).unwrap() {
         let kernel = &kernels[node];
         if kernel.code == "Inputs" {
@@ -144,6 +140,7 @@ pub fn run_graph(
         } else if kernel.code == "Outputs" {
             // Run
             let start = std::time::Instant::now();
+            stream.synchronize().unwrap(); // There shouldn't be any other syncs from dispatch till here
             let time_taken_micros = start.elapsed().as_micros();
             let outputs = kernels
                 .edges_directed(node, Direction::Incoming)
@@ -159,7 +156,6 @@ pub fn run_graph(
         } else if kernel.code.starts_with("Diff") {
             // Load file and diff numbers
             let diff_name = kernel.code.replace("Diff", "");
-
             let (input, input_index) = kernels
                 .edges_directed(node, Direction::Incoming)
                 .sorted_by_key(|n| n.weight().1)
@@ -251,101 +247,4 @@ pub fn run_graph(
         }
     }
     panic!("No output kernel detected in graph!");
-}
-
-// Analyze memory buffers and produce a mapping from node -> Vec<buffer index> and a list of buffers to allocate ahead of time
-pub fn produce_buffer_map(
-    graph: &StableGraph<Kernel, (u8, u8)>,
-) -> (Vec<Expression>, FxHashMap<NodeIndex, Vec<usize>>) {
-    // First pass - get clear sets for each node
-    #[allow(clippy::type_complexity)]
-    let mut first_pass: FxHashMap<
-        NodeIndex,
-        (
-            BTreeMap<NodeIndex, BTreeSet<NodeIndex>>,
-            BTreeSet<NodeIndex>,
-        ),
-    > = FxHashMap::default();
-    let toposort = toposort(&graph, None).unwrap();
-    // Loop through nodes in graph
-    for node in &toposort {
-        // Run through parents to build new tenative set and clear set
-        let (mut tenative_sets, mut clear_set) = (BTreeMap::default(), BTreeSet::default());
-        for parent in graph.neighbors_directed(*node, Direction::Incoming) {
-            let parent_children = graph
-                .neighbors_directed(parent, Direction::Outgoing)
-                .collect::<BTreeSet<_>>();
-            tenative_sets.insert(parent, parent_children);
-            if let Some((parent_tenative_set, parent_clear_set)) = first_pass.get(&parent) {
-                for (node_index, new_tenative_set) in parent_tenative_set.iter().map(|(n, c)| {
-                    let mut c = c.clone();
-                    c.retain(|n| *n != parent);
-                    (*n, c)
-                }) {
-                    if let Some(set) = tenative_sets.get(&node_index) {
-                        *tenative_sets.get_mut(&node_index).unwrap() =
-                            btreeset_intersection(new_tenative_set, set);
-                    } else {
-                        tenative_sets.insert(node_index, new_tenative_set);
-                    }
-                }
-                clear_set.extend(
-                    tenative_sets
-                        .iter()
-                        .filter(|(_, v)| v.is_empty())
-                        .map(|(n, _)| *n),
-                );
-                tenative_sets.retain(|_, v| !v.is_empty());
-                clear_set.extend(parent_clear_set);
-            }
-        }
-        first_pass.insert(*node, (tenative_sets, clear_set));
-    }
-
-    // Second pass - assign buffers
-    let available_buffers = graph
-        .node_indices()
-        .map(|n| (n, graph[n].outputs.clone()))
-        .collect::<FxHashMap<_, _>>();
-    // Loop through nodes in graph
-    let mut buffers = vec![];
-    let mut buffer_map = FxHashMap::default();
-    let mut used = FxHashSet::<NodeIndex>::default();
-    for node in &toposort {
-        buffer_map.insert(*node, vec![]);
-        // Assign output buffers
-        for required_buffer in &graph[*node].outputs {
-            // println!("required :{}", required_buffer);
-            // Find an applicable buffer
-            if let Some((buffer_index, source_node, _)) = first_pass[node]
-                .1
-                .iter()
-                .filter(|i| !used.contains(i))
-                .filter(|i| available_buffers.contains_key(i))
-                .flat_map(|i| {
-                    available_buffers[i]
-                        .iter()
-                        .enumerate()
-                        .map(|(o, b)| (o, *i, b))
-                })
-                .find(|(_, _, size)| **size == *required_buffer)
-            {
-                let buffer = buffer_map.get(&source_node).unwrap()[buffer_index];
-                buffer_map.get_mut(node).unwrap().push(buffer);
-                // Remove this buffer from first_pass so it can't be used again
-                used.insert(source_node);
-            } else {
-                // Allocate new buffer
-                buffer_map.get_mut(node).unwrap().push(buffers.len());
-                buffers.push(*required_buffer);
-            }
-        }
-    }
-
-    (buffers, buffer_map)
-}
-
-fn btreeset_intersection<T: Ord>(mut a: BTreeSet<T>, b: &BTreeSet<T>) -> BTreeSet<T> {
-    a.retain(|i| b.contains(i));
-    a
 }

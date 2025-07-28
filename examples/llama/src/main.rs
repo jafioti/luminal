@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use clap::Parser;
 use colored::Colorize;
 use itertools::Itertools;
@@ -9,6 +7,7 @@ use luminal_2::{
     translate::{translate_graph, InitData},
 };
 use model::{HEAD_DIM, N_KV_HEADS};
+use rustc_hash::FxHashMap;
 use tokenizers::Tokenizer;
 
 mod gguf;
@@ -83,7 +82,7 @@ fn main() {
     // Set up inputs
     let ctx = cudarc::driver::CudaContext::new(0).unwrap();
     let stream = ctx.default_stream();
-    let mut inps = HashMap::new();
+    let mut inps = FxHashMap::default();
     inps.insert(
         gmem_mapping[&old_to_new_mapping[&input.id]],
         (copy_cuda_buffer(&input_ids, &stream), true),
