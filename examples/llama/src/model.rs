@@ -268,12 +268,12 @@ extern \"C\" __global__ void kernel_name(const float *inp, const float *weights,
             Kernel {
                 code: format!(
                     "extern \"C\" __global__ void kernel_name(
+                    	const float* A,
                         const float* B,
-                        const float* A,
                         float* C, const size_t const_p, const size_t const_s)
                     {{
                         int m = blockIdx.y;
-                        int n = blockIdx.x;
+                        int n = blockIdx.x * blockDim.x + threadIdx.x;
                         const float* a = A + m * {HIDDEN_DIM};
                         const float* b = B + n * {HIDDEN_DIM};
                         float acc = 0.f;
@@ -284,8 +284,8 @@ extern \"C\" __global__ void kernel_name(const float *inp, const float *weights,
                         C[m * {VOCAB_SIZE} + n] = acc;
                     }}"
                 ),
-                grid: (VOCAB_SIZE.into(), sequence_length, 1.into()),
-                threadblock: (1.into(), 1.into(), 1.into()),
+                grid: ((VOCAB_SIZE / 32).into(), sequence_length, 1.into()),
+                threadblock: (32.into(), 1.into(), 1.into()),
                 smem: 0.into(),
                 outputs: vec![sequence_length * VOCAB_SIZE],
             },

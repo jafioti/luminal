@@ -2,7 +2,7 @@ use itertools::Itertools;
 use luminal::{
     prelude::{
         NodeIndex,
-        petgraph::{Directed, Direction, algo::toposort, prelude::StableGraph, visit::EdgeRef},
+        petgraph::{Directed, Direction, algo::toposort, prelude::StableGraph},
     },
     shape::{Expression, Term},
 };
@@ -1190,41 +1190,20 @@ fn split_kernels(
             }
         }
     }
-    let final_outputs = final_outputs
-        .into_iter()
-        .sorted_by_key(|(k, _)| *k)
-        .map(|(_, v)| v)
-        .collect_vec();
-    // Go through graph inputs and add them to the kernel hashmap as inputs
-    for input in marked_graph
-        .externals(Direction::Incoming)
-        // Must not be an SMEM
-        .filter(|n| !matches!(marked_graph[*n].0, GraphTerm::SMEM))
-        .sorted_by_key(|n| {
-            marked_graph
-                .edges_directed(*n, Direction::Outgoing)
-                .next()
-                .unwrap()
-                .id()
-        })
-    {
-        let (_, _, kernels) = &marked_graph[input];
-        for kernel in kernels {
-            kernel_graphs[*kernel].1.push((
-                GMEMBuffer::Input { node: input },
-                node_maps[*kernel][&input],
-            ));
-        }
-    }
 
     // Mark cross kernel dependencies in the kernel inputs / outputs
     for edge in marked_graph.edge_indices() {
         let (start, end) = marked_graph.edge_endpoints(edge).unwrap();
-        let weight = marked_graph.edge_weight(edge).unwrap();
         let (_, _, start_kernels) = &marked_graph[start];
         let (_, _, end_kernels) = &marked_graph[end];
         for end_kernel in end_kernels {
-            if !start_kernels.contains(end_kernel) {
+            if matches!(marked_graph[start].0, GraphTerm::GMEM { .. }) {
+                assert_eq!(start_kernels, end_kernels);
+                kernel_graphs[*end_kernel].1.push((
+                    GMEMBuffer::Input { node: start },
+                    node_maps[*end_kernel][&end],
+                ));
+            } else if !start_kernels.contains(end_kernel) {
                 // start kernel must be outputted
                 let start_kernel = start_kernels.iter().sorted().next().unwrap();
                 // Start and end are in different kernels
@@ -1257,7 +1236,7 @@ fn split_kernels(
                 kernel_graphs[*end_kernel].0.add_edge(
                     node_maps[*end_kernel][&start],
                     node_maps[*end_kernel][&end],
-                    *weight,
+                    (),
                 );
             }
         }
@@ -1333,5 +1312,12 @@ fn split_kernels(
         }
     }
 
-    (kernel_graphs, final_outputs)
+    (
+        kernel_graphs,
+        final_outputs
+            .into_iter()
+            .sorted_by_key(|(k, _)| *k)
+            .map(|(_, v)| v)
+            .collect(),
+    )
 }

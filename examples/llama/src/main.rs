@@ -74,8 +74,14 @@ fn main() {
         outputs.push(old_to_new_mapping[&v.id]);
     }
     let now = std::time::Instant::now();
-    let (kernels, gmem_mapping) =
-        codegen(new_graph, outputs, luminal_2::GPUArch::CUDA, 0, &cx.dyn_map).unwrap();
+    let (kernels, gmem_mapping) = codegen(
+        new_graph.clone(),
+        outputs,
+        luminal_2::GPUArch::CUDA,
+        0,
+        &cx.dyn_map,
+    )
+    .unwrap();
     println!("Codegen: {}ms", now.elapsed().as_millis());
     // luminal_2::utils::display_graph(&kernels, &[]);
 

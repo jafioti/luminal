@@ -40,7 +40,7 @@ pub fn translate_graph(
             "Sqrt" | "Exp2" | "Log2" | "Sin" | "Contiguous" | "Recip" => {
                 // walk through input ranges and strides, making new loopins as we go
                 let (source, output_index, shape) = sources.pop().unwrap();
-                let new_source = node_mapping[&(source, output_index)];
+                let new_source = node_mapping[&(source, output_index as usize)];
                 let (new_source, ranges) = scope_in(
                     new_source,
                     shape,
@@ -72,7 +72,7 @@ pub fn translate_graph(
                 // walk through input ranges and strides, making new loopins as we go
                 let (source_a, output_index_a, shape_a) = sources.pop().unwrap();
                 let (new_source_a, ranges) = scope_in(
-                    node_mapping[&(source_a, output_index_a)],
+                    node_mapping[&(source_a, output_index_a as usize)],
                     shape_a,
                     None,
                     &mut new_graph,
@@ -81,7 +81,7 @@ pub fn translate_graph(
                 );
                 let (source_b, output_index_b, shape_b) = sources.pop().unwrap();
                 let (new_source_b, _) = scope_in(
-                    node_mapping[&(source_b, output_index_b)],
+                    node_mapping[&(source_b, output_index_b as usize)],
                     shape_b,
                     None,
                     &mut new_graph,
@@ -122,7 +122,7 @@ pub fn translate_graph(
                 // walk through input ranges and strides, making new loopins as we go
                 let (source, output_index, shape) = sources.pop().unwrap();
                 let (new_source, ranges) = scope_in(
-                    node_mapping[&(source, output_index)],
+                    node_mapping[&(source, output_index as usize)],
                     shape,
                     Some(reduce_dim),
                     &mut new_graph,
@@ -184,16 +184,18 @@ pub fn translate_graph(
                     // Add a custom kernel
                     let custom = new_graph.add_node(GraphTerm::Custom(kernel.0.clone()));
                     for (source, ind, _) in sources {
-                        let new_source = node_mapping[&(source, ind)];
+                        let new_source = node_mapping[&(source, ind as usize)];
                         new_graph.add_edge(new_source, custom, ());
                     }
-                    node_mapping.insert((node, 0), custom);
+                    for i in 0..kernel.0.outputs.len() {
+                        node_mapping.insert((node, i), custom);
+                    }
                     old_to_new_mapping.insert(node, custom);
                 } else if let Some(diff) = node_weight.as_any().downcast_ref::<Diff>() {
                     // Add a diff
                     let custom = new_graph.add_node(GraphTerm::Diff(diff.name.clone()));
                     for (source, ind, _) in sources {
-                        let new_source = node_mapping[&(source, ind)];
+                        let new_source = node_mapping[&(source, ind as usize)];
                         new_graph.add_edge(new_source, custom, ());
                     }
                     node_mapping.insert((node, 0), custom);
