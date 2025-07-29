@@ -72,6 +72,76 @@ fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> Gra
     x0_out.concat_along(x1_out, 4).reshape(input.shape)
 }
 
+fn apply_rotary_embeddings_cuda(input: GraphTensor, prev_seq: Expression) -> GraphTensor {
+    let (batch, n_heads, seq, head_dim) = input.dims4();
+    let (n_heads_kernel, seq_kernel, head_dim_kernel, prev_seq_kernel) = (
+        n_heads.to_kernel(),
+        seq.to_kernel(),
+        head_dim.to_kernel(),
+        prev_seq.to_kernel(),
+    );
+    let [x] = custom_kernel(
+        &[input],
+        Kernel {
+            code: format!(
+                "
+#include <math_constants.h>
+
+extern \"C\" __global__ void kernel_name(
+    const float* __restrict__ x,  // [B,H,S,D]
+    float* __restrict__ y,        // [B,H,S,D] (can be same as x)
+    const size_t const_p, const size_t const_s
+) {{
+    // Each block handles one (b,h,s) row; threads iterate over i in [0, D/2)
+    int row = blockIdx.x;
+    int s = row % {seq_kernel};
+    int tmp = row / {seq_kernel};
+    int h = tmp % {n_heads_kernel};
+    int b = tmp / {n_heads_kernel};
+
+    const float rope_base = 500000.0f;
+
+    const int pairs = {head_dim_kernel} >> 1; // D/2
+    const size_t row_base = (((size_t)b * {n_heads_kernel} + h) * {seq_kernel} + s) * {head_dim_kernel};
+
+    const float pos = (float)({prev_seq_kernel} + s);
+
+    for (int i = threadIdx.x; i < pairs; i += blockDim.x) {{
+        const size_t even_idx = row_base + (size_t)(2 * i);
+        const size_t odd_idx  = even_idx + 1;
+
+        // Load pair
+        float x0 = x[even_idx];
+        float x1 = x[odd_idx];
+
+        // Angle = pos * inv_freq[i]
+        float inv = 1.0f / powf(rope_base, (2.0f*i) / (float){head_dim_kernel});
+        float angle = pos * inv;
+
+        float sn, cs;
+        __sincosf(angle, &sn, &cs);
+
+        // Rotate
+        float out0 = x0 * cs - x1 * sn; // even
+        float out1 = x0 * sn + x1 * cs; // odd
+
+        // Store (supports in-place)
+        y[even_idx] = out0;
+        y[odd_idx]  = out1;
+    }}
+}}"
+            ),
+            grid: ((seq * n_heads).into(), 1.into(), 1.into()),
+            threadblock: (64.into(), 1.into(), 1.into()),
+            smem: 0.into(),
+            outputs: vec![input.shape.n_elements()],
+        },
+        [(batch, n_heads, seq, head_dim)],
+        input.graph(),
+    );
+    x
+}
+
 pub struct SelfAttention {
     pub q_proj: GraphTensor, // Hidden -> hidden
     pub k_proj: GraphTensor, // Proj dim -> hidden
@@ -99,8 +169,8 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
             .permute((0, 2, 1, 3));
 
         // Rotary embed queries and keys
-        let queries = apply_rotary_embeddings_ggml(queries, prev_seq);
-        let keys = apply_rotary_embeddings_ggml(keys, prev_seq);
+        let queries = apply_rotary_embeddings_cuda(queries.contiguous(), prev_seq);
+        let keys = apply_rotary_embeddings_cuda(keys.contiguous(), prev_seq);
 
         // Add KV cache
         let keys = k_cache.concat_along(keys, 2);
