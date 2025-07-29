@@ -1,7 +1,7 @@
 use std::{fs::File, io::Read};
 
 use cudarc::{
-    driver::{CudaFunction, CudaSlice, DeviceSlice, LaunchConfig, PushKernelArg},
+    driver::{CudaFunction, CudaSlice, LaunchConfig, PushKernelArg},
     nvrtc::CompileOptions,
 };
 use itertools::Itertools;
@@ -190,9 +190,6 @@ pub fn run_graph(
             let dest_buffer = &mut buffers[intermediate_buffer_map[&node][0]];
             stream.memcpy_htod(&data, dest_buffer).unwrap();
         } else {
-            // println!("Grid {:?} TB: {:?}", kernel.grid, kernel.threadblock);
-            // println!("{}", kernel.code);
-
             let mut builder = stream.launch_builder(&compiled_kernels[&kernel.code]);
 
             // set inputs

@@ -106,6 +106,142 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         let keys = k_cache.concat_along(keys, 2);
         let values = v_cache.concat_along(values, 2);
 
+        //         let [output] = custom_kernel(
+        //             &[queries, keys, values],
+        //             Kernel {
+        //                 code: format!(
+        //                     "
+        // #define TILE_Q 32
+        // #define TILE_K 64
+        // #define HEAD_DIM_MAX 128
+
+        // extern \"C\" __global__ void kernel_name(
+        //     const float* __restrict__ Q,   // [B, N_KV_HEADS, {N_ATTENTION_GROUPS}, const_s, {HEAD_DIM}]
+        //     const float* __restrict__ K,   // [B, N_KV_HEADS, const_s + const_p, {HEAD_DIM}]
+        //     const float* __restrict__ V,   // [B, N_KV_HEADS, const_s + const_p, {HEAD_DIM}]
+        //     float* __restrict__ Out,       // [B, N_KV_HEADS, {N_ATTENTION_GROUPS}, const_s, {HEAD_DIM}]
+        //     const size_t const_p,
+        //     const size_t const_s
+        // ){{
+        //     const int b  = blockIdx.x;
+        //     const int hg = blockIdx.y;                  // packs (g, N_KV_HEADS)
+        //     const int g  = hg / {N_KV_HEADS};
+        //     const int h  = hg % {N_KV_HEADS};
+        //     const int q_tile = blockIdx.z * TILE_Q;
+
+        //     const int tid = threadIdx.x;                // 0..TILE_Q-1
+        //     if (g >= {N_ATTENTION_GROUPS} || h >= {N_KV_HEADS} || tid >= TILE_Q) return;
+
+        //     const int qi = q_tile + tid;                // query index in this tile
+        //     if (qi >= const_s) return;
+
+        //     // Base pointers (row-major)
+        //     const size_t strideQ_b = (size_t){N_KV_HEADS} * {N_ATTENTION_GROUPS} * const_s * {HEAD_DIM};
+        //     const size_t strideQ_h = (size_t){N_ATTENTION_GROUPS} * const_s * {HEAD_DIM};
+        //     const size_t strideQ_g = (size_t)const_s * {HEAD_DIM};
+
+        //     const size_t strideK_b = (size_t){N_KV_HEADS} * const_s + const_p * {HEAD_DIM};
+        //     const size_t strideK_h = (size_t)const_s + const_p * {HEAD_DIM};
+
+        //     const size_t strideO_b = (size_t){N_KV_HEADS} * {N_ATTENTION_GROUPS} * const_s * {HEAD_DIM};
+        //     const size_t strideO_h = (size_t){N_ATTENTION_GROUPS} * const_s * {HEAD_DIM};
+        //     const size_t strideO_g = (size_t)const_s * {HEAD_DIM};
+
+        //     const float* Qptr = Q + b*strideQ_b + h*strideQ_h + g*strideQ_g + (size_t)qi*{HEAD_DIM};
+        //     const float* Kbase = K + b*strideK_b + h*strideK_h;
+        //     const float* Vbase = V + b*strideK_b + h*strideK_h;
+        //     float* Outptr = Out + b*strideO_b + h*strideO_h + g*strideO_g + (size_t)qi*{HEAD_DIM};
+
+        //     // Load this query row into registers
+        //     float q_row[HEAD_DIM_MAX];
+        //     for (int d = 0; d < {HEAD_DIM}; ++d) q_row[d] = Qptr[d];
+
+        //     // Online softmax state for this query row
+        //     const float scale = rsqrtf((float){HEAD_DIM});
+        //     float m_i = -__int_as_float(0x7f800000);   // running max
+        //     float l_i = 0.f;             // running sum of exp
+        //     float out_i[HEAD_DIM_MAX];   // accumulated output
+        //     for (int d = 0; d < {HEAD_DIM}; ++d) out_i[d] = 0.f;
+
+        //     // Absolute query position (for causal maconst_s + const_ping)
+        //     const int q_abs = const_p + qi;
+
+        //     extern __shared__ float smem[]; // size = (TILE_K*{HEAD_DIM})*2 floats
+        //     float* Ks = smem;               // [TILE_K, {HEAD_DIM}]
+        //     float* Vs = smem + (size_t)TILE_K * {HEAD_DIM};
+
+        //     // Iterate over keys in tiles of TILE_K
+        //     for (int k0 = 0; k0 < const_s + const_p; k0 += TILE_K) {{
+        //         const int tileK = min((int)TILE_K, (int)(const_s + const_p - k0));
+
+        //         // Cooperative load: K and V tiles into shared
+        //         // Flattened idx over tileK*{HEAD_DIM}
+        //         for (int t = tid; t < tileK*{HEAD_DIM}; t += blockDim.x) {{
+        //             int tr = t / {HEAD_DIM};   // 0..tileK-1  (key row)
+        //             int tc = t % {HEAD_DIM};   // 0..{HEAD_DIM}-1
+        //             Ks[tr*{HEAD_DIM} + tc] = Kbase[(k0 + tr)*(size_t){HEAD_DIM} + tc];
+        //             Vs[tr*{HEAD_DIM} + tc] = Vbase[(k0 + tr)*(size_t){HEAD_DIM} + tc];
+        //         }}
+        //         __syncthreads();
+
+        //         // Compute current tile logits for this query row and online update
+        //         // First, find max within this tile (with causal maconst_s + const_p)
+        //         float m_tile = -__int_as_float(0x7f800000);
+        //         // We’ll also cache logits to registers to avoid recomputing dot(Q,K)
+        //         // (bounded by TILE_K)
+        //         float logits[TILE_K];
+
+        //         for (int tk = 0; tk < tileK; ++tk) {{
+        //             const int k_abs = k0 + tk;
+        //             float s = -__int_as_float(0x7f800000);
+        //             if (k_abs <= q_abs) {{  // causal maconst_s + const_p
+        //                 // dot(q_row, Ks[tk,:])
+        //                 float dot = 0.f;
+        //                 const float* __restrict__ Krow = &Ks[tk*{HEAD_DIM}];
+        //                 // Unrolled by 4 is often fine; keep simple here
+        //                 for (int d = 0; d < {HEAD_DIM}; ++d) dot += q_row[d] * Krow[d];
+        //                 s = dot * scale;
+        //             }}
+        //             logits[tk] = s;
+        //             m_tile = fmaxf(m_tile, s);
+        //         }}
+
+        //         // Merge max with running max
+        //         const float m_new = fmaxf(m_i, m_tile);
+
+        //         // Compute exp(logits - m_new), accumulate l and out
+        //         // Also apply rescaling factor to previous accumulators.
+        //         float l_tile = 0.f;
+        //         const float alpha = __expf(m_i - m_new);   // rescales previous terms
+        //         for (int d = 0; d < {HEAD_DIM}; ++d) out_i[d] *= alpha;
+
+        //         for (int tk = 0; tk < tileK; ++tk) {{
+        //             float p = __expf(logits[tk] - m_new);  // 0 if maconst_s + const_ped
+        //             l_tile += p;
+        //             const float* __restrict__ Vrow = &Vs[tk*{HEAD_DIM}];
+        //             for (int d = 0; d < {HEAD_DIM}; ++d) out_i[d] += p * Vrow[d];
+        //         }}
+
+        //         l_i = l_i * alpha + l_tile;
+        //         m_i = m_new;
+
+        //         __syncthreads();
+        //     }}
+
+        //     // Normalize
+        //     const float inv_l = 1.f / fmaxf(l_i, 1e-20f);
+        //     for (int d = 0; d < {HEAD_DIM}; ++d) Outptr[d] = out_i[d] * inv_l;
+        // }}"
+        //                 ),
+        //                 grid: (1.into(), HEAD_DIM.into(), ((seq + 32 - 1) / 32).into()),
+        //                 threadblock: (32.into(), 1.into(), 1.into()),
+        //                 smem: (64 * HEAD_DIM * 2 * size_of::<f32>()).into(),
+        //                 outputs: vec![batch * seq * N_KV_HEADS * N_ATTENTION_GROUPS * HIDDEN_DIM],
+        //             },
+        //             [(batch, N_KV_HEADS, N_ATTENTION_GROUPS, seq, HIDDEN_DIM)],
+        //             queries.graph(),
+        //         );
+
         // Repeat the KV States for Grouped-Query Attention
         let repeated_keys = keys.expand_dim(2, N_ATTENTION_GROUPS);
         let repeated_values = values.expand_dim(2, N_ATTENTION_GROUPS);
@@ -115,7 +251,7 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
             .matmul(repeated_keys.permute((0, 1, 2, 4, 3)))
             / (HEAD_DIM as f32).sqrt();
 
-        // Causal mask
+        // Causal maconst_s + const_p
         let attention_mask = self.k_proj.graph().triu(seq, 1) * f16::MIN.to_f32();
         attention_weights += attention_mask
             .pad_along(prev_seq, 0, 1)
@@ -127,13 +263,14 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         let output = attention_weights
             .softmax(4)
             // Apply distribution to values
-            .matmul(repeated_values)
+            .matmul(repeated_values);
+
+        let output = output
             // Merge heads
             .permute((0, 3, 1, 2, 4))
             .reshape((batch, seq, HIDDEN_DIM));
         // Apply output projection
-        let output = bmm_col_major_b(output, self.o_proj);
-        (output, (keys, values))
+        (bmm_col_major_b(output, self.o_proj), (keys, values))
     }
 }
 
@@ -233,16 +370,8 @@ extern \"C\" __global__ void kernel_name(const float *inp, const float *weights,
     }}
 }}"
                 ),
-                grid: (
-                    sequence_length,
-                    Expression::from(HIDDEN_DIM),
-                    Expression::from(1),
-                ),
-                threadblock: (
-                    Expression::from(1),
-                    Expression::from(1),
-                    Expression::from(1),
-                ),
+                grid: (sequence_length, (HIDDEN_DIM / 256).into(), 1.into()),
+                threadblock: (1.into(), 256.into(), 1.into()),
                 smem: Expression::from(0),
                 outputs: vec![sequence_length * HIDDEN_DIM],
             },
@@ -259,41 +388,7 @@ extern \"C\" __global__ void kernel_name(const float *inp, const float *weights,
         }
 
         // Run through last norm and output projection
-        x = self.head_norm.forward(x);
-        [x] = custom_kernel(
-            &[x, self.head_proj.weight],
-            Kernel {
-                code: format!(
-                    "
-extern \"C\" __global__ void kernel_name(
-   	const float* A,
-    const float* B,
-    float* C,
-    const size_t const_p,
-    const size_t const_s
-)
-{{
-    int m = blockIdx.y;
-    int n = blockIdx.x * blockDim.x + threadIdx.x;
-    const float* a = A + m * {HIDDEN_DIM};
-    const float* b = B + n * {HIDDEN_DIM};
-    float acc = 0.f;
-    for (int k = 0; k < {HIDDEN_DIM}; ++k) {{
-       	acc += a[k] * b[k];
-    }}
-
-    C[m * {VOCAB_SIZE} + n] = acc;
-}}
-"
-                ),
-                grid: ((VOCAB_SIZE / 64).into(), sequence_length, 1.into()),
-                threadblock: (64.into(), 1.into(), 1.into()),
-                smem: 0.into(),
-                outputs: vec![sequence_length * VOCAB_SIZE],
-            },
-            [(batch, sequence_length, VOCAB_SIZE)],
-            input.graph(),
-        );
+        x = bmm_col_major_b(self.head_norm.forward(x), self.head_proj.weight);
         (x, new_caches)
     }
 }

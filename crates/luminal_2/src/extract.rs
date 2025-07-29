@@ -2,7 +2,7 @@ use std::usize;
 
 use crate::Kernel;
 use crate::utils::{display_graph, print_kernels};
-use crate::{GPUArch, GraphTerm, run::run_graph};
+use crate::{GPUArch, GraphTerm};
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
 use luminal::prelude::NodeIndex;
