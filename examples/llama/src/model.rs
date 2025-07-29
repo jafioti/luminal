@@ -1,4 +1,4 @@
-use luminal::prelude::{binary::F32Pow, *};
+use luminal::prelude::*;
 use luminal_2::{custom_kernel, Kernel};
 use luminal_nn::{LayerNorm, Linear};
 
@@ -48,28 +48,6 @@ impl SerializeModule for Mlp {
         s.module("ffn_up", &self.up_proj);
         s.module("ffn_down", &self.down_proj);
     }
-}
-
-fn apply_rotary_embeddings_ggml(input: GraphTensor, prev_seq: Expression) -> GraphTensor {
-    assert_eq!(input.shape.len(), 4); // batch, n_heads, seq, head_dim
-    let (batch, n_heads, seq, head_dim) = input.dims4();
-    // Get freqs
-    let freqs = (input.graph().arange(head_dim / 2) * 2.0) / (head_dim.to_usize().unwrap() as f32);
-    let inv_freqs = 500_000_f32.pow(freqs).reciprocal();
-    let pos = input.graph().arange(seq) + prev_seq;
-    let emb = pos.expand_dim(1, 1).matmul(inv_freqs.expand_dim(0, 1));
-
-    // Split input into evens and odds
-    let split = input.reshape((batch, n_heads, seq, head_dim / 2, 2));
-    let x0 = split.slice((.., .., .., .., ..1));
-    let x1 = split.slice((.., .., .., .., 1..));
-
-    // Apply sin and cos embeddings
-    let x0_out = x0 * emb.cos().expand(x0.shape) - x1 * emb.sin().expand(x1.shape);
-    let x1_out = x0 * emb.sin().expand(x0.shape) + x1 * emb.cos().expand(x1.shape);
-
-    // Combine back into output
-    x0_out.concat_along(x1_out, 4).reshape(input.shape)
 }
 
 fn apply_rotary_embeddings_cuda(input: GraphTensor, prev_seq: Expression) -> GraphTensor {
@@ -149,6 +127,172 @@ pub struct SelfAttention {
     pub o_proj: GraphTensor, // Hidden -> hidden
 }
 
+fn attention_qkv_cuda(
+    queries: GraphTensor, // [B,Hk,G,S,D]
+    keys: GraphTensor,    // [B,Hk,prev_seq + S,D]
+    values: GraphTensor,  // [B,Hk,prev_seq + S,D]
+    prev_seq: Expression,
+) -> GraphTensor {
+    let (batch, hk, groups, seq, head_dim) = queries.dims5();
+    let (_bk, _hk_k, _t_k, _d_k) = keys.dims4();
+    let (_bv, _hk_v, _t_v, _d_v) = values.dims4();
+
+    let (
+        batch_kernel,
+        n_kv_heads_kernel,
+        n_groups_kernel,
+        seq_kernel,
+        head_dim_kernel,
+        prev_seq_kernel,
+    ) = (
+        batch.to_kernel(),
+        hk.to_kernel(),
+        groups.to_kernel(),
+        seq.to_kernel(),
+        head_dim.to_kernel(),
+        prev_seq.to_kernel(),
+    );
+
+    let tb_x: usize = 64;
+    let hidden_dim = hk * groups * head_dim;
+
+    let [out] = custom_kernel(
+        &[queries, keys, values],
+        Kernel {
+            code: format!(
+                "
+#include <math_constants.h>
+#include <math_functions.h>
+
+extern \"C\" __global__ void kernel_name(
+    const float* __restrict__ q,   // [B,Hk,G,S,D]
+    const float* __restrict__ k,   // [B,Hk,T,D], T = prev_seq + S
+    const float* __restrict__ v,   // [B,Hk,T,D]
+    float* __restrict__ y,         // [B,S,(Hk*G)*D]
+    const size_t const_p, const size_t const_s
+) {{
+    const int B   = {batch_kernel};
+    const int Hk  = {n_kv_heads_kernel};
+    const int G   = {n_groups_kernel};
+    const int S   = {seq_kernel};
+    const int D   = {head_dim_kernel};
+    const int T   = {prev_seq_kernel} + S;
+    const int Hq  = Hk * G;
+    const float scale = rsqrtf((float)D);
+
+    // one block per (b, hk, g, s)
+    int row = blockIdx.x;
+    int s   = row % S;
+    int tmp = row / S;
+    int g   = tmp % G;  tmp /= G;
+    int hk  = tmp % Hk; tmp /= Hk;
+    int b   = tmp;
+    if (b >= B) return;
+
+    // dynamic shared memory for reductions/broadcasts
+    extern __shared__ float red[];
+
+    // bases
+    size_t q_row_base = (((((size_t)b * Hk + (size_t)hk) * G + (size_t)g) * S + (size_t)s) * (size_t)D);
+    size_t out_row_base = (((size_t)b * (size_t)S + (size_t)s) * (size_t)(Hq * D))
+                         + (((size_t)hk * (size_t)G + (size_t)g) * (size_t)D);
+
+    // zero output slice
+    for (int d = threadIdx.x; d < D; d += blockDim.x) {{
+        y[out_row_base + d] = 0.0f;
+    }}
+    __syncthreads();
+
+    // Pass 1: max score across t
+    float max_score = -CUDART_INF_F;
+    for (int t = 0; t < T; ++t) {{
+        size_t k_row_base = ((((size_t)b * Hk + (size_t)hk) * (size_t)T + (size_t)t) * (size_t)D);
+        float partial = 0.0f;
+        for (int d = threadIdx.x; d < D; d += blockDim.x) {{
+            partial += q[q_row_base + d] * k[k_row_base + d];
+        }}
+        red[threadIdx.x] = partial;
+        __syncthreads();
+        for (int off = blockDim.x >> 1; off > 0; off >>= 1) {{
+            if (threadIdx.x < off) red[threadIdx.x] += red[threadIdx.x + off];
+            __syncthreads();
+        }}
+        if (threadIdx.x == 0) {{
+            float score = red[0] * scale;
+            if (t > ({prev_seq_kernel} + s)) score = -CUDART_INF_F; // causal with left pad
+            if (score > max_score) max_score = score;
+        }}
+        __syncthreads();
+    }}
+    if (threadIdx.x == 0) red[0] = max_score;
+    __syncthreads();
+    float max_s = red[0];
+
+    // Pass 2: denom = sum_t exp(score - max_s)  (use separate accumulator)
+    float denom_acc = 0.0f;
+    for (int t = 0; t < T; ++t) {{
+        size_t k_row_base = ((((size_t)b * Hk + (size_t)hk) * (size_t)T + (size_t)t) * (size_t)D);
+        float partial = 0.0f;
+        for (int d = threadIdx.x; d < D; d += blockDim.x) {{
+            partial += q[q_row_base + d] * k[k_row_base + d];
+        }}
+        red[threadIdx.x] = partial;
+        __syncthreads();
+        for (int off = blockDim.x >> 1; off > 0; off >>= 1) {{
+            if (threadIdx.x < off) red[threadIdx.x] += red[threadIdx.x + off];
+            __syncthreads();
+        }}
+        if (threadIdx.x == 0) {{
+            float score = red[0] * scale;
+            if (t > ({prev_seq_kernel} + s)) score = -CUDART_INF_F;
+            denom_acc += expf(score - max_s);
+        }}
+        __syncthreads();
+    }}
+    if (threadIdx.x == 0) red[0] = denom_acc;
+    __syncthreads();
+    float denom = red[0];
+
+    // Pass 3: y += sum_t softmax(score)_t * v_t
+    for (int t = 0; t < T; ++t) {{
+        size_t kv_row_base = ((((size_t)b * Hk + (size_t)hk) * (size_t)T + (size_t)t) * (size_t)D);
+
+        float partial = 0.0f;
+        for (int d = threadIdx.x; d < D; d += blockDim.x) {{
+            partial += q[q_row_base + d] * k[kv_row_base + d];
+        }}
+        red[threadIdx.x] = partial;
+        __syncthreads();
+        for (int off = blockDim.x >> 1; off > 0; off >>= 1) {{
+            if (threadIdx.x < off) red[threadIdx.x] += red[threadIdx.x + off];
+            __syncthreads();
+        }}
+        if (threadIdx.x == 0) {{
+            float score = red[0] * scale;
+            if (t > ({prev_seq_kernel} + s)) score = -CUDART_INF_F;
+            red[0] = expf(score - max_s) / denom; // weight
+        }}
+        __syncthreads();
+        float w = red[0];
+
+        for (int d = threadIdx.x; d < D; d += blockDim.x) {{
+            y[out_row_base + d] += w * v[kv_row_base + d];
+        }}
+        __syncthreads();
+    }}
+}}"
+            ),
+            grid: ((batch * hk * groups * seq).into(), 1.into(), 1.into()),
+            threadblock: (tb_x.into(), 1.into(), 1.into()),
+            smem: (tb_x * 4).into(),
+            outputs: vec![batch * seq * hidden_dim],
+        },
+        [(batch, seq, hidden_dim)],
+        queries.graph(),
+    );
+    out
+}
+
 impl Module<(GraphTensor, KVCache)> for SelfAttention {
     type Output = (GraphTensor, KVCache);
     fn forward(&self, (x, (k_cache, v_cache)): (GraphTensor, KVCache)) -> Self::Output {
@@ -176,169 +320,13 @@ impl Module<(GraphTensor, KVCache)> for SelfAttention {
         let keys = k_cache.concat_along(keys, 2);
         let values = v_cache.concat_along(values, 2);
 
-        //         let [output] = custom_kernel(
-        //             &[queries, keys, values],
-        //             Kernel {
-        //                 code: format!(
-        //                     "
-        // #define TILE_Q 32
-        // #define TILE_K 64
-        // #define HEAD_DIM_MAX 128
+        let output = attention_qkv_cuda(
+            queries.reshape((batch, N_KV_HEADS, N_ATTENTION_GROUPS, seq, HEAD_DIM)),
+            keys,
+            values,
+            prev_seq,
+        );
 
-        // extern \"C\" __global__ void kernel_name(
-        //     const float* __restrict__ Q,   // [B, N_KV_HEADS, {N_ATTENTION_GROUPS}, const_s, {HEAD_DIM}]
-        //     const float* __restrict__ K,   // [B, N_KV_HEADS, const_s + const_p, {HEAD_DIM}]
-        //     const float* __restrict__ V,   // [B, N_KV_HEADS, const_s + const_p, {HEAD_DIM}]
-        //     float* __restrict__ Out,       // [B, N_KV_HEADS, {N_ATTENTION_GROUPS}, const_s, {HEAD_DIM}]
-        //     const size_t const_p,
-        //     const size_t const_s
-        // ){{
-        //     const int b  = blockIdx.x;
-        //     const int hg = blockIdx.y;                  // packs (g, N_KV_HEADS)
-        //     const int g  = hg / {N_KV_HEADS};
-        //     const int h  = hg % {N_KV_HEADS};
-        //     const int q_tile = blockIdx.z * TILE_Q;
-
-        //     const int tid = threadIdx.x;                // 0..TILE_Q-1
-        //     if (g >= {N_ATTENTION_GROUPS} || h >= {N_KV_HEADS} || tid >= TILE_Q) return;
-
-        //     const int qi = q_tile + tid;                // query index in this tile
-        //     if (qi >= const_s) return;
-
-        //     // Base pointers (row-major)
-        //     const size_t strideQ_b = (size_t){N_KV_HEADS} * {N_ATTENTION_GROUPS} * const_s * {HEAD_DIM};
-        //     const size_t strideQ_h = (size_t){N_ATTENTION_GROUPS} * const_s * {HEAD_DIM};
-        //     const size_t strideQ_g = (size_t)const_s * {HEAD_DIM};
-
-        //     const size_t strideK_b = (size_t){N_KV_HEADS} * const_s + const_p * {HEAD_DIM};
-        //     const size_t strideK_h = (size_t)const_s + const_p * {HEAD_DIM};
-
-        //     const size_t strideO_b = (size_t){N_KV_HEADS} * {N_ATTENTION_GROUPS} * const_s * {HEAD_DIM};
-        //     const size_t strideO_h = (size_t){N_ATTENTION_GROUPS} * const_s * {HEAD_DIM};
-        //     const size_t strideO_g = (size_t)const_s * {HEAD_DIM};
-
-        //     const float* Qptr = Q + b*strideQ_b + h*strideQ_h + g*strideQ_g + (size_t)qi*{HEAD_DIM};
-        //     const float* Kbase = K + b*strideK_b + h*strideK_h;
-        //     const float* Vbase = V + b*strideK_b + h*strideK_h;
-        //     float* Outptr = Out + b*strideO_b + h*strideO_h + g*strideO_g + (size_t)qi*{HEAD_DIM};
-
-        //     // Load this query row into registers
-        //     float q_row[HEAD_DIM_MAX];
-        //     for (int d = 0; d < {HEAD_DIM}; ++d) q_row[d] = Qptr[d];
-
-        //     // Online softmax state for this query row
-        //     const float scale = rsqrtf((float){HEAD_DIM});
-        //     float m_i = -__int_as_float(0x7f800000);   // running max
-        //     float l_i = 0.f;             // running sum of exp
-        //     float out_i[HEAD_DIM_MAX];   // accumulated output
-        //     for (int d = 0; d < {HEAD_DIM}; ++d) out_i[d] = 0.f;
-
-        //     // Absolute query position (for causal maconst_s + const_ping)
-        //     const int q_abs = const_p + qi;
-
-        //     extern __shared__ float smem[]; // size = (TILE_K*{HEAD_DIM})*2 floats
-        //     float* Ks = smem;               // [TILE_K, {HEAD_DIM}]
-        //     float* Vs = smem + (size_t)TILE_K * {HEAD_DIM};
-
-        //     // Iterate over keys in tiles of TILE_K
-        //     for (int k0 = 0; k0 < const_s + const_p; k0 += TILE_K) {{
-        //         const int tileK = min((int)TILE_K, (int)(const_s + const_p - k0));
-
-        //         // Cooperative load: K and V tiles into shared
-        //         // Flattened idx over tileK*{HEAD_DIM}
-        //         for (int t = tid; t < tileK*{HEAD_DIM}; t += blockDim.x) {{
-        //             int tr = t / {HEAD_DIM};   // 0..tileK-1  (key row)
-        //             int tc = t % {HEAD_DIM};   // 0..{HEAD_DIM}-1
-        //             Ks[tr*{HEAD_DIM} + tc] = Kbase[(k0 + tr)*(size_t){HEAD_DIM} + tc];
-        //             Vs[tr*{HEAD_DIM} + tc] = Vbase[(k0 + tr)*(size_t){HEAD_DIM} + tc];
-        //         }}
-        //         __syncthreads();
-
-        //         // Compute current tile logits for this query row and online update
-        //         // First, find max within this tile (with causal maconst_s + const_p)
-        //         float m_tile = -__int_as_float(0x7f800000);
-        //         // We’ll also cache logits to registers to avoid recomputing dot(Q,K)
-        //         // (bounded by TILE_K)
-        //         float logits[TILE_K];
-
-        //         for (int tk = 0; tk < tileK; ++tk) {{
-        //             const int k_abs = k0 + tk;
-        //             float s = -__int_as_float(0x7f800000);
-        //             if (k_abs <= q_abs) {{  // causal maconst_s + const_p
-        //                 // dot(q_row, Ks[tk,:])
-        //                 float dot = 0.f;
-        //                 const float* __restrict__ Krow = &Ks[tk*{HEAD_DIM}];
-        //                 // Unrolled by 4 is often fine; keep simple here
-        //                 for (int d = 0; d < {HEAD_DIM}; ++d) dot += q_row[d] * Krow[d];
-        //                 s = dot * scale;
-        //             }}
-        //             logits[tk] = s;
-        //             m_tile = fmaxf(m_tile, s);
-        //         }}
-
-        //         // Merge max with running max
-        //         const float m_new = fmaxf(m_i, m_tile);
-
-        //         // Compute exp(logits - m_new), accumulate l and out
-        //         // Also apply rescaling factor to previous accumulators.
-        //         float l_tile = 0.f;
-        //         const float alpha = __expf(m_i - m_new);   // rescales previous terms
-        //         for (int d = 0; d < {HEAD_DIM}; ++d) out_i[d] *= alpha;
-
-        //         for (int tk = 0; tk < tileK; ++tk) {{
-        //             float p = __expf(logits[tk] - m_new);  // 0 if maconst_s + const_ped
-        //             l_tile += p;
-        //             const float* __restrict__ Vrow = &Vs[tk*{HEAD_DIM}];
-        //             for (int d = 0; d < {HEAD_DIM}; ++d) out_i[d] += p * Vrow[d];
-        //         }}
-
-        //         l_i = l_i * alpha + l_tile;
-        //         m_i = m_new;
-
-        //         __syncthreads();
-        //     }}
-
-        //     // Normalize
-        //     const float inv_l = 1.f / fmaxf(l_i, 1e-20f);
-        //     for (int d = 0; d < {HEAD_DIM}; ++d) Outptr[d] = out_i[d] * inv_l;
-        // }}"
-        //                 ),
-        //                 grid: (1.into(), HEAD_DIM.into(), ((seq + 32 - 1) / 32).into()),
-        //                 threadblock: (32.into(), 1.into(), 1.into()),
-        //                 smem: (64 * HEAD_DIM * 2 * size_of::<f32>()).into(),
-        //                 outputs: vec![batch * seq * N_KV_HEADS * N_ATTENTION_GROUPS * HIDDEN_DIM],
-        //             },
-        //             [(batch, N_KV_HEADS, N_ATTENTION_GROUPS, seq, HIDDEN_DIM)],
-        //             queries.graph(),
-        //         );
-
-        // Repeat the KV States for Grouped-Query Attention
-        let repeated_keys = keys.expand_dim(2, N_ATTENTION_GROUPS);
-        let repeated_values = values.expand_dim(2, N_ATTENTION_GROUPS);
-
-        let mut attention_weights = queries
-            .reshape((batch, N_KV_HEADS, N_ATTENTION_GROUPS, seq, HEAD_DIM))
-            .matmul(repeated_keys.permute((0, 1, 2, 4, 3)))
-            / (HEAD_DIM as f32).sqrt();
-
-        // Causal maconst_s + const_p
-        let attention_mask = self.k_proj.graph().triu(seq, 1) * f16::MIN.to_f32();
-        attention_weights += attention_mask
-            .pad_along(prev_seq, 0, 1)
-            .expand_dim(0, batch)
-            .expand_dim(1, N_KV_HEADS)
-            .expand_dim(2, N_ATTENTION_GROUPS);
-
-        // Calculate final outputs
-        let output = attention_weights
-            .softmax(4)
-            // Apply distribution to values
-            .matmul(repeated_values);
-
-        let output = output
-            // Merge heads
-            .permute((0, 3, 1, 2, 4))
-            .reshape((batch, seq, HIDDEN_DIM));
         // Apply output projection
         (bmm_col_major_b(output, self.o_proj), (keys, values))
     }
