@@ -505,8 +505,15 @@ fn attention_qkv_cuda(
     prev_seq: Expression,
 ) -> GraphTensor {
     let (batch, hk, groups, seq, head_dim) = queries.dims5();
-    let (_bk, _hk_k, _t_k, _d_k) = keys.dims4();
-    let (_bv, _hk_v, _t_v, _d_v) = values.dims4();
+    let hq = hk * groups;
+    let hidden_dim = hq * head_dim;
+
+    // threads along D (power-of-two)
+    let tb_x: usize = if head_dim.to_usize().unwrap() >= 128 {
+        128
+    } else {
+        64
+    };
 
     let (
         batch_kernel,
@@ -524,8 +531,9 @@ fn attention_qkv_cuda(
         prev_seq.to_kernel(),
     );
 
-    let tb_x: usize = 64;
-    let hidden_dim = hk * groups * head_dim;
+    // smem floats: Q[D] + Y[D] + red[blockDim.x] + a couple scalars
+    let smem_f32 = (2 * head_dim.to_usize().unwrap()) + tb_x + 4;
+    let smem_bytes = smem_f32 * core::mem::size_of::<f32>();
 
     let out = custom_kernel(
         &[queries, keys, values],
@@ -556,106 +564,86 @@ extern \"C\" __global__ void kernel_name(
     int s   = row % S;
     int tmp = row / S;
     int g   = tmp % G;  tmp /= G;
-    int hk  = tmp % Hk; tmp /= Hk;
+    int hkv = tmp % Hk; tmp /= Hk;
     int b   = tmp;
     if (b >= B) return;
 
-    // dynamic shared memory for reductions/broadcasts
-    extern __shared__ float red[];
+    // shared memory: Q[D], Y[D], red[blockDim.x], scal[4]
+    extern __shared__ float smem[];
+    float* shQ = smem;                 // [D]
+    float* shY = shQ + D;              // [D]
+    float* red = shY + D;              // [blockDim.x]
+    float* scal = red + blockDim.x;    // [4] (m, l, p, alpha)
 
     // bases
-    size_t q_row_base = (((((size_t)b * Hk + (size_t)hk) * G + (size_t)g) * S + (size_t)s) * (size_t)D);
+    size_t q_row_base   = (((((size_t)b * Hk + (size_t)hkv) * G + (size_t)g) * S + (size_t)s) * (size_t)D);
+    size_t kv_head_base = (((size_t)b * Hk + (size_t)hkv) * (size_t)T) * (size_t)D;
     size_t out_row_base = (((size_t)b * (size_t)S + (size_t)s) * (size_t)(Hq * D))
-                         + (((size_t)hk * (size_t)G + (size_t)g) * (size_t)D);
+                         + (((size_t)hkv * (size_t)G + (size_t)g) * (size_t)D);
 
-    // zero output slice
+    // load Q and init Y
     for (int d = threadIdx.x; d < D; d += blockDim.x) {{
-        y[out_row_base + d] = 0.0f;
+        shQ[d] = q[q_row_base + d];
+        shY[d] = 0.0f;
     }}
     __syncthreads();
 
-    // Pass 1: max score across t
-    float max_score = -CUDART_INF_F;
+    // online softmax state
+    float m = -CUDART_INF_F;  // running max
+    float l = 0.0f;           // running sum exp
+
+    // single pass over T (no large shared tiles)
     for (int t = 0; t < T; ++t) {{
-        size_t k_row_base = ((((size_t)b * Hk + (size_t)hk) * (size_t)T + (size_t)t) * (size_t)D);
-        float partial = 0.0f;
+        // dot = <Q, K_t>
+        float part = 0.0f;
+        size_t base = (size_t)t * (size_t)D;
         for (int d = threadIdx.x; d < D; d += blockDim.x) {{
-            partial += q[q_row_base + d] * k[k_row_base + d];
+            part = fmaf(shQ[d], k[kv_head_base + base + d], part);
         }}
-        red[threadIdx.x] = partial;
+        red[threadIdx.x] = part;
         __syncthreads();
+
+        // block reduce red -> red[0]
         for (int off = blockDim.x >> 1; off > 0; off >>= 1) {{
             if (threadIdx.x < off) red[threadIdx.x] += red[threadIdx.x + off];
             __syncthreads();
         }}
+
         if (threadIdx.x == 0) {{
-            float score = red[0] * scale;
-            if (t > ({prev_seq_kernel} + s)) score = -CUDART_INF_F; // causal with left pad
-            if (score > max_score) max_score = score;
+            float s_val = red[0] * scale;
+            if (t > ({prev_seq_kernel} + s)) s_val = -CUDART_INF_F; // causal with left pad
+            float m_new = fmaxf(m, s_val);
+            float alpha = __expf(m - m_new);
+            float p     = __expf(s_val - m_new);
+            l = l * alpha + p;
+            m = m_new;
+            scal[0] = p;       // p
+            scal[1] = alpha;   // alpha
+            scal[2] = l;       // keep l for later
+        }}
+        __syncthreads();
+
+        float p     = scal[0];
+        float alpha = scal[1];
+
+        // Y = Y*alpha + p * V_t
+        for (int d = threadIdx.x; d < D; d += blockDim.x) {{
+            shY[d] = shY[d] * alpha + p * v[kv_head_base + base + d];
         }}
         __syncthreads();
     }}
-    if (threadIdx.x == 0) red[0] = max_score;
-    __syncthreads();
-    float max_s = red[0];
 
-    // Pass 2: denom = sum_t exp(score - max_s)  (use separate accumulator)
-    float denom_acc = 0.0f;
-    for (int t = 0; t < T; ++t) {{
-        size_t k_row_base = ((((size_t)b * Hk + (size_t)hk) * (size_t)T + (size_t)t) * (size_t)D);
-        float partial = 0.0f;
-        for (int d = threadIdx.x; d < D; d += blockDim.x) {{
-            partial += q[q_row_base + d] * k[k_row_base + d];
-        }}
-        red[threadIdx.x] = partial;
-        __syncthreads();
-        for (int off = blockDim.x >> 1; off > 0; off >>= 1) {{
-            if (threadIdx.x < off) red[threadIdx.x] += red[threadIdx.x + off];
-            __syncthreads();
-        }}
-        if (threadIdx.x == 0) {{
-            float score = red[0] * scale;
-            if (t > ({prev_seq_kernel} + s)) score = -CUDART_INF_F;
-            denom_acc += expf(score - max_s);
-        }}
-        __syncthreads();
-    }}
-    if (threadIdx.x == 0) red[0] = denom_acc;
-    __syncthreads();
-    float denom = red[0];
-
-    // Pass 3: y += sum_t softmax(score)_t * v_t
-    for (int t = 0; t < T; ++t) {{
-        size_t kv_row_base = ((((size_t)b * Hk + (size_t)hk) * (size_t)T + (size_t)t) * (size_t)D);
-
-        float partial = 0.0f;
-        for (int d = threadIdx.x; d < D; d += blockDim.x) {{
-            partial += q[q_row_base + d] * k[kv_row_base + d];
-        }}
-        red[threadIdx.x] = partial;
-        __syncthreads();
-        for (int off = blockDim.x >> 1; off > 0; off >>= 1) {{
-            if (threadIdx.x < off) red[threadIdx.x] += red[threadIdx.x + off];
-            __syncthreads();
-        }}
-        if (threadIdx.x == 0) {{
-            float score = red[0] * scale;
-            if (t > ({prev_seq_kernel} + s)) score = -CUDART_INF_F;
-            red[0] = expf(score - max_s) / denom; // weight
-        }}
-        __syncthreads();
-        float w = red[0];
-
-        for (int d = threadIdx.x; d < D; d += blockDim.x) {{
-            y[out_row_base + d] += w * v[kv_row_base + d];
-        }}
-        __syncthreads();
+    // normalize by l and write out
+    float inv_l = 1.0f / scal[2];
+    for (int d = threadIdx.x; d < D; d += blockDim.x) {{
+        y[out_row_base + d] = shY[d] * inv_l;
     }}
 }}"
             ),
+            // grid: one block per (B, Hk, G, S)
             grid: ((batch * hk * groups * seq).into(), 1.into(), 1.into()),
             threadblock: (tb_x.into(), 1.into(), 1.into()),
-            smem: (tb_x * 4).into(),
+            smem: smem_bytes.into(), // BYTES
             outputs: vec![batch * seq * hidden_dim],
         },
         (batch, seq, hidden_dim),
