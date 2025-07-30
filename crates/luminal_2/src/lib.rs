@@ -142,23 +142,19 @@ impl Operator for CompatKernel {
     }
 }
 
-pub fn custom_kernel<const O: usize>(
+pub fn custom_kernel(
     inputs: &[GraphTensor],
     kernel: Kernel,
-    output_shapes: [impl ToShape; O],
+    output_shape: impl ToShape,
     cx: &mut Graph,
-) -> [GraphTensor; O] {
+) -> GraphTensor {
     let graph_ref: *mut Graph = cx;
     let mut kernel_op = cx.add_op(CompatKernel(kernel, graph_ref));
     for input in inputs {
         kernel_op = kernel_op.input(input.id, 0, input.shape);
     }
     let kernel_op = kernel_op.finish();
-    let mut outputs = [GraphTensor::from_id(kernel_op, ShapeTracker::new(()), cx); O];
-    for (i, output_shape) in output_shapes.into_iter().enumerate() {
-        outputs[i].shape = ShapeTracker::new(output_shape);
-    }
-    outputs
+    GraphTensor::from_id(kernel_op, ShapeTracker::new(output_shape), cx)
 }
 
 #[derive(Debug)]

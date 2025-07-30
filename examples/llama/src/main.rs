@@ -127,7 +127,7 @@ fn main() {
     }
 
     // Run prompt processing pass
-    let (outputs, _) = run_graph(
+    let (mut outputs, _) = run_graph(
         &mut inps,
         &kernels,
         &cx.dyn_map,
@@ -137,15 +137,16 @@ fn main() {
     );
 
     // Process outputs
-    let mut output_id = argmax(&outputs[0]);
+    let mut logits = stream.memcpy_dtov(&outputs[0]).unwrap();
+    let mut output_id = argmax(&logits);
     input_ids.push(output_id as f32);
-    let mut kv_out = outputs
-        .into_iter()
-        .skip(1)
-        .chunks(2)
-        .into_iter()
-        .map(|mut i| (i.next().unwrap(), i.next().unwrap()))
-        .collect_vec();
+    // let mut kv_out = outputs
+    //     .into_iter()
+    //     .skip(1)
+    //     .chunks(2)
+    //     .into_iter()
+    //     .map(|mut i| (i.next().unwrap(), i.next().unwrap()))
+    //     .collect_vec();
 
     // Decode token
     let mut completion = tokenizer.decode(&[output_id], false).unwrap();
@@ -157,6 +158,7 @@ fn main() {
 
     // Decode loop
     for _ in 0..100 {
+        let n = std::time::Instant::now();
         cx.set_dyn_dim('s', 1);
         cx.set_dyn_dim('p', input_ids.len() - 1);
 
@@ -164,14 +166,17 @@ fn main() {
         inps.insert(gmem_mapping[&old_to_new_mapping[&input.id]], {
             (copy_cuda_buffer(&vec![output_id as f32], &stream), true)
         });
-        for ((k, v), (k_data, v_data)) in cache_src.iter().zip(kv_out) {
+        for ((k, v), mut kv_data) in cache_src
+            .iter()
+            .zip(outputs.into_iter().skip(1).chunks(2).into_iter())
+        {
             inps.insert(
                 gmem_mapping[&old_to_new_mapping[&k.id]],
-                (copy_cuda_buffer(&k_data, &stream), true),
+                (kv_data.next().unwrap(), true),
             );
             inps.insert(
                 gmem_mapping[&old_to_new_mapping[&v.id]],
-                (copy_cuda_buffer(&v_data, &stream), true),
+                (kv_data.next().unwrap(), true),
             );
         }
         for (label, val) in &accs {
@@ -186,9 +191,10 @@ fn main() {
                 InitData::Data(_) => {} // Wasn't deleted, don't need to make new buffer
             }
         }
+        println!("init {}micros", n.elapsed().as_micros());
 
         // Run
-        let (outputs, _) = run_graph(
+        (outputs, _) = run_graph(
             &mut inps,
             &kernels,
             &cx.dyn_map,
@@ -196,20 +202,16 @@ fn main() {
             &int_buffers,
             &int_buffer_map,
         );
+        println!("run {}micros", n.elapsed().as_micros());
 
         // Get outputs
-        output_id = argmax(&outputs[0]);
+        stream.memcpy_dtoh(&outputs[0], &mut logits).unwrap();
+        output_id = argmax(&logits);
         input_ids.push(output_id as f32);
-        kv_out = outputs
-            .into_iter()
-            .skip(1)
-            .chunks(2)
-            .into_iter()
-            .map(|mut i| (i.next().unwrap(), i.next().unwrap()))
-            .collect_vec();
 
         // Decode token
         completion.push_str(&tokenizer.decode(&[output_id], false).unwrap());
+        println!("token {}micros", n.elapsed().as_micros());
         println!(
             "{}{}",
             cli_args.prompt.white().bold(),

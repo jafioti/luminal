@@ -120,9 +120,11 @@ pub fn run_graph(
     compiled_kernels: &FxHashMap<String, CudaFunction>,
     intermediate_buffers: &Vec<Expression>,
     intermediate_buffer_map: &FxHashMap<NodeIndex, Vec<usize>>,
-) -> (Vec<Vec<f32>>, u128) {
+) -> (Vec<CudaSlice<f32>>, u128) {
     let ctx = cudarc::driver::CudaContext::new(0).unwrap();
     let stream = ctx.default_stream();
+    let start = std::time::Instant::now();
+
     // Allocate intermediate buffers
     let mut buffers = intermediate_buffers
         .iter()
@@ -132,27 +134,28 @@ pub fn run_graph(
         .node_indices()
         .find(|n| kernels[*n].code == "Inputs")
         .unwrap();
-    let mut exec_time = 0;
     for node in toposort(kernels, None).unwrap() {
         let kernel = &kernels[node];
         if kernel.code == "Inputs" {
             // Inputs should already be in the buffer map
         } else if kernel.code == "Outputs" {
             // Run
-            let start = std::time::Instant::now();
             stream.synchronize().unwrap(); // There shouldn't be any other syncs from dispatch till here
-            let time_taken_micros = start.elapsed().as_micros();
             let outputs = kernels
                 .edges_directed(node, Direction::Incoming)
-                .sorted_by_key(|e| e.weight().1)
                 .map(|e| {
-                    stream
-                        .memcpy_dtov(&buffers[intermediate_buffer_map[&e.source()][e.weight().0]])
-                        .unwrap()
+                    (
+                        e.weight().1,
+                        intermediate_buffer_map[&e.source()][e.weight().0],
+                    )
                 })
-                .collect();
-            println!("Exec Millis: {}", exec_time / 1000);
-            return (outputs, time_taken_micros);
+                .sorted_by_key(|(_, b)| *b)
+                .rev()
+                .map(|(a, b)| (a, buffers.remove(b)))
+                .sorted_by_key(|(a, _)| *a)
+                .map(|(_, a)| a)
+                .collect_vec();
+            return (outputs, start.elapsed().as_micros());
         } else if kernel.code.starts_with("Diff") {
             // Load file and diff numbers
             let diff_name = kernel.code.replace("Diff", "");
@@ -234,7 +237,6 @@ pub fn run_graph(
             assert!(grid.1 <= 65535, "grid.y > 65535");
             assert!(grid.2 <= 65535, "grid.z > 65535");
             assert!(grid.0 <= 2147483647, "grid.x > 2147483647");
-            let now = std::time::Instant::now();
             unsafe {
                 builder.launch(LaunchConfig {
                     grid_dim: grid,
@@ -243,7 +245,6 @@ pub fn run_graph(
                 })
             }
             .unwrap();
-            exec_time += now.elapsed().as_micros();
         }
     }
     panic!("No output kernel detected in graph!");
