@@ -380,7 +380,7 @@ impl DerefMut for Graph {
 
 impl Drop for Graph {
     fn drop(&mut self) {
-        expression_cleanup();
+        // expression_cleanup();
     }
 }
 
