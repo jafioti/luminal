@@ -14,6 +14,7 @@ use std::{
 
 use crate::{
     GMEMBuffer, GPUArch, GraphTerm, Kernel,
+    translate::{MetaGraph, SubGraph},
     utils::{display_graph, validate_graph},
 };
 
@@ -733,7 +734,7 @@ fn make_kernel(
             GraphTerm::LoopOut { range, stride, .. } => {
                 panic!("found loopout range: {range} stride: {stride}")
             }
-            GraphTerm::Custom(_) | GraphTerm::Diff(_) => {
+            GraphTerm::Custom(_) | GraphTerm::Diff(_) | GraphTerm::Break => {
                 unreachable!("this should be handled directly in codegen!")
             }
             GraphTerm::SMEMLoad | GraphTerm::SMEMRead => {
@@ -1320,4 +1321,37 @@ fn split_kernels(
             .map(|(_, v)| v)
             .collect(),
     )
+}
+
+pub fn stitch_meta_graph_together(meta_graph: MetaGraph) -> SubGraph {
+    let mut out = SubGraph::new();
+    // map (meta_node, inner_node) -> stitched node
+    let mut map: FxHashMap<(NodeIndex, NodeIndex), NodeIndex> = FxHashMap::default();
+
+    // 1) copy nodes
+    for m in meta_graph.node_indices() {
+        let inner = &meta_graph[m];
+        for n in inner.node_indices() {
+            let new_n = out.add_node(inner[n].clone());
+            map.insert((m, n), new_n);
+        }
+    }
+
+    // 2) copy inner edges
+    for m in meta_graph.node_indices() {
+        let inner = &meta_graph[m];
+        for e in inner.edge_indices() {
+            let (u, v) = inner.edge_endpoints(e).unwrap();
+            out.add_edge(map[&(m, u)], map[&(m, v)], ());
+        }
+    }
+
+    // 3) connect across breaks using meta-edges (producer_inner -> consumer_placeholder_inner)
+    for me in meta_graph.edge_indices() {
+        let (mu, mv) = meta_graph.edge_endpoints(me).unwrap();
+        let (u_inner, v_inner) = meta_graph[me];
+        out.add_edge(map[&(mu, u_inner)], map[&(mv, v_inner)], ());
+    }
+
+    out
 }

@@ -211,6 +211,7 @@ impl TermToString for GraphTerm {
             GraphTerm::Diff(d) => format!("Diff({d})"),
             GraphTerm::SMEMLoad => "SMEMLoad".to_string(),
             GraphTerm::SMEMRead => "SMEMRead".to_string(),
+            GraphTerm::Break => "Break".to_string(),
         }
     }
 }
@@ -453,6 +454,7 @@ fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>) -> (String, Strin
             }
             GraphTerm::Custom(_) => "(Custom)".into(),
             GraphTerm::Diff(_) => "(Diff)".into(),
+            GraphTerm::Break => "(Break)".into(),
 
             GraphTerm::Add
             | GraphTerm::Mul

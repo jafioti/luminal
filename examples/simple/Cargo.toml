@@ -9,7 +9,6 @@ edition = "2021"
 itertools = "0.14.0"
 luminal = { path = "../.." }
 luminal_nn = {path="../../crates/luminal_nn"}
-luminal_metal = {path="../../crates/luminal_metal"}
 luminal_2 = {path="../../crates/luminal_2"}
 rand = "0.9.1"
 regex = "1.11.1"
@@ -17,3 +16,7 @@ serde_json = "1.0.140"
 urlencoding = "2.1.3"
 webbrowser = "1.0.5"
 rustc-hash = "2.1.1"
+cudarc = { version = "0.16.6", features = [
+	"f16",
+	"cuda-12080",
+] }

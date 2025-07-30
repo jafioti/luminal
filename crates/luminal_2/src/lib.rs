@@ -82,6 +82,7 @@ pub enum GraphTerm {
     SMEMRead, // Takes in an smem pointer and an smemload, returns the smem pointer
     Custom(Kernel),
     Diff(String), // Diff a buffer
+    Break,
 }
 
 #[derive(Debug)]

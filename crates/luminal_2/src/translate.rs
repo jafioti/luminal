@@ -15,6 +15,299 @@ pub enum InitData {
     Data(Vec<f32>),
 }
 
+pub type SubGraph = StableGraph<GraphTerm, (), Directed>;
+pub type MetaGraph = StableGraph<SubGraph, (NodeIndex, NodeIndex), Directed>;
+
+pub fn translate_graph_meta(
+    graph: &Graph,
+) -> (
+    MetaGraph,
+    FxHashMap<NodeIndex, (NodeIndex /*meta*/, NodeIndex /*inner*/)>,
+    FxHashMap<NodeIndex /*meta*/, Vec<(NodeIndex /*inner*/, InitData)>>,
+) {
+    let mut meta: MetaGraph = MetaGraph::new();
+
+    // --- current slice state ---
+    let mut g: SubGraph = SubGraph::new();
+    let mut node_map: FxHashMap<(NodeIndex, usize), NodeIndex> = FxHashMap::default();
+    let mut old_to_new: FxHashMap<NodeIndex, NodeIndex> = FxHashMap::default();
+    let mut inits: Vec<(NodeIndex, InitData)> = vec![];
+    let mut simplify_cache = FxHashMap::default();
+
+    // meta-level outputs
+    let mut global_map: FxHashMap<NodeIndex, (NodeIndex, NodeIndex)> = FxHashMap::default();
+    let mut inits_by_meta: FxHashMap<NodeIndex, Vec<(NodeIndex, InitData)>> = FxHashMap::default();
+
+    // For the CURRENT slice being built, remember meta-edge stubs that must be wired
+    // when this slice is finalized: (src_meta, src_inner_out, dst_inner_placeholder)
+    let mut pending_in_edges: Vec<(NodeIndex, NodeIndex, NodeIndex)> = vec![];
+
+    // finalize current slice into the meta-graph and return its meta node
+    let finalize_current_slice =
+        |meta: &mut MetaGraph,
+         g: &mut SubGraph,
+         old_to_new: &mut FxHashMap<NodeIndex, NodeIndex>,
+         inits: &mut Vec<(NodeIndex, InitData)>,
+         pending_in_edges: &mut Vec<(NodeIndex, NodeIndex, NodeIndex)>,
+         global_map: &mut FxHashMap<NodeIndex, (NodeIndex, NodeIndex)>,
+         inits_by_meta: &mut FxHashMap<NodeIndex, Vec<(NodeIndex, InitData)>>|
+         -> NodeIndex {
+            // move inner graph into meta node
+            let g_moved = std::mem::replace(g, SubGraph::new());
+            let meta_node = meta.add_node(g_moved);
+
+            // wire all deferred inbound edges to this meta node
+            for (src_meta, src_inner, dst_inner) in pending_in_edges.drain(..) {
+                meta.add_edge(src_meta, meta_node, (src_inner, dst_inner));
+            }
+
+            // publish inits and global mapping for nodes in the slice we just sealed
+            inits_by_meta.insert(meta_node, std::mem::take(inits));
+            for (old, inner) in old_to_new.drain() {
+                global_map.insert(old, (meta_node, inner));
+            }
+
+            // clear per-slice maps (node_map cleared by caller if needed)
+            meta_node
+        };
+
+    for old_node in toposort(&graph.graph, None).unwrap() {
+        let node_weight = graph.node_weight(old_node).unwrap();
+        let op_name_full = format!("{node_weight:?}");
+        let op = op_name_full
+            .split('|')
+            .next()
+            .unwrap_or(&op_name_full)
+            .trim();
+        let mut sources = graph.get_sources(old_node);
+
+        match op {
+            // ---- GRAPH BREAK ----
+            "Break" => {
+                // 1) fully realize producer inside current slice
+                let (src_old, out_idx, shape) = sources.pop().unwrap();
+                let src_inner = node_map[&(src_old, out_idx as usize)];
+                let (scoped_in, ranges) = scope_in(
+                    src_inner,
+                    shape,
+                    None,
+                    &mut g,
+                    &mut inits,
+                    &mut simplify_cache,
+                );
+                let producer_out = scope_out(scoped_in, ranges, false, &mut g);
+
+                // 2) seal current slice into meta
+                let producer_meta = finalize_current_slice(
+                    &mut meta,
+                    &mut g,
+                    &mut old_to_new,
+                    &mut inits,
+                    &mut pending_in_edges,
+                    &mut global_map,
+                    &mut inits_by_meta,
+                );
+
+                // 3) start fresh slice; create placeholder fed by the producer
+                node_map.clear();
+                simplify_cache = FxHashMap::default();
+                // placeholder for the consumer side of the break
+                let placeholder = g.add_node(GraphTerm::GMEM {
+                    label: Some("break_in".into()),
+                });
+                // remember to connect (producer_meta, producer_out) -> (this_meta=unknown yet, placeholder)
+                pending_in_edges.push((producer_meta, producer_out, placeholder));
+
+                // map Break node to the placeholder (acts like passthrough)
+                node_map.insert((old_node, 0), placeholder);
+                old_to_new.insert(old_node, placeholder);
+            }
+
+            // ---- UNARY ELEMENTWISE ----
+            "Sqrt" | "Exp2" | "Log2" | "Sin" | "Contiguous" | "Recip" => {
+                let (s0, i0, shape0) = sources.pop().unwrap();
+                let base0 = node_map[&(s0, i0 as usize)];
+                let (base0, ranges) =
+                    scope_in(base0, shape0, None, &mut g, &mut inits, &mut simplify_cache);
+
+                let mut out = if op == "Contiguous" {
+                    base0
+                } else {
+                    let r = g.add_node(match op {
+                        "Sqrt" => GraphTerm::Sqrt,
+                        "Exp2" => GraphTerm::Exp2,
+                        "Log2" => GraphTerm::Log2,
+                        "Sin" => GraphTerm::Sin,
+                        "Recip" => GraphTerm::Recip,
+                        _ => unreachable!(),
+                    });
+                    g.add_edge(base0, r, ());
+                    r
+                };
+                out = scope_out(out, ranges, false, &mut g);
+                old_to_new.insert(old_node, out);
+                node_map.insert((old_node, 0), out);
+            }
+
+            // ---- BINARY ELEMENTWISE ----
+            "Add" | "Mul" | "Mod" | "LessThan" => {
+                let (sa, ia, shape_a) = sources.pop().unwrap();
+                let (sb, ib, shape_b) = sources.pop().unwrap();
+                let (ain, ranges) = scope_in(
+                    node_map[&(sa, ia as usize)],
+                    shape_a,
+                    None,
+                    &mut g,
+                    &mut inits,
+                    &mut simplify_cache,
+                );
+                let (bin, _) = scope_in(
+                    node_map[&(sb, ib as usize)],
+                    shape_b,
+                    None,
+                    &mut g,
+                    &mut inits,
+                    &mut simplify_cache,
+                );
+
+                let mut opn = g.add_node(match op {
+                    "Add" => GraphTerm::Add,
+                    "Mul" => GraphTerm::Mul,
+                    "Mod" => GraphTerm::Mod,
+                    "LessThan" => GraphTerm::LessThan,
+                    _ => unreachable!(),
+                });
+                g.add_edge(ain, opn, ());
+                g.add_edge(bin, opn, ());
+                opn = scope_out(opn, ranges, false, &mut g);
+                old_to_new.insert(old_node, opn);
+                node_map.insert((old_node, 0), opn);
+            }
+
+            // ---- REDUCTIONS ----
+            s if s.starts_with("SumReduce") || s.starts_with("MaxReduce") => {
+                let (start_val, term, reduce_dim) = match op {
+                    s if s.starts_with("SumReduce") => {
+                        (0.0, GraphTerm::Add, graph.get_op::<SumReduce>(old_node).0)
+                    }
+                    s if s.starts_with("MaxReduce") => (
+                        f32::NEG_INFINITY,
+                        GraphTerm::Max,
+                        graph.get_op::<MaxReduce>(old_node).0,
+                    ),
+                    _ => unreachable!(),
+                };
+
+                let mut acc = g.add_node(GraphTerm::GMEM {
+                    label: Some(format!("acc_{}", inits.len())),
+                });
+                let orig_acc = acc;
+
+                let (source, output_index, shape) = sources.pop().unwrap();
+                let (new_source, ranges) = scope_in(
+                    node_map[&(source, output_index as usize)],
+                    shape,
+                    Some(reduce_dim),
+                    &mut g,
+                    &mut inits,
+                    &mut simplify_cache,
+                );
+
+                let mut rm_strides = ranges
+                    .iter()
+                    .rev()
+                    .scan(Expression::from(1), |i, (s, _)| {
+                        let r = *i;
+                        *i *= s;
+                        Some(r)
+                    })
+                    .collect::<Vec<_>>();
+                rm_strides.reverse();
+                for (i, ((range, name), acc_stride)) in ranges.iter().zip(rm_strides).enumerate() {
+                    let stride = if i == GRID_DIMS + THREADBLOCK_DIMS {
+                        Expression::from(Term::Acc('a'))
+                    } else if i > GRID_DIMS + THREADBLOCK_DIMS {
+                        Expression::from('z') * acc_stride
+                    } else {
+                        Expression::from(0)
+                    };
+                    let new_acc = g.add_node(GraphTerm::LoopIn {
+                        range: *range,
+                        stride,
+                        marker: name.to_string(),
+                    });
+                    g.add_edge(acc, new_acc, ());
+                    acc = new_acc;
+                }
+                inits.push((orig_acc, InitData::Data(vec![start_val])));
+
+                let mut opn = g.add_node(term);
+                g.add_edge(new_source, opn, ());
+                g.add_edge(acc, opn, ());
+                opn = scope_out(opn, ranges, true, &mut g);
+                old_to_new.insert(old_node, opn);
+                node_map.insert((old_node, 0), opn);
+            }
+
+            // ---- CONSTANTS / CUSTOM / DIFF / LOADS ----
+            _ => {
+                if let Some(constant) = node_weight.as_any().downcast_ref::<Constant>() {
+                    let newn = g.add_node(GraphTerm::GMEM {
+                        label: Some(op.to_string()),
+                    });
+                    old_to_new.insert(old_node, newn);
+                    node_map.insert((old_node, 0), newn);
+                    inits.push((
+                        newn,
+                        match constant.0 {
+                            ConstantValue::Expression(e) => InitData::Expr(e),
+                            ConstantValue::Float(f) => InitData::Data(vec![f]),
+                        },
+                    ));
+                } else if let Some(kernel) = node_weight.as_any().downcast_ref::<CompatKernel>() {
+                    let custom = g.add_node(GraphTerm::Custom(kernel.0.clone()));
+                    for (source, ind, _) in sources {
+                        g.add_edge(node_map[&(source, ind as usize)], custom, ());
+                    }
+                    for i in 0..kernel.0.outputs.len() {
+                        node_map.insert((old_node, i), custom);
+                    }
+                    old_to_new.insert(old_node, custom);
+                } else if let Some(diff) = node_weight.as_any().downcast_ref::<Diff>() {
+                    let custom = g.add_node(GraphTerm::Diff(diff.name.clone()));
+                    for (source, ind, _) in sources {
+                        g.add_edge(node_map[&(source, ind as usize)], custom, ());
+                    }
+                    node_map.insert((old_node, 0), custom);
+                    old_to_new.insert(old_node, custom);
+                } else {
+                    // Assume a load
+                    let newn = g.add_node(GraphTerm::GMEM {
+                        label: Some(op.to_string()),
+                    });
+                    node_map.insert((old_node, 0), newn);
+                    old_to_new.insert(old_node, newn);
+                }
+            }
+        }
+    }
+
+    // seal trailing slice if non-empty or if it has pending inbound edges
+    if g.node_count() > 0 || !pending_in_edges.is_empty() {
+        finalize_current_slice(
+            &mut meta,
+            &mut g,
+            &mut old_to_new,
+            &mut inits,
+            &mut pending_in_edges,
+            &mut global_map,
+            &mut inits_by_meta,
+        );
+    }
+
+    (meta, global_map, inits_by_meta)
+}
+
 pub fn translate_graph(
     graph: &Graph,
 ) -> (
@@ -212,15 +505,6 @@ pub fn translate_graph(
             }
         }
     }
-
-    // // Add gmems for to_retrieve
-    // for (t, _) in &graph.to_retrieve {
-    //     let gmem = new_graph.add_node(GraphTerm::GMEM {
-    //         label: Some("Output".to_string()),
-    //     });
-    //     new_graph.add_edge(old_to_new_mapping[t], gmem, ());
-    //     old_to_new_mapping.insert(*t, gmem);
-    // }
 
     (new_graph, old_to_new_mapping, inits)
 }
