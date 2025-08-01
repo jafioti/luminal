@@ -20,6 +20,7 @@ use crate::{
 pub const GRID_DIMS: usize = 3;
 pub const THREADBLOCK_DIMS: usize = 2;
 pub const MAX_THREADBLOCK_SIZE: usize = 1024; // this is max on mac
+pub const DTYPE: &str = "float";
 
 pub fn codegen(
     graph: StableGraph<GraphTerm, (), Directed>,
@@ -181,7 +182,7 @@ pub fn codegen(
                     .into_iter()
                     .map(|(_, a)| a)
                     .chain(outputs.iter().map(|(_, i)| *i))
-                    .map(|a| format!("float* {}", var_to_char(node_to_var[&a].0)))
+                    .map(|a| format!("{DTYPE}* {}", var_to_char(node_to_var[&a].0)))
                     .chain(
                         dyn_vars
                             .iter()
@@ -193,12 +194,12 @@ pub fn codegen(
                     "".to_string()
                 } else {
                     format!(
-                        "\textern __shared__ float sm[];\n{}",
+                        "\textern __shared__ {{DTYPE}} sm[];\n{}",
                         smem_buffers
                             .iter()
                             .scan("".to_string(), |prev_buffers, (n, _, size)| {
                                 let r =
-                                    format!("\tfloat* {} = sm{prev_buffers};\n", var_to_char(*n));
+                                    format!("\t{DTYPE}* {} = sm{prev_buffers};\n", var_to_char(*n));
                                 prev_buffers.push_str(&format!(" + {size}"));
                                 Some(r)
                             })
@@ -206,7 +207,8 @@ pub fn codegen(
                     )
                 };
                 format!(
-                    "extern \"C\" __global__ void kernel_name({inputs}) {{
+                    "#include <cuda_bf16.h>
+extern \"C\" __global__ void kernel_name({inputs}) {{
 {smem_setup}{kernel_lines}
 }}"
                 )
@@ -236,7 +238,7 @@ pub fn codegen(
                     .enumerate()
                     .map(|(i, a)| {
                         format!(
-                            "device float* {} [[buffer({i})]]",
+                            "device {DTYPE}* {} [[buffer({i})]]",
                             var_to_char(node_to_var[&a].0)
                         )
                     })
@@ -255,14 +257,14 @@ pub fn codegen(
                             .iter()
                             .scan("".to_string(), |prev_buffers, (n, _, size)| {
                                 let r = format!(
-                                    "\tthreadgroup float* {} = sm{prev_buffers};\n",
+                                    "\tthreadgroup {DTYPE}* {} = sm{prev_buffers};\n",
                                     var_to_char(*n)
                                 );
                                 prev_buffers.push_str(&format!(" + {size}"));
                                 Some(r)
                             })
                             .join(""),
-                        ", threadgroup float* sm [[threadgroup(0)]]".to_string(),
+                        ", threadgroup {DTYPE}* sm [[threadgroup(0)]]".to_string(),
                     )
                 };
 
@@ -569,7 +571,7 @@ fn make_kernel(
                                 arch.metal_buffer_type(real_input),
                             );
                             kernel_lines.push(format!(
-                                "{inner_spacing}{}float* {} = {} + {};",
+                                "{inner_spacing}{}{DTYPE}* {} = {} + {};",
                                 arch.metal_buffer_type(*prev_max_var),
                                 var_to_char(*prev_max_var),
                                 var_to_char(real_input),
@@ -605,7 +607,7 @@ fn make_kernel(
                                 arch.metal_buffer_type(real_output),
                             );
                             kernel_lines.push(format!(
-                                "{inner_spacing}{}float* {} = {} + {};",
+                                "{inner_spacing}{}{DTYPE}* {} = {} + {};",
                                 arch.metal_buffer_type(*prev_max_var),
                                 var_to_char(*prev_max_var),
                                 var_to_char(real_output),

@@ -1,9 +1,10 @@
+use cudarc::driver::CudaSlice;
 use luminal::{
     prelude::{
         NodeIndex,
         petgraph::{Directed, prelude::StableGraph},
     },
-    shape::{Expression, Term, expression_cleanup},
+    shape::{Expression, Term},
 };
 use rustc_hash::FxHashMap;
 
@@ -98,7 +99,6 @@ fn test_sum_reduce() {
     )
     .0;
     assert_eq!(outputs[0], vec![10.0]);
-    expression_cleanup();
 }
 
 #[test]
@@ -179,7 +179,6 @@ fn test_matmul() {
     for (a, b) in outputs.into_iter().zip(pt_output) {
         assert!((a - b).abs() < 1e-3);
     }
-    expression_cleanup();
 }
 
 #[test]
@@ -1054,7 +1053,6 @@ fn test_tiled_matmul_basic() {
     for (a, b) in outputs.into_iter().zip(pt_output) {
         assert!((a - b).abs() < 1e-3);
     }
-    expression_cleanup();
 }
 #[test]
 fn test_tiled_matmul_smem() {
@@ -1966,7 +1964,6 @@ fn test_tiled_matmul_smem() {
     for (a, b) in outputs.into_iter().zip(pt_output) {
         assert!((a - b).abs() < 1e-3);
     }
-    expression_cleanup();
 }
 
 // #[test]
