@@ -97,7 +97,6 @@ pub fn compile_kernels(
             && kernel.code != "Inputs"
             && kernel.code != "Outputs"
         {
-            println!("{}", kernel.code);
             let ptx = cudarc::nvrtc::compile_ptx_with_opts(
                 &kernel.code,
                 CompileOptions {
