@@ -14,7 +14,7 @@ rand = "0.8.5"
 urlencoding = "2.1.2"
 webbrowser = "1.0.0"
 dyn-clone = "1.0.12"
-half = "*"
+half = {version="*", features=["bytemuck"]}
 tinyvec = { version = "1.6.0", features = ["serde"] }
 term_size = "0.3.2"
 colored = "2.0.4"
