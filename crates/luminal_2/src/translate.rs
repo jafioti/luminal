@@ -12,7 +12,7 @@ use crate::{
 
 pub enum InitData {
     Expr(Expression),
-    Data(Vec<f32>),
+    Data(Vec<bf16>),
 }
 
 pub fn translate_graph(
@@ -105,11 +105,13 @@ pub fn translate_graph(
             s if s.starts_with("SumReduce") || s.starts_with("MaxReduce") => {
                 // make accumulator
                 let (start_val, term, reduce_dim) = match op {
-                    s if s.starts_with("SumReduce") => {
-                        (0.0, GraphTerm::Add, graph.get_op::<SumReduce>(node).0)
-                    }
+                    s if s.starts_with("SumReduce") => (
+                        bf16::from_f32(0.0),
+                        GraphTerm::Add,
+                        graph.get_op::<SumReduce>(node).0,
+                    ),
                     s if s.starts_with("MaxReduce") => (
-                        f32::NEG_INFINITY,
+                        bf16::NEG_INFINITY,
                         GraphTerm::Max,
                         graph.get_op::<MaxReduce>(node).0,
                     ),
@@ -177,7 +179,7 @@ pub fn translate_graph(
                         new,
                         match constant.0 {
                             ConstantValue::Expression(e) => InitData::Expr(e),
-                            ConstantValue::Float(f) => InitData::Data(vec![f]),
+                            ConstantValue::Float(f) => InitData::Data(vec![bf16::from_f32(f)]),
                         },
                     ));
                 } else if let Some(kernel) = node_weight.as_any().downcast_ref::<CompatKernel>() {
@@ -285,7 +287,10 @@ fn scope_in(
             let mask = graph.add_node(GraphTerm::GMEM {
                 label: Some("Mask".to_string()),
             });
-            inits.push((mask, InitData::Data(vec![0., 1.])));
+            inits.push((
+                mask,
+                InitData::Data(vec![bf16::from_f32(0.), bf16::from_f32(1.)]),
+            ));
             // Loop mask in
             let mut mask_range = curr_range;
             for level in 0..i {

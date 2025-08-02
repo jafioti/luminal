@@ -20,7 +20,7 @@ use crate::{
 pub const GRID_DIMS: usize = 3;
 pub const THREADBLOCK_DIMS: usize = 2;
 pub const MAX_THREADBLOCK_SIZE: usize = 1024; // this is max on mac
-pub const DTYPE: &str = "float";
+pub const DTYPE: &str = "__nv_bfloat16";
 
 pub fn codegen(
     graph: StableGraph<GraphTerm, (), Directed>,
@@ -125,9 +125,9 @@ pub fn codegen(
             .chain(outputs.iter().map(|(_, i)| *i))
             .chain(smem_buffers.iter().map(|(_, i, _)| *i))
             .enumerate()
-            .map(|(v, n)| (n, (v, true)))
+            .map(|(v, n)| (n, (v, true, DTYPE.to_string())))
             .collect::<HashMap<_, _>>();
-        for (_, (n, _)) in &node_to_var {
+        for (_, (n, _, _)) in &node_to_var {
             arch.add_metal_buffer_type(*n, "device ");
         }
         for (n, _, _) in &smem_buffers {
@@ -311,7 +311,7 @@ fn var_to_char(var: usize) -> String {
 fn make_kernel(
     kernel_graph: &StableGraph<(GraphTerm, usize), (), Directed>,
     include_nodes: HashSet<NodeIndex>,
-    node_to_var: &mut HashMap<NodeIndex, (usize, bool)>,
+    node_to_var: &mut HashMap<NodeIndex, (usize, bool, String)>,
     prev_max_var: &mut usize, // contains the char last used
     loop_levels: &mut Vec<Expression>,
     loop_indexes: &mut HashMap<NodeIndex, usize>,
@@ -488,8 +488,11 @@ fn make_kernel(
                             var_to_char(node_to_var[&outer_input].0),
                         ));
                         kernel_lines.push(format!("{spacing}}}"));
-                        node_to_var.insert(*input, (*prev_max_var, true));
-                        node_to_var.insert(cooresponding_output, (*prev_max_var, true));
+                        node_to_var.insert(*input, (*prev_max_var, true, "float".to_string()));
+                        node_to_var.insert(
+                            cooresponding_output,
+                            (*prev_max_var, true, "float".to_string()),
+                        );
                         accs.push((*input, cooresponding_output, size, out_loops));
                     }
                 }
@@ -516,7 +519,7 @@ fn make_kernel(
                             "{spacing}thread float {}[{size}] = {{0.0}};",
                             var_to_char(*prev_max_var)
                         ));
-                        node_to_var.insert(*output, (*prev_max_var, true));
+                        node_to_var.insert(*output, (*prev_max_var, true, "float".to_string()));
                         arch.add_metal_buffer_type(*prev_max_var, "thread ");
                     }
                 }
@@ -557,13 +560,13 @@ fn make_kernel(
                         .neighbors_directed(*input, Direction::Incoming)
                         .next()
                         .unwrap();
-                    let (real_input, is_ptr) = node_to_var[&src].clone();
+                    let (real_input, is_ptr, real_input_dtype) = node_to_var[&src].clone();
                     if !stride.is_acc() {
                         if **stride == 0
                             || (*range == 1 && stride.substitute('z', 0).simplify() == 0)
                         {
                             // Either the range is 1 or the stride is zero, so no offset needs to happen
-                            node_to_var.insert(*input, (real_input, is_ptr));
+                            node_to_var.insert(*input, (real_input, is_ptr, real_input_dtype));
                         } else {
                             *prev_max_var += 1;
                             arch.add_metal_buffer_type(
@@ -579,7 +582,7 @@ fn make_kernel(
                                     .to_kernel()
                                     .replace("const_z", &format!("loop_{loop_var}"))
                             ));
-                            node_to_var.insert(*input, (*prev_max_var, is_ptr));
+                            node_to_var.insert(*input, (*prev_max_var, is_ptr, DTYPE.to_string()));
                         }
                     }
                 }
@@ -593,12 +596,14 @@ fn make_kernel(
                         .neighbors_directed(*output, Direction::Outgoing)
                         .next()
                         .unwrap();
-                    if let Some((real_output, is_ptr)) = node_to_var.get(&dest).copied() {
+                    if let Some((real_output, is_ptr, real_output_dtype)) =
+                        node_to_var.get(&dest).cloned()
+                    {
                         if **stride == 0
                             || (*range == 1 && stride.substitute('z', 0).simplify() == 0)
                         {
                             new_output_vars.push(real_output);
-                            node_to_var.insert(*output, (real_output, is_ptr));
+                            node_to_var.insert(*output, (real_output, is_ptr, real_output_dtype));
                         } else {
                             assert!(is_ptr, "Only pointers can be offset!");
                             *prev_max_var += 1;
@@ -616,7 +621,7 @@ fn make_kernel(
                                     .replace("const_z", &format!("loop_{loop_var}"))
                             ));
                             new_output_vars.push(*prev_max_var);
-                            node_to_var.insert(*output, (*prev_max_var, is_ptr));
+                            node_to_var.insert(*output, (*prev_max_var, is_ptr, DTYPE.to_string()));
                         }
                     }
                 }
@@ -637,8 +642,10 @@ fn make_kernel(
 
                 // Handle no-op copy (empty body)
                 if loop_body.is_empty() && loop_inputs.len() == 1 && loop_outputs.len() == 1 {
-                    let (src, src_ptr) = node_to_var[&loop_inputs.iter().next().unwrap().0];
-                    let (dest, dest_ptr) = node_to_var[&loop_outputs.iter().next().unwrap().0];
+                    let (src, src_ptr, src_dtype) =
+                        node_to_var[&loop_inputs.iter().next().unwrap().0].clone();
+                    let (dest, dest_ptr, dest_dtype) =
+                        node_to_var[&loop_outputs.iter().next().unwrap().0].clone();
                     kernel_lines.push(format!(
                         "{inner_spacing}{}{} = {}{};",
                         if dest_ptr { "*" } else { "" },
@@ -655,8 +662,10 @@ fn make_kernel(
                         .neighbors_directed(*output_node, Direction::Incoming)
                         .next()
                         .unwrap();
-                    let (body_out, body_out_ptr) = node_to_var[&body_out];
-                    if let Some((output, output_ptr)) = node_to_var.get(&output_node).copied() {
+                    let (body_out, body_out_ptr, body_out_dtype) = node_to_var[&body_out].clone();
+                    if let Some((output, output_ptr, output_dtype)) =
+                        node_to_var.get(&output_node).cloned()
+                    {
                         if output != body_out && !body_out_ptr {
                             kernel_lines.push(format!(
                                 "{inner_spacing}{}{} = {}{};",
@@ -667,7 +676,7 @@ fn make_kernel(
                             ));
                         }
                     } else {
-                        node_to_var.insert(*output_node, (body_out, false));
+                        node_to_var.insert(*output_node, (body_out, false, body_out_dtype));
                     }
                 }
 
@@ -683,12 +692,13 @@ fn make_kernel(
                         .neighbors_directed(output_node, Direction::Outgoing)
                         .next()
                         .unwrap();
-                    let (output, output_ptr) = node_to_var[&output_node];
+                    let (output, output_ptr, output_dtype) = node_to_var[&output_node].clone();
                     if !node_to_var.contains_key(&outer_out) {
                         continue;
                         // display_graph(&kernel_graph, &[(outer_out, "yellow".to_string())]);
                     }
-                    let (outer_out, outer_out_ptr) = node_to_var[&outer_out];
+                    let (outer_out, outer_out_ptr, outer_out_dtype) =
+                        node_to_var[&outer_out].clone();
                     assert!(output_ptr);
                     assert!(outer_out_ptr || size.to_usize().unwrap() == 1);
                     let mut map = FxHashMap::default();
@@ -763,8 +773,8 @@ fn make_kernel(
                     assert!(search_for_smem(inputs[1])); // ensure the other input is an smem ptr
                     (inputs[1], inputs[0])
                 };
-                let (gmem, gmem_ptr) = node_to_var[&gmem];
-                let (smem, smem_ptr) = node_to_var[&smem];
+                let (gmem, gmem_ptr, gmem_dtype) = node_to_var[&gmem].clone();
+                let (smem, smem_ptr, smem_dtype) = node_to_var[&smem].clone();
                 assert!(smem_ptr);
                 let sync_barrier = match arch {
                     GPUArch::CUDA => "__syncthreads()",
@@ -779,12 +789,12 @@ fn make_kernel(
                             if gmem_ptr { "*" } else { "" },
                             var_to_char(gmem),
                         ));
-                        node_to_var.insert(node, (smem, true));
+                        node_to_var.insert(node, (smem, true, smem_dtype));
                     }
                     GraphTerm::SMEMRead => {
                         // gmem ptr isn't actually gmem, it should be pointing to the smem copy
                         kernel_lines.push(format!("{spacing}{sync_barrier};"));
-                        node_to_var.insert(node, (smem, true));
+                        node_to_var.insert(node, (smem, true, smem_dtype));
                     }
                     _ => panic!(),
                 }
@@ -798,12 +808,17 @@ fn make_kernel(
             | GraphTerm::Recip
             | GraphTerm::Sqrt => {
                 *prev_max_var += 1;
-                let (src, src_ptr) = node_to_var[&kernel_graph
+                let (src, src_ptr, src_dtype) = node_to_var[&kernel_graph
                     .neighbors_directed(node, Direction::Incoming)
                     .next()
-                    .unwrap()];
-                node_to_var.insert(node, (*prev_max_var, false));
-                let inp = format!("{}{}", if src_ptr { "*" } else { "" }, var_to_char(src));
+                    .unwrap()]
+                    .clone();
+                node_to_var.insert(node, (*prev_max_var, false, src_dtype));
+                let inp = format!(
+                    "(float){}{}",
+                    if src_ptr { "*" } else { "" },
+                    var_to_char(src)
+                );
                 let expr = match term {
                     GraphTerm::Sin => format!("sin({inp})"),
                     GraphTerm::Exp2 => format!("exp2({inp})"),
@@ -825,11 +840,19 @@ fn make_kernel(
             | GraphTerm::LessThan => {
                 *prev_max_var += 1;
                 let mut srcs = kernel_graph.neighbors_directed(node, Direction::Incoming);
-                let (src_a, src_a_ptr) = node_to_var[&srcs.next().unwrap()];
-                let (src_b, src_b_ptr) = node_to_var[&srcs.next().unwrap()];
-                node_to_var.insert(node, (*prev_max_var, false));
-                let inp_a = format!("{}{}", if src_a_ptr { "*" } else { "" }, var_to_char(src_a));
-                let inp_b = format!("{}{}", if src_b_ptr { "*" } else { "" }, var_to_char(src_b));
+                let (src_a, src_a_ptr, src_a_dtype) = node_to_var[&srcs.next().unwrap()].clone();
+                let (src_b, src_b_ptr, src_b_dtype) = node_to_var[&srcs.next().unwrap()].clone();
+                node_to_var.insert(node, (*prev_max_var, false, "float".to_string()));
+                let inp_a = format!(
+                    "(float){}{}",
+                    if src_a_ptr { "*" } else { "" },
+                    var_to_char(src_a)
+                );
+                let inp_b = format!(
+                    "(float){}{}",
+                    if src_b_ptr { "*" } else { "" },
+                    var_to_char(src_b)
+                );
                 let expr = match &term {
                     GraphTerm::Add => format!("{inp_a} + {inp_b}"),
                     GraphTerm::Mul => format!("{inp_a} * {inp_b}"),

@@ -7,7 +7,7 @@ use cudarc::{
 use itertools::Itertools;
 use luminal::{
     prelude::{
-        NodeIndex,
+        NodeIndex, bf16,
         petgraph::{
             Direction,
             algo::toposort,
@@ -20,6 +20,11 @@ use luminal::{
 use rustc_hash::FxHashMap;
 
 use crate::Kernel;
+
+pub enum CudaData {
+    F32Buffer(CudaSlice<f32>),
+    BF16Buffer(CudaSlice<bf16>),
+}
 
 pub fn assign_buffers(
     graph: &StableGraph<Kernel, (usize, usize)>,
@@ -92,6 +97,7 @@ pub fn compile_kernels(
             && kernel.code != "Inputs"
             && kernel.code != "Outputs"
         {
+            println!("{}", kernel.code);
             let ptx = cudarc::nvrtc::compile_ptx_with_opts(
                 &kernel.code,
                 CompileOptions {
@@ -114,13 +120,13 @@ pub fn compile_kernels(
 }
 
 pub fn run_graph(
-    inputs: &mut FxHashMap<usize, (CudaSlice<f32>, bool)>,
+    inputs: &mut FxHashMap<usize, (CudaData, bool)>,
     kernels: &StableGraph<Kernel, (usize, usize)>,
     dyn_vars: &FxHashMap<char, usize>,
     compiled_kernels: &FxHashMap<String, CudaFunction>,
     intermediate_buffers: &Vec<Expression>,
     intermediate_buffer_map: &FxHashMap<NodeIndex, Vec<usize>>,
-) -> (Vec<CudaSlice<f32>>, u128) {
+) -> (Vec<CudaSlice<bf16>>, u128) {
     let ctx = cudarc::driver::CudaContext::new(0).unwrap();
     let stream = ctx.default_stream();
     let start = std::time::Instant::now();
@@ -166,7 +172,7 @@ pub fn run_graph(
                 .next()
                 .unwrap();
             let buffer = &buffers[intermediate_buffer_map[&input][input_index]];
-            let data: Vec<f32> = stream.memcpy_dtov(buffer).unwrap();
+            let data: Vec<bf16> = stream.memcpy_dtov(buffer).unwrap();
             let mut file = File::open(format!("{diff_name}.bin")).unwrap();
             let mut file_buffer = Vec::new();
             file.read_to_end(&mut file_buffer).unwrap();
@@ -180,7 +186,7 @@ pub fn run_graph(
             let mut matched = true;
             println!("Diff {} | {}", data.len(), floats.len());
             for (ind, (i, j)) in data.iter().zip(floats).enumerate() {
-                if (i - j).abs() > 1e-5 {
+                if (i.to_f32() - j).abs() > 1e-5 {
                     matched = false;
                     println!("Diff {diff_name} failed: curr: {i} != file: {j}, index {ind}");
                     break;
@@ -202,7 +208,10 @@ pub fn run_graph(
                 .map(|n| (n.source(), n.weight().0))
             {
                 if input == input_node {
-                    builder.arg(&inputs[&input_index].0);
+                    match &inputs[&input_index].0 {
+                        CudaData::BF16Buffer(f) => builder.arg(f),
+                        CudaData::F32Buffer(f) => builder.arg(f),
+                    };
                 } else {
                     builder.arg(&buffers[intermediate_buffer_map[&input][input_index]]);
                 }
