@@ -42,7 +42,7 @@ fn main() {
     cx.execute_debug();
     let (new_graph, old_to_new_mapping, accs) = translate_graph_meta(&cx);
 
-    let new_graph = stitch_meta_graph_together(new_graph);
+    let (new_graph, new_accs) = stitch_meta_graph_together(new_graph, accs);
     // luminal_2::utils::display_graph(&new_graph, &[]);
     // Print the results
     // for sub_graph_id in new_graph.node_indices() {

@@ -14,7 +14,7 @@ use std::{
 
 use crate::{
     GMEMBuffer, GPUArch, GraphTerm, Kernel,
-    translate::{MetaGraph, SubGraph},
+    translate::{InitData, MetaGraph, SubGraph},
     utils::{display_graph, validate_graph},
 };
 
@@ -1323,16 +1323,23 @@ fn split_kernels(
     )
 }
 
-pub fn stitch_meta_graph_together(meta_graph: MetaGraph) -> SubGraph {
+pub fn stitch_meta_graph_together(
+    meta_graph: MetaGraph,
+    mut accs: FxHashMap<NodeIndex, Vec<(NodeIndex, InitData)>>,
+) -> (SubGraph, FxHashMap<NodeIndex, InitData>) {
     let mut out = SubGraph::new();
     // map (meta_node, inner_node) -> stitched node
     let mut map: FxHashMap<(NodeIndex, NodeIndex), NodeIndex> = FxHashMap::default();
 
     // 1) copy nodes
+    let mut new_accs = HashMap::default();
     for m in meta_graph.node_indices() {
         let inner = &meta_graph[m];
         for n in inner.node_indices() {
             let new_n = out.add_node(inner[n].clone());
+            let old = accs[&m].iter().position(|(m_i, _)| *m_i == m).unwrap();
+            let (_, old) = accs.get_mut(&m).unwrap().remove(old);
+            new_accs.insert(new_n, old);
             map.insert((m, n), new_n);
         }
     }
@@ -1353,5 +1360,5 @@ pub fn stitch_meta_graph_together(meta_graph: MetaGraph) -> SubGraph {
         out.add_edge(map[&(mu, u_inner)], map[&(mv, v_inner)], ());
     }
 
-    out
+    (out, new_accs)
 }
