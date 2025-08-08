@@ -7,7 +7,7 @@ use luminal_2::{
     codegen::{codegen, stitch_meta_graph_together},
     extract::search,
     run::{assign_buffers, compile_kernels, run_graph},
-    translate::{translate_graph, translate_graph_meta, InitData},
+    translate::{translate_graph_meta, InitData},
     utils::{build_search_space, print_kernels},
     GPUArch,
 };
@@ -41,8 +41,8 @@ fn main() {
     cx.set_dyn_dim('b', 2);
     cx.execute_debug();
     let (new_graph, old_to_new_mapping, accs) = translate_graph_meta(&cx);
+    let (new_graph, accs) = stitch_meta_graph_together(new_graph, accs);
 
-    let (new_graph, new_accs) = stitch_meta_graph_together(new_graph, accs);
     // luminal_2::utils::display_graph(&new_graph, &[]);
     // Print the results
     // for sub_graph_id in new_graph.node_indices() {

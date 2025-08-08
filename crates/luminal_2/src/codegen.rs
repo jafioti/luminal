@@ -1330,17 +1330,17 @@ pub fn stitch_meta_graph_together(
     let mut out = SubGraph::new();
     // map (meta_node, inner_node) -> stitched node
     let mut map: FxHashMap<(NodeIndex, NodeIndex), NodeIndex> = FxHashMap::default();
+    let mut new_accs = HashMap::default();
 
     // 1) copy nodes
-    let mut new_accs = HashMap::default();
     for m in meta_graph.node_indices() {
         let inner = &meta_graph[m];
         for n in inner.node_indices() {
-            let new_n = out.add_node(inner[n].clone());
-            let old = accs[&m].iter().position(|(m_i, _)| *m_i == m).unwrap();
-            let (_, old) = accs.get_mut(&m).unwrap().remove(old);
-            new_accs.insert(new_n, old);
-            map.insert((m, n), new_n);
+            map.insert((m, n), out.add_node(inner[n].clone()));
+        }
+        // Combine accs
+        for (node, data) in accs.remove(&m).unwrap_or_default() {
+            new_accs.insert(map[&(m, node)], data);
         }
     }
 
