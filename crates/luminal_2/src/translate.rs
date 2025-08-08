@@ -80,22 +80,12 @@ pub fn translate_graph_meta(
             .unwrap_or(&op_name_full)
             .trim();
         let mut sources = graph.get_sources(old_node);
-
         match op {
             // ---- GRAPH BREAK ----
-            "Break" => {
-                // 1) fully realize producer inside current slice
-                let (src_old, out_idx, shape) = sources.pop().unwrap();
-                let src_inner = node_map[&(src_old, out_idx as usize)];
-                let (scoped_in, ranges) = scope_in(
-                    src_inner,
-                    shape,
-                    None,
-                    &mut g,
-                    &mut inits,
-                    &mut simplify_cache,
-                );
-                let producer_out = scope_out(scoped_in, ranges, false, &mut g);
+            "GraphBreak" => {
+                // 1) identify producer's inner node (no scope_in/out needed)
+                let (src_old, out_idx, _shape_unused) = sources.pop().unwrap();
+                let producer_inner_out = node_map[&(src_old, out_idx as usize)];
 
                 // 2) seal current slice into meta
                 let producer_meta = finalize_current_slice(
@@ -111,14 +101,15 @@ pub fn translate_graph_meta(
                 // 3) start fresh slice; create placeholder fed by the producer
                 node_map.clear();
                 simplify_cache = FxHashMap::default();
-                // placeholder for the consumer side of the break
+
                 let placeholder = g.add_node(GraphTerm::GMEM {
                     label: Some("break_in".into()),
                 });
-                // remember to connect (producer_meta, producer_out) -> (this_meta=unknown yet, placeholder)
-                pending_in_edges.push((producer_meta, producer_out, placeholder));
 
-                // map Break node to the placeholder (acts like passthrough)
+                // defer wiring: (producer_meta, producer_inner_out) -> (this_meta (TBD), placeholder)
+                pending_in_edges.push((producer_meta, producer_inner_out, placeholder));
+
+                // map Break node to the placeholder (passthrough)
                 node_map.insert((old_node, 0), placeholder);
                 old_to_new.insert(old_node, placeholder);
             }

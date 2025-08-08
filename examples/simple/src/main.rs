@@ -8,7 +8,7 @@ use luminal_2::{
     run::{assign_buffers, compile_kernels, run_graph},
     translate::{translate_graph_meta, InitData},
     utils::{build_search_space, print_kernels},
-    GPUArch,
+    GPUArch, GT2,
 };
 use metal_rs::{objc::rc::autoreleasepool, Buffer, Device, MTLResourceOptions};
 use rand::rng;
@@ -30,15 +30,16 @@ fn main() {
         let b = cx.tensor((1, 3, 2, 'b')).set(vec![
             0.1_f32, 1.1, 18.1, 1.1, 3.1, 2.1, 0.2, 1.2, 18.2, 1.2, 3.2, 2.2,
         ]);
-        let c = a.matmul(b).retrieve();
-        println!("OUT: {:?}", c.dims());
+        let c = a.matmul(b).graph_break().sin().retrieve();
         // Execute the graph
         cx.set_dyn_dim('a', 3);
         cx.set_dyn_dim('b', 2);
         cx.execute_debug();
         let (new_graph, old_to_new_mapping, accs) = translate_graph_meta(&cx);
+        for g in new_graph.node_weights() {
+            luminal_2::utils::display_graph(g, &[]);
+        }
         let (new_graph, accs) = stitch_meta_graph_together(new_graph, accs);
-        // luminal_2::utils::display_graph(&new_graph, &[]);
         let (kernels, gmem_mapping) = codegen(
             new_graph.clone(),
             vec![old_to_new_mapping[&c.id].1],
