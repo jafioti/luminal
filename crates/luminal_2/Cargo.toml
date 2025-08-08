@@ -3,14 +3,19 @@ name = "luminal_2"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["metal"]
+cuda = ["dep:cudarc", "dep:luminal_cuda"]
+metal = ["dep:metal-rs"]
 
 [dependencies]
 luminal = {path="../../"}
-luminal_cuda = {path="../luminal_cuda"}
+luminal_cuda = {path="../luminal_cuda", optional=true}
 cudarc = { version = "0.16.6", features = [
 	"f16",
 	"cuda-12080",
-] }
+], optional=true}
+metal-rs = { version = "0.28.0", package = "metal", optional=true }
 itertools = "0.14.0"
 egglog = { git = "https://github.com/egraphs-good/egglog", rev="d2fa5b733de0796fb187dc5a27e570d5644aa75a" }
 urlencoding = "2.1.3"

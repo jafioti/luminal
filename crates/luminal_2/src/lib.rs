@@ -7,11 +7,8 @@ pub mod utils;
 #[cfg(test)]
 mod tests;
 
-use cudarc::driver::{LaunchConfig, PushKernelArg};
-use itertools::Itertools;
 use luminal::prelude::*;
-use luminal_cuda::CudaData;
-use std::{collections::HashMap, fmt::Debug, fs::File, io::Write};
+use std::{collections::HashMap, fmt::Debug};
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum GPUArch {
@@ -87,8 +84,12 @@ pub enum GraphTerm {
 
 #[derive(Debug)]
 pub struct CompatKernel(Kernel, *mut Graph);
+
+#[cfg(feature = "cuda")]
 impl Operator for CompatKernel {
     fn process(&mut self, inputs: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        use cudarc::driver::{LaunchConfig, PushKernelArg};
+        use luminal_cuda::CudaData;
         let dyn_vars = &unsafe { self.1.as_ref().unwrap() }.dyn_map;
         let ctx = cudarc::driver::CudaContext::new(0).unwrap();
         let stream = ctx.default_stream();
@@ -143,6 +144,13 @@ impl Operator for CompatKernel {
     }
 }
 
+#[cfg(feature = "metal")]
+impl Operator for CompatKernel {
+    fn process(&mut self, _inputs: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        todo!()
+    }
+}
+
 pub fn custom_kernel(
     inputs: &[GraphTensor],
     kernel: Kernel,
@@ -163,6 +171,7 @@ pub struct Diff {
     name: String,
 }
 
+#[cfg(feature = "cuda")]
 impl Operator for Diff {
     fn process(&mut self, inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
         // Dump
@@ -179,6 +188,13 @@ impl Operator for Diff {
         };
         file.write_all(bytes).unwrap();
         vec![Tensor::new(buffer.clone())]
+    }
+}
+
+#[cfg(feature = "metal")]
+impl Operator for Diff {
+    fn process(&mut self, _inp: Vec<(InputTensor, ShapeTracker)>) -> Vec<Tensor> {
+        todo!()
     }
 }
 
