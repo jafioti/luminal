@@ -308,7 +308,6 @@ pub fn run_graph(
             .unwrap();
         for node in toposort(kernels, None).unwrap() {
             let kernel = &kernels[node];
-            println!("Kernel: {}", kernel.code);
             if kernel.code == "Inputs" {
                 // Inputs should already be in the buffer map
             } else if kernel.code == "Outputs" {

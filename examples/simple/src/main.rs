@@ -10,7 +10,7 @@ use luminal_2::{
     extract::{make_test_inputs, search},
     run::{assign_buffers, compile_kernels, run_graph},
     translate::{translate_graph_meta, InitData},
-    utils::{build_search_space, print_kernels},
+    utils::build_search_space,
     GPUArch, GraphTerm, GT2,
 };
 use metal_rs::{objc::rc::autoreleasepool, Buffer, Device, MTLResourceOptions};
@@ -121,7 +121,7 @@ fn main() {
             &cx.dyn_map,
         )
         .unwrap();
-        print_kernels(&kernels);
+        // print_kernels(&kernels);
 
         // let w1 = weight.clone();
         let a_data = vec![
@@ -156,9 +156,7 @@ fn main() {
         }
 
         let compiled_kernels = compile_kernels(&kernels);
-        println!("Compiled");
         let (int_buffers, int_buffer_map) = assign_buffers(&kernels);
-        println!("Assigned");
         let (outputs, _) = run_graph(
             &mut inputs,
             &kernels,
@@ -167,7 +165,6 @@ fn main() {
             &int_buffers,
             &int_buffer_map,
         );
-        println!("Ran");
         println!("{:?}", c.data());
         println!("{:?}", copy_metal_buffer_back(&outputs[0]));
     });

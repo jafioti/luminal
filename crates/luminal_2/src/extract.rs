@@ -34,7 +34,7 @@ type Cost = u128; // Execution time in microseconds
 
 pub fn search(
     egraph: &EGraph,
-    inputs: &[(NodeIndex, Vec<f32>)],
+    inputs: &[(String, Vec<f32>)],
     arch: GPUArch,
     dyn_vars: &FxHashMap<char, usize>,
 ) -> Option<StableGraph<GraphTerm, ()>> {
@@ -107,12 +107,13 @@ pub fn search(
 
     let (trajectories, _) = recurse(egraph, &egraph.root_eclasses[0], &mut FxHashMap::default());
     // Now we have DFS trajectories
+
+    // Convert inputs to GMEM_label -> data
     let mut ref_outputs: Vec<Vec<f32>> = vec![];
     let mut best_time = u128::MAX;
     let mut best_graph = None;
     let mut valid_graphs = 0;
     let total_trajectories = trajectories.len().min(MAX_SEARCHED_GRAPHS);
-    let mut min_kernels = usize::MAX;
     'trajectory_loop: for (n, trajectory) in trajectories
         .into_iter()
         .take(MAX_SEARCHED_GRAPHS)
@@ -120,7 +121,8 @@ pub fn search(
     {
         // Build termdag
         let graph = extraction_to_graph(egraph, &trajectory);
-        let inputs = make_test_inputs(&graph, dyn_vars);
+        // convert inputs to reference nodes in graph
+        let inputs = inputs.into_iter().map(|(l, d)| (graph.node_indices().find(|n| matches!(graph.node_weight(*n).unwrap(), GraphTerm::GMEM { label } if label == l)).unwrap(), d.clone())).collect_vec();
         let root = graph.externals(Direction::Outgoing).next().unwrap();
         let Some((kernels, gmem_mapping)) =
             crate::codegen::codegen(graph.clone(), vec![root], arch.clone(), 0, dyn_vars)
@@ -150,11 +152,6 @@ pub fn search(
                 }
             }
             GPUArch::Metal(_) => {
-                // if kernels.node_count() - 2 > 1 || graph.node_count() >= 27 {
-                //     continue;
-                // }
-                // println!("KERNEL NUMBER {n}");
-                // display_graph(&graph, &[]);
                 if let Some((us, outs)) = cost(&kernels, &inputs, &gmem_mapping, dyn_vars) {
                     valid_graphs += 1;
                     if option_env!("PRINT_KERNELS").is_some() {
@@ -175,6 +172,7 @@ pub fn search(
                             for (x, y) in a.iter().zip(b) {
                                 if (x - y).abs() >= 1e-3 {
                                     if option_env!("PRINT_KERNELS").is_some() {
+                                        println!("REF: {:?} New: {:?}", ref_outputs, outs);
                                         println!(
                                             "{} {x} != {y}",
                                             "Output Mismatch".on_bright_red()
@@ -188,8 +186,8 @@ pub fn search(
                             println!("{}", "Outputs Validated".on_bright_green());
                         }
                     }
-                    if kernels.node_count() - 2 < min_kernels {
-                        min_kernels = kernels.node_count() - 2;
+                    if us < best_time {
+                        best_time = us;
                         best_graph = Some(graph);
                     }
                 }
@@ -199,7 +197,6 @@ pub fn search(
         //     break;
         // }
     }
-    println!("MIN: {min_kernels}");
     best_graph
 }
 
@@ -455,12 +452,12 @@ pub fn copy_metal_buffer_back(v: &Buffer) -> Vec<f32> {
 pub fn make_test_inputs(
     graph: &StableGraph<GraphTerm, ()>,
     dyn_map: &FxHashMap<char, usize>,
-) -> Vec<(NodeIndex, Vec<f32>)> {
+) -> Vec<(String, Vec<f32>)> {
     // Go through each GMEM and work out the size
     let mut inputs = vec![];
     let mut rng = rng();
     for node in graph.externals(Direction::Incoming) {
-        if matches!(graph.node_weight(node).unwrap(), GraphTerm::GMEM { .. }) {
+        if let GraphTerm::GMEM { label } = graph.node_weight(node).unwrap() {
             // Walk down the loopins to find the max size
             let mut size = Expression::from(0);
             let mut curr = graph
@@ -479,7 +476,7 @@ pub fn make_test_inputs(
                 }
             }
             inputs.push((
-                node,
+                label.clone(),
                 (0..size.exec(&dyn_map).unwrap())
                     .map(|_| rng.random())
                     .collect(),
