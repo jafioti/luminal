@@ -36,13 +36,11 @@ fn main() {
         cx.set_dyn_dim('b', 2);
         cx.execute_debug();
         let (new_graph, old_to_new_mapping, accs) = translate_graph_meta(&cx);
-        for g in new_graph.node_weights() {
-            luminal_2::utils::display_graph(g, &[]);
-        }
-        let (new_graph, accs) = stitch_meta_graph_together(new_graph, accs);
+        let outputs = vec![old_to_new_mapping[&c.id]];
+        let (new_graph, accs, outputs) = stitch_meta_graph_together(new_graph, accs, outputs);
         let (kernels, gmem_mapping) = codegen(
             new_graph.clone(),
-            vec![old_to_new_mapping[&c.id].1],
+            outputs,
             GPUArch::Metal(HashMap::default()),
             0,
             &cx.dyn_map,

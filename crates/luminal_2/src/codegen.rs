@@ -1326,39 +1326,86 @@ fn split_kernels(
 pub fn stitch_meta_graph_together(
     meta_graph: MetaGraph,
     mut accs: FxHashMap<NodeIndex, Vec<(NodeIndex, InitData)>>,
-) -> (SubGraph, FxHashMap<NodeIndex, InitData>) {
+    outputs: Vec<(NodeIndex, NodeIndex)>,
+) -> (SubGraph, FxHashMap<NodeIndex, InitData>, Vec<NodeIndex>) {
     let mut out = SubGraph::new();
-    // map (meta_node, inner_node) -> stitched node
+
+    // (meta_node, inner_node) -> stitched node (no entry for break_in placeholders)
     let mut map: FxHashMap<(NodeIndex, NodeIndex), NodeIndex> = FxHashMap::default();
+    // record which inner nodes are break_in placeholders, per meta node
+    let mut is_placeholder: FxHashMap<(NodeIndex, NodeIndex), bool> = FxHashMap::default();
+    // record outgoing targets of each placeholder: (meta, placeholder_inner) -> Vec<inner_target>
+    let mut placeholder_outs: FxHashMap<(NodeIndex, NodeIndex), Vec<NodeIndex>> =
+        FxHashMap::default();
+
     let mut new_accs = HashMap::default();
 
-    // 1) copy nodes
+    let is_break_in = |term: &GraphTerm| {
+        matches!(term,
+            GraphTerm::GMEM { label: Some(l) } if l == "break_in"
+        )
+    };
+
+    // 1) copy nodes (skip creating nodes for break_in placeholders)
     for m in meta_graph.node_indices() {
         let inner = &meta_graph[m];
         for n in inner.node_indices() {
-            map.insert((m, n), out.add_node(inner[n].clone()));
+            let term = &inner[n];
+            let ph = is_break_in(term);
+            is_placeholder.insert((m, n), ph);
+            if !ph {
+                map.insert((m, n), out.add_node(term.clone()));
+            }
         }
-        // Combine accs
+        // combine accs
         for (node, data) in accs.remove(&m).unwrap_or_default() {
             new_accs.insert(map[&(m, node)], data);
         }
     }
+    // translate outputs
+    let new_outputs = outputs.into_iter().map(|k| map[&k]).collect();
 
-    // 2) copy inner edges
+    // 2) copy inner edges (skip edges touching placeholders; record placeholder -> target)
     for m in meta_graph.node_indices() {
         let inner = &meta_graph[m];
         for e in inner.edge_indices() {
             let (u, v) = inner.edge_endpoints(e).unwrap();
+            let up = *is_placeholder.get(&(m, u)).unwrap();
+            let vp = *is_placeholder.get(&(m, v)).unwrap();
+
+            if up {
+                // defer: producer will be connected to all of v later
+                placeholder_outs.entry((m, u)).or_default().push(v);
+                continue;
+            }
+            if vp {
+                // edges *into* placeholder are never needed
+                continue;
+            }
+
             out.add_edge(map[&(m, u)], map[&(m, v)], ());
         }
     }
 
-    // 3) connect across breaks using meta-edges (producer_inner -> consumer_placeholder_inner)
+    // 3) connect across breaks using meta-edges
+    // meta edge payload: (producer_inner, consumer_placeholder_inner_or_real)
     for me in meta_graph.edge_indices() {
         let (mu, mv) = meta_graph.edge_endpoints(me).unwrap();
         let (u_inner, v_inner) = meta_graph[me];
-        out.add_edge(map[&(mu, u_inner)], map[&(mv, v_inner)], ());
+
+        let v_is_ph = *is_placeholder.get(&(mv, v_inner)).unwrap_or(&false);
+        if v_is_ph {
+            // fan-out to every recorded consumer of the placeholder
+            if let Some(targets) = placeholder_outs.get(&(mv, v_inner)) {
+                let src = map[&(mu, u_inner)];
+                for &t_inner in targets {
+                    out.add_edge(src, map[&(mv, t_inner)], ());
+                }
+            }
+        } else {
+            out.add_edge(map[&(mu, u_inner)], map[&(mv, v_inner)], ());
+        }
     }
 
-    (out, new_accs)
+    (out, new_accs, new_outputs)
 }
