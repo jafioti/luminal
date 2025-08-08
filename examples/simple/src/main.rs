@@ -1,22 +1,23 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use itertools::Itertools;
-use luminal::prelude::{petgraph::Direction, *};
+use luminal::prelude::{
+    petgraph::{visit::EdgeRef, Direction},
+    *,
+};
 use luminal_2::{
     codegen::{codegen, stitch_meta_graph_together},
-    extract::search,
+    extract::{make_test_inputs, search},
     run::{assign_buffers, compile_kernels, run_graph},
     translate::{translate_graph_meta, InitData},
     utils::{build_search_space, print_kernels},
-    GPUArch, GT2,
+    GPUArch, GraphTerm, GT2,
 };
 use metal_rs::{objc::rc::autoreleasepool, Buffer, Device, MTLResourceOptions};
-use rand::rng;
 use rustc_hash::FxHashMap;
 
 fn main() {
     autoreleasepool(|| {
-        let mut rng = rng();
         // let weight = (0..4 * 5).map(|_| rng.random()).collect_vec();
         // Create a new graph
         let mut cx = Graph::new();
@@ -24,10 +25,10 @@ fn main() {
         // let model = Linear::new(4, 5, false, &mut cx);
         // model.weight.set(weight.clone());
         // Make an input tensor
-        let a = cx.tensor((1, 3, 2, 2)).set(vec![
+        let a = cx.named_tensor("A", (1, 3, 2, 2)).set(vec![
             1.1, 2.1, 3.1, 4.1, 5.1, 3.1, 1.2, 2.2, 3.2, 4.2, 5.2, 3.2,
         ]);
-        let b = cx.tensor((1, 3, 2, 'b')).set(vec![
+        let b = cx.named_tensor("B", (1, 3, 2, 'b')).set(vec![
             0.1_f32, 1.1, 18.1, 1.1, 3.1, 2.1, 0.2, 1.2, 18.2, 1.2, 3.2, 2.2,
         ]);
         let c = a.matmul(b).graph_break().sin().retrieve();
@@ -35,9 +36,83 @@ fn main() {
         cx.set_dyn_dim('a', 3);
         cx.set_dyn_dim('b', 2);
         cx.execute_debug();
-        let (new_graph, old_to_new_mapping, accs) = translate_graph_meta(&cx);
+        let (mut new_graph, mut old_to_new_mapping, mut accs) = translate_graph_meta(&cx);
+        // Insert accs into the old_to_new_mapping
+        for (meta_node, nodes) in &accs {
+            for (node, _) in nodes {
+                old_to_new_mapping.insert(*node, (*meta_node, *node));
+            }
+        }
+
+        // Search each subgraph
+        for graph_node in new_graph.node_indices().collect_vec() {
+            let graph = new_graph.node_weight_mut(graph_node).unwrap();
+            let search_space = build_search_space(graph, 4, false);
+            let inputs = make_test_inputs(graph, &cx.dyn_map);
+            let searched_graph = search(
+                &search_space,
+                &inputs,
+                GPUArch::Metal(HashMap::default()),
+                &cx.dyn_map,
+            )
+            .unwrap();
+            // screw it just say that the new only output of this graph is the only output (this doesn't work with multiple outputs)
+            // adjust meta-edges
+            let old_output = graph.externals(Direction::Outgoing).next().unwrap();
+            let new_output = searched_graph
+                .externals(Direction::Outgoing)
+                .next()
+                .unwrap();
+            let old_inputs = graph
+                .node_indices()
+                .filter_map(|n| {
+                    if let GraphTerm::GMEM { label } = graph.node_weight(n).unwrap() {
+                        Some((n, label.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<HashMap<_, _>>();
+            let new_inputs = searched_graph
+                .node_indices()
+                .filter_map(|n| {
+                    if let GraphTerm::GMEM { label } = searched_graph.node_weight(n).unwrap() {
+                        Some((label.clone(), n))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<HashMap<_, _>>();
+            *graph = searched_graph;
+            for edge in new_graph
+                .edges_directed(graph_node, Direction::Outgoing)
+                .map(|e| e.id())
+                .collect_vec()
+            {
+                let (input, _) = new_graph.edge_weight_mut(edge).unwrap();
+                *input = new_output;
+            }
+            // Update old-to-new-mappings
+            for (_, (meta, v)) in &mut old_to_new_mapping {
+                if *meta != graph_node {
+                    continue;
+                }
+                if *v == old_output {
+                    *v = new_output;
+                }
+                if let Some(gmem_label) = old_inputs.get(v) {
+                    *v = new_inputs[gmem_label];
+                }
+            }
+        }
         let outputs = vec![old_to_new_mapping[&c.id]];
+        for (_, nodes) in &mut accs {
+            for (node, _) in nodes {
+                *node = old_to_new_mapping[node].1;
+            }
+        }
         let (new_graph, accs, outputs) = stitch_meta_graph_together(new_graph, accs, outputs);
+        // luminal_2::utils::display_graph(&new_graph, &[]);
         let (kernels, gmem_mapping) = codegen(
             new_graph.clone(),
             outputs,
@@ -75,8 +150,7 @@ fn main() {
                     });
                 }
                 InitData::Data(d) => {
-                    let d = d.clone();
-                    inputs.insert(gmem_mapping[label], (copy_metal_buffer(&d, &device), true));
+                    inputs.insert(gmem_mapping[&label], (copy_metal_buffer(d, &device), true));
                 }
             }
         }

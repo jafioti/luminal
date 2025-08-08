@@ -971,7 +971,7 @@ fn split_kernels(
             }
             marked_graph.node_weight_mut(n).unwrap().1 = neighbor_levels;
         } else {
-            display_graph(&marked_graph, &[(n, "yellow".to_string())]);
+            display_graph(&marked_graph, &[(n, "yellow")]);
             panic!("No seen neighbors when building loop levels!");
         }
         dfs.extend(marked_graph.neighbors_undirected(n));
@@ -1281,14 +1281,24 @@ fn split_kernels(
         // Ensure GMEM is placed on the graph
         for (_, input) in inputs {
             if !matches!(kernel_graph[*input].0, GraphTerm::GMEM { .. }) {
-                let new_input = kernel_graph.add_node((GraphTerm::GMEM { label: None }, 0));
+                let new_input = kernel_graph.add_node((
+                    GraphTerm::GMEM {
+                        label: "Output".to_string(),
+                    },
+                    0,
+                ));
                 kernel_graph.add_edge(new_input, *input, ());
                 *input = new_input;
             }
         }
         for (size, output) in outputs {
             if !matches!(kernel_graph[*output].0, GraphTerm::GMEM { .. }) {
-                let new_output = kernel_graph.add_node((GraphTerm::GMEM { label: None }, 0));
+                let new_output = kernel_graph.add_node((
+                    GraphTerm::GMEM {
+                        label: "Output".to_string(),
+                    },
+                    0,
+                ));
                 kernel_graph.add_edge(*output, new_output, ());
                 *output = new_output;
             }
@@ -1342,7 +1352,7 @@ pub fn stitch_meta_graph_together(
 
     let is_break_in = |term: &GraphTerm| {
         matches!(term,
-            GraphTerm::GMEM { label: Some(l) } if l == "break_in"
+            GraphTerm::GMEM { label } if label.starts_with("break_")
         )
     };
 

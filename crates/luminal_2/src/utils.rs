@@ -199,13 +199,7 @@ impl TermToString for GraphTerm {
                 stride,
                 marker,
             } => format!("LoopOut ({range}; {stride}; -{marker}-)"),
-            GraphTerm::GMEM { label } => {
-                if let Some(label) = label {
-                    format!("GMEM ({label})")
-                } else {
-                    "GMEM".to_string()
-                }
-            }
+            GraphTerm::GMEM { label } => format!("GMEM ({label})"),
             GraphTerm::SMEM => "SMEM".to_string(),
             GraphTerm::Custom(_) => "CustomKernel".to_string(),
             GraphTerm::Diff(d) => format!("Diff({d})"),
@@ -246,9 +240,9 @@ impl TermToString for (GraphTerm, Vec<String>, Vec<usize>) {
 }
 
 /// View a debug graph in the browser
-pub fn display_graph<G: TermToString, E: EdgeToString>(
-    graph: &StableGraph<G, E, Directed, u32>,
-    mark_nodes: &[(NodeIndex, String)],
+pub fn display_graph(
+    graph: &StableGraph<impl TermToString, impl EdgeToString, Directed, u32>,
+    mark_nodes: &[(NodeIndex, &str)],
 ) {
     let mut new_graph = StableGraph::new();
     let mut map = HashMap::new();
@@ -271,7 +265,7 @@ pub fn display_graph<G: TermToString, E: EdgeToString>(
             &format!("    {} [ label =", n.index()),
             &format!(
                 "    {} [ style=\"filled\" fillcolor=\"{color}\" label =",
-                n.index()
+                n.index(),
             ),
         );
     }
@@ -295,13 +289,7 @@ pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), (), Directed>) {
                 let (new_term, new_level) = graph.node_weight(new_node).unwrap();
                 if !matches!(new_term, GraphTerm::LoopOut { .. }) {
                     if *new_level != *curr_level + 1 {
-                        display_graph(
-                            graph,
-                            &[
-                                (node, "yellow".to_string()),
-                                (new_node, "yellow".to_string()),
-                            ],
-                        );
+                        display_graph(graph, &[(node, "yellow"), (new_node, "yellow")]);
                         panic!("incorrect levels");
                     }
                 }
@@ -312,13 +300,7 @@ pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), (), Directed>) {
                 let (new_term, new_level) = graph.node_weight(new_node).unwrap();
                 if !matches!(new_term, GraphTerm::LoopIn { .. }) {
                     if *new_level != *curr_level + 1 {
-                        display_graph(
-                            graph,
-                            &[
-                                (node, "yellow".to_string()),
-                                (new_node, "yellow".to_string()),
-                            ],
-                        );
+                        display_graph(graph, &[(node, "yellow"), (new_node, "yellow")]);
                         panic!("incorrect levels");
                     }
                 }
@@ -331,13 +313,7 @@ pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), (), Directed>) {
                     GraphTerm::LoopIn { .. } | GraphTerm::LoopOut { .. }
                 ) {
                     if *new_level != *curr_level {
-                        display_graph(
-                            graph,
-                            &[
-                                (node, "yellow".to_string()),
-                                (new_node, "yellow".to_string()),
-                            ],
-                        );
+                        display_graph(graph, &[(node, "yellow"), (new_node, "yellow")]);
                         panic!("incorrect levels");
                     }
                 }
@@ -350,7 +326,7 @@ pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), (), Directed>) {
                 && !matches!(graph.node_weight(node).unwrap().0, GraphTerm::SMEM)
             {
                 if *curr_level != 0 {
-                    display_graph(graph, &[(node, "yellow".to_string())]);
+                    display_graph(graph, &[(node, "yellow")]);
                     panic!("Inputs must have level 0, found {curr_level}");
                 }
             }
@@ -420,7 +396,7 @@ fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>) -> (String, Strin
         next_id += 1;
         let code = match &graph[n] {
             GraphTerm::GMEM { label } => {
-                format!("(GMEM \"{}\")", label.clone().unwrap_or_default())
+                format!("(GMEM \"{label}\")")
             }
             GraphTerm::SMEM => "(SMEM)".into(),
 

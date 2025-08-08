@@ -51,7 +51,7 @@ pub enum GMEMBuffer {
 pub enum GraphTerm {
     GMEM {
         // Signifies global memory
-        label: Option<String>,
+        label: String,
     },
     LoopIn {
         range: Expression,

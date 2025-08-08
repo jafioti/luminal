@@ -1,18 +1,24 @@
+use std::collections::HashMap;
 use std::usize;
 
 use crate::Kernel;
+use crate::run::{assign_buffers, compile_kernels, run_graph};
 use crate::utils::{display_graph, print_kernels};
 use crate::{GPUArch, GraphTerm};
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
+use itertools::Itertools;
 use luminal::prelude::NodeIndex;
 use luminal::prelude::petgraph::prelude::StableGraph;
 use luminal::prelude::petgraph::{Directed, Direction};
 use luminal::shape::{Expression, Term};
+use metal_rs::objc::rc::autoreleasepool;
+use metal_rs::{Buffer, Device, MTLResourceOptions};
+use rand::{Rng, rng};
 use rustc_hash::FxHashMap;
 
-const WARMUP_TRIALS: usize = 1;
-const TRIALS: usize = 10;
+const WARMUP_TRIALS: usize = 0;
+const TRIALS: usize = 1;
 const MAX_SEARCHED_GRAPHS: usize = 600_000;
 const MAX_CYCLES: usize = 1;
 const INVALID_IR: &[&str] = &[
@@ -31,7 +37,7 @@ pub fn search(
     inputs: &[(NodeIndex, Vec<f32>)],
     arch: GPUArch,
     dyn_vars: &FxHashMap<char, usize>,
-) -> Option<StableGraph<Kernel, (usize, usize)>> {
+) -> Option<StableGraph<GraphTerm, ()>> {
     fn recurse<'a>(
         egraph: &'a EGraph,
         current_class: &'a ClassId,
@@ -114,6 +120,7 @@ pub fn search(
     {
         // Build termdag
         let graph = extraction_to_graph(egraph, &trajectory);
+        let inputs = make_test_inputs(&graph, dyn_vars);
         let root = graph.externals(Direction::Outgoing).next().unwrap();
         let Some((kernels, gmem_mapping)) =
             crate::codegen::codegen(graph.clone(), vec![root], arch.clone(), 0, dyn_vars)
@@ -148,7 +155,7 @@ pub fn search(
                 // }
                 // println!("KERNEL NUMBER {n}");
                 // display_graph(&graph, &[]);
-                if let Some((us, outs)) = cost(&kernels, inputs) {
+                if let Some((us, outs)) = cost(&kernels, &inputs, &gmem_mapping, dyn_vars) {
                     valid_graphs += 1;
                     if option_env!("PRINT_KERNELS").is_some() {
                         println!(
@@ -183,7 +190,7 @@ pub fn search(
                     }
                     if kernels.node_count() - 2 < min_kernels {
                         min_kernels = kernels.node_count() - 2;
-                        best_graph = Some(kernels);
+                        best_graph = Some(graph);
                     }
                 }
             }
@@ -221,12 +228,10 @@ pub fn extraction_to_graph(
                 *current += 1;
                 Ret::Expr(
                     g.add_node(GraphTerm::GMEM {
-                        label: Some(
-                            egraph.nodes[&enode.children[0]]
-                                .op
-                                .replace("Boxed(\"", "")
-                                .replace("\")", ""),
-                        ),
+                        label: egraph.nodes[&enode.children[0]]
+                            .op
+                            .replace("Boxed(\"", "")
+                            .replace("\")", ""),
                     }),
                 )
             }
@@ -383,21 +388,103 @@ pub fn extraction_to_graph(
 fn cost<'a>(
     kernels: &StableGraph<Kernel, (usize, usize), Directed>,
     inputs: &[(NodeIndex, Vec<f32>)],
+    gmem_mapping: &HashMap<NodeIndex, usize>,
+    dyn_vars: &FxHashMap<char, usize>,
 ) -> Option<(Cost, Vec<Vec<f32>>)> {
-    todo!()
-    // // Get buffer info
-    // // let (buffer_sizes, buffer_map) = produce_buffer_map(kernels);
-    // // Warm up resources (buffer allocation, kernel compiler, etc.)
-    // for _ in 0..WARMUP_TRIALS {
-    //     run_graph(inputs, &kernels, &FxHashMap::default());
-    // }
-    // // Test runtime
-    // let mut micros = vec![];
-    // let mut outputs = vec![];
-    // let mut m;
-    // for _ in 0..TRIALS {
-    //     (outputs, m) = run_graph(inputs, &kernels, &FxHashMap::default());
-    //     micros.push(m);
-    // }
-    // Some((micros.into_iter().sum::<u128>() / TRIALS as u128, outputs))
+    autoreleasepool(|| {
+        // Get buffer info
+        let (int_buffers, int_buffer_map) = assign_buffers(&kernels);
+        let compiled_kernels = compile_kernels(&kernels);
+        let device = Device::system_default().unwrap();
+        // Copy input buffers over
+        let mut inputs = inputs
+            .into_iter()
+            .map(|(n, b)| (gmem_mapping[n], (copy_metal_buffer(b, &device), false)))
+            .collect::<FxHashMap<_, _>>();
+        // Warm up resources (buffer allocation, kernel compiler, etc.)
+        for _ in 0..WARMUP_TRIALS {
+            run_graph(
+                &mut inputs,
+                &kernels,
+                dyn_vars,
+                &compiled_kernels,
+                &int_buffers,
+                &int_buffer_map,
+            );
+        }
+        // Test runtime
+        let mut micros = vec![];
+        let mut outputs = vec![];
+        let mut m;
+        for _ in 0..TRIALS {
+            (outputs, m) = run_graph(
+                &mut inputs,
+                &kernels,
+                dyn_vars,
+                &compiled_kernels,
+                &int_buffers,
+                &int_buffer_map,
+            );
+            micros.push(m);
+        }
+        Some((
+            micros.into_iter().sum::<u128>() / TRIALS as u128,
+            outputs.iter().map(copy_metal_buffer_back).collect_vec(),
+        ))
+    })
+}
+
+pub fn copy_metal_buffer(v: &Vec<f32>, device: &Device) -> Buffer {
+    assert!(v.len() > 0);
+    let buf = device.new_buffer_with_data(
+        v.as_ptr() as *const _,
+        (v.len() * std::mem::size_of::<f32>()) as u64,
+        MTLResourceOptions::StorageModeShared,
+    );
+    buf
+}
+pub fn copy_metal_buffer_back(v: &Buffer) -> Vec<f32> {
+    let mut data = vec![0f32; v.length() as usize / size_of::<f32>()];
+    let ptr = v.contents() as *mut f32;
+    for (i, d) in data.iter_mut().enumerate() {
+        *d = unsafe { *ptr.add(i) };
+    }
+    data
+}
+
+pub fn make_test_inputs(
+    graph: &StableGraph<GraphTerm, ()>,
+    dyn_map: &FxHashMap<char, usize>,
+) -> Vec<(NodeIndex, Vec<f32>)> {
+    // Go through each GMEM and work out the size
+    let mut inputs = vec![];
+    let mut rng = rng();
+    for node in graph.externals(Direction::Incoming) {
+        if matches!(graph.node_weight(node).unwrap(), GraphTerm::GMEM { .. }) {
+            // Walk down the loopins to find the max size
+            let mut size = Expression::from(0);
+            let mut curr = graph
+                .neighbors_directed(node, Direction::Outgoing)
+                .next()
+                .unwrap();
+            loop {
+                if let GraphTerm::LoopIn { range, stride, .. } = graph.node_weight(curr).unwrap() {
+                    size = size.max(stride.substitute('z', *range - 1) + 1);
+                    curr = graph
+                        .neighbors_directed(curr, Direction::Outgoing)
+                        .next()
+                        .unwrap();
+                } else {
+                    break;
+                }
+            }
+            inputs.push((
+                node,
+                (0..size.exec(&dyn_map).unwrap())
+                    .map(|_| rng.random())
+                    .collect(),
+            ));
+        }
+    }
+    inputs
 }

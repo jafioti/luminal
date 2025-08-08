@@ -103,7 +103,7 @@ pub fn translate_graph_meta(
                 simplify_cache = FxHashMap::default();
 
                 let placeholder = g.add_node(GraphTerm::GMEM {
-                    label: Some("break_in".into()),
+                    label: format!("break_{}", old_node.index()),
                 });
 
                 // defer wiring: (producer_meta, producer_inner_out) -> (this_meta (TBD), placeholder)
@@ -190,7 +190,7 @@ pub fn translate_graph_meta(
                 };
 
                 let mut acc = g.add_node(GraphTerm::GMEM {
-                    label: Some(format!("acc_{}", inits.len())),
+                    label: format!("acc_{}", inits.len()),
                 });
                 let orig_acc = acc;
 
@@ -244,7 +244,7 @@ pub fn translate_graph_meta(
             _ => {
                 if let Some(constant) = node_weight.as_any().downcast_ref::<Constant>() {
                     let newn = g.add_node(GraphTerm::GMEM {
-                        label: Some(op.to_string()),
+                        label: op.to_string(),
                     });
                     old_to_new.insert(old_node, newn);
                     node_map.insert((old_node, 0), newn);
@@ -274,7 +274,7 @@ pub fn translate_graph_meta(
                 } else {
                     // Assume a load
                     let newn = g.add_node(GraphTerm::GMEM {
-                        label: Some(op.to_string()),
+                        label: op.to_string(),
                     });
                     node_map.insert((old_node, 0), newn);
                     old_to_new.insert(old_node, newn);
@@ -357,7 +357,7 @@ fn scope_in(
         if let Some(mask_stride) = mask_stride {
             // Bring in mask
             let mask = graph.add_node(GraphTerm::GMEM {
-                label: Some("Mask".to_string()),
+                label: "Mask".to_string(),
             });
             inits.push((mask, InitData::Data(vec![0., 1.])));
             // Loop mask in
