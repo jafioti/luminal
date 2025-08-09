@@ -199,23 +199,14 @@
 	(LoopOut (LoopOut (Binary ?bin (LoopIn ?a (Loop "newpad" (MNum 1)) (MNum 0)) (LoopIn ?b (Loop "newpad" (MNum 1)) (MNum 0))) (Loop "newpad" (MNum 1)) (MNum 0)) (Loop ?l ?r) ?s)
 	:when ((!= ?r (MNum 1)) (!= ?s (MNum 0)))
 )
-(rewrite
-	(LoopOut (Binary ?bin2 (Binary ?bin ?a ?b) ?c) (Loop ?l ?r) ?s)
-	(LoopOut (LoopOut (Binary ?bin2 (Binary ?bin (LoopIn ?a (Loop "newpad" (MNum 1)) (MNum 0)) (LoopIn ?b (Loop "newpad" (MNum 1)) (MNum 0))) (LoopIn ?c (Loop "newpad" (MNum 1)) (MNum 0))) (Loop "newpad" (MNum 1)) (MNum 0)) (Loop ?l ?r) ?s)
-	:when ((!= ?r (MNum 1)) (!= ?s (MNum 0)))
-)
 
 ; Loop Fusion
-(rewrite (LoopIn (LoopOut ?x (Loop ?loopA ?range) ?st) (Loop ?loopB ?range) ?st) ?x)
+;(rewrite (LoopIn (LoopOut ?x (Loop ?loopA ?range) ?st) (Loop ?loopB ?range) ?st) ?x)
 
 ; Specialized swap loops
 (rewrite
-	(LoopOut (LoopOut (Binary ?bin (LoopIn (LoopIn ?a ?outA ?outASt) ?inA ?inASt) (LoopIn (LoopIn ?b ?outB ?outBSt) ?inB ?inBSt)) ?in ?inSt) ?out ?outSt)
-	(LoopOut (LoopOut (Binary ?bin (LoopIn (LoopIn ?a ?inA ?inASt) ?outA ?outASt) (LoopIn (LoopIn ?b ?inB ?inBSt) ?outB ?outBSt)) ?out ?outSt) ?in ?inSt)
-)
-(rewrite
-	(LoopOut (LoopOut (Binary ?bin2 (Binary ?bin (LoopIn (LoopIn ?a ?outA ?outASt) ?inA ?inASt) (LoopIn (LoopIn ?b ?outB ?outBSt) ?inB ?inBSt)) (LoopIn (LoopIn ?c ?outC ?outCSt) ?inC ?inCSt)) ?in ?inSt) ?out ?outSt)
-	(LoopOut (LoopOut (Binary ?bin2 (Binary ?bin (LoopIn (LoopIn ?a ?inA ?inASt) ?outA ?outASt) (LoopIn (LoopIn ?b ?inB ?inBSt) ?outB ?outBSt)) (LoopIn (LoopIn ?c ?inC ?inCSt) ?outC ?outCSt)) ?out ?outSt) ?in ?inSt)
+	(LoopOut (LoopOut (Binary ?bin (LoopIn (LoopIn ?a (Loop ?outAL ?outA) ?outASt) (Loop ?inAL ?inA) ?inASt) (LoopIn (LoopIn ?b (Loop ?outBL ?outB) ?outBSt) (Loop ?inBL ?inB) ?inBSt)) (Loop ?inL ?in) ?inSt) (Loop ?outL ?out) ?outSt)
+	(LoopOut (LoopOut (Binary ?bin (LoopIn (LoopIn ?a (Loop (+ ?inAL "sw") ?inA) ?inASt) (Loop (+ ?outAL "sw") ?outA) ?outASt) (LoopIn (LoopIn ?b (Loop (+ ?inBL "sw") ?inB) ?inBSt) (Loop (+ ?outBL "sw") ?outB) ?outBSt)) (Loop (+ ?outL "sw") ?out) ?outSt) (Loop (+ ?inL "sw") ?in) ?inSt)
 )
 
 ; Tiling
@@ -317,4 +308,43 @@
 (let out_pad1 (LoopOut out_pad2 (Loop "-pad1-" (MNum 1)) (MVar "z")))
 (let out0 (LoopOut out_pad1 (Loop "0" (MNum 4)) (MVar "z")))
 
-;(check (= out0 t19))
+(let at0 (GMEM "B Load"))
+(let at1 (LoopIn at0 (Loop "" (MNum 8)) (MAdd (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2)) (MMul (MNum 2) (MAdd (MMul (MDiv (MMod (MVar "z") (MNum 2)) (MNum 2)) (MNum 2)) (MMod (MMod (MVar "z") (MNum 2)) (MNum 2)))))))
+(let at2 (LoopIn at1 (Loop "" (MNum 1)) (MNum 0)))
+(let at3 (GMEM "A Load"))
+(let at4 (LoopIn at3 (Loop "" (MNum 8)) (MAdd (MMul (MNum 2) (MMod (MDiv (MVar "z") (MNum 4)) (MNum 2))) (MAdd (MMul (MDiv (MMod (MVar "z") (MNum 2)) (MNum 2)) (MNum 2)) (MMod (MMod (MVar "z") (MNum 2)) (MNum 2))))))
+(let at5 (LoopIn at4 (Loop "" (MNum 1)) (MNum 0)))
+(let at6 (Mul at2 at5))
+(let at7 (LoopOut at6 (Loop "" (MNum 1)) (MNum 0)))
+(let at8 (LoopOut at7 (Loop "" (MNum 8)) (MVar "z")))
+(let at9 (LoopIn at8 (Loop "" (MNum 4)) (MAdd (MAdd (MMul (MNum 4) (MMod (MDiv (MAdd (MMul (MNum 4) (MMod (MDiv (MDiv (MVar "z") (MNum 2)) (MNum 2)) (MNum 2))) (MMul (MNum 2) (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2)))) (MNum 2)) (MNum 2))) (MMul (MNum 2) (MMod (MAdd (MMul (MNum 4) (MMod (MDiv (MDiv (MVar "z") (MNum 2)) (MNum 2)) (MNum 2))) (MMul (MNum 2) (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2)))) (MNum 2)))) (MAdd (MMul (MNum 2) (MMul (MNum 2) (MMod (MDiv (MMod (MVar "z") (MNum 2)) (MNum 2)) (MNum 2)))) (MMul (MNum 2) (MMod (MMod (MVar "z") (MNum 2)) (MNum 2)))))))
+(let at10 (LoopOut at9 (Loop "" (MNum 2)) (MAdd (MMul (MNum 4) (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2))) (MMul (MNum 2) (MAdd (MMul (MDiv (MMod (MVar "z") (MNum 2)) (MNum 2)) (MNum 2)) (MMod (MMod (MVar "z") (MNum 2)) (MNum 2)))))))
+(let at11 (LoopOut at10 (Loop "" (MNum 2)) (MAdd (MMul (MNum 2) (MMul (MNum 2) (MMod (MDiv (MAdd (MMul (MNum 4) (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2))) (MMul (MNum 2) (MAdd (MMul (MDiv (MMod (MVar "z") (MNum 2)) (MNum 2)) (MNum 2)) (MMod (MMod (MVar "z") (MNum 2)) (MNum 2))))) (MNum 2)) (MNum 2)))) (MMul (MNum 2) (MMod (MAdd (MMul (MNum 4) (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2))) (MMul (MNum 2) (MAdd (MMul (MDiv (MMod (MVar "z") (MNum 2)) (MNum 2)) (MNum 2)) (MMod (MMod (MVar "z") (MNum 2)) (MNum 2))))) (MNum 2))))))
+(let at12 (LoopIn at11 (Loop "" (MNum 2)) (MAdd (MMul (MNum 2) (MMul (MNum 2) (MMod (MDiv (MAdd (MMul (MNum 4) (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2))) (MMul (MNum 2) (MAdd (MMul (MDiv (MMod (MVar "z") (MNum 2)) (MNum 2)) (MNum 2)) (MMod (MMod (MVar "z") (MNum 2)) (MNum 2))))) (MNum 2)) (MNum 2)))) (MMul (MNum 2) (MMod (MAdd (MMul (MNum 4) (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2))) (MMul (MNum 2) (MAdd (MMul (MDiv (MMod (MVar "z") (MNum 2)) (MNum 2)) (MNum 2)) (MMod (MMod (MVar "z") (MNum 2)) (MNum 2))))) (MNum 2))))))
+(let at13 (LoopIn at12 (Loop "" (MNum 2)) (MAdd (MMul (MNum 4) (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2))) (MMul (MNum 2) (MAdd (MMul (MDiv (MMod (MVar "z") (MNum 2)) (MNum 2)) (MNum 2)) (MMod (MMod (MVar "z") (MNum 2)) (MNum 2)))))))
+(let at14 (LoopOut at13 (Loop "" (MNum 4)) (MAdd (MAdd (MMul (MNum 4) (MMod (MDiv (MAdd (MMul (MNum 4) (MMod (MDiv (MDiv (MVar "z") (MNum 2)) (MNum 2)) (MNum 2))) (MMul (MNum 2) (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2)))) (MNum 2)) (MNum 2))) (MMul (MNum 2) (MMod (MAdd (MMul (MNum 4) (MMod (MDiv (MDiv (MVar "z") (MNum 2)) (MNum 2)) (MNum 2))) (MMul (MNum 2) (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2)))) (MNum 2)))) (MAdd (MMul (MNum 2) (MMul (MNum 2) (MMod (MDiv (MMod (MVar "z") (MNum 2)) (MNum 2)) (MNum 2)))) (MMul (MNum 2) (MMod (MMod (MVar "z") (MNum 2)) (MNum 2)))))))
+(let at15 (LoopIn at14 (Loop "" (MNum 2)) (MAdd (MMul (MNum 2) (MMul (MNum 2) (MMod (MDiv (MAdd (MMul (MNum 4) (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2))) (MMul (MNum 2) (MAdd (MMul (MDiv (MMod (MVar "z") (MNum 2)) (MNum 2)) (MNum 2)) (MMod (MMod (MVar "z") (MNum 2)) (MNum 2))))) (MNum 2)) (MNum 2)))) (MMul (MNum 2) (MMod (MAdd (MMul (MNum 4) (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2))) (MMul (MNum 2) (MAdd (MMul (MDiv (MMod (MVar "z") (MNum 2)) (MNum 2)) (MNum 2)) (MMod (MMod (MVar "z") (MNum 2)) (MNum 2))))) (MNum 2))))))
+(let at16 (LoopOut at15 (Loop "" (MNum 2)) (MAdd (MMul (MNum 2) (MMul (MNum 2) (MMod (MDiv (MAdd (MMul (MNum 4) (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2))) (MMul (MNum 2) (MAdd (MMul (MDiv (MMod (MVar "z") (MNum 2)) (MNum 2)) (MNum 2)) (MMod (MMod (MVar "z") (MNum 2)) (MNum 2))))) (MNum 2)) (MNum 2)))) (MMul (MNum 2) (MMod (MAdd (MMul (MNum 4) (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2))) (MMul (MNum 2) (MAdd (MMul (MDiv (MMod (MVar "z") (MNum 2)) (MNum 2)) (MNum 2)) (MMod (MMod (MVar "z") (MNum 2)) (MNum 2))))) (MNum 2))))))
+(let at17 (LoopIn at16 (Loop "" (MNum 4)) (MAdd (MMul (MNum 4) (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2))) (MMul (MNum 2) (MAdd (MMul (MDiv (MMod (MVar "z") (MNum 2)) (MNum 2)) (MNum 2)) (MMod (MMod (MVar "z") (MNum 2)) (MNum 2)))))))
+(let at18 (LoopIn at17 (Loop "" (MNum 1)) (MNum 0)))
+(let at19 (LoopIn at18 (Loop "" (MNum 1)) (MNum 0)))
+(let at20 (LoopIn at19 (Loop "" (MNum 2)) (MVar "z")))
+(let at21 (LoopIn at20 (Loop "" (MNum 1)) (MNum 0)))
+(let at22 (GMEM "acc_0"))
+(let at23 (LoopIn at22 (Loop "" (MNum 4)) (MNum 0)))
+(let at24 (LoopIn at23 (Loop "" (MNum 1)) (MNum 0)))
+(let at25 (LoopIn at24 (Loop "" (MNum 1)) (MNum 0)))
+(let at26 (LoopIn at25 (Loop "" (MNum 2)) (MAccum "a")))
+(let at27 (LoopIn at26 (Loop "" (MNum 1)) (MNum 0)))
+(let at28 (Add at21 at27))
+(let at29 (LoopOut at28 (Loop "" (MNum 1)) (MNum 0)))
+(let at30 (LoopOut at29 (Loop "" (MNum 2)) (MAccum "a")))
+(let at31 (LoopOut at30 (Loop "" (MNum 1)) (MVar "z")))
+(let at32 (LoopOut at31 (Loop "" (MNum 1)) (MVar "z")))
+(let at33 (LoopOut at32 (Loop "" (MNum 4)) (MVar "z")))
+
+(rewrite (Loop ?name ?range) (Loop "" ?range))
+
+;(run 1)
+
+;(check (= at33 t19))

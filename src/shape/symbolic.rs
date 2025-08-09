@@ -50,7 +50,7 @@ impl Expression {
     }
 
     pub fn is_acc(&self) -> bool {
-        self.terms.read().len() == 1 && matches!(self.terms.read()[0], Term::Acc(_))
+        self.terms.read().iter().any(|i| matches!(i, Term::Acc(_)))
     }
 }
 

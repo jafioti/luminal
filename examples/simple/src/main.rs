@@ -33,6 +33,7 @@ fn main() {
         cx.set_dyn_dim('b', 2);
         cx.execute_debug();
         let (mut new_graph, mut old_to_new_mapping, mut accs) = translate_graph_meta(&cx);
+        // luminal_2::utils::display_graph(&new_graph.node_weights().next().unwrap(), &[]);
         // Insert accs into the old_to_new_mapping
         for (meta_node, nodes) in &accs {
             for (node, _) in nodes {
@@ -43,7 +44,7 @@ fn main() {
         // Search each subgraph
         for graph_node in new_graph.node_indices().collect_vec() {
             let graph = new_graph.node_weight_mut(graph_node).unwrap();
-            let search_space = build_search_space(graph, 7);
+            let search_space = build_search_space(graph, 9);
             let inputs = make_test_inputs(graph, &cx.dyn_map);
             let searched_graph = search(
                 &search_space,

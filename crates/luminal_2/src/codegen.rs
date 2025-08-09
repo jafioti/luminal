@@ -331,6 +331,10 @@ fn make_kernel(
         let (term, loop_level) = &kernel_graph[node];
         match term {
             GraphTerm::LoopIn { range, stride, .. } => {
+                // maybe we tried to merge a loop with an acc
+                if stride.terms.read().len() > 1 && stride.is_acc() {
+                    return None;
+                }
                 // go through graph to find inputs and outputs
                 let mut loop_inputs = HashSet::new();
                 loop_inputs.insert((node, stride));
@@ -463,7 +467,7 @@ fn make_kernel(
                             "{spacing}{}float {}[{}] = {{0.0}};",
                             arch.metal_buffer_type(*prev_max_var),
                             var_to_char(*prev_max_var),
-                            size.to_kernel()
+                            size.to_usize().unwrap()
                         ));
 
                         // Copy from source to accumulator

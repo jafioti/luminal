@@ -213,10 +213,8 @@ pub fn search(
                                 if (x - y).abs() >= 1e-3 {
                                     if option_env!("PRINT_KERNELS").is_some() {
                                         println!("REF: {:?} New: {:?}", ref_outputs, outs);
-                                        println!(
-                                            "{} {x} != {y}",
-                                            "Output Mismatch".on_bright_red()
-                                        );
+                                        display_graph(&graph, &[]);
+                                        panic!("{} {x} != {y}", "Output Mismatch".on_bright_red());
                                     }
                                     continue 'trajectory_loop;
                                 }
@@ -242,127 +240,6 @@ pub fn search(
     best_graph
 }
 
-// fn build_best_expr_dp(egraph: &EGraph) -> FxHashMap<ClassId, Vec<NodeId>> {
-//     let classes: Vec<ClassId> = egraph.classes().keys().cloned().collect();
-//     let expr_classes: Vec<ClassId> = classes
-//         .iter()
-//         .cloned()
-//         .filter(|cid| is_expr_class(egraph, cid))
-//         .collect();
-
-//     // Phase 1: DP to pick the best root enode per Expr class
-//     let mut best_root: FxHashMap<ClassId, (u32, NodeId)> = FxHashMap::default();
-
-//     // Seed cheap leaves (cost = 1)
-//     for cid in &expr_classes {
-//         for nid in &egraph.classes()[cid].nodes {
-//             let op = egraph.nodes[nid].op.as_str();
-//             if !is_expr_op(op) {
-//                 continue;
-//             }
-//             // Treat MNum/MVar/MAccum (and any Expr whose children are all non-Expr) as leaves.
-//             let is_leaf_like = op == "MNum"
-//                 || op == "MVar"
-//                 || op == "MAccum"
-//                 || op.starts_with("MNum:")
-//                 || op.starts_with("MVar:")
-//                 || !egraph.nodes[nid]
-//                     .children
-//                     .iter()
-//                     .any(|ch| is_expr_class(egraph, &egraph.nid_to_cid(ch)));
-//             if is_leaf_like {
-//                 best_root.entry(cid.clone()).or_insert((1, nid.clone()));
-//             }
-//         }
-//     }
-
-//     // Relax to fixpoint
-//     for _ in 0..1000 {
-//         let mut changed = false;
-//         for cid in &expr_classes {
-//             for nid in &egraph.classes()[cid].nodes {
-//                 let op = egraph.nodes[nid].op.as_str();
-//                 if !is_expr_op(op) {
-//                     continue;
-//                 }
-
-//                 // cost = 1 + sum(child costs over Expr-children)
-//                 let mut sum: u32 = 1;
-//                 let mut ok = true;
-//                 for ch in &egraph.nodes[nid].children {
-//                     let ccid = egraph.nid_to_cid(ch);
-//                     if is_expr_class(egraph, &ccid) {
-//                         if let Some((c, _)) = best_root.get(&ccid) {
-//                             sum += *c;
-//                         } else {
-//                             ok = false;
-//                             break;
-//                         }
-//                     }
-//                 }
-//                 if !ok {
-//                     continue;
-//                 }
-
-//                 match best_root.get(cid) {
-//                     None => {
-//                         best_root.insert(cid.clone(), (sum, nid.clone()));
-//                         changed = true;
-//                     }
-//                     Some((cur, _)) if sum < *cur => {
-//                         best_root.insert(cid.clone(), (sum, nid.clone()));
-//                         changed = true;
-//                     }
-//                     _ => {}
-//                 }
-//             }
-//         }
-//         if !changed {
-//             break;
-//         }
-//     }
-
-//     // Phase 2: Reconstruct **preorder** Expr-trajectory for each class
-//     fn recon_preorder(
-//         egraph: &EGraph,
-//         cid: &ClassId,
-//         best_root: &FxHashMap<ClassId, (u32, NodeId)>,
-//     ) -> Vec<NodeId> {
-//         let (_, root) = best_root
-//             .get(cid)
-//             .cloned()
-//             .expect("best_root missing for expression class");
-
-//         let mut out = Vec::new();
-//         // Preorder: push parent, then expand Expr-children
-//         fn dfs(
-//             egraph: &EGraph,
-//             nid: NodeId,
-//             best_root: &FxHashMap<ClassId, (u32, NodeId)>,
-//             out: &mut Vec<NodeId>,
-//         ) {
-//             out.push(nid.clone());
-//             for ch in &egraph.nodes[&nid].children {
-//                 let ccid = egraph.nid_to_cid(ch);
-//                 // Only follow Expr-typed children; non-Expr children contribute no Expr nodes
-//                 if let Some((_c, best_child)) = best_root.get(&ccid) {
-//                     dfs(egraph, best_child.clone(), best_root, out);
-//                 }
-//             }
-//         }
-//         dfs(egraph, root, best_root, &mut out);
-//         out
-//     }
-
-//     let mut segs: FxHashMap<ClassId, Vec<NodeId>> = FxHashMap::default();
-//     for cid in &expr_classes {
-//         if best_root.contains_key(cid) {
-//             segs.insert(cid.clone(), recon_preorder(egraph, cid, &best_root));
-//         }
-//     }
-//     segs
-// }
-
 pub fn extraction_to_graph(
     egraph: &EGraph,
     trajectory: &[&NodeId],
@@ -372,6 +249,7 @@ pub fn extraction_to_graph(
     enum Ret {
         Expr(NodeIndex),
         Math(Expression),
+        Loop(String, Expression),
     }
 
     fn recurse(
@@ -404,7 +282,7 @@ pub fn extraction_to_graph(
                     panic!()
                 };
                 *current += 1;
-                let Ret::Math(range) = recurse(egraph, trajectory, current, g) else {
+                let Ret::Loop(label, range) = recurse(egraph, trajectory, current, g) else {
                     panic!()
                 };
                 *current += 1;
@@ -415,12 +293,12 @@ pub fn extraction_to_graph(
                     "LoopIn" => GraphTerm::LoopIn {
                         range,
                         stride,
-                        marker: "".to_string(),
+                        marker: label,
                     },
                     "LoopOut" => GraphTerm::LoopOut {
                         range,
                         stride,
-                        marker: "".to_string(),
+                        marker: label,
                     },
                     _ => panic!(),
                 });
@@ -524,8 +402,15 @@ pub fn extraction_to_graph(
                 Ret::Math(Expression::from(Term::Acc('a')))
             }
             "Loop" => {
+                let label = egraph.nodes[trajectory[*current + 1]]
+                    .op
+                    .replace("Boxed(\"", "")
+                    .replace("\")", "");
                 *current += 2; // skip loop label
-                recurse(egraph, trajectory, current, g)
+                let Ret::Math(e) = recurse(egraph, trajectory, current, g) else {
+                    panic!()
+                };
+                Ret::Loop(label, e)
             }
             "MNum" | "MVar" => {
                 *current += 1;
