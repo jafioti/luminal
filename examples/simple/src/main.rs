@@ -25,12 +25,8 @@ fn main() {
         // let model = Linear::new(4, 5, false, &mut cx);
         // model.weight.set(weight.clone());
         // Make an input tensor
-        let a = cx.named_tensor("A", (1, 3, 2, 2)).set(vec![
-            1.1, 2.1, 3.1, 4.1, 5.1, 3.1, 1.2, 2.2, 3.2, 4.2, 5.2, 3.2,
-        ]);
-        let b = cx.named_tensor("B", (1, 3, 2, 'b')).set(vec![
-            0.1_f32, 1.1, 18.1, 1.1, 3.1, 2.1, 0.2, 1.2, 18.2, 1.2, 3.2, 2.2,
-        ]);
+        let a = cx.named_tensor("A", (2, 2)).set(vec![1.1, 2.1, 3.1, 4.1]);
+        let b = cx.named_tensor("B", (2, 2)).set(vec![0.1, 1.1, 18.1, 1.1]);
         let c = a.matmul(b).retrieve();
         // Execute the graph
         cx.set_dyn_dim('a', 3);
@@ -47,7 +43,7 @@ fn main() {
         // Search each subgraph
         for graph_node in new_graph.node_indices().collect_vec() {
             let graph = new_graph.node_weight_mut(graph_node).unwrap();
-            let search_space = build_search_space(graph, 3);
+            let search_space = build_search_space(graph, 7);
             let inputs = make_test_inputs(graph, &cx.dyn_map);
             let searched_graph = search(
                 &search_space,
@@ -124,12 +120,8 @@ fn main() {
         // print_kernels(&kernels);
 
         // let w1 = weight.clone();
-        let a_data = vec![
-            1.1_f32, 2.1, 3.1, 4.1, 5.1, 3.1, 1.2, 2.2, 3.2, 4.2, 5.2, 3.2,
-        ];
-        let b_data = vec![
-            0.1_f32, 1.1, 18.1, 1.1, 3.1, 2.1, 0.2, 1.2, 18.2, 1.2, 3.2, 2.2,
-        ];
+        let a_data = vec![1.1_f32, 2.1, 3.1, 4.1];
+        let b_data = vec![0.1_f32, 1.1, 18.1, 1.1];
         let device = Device::system_default().unwrap();
         let mut inputs = FxHashMap::default();
         inputs.insert(

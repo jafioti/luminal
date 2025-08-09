@@ -18,8 +18,8 @@ use crate::{
     utils::{display_graph, validate_graph},
 };
 
-pub const GRID_DIMS: usize = 3;
-pub const THREADBLOCK_DIMS: usize = 2;
+pub const GRID_DIMS: usize = 2;
+pub const THREADBLOCK_DIMS: usize = 1;
 pub const MAX_THREADBLOCK_SIZE: usize = 1024; // this is max on mac
 
 pub fn codegen(
@@ -952,6 +952,9 @@ fn split_kernels(
                 neighbor_levels.push(range);
             }
             if matches!(curr_term, GraphTerm::LoopIn { .. }) {
+                if neighbor_levels.is_empty() {
+                    display_graph(&marked_graph, &[(outputs[0], "yellow")]);
+                }
                 neighbor_levels.pop().unwrap();
             }
             marked_graph.node_weight_mut(n).unwrap().1 = neighbor_levels;

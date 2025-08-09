@@ -57,6 +57,13 @@
 ;; leave other vars unchanged
 (rewrite (MReplace (MVar ?v) (MVar ?x) ?y) (MVar ?v) :when ((!= ?v ?x)))
 
+; reduce multi-dim squeezed indexing into simple multiplicative indexing
+(rewrite
+  (MAdd (MMul (MNum (* d n2)) (MMod (MDiv ?v (MNum d)) (MNum m)))
+        (MMul (MNum n2) (MMod ?v (MNum d))))
+  (MMul ?v (MNum n2))
+)
+
 ; -------- IR --------
 
 (datatype LoopType (Loop String Expression))
@@ -202,25 +209,34 @@
 (rewrite (LoopIn (LoopOut ?x (Loop ?loopA ?range) ?st) (Loop ?loopB ?range) ?st) ?x)
 
 ; Specialized swap loops
+(rewrite
+	(LoopOut (LoopOut (Binary ?bin (LoopIn (LoopIn ?a ?outA ?outASt) ?inA ?inASt) (LoopIn (LoopIn ?b ?outB ?outBSt) ?inB ?inBSt)) ?in ?inSt) ?out ?outSt)
+	(LoopOut (LoopOut (Binary ?bin (LoopIn (LoopIn ?a ?inA ?inASt) ?outA ?outASt) (LoopIn (LoopIn ?b ?inB ?inBSt) ?outB ?outBSt)) ?out ?outSt) ?in ?inSt)
+)
+(rewrite
+	(LoopOut (LoopOut (Binary ?bin2 (Binary ?bin (LoopIn (LoopIn ?a ?outA ?outASt) ?inA ?inASt) (LoopIn (LoopIn ?b ?outB ?outBSt) ?inB ?inBSt)) (LoopIn (LoopIn ?c ?outC ?outCSt) ?inC ?inCSt)) ?in ?inSt) ?out ?outSt)
+	(LoopOut (LoopOut (Binary ?bin2 (Binary ?bin (LoopIn (LoopIn ?a ?inA ?inASt) ?outA ?outASt) (LoopIn (LoopIn ?b ?inB ?inBSt) ?outB ?outBSt)) (LoopIn (LoopIn ?c ?inC ?inCSt) ?outC ?outCSt)) ?out ?outSt) ?in ?inSt)
+)
 
 ; Tiling
+(let tileFactor 2)
 (rewrite
 	(LoopOut ?body (Loop ?loop (MNum ?range)) ?stride)
 	(LoopOut
 		(LoopOut
 			(TileLoop ?body ?loop)
-			(Loop (+ ?loop "_tile") (MNum 8))
+			(Loop (+ ?loop "_tile") (MNum tileFactor))
 			?stride
 		)
-		(Loop ?loop (MNum (/ ?range 8)))
-		(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum 8)))
+		(Loop ?loop (MNum (/ ?range tileFactor)))
+		(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
 	)
-	:when ((> ?range 8) (= (% ?range 8) 0))
+	:when ((> ?range tileFactor) (= (% ?range tileFactor) 0))
 )
 (rewrite
 	(TileLoop (LoopIn ?body (Loop ?loop (MNum ?range)) ?stride) ?loop)
-	(LoopIn (LoopIn ?body (Loop ?loop (MNum (/ ?range 8))) (MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum 8)))) (Loop (+ ?loop "_tile") (MNum 8)) ?stride)
-	:when ((> ?range 8) (= (% ?range 8) 0))
+	(LoopIn (LoopIn ?body (Loop ?loop (MNum (/ ?range tileFactor))) (MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum tileFactor)))) (Loop (+ ?loop "_tile") (MNum tileFactor)) ?stride)
+	:when ((> ?range tileFactor) (= (% ?range tileFactor) 0))
 )
 ; Merging
 (rewrite
@@ -239,3 +255,66 @@
 
 {code}
 (run {iters})
+
+
+(let acc_gmem (GMEM "acc_0"))
+(let acc_0 (LoopIn acc_gmem (Loop "0" (MNum 4)) (MNum 0)))
+(let acc_pad1 (LoopIn acc_0 (Loop "-pad1-" (MNum 1)) (MNum 0)))
+(let acc_pad2 (LoopIn acc_pad1 (Loop "-pad2-" (MNum 1)) (MNum 0)))
+(let acc_2 (LoopIn acc_pad2 (Loop "2" (MNum 2)) (MAccum "a")))
+
+(let a_gmem (GMEM "A Load"))
+
+(let a_0
+    (LoopIn a_gmem
+        (Loop "0" (MNum 4))
+        (MAdd
+            (MMul (MNum 2) (MMod (MDiv (MMul (MVar "z") (MNum 2)) (MNum 4)) (MNum 2)))
+            (MMod (MMul (MVar "z") (MNum 2)) (MNum 2))
+        )
+    )
+)
+(let a_pad1 (LoopIn a_0 (Loop "newpad" (MNum 1)) (MNum 0)))
+(let a_pad2 (LoopIn a_pad1 (Loop "newpad" (MNum 1)) (MNum 0)))
+(let a_1
+    (LoopIn a_pad2
+        (Loop "0_tile" (MNum 2))
+        (MAdd
+            (MMul (MNum 2) (MMod (MDiv (MVar "z") (MNum 4)) (MNum 2)))
+            (MMod (MVar "z") (MNum 2))
+        )
+    )
+)
+
+(let b_gmem (GMEM "B Load"))
+
+(let b_0
+    (LoopIn b_gmem
+        (Loop "0" (MNum 4))
+        (MAdd
+            (MMod (MDiv (MMul (MVar "z") (MNum 2)) (MNum 2)) (MNum 2))
+            (MMul (MNum 2) (MMod (MMul (MVar "z") (MNum 2)) (MNum 2)))
+        )
+    )
+)
+(let b_pad1 (LoopIn b_0 (Loop "newpad" (MNum 1)) (MNum 0)))
+(let b_pad2 (LoopIn b_pad1 (Loop "newpad" (MNum 1)) (MNum 0)))
+(let b_1
+    (LoopIn b_pad2
+        (Loop "0_tile" (MNum 2))
+        (MAdd
+            (MMod (MDiv (MVar "z") (MNum 2)) (MNum 2))
+            (MMul (MNum 2) (MMod (MVar "z") (MNum 2)))
+        )
+    )
+)
+
+(let mul_0 (Mul a_1 b_1))
+(let add_final (Add acc_2 mul_0))
+
+(let out2 (LoopOut add_final (Loop "2" (MNum 2)) (MAccum "a")))
+(let out_pad2 (LoopOut out2 (Loop "-pad2-" (MNum 1)) (MVar "z")))
+(let out_pad1 (LoopOut out_pad2 (Loop "-pad1-" (MNum 1)) (MVar "z")))
+(let out0 (LoopOut out_pad1 (Loop "0" (MNum 4)) (MVar "z")))
+
+;(check (= out0 t19))
