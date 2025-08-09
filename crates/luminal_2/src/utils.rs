@@ -337,10 +337,8 @@ pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), (), Directed>) {
 pub fn build_search_space(
     graph: &StableGraph<GraphTerm, (), Directed>,
     iters: usize,
-    remove_tiling: bool,
 ) -> egraph_serialize::EGraph {
     let (rendered, root) = render_egglog(graph);
-    println!("{rendered}");
     if option_env!("PRINT_KERNELS").is_some() {
         println!("{rendered}");
     }
@@ -349,26 +347,13 @@ pub fn build_search_space(
     let mut final_code = code
         .replace("{code}", &rendered)
         .replace("{iters}", &iters.to_string());
-    if remove_tiling {
-        final_code = final_code.replace(
-            r#"(rewrite
-	(LoopOut ?body (Loop ?loop (MNum ?range)) ?stride)
-	(LoopOut
-		(LoopOut
-			(TileLoop ?body ?loop)
-			(Loop (+ ?loop "_tile") (MNum 8))
-			?stride
-		)
-		(Loop ?loop (MNum (/ ?range 8)))
-		(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum 8)))
-	)
-	:when ((> ?range 8) (= (% ?range 8) 0))
-)"#,
-            "",
-        ); // tiling rule is causing an egglog bug!
+    if option_env!("SAVE_EGGLOG").is_some() {
+        std::fs::write("egglog.txt", &final_code).unwrap();
     }
     let (_egglog_messages, serialized) = run_egglog_program(&final_code, &root).unwrap();
-    println!("Done");
+    if option_env!("PRINT_KERNELS").is_some() {
+        println!("Done building search space.");
+    }
     serialized
 }
 

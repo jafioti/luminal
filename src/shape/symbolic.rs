@@ -1168,6 +1168,8 @@ fn make_rules(lower_bound_zero: bool) -> Vec<Rewrite> {
         rewrite!("mul-one";  "?a" => "(* ?a 1)"),
         rewrite!("cancel-sub"; "(- ?a ?a)" => "0"),
         rewrite!("cancel-div"; "(/ ?a ?a)" => "1" if is_not_zero("?a")),
+        rewrite!("dedup-max"; "(max ?a (max ?a ?b))" => "(max ?a ?b)"),
+        rewrite!("dedup-min"; "(min ?a (min ?a ?b))" => "(min ?a ?b)"),
     ];
     if lower_bound_zero {
         v.push(rewrite!("max-zero"; "(max ?a 0)" => "?a"));

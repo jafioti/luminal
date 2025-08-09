@@ -451,15 +451,15 @@ fn scope_in(
         ranges.push((thread_range, 0.to_string()));
         src = loop_in(
             src,
-            thread_range.simplify(),
-            thread_stride.simplify(),
+            thread_range.simplify_cache(simplify_cache),
+            thread_stride.simplify_cache(simplify_cache),
             0,
             graph,
         );
         for mask in &mut masks {
             *mask = loop_in(
                 *mask,
-                thread_range.simplify(),
+                thread_range.simplify_cache(simplify_cache),
                 0,
                 GRID_DIMS + THREADBLOCK_DIMS,
                 graph,

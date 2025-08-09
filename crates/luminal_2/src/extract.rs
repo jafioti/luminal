@@ -15,11 +15,11 @@ use luminal::shape::{Expression, Term};
 use metal_rs::objc::rc::autoreleasepool;
 use metal_rs::{Buffer, Device, MTLResourceOptions};
 use rand::{Rng, rng};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 const WARMUP_TRIALS: usize = 0;
 const TRIALS: usize = 1;
-const MAX_SEARCHED_GRAPHS: usize = 600_000;
+const MAX_SEARCHED_GRAPHS: usize = 10_000;
 const MAX_CYCLES: usize = 1;
 const INVALID_IR: &[&str] = &[
     "SwapLoops",
@@ -28,9 +28,43 @@ const INVALID_IR: &[&str] = &[
     "Unary",
     "Binary",
     "MReplace",
+    "PropOneArg",
+    "PropTwoArgs",
+    "MergeLoops",
 ];
 
 type Cost = u128; // Execution time in microseconds
+
+fn is_expr_op(op: &str) -> bool {
+    matches!(
+        op,
+        "MNum"
+            | "MVar"
+            | "MAdd"
+            | "MSub"
+            | "MMul"
+            | "MDiv"
+            | "MMod"
+            | "MMin"
+            | "MMax"
+            | "MAnd"
+            | "MOr"
+            | "MGte"
+            | "MLt"
+            | "MFloorTo"
+            | "MReplace"
+            | "MAccum"
+    ) || op.starts_with("MNum:")
+        || op.starts_with("MVar:")
+}
+
+fn is_expr_class(egraph: &EGraph, cid: &ClassId) -> bool {
+    // Expression constructors all start with 'M' in your grammar (MAdd, MNum, ...).
+    egraph.classes()[cid]
+        .nodes
+        .iter()
+        .all(|nid| is_expr_op(egraph.nodes[nid].op.as_str()))
+}
 
 pub fn search(
     egraph: &EGraph,
@@ -38,10 +72,187 @@ pub fn search(
     arch: GPUArch,
     dyn_vars: &FxHashMap<char, usize>,
 ) -> Option<StableGraph<GraphTerm, ()>> {
+    fn is_expr_op(op: &str) -> bool {
+        matches!(
+            op,
+            "MNum"
+                | "MVar"
+                | "MAdd"
+                | "MSub"
+                | "MMul"
+                | "MDiv"
+                | "MMod"
+                | "MMin"
+                | "MMax"
+                | "MAnd"
+                | "MOr"
+                | "MGte"
+                | "MLt"
+                | "MFloorTo"
+                | "MReplace"
+                | "MAccum"
+        ) || op.starts_with("MNum:")
+            || op.starts_with("MVar:")
+    }
+
+    fn is_expr_class(egraph: &EGraph, cid: &ClassId) -> bool {
+        egraph.classes()[cid]
+            .nodes
+            .iter()
+            .all(|nid| is_expr_op(egraph.nodes[nid].op.as_str()))
+    }
+
+    fn class_has_any_expr(egraph: &EGraph, cid: &ClassId) -> bool {
+        egraph.classes()[cid]
+            .nodes
+            .iter()
+            .any(|nid| is_expr_op(egraph.nodes[nid].op.as_str()))
+    }
+
+    // Full preorder segment for the *first* Expr enode in the class (owned NodeIds)
+    fn first_expr_segment(egraph: &EGraph, cid: &ClassId) -> Vec<NodeId> {
+        let root = egraph.classes()[cid]
+            .nodes
+            .iter()
+            .find(|nid| is_expr_op(egraph.nodes[*nid].op.as_str()))
+            .expect("expr class has no expr enode");
+
+        fn dfs(egraph: &EGraph, nid: NodeId, out: &mut Vec<NodeId>) {
+            out.push(nid.clone());
+            for ch in &egraph.nodes[&nid].children {
+                let ccid = egraph.nid_to_cid(ch);
+                if class_has_any_expr(egraph, ccid) {
+                    if let Some(next) = egraph.classes()[ccid]
+                        .nodes
+                        .iter()
+                        .find(|n| is_expr_op(egraph.nodes[*n].op.as_str()))
+                    {
+                        dfs(egraph, (*next).clone(), out);
+                    }
+                }
+            }
+        }
+
+        let mut seg = Vec::new();
+        dfs(egraph, root.clone(), &mut seg);
+        seg
+    }
+
+    // fn recurse<'a>(
+    //     egraph: &'a EGraph,
+    //     current_class: &ClassId,
+    //     seen: &mut FxHashMap<&'a NodeId, usize>,
+    // ) -> (Vec<Vec<NodeId>>, usize) {
+    //     // Pure Expression class → one trajectory: the full expr segment
+    //     if is_expr_class(egraph, current_class) {
+    //         return (vec![first_expr_segment(egraph, current_class)], 1);
+    //     }
+
+    //     let mut trajectories: Vec<Vec<NodeId>> = vec![];
+    //     let mut total_completed = 0;
+
+    //     'enode_loop: for enode in &egraph.classes()[current_class].nodes {
+    //         if total_completed >= MAX_SEARCHED_GRAPHS {
+    //             break;
+    //         }
+
+    //         let op = egraph.nodes[enode].op.as_str();
+    //         if INVALID_IR.contains(&op)
+    //             || seen.get(&enode).copied().unwrap_or_default() >= MAX_CYCLES
+    //         {
+    //             continue;
+    //         }
+    //         // Mixed class: do NOT branch from expression enodes at this level.
+    //         if is_expr_op(op) {
+    //             continue;
+    //         }
+
+    //         let mut enode_trajectories: Vec<Vec<NodeId>> = vec![];
+    //         let mut completed = 0;
+
+    //         for child in &egraph.nodes[enode].children {
+    //             *seen.entry(enode).or_insert(0) += 1;
+
+    //             let c_cid = egraph.nid_to_cid(child);
+    //             let (child_trajectories, child_completed) = if is_expr_class(egraph, &c_cid) {
+    //                 (vec![first_expr_segment(egraph, &c_cid)], 1)
+    //             } else {
+    //                 recurse(egraph, &c_cid, seen)
+    //             };
+
+    //             *seen.get_mut(&enode).unwrap() -= 1;
+
+    //             completed = completed
+    //                 .max(child_completed.min(1))
+    //                 .saturating_mul(child_completed);
+
+    //             if child_trajectories.is_empty() {
+    //                 continue 'enode_loop;
+    //             }
+
+    //             if enode_trajectories.is_empty() {
+    //                 for mut ct in child_trajectories {
+    //                     // prepend current enode
+    //                     ct.insert(0, enode.clone());
+    //                     enode_trajectories.push(ct);
+    //                 }
+    //             } else {
+    //                 let mut next = Vec::new();
+    //                 for past in &enode_trajectories {
+    //                     for newt in &child_trajectories {
+    //                         if next.len() > MAX_SEARCHED_GRAPHS {
+    //                             continue;
+    //                         }
+    //                         let mut v = past.clone();
+    //                         v.extend_from_slice(newt); // both own NodeId → clones happen
+    //                         next.push(v);
+    //                     }
+    //                 }
+    //                 if !next.is_empty() {
+    //                     enode_trajectories = next;
+    //                 }
+    //             }
+    //         }
+
+    //         if egraph.nodes[enode].children.is_empty() {
+    //             trajectories.push(vec![enode.clone()]);
+    //             completed += 1;
+    //         } else {
+    //             trajectories.extend(enode_trajectories);
+    //         }
+    //         total_completed += completed;
+    //     }
+    //     (trajectories, total_completed)
+    // }
+
+    fn is_expression_enode(enode_label: &str) -> bool {
+        matches!(
+            enode_label,
+            "MNum"
+                | "MVar"
+                | "MAdd"
+                | "MSub"
+                | "MMul"
+                | "MDiv"
+                | "MMod"
+                | "MMin"
+                | "MMax"
+                | "MAnd"
+                | "MOr"
+                | "MGte"
+                | "MLt"
+                | "MFloorTo"
+                | "MReplace"
+                | "MAccum"
+        ) || enode_label.starts_with("MNum:")
+            || enode_label.starts_with("MVar:")
+    }
+
     fn recurse<'a>(
         egraph: &'a EGraph,
         current_class: &'a ClassId,
         seen: &mut FxHashMap<&'a NodeId, usize>,
+        in_expression: bool,
     ) -> (Vec<Vec<&'a NodeId>>, usize) {
         let mut trajectories = vec![];
         let mut total_completed = 0;
@@ -60,8 +271,12 @@ pub fn search(
             for child in &egraph.nodes[enode].children {
                 // Ask what's the child's trajectories
                 *seen.entry(enode).or_insert(0) += 1;
-                let (child_trajectories, child_completed) =
-                    recurse(egraph, egraph.nid_to_cid(child), seen);
+                let (child_trajectories, child_completed) = recurse(
+                    egraph,
+                    egraph.nid_to_cid(child),
+                    seen,
+                    is_expression_enode(&egraph.nodes[child].op),
+                );
                 *seen.get_mut(&enode).unwrap() -= 1;
                 completed = completed
                     .max(child_completed.min(1))
@@ -82,6 +297,9 @@ pub fn search(
                     let mut new_enode_trajectories = vec![];
                     for past_trajectory in &enode_trajectories {
                         for new_trajectory in &child_trajectories {
+                            if new_enode_trajectories.len() > MAX_SEARCHED_GRAPHS {
+                                continue;
+                            }
                             new_enode_trajectories
                                 .push([past_trajectory.clone(), new_trajectory.clone()].concat());
                         }
@@ -101,16 +319,24 @@ pub fn search(
                 trajectories.extend(enode_trajectories);
             }
             total_completed += completed;
+            if in_expression {
+                break; // Only pick the first valid (non cycling) enode for expressions
+            }
         }
         (trajectories, total_completed)
     }
 
-    let (trajectories, _) = recurse(egraph, &egraph.root_eclasses[0], &mut FxHashMap::default());
-    // Now we have DFS trajectories
+    let (trajectories, _) = recurse(
+        egraph,
+        &egraph.root_eclasses[0],
+        &mut FxHashMap::default(),
+        false,
+    );
 
-    // Convert inputs to GMEM_label -> data
+    // Now we have DFS trajectories
     let mut ref_outputs: Vec<Vec<f32>> = vec![];
     let mut best_time = u128::MAX;
+    let mut best_kernels = usize::MAX;
     let mut best_graph = None;
     let mut valid_graphs = 0;
     let total_trajectories = trajectories.len().min(MAX_SEARCHED_GRAPHS);
@@ -121,6 +347,7 @@ pub fn search(
     {
         // Build termdag
         let graph = extraction_to_graph(egraph, &trajectory);
+        // display_graph(&graph, &[]);
         // convert inputs to reference nodes in graph
         let inputs = inputs.into_iter().map(|(l, d)| (graph.node_indices().find(|n| matches!(graph.node_weight(*n).unwrap(), GraphTerm::GMEM { label } if label == l)).unwrap(), d.clone())).collect_vec();
         let root = graph.externals(Direction::Outgoing).next().unwrap();
@@ -173,10 +400,7 @@ pub fn search(
                                 if (x - y).abs() >= 1e-3 {
                                     if option_env!("PRINT_KERNELS").is_some() {
                                         println!("REF: {:?} New: {:?}", ref_outputs, outs);
-                                        println!(
-                                            "{} {x} != {y}",
-                                            "Output Mismatch".on_bright_red()
-                                        );
+                                        panic!("{} {x} != {y}", "Output Mismatch".on_bright_red());
                                     }
                                     continue 'trajectory_loop;
                                 }
@@ -186,6 +410,7 @@ pub fn search(
                             println!("{}", "Outputs Validated".on_bright_green());
                         }
                     }
+                    best_kernels = best_kernels.min(kernels.node_count() - 2);
                     if us < best_time {
                         best_time = us;
                         best_graph = Some(graph);
@@ -197,7 +422,129 @@ pub fn search(
         //     break;
         // }
     }
+    println!("BEST KERNELS: {}", best_kernels);
     best_graph
+}
+
+fn build_best_expr_dp(egraph: &EGraph) -> FxHashMap<ClassId, Vec<NodeId>> {
+    let classes: Vec<ClassId> = egraph.classes().keys().cloned().collect();
+    let expr_classes: Vec<ClassId> = classes
+        .iter()
+        .cloned()
+        .filter(|cid| is_expr_class(egraph, cid))
+        .collect();
+
+    // Phase 1: DP to pick the best root enode per Expr class
+    let mut best_root: FxHashMap<ClassId, (u32, NodeId)> = FxHashMap::default();
+
+    // Seed cheap leaves (cost = 1)
+    for cid in &expr_classes {
+        for nid in &egraph.classes()[cid].nodes {
+            let op = egraph.nodes[nid].op.as_str();
+            if !is_expr_op(op) {
+                continue;
+            }
+            // Treat MNum/MVar/MAccum (and any Expr whose children are all non-Expr) as leaves.
+            let is_leaf_like = op == "MNum"
+                || op == "MVar"
+                || op == "MAccum"
+                || op.starts_with("MNum:")
+                || op.starts_with("MVar:")
+                || !egraph.nodes[nid]
+                    .children
+                    .iter()
+                    .any(|ch| is_expr_class(egraph, &egraph.nid_to_cid(ch)));
+            if is_leaf_like {
+                best_root.entry(cid.clone()).or_insert((1, nid.clone()));
+            }
+        }
+    }
+
+    // Relax to fixpoint
+    for _ in 0..1000 {
+        let mut changed = false;
+        for cid in &expr_classes {
+            for nid in &egraph.classes()[cid].nodes {
+                let op = egraph.nodes[nid].op.as_str();
+                if !is_expr_op(op) {
+                    continue;
+                }
+
+                // cost = 1 + sum(child costs over Expr-children)
+                let mut sum: u32 = 1;
+                let mut ok = true;
+                for ch in &egraph.nodes[nid].children {
+                    let ccid = egraph.nid_to_cid(ch);
+                    if is_expr_class(egraph, &ccid) {
+                        if let Some((c, _)) = best_root.get(&ccid) {
+                            sum += *c;
+                        } else {
+                            ok = false;
+                            break;
+                        }
+                    }
+                }
+                if !ok {
+                    continue;
+                }
+
+                match best_root.get(cid) {
+                    None => {
+                        best_root.insert(cid.clone(), (sum, nid.clone()));
+                        changed = true;
+                    }
+                    Some((cur, _)) if sum < *cur => {
+                        best_root.insert(cid.clone(), (sum, nid.clone()));
+                        changed = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    // Phase 2: Reconstruct **preorder** Expr-trajectory for each class
+    fn recon_preorder(
+        egraph: &EGraph,
+        cid: &ClassId,
+        best_root: &FxHashMap<ClassId, (u32, NodeId)>,
+    ) -> Vec<NodeId> {
+        let (_, root) = best_root
+            .get(cid)
+            .cloned()
+            .expect("best_root missing for expression class");
+
+        let mut out = Vec::new();
+        // Preorder: push parent, then expand Expr-children
+        fn dfs(
+            egraph: &EGraph,
+            nid: NodeId,
+            best_root: &FxHashMap<ClassId, (u32, NodeId)>,
+            out: &mut Vec<NodeId>,
+        ) {
+            out.push(nid.clone());
+            for ch in &egraph.nodes[&nid].children {
+                let ccid = egraph.nid_to_cid(ch);
+                // Only follow Expr-typed children; non-Expr children contribute no Expr nodes
+                if let Some((_c, best_child)) = best_root.get(&ccid) {
+                    dfs(egraph, best_child.clone(), best_root, out);
+                }
+            }
+        }
+        dfs(egraph, root, best_root, &mut out);
+        out
+    }
+
+    let mut segs: FxHashMap<ClassId, Vec<NodeId>> = FxHashMap::default();
+    for cid in &expr_classes {
+        if best_root.contains_key(cid) {
+            segs.insert(cid.clone(), recon_preorder(egraph, cid, &best_root));
+        }
+    }
+    segs
 }
 
 pub fn extraction_to_graph(

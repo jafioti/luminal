@@ -395,7 +395,6 @@ fn make_kernel(
                 for (input, stride) in &loop_inputs {
                     if stride.is_acc() {
                         if *loop_level < GRID_DIMS + THREADBLOCK_DIMS {
-                            println!("too low");
                             return None;
                         }
                         let Term::Acc(acc_symbol) = stride.terms.read()[0] else {
@@ -502,7 +501,6 @@ fn make_kernel(
                         // Handle the case where the dest is not the real loop output
                         let size = stride.substitute('z', range).max(1);
                         if current_loop_level < THREADBLOCK_DIMS + GRID_DIMS {
-                            println!("loo low");
                             return None;
                         }
                         // assert!(

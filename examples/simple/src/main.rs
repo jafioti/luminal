@@ -11,7 +11,7 @@ use luminal_2::{
     run::{assign_buffers, compile_kernels, run_graph},
     translate::{translate_graph_meta, InitData},
     utils::build_search_space,
-    GPUArch, GraphTerm, GT2,
+    GPUArch, GraphTerm,
 };
 use metal_rs::{objc::rc::autoreleasepool, Buffer, Device, MTLResourceOptions};
 use rustc_hash::FxHashMap;
@@ -31,7 +31,7 @@ fn main() {
         let b = cx.named_tensor("B", (1, 3, 2, 'b')).set(vec![
             0.1_f32, 1.1, 18.1, 1.1, 3.1, 2.1, 0.2, 1.2, 18.2, 1.2, 3.2, 2.2,
         ]);
-        let c = a.matmul(b).graph_break().sin().retrieve();
+        let c = a.matmul(b).retrieve();
         // Execute the graph
         cx.set_dyn_dim('a', 3);
         cx.set_dyn_dim('b', 2);
@@ -47,7 +47,7 @@ fn main() {
         // Search each subgraph
         for graph_node in new_graph.node_indices().collect_vec() {
             let graph = new_graph.node_weight_mut(graph_node).unwrap();
-            let search_space = build_search_space(graph, 4, false);
+            let search_space = build_search_space(graph, 3);
             let inputs = make_test_inputs(graph, &cx.dyn_map);
             let searched_graph = search(
                 &search_space,
