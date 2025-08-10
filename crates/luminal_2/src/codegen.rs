@@ -665,11 +665,6 @@ fn make_kernel(
                 }
                 kernel_lines.extend(loop_body);
 
-                // Undo temporary remapping for register buffers
-                for (node, real_output) in created_buffers {
-                    node_to_var.insert(node, (real_output, true));
-                }
-
                 // Set outputs if nessecary
                 for (output_node, _) in &loop_outputs {
                     let body_out = kernel_graph
@@ -690,6 +685,11 @@ fn make_kernel(
                     } else {
                         node_to_var.insert(*output_node, (body_out, false));
                     }
+                }
+
+                // Undo temporary remapping for register buffers
+                for (node, real_output) in created_buffers {
+                    node_to_var.insert(node, (real_output, true));
                 }
 
                 if *loop_level >= GRID_DIMS + THREADBLOCK_DIMS {
