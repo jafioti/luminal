@@ -496,6 +496,7 @@ fn make_kernel(
                     }
                 }
                 // Make thread-level buffers
+                let mut created_buffers = FxHashMap::default();
                 for (output, stride) in &loop_outputs {
                     let dest = kernel_graph
                         .neighbors_directed(*output, Direction::Outgoing)
@@ -507,17 +508,14 @@ fn make_kernel(
                         if current_loop_level < THREADBLOCK_DIMS + GRID_DIMS {
                             return None;
                         }
-                        // assert!(
-                        //     current_loop_level >= THREADBLOCK_DIMS + GRID_DIMS,
-                        //     "Grid / Threadblock intermediate buffers not supported yet!"
-                        // );
-                        // We don't have a place to save this accumulator to. Need to allocate a register buffer
+                        // We don't have a place to save this output to. Need to allocate a register buffer
                         *prev_max_var += 1;
                         kernel_lines.push(format!(
                             "{spacing}thread float {}[{size}] = {{0.0}};",
                             var_to_char(*prev_max_var)
                         ));
                         node_to_var.insert(*output, (*prev_max_var, true));
+                        created_buffers.insert(*output, *prev_max_var);
                         arch.add_metal_buffer_type(*prev_max_var, "thread ");
                     }
                 }
@@ -619,6 +617,23 @@ fn make_kernel(
                             new_output_vars.push(*prev_max_var);
                             node_to_var.insert(*output, (*prev_max_var, is_ptr));
                         }
+                    } else if let Some(real_output) = created_buffers.get(output) {
+                        *prev_max_var += 1;
+                        arch.add_metal_buffer_type(
+                            *prev_max_var,
+                            arch.metal_buffer_type(*real_output),
+                        );
+                        kernel_lines.push(format!(
+                            "{inner_spacing}{}float* {} = {} + {};",
+                            arch.metal_buffer_type(*prev_max_var),
+                            var_to_char(*prev_max_var),
+                            var_to_char(*real_output),
+                            stride
+                                .to_kernel()
+                                .replace("const_z", &format!("loop_{loop_var}"))
+                        ));
+                        new_output_vars.push(*prev_max_var);
+                        node_to_var.insert(*output, (*prev_max_var, true));
                     }
                 }
                 for (inp, _) in &loop_inputs {
@@ -649,6 +664,11 @@ fn make_kernel(
                     ));
                 }
                 kernel_lines.extend(loop_body);
+
+                // Undo temporary remapping for register buffers
+                for (node, real_output) in created_buffers {
+                    node_to_var.insert(node, (real_output, true));
+                }
 
                 // Set outputs if nessecary
                 for (output_node, _) in &loop_outputs {

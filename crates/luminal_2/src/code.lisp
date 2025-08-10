@@ -138,38 +138,38 @@
 (rewrite (PropTwoArgs "MergeLoops" ?expr ?loopA ?loopB)  (MergeLoops ?expr ?loopA ?loopB))
 
 ; propogation helpers
-(rewrite
-	(PropOneArg ?prop (LoopIn ?body (Loop ?other ?range) ?stride) ?arg)
-	(LoopIn (PropOneArg ?prop ?body ?arg) (Loop ?other ?range) ?stride)
-)
-(rewrite
-	(PropOneArg ?prop (LoopOut ?body (Loop ?other ?range) ?stride) ?arg)
-	(LoopOut (PropOneArg ?prop ?body ?arg) (Loop ?other ?range) ?stride)
-)
-(rewrite
-	(PropOneArg ?prop (Unary ?un ?body) ?arg)
-	(Unary ?un (PropOneArg ?prop ?body ?arg))
-)
-(rewrite
-	(PropOneArg ?prop (Binary ?bin ?bodyA ?bodyB) ?arg)
-	(Binary ?bin (PropOneArg ?prop ?bodyA ?arg) (PropOneArg ?prop ?bodyB ?arg))
-)
-(rewrite
-	(PropTwoArgs ?prop (LoopIn ?body (Loop ?other ?range) ?stride) ?arg1 ?arg2)
-	(LoopIn (PropTwoArgs ?prop ?body ?arg1 ?arg2) (Loop ?other ?range) ?stride)
-)
-(rewrite
-	(PropTwoArgs ?prop (LoopOut ?body (Loop ?other ?range) ?stride) ?arg1 ?arg2)
-	(LoopOut (PropTwoArgs ?prop ?body ?arg1 ?arg2) (Loop ?other ?range) ?stride)
-)
-(rewrite
-	(PropTwoArgs ?prop (Unary ?un ?body) ?arg1 ?arg2)
-	(Unary ?un (PropTwoArgs ?prop ?body ?arg1 ?arg2))
-)
-(rewrite
-	(PropTwoArgs ?prop (Binary ?bin ?bodyA ?bodyB) ?arg1 ?arg2)
-	(Binary ?bin (PropTwoArgs ?prop ?bodyA ?arg1 ?arg2) (PropTwoArgs ?prop ?bodyB ?arg1 ?arg2))
-)
+;(rewrite
+;	(PropOneArg ?prop (LoopIn ?body (Loop ?other ?range) ?stride) ?arg)
+;	(LoopIn (PropOneArg ?prop ?body ?arg) (Loop ?other ?range) ?stride)
+;)
+;(rewrite
+;	(PropOneArg ?prop (LoopOut ?body (Loop ?other ?range) ?stride) ?arg)
+;	(LoopOut (PropOneArg ?prop ?body ?arg) (Loop ?other ?range) ?stride)
+;)
+;(rewrite
+;	(PropOneArg ?prop (Unary ?un ?body) ?arg)
+;	(Unary ?un (PropOneArg ?prop ?body ?arg))
+;)
+;(rewrite
+;	(PropOneArg ?prop (Binary ?bin ?bodyA ?bodyB) ?arg)
+;	(Binary ?bin (PropOneArg ?prop ?bodyA ?arg) (PropOneArg ?prop ?bodyB ?arg))
+;)
+;(rewrite
+;	(PropTwoArgs ?prop (LoopIn ?body (Loop ?other ?range) ?stride) ?arg1 ?arg2)
+;	(LoopIn (PropTwoArgs ?prop ?body ?arg1 ?arg2) (Loop ?other ?range) ?stride)
+;)
+;(rewrite
+;	(PropTwoArgs ?prop (LoopOut ?body (Loop ?other ?range) ?stride) ?arg1 ?arg2)
+;	(LoopOut (PropTwoArgs ?prop ?body ?arg1 ?arg2) (Loop ?other ?range) ?stride)
+;)
+;(rewrite
+;	(PropTwoArgs ?prop (Unary ?un ?body) ?arg1 ?arg2)
+;	(Unary ?un (PropTwoArgs ?prop ?body ?arg1 ?arg2))
+;)
+;(rewrite
+;	(PropTwoArgs ?prop (Binary ?bin ?bodyA ?bodyB) ?arg1 ?arg2)
+;	(Binary ?bin (PropTwoArgs ?prop ?bodyA ?arg1 ?arg2) (PropTwoArgs ?prop ?bodyB ?arg1 ?arg2))
+;)
 
 ; Communative binary ops
 ;(rewrite (Binary ?bin ?a ?b) (Binary ?bin ?b ?a))
@@ -201,12 +201,50 @@
 )
 
 ; Loop Fusion
-;(rewrite (LoopIn (LoopOut ?x (Loop ?loopA ?range) ?st) (Loop ?loopB ?range) ?st) ?x)
+(rewrite (LoopIn (LoopOut ?x (Loop ?loopA ?range) ?st) (Loop ?loopB ?range) ?st) ?x)
 
 ; Specialized swap loops
 (rewrite
-	(LoopOut (LoopOut (Binary ?bin (LoopIn (LoopIn ?a (Loop ?outAL ?outA) ?outASt) (Loop ?inAL ?inA) ?inASt) (LoopIn (LoopIn ?b (Loop ?outBL ?outB) ?outBSt) (Loop ?inBL ?inB) ?inBSt)) (Loop ?inL ?in) ?inSt) (Loop ?outL ?out) ?outSt)
-	(LoopOut (LoopOut (Binary ?bin (LoopIn (LoopIn ?a (Loop (+ ?inAL "sw") ?inA) ?inASt) (Loop (+ ?outAL "sw") ?outA) ?outASt) (LoopIn (LoopIn ?b (Loop (+ ?inBL "sw") ?inB) ?inBSt) (Loop (+ ?outBL "sw") ?outB) ?outBSt)) (Loop (+ ?outL "sw") ?out) ?outSt) (Loop (+ ?inL "sw") ?in) ?inSt)
+	(LoopOut
+		(LoopOut
+			(Binary ?bin
+				(LoopIn
+					(LoopIn ?a (Loop ?outL ?out) ?outASt)
+					(Loop ?inL ?in)
+					?inASt
+				)
+				(LoopIn
+					(LoopIn ?b (Loop ?outL ?out) ?outBSt)
+					(Loop ?inL ?in)
+					?inBSt
+				)
+			)
+			(Loop ?inL ?in)
+			?inSt
+		)
+		(Loop ?outL ?out)
+		?outSt
+	)
+	(LoopOut
+		(LoopOut
+			(Binary ?bin
+				(LoopIn
+					(LoopIn ?a (Loop ?inL ?in) ?inASt)
+					(Loop ?outL ?out)
+					?outASt
+				)
+				(LoopIn
+					(LoopIn ?b (Loop ?inL ?in) ?inBSt)
+					(Loop ?outL ?out)
+					?outBSt
+				)
+			)
+			(Loop ?outL ?out)
+			?outSt
+		)
+		(Loop ?inL ?in)
+		?inSt
+	)
 )
 
 ; Tiling
@@ -264,24 +302,6 @@
 	(Binary ?bin (TileLoop ?bodyA ?loop) (TileLoop ?bodyB ?loop))
 )
 
-
-
-
-
-; Merging
-(rewrite
- 	(LoopOut (LoopOut ?ir (Loop ?innerL ?inner) ?innerStride) (Loop ?outerL ?outer) ?outerStride)
- 	(LoopOut (MergeLoops ?ir ?innerL ?outerL)
-     	(Loop (+ ?outerL ?innerL) (MMul ?inner ?outer))
-		(MAdd (MReplace ?outerStride (MVar "z") (MDiv (MVar "z") ?inner)) (MReplace ?innerStride (MVar "z") (MMod (MVar "z") ?inner)))
-    )
-)
-(rewrite (MergeLoops (LoopIn (LoopIn ?ir (Loop ?outerL ?outer) ?outerStride) (Loop ?innerL ?inner) ?innerStride) ?innerL ?outerL)
-	(LoopIn ?ir
-		(Loop (+ ?outerL ?innerL) (MMul ?inner ?outer))
-		(MAdd (MReplace ?outerStride (MVar "z") (MDiv (MVar "z") ?inner)) (MReplace ?innerStride (MVar "z") (MMod (MVar "z") ?inner)))
-	)
-)
 
 {code}
 (run {iters})

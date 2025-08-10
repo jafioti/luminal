@@ -72,6 +72,7 @@ pub fn search(
         trajectory_cache: &mut FxHashMap<&'a NodeId, Vec<Vec<&'a NodeId>>>,
         waiting: usize,
     ) -> Vec<Vec<&'a NodeId>> {
+        println!("waiting: {waiting}");
         let mut trajectories = vec![];
         'enode_loop: for enode in &egraph.classes()[current_class].nodes {
             if INVALID_IR.contains(&egraph.nodes[enode].op.as_str()) {
