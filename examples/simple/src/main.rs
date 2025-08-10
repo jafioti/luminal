@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use luminal::prelude::{
-    petgraph::{visit::EdgeRef, Direction},
+    petgraph::{graph, visit::EdgeRef, Direction},
     *,
 };
 use luminal_2::{
@@ -44,6 +44,7 @@ fn main() {
         // Search each subgraph
         for graph_node in new_graph.node_indices().collect_vec() {
             let graph = new_graph.node_weight_mut(graph_node).unwrap();
+            luminal_2::utils::display_graph(&graph, &[]);
             let search_space = build_search_space(graph, 10);
             let inputs = make_test_inputs(graph, &cx.dyn_map);
             let searched_graph = search(
