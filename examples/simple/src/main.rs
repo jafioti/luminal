@@ -45,7 +45,7 @@ fn main() {
         for graph_node in new_graph.node_indices().collect_vec() {
             let graph = new_graph.node_weight_mut(graph_node).unwrap();
             // luminal_2::utils::display_graph(&graph, &[]);
-            let search_space = build_search_space(graph, 12);
+            let search_space = build_search_space(graph, 7);
             let inputs = make_test_inputs(graph, &cx.dyn_map);
             let searched_graph = search(
                 &search_space,

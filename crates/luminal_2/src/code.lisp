@@ -169,8 +169,26 @@
 	:when ((!= ?r (MNum 1)) (!= ?s (MNum 0)))
 )
 
-; Loop Fusion
-(rewrite (LoopIn (LoopOut ?x (Loop ?loopA ?range) ?st) (Loop ?loopB ?range) ?st) ?x)
+; Loop Fusion (1 level, 2 levels, 3 levels, 4 levels)
+(rewrite (LoopIn (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA ?range) ?st) (Loop ?loopB ?range) ?st) (Binary ?bin ?a ?b))
+(rewrite
+	(LoopIn (LoopIn
+		(LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2)
+	(Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
+	(Binary ?bin ?a ?b)
+)
+(rewrite
+	(LoopIn (LoopIn (LoopIn
+		(LoopOut (LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2) (Loop ?loopA3 ?range3) ?st3)
+	(Loop ?loopB3 ?range3) ?st3) (Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
+	(Binary ?bin ?a ?b)
+)
+(rewrite
+	(LoopIn (LoopIn (LoopIn (LoopIn
+		(LoopOut (LoopOut (LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2) (Loop ?loopA3 ?range3) ?st3) (Loop ?loopA4 ?range4) ?st4)
+	(Loop ?loopB4 ?range4) ?st4) (Loop ?loopB3 ?range3) ?st3) (Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
+	(Binary ?bin ?a ?b)
+)
 
 ; Specialized swap loops
 (rewrite
