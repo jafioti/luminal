@@ -72,7 +72,6 @@ pub fn search(
         trajectory_cache: &mut FxHashMap<&'a NodeId, Vec<Vec<&'a NodeId>>>,
         waiting: usize,
     ) -> Vec<Vec<&'a NodeId>> {
-        println!("waiting: {waiting}");
         let mut trajectories = vec![];
         'enode_loop: for enode in &egraph.classes()[current_class].nodes {
             if INVALID_IR.contains(&egraph.nodes[enode].op.as_str()) {
@@ -240,10 +239,14 @@ pub fn search(
     // Now we have DFS trajectories
     let mut ref_outputs: Vec<Vec<f32>> = vec![];
     let mut best_time = u128::MAX;
-    let mut best_kernels = usize::MAX;
+    let mut shortest = "".to_string();
     let mut best_graph = None;
     let mut valid_graphs = 0;
     let total_trajectories = trajectories.len().min(MAX_SEARCHED_GRAPHS);
+    let mut ui_functions = None;
+    if option_env!("DISPLAY").is_some() {
+        ui_functions = Some(crate::utils::search_ui());
+    };
     'trajectory_loop: for (n, trajectory) in trajectories
         .into_iter()
         .take(MAX_SEARCHED_GRAPHS)
@@ -256,7 +259,7 @@ pub fn search(
         let inputs = inputs.into_iter().map(|(l, d)| (graph.node_indices().find(|n| matches!(graph.node_weight(*n).unwrap(), GraphTerm::GMEM { label } if label == l)).unwrap(), d.clone())).collect_vec();
         let root = graph.externals(Direction::Outgoing).next().unwrap();
         let Some((kernels, gmem_mapping)) =
-            crate::codegen::codegen(graph.clone(), vec![root], arch.clone(), 0, dyn_vars)
+            crate::codegen::codegen(graph.clone(), vec![root], arch.clone(), 0, dyn_vars, false)
         else {
             continue;
         };
@@ -264,37 +267,26 @@ pub fn search(
             display_graph(&graph, &[]);
             panic!();
         }
-        // Print kernels
-        if option_env!("PRINT_KERNELS").is_some() {
-            print_kernels(&kernels);
-        }
         match &arch {
             GPUArch::CUDA => {
                 valid_graphs += 1;
-                if option_env!("PRINT_KERNELS").is_some() {
-                    println!(
-                        "{}",
-                        format!(
-                            "Graph {valid_graphs} ({:.1}%) ",
-                            (n as f32 / total_trajectories as f32) * 100.0
-                        )
-                        .bold()
-                    );
+                if let Some((_, s, _, _)) = &ui_functions {
+                    s(format!(
+                        "Graph {valid_graphs} ({:.1}%) ",
+                        (n as f32 / total_trajectories as f32) * 100.0
+                    ));
                 }
             }
             GPUArch::Metal(_) => {
                 if let Some((us, outs)) = cost(&kernels, &inputs, &gmem_mapping, dyn_vars) {
                     valid_graphs += 1;
-                    if option_env!("PRINT_KERNELS").is_some() {
-                        println!(
-                            "{}{}",
-                            format!(
-                                "Graph {valid_graphs} ({:.1}%) ",
-                                (n as f32 / total_trajectories as f32) * 100.0
-                            )
-                            .bold(),
-                            format!("{us}µs").bright_green().bold()
-                        );
+                    if let Some((progress, logs, title, _)) = &ui_functions {
+                        progress(((n as f32 / total_trajectories as f32) * 100.0) as u16);
+                        logs(print_kernels(&kernels));
+                        title(format!("Graph {valid_graphs} {us}µs"));
+                    } else if option_env!("DEBUG").is_some() {
+                        println!("{}", print_kernels(&kernels));
+                        println!("Graph {valid_graphs} {us}µs");
                     }
                     if ref_outputs.is_empty() {
                         ref_outputs = outs;
@@ -302,20 +294,26 @@ pub fn search(
                         for (a, b) in ref_outputs.iter().zip(&outs) {
                             for (x, y) in a.iter().zip(b) {
                                 if (x - y).abs() >= 1e-3 {
-                                    if option_env!("PRINT_KERNELS").is_some() {
+                                    if option_env!("DEBUG").is_some() {
                                         println!("REF: {:?} New: {:?}", ref_outputs, outs);
                                         display_graph(&graph, &[]);
-                                        panic!("{} {x} != {y}", "Output Mismatch".on_bright_red());
+                                        panic!(
+                                            "{} {x} != {y}",
+                                            "Output Mismatch".bold().on_bright_red()
+                                        );
                                     }
                                     continue 'trajectory_loop;
                                 }
                             }
                         }
-                        if option_env!("PRINT_KERNELS").is_some() {
-                            println!("{}", "Outputs Validated".on_bright_green());
+                        if option_env!("DEBUG").is_some() {
+                            println!("{}", "Outputs Validated".bold().on_bright_green());
                         }
                     }
-                    best_kernels = best_kernels.min(kernels.node_count() - 2);
+                    let kernel_string = kernels.node_weights().map(|k| k.code.clone()).join("\n");
+                    if kernel_string.len() < shortest.len() || shortest.is_empty() {
+                        shortest = kernel_string;
+                    }
                     if us < best_time {
                         best_time = us;
                         best_graph = Some(graph);
@@ -327,7 +325,10 @@ pub fn search(
         //     break;
         // }
     }
-    println!("BEST KERNELS: {}", best_kernels);
+    if let Some((_, _, _, e)) = &ui_functions {
+        e();
+    }
+    println!("SHORTEST: {shortest}");
     best_graph
 }
 

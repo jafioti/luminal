@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Write};
 
 use egglog::{EGraph, Error, Term, prelude::exprs::var};
 use luminal::{
@@ -339,7 +339,7 @@ pub fn build_search_space(
     iters: usize,
 ) -> egraph_serialize::EGraph {
     let (rendered, root) = render_egglog(graph);
-    if option_env!("PRINT_KERNELS").is_some() {
+    if option_env!("DEBUG").is_some() {
         println!("{rendered}");
     }
     let code = include_str!("code.lisp");
@@ -351,7 +351,7 @@ pub fn build_search_space(
         std::fs::write("egglog.txt", &final_code).unwrap();
     }
     let (_egglog_messages, serialized) = run_egglog_program(&final_code, &root).unwrap();
-    if option_env!("PRINT_KERNELS").is_some() {
+    if option_env!("DEBUG").is_some() {
         println!("Done building search space.");
     }
     serialized
@@ -509,8 +509,8 @@ fn run_egglog_program(
     Ok((msgs, s))
 }
 
-pub fn print_kernels(kernels: &StableGraph<Kernel, (usize, usize), Directed>) {
-    println!("Kernels: {}", kernels.node_count() - 2);
+pub fn print_kernels(kernels: &StableGraph<Kernel, (usize, usize), Directed>) -> String {
+    let mut s = format!("Kernels: {}", kernels.node_count() - 2);
     for (i, node) in toposort(&kernels, None).unwrap().into_iter().enumerate() {
         let Kernel {
             code,
@@ -520,9 +520,201 @@ pub fn print_kernels(kernels: &StableGraph<Kernel, (usize, usize), Directed>) {
             outputs,
         } = kernels.node_weight(node).unwrap();
         if !code.starts_with("Inputs") && code != "Outputs" {
-            println!("Kernel {i} Grid: {grid:?} Threadblock: {threadblock:?} Smem: {smem}");
-            println!("{code}");
-            println!("Outputs: {:?}", outputs);
+            s.push_str(&format!(
+                "\nKernel {i} Grid: {grid:?} Threadblock: {threadblock:?} Smem: {smem}"
+            ));
+            s.push_str(&format!("\n{code}"));
+            s.push_str(&format!("\nOutputs: {:?}", outputs));
         }
     }
+    s
+}
+
+use crossterm::{
+    cursor::Show,
+    event::{self, Event, KeyCode},
+    execute,
+    terminal::{self, LeaveAlternateScreen},
+};
+use ratatui::{
+    Terminal,
+    backend::CrosstermBackend,
+    layout::{Constraint, Layout},
+    style::{Color, Style},
+    text::{Line, Span},
+    widgets::{
+        Block, Borders, Gauge, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+    },
+};
+use std::{
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
+};
+
+enum Msg {
+    Set(u16),
+    Text(String),
+    Title(String),
+    Exit,
+}
+
+fn expand_tabs(input: &str, tabstop: usize) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut col = 0usize;
+    for ch in input.chars() {
+        match ch {
+            '\n' => {
+                out.push(ch);
+                col = 0;
+            }
+            '\t' => {
+                let spaces = tabstop - (col % tabstop);
+                for _ in 0..spaces {
+                    out.push(' ');
+                }
+                col += spaces;
+            }
+            _ => {
+                out.push(ch);
+                col += unicode_width::UnicodeWidthChar::width(ch)
+                    .unwrap_or(1)
+                    .max(1);
+            }
+        }
+    }
+    out
+}
+
+pub fn search_ui() -> (
+    impl Fn(u16) + Send + 'static,    // set_progress
+    impl Fn(String) + Send + 'static, // set_log_text
+    impl Fn(String) + Send + 'static, // set_title
+    impl Fn() + Send + 'static,       // exit (blocks until teardown done)
+) {
+    let (tx, rx) = mpsc::channel::<Msg>();
+
+    // one-shot to wait for teardown
+    let (done_tx, done_rx) = mpsc::channel::<()>();
+
+    let set_progress = {
+        let tx = tx.clone();
+        move |pct: u16| {
+            let _ = tx.send(Msg::Set(pct.min(100)));
+        }
+    };
+    let set_log_text = {
+        let tx = tx.clone();
+        move |text: String| {
+            let _ = tx.send(Msg::Text(text));
+        }
+    };
+    let set_title = {
+        let tx = tx.clone();
+        move |title: String| {
+            let _ = tx.send(Msg::Title(title));
+        }
+    };
+
+    let exit = {
+        let tx = tx.clone();
+        move || {
+            let _ = tx.send(Msg::Exit);
+            // wait for UI thread to finish teardown
+            let _ = done_rx.recv();
+        }
+    };
+
+    std::thread::spawn(move || {
+        // setup
+        let mut stdout = std::io::stdout();
+        let _ = crossterm::terminal::enable_raw_mode();
+        let _ = crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen);
+        let backend = ratatui::backend::CrosstermBackend::new(stdout);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        let green = ratatui::style::Style::default().fg(ratatui::style::Color::Green);
+
+        let mut progress: u16 = 0;
+        let mut log_text = String::new();
+        let mut title = String::from("Logs");
+
+        'ui: loop {
+            while let Ok(msg) = rx.try_recv() {
+                match msg {
+                    Msg::Set(p) => progress = p,
+                    Msg::Text(t) => log_text = expand_tabs(&t, 8),
+                    Msg::Title(t) => title = t,
+                    Msg::Exit => break 'ui,
+                }
+            }
+
+            if crossterm::event::poll(std::time::Duration::from_millis(8)).unwrap_or(false) {
+                if let Ok(crossterm::event::Event::Key(k)) = crossterm::event::read() {
+                    if k.code == crossterm::event::KeyCode::Char('q') {
+                        break 'ui;
+                    }
+                }
+            }
+
+            let _ = terminal.draw(|f| {
+                let chunks = ratatui::layout::Layout::default()
+                    .direction(ratatui::layout::Direction::Vertical)
+                    .constraints([
+                        ratatui::layout::Constraint::Min(1),
+                        ratatui::layout::Constraint::Length(3),
+                    ])
+                    .split(f.area());
+
+                let log_widget = ratatui::widgets::Paragraph::new(log_text.clone())
+                    .block(
+                        ratatui::widgets::Block::default()
+                            .borders(ratatui::widgets::Borders::ALL)
+                            .title(ratatui::text::Span::styled(
+                                title.clone(),
+                                green.add_modifier(ratatui::style::Modifier::BOLD),
+                            ))
+                            .border_style(green)
+                            .title_style(green),
+                    )
+                    .style(green)
+                    .wrap(ratatui::widgets::Wrap { trim: false });
+                f.render_widget(log_widget, chunks[0]);
+
+                let gauge = ratatui::widgets::Gauge::default()
+                    .block(
+                        ratatui::widgets::Block::default()
+                            .borders(ratatui::widgets::Borders::ALL)
+                            .title(ratatui::text::Span::styled(
+                                "Progress",
+                                green.add_modifier(ratatui::style::Modifier::BOLD),
+                            ))
+                            .border_style(green)
+                            .title_style(green),
+                    )
+                    .gauge_style(green)
+                    .ratio((progress as f64 / 100.0).clamp(0.0, 1.0))
+                    .label(format!("{progress}%"));
+                f.render_widget(gauge, chunks[1]);
+            });
+        }
+
+        // teardown (ordered + flush)
+        // 1) drop Terminal to flush backend buffers
+        drop(terminal);
+        // 2) disable raw mode
+        let _ = crossterm::terminal::disable_raw_mode();
+        // 3) leave alt screen + show cursor
+        let mut out = std::io::stdout();
+        let _ = crossterm::execute!(
+            out,
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::cursor::Show
+        );
+        let _ = out.flush();
+
+        // signal we're done so exit() can return
+        let _ = done_tx.send(());
+    });
+
+    (set_progress, set_log_text, set_title, exit)
 }

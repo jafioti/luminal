@@ -39,6 +39,9 @@
 (rewrite (MDiv a (MNum 1)) a)
 (rewrite (MMul (MDiv ?a ?b) ?b) (MFloorTo ?a ?b))
 (rewrite (MAdd (MFloorTo ?a ?b) (MMod ?a ?b)) ?a)
+;(rewrite (MDiv ?a ?a) (MNum 1)) ; why does this cause kernels to incorrectly oversimplify?
+;(rewrite (MDiv (MMul ?x ?y) ?y) ?x) ; and this?
+(rewrite (MMod (MMul ?x ?y) ?y) (MNum 0))
 
 ; Replacement
 (rewrite (MReplace ?x ?y ?z) ?z :when ((= ?x ?y)))
@@ -137,45 +140,11 @@
 (rewrite (MergeLoops ?expr ?loopA ?loopB) (PropTwoArgs "MergeLoops" ?expr ?loopA ?loopB))
 (rewrite (PropTwoArgs "MergeLoops" ?expr ?loopA ?loopB)  (MergeLoops ?expr ?loopA ?loopB))
 
-; propogation helpers
-;(rewrite
-;	(PropOneArg ?prop (LoopIn ?body (Loop ?other ?range) ?stride) ?arg)
-;	(LoopIn (PropOneArg ?prop ?body ?arg) (Loop ?other ?range) ?stride)
-;)
-;(rewrite
-;	(PropOneArg ?prop (LoopOut ?body (Loop ?other ?range) ?stride) ?arg)
-;	(LoopOut (PropOneArg ?prop ?body ?arg) (Loop ?other ?range) ?stride)
-;)
-;(rewrite
-;	(PropOneArg ?prop (Unary ?un ?body) ?arg)
-;	(Unary ?un (PropOneArg ?prop ?body ?arg))
-;)
-;(rewrite
-;	(PropOneArg ?prop (Binary ?bin ?bodyA ?bodyB) ?arg)
-;	(Binary ?bin (PropOneArg ?prop ?bodyA ?arg) (PropOneArg ?prop ?bodyB ?arg))
-;)
-;(rewrite
-;	(PropTwoArgs ?prop (LoopIn ?body (Loop ?other ?range) ?stride) ?arg1 ?arg2)
-;	(LoopIn (PropTwoArgs ?prop ?body ?arg1 ?arg2) (Loop ?other ?range) ?stride)
-;)
-;(rewrite
-;	(PropTwoArgs ?prop (LoopOut ?body (Loop ?other ?range) ?stride) ?arg1 ?arg2)
-;	(LoopOut (PropTwoArgs ?prop ?body ?arg1 ?arg2) (Loop ?other ?range) ?stride)
-;)
-;(rewrite
-;	(PropTwoArgs ?prop (Unary ?un ?body) ?arg1 ?arg2)
-;	(Unary ?un (PropTwoArgs ?prop ?body ?arg1 ?arg2))
-;)
-;(rewrite
-;	(PropTwoArgs ?prop (Binary ?bin ?bodyA ?bodyB) ?arg1 ?arg2)
-;	(Binary ?bin (PropTwoArgs ?prop ?bodyA ?arg1 ?arg2) (PropTwoArgs ?prop ?bodyB ?arg1 ?arg2))
-;)
-
 ; Communative binary ops
-;(rewrite (Binary ?bin ?a ?b) (Binary ?bin ?b ?a))
+(rewrite (Binary ?bin ?a ?b) (Binary ?bin ?b ?a))
 ; distributive/associative skeletons so sums and products re-associate
-;(rewrite (Add (Add ?a ?b) ?c) (Add ?a (Add ?b ?c)))
-;(rewrite (Mul (Mul ?a ?b) ?c) (Mul ?a (Mul ?b ?c)))
+(rewrite (Add (Add ?a ?b) ?c) (Add ?a (Add ?b ?c)))
+(rewrite (Mul (Mul ?a ?b) ?c) (Mul ?a (Mul ?b ?c)))
 
 ; ---------- RULES ----------
 
@@ -257,7 +226,7 @@
 			(Loop (+ ?loop "_tile") (MNum tileFactor))
 			?stride
 		)
-		(Loop (+ ?loop "_out") (MNum (/ ?range tileFactor)))
+		(Loop (+ ?loop "_tout") (MNum (/ ?range tileFactor)))
 		(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
 	)
 	:when ((> ?range tileFactor) (= (% ?range tileFactor) 0))
@@ -266,7 +235,7 @@
 	(TileLoop (LoopIn ?body (Loop ?loop (MNum ?range)) ?stride) ?loop)
 	(LoopIn
 		(LoopIn ?body
-			(Loop (+ ?loop "_out") (MNum (/ ?range tileFactor)))
+			(Loop (+ ?loop "_tout") (MNum (/ ?range tileFactor)))
 			(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
 		)
 		(Loop (+ ?loop "_tile") (MNum tileFactor))

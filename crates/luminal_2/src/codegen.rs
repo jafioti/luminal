@@ -28,6 +28,7 @@ pub fn codegen(
     mut arch: GPUArch,
     n_graph: usize,
     dyn_vars: &FxHashMap<char, usize>,
+    print: bool,
 ) -> Option<(
     StableGraph<Kernel, (usize, usize), Directed>,
     HashMap<NodeIndex, usize>,
@@ -295,6 +296,9 @@ kernel void kernel_name(
             smem: smem_buffers.into_iter().map(|(_, _, a)| a).sum(),
             outputs: outputs.into_iter().map(|(o, _)| o.simplify()).collect(),
         };
+    }
+    if print {
+        println!("END");
     }
     Some((meta_graph, gmem_mapping))
 }
