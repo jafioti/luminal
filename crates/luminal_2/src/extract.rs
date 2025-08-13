@@ -254,7 +254,8 @@ pub fn search(
     {
         // Build termdag
         let graph = extraction_to_graph(egraph, &trajectory);
-        // display_graph(&graph, &[]);
+        // println!("built!");
+        display_graph(&graph, &[]);
         // convert inputs to reference nodes in graph
         let inputs = inputs.into_iter().map(|(l, d)| (graph.node_indices().find(|n| matches!(graph.node_weight(*n).unwrap(), GraphTerm::GMEM { label } if label == l)).unwrap(), d.clone())).collect_vec();
         let root = graph.externals(Direction::Outgoing).next().unwrap();
@@ -535,6 +536,7 @@ fn cost<'a>(
             .into_iter()
             .map(|(n, b)| (gmem_mapping[n], (copy_metal_buffer(b, &device), false)))
             .collect::<FxHashMap<_, _>>();
+        println!("INPUTS for warmups: {:?}", inputs);
         // Warm up resources (buffer allocation, kernel compiler, etc.)
         for _ in 0..WARMUP_TRIALS {
             run_graph(
@@ -550,6 +552,7 @@ fn cost<'a>(
         let mut micros = vec![];
         let mut outputs = vec![];
         let mut m;
+        println!("INPUTS for trials: {:?}", inputs);
         for _ in 0..TRIALS {
             (outputs, m) = run_graph(
                 &mut inputs,

@@ -24,7 +24,7 @@ pub fn translate_graph_meta(
 ) -> (
     MetaGraph,
     FxHashMap<NodeIndex, (NodeIndex /*meta*/, NodeIndex /*inner*/)>,
-    FxHashMap<NodeIndex /*meta*/, Vec<(NodeIndex /*inner*/, InitData)>>,
+    Vec<(NodeIndex /*orig*/, InitData)>,
 ) {
     let mut meta: MetaGraph = MetaGraph::new();
 
@@ -37,21 +37,18 @@ pub fn translate_graph_meta(
 
     // meta-level outputs
     let mut global_map: FxHashMap<NodeIndex, (NodeIndex, NodeIndex)> = FxHashMap::default();
-    let mut inits_by_meta: FxHashMap<NodeIndex, Vec<(NodeIndex, InitData)>> = FxHashMap::default();
 
     // For the CURRENT slice being built, remember meta-edge stubs that must be wired
     // when this slice is finalized: (src_meta, src_inner_out, dst_inner_placeholder)
     let mut pending_in_edges: Vec<(NodeIndex, NodeIndex, NodeIndex)> = vec![];
 
     // finalize current slice into the meta-graph and return its meta node
-    let finalize_current_slice =
+    let mut finalize_current_slice =
         |meta: &mut MetaGraph,
          g: &mut SubGraph,
          old_to_new: &mut FxHashMap<NodeIndex, NodeIndex>,
-         inits: &mut Vec<(NodeIndex, InitData)>,
          pending_in_edges: &mut Vec<(NodeIndex, NodeIndex, NodeIndex)>,
-         global_map: &mut FxHashMap<NodeIndex, (NodeIndex, NodeIndex)>,
-         inits_by_meta: &mut FxHashMap<NodeIndex, Vec<(NodeIndex, InitData)>>|
+         global_map: &mut FxHashMap<NodeIndex, (NodeIndex, NodeIndex)>|
          -> NodeIndex {
             // move inner graph into meta node
             let meta_node = meta.add_node(std::mem::take(g));
@@ -62,7 +59,6 @@ pub fn translate_graph_meta(
             }
 
             // publish inits and global mapping for nodes in the slice we just sealed
-            inits_by_meta.insert(meta_node, std::mem::take(inits));
             for (old, inner) in old_to_new.drain() {
                 global_map.insert(old, (meta_node, inner));
             }
@@ -92,10 +88,8 @@ pub fn translate_graph_meta(
                     &mut meta,
                     &mut g,
                     &mut old_to_new,
-                    &mut inits,
                     &mut pending_in_edges,
                     &mut global_map,
-                    &mut inits_by_meta,
                 );
 
                 // 3) start fresh slice; create placeholder fed by the producer
@@ -118,8 +112,16 @@ pub fn translate_graph_meta(
             "Sqrt" | "Exp2" | "Log2" | "Sin" | "Contiguous" | "Recip" => {
                 let (s0, i0, shape0) = sources.pop().unwrap();
                 let base0 = node_map[&(s0, i0 as usize)];
-                let (base0, ranges) =
-                    scope_in(base0, shape0, None, &mut g, &mut inits, &mut simplify_cache);
+                let (base0, ranges) = scope_in(
+                    base0,
+                    shape0,
+                    None,
+                    &mut g,
+                    &mut inits,
+                    &mut simplify_cache,
+                    &mut old_to_new,
+                    graph.node_count(),
+                );
 
                 let mut out = if op == "Contiguous" {
                     base0
@@ -151,6 +153,8 @@ pub fn translate_graph_meta(
                     &mut g,
                     &mut inits,
                     &mut simplify_cache,
+                    &mut old_to_new,
+                    graph.node_count(),
                 );
                 let (bin, _) = scope_in(
                     node_map[&(sb, ib as usize)],
@@ -159,6 +163,8 @@ pub fn translate_graph_meta(
                     &mut g,
                     &mut inits,
                     &mut simplify_cache,
+                    &mut old_to_new,
+                    graph.node_count(),
                 );
 
                 let mut opn = g.add_node(match op {
@@ -202,6 +208,8 @@ pub fn translate_graph_meta(
                     &mut g,
                     &mut inits,
                     &mut simplify_cache,
+                    &mut old_to_new,
+                    graph.node_count(),
                 );
 
                 let mut rm_strides = ranges
@@ -230,7 +238,11 @@ pub fn translate_graph_meta(
                     g.add_edge(acc, new_acc, ());
                     acc = new_acc;
                 }
-                inits.push((orig_acc, InitData::Data(vec![start_val])));
+                old_to_new.insert(NodeIndex::new(graph.node_count() + inits.len()), orig_acc);
+                inits.push((
+                    NodeIndex::new(graph.node_count() + inits.len()),
+                    InitData::Data(vec![start_val]),
+                ));
 
                 let mut opn = g.add_node(term);
                 g.add_edge(new_source, opn, ());
@@ -248,8 +260,10 @@ pub fn translate_graph_meta(
                     });
                     old_to_new.insert(old_node, newn);
                     node_map.insert((old_node, 0), newn);
+                    println!("CONSTANT OLD: {old_node:?} NEW: {:?}", newn);
+                    old_to_new.insert(NodeIndex::new(graph.node_count() + inits.len()), newn);
                     inits.push((
-                        newn,
+                        NodeIndex::new(graph.node_count() + inits.len()),
                         match constant.0 {
                             ConstantValue::Expression(e) => InitData::Expr(e),
                             ConstantValue::Float(f) => InitData::Data(vec![f]),
@@ -276,6 +290,7 @@ pub fn translate_graph_meta(
                     let newn = g.add_node(GraphTerm::GMEM {
                         label: op.to_string(),
                     });
+                    println!("LOAD: {:?} | {:?}", old_node, newn);
                     node_map.insert((old_node, 0), newn);
                     old_to_new.insert(old_node, newn);
                 }
@@ -289,14 +304,12 @@ pub fn translate_graph_meta(
             &mut meta,
             &mut g,
             &mut old_to_new,
-            &mut inits,
             &mut pending_in_edges,
             &mut global_map,
-            &mut inits_by_meta,
         );
     }
 
-    (meta, global_map, inits_by_meta)
+    (meta, global_map, inits)
 }
 
 fn smart_loop_in(
@@ -336,6 +349,8 @@ fn scope_in(
     graph: &mut StableGraph<GraphTerm, (), Directed>,
     inits: &mut Vec<(NodeIndex, InitData)>,
     simplify_cache: &mut FxHashMap<Expression, Expression>,
+    translation_mapping: &mut FxHashMap<NodeIndex, NodeIndex>,
+    n_orig_nodes: usize,
 ) -> (NodeIndex, Vec<(Expression, String)>) {
     let mut masks = vec![];
     let mut ranges = vec![];
@@ -359,7 +374,12 @@ fn scope_in(
             let mask = graph.add_node(GraphTerm::GMEM {
                 label: "Mask".to_string(),
             });
-            inits.push((mask, InitData::Data(vec![0., 1.])));
+            // Make new "fake" nodeindex for this init
+            translation_mapping.insert(NodeIndex::new(n_orig_nodes + inits.len()), mask);
+            inits.push((
+                NodeIndex::new(n_orig_nodes + inits.len()),
+                InitData::Data(vec![0., 1.]),
+            ));
             // Loop mask in
             let mut mask_range = curr_range;
             for level in 0..i {
