@@ -402,13 +402,8 @@ pub fn run_graph(
                     .sorted_by_key(|n| n.weight().1)
                     .map(|n| (n.source(), n.weight().0))
                 {
-                    println!("({:?} , {:?})", input, input_index);
                     if input == input_node {
-                        println!("index: {:?}", &input_index);
-                        println!("inputs: {:?}", inputs.keys());
-                        println!("inuts: {:?}", &inputs[&input_index].0);
                         encoder.set_buffer(buffer_count, Some(&inputs[&input_index].0), 0);
-                        println!("did not panic");
                     } else {
                         encoder.set_buffer(
                             buffer_count,
