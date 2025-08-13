@@ -1364,9 +1364,12 @@ fn split_kernels(
 
 pub fn stitch_meta_graph_together(
     meta_graph: MetaGraph,
-    mut accs: FxHashMap<NodeIndex, Vec<(NodeIndex, InitData)>>,
     outputs: Vec<(NodeIndex, NodeIndex)>,
-) -> (SubGraph, FxHashMap<NodeIndex, InitData>, Vec<NodeIndex>) {
+) -> (
+    SubGraph,
+    FxHashMap<(NodeIndex, NodeIndex), NodeIndex>,
+    Vec<NodeIndex>,
+) {
     let mut out = SubGraph::new();
 
     // (meta_node, inner_node) -> stitched node (no entry for break_in placeholders)
@@ -1376,8 +1379,6 @@ pub fn stitch_meta_graph_together(
     // record outgoing targets of each placeholder: (meta, placeholder_inner) -> Vec<inner_target>
     let mut placeholder_outs: FxHashMap<(NodeIndex, NodeIndex), Vec<NodeIndex>> =
         FxHashMap::default();
-
-    let mut new_accs = HashMap::default();
 
     let is_break_in = |term: &GraphTerm| {
         matches!(term,
@@ -1395,10 +1396,6 @@ pub fn stitch_meta_graph_together(
             if !ph {
                 map.insert((m, n), out.add_node(term.clone()));
             }
-        }
-        // combine accs
-        for (node, data) in accs.remove(&m).unwrap_or_default() {
-            new_accs.insert(map[&(m, node)], data);
         }
     }
     // translate outputs
@@ -1446,5 +1443,5 @@ pub fn stitch_meta_graph_together(
         }
     }
 
-    (out, new_accs, new_outputs)
+    (out, map, new_outputs)
 }

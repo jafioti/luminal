@@ -287,6 +287,8 @@ pub fn run_graph(
     autoreleasepool(|| {
         use metal_rs::MTLResourceOptions;
 
+        // println!("deep down in the mines");
+
         let device = metal_rs::Device::system_default().unwrap();
         let queue = device.new_command_queue();
         let command_buffer = queue.new_command_buffer();
@@ -308,6 +310,7 @@ pub fn run_graph(
             .unwrap();
         for node in toposort(kernels, None).unwrap() {
             let kernel = &kernels[node];
+            // println!("Our wonderful kernel: {:?}", kernel);
             if kernel.code == "Inputs" {
                 // Inputs should already be in the buffer map
             } else if kernel.code == "Outputs" {
@@ -399,8 +402,13 @@ pub fn run_graph(
                     .sorted_by_key(|n| n.weight().1)
                     .map(|n| (n.source(), n.weight().0))
                 {
+                    println!("({:?} , {:?})", input, input_index);
                     if input == input_node {
+                        println!("index: {:?}", &input_index);
+                        println!("inputs: {:?}", inputs.keys());
+                        println!("inuts: {:?}", &inputs[&input_index].0);
                         encoder.set_buffer(buffer_count, Some(&inputs[&input_index].0), 0);
+                        println!("did not panic");
                     } else {
                         encoder.set_buffer(
                             buffer_count,
