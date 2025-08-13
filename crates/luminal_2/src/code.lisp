@@ -53,11 +53,11 @@
 (rewrite (MReplace (MMin ?a ?b) ?x ?y) (MMin (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)))
 (rewrite (MReplace (MMax ?a ?b) ?x ?y) (MMax (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)))
 (rewrite (MReplace (MFloorTo ?a ?b) ?x ?y) (MFloorTo (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)))
-;; leave numbers unchanged
+; leave numbers unchanged
 (rewrite (MReplace (MNum ?n) ?x ?y) (MNum ?n))
 (rewrite (MReplace (MAccum ?acc) ?x ?y) (MAccum ?acc))
 
-;; leave other vars unchanged
+; leave other vars unchanged
 (rewrite (MReplace (MVar ?v) (MVar ?x) ?y) (MVar ?v) :when ((!= ?v ?x)))
 
 ; reduce multi-dim squeezed indexing into simple multiplicative indexing
@@ -141,10 +141,10 @@
 (rewrite (PropTwoArgs "MergeLoops" ?expr ?loopA ?loopB)  (MergeLoops ?expr ?loopA ?loopB))
 
 ; Communative binary ops
-(rewrite (Binary ?bin ?a ?b) (Binary ?bin ?b ?a))
+;(rewrite (Binary ?bin ?a ?b) (Binary ?bin ?b ?a))
 ; distributive/associative skeletons so sums and products re-associate
-(rewrite (Add (Add ?a ?b) ?c) (Add ?a (Add ?b ?c)))
-(rewrite (Mul (Mul ?a ?b) ?c) (Mul ?a (Mul ?b ?c)))
+;(rewrite (Add (Add ?a ?b) ?c) (Add ?a (Add ?b ?c)))
+;(rewrite (Mul (Mul ?a ?b) ?c) (Mul ?a (Mul ?b ?c)))
 
 ; ---------- RULES ----------
 
@@ -170,25 +170,64 @@
 )
 
 ; Loop Fusion (1 level, 2 levels, 3 levels, 4 levels)
-(rewrite (LoopIn (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA ?range) ?st) (Loop ?loopB ?range) ?st) (Binary ?bin ?a ?b))
+;(rewrite (LoopIn (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA ?range) ?st) (Loop ?loopB ?range) ?st) (Binary ?bin ?a ?b))
+;(rewrite
+;	(LoopIn (LoopIn
+;		(LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2)
+;	(Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
+;	(Binary ?bin ?a ?b)
+;)
+;(rewrite
+;	(LoopIn (LoopIn (LoopIn
+;		(LoopOut (LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2) (Loop ?loopA3 ?range3) ?st3)
+;	(Loop ?loopB3 ?range3) ?st3) (Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
+;	(Binary ?bin ?a ?b)
+;)
+;(rewrite
+;	(LoopIn (LoopIn (LoopIn (LoopIn
+;		(LoopOut (LoopOut (LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2) (Loop ?loopA3 ?range3) ?st3) (Loop ?loopA4 ?range4) ?st4)
+;	(Loop ?loopB4 ?range4) ?st4) (Loop ?loopB3 ?range3) ?st3) (Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
+;	(Binary ?bin ?a ?b)
+;)
+;(rewrite
+;	(LoopIn (LoopIn (LoopIn (LoopIn (LoopIn
+;		(LoopOut (LoopOut (LoopOut (LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2) (Loop ?loopA3 ?range3) ?st3) (Loop ?loopA4 ?range4) ?st4) (Loop ?loopA5 ?range5) ?st5)
+;	(Loop ?loopB5 ?range5) ?st5) (Loop ?loopB4 ?range4) ?st4) (Loop ?loopB3 ?range3) ?st3) (Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
+;	(Binary ?bin ?a ?b)
+;)
+
+;; loop signatures equal if ranges match (ignore name)
+(relation loop-same (LoopType LoopType))
+(rule
+  ((= ?L1 (Loop ?n1 ?r1))
+   (= ?L2 (Loop ?n2 ?r2))
+   (= ?r1 ?r2))
+  ((loop-same ?L1 ?L2)))
+
+;; peelable(x) ↔ x reduces to a Binary by removing zero or more valid In/Out pairs
+(relation peelable (IR))
+
+;; base: a Binary is peelable
+(rule
+  ((= ?x (Binary ?op ?a ?b)))
+  ((peelable ?x)))
+
+;; step: a matching In(Out(z, Lout, s), Lin, s) is peelable if z is peelable and loops match by signature
+(rule
+  ((= ?y (LoopIn (LoopOut ?z ?Lout ?s) ?Lin ?s))
+   (loop-same ?Lin ?Lout)
+   (peelable ?z))
+  ((peelable ?y)))
+
+;; cancel one pair only when loops match by signature and the inner is peelable
 (rewrite
-	(LoopIn (LoopIn
-		(LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2)
-	(Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
-	(Binary ?bin ?a ?b)
-)
-(rewrite
-	(LoopIn (LoopIn (LoopIn
-		(LoopOut (LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2) (Loop ?loopA3 ?range3) ?st3)
-	(Loop ?loopB3 ?range3) ?st3) (Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
-	(Binary ?bin ?a ?b)
-)
-(rewrite
-	(LoopIn (LoopIn (LoopIn (LoopIn
-		(LoopOut (LoopOut (LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2) (Loop ?loopA3 ?range3) ?st3) (Loop ?loopA4 ?range4) ?st4)
-	(Loop ?loopB4 ?range4) ?st4) (Loop ?loopB3 ?range3) ?st3) (Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
-	(Binary ?bin ?a ?b)
-)
+  (LoopIn (LoopOut ?x ?Lout ?s) ?Lin ?s)
+  ?x
+  :when ((loop-same ?Lin ?Lout) (peelable ?x))
+  :subsume)
+
+
+
 
 ; Specialized swap loops
 (rewrite
@@ -235,7 +274,7 @@
 )
 
 ; Tiling
-(let tileFactor 2)
+(let tileFactor 4)
 (rewrite
 	(LoopOut ?body (Loop ?loop (MNum ?range)) ?stride)
 	(LoopOut

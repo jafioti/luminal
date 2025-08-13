@@ -14,6 +14,7 @@ use luminal_2::{
     GPUArch, GraphTerm,
 };
 use metal_rs::{objc::rc::autoreleasepool, Buffer, Device, MTLResourceOptions};
+use rand::{rng, Rng};
 use rustc_hash::FxHashMap;
 
 fn main() {
@@ -25,8 +26,12 @@ fn main() {
         // let model = Linear::new(4, 5, false, &mut cx);
         // model.weight.set(weight.clone());
         // Make an input tensor
-        let a = cx.named_tensor("A", (2, 2)).set(vec![1.1, 2.1, 3.1, 4.1]);
-        let b = cx.named_tensor("B", (2, 2)).set(vec![0.1, 1.1, 18.1, 1.1]);
+        let mut rng = rng();
+        let (m, k, n) = (4, 4, 4);
+        let a_data = (0..(m * k)).map(|_| rng.random()).collect_vec();
+        let b_data = (0..(k * n)).map(|_| rng.random()).collect_vec();
+        let a = cx.named_tensor("A", (m, k)).set(a_data.clone());
+        let b = cx.named_tensor("B", (k, n)).set(b_data.clone());
         let c = a.matmul(b).retrieve();
         // Execute the graph
         cx.set_dyn_dim('a', 3);
@@ -45,7 +50,7 @@ fn main() {
         for graph_node in new_graph.node_indices().collect_vec() {
             let graph = new_graph.node_weight_mut(graph_node).unwrap();
             // luminal_2::utils::display_graph(&graph, &[]);
-            let search_space = build_search_space(graph, 7);
+            let search_space = build_search_space(graph, 16);
             let inputs = make_test_inputs(graph, &cx.dyn_map);
             let searched_graph = search(
                 &search_space,
@@ -123,8 +128,6 @@ fn main() {
         // print_kernels(&kernels);
 
         // let w1 = weight.clone();
-        let a_data = vec![1.1_f32, 2.1, 3.1, 4.1];
-        let b_data = vec![0.1_f32, 1.1, 18.1, 1.1];
         let device = Device::system_default().unwrap();
         let mut inputs = FxHashMap::default();
         inputs.insert(

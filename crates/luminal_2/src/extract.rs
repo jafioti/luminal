@@ -296,8 +296,8 @@ pub fn search(
                                 if (x - y).abs() >= 1e-3 {
                                     if option_env!("DEBUG").is_some() {
                                         println!("REF: {:?} New: {:?}", ref_outputs, outs);
-                                        display_graph(&graph, &[]);
-                                        panic!(
+                                        // display_graph(&graph, &[]);
+                                        println!(
                                             "{} {x} != {y}",
                                             "Output Mismatch".bold().on_bright_red()
                                         );
@@ -310,7 +310,7 @@ pub fn search(
                             println!("{}", "Outputs Validated".bold().on_bright_green());
                         }
                     }
-                    let kernel_string = kernels.node_weights().map(|k| k.code.clone()).join("\n");
+                    let kernel_string = print_kernels(&kernels);
                     if kernel_string.len() < shortest.len() || shortest.is_empty() {
                         shortest = kernel_string;
                     }
@@ -321,14 +321,11 @@ pub fn search(
                 }
             }
         }
-        // if min_kernels == 1 {
-        //     break;
-        // }
     }
     if let Some((_, _, _, e)) = &ui_functions {
         e();
     }
-    println!("SHORTEST: {shortest}");
+    println!("SHORTEST ({}ms): {shortest}", best_time / 1000);
     best_graph
 }
 
