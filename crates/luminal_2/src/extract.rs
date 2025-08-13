@@ -254,8 +254,6 @@ pub fn search(
     {
         // Build termdag
         let graph = extraction_to_graph(egraph, &trajectory);
-        // println!("built!");
-        display_graph(&graph, &[]);
         // convert inputs to reference nodes in graph
         let inputs = inputs.into_iter().map(|(l, d)| (graph.node_indices().find(|n| matches!(graph.node_weight(*n).unwrap(), GraphTerm::GMEM { label } if label == l)).unwrap(), d.clone())).collect_vec();
         let root = graph.externals(Direction::Outgoing).next().unwrap();
@@ -264,10 +262,6 @@ pub fn search(
         else {
             continue;
         };
-        if kernels.node_count() == 1 {
-            display_graph(&graph, &[]);
-            panic!();
-        }
         match &arch {
             GPUArch::CUDA => {
                 valid_graphs += 1;

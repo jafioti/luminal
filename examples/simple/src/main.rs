@@ -40,11 +40,6 @@ fn main() {
         let (mut new_graph, mut old_to_new_mapping, mut accs) = translate_graph_meta(&cx);
         // luminal_2::utils::display_graph(&new_graph.node_weights().next().unwrap(), &[]);
         // Insert accs into the old_to_new_mapping
-        for (meta_node, nodes) in &accs {
-            for (node, _) in nodes {
-                old_to_new_mapping.insert(*node, (*meta_node, *node));
-            }
-        }
 
         // Search each subgraph
         for graph_node in new_graph.node_indices().collect_vec() {
@@ -109,12 +104,11 @@ fn main() {
             }
         }
         let outputs = vec![old_to_new_mapping[&c.id]];
-        for (_, nodes) in &mut accs {
-            for (node, _) in nodes {
-                *node = old_to_new_mapping[node].1;
-            }
+        let (new_graph, meta_to_unified, outputs) = stitch_meta_graph_together(new_graph, outputs);
+        let mut unified_map = FxHashMap::default();
+        for (k, v) in old_to_new_mapping {
+            unified_map.insert(k, meta_to_unified[&v]);
         }
-        let (new_graph, accs, outputs) = stitch_meta_graph_together(new_graph, accs, outputs);
         // luminal_2::utils::display_graph(&new_graph, &[]);
         let (kernels, gmem_mapping) = codegen(
             new_graph.clone(),
@@ -131,24 +125,24 @@ fn main() {
         let device = Device::system_default().unwrap();
         let mut inputs = FxHashMap::default();
         inputs.insert(
-            gmem_mapping[&old_to_new_mapping[&a.id].1],
+            gmem_mapping[&unified_map[&a.id]],
             (copy_metal_buffer(&a_data, &device), true),
         );
         inputs.insert(
-            gmem_mapping[&old_to_new_mapping[&b.id].1],
+            gmem_mapping[&unified_map[&b.id]],
             (copy_metal_buffer(&b_data, &device), true),
         );
         for (label, val) in &accs {
             match val {
                 InitData::Expr(e) => {
                     let val = e.exec(&cx.dyn_map).unwrap();
-                    inputs.insert(gmem_mapping[label], {
+                    inputs.insert(gmem_mapping[&unified_map[label]], {
                         let v = vec![val as f32];
                         (copy_metal_buffer(&v, &device), true)
                     });
                 }
                 InitData::Data(d) => {
-                    inputs.insert(gmem_mapping[&label], (copy_metal_buffer(d, &device), true));
+                    inputs.insert(gmem_mapping[&unified_map[&label]], (copy_metal_buffer(d, &device), true));
                 }
             }
         }
