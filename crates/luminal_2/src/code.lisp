@@ -1,5 +1,5 @@
 ; -------- SYMBOLIC ALGEBRA -------
-
+(ruleset expr)
 (datatype Expression
 	(MNum i64)
 	(MVar String)
@@ -20,55 +20,72 @@
 )
 
 ; Associative
-(rewrite (MAdd (MAdd a b) c) (MAdd a (MAdd b c)))
-(rewrite (MMul (MMul a b) c) (MMul a (MMul b c)))
+(rewrite (MAdd (MAdd a b) c) (MAdd a (MAdd b c)) :ruleset expr)
+(rewrite (MMul (MMul a b) c) (MMul a (MMul b c)) :ruleset expr)
 
 ; Constant folding
-(rewrite (MAdd (MNum a) (MNum b)) (MNum (+ a b)))
-(rewrite (MSub (MNum a) (MNum b)) (MNum (- a b)))
-(rewrite (MMul (MNum a) (MNum b)) (MNum (* a b)) :when ((< a 10000) (< b 10000)))
-(rewrite (MDiv (MNum a) (MNum b)) (MNum (/ a b)) :when ((!= 0 b) (= 0 (% a b))))
-(rewrite (MMax (MNum a) (MNum b)) (MNum (max a b)))
-(rewrite (MMin (MNum a) (MNum b)) (MNum (min a b)))
-(rewrite (MAnd (MNum a) (MNum b)) (MNum (& a b)))
+(rewrite (MAdd (MNum a) (MNum b)) (MNum (+ a b)) :ruleset expr)
+(rewrite (MSub (MNum a) (MNum b)) (MNum (- a b)) :ruleset expr)
+(rewrite (MMul (MNum a) (MNum b)) (MNum (* a b)) :when ((< a 10000) (< b 10000)) :ruleset expr)
+(rewrite (MDiv (MNum a) (MNum b)) (MNum (/ a b)) :when ((!= 0 b) (= 0 (% a b))) :ruleset expr)
+(rewrite (MMax (MNum a) (MNum b)) (MNum (max a b)) :ruleset expr)
+(rewrite (MMin (MNum a) (MNum b)) (MNum (min a b)) :ruleset expr)
+(rewrite (MAnd (MNum a) (MNum b)) (MNum (& a b)) :ruleset expr)
 
 ; Simple reductions
-(rewrite (MAdd a (MNum 0)) a)
-(rewrite (MMul a (MNum 1)) a)
-(rewrite (MMul a (MNum 0)) (MNum 0))
-(rewrite (MDiv a (MNum 1)) a)
-(rewrite (MMul (MDiv ?a ?b) ?b) (MFloorTo ?a ?b))
-(rewrite (MAdd (MFloorTo ?a ?b) (MMod ?a ?b)) ?a)
-;(rewrite (MDiv ?a ?a) (MNum 1)) ; why does this cause kernels to incorrectly oversimplify?
-;(rewrite (MDiv (MMul ?x ?y) ?y) ?x) ; and this?
-(rewrite (MMod (MMul ?x ?y) ?y) (MNum 0))
+(rewrite (MAdd a (MNum 0)) a :ruleset expr)
+(rewrite (MMul a (MNum 1)) a :ruleset expr)
+(rewrite (MMul a (MNum 0)) (MNum 0) :ruleset expr)
+(rewrite (MDiv a (MNum 1)) a :ruleset expr)
+;(rewrite (MMul (MDiv ?a ?b) ?b) (MFloorTo ?a ?b) :ruleset expr)
+(rewrite (MMul (MDiv ?a ?b) ?b) ?a :ruleset expr) ; this technically isn't true, should be FloorTo like the rule above, but really we shouldn't rely on integer math for flooring
+(rewrite (MAdd (MFloorTo ?a ?b) (MMod ?a ?b)) ?a :ruleset expr)
+;(rewrite (MDiv ?a ?a) (MNum 1) :ruleset expr) ; why does this cause kernels to incorrectly oversimplify?
+(rewrite (MMod (MMul ?x ?y) ?y) (MNum 0) :ruleset expr)
+(rewrite (MDiv (MMul ?x ?y) ?z) (MMul ?x (MDiv ?y ?z)) :ruleset expr)
+(rewrite (MMod (MMod ?x (MNum ?y)) (MNum ?z)) (MMod ?x (MNum ?y)) :when ((>= ?z ?y) (= 0 (% ?y ?z)))) ; nested mods
+(rewrite (MMod (MMod ?x (MNum ?y)) (MNum ?z)) (MMod ?x (MNum ?z)) :when ((>= ?y ?z) (= 0 (% ?z ?y))))
+
+; reduce contiguous multidimensional indexing
+(rewrite
+	(MAdd
+		(MMul (MNum ?outerStride) (MMod (MDiv (MVar "z") (MNum ?innerSize)) (MNum ?outerSize)))
+		(MMul (MNum ?innerStride) (MMod (MVar "z") (MNum ?innerSize)))
+	)
+	(MMul (MNum ?innerStride) (MMod (MVar "z") (MNum (* ?innerSize ?outerSize))))
+	:ruleset expr
+)
+
 
 ; Replacement
-(rewrite (MReplace ?x ?y ?z) ?z :when ((= ?x ?y)))
-(rewrite (MReplace (MAdd ?a ?b) ?x ?y) (MAdd (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)))
-(rewrite (MReplace (MSub ?a ?b) ?x ?y) (MSub (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)))
-(rewrite (MReplace (MMul ?a ?b) ?x ?y) (MMul (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)))
-(rewrite (MReplace (MDiv ?a ?b) ?x ?y) (MDiv (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)))
-(rewrite (MReplace (MMod ?a ?b) ?x ?y) (MMod (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)))
-(rewrite (MReplace (MMin ?a ?b) ?x ?y) (MMin (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)))
-(rewrite (MReplace (MMax ?a ?b) ?x ?y) (MMax (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)))
-(rewrite (MReplace (MFloorTo ?a ?b) ?x ?y) (MFloorTo (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)))
+(rewrite (MReplace ?x ?y ?z) ?z :when ((= ?x ?y)) :ruleset expr)
+(rewrite (MReplace (MAdd ?a ?b) ?x ?y) (MAdd (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)) :ruleset expr)
+(rewrite (MReplace (MSub ?a ?b) ?x ?y) (MSub (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)) :ruleset expr)
+(rewrite (MReplace (MMul ?a ?b) ?x ?y) (MMul (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)) :ruleset expr)
+(rewrite (MReplace (MDiv ?a ?b) ?x ?y) (MDiv (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)) :ruleset expr)
+(rewrite (MReplace (MMod ?a ?b) ?x ?y) (MMod (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)) :ruleset expr)
+(rewrite (MReplace (MMin ?a ?b) ?x ?y) (MMin (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)) :ruleset expr)
+(rewrite (MReplace (MMax ?a ?b) ?x ?y) (MMax (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)) :ruleset expr)
+(rewrite (MReplace (MFloorTo ?a ?b) ?x ?y) (MFloorTo (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)) :ruleset expr)
 ; leave numbers unchanged
-(rewrite (MReplace (MNum ?n) ?x ?y) (MNum ?n))
-(rewrite (MReplace (MAccum ?acc) ?x ?y) (MAccum ?acc))
+(rewrite (MReplace (MNum ?n) ?x ?y) (MNum ?n) :ruleset expr)
+(rewrite (MReplace (MAccum ?acc) ?x ?y) (MAccum ?acc) :ruleset expr)
 
 ; leave other vars unchanged
-(rewrite (MReplace (MVar ?v) (MVar ?x) ?y) (MVar ?v) :when ((!= ?v ?x)))
+(rewrite (MReplace (MVar ?v) (MVar ?x) ?y) (MVar ?v) :when ((!= ?v ?x)) :ruleset expr)
 
 ; reduce multi-dim squeezed indexing into simple multiplicative indexing
 (rewrite
   (MAdd (MMul (MNum (* d n2)) (MMod (MDiv ?v (MNum d)) (MNum m)))
         (MMul (MNum n2) (MMod ?v (MNum d))))
   (MMul ?v (MNum n2))
+	:ruleset expr
 )
 
 ; -------- IR --------
-
+(ruleset ir)
+(ruleset ir-prop)
+(ruleset ir-generic)
 (datatype LoopType (Loop String Expression))
 (datatype*
  	(IR
@@ -102,6 +119,7 @@
        	(TileLoop IR String) ; Tile a loop, identified by it's string
         (UnpadLoop IR String) ; Remove a padding loop, identified by it's string
         (MergeLoops IR String String) ; Merge loops, identified by their strings
+        (Fusable IR) ; Dictates that this IR is fuseable with downstream loopin -> loopout
 
     	; propogation pattern helpers
      	(PropOneArg String IR String) ; Generic prop one arg back
@@ -112,39 +130,21 @@
 ; -------------- HELPERS ---------------
 
 ; Convert to and from generic unary ops
-(rewrite (Exp2 ?x) (Unary "Exp2" ?x))
-(rewrite (Unary "Exp2" ?x) (Exp2 ?x))
-(rewrite (Log2 ?x) (Unary "Log2" ?x))
-(rewrite (Unary "Log2" ?x) (Log2 ?x))
-(rewrite (Sqrt ?x) (Unary "Sqrt" ?x))
-(rewrite (Unary "Sqrt" ?x) (Sqrt ?x))
-(rewrite (Sin ?x) (Unary "Sin" ?x))
-(rewrite (Unary "Sin" ?x) (Sin ?x))
-(rewrite (Recip ?x) (Unary "Recip" ?x))
-(rewrite (Unary "Recip" ?x) (Recip ?x))
-(rewrite (Neg ?x) (Unary "Neg" ?x))
-(rewrite (Unary "Neg" ?x) (Neg ?x))
-(rewrite (Add ?a ?b) (Binary "Add" ?a ?b))
-(rewrite (Binary "Add" ?a ?b) (Add ?a ?b))
-(rewrite (Mul ?a ?b) (Binary "Mul" ?a ?b))
-(rewrite (Binary "Mul" ?a ?b) (Mul ?a ?b))
-(rewrite (Max ?a ?b) (Binary "Max" ?a ?b))
-(rewrite (Binary "Max" ?a ?b) (Max ?a ?b))
-; propogation patterns
-(rewrite (SwapLoops ?expr ?a ?b) (PropTwoArgs "SwapLoops" ?expr ?a ?b))
-(rewrite (PropTwoArgs "SwapLoops" ?expr ?a ?b) (SwapLoops ?expr ?a ?b))
-;(rewrite (TileLoop ?expr ?loop) (PropOneArg "TileLoop" ?expr ?loop))
-;(rewrite (PropOneArg "TileLoop" ?expr ?loop)  (TileLoop ?expr ?loop))
-(rewrite (UnpadLoop ?expr ?loop) (PropOneArg "UnpadLoop" ?expr ?loop))
-(rewrite (PropOneArg "UnpadLoop" ?expr ?loop)  (UnpadLoop ?expr ?loop))
-(rewrite (MergeLoops ?expr ?loopA ?loopB) (PropTwoArgs "MergeLoops" ?expr ?loopA ?loopB))
-(rewrite (PropTwoArgs "MergeLoops" ?expr ?loopA ?loopB)  (MergeLoops ?expr ?loopA ?loopB))
+(birewrite (Exp2 ?x) (Unary "Exp2" ?x) :ruleset ir-generic)
+(birewrite (Log2 ?x) (Unary "Log2" ?x) :ruleset ir-generic)
+(birewrite (Sqrt ?x) (Unary "Sqrt" ?x) :ruleset ir-generic)
+(birewrite (Sin ?x) (Unary "Sin" ?x) :ruleset ir-generic)
+(birewrite (Recip ?x) (Unary "Recip" ?x) :ruleset ir-generic)
+(birewrite (Neg ?x) (Unary "Neg" ?x) :ruleset ir-generic)
+(birewrite (Add ?a ?b) (Binary "Add" ?a ?b) :ruleset ir-generic)
+(birewrite (Mul ?a ?b) (Binary "Mul" ?a ?b) :ruleset ir-generic)
+(birewrite (Max ?a ?b) (Binary "Max" ?a ?b) :ruleset ir-generic)
 
 ; Communative binary ops
-;(rewrite (Binary ?bin ?a ?b) (Binary ?bin ?b ?a))
+;(rewrite (Binary ?bin ?a ?b) (Binary ?bin ?b ?a) :ruleset ir)
 ; distributive/associative skeletons so sums and products re-associate
-;(rewrite (Add (Add ?a ?b) ?c) (Add ?a (Add ?b ?c)))
-;(rewrite (Mul (Mul ?a ?b) ?c) (Mul ?a (Mul ?b ?c)))
+;(rewrite (Add (Add ?a ?b) ?c) (Add ?a (Add ?b ?c)) :ruleset ir)
+;(rewrite (Mul (Mul ?a ?b) ?c) (Mul ?a (Mul ?b ?c)) :ruleset ir)
 
 ; ---------- RULES ----------
 
@@ -152,82 +152,32 @@
 (rewrite
  	(LoopOut (Unary ?un (LoopIn ?x (Loop ?loop (MNum 1)) (MNum 0))) (Loop ?loop (MNum 1)) (MNum 0))
 	(Unary ?un ?x)
+	 :ruleset ir
 )
 (rewrite
  	(LoopOut (Binary ?bin (LoopIn ?a (Loop ?loop (MNum 1)) (MNum 0)) (LoopIn ?b (Loop ?loop (MNum 1)) (MNum  0))) (Loop ?loop (MNum 1)) (MNum 0))
 	(Binary ?bin ?a ?b)
+	 :ruleset ir
 )
 ; add pad loop
 (rewrite
 	(LoopOut (Unary ?un ?x) (Loop ?l ?r) ?s)
 	(LoopOut (LoopOut (Unary ?un (LoopIn ?x (Loop "newpad" (MNum 1)) (MNum 0))) (Loop "newpad" (MNum 1)) (MNum 0)) (Loop ?l ?r) ?s)
 	:when ((!= ?r (MNum 1)) (!= ?s (MNum 0)))
+	 :ruleset ir
 )
 (rewrite
 	(LoopOut (Binary ?bin ?a ?b) (Loop ?l ?r) ?s)
 	(LoopOut (LoopOut (Binary ?bin (LoopIn ?a (Loop "newpad" (MNum 1)) (MNum 0)) (LoopIn ?b (Loop "newpad" (MNum 1)) (MNum 0))) (Loop "newpad" (MNum 1)) (MNum 0)) (Loop ?l ?r) ?s)
 	:when ((!= ?r (MNum 1)) (!= ?s (MNum 0)))
+	 :ruleset ir
 )
+; remove unnessecary modulo
+(rewrite (LoopIn ?x (Loop ?l ?range) (MMul ?st (MMod (MVar "z") ?range))) (LoopIn ?x (Loop ?l ?range) (MMul ?st (MVar "z"))) :ruleset expr)
+(rewrite (LoopOut ?x (Loop ?l ?range) (MMul ?st (MMod (MVar "z") ?range))) (LoopOut ?x (Loop ?l ?range) (MMul ?st (MVar "z"))) :ruleset expr)
 
-; Loop Fusion (1 level, 2 levels, 3 levels, 4 levels)
-;(rewrite (LoopIn (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA ?range) ?st) (Loop ?loopB ?range) ?st) (Binary ?bin ?a ?b))
-;(rewrite
-;	(LoopIn (LoopIn
-;		(LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2)
-;	(Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
-;	(Binary ?bin ?a ?b)
-;)
-;(rewrite
-;	(LoopIn (LoopIn (LoopIn
-;		(LoopOut (LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2) (Loop ?loopA3 ?range3) ?st3)
-;	(Loop ?loopB3 ?range3) ?st3) (Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
-;	(Binary ?bin ?a ?b)
-;)
-;(rewrite
-;	(LoopIn (LoopIn (LoopIn (LoopIn
-;		(LoopOut (LoopOut (LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2) (Loop ?loopA3 ?range3) ?st3) (Loop ?loopA4 ?range4) ?st4)
-;	(Loop ?loopB4 ?range4) ?st4) (Loop ?loopB3 ?range3) ?st3) (Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
-;	(Binary ?bin ?a ?b)
-;)
-;(rewrite
-;	(LoopIn (LoopIn (LoopIn (LoopIn (LoopIn
-;		(LoopOut (LoopOut (LoopOut (LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2) (Loop ?loopA3 ?range3) ?st3) (Loop ?loopA4 ?range4) ?st4) (Loop ?loopA5 ?range5) ?st5)
-;	(Loop ?loopB5 ?range5) ?st5) (Loop ?loopB4 ?range4) ?st4) (Loop ?loopB3 ?range3) ?st3) (Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
-;	(Binary ?bin ?a ?b)
-;)
-
-;; loop signatures equal if ranges match (ignore name)
-(relation loop-same (LoopType LoopType))
-(rule
-  ((= ?L1 (Loop ?n1 ?r1))
-   (= ?L2 (Loop ?n2 ?r2))
-   (= ?r1 ?r2))
-  ((loop-same ?L1 ?L2)))
-
-;; peelable(x) ↔ x reduces to a Binary by removing zero or more valid In/Out pairs
-(relation peelable (IR))
-
-;; base: a Binary is peelable
-(rule
-  ((= ?x (Binary ?op ?a ?b)))
-  ((peelable ?x)))
-
-;; step: a matching In(Out(z, Lout, s), Lin, s) is peelable if z is peelable and loops match by signature
-(rule
-  ((= ?y (LoopIn (LoopOut ?z ?Lout ?s) ?Lin ?s))
-   (loop-same ?Lin ?Lout)
-   (peelable ?z))
-  ((peelable ?y)))
-
-;; cancel one pair only when loops match by signature and the inner is peelable
-(rewrite
-  (LoopIn (LoopOut ?x ?Lout ?s) ?Lin ?s)
-  ?x
-  :when ((loop-same ?Lin ?Lout) (peelable ?x))
-  :subsume)
-
-
-
+; Loop Fusion
+(rewrite (LoopIn (LoopOut ?x (Loop ?lo ?range) ?st) (Loop ?li ?range) ?st) ?x :ruleset ir)
 
 ; Specialized swap loops
 (rewrite
@@ -271,10 +221,11 @@
 		(Loop ?inL ?in)
 		?inSt
 	)
+	 :ruleset ir
 )
 
 ; Tiling
-(let tileFactor 4)
+(let tileFactor 2)
 (rewrite
 	(LoopOut ?body (Loop ?loop (MNum ?range)) ?stride)
 	(LoopOut
@@ -283,51 +234,157 @@
 			(Loop (+ ?loop "_tile") (MNum tileFactor))
 			?stride
 		)
-		(Loop (+ ?loop "_tout") (MNum (/ ?range tileFactor)))
+		(Loop (+ ?loop "_out") (MNum (/ ?range tileFactor)))
 		(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
 	)
 	:when ((> ?range tileFactor) (= (% ?range tileFactor) 0))
+	 :ruleset ir
 )
 (rewrite
 	(TileLoop (LoopIn ?body (Loop ?loop (MNum ?range)) ?stride) ?loop)
 	(LoopIn
 		(LoopIn ?body
-			(Loop (+ ?loop "_tout") (MNum (/ ?range tileFactor)))
+			(Loop (+ ?loop "_out") (MNum (/ ?range tileFactor)))
 			(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
 		)
 		(Loop (+ ?loop "_tile") (MNum tileFactor))
 		?stride
 	)
-	:when ((> ?range tileFactor) (= (% ?range tileFactor) 0))
+	 :ruleset ir-prop
 )
 ; propogation
 (rewrite
 	(TileLoop (LoopIn ?body (Loop ?other ?range) ?stride) ?loop)
 	(LoopIn (TileLoop ?body ?loop) (Loop ?other ?range) ?stride)
 	:when ((!= ?loop ?other))
+	 :ruleset ir-prop
 )
 (rewrite
 	(TileLoop (LoopOut ?body (Loop ?other ?range) ?stride) ?loop)
 	(LoopOut (TileLoop ?body ?loop) (Loop ?other ?range) ?stride)
-)
-(rewrite
-	(TileLoop (LoopIn (LoopIn ?body (Loop ?otherOther ?rangeOther) ?strideOther) (Loop ?other ?range) ?stride) ?loop)
-	(LoopIn (LoopIn (TileLoop ?body ?loop) (Loop ?otherOther ?rangeOther) ?strideOther) (Loop ?other ?range) ?stride)
-	:when ((!= ?loop ?other) (!= ?loop ?otherOther))
-)
-(rewrite
-	(TileLoop (LoopOut (LoopOut ?body (Loop ?otherOther ?rangeOther) ?strideOther) (Loop ?other ?range) ?stride) ?loop)
-	(LoopOut (LoopOut (TileLoop ?body ?loop)  (Loop ?otherOther ?rangeOther) ?strideOther) (Loop ?other ?range) ?stride)
+	 :ruleset ir-prop
 )
 (rewrite
 	(TileLoop (Unary ?un ?body) ?loop)
 	(Unary ?un (TileLoop ?body ?loop))
+	 :ruleset ir-prop
 )
 (rewrite
 	(TileLoop (Binary ?bin ?bodyA ?bodyB) ?loop)
 	(Binary ?bin (TileLoop ?bodyA ?loop) (TileLoop ?bodyB ?loop))
+	 :ruleset ir-prop
 )
 
+; Loop merging
+(rewrite
+	(LoopOut
+		(LoopOut ?x
+			(Loop ?i ?rangeI) ?stI
+		)
+		(Loop ?o ?rangeO) ?stO
+	)
+	(LoopOut (MergeLoops ?x ?o ?i)
+		(Loop (+ ?o ?i) (MMul ?rangeO ?rangeI))
+		(MAdd (MReplace ?stO (MVar "z") (MDiv (MVar "z") ?rangeI)) (MReplace ?stI (MVar "z") (MMod (MVar "z") ?rangeI)))
+	)
+	 :ruleset ir
+)
+(rewrite
+	(MergeLoops
+		(LoopIn
+			(LoopIn
+				?x
+				(Loop ?o ?rangeO) ?stO
+			)
+			(Loop ?i ?rangeI) ?stI
+		)
+		?o ?i
+	)
+	(LoopIn
+		?x
+		(Loop (+ ?o ?i) (MMul ?rangeO ?rangeI))
+		(MAdd (MReplace ?stO (MVar "z") (MDiv (MVar "z") ?rangeI)) (MReplace ?stI (MVar "z") (MMod (MVar "z") ?rangeI)))
+	)
+	 :ruleset ir-prop
+)
+; propogation
+(rewrite
+	(MergeLoops (LoopIn ?body (Loop ?other ?range) ?stride) ?o ?i)
+	(LoopIn (MergeLoops ?body ?o ?i) (Loop ?other ?range) ?stride)
+	:when ((!= ?i ?other))
+	 :ruleset ir-prop
+)
+(rewrite
+	(MergeLoops (LoopOut ?body (Loop ?other ?range) ?stride) ?o ?i)
+	(LoopOut (MergeLoops ?body ?o ?i) (Loop ?other ?range) ?stride)
+	 :ruleset ir-prop
+)
+(rewrite
+	(MergeLoops (Unary ?un ?body) ?o ?i)
+	(Unary ?un (MergeLoops ?body ?o ?i))
+	 :ruleset ir-prop
+)
+(rewrite
+	(MergeLoops (Binary ?bin ?bodyA ?bodyB) ?o ?i)
+	(Binary ?bin (MergeLoops ?bodyA ?o ?i) (MergeLoops ?bodyB ?o ?i))
+	 :ruleset ir-prop
+)
 
 {code}
-(run {iters})
+(run-schedule
+	(saturate ir-generic)
+	(repeat {iters}
+		(run ir) ; run ir rules once
+		(repeat 4 ir-prop)
+		(repeat 3 expr)
+	)
+	(saturate ir-generic) ; why is this needed?
+)
+
+(let a0 (GMEM "acc_0"))
+(let a1 (LoopIn a0 (Loop "" (MNum 64)) (MNum 0)))
+(let a2 (LoopIn a1 (Loop "" (MNum 1)) (MNum 0)))
+(let a3 (LoopIn a2 (Loop "" (MNum 1)) (MNum 0)))
+(let a4 (LoopIn a3 (Loop "" (MNum 8)) (MAccum "a")))
+(let a5 (GMEM "A Load"))
+;(let a6 (TileLoop (LoopIn a5 (Loop "" (MNum 512)) (MAdd (MMul (MNum 8) (MMod (MDiv (MVar "z") (MNum 64)) (MNum 8))) (MMod (MVar "z") (MNum 8)))) "0"))
+(let a6 (LoopIn a5 (Loop "" (MNum 128)) (MAdd (MMul (MNum 8) (MMod (MDiv (MMul (MMul (MVar "z") (MNum 2)) (MNum 2)) (MNum 64)) (MNum 8))) (MMod (MMul (MMul (MVar "z") (MNum 2)) (MNum 2)) (MNum 8)))))
+;(let a6tileouter (LoopIn a6 (Loop "" (MNum 2)) (MAdd (MMul (MNum 8) (MMod (MDiv (MMul (MVar "z") (MNum 2)) (MNum 64)) (MNum 8))) (MMod (MMul (MVar "z") (MNum 2)) (MNum 8)))))
+(let a6tile (LoopIn a6 (Loop "" (MNum 4))
+	(MAdd
+		(MAdd (MMul (MNum 8) (MMod (MDiv (MVar "z") (MNum 64)) (MNum 8))) (MMod (MVar "z") (MNum 8)))
+		(MAdd (MMul (MNum 8) (MMod (MDiv (MMod (MVar "z") (MNum 2)) (MNum 64)) (MNum 8))) (MMod (MVar "z") (MNum 2)))
+	)
+))
+(let a7 (GMEM "B Load"))
+;(let a8 (LoopIn a7 (Loop "0" (MNum 512)) (MAdd (MMod (MDiv (MVar "z") (MNum 8)) (MNum 8)) (MMul (MNum 8) (MMod (MVar "z") (MNum 8))))))
+(let a8 (LoopIn a7 (Loop "" (MNum 128)) (MAdd (MMod (MDiv (MMul (MMul (MVar "z") (MNum 2)) (MNum 2)) (MNum 8)) (MNum 8)) (MMul (MNum 8) (MMod (MMul (MMul (MVar "z") (MNum 2)) (MNum 2)) (MNum 8))))))
+;(let a8tileouter (LoopIn a8 (Loop "" (MNum 2)) (MAdd (MMod (MDiv (MMul (MVar "z") (MNum 2)) (MNum 8)) (MNum 8)) (MMul (MNum 8) (MMod (MMul (MVar "z") (MNum 2)) (MNum 8))))))
+(let a8tile (LoopIn a8 (Loop "" (MNum 4))
+	(MAdd
+		(MAdd (MMod (MDiv (MMul (MDiv (MVar "z") (MNum 2)) (MNum 2)) (MNum 8)) (MNum 8)) (MMul (MNum 8) (MMod (MMul (MDiv (MVar "z") (MNum 2)) (MNum 2)) (MNum 8))))
+		(MAdd (MMod (MDiv (MMod (MVar "z") (MNum 2)) (MNum 8)) (MNum 8)) (MMul (MNum 8) (MMod (MVar "z") (MNum 2))))
+	)
+))
+(let a9 (Mul a6tile a8tile))
+(let a10tile (LoopOut a9 (Loop "" (MNum 4)) (MAdd (MMul (MDiv (MVar "z") (MNum 2)) (MNum 2)) (MMod (MVar "z") (MNum 2)))))
+;(let a10tileouter (LoopOut a10tile (Loop "" (MNum 2)) (MMul (MVar "z") (MNum 2))))
+(let a10 (LoopOut a10tile (Loop "" (MNum 128)) (MMul (MMul (MVar "z") (MNum 2)) (MNum 2))))
+;(let a11 (LoopIn a10 (Loop "" (MNum 64)) (MAdd (MMul (MNum 64) (MMod (MDiv (MVar "z") (MNum 8)) (MNum 8))) (MMul (MNum 8) (MMod (MVar "z") (MNum 8))))))
+(let a11 (LoopIn a10 (Loop "" (MNum 64)) (MMul (MNum 8) (MVar "z"))))
+(let a12 (LoopIn a11 (Loop "" (MNum 1)) (MNum 0)))
+(let a13 (LoopIn a12 (Loop "" (MNum 1)) (MNum 0)))
+(let a14 (LoopIn a13 (Loop "" (MNum 8)) (MVar "z")))
+(let a15 (Add a4 a14))
+(let a16 (LoopOut a15 (Loop "" (MNum 8)) (MAccum "a")))
+(let a17 (LoopOut a16 (Loop "" (MNum 1)) (MVar "z")))
+(let a18 (LoopOut a17 (Loop "" (MNum 1)) (MVar "z")))
+(let a19 (LoopOut a18 (Loop "" (MNum 64)) (MVar "z")))
+
+(ruleset a-rule)
+(rewrite (Loop ?x ?r) (Loop "" ?r) :ruleset a-rule)
+(rewrite (TileLoop ?x ?l) (TileLoop ?x "") :ruleset a-rule)
+(rewrite (MergeLoops ?x ?l ?o) (MergeLoops ?x "" "") :ruleset a-rule)
+(run-schedule (saturate a-rule))
+
+(check (= a19 t19))

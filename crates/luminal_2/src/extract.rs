@@ -31,6 +31,7 @@ const INVALID_IR: &[&str] = &[
     "PropOneArg",
     "PropTwoArgs",
     "MergeLoops",
+    "Fusable"
 ];
 
 type Cost = u128; // Execution time in microseconds
@@ -530,7 +531,6 @@ fn cost<'a>(
             .into_iter()
             .map(|(n, b)| (gmem_mapping[n], (copy_metal_buffer(b, &device), false)))
             .collect::<FxHashMap<_, _>>();
-        println!("INPUTS for warmups: {:?}", inputs);
         // Warm up resources (buffer allocation, kernel compiler, etc.)
         for _ in 0..WARMUP_TRIALS {
             run_graph(
@@ -546,7 +546,6 @@ fn cost<'a>(
         let mut micros = vec![];
         let mut outputs = vec![];
         let mut m;
-        println!("INPUTS for trials: {:?}", inputs);
         for _ in 0..TRIALS {
             (outputs, m) = run_graph(
                 &mut inputs,

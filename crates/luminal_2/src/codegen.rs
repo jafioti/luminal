@@ -515,8 +515,8 @@ fn make_kernel(
                         // We don't have a place to save this output to. Need to allocate a register buffer
                         *prev_max_var += 1;
                         kernel_lines.push(format!(
-                            "{spacing}thread float {}[{size}] = {{0.0}};",
-                            var_to_char(*prev_max_var)
+                            "{spacing}thread float {}[{}] = {{0.0}};",
+                            var_to_char(*prev_max_var), size.to_usize().unwrap()
                         ));
                         node_to_var.insert(*output, (*prev_max_var, true));
                         created_buffers.insert(*output, *prev_max_var);

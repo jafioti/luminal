@@ -27,7 +27,7 @@ fn main() {
         // model.weight.set(weight.clone());
         // Make an input tensor
         let mut rng = rng();
-        let (m, k, n) = (4, 4, 4);
+        let (m, k, n) = (8, 8, 8);
         let a_data = (0..(m * k)).map(|_| rng.random()).collect_vec();
         let b_data = (0..(k * n)).map(|_| rng.random()).collect_vec();
         let a = cx.named_tensor("A", (m, k)).set(a_data.clone());
@@ -45,7 +45,7 @@ fn main() {
         for graph_node in new_graph.node_indices().collect_vec() {
             let graph = new_graph.node_weight_mut(graph_node).unwrap();
             // luminal_2::utils::display_graph(&graph, &[]);
-            let search_space = build_search_space(graph, 16);
+            let search_space = build_search_space(graph, 3);
             let inputs = make_test_inputs(graph, &cx.dyn_map);
             let searched_graph = search(
                 &search_space,

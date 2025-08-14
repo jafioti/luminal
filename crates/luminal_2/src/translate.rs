@@ -399,11 +399,7 @@ fn scope_in(
             ));
         };
         range *= curr_range;
-        stride += if i == shape.len() - 1 {
-            curr_stride.substitute('z', Expression::from('z') % curr_range)
-        } else {
-            curr_stride.substitute('z', (Expression::from('z') / element_size) % curr_range)
-        };
+        stride += curr_stride.substitute('z', (Expression::from('z') / element_size) % curr_range);
     }
     ranges.push((range, "0".to_string()));
     src = loop_in(

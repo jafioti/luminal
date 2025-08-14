@@ -338,9 +338,10 @@ pub fn build_search_space(
     graph: &StableGraph<GraphTerm, (), Directed>,
     iters: usize,
 ) -> egraph_serialize::EGraph {
-    let (rendered, root) = render_egglog(graph);
+    let (rendered, root) = render_egglog(graph, "t");
     if option_env!("DEBUG").is_some() {
         println!("{rendered}");
+        // println!("{}", render_egglog(graph, "a").0);
     }
     let code = include_str!("code.lisp");
 
@@ -357,7 +358,7 @@ pub fn build_search_space(
     serialized
 }
 
-fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>) -> (String, String) {
+fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>, prefix: &str) -> (String, String) {
     // 1.  Topo-order so operands are rendered before users
     let mut topo = Topo::new(&graph);
 
@@ -377,7 +378,7 @@ fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>) -> (String, Strin
     };
 
     while let Some(n) = topo.next(&graph) {
-        let var = format!("t{next_id}");
+        let var = format!("{prefix}{next_id}");
         next_id += 1;
         let code = match &graph[n] {
             GraphTerm::GMEM { label } => {
