@@ -14,6 +14,7 @@ use luminal_2::{
     GPUArch, GraphTerm,
 };
 use metal_rs::{objc::rc::autoreleasepool, Buffer, Device, MTLResourceOptions};
+use rand::{rng, Rng};
 use rustc_hash::FxHashMap;
 
 fn main() {
@@ -25,8 +26,12 @@ fn main() {
         // let model = Linear::new(4, 5, false, &mut cx);
         // model.weight.set(weight.clone());
         // Make an input tensor
-        let a = cx.named_tensor("A", (2, 2)).set(vec![1.1, 2.1, 3.1, 4.1]);
-        let b = cx.named_tensor("B", (2, 2)).set(vec![0.1, 1.1, 18.1, 1.1]);
+        let mut rng = rng();
+        let (m, k, n) = (8, 8, 8);
+        let a_data = (0..(m * k)).map(|_| rng.random()).collect_vec();
+        let b_data = (0..(k * n)).map(|_| rng.random()).collect_vec();
+        let a = cx.named_tensor("A", (m, k)).set(a_data.clone());
+        let b = cx.named_tensor("B", (k, n)).set(b_data.clone());
         let c = a.matmul(b).retrieve();
         // Execute the graph
         cx.set_dyn_dim('a', 3);
@@ -35,17 +40,12 @@ fn main() {
         let (mut new_graph, mut old_to_new_mapping, mut accs) = translate_graph_meta(&cx);
         // luminal_2::utils::display_graph(&new_graph.node_weights().next().unwrap(), &[]);
         // Insert accs into the old_to_new_mapping
-        for (meta_node, nodes) in &accs {
-            for (node, _) in nodes {
-                old_to_new_mapping.insert(*node, (*meta_node, *node));
-            }
-        }
 
         // Search each subgraph
         for graph_node in new_graph.node_indices().collect_vec() {
             let graph = new_graph.node_weight_mut(graph_node).unwrap();
             // luminal_2::utils::display_graph(&graph, &[]);
-            let search_space = build_search_space(graph, 7);
+            let search_space = build_search_space(graph, 3);
             let inputs = make_test_inputs(graph, &cx.dyn_map);
             let searched_graph = search(
                 &search_space,
@@ -104,12 +104,11 @@ fn main() {
             }
         }
         let outputs = vec![old_to_new_mapping[&c.id]];
-        for (_, nodes) in &mut accs {
-            for (node, _) in nodes {
-                *node = old_to_new_mapping[node].1;
-            }
+        let (new_graph, meta_to_unified, outputs) = stitch_meta_graph_together(new_graph, outputs);
+        let mut unified_map = FxHashMap::default();
+        for (k, v) in old_to_new_mapping {
+            unified_map.insert(k, meta_to_unified[&v]);
         }
-        let (new_graph, accs, outputs) = stitch_meta_graph_together(new_graph, accs, outputs);
         // luminal_2::utils::display_graph(&new_graph, &[]);
         let (kernels, gmem_mapping) = codegen(
             new_graph.clone(),
@@ -123,29 +122,27 @@ fn main() {
         // print_kernels(&kernels);
 
         // let w1 = weight.clone();
-        let a_data = vec![1.1_f32, 2.1, 3.1, 4.1];
-        let b_data = vec![0.1_f32, 1.1, 18.1, 1.1];
         let device = Device::system_default().unwrap();
         let mut inputs = FxHashMap::default();
         inputs.insert(
-            gmem_mapping[&old_to_new_mapping[&a.id].1],
+            gmem_mapping[&unified_map[&a.id]],
             (copy_metal_buffer(&a_data, &device), true),
         );
         inputs.insert(
-            gmem_mapping[&old_to_new_mapping[&b.id].1],
+            gmem_mapping[&unified_map[&b.id]],
             (copy_metal_buffer(&b_data, &device), true),
         );
         for (label, val) in &accs {
             match val {
                 InitData::Expr(e) => {
                     let val = e.exec(&cx.dyn_map).unwrap();
-                    inputs.insert(gmem_mapping[label], {
+                    inputs.insert(gmem_mapping[&unified_map[label]], {
                         let v = vec![val as f32];
                         (copy_metal_buffer(&v, &device), true)
                     });
                 }
                 InitData::Data(d) => {
-                    inputs.insert(gmem_mapping[&label], (copy_metal_buffer(d, &device), true));
+                    inputs.insert(gmem_mapping[&unified_map[&label]], (copy_metal_buffer(d, &device), true));
                 }
             }
         }

@@ -31,6 +31,7 @@ const INVALID_IR: &[&str] = &[
     "PropOneArg",
     "PropTwoArgs",
     "MergeLoops",
+    "Fusable"
 ];
 
 type Cost = u128; // Execution time in microseconds
@@ -254,8 +255,6 @@ pub fn search(
     {
         // Build termdag
         let graph = extraction_to_graph(egraph, &trajectory);
-        // println!("built!");
-        //display_graph(&graph, &[]);
         // convert inputs to reference nodes in graph
         let inputs = inputs.into_iter().map(|(l, d)| (graph.node_indices().find(|n| matches!(graph.node_weight(*n).unwrap(), GraphTerm::GMEM { label } if label == l)).unwrap(), d.clone())).collect_vec();
         let root = graph.externals(Direction::Outgoing).next().unwrap();
@@ -264,10 +263,6 @@ pub fn search(
         else {
             continue;
         };
-        if kernels.node_count() == 1 {
-            display_graph(&graph, &[]);
-            panic!();
-        }
         match &arch {
             GPUArch::CUDA => {
                 if let Some((_, s, _, _)) = &ui_functions {
@@ -296,8 +291,8 @@ pub fn search(
                                 if (x - y).abs() >= 1e-3 {
                                     if option_env!("DEBUG").is_some() {
                                         println!("REF: {:?} New: {:?}", ref_outputs, outs);
-                                        display_graph(&graph, &[]);
-                                        panic!(
+                                        // display_graph(&graph, &[]);
+                                        println!(
                                             "{} {x} != {y}",
                                             "Output Mismatch".bold().on_bright_red()
                                         );
@@ -310,7 +305,7 @@ pub fn search(
                             println!("{}", "Outputs Validated".bold().on_bright_green());
                         }
                     }
-                    let kernel_string = kernels.node_weights().map(|k| k.code.clone()).join("\n");
+                    let kernel_string = print_kernels(&kernels);
                     if kernel_string.len() < shortest.len() || shortest.is_empty() {
                         shortest = kernel_string;
                     }
@@ -325,8 +320,7 @@ pub fn search(
     if let Some((_, _, _, e)) = &ui_functions {
         e();
     }
-    // println!("SHORTEST: {shortest}");
-    // println!("BEST TIME Kernel: {:?}", best_graph);
+    println!("SHORTEST ({}ms): {shortest}", best_time / 1000);
     best_graph
 }
 
@@ -536,7 +530,6 @@ fn cost<'a>(
             .into_iter()
             .map(|(n, b)| (gmem_mapping[n], (copy_metal_buffer(b, &device), false)))
             .collect::<FxHashMap<_, _>>();
-        // println!("INPUTS for warmups: {:?}", inputs);
         // Warm up resources (buffer allocation, kernel compiler, etc.)
         for _ in 0..WARMUP_TRIALS {
             run_graph(
@@ -552,7 +545,6 @@ fn cost<'a>(
         let mut micros = vec![];
         let mut outputs = vec![];
         let mut m;
-        // println!("INPUTS cfor trials: {:?}", inputs);
         for _ in 0..TRIALS {
             (outputs, m) = run_graph(
                 &mut inputs,
