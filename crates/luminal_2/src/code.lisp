@@ -37,14 +37,14 @@
 (rewrite (MMul a (MNum 1)) a :ruleset expr)
 (rewrite (MMul a (MNum 0)) (MNum 0) :ruleset expr)
 (rewrite (MDiv a (MNum 1)) a :ruleset expr)
-;(rewrite (MMul (MDiv ?a ?b) ?b) (MFloorTo ?a ?b) :ruleset expr)
-(rewrite (MMul (MDiv ?a ?b) ?b) ?a :ruleset expr) ; this technically isn't true, should be FloorTo like the rule above, but really we shouldn't rely on integer math for flooring
+(rewrite (MMul (MDiv ?a ?b) ?b) (MFloorTo ?a ?b) :ruleset expr)
 (rewrite (MAdd (MFloorTo ?a ?b) (MMod ?a ?b)) ?a :ruleset expr)
 ;(rewrite (MDiv ?a ?a) (MNum 1) :ruleset expr) ; why does this cause kernels to incorrectly oversimplify?
+;(rewrite (MDiv (MMul ?x ?y) ?y) ?x :ruleset expr) ; and this?
 (rewrite (MMod (MMul ?x ?y) ?y) (MNum 0) :ruleset expr)
 (rewrite (MDiv (MMul ?x ?y) ?z) (MMul ?x (MDiv ?y ?z)) :ruleset expr)
-(rewrite (MMod (MMod ?x (MNum ?y)) (MNum ?z)) (MMod ?x (MNum ?y)) :when ((>= ?z ?y) (= 0 (% ?y ?z)))) ; nested mods
-(rewrite (MMod (MMod ?x (MNum ?y)) (MNum ?z)) (MMod ?x (MNum ?z)) :when ((>= ?y ?z) (= 0 (% ?z ?y))))
+(rewrite (MMod (MMod ?x (MNum ?y)) (MNum ?z)) (MMod ?x (MNum ?y)) :when ((>= ?z ?y) (= 0 (% ?y ?z))) :ruleset expr) ; nested mods
+(rewrite (MMod (MMod ?x (MNum ?y)) (MNum ?z)) (MMod ?x (MNum ?z)) :when ((>= ?y ?z) (= 0 (% ?z ?y))) :ruleset expr)
 
 ; reduce contiguous multidimensional indexing
 (rewrite
@@ -336,7 +336,7 @@
 	(repeat {iters}
 		(run ir) ; run ir rules once
 		(repeat 4 ir-prop)
-		(repeat 3 expr)
+		(repeat 5 expr)
 	)
 	(saturate ir-generic) ; why is this needed?
 )
@@ -352,8 +352,8 @@
 ;(let a6tileouter (LoopIn a6 (Loop "" (MNum 2)) (MAdd (MMul (MNum 8) (MMod (MDiv (MMul (MVar "z") (MNum 2)) (MNum 64)) (MNum 8))) (MMod (MMul (MVar "z") (MNum 2)) (MNum 8)))))
 (let a6tile (LoopIn a6 (Loop "" (MNum 4))
 	(MAdd
-		(MAdd (MMul (MNum 8) (MMod (MDiv (MVar "z") (MNum 64)) (MNum 8))) (MMod (MVar "z") (MNum 8)))
-		(MAdd (MMul (MNum 8) (MMod (MDiv (MMod (MVar "z") (MNum 2)) (MNum 64)) (MNum 8))) (MMod (MVar "z") (MNum 2)))
+		(MAdd (MMul (MNum 8) (MMod (MDiv (MMul (MDiv (MVar "z") (MNum 2)) (MNum 2)) (MNum 64)) (MNum 8))) (MMod (MMul (MDiv (MVar "z") (MNum 2)) (MNum 2)) (MNum 8)))
+		(MAdd (MMul (MNum 8) (MMod (MDiv (MMod (MVar "z") (MNum 2)) (MNum 64)) (MNum 8))) (MMod (MMod (MVar "z") (MNum 2)) (MNum 8)))
 	)
 ))
 (let a7 (GMEM "B Load"))
@@ -367,10 +367,8 @@
 	)
 ))
 (let a9 (Mul a6tile a8tile))
-(let a10tile (LoopOut a9 (Loop "" (MNum 4)) (MAdd (MMul (MDiv (MVar "z") (MNum 2)) (MNum 2)) (MMod (MVar "z") (MNum 2)))))
-;(let a10tileouter (LoopOut a10tile (Loop "" (MNum 2)) (MMul (MVar "z") (MNum 2))))
-(let a10 (LoopOut a10tile (Loop "" (MNum 128)) (MMul (MMul (MVar "z") (MNum 2)) (MNum 2))))
-;(let a11 (LoopIn a10 (Loop "" (MNum 64)) (MAdd (MMul (MNum 64) (MMod (MDiv (MVar "z") (MNum 8)) (MNum 8))) (MMul (MNum 8) (MMod (MVar "z") (MNum 8))))))
+(let a10tile (LoopOut a9 (Loop "" (MNum 4)) (MVar "z")))
+(let a10 (LoopOut a10tile (Loop "" (MNum 128)) (MMul (MVar "z") (MNum 4))))
 (let a11 (LoopIn a10 (Loop "" (MNum 64)) (MMul (MNum 8) (MVar "z"))))
 (let a12 (LoopIn a11 (Loop "" (MNum 1)) (MNum 0)))
 (let a13 (LoopIn a12 (Loop "" (MNum 1)) (MNum 0)))
