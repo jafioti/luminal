@@ -16,8 +16,14 @@ pub enum InitData {
     Data(Vec<f32>),
 }
 
+pub type CrossSubGraphTensorIndexes = (NodeIndex, NodeIndex);
+pub type MetaGraphNodeIndex = (NodeIndex);
+pub type SubGraphNodeIndex = (NodeIndex);
+pub type OrigGraphNodeIndex = (NodeIndex);
+pub type OptimalGraphNodeIndex = (NodeIndex);
+
 pub type SubGraph = StableGraph<GraphTerm, (), Directed>;
-pub type MetaGraph = StableGraph<SubGraph, (NodeIndex, NodeIndex), Directed>;
+pub type MetaGraph = StableGraph<SubGraph, CrossSubGraphTensorIndexes, Directed>;
 
 pub fn translate_graph_meta(
     graph: &Graph,
@@ -30,13 +36,15 @@ pub fn translate_graph_meta(
 
     // --- current slice state ---
     let mut g: SubGraph = SubGraph::new();
-    let mut node_map: FxHashMap<(NodeIndex, usize), NodeIndex> = FxHashMap::default();
-    let mut old_to_new: FxHashMap<NodeIndex, NodeIndex> = FxHashMap::default();
+    let mut orig_to_subgraph_node_map: FxHashMap<(OrigGraphNodeIndex, usize), SubGraphNodeIndex> =
+        FxHashMap::default();
+    let mut key_to_subgraph_buffer: FxHashMap<NodeIndex, SubGraphNodeIndex> = FxHashMap::default(); // can hold original or synthetic nodeIndexes
     let mut inits: Vec<(NodeIndex, InitData)> = vec![];
     let mut simplify_cache = FxHashMap::default();
 
     // meta-level outputs
-    let mut global_map: FxHashMap<NodeIndex, (NodeIndex, NodeIndex)> = FxHashMap::default();
+    let mut global_map: FxHashMap<OrigGraphNodeIndex, (MetaGraphNodeIndex, SubGraphNodeIndex)> =
+        FxHashMap::default();
 
     // For the CURRENT slice being built, remember meta-edge stubs that must be wired
     // when this slice is finalized: (src_meta, src_inner_out, dst_inner_placeholder)
@@ -81,19 +89,19 @@ pub fn translate_graph_meta(
             "GraphBreak" => {
                 // 1) identify producer's inner node (no scope_in/out needed)
                 let (src_old, out_idx, _shape_unused) = sources.pop().unwrap();
-                let producer_inner_out = node_map[&(src_old, out_idx as usize)];
+                let producer_inner_out = orig_to_subgraph_node_map[&(src_old, out_idx as usize)];
 
                 // 2) seal current slice into meta
                 let producer_meta = finalize_current_slice(
                     &mut meta,
                     &mut g,
-                    &mut old_to_new,
+                    &mut key_to_subgraph_buffer,
                     &mut pending_in_edges,
                     &mut global_map,
                 );
 
                 // 3) start fresh slice; create placeholder fed by the producer
-                node_map.clear();
+                orig_to_subgraph_node_map.clear();
                 simplify_cache = FxHashMap::default();
 
                 let placeholder = g.add_node(GraphTerm::GMEM {
@@ -104,14 +112,14 @@ pub fn translate_graph_meta(
                 pending_in_edges.push((producer_meta, producer_inner_out, placeholder));
 
                 // map Break node to the placeholder (passthrough)
-                node_map.insert((old_node, 0), placeholder);
-                old_to_new.insert(old_node, placeholder);
+                orig_to_subgraph_node_map.insert((old_node, 0), placeholder);
+                key_to_subgraph_buffer.insert(old_node, placeholder);
             }
 
             // ---- UNARY ELEMENTWISE ----
             "Sqrt" | "Exp2" | "Log2" | "Sin" | "Contiguous" | "Recip" => {
                 let (s0, i0, shape0) = sources.pop().unwrap();
-                let base0 = node_map[&(s0, i0 as usize)];
+                let base0 = orig_to_subgraph_node_map[&(s0, i0 as usize)];
                 let (base0, ranges) = scope_in(
                     base0,
                     shape0,
@@ -119,7 +127,7 @@ pub fn translate_graph_meta(
                     &mut g,
                     &mut inits,
                     &mut simplify_cache,
-                    &mut old_to_new,
+                    &mut key_to_subgraph_buffer,
                     graph.node_count(),
                 );
 
@@ -138,8 +146,8 @@ pub fn translate_graph_meta(
                     r
                 };
                 out = scope_out(out, ranges, false, &mut g);
-                old_to_new.insert(old_node, out);
-                node_map.insert((old_node, 0), out);
+                key_to_subgraph_buffer.insert(old_node, out);
+                orig_to_subgraph_node_map.insert((old_node, 0), out);
             }
 
             // ---- BINARY ELEMENTWISE ----
@@ -147,23 +155,23 @@ pub fn translate_graph_meta(
                 let (sa, ia, shape_a) = sources.pop().unwrap();
                 let (sb, ib, shape_b) = sources.pop().unwrap();
                 let (ain, ranges) = scope_in(
-                    node_map[&(sa, ia as usize)],
+                    orig_to_subgraph_node_map[&(sa, ia as usize)],
                     shape_a,
                     None,
                     &mut g,
                     &mut inits,
                     &mut simplify_cache,
-                    &mut old_to_new,
+                    &mut key_to_subgraph_buffer,
                     graph.node_count(),
                 );
                 let (bin, _) = scope_in(
-                    node_map[&(sb, ib as usize)],
+                    orig_to_subgraph_node_map[&(sb, ib as usize)],
                     shape_b,
                     None,
                     &mut g,
                     &mut inits,
                     &mut simplify_cache,
-                    &mut old_to_new,
+                    &mut key_to_subgraph_buffer,
                     graph.node_count(),
                 );
 
@@ -177,8 +185,8 @@ pub fn translate_graph_meta(
                 g.add_edge(ain, opn, ());
                 g.add_edge(bin, opn, ());
                 opn = scope_out(opn, ranges, false, &mut g);
-                old_to_new.insert(old_node, opn);
-                node_map.insert((old_node, 0), opn);
+                key_to_subgraph_buffer.insert(old_node, opn);
+                orig_to_subgraph_node_map.insert((old_node, 0), opn);
             }
 
             // ---- REDUCTIONS ----
@@ -202,13 +210,13 @@ pub fn translate_graph_meta(
 
                 let (source, output_index, shape) = sources.pop().unwrap();
                 let (new_source, ranges) = scope_in(
-                    node_map[&(source, output_index as usize)],
+                    orig_to_subgraph_node_map[&(source, output_index as usize)],
                     shape,
                     Some(reduce_dim),
                     &mut g,
                     &mut inits,
                     &mut simplify_cache,
-                    &mut old_to_new,
+                    &mut key_to_subgraph_buffer,
                     graph.node_count(),
                 );
 
@@ -238,7 +246,8 @@ pub fn translate_graph_meta(
                     g.add_edge(acc, new_acc, ());
                     acc = new_acc;
                 }
-                old_to_new.insert(NodeIndex::new(graph.node_count() + inits.len()), orig_acc);
+                key_to_subgraph_buffer
+                    .insert(NodeIndex::new(graph.node_count() + inits.len()), orig_acc);
                 inits.push((
                     NodeIndex::new(graph.node_count() + inits.len()),
                     InitData::Data(vec![start_val]),
@@ -248,8 +257,8 @@ pub fn translate_graph_meta(
                 g.add_edge(new_source, opn, ());
                 g.add_edge(acc, opn, ());
                 opn = scope_out(opn, ranges, true, &mut g);
-                old_to_new.insert(old_node, opn);
-                node_map.insert((old_node, 0), opn);
+                key_to_subgraph_buffer.insert(old_node, opn);
+                orig_to_subgraph_node_map.insert((old_node, 0), opn);
             }
 
             // ---- CONSTANTS / CUSTOM / DIFF / LOADS ----
@@ -258,10 +267,11 @@ pub fn translate_graph_meta(
                     let newn = g.add_node(GraphTerm::GMEM {
                         label: op.to_string(),
                     });
-                    old_to_new.insert(old_node, newn);
-                    node_map.insert((old_node, 0), newn);
+                    key_to_subgraph_buffer.insert(old_node, newn);
+                    orig_to_subgraph_node_map.insert((old_node, 0), newn);
                     println!("CONSTANT OLD: {old_node:?} NEW: {:?}", newn);
-                    old_to_new.insert(NodeIndex::new(graph.node_count() + inits.len()), newn);
+                    key_to_subgraph_buffer
+                        .insert(NodeIndex::new(graph.node_count() + inits.len()), newn);
                     inits.push((
                         NodeIndex::new(graph.node_count() + inits.len()),
                         match constant.0 {
@@ -272,27 +282,35 @@ pub fn translate_graph_meta(
                 } else if let Some(kernel) = node_weight.as_any().downcast_ref::<CompatKernel>() {
                     let custom = g.add_node(GraphTerm::Custom(kernel.0.clone()));
                     for (source, ind, _) in sources {
-                        g.add_edge(node_map[&(source, ind as usize)], custom, ());
+                        g.add_edge(
+                            orig_to_subgraph_node_map[&(source, ind as usize)],
+                            custom,
+                            (),
+                        );
                     }
                     for i in 0..kernel.0.outputs.len() {
-                        node_map.insert((old_node, i), custom);
+                        orig_to_subgraph_node_map.insert((old_node, i), custom);
                     }
-                    old_to_new.insert(old_node, custom);
+                    key_to_subgraph_buffer.insert(old_node, custom);
                 } else if let Some(diff) = node_weight.as_any().downcast_ref::<Diff>() {
                     let custom = g.add_node(GraphTerm::Diff(diff.name.clone()));
                     for (source, ind, _) in sources {
-                        g.add_edge(node_map[&(source, ind as usize)], custom, ());
+                        g.add_edge(
+                            orig_to_subgraph_node_map[&(source, ind as usize)],
+                            custom,
+                            (),
+                        );
                     }
-                    node_map.insert((old_node, 0), custom);
-                    old_to_new.insert(old_node, custom);
+                    orig_to_subgraph_node_map.insert((old_node, 0), custom);
+                    key_to_subgraph_buffer.insert(old_node, custom);
                 } else {
                     // Assume a load
                     let newn = g.add_node(GraphTerm::GMEM {
                         label: op.to_string(),
                     });
                     println!("LOAD: {:?} | {:?}", old_node, newn);
-                    node_map.insert((old_node, 0), newn);
-                    old_to_new.insert(old_node, newn);
+                    orig_to_subgraph_node_map.insert((old_node, 0), newn);
+                    key_to_subgraph_buffer.insert(old_node, newn);
                 }
             }
         }
@@ -303,7 +321,7 @@ pub fn translate_graph_meta(
         finalize_current_slice(
             &mut meta,
             &mut g,
-            &mut old_to_new,
+            &mut key_to_subgraph_buffer,
             &mut pending_in_edges,
             &mut global_map,
         );
