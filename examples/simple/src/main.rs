@@ -27,7 +27,7 @@ fn main() {
         // model.weight.set(weight.clone());
         // Make an input tensor
         let mut rng = rng();
-        let (m, k, n) = (8, 8, 8);
+        let (m, k, n) = (512, 512, 512);
         let a_data = (0..(m * k)).map(|_| rng.random()).collect_vec();
         let b_data = (0..(k * n)).map(|_| rng.random()).collect_vec();
         let a = cx.named_tensor("A", (m, k)).set(a_data.clone());
@@ -142,7 +142,10 @@ fn main() {
                     });
                 }
                 InitData::Data(d) => {
-                    inputs.insert(gmem_mapping[&unified_map[&label]], (copy_metal_buffer(d, &device), true));
+                    inputs.insert(
+                        gmem_mapping[&unified_map[&label]],
+                        (copy_metal_buffer(d, &device), true),
+                    );
                 }
             }
         }
@@ -157,8 +160,8 @@ fn main() {
             &int_buffers,
             &int_buffer_map,
         );
-        println!("{:?}", c.data());
-        println!("{:?}", copy_metal_buffer_back(&outputs[0]));
+        println!("{:?}", &c.data()[..10]);
+        println!("{:?}", &copy_metal_buffer_back(&outputs[0])[..10]);
     });
 }
 

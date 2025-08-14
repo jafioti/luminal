@@ -28,10 +28,7 @@ const INVALID_IR: &[&str] = &[
     "Unary",
     "Binary",
     "MReplace",
-    "PropOneArg",
-    "PropTwoArgs",
     "MergeLoops",
-    "Fusable"
 ];
 
 type Cost = u128; // Execution time in microseconds
@@ -307,12 +304,13 @@ pub fn search(
                         }
                     }
                     let kernel_string = print_kernels(&kernels);
-                    if kernel_string.len() < shortest.len() || shortest.is_empty() {
-                        shortest = kernel_string;
-                    }
+                    // if kernel_string.len() < shortest.len() || shortest.is_empty() {
+
+                    // }
                     if us < best_time {
                         best_time = us;
                         best_graph = Some(graph);
+                        shortest = kernel_string;
                     }
                 }
             }

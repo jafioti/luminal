@@ -19,6 +19,10 @@
     (MAccum String) ; this marks that we feed the output (also marked with MAccum) back in
 )
 
+; Communative
+(rewrite (MAdd a b) (MAdd b a) :ruleset expr)
+(rewrite (MMul a b) (MMul b a) :ruleset expr)
+
 ; Associative
 (rewrite (MAdd (MAdd a b) c) (MAdd a (MAdd b c)) :ruleset expr)
 (rewrite (MMul (MMul a b) c) (MMul a (MMul b c)) :ruleset expr)
@@ -177,7 +181,30 @@
 (rewrite (LoopOut ?x (Loop ?l ?range) (MMul ?st (MMod (MVar "z") ?range))) (LoopOut ?x (Loop ?l ?range) (MMul ?st (MVar "z"))) :ruleset expr)
 
 ; Loop Fusion
-(rewrite (LoopIn (LoopOut ?x (Loop ?lo ?range) ?st) (Loop ?li ?range) ?st) ?x :ruleset ir)
+;(rewrite (LoopIn (LoopOut ?x (Loop ?lo ?range) ?st) (Loop ?li ?range) ?st) ?x :ruleset ir)
+
+(rewrite (LoopIn (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA ?range) ?st) (Loop ?loopB ?range) ?st) (Binary ?bin ?a ?b) :ruleset ir)
+(rewrite
+	(LoopIn (LoopIn
+		(LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2)
+	(Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
+	(Binary ?bin ?a ?b)
+	 :ruleset ir
+)
+(rewrite
+	(LoopIn (LoopIn (LoopIn
+		(LoopOut (LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2) (Loop ?loopA3 ?range3) ?st3)
+	(Loop ?loopB3 ?range3) ?st3) (Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
+	(Binary ?bin ?a ?b)
+	 :ruleset ir
+)
+(rewrite
+	(LoopIn (LoopIn (LoopIn (LoopIn
+		(LoopOut (LoopOut (LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2) (Loop ?loopA3 ?range3) ?st3) (Loop ?loopA4 ?range4) ?st4)
+	(Loop ?loopB4 ?range4) ?st4) (Loop ?loopB3 ?range3) ?st3) (Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
+	(Binary ?bin ?a ?b)
+	 :ruleset ir
+)
 
 ; Specialized swap loops
 (rewrite
@@ -225,7 +252,7 @@
 )
 
 ; Tiling
-(let tileFactor 2)
+(let tileFactor 8)
 (rewrite
 	(LoopOut ?body (Loop ?loop (MNum ?range)) ?stride)
 	(LoopOut
@@ -335,54 +362,46 @@
 	(saturate ir-generic)
 	(repeat {iters}
 		(run ir) ; run ir rules once
-		(repeat 4 ir-prop)
-		(repeat 5 expr)
+		(repeat 1 ir-prop)
+		(repeat 1 expr)
 	)
 	(saturate ir-generic) ; why is this needed?
 )
 
-(let a0 (GMEM "acc_0"))
-(let a1 (LoopIn a0 (Loop "" (MNum 64)) (MNum 0)))
-(let a2 (LoopIn a1 (Loop "" (MNum 1)) (MNum 0)))
-(let a3 (LoopIn a2 (Loop "" (MNum 1)) (MNum 0)))
-(let a4 (LoopIn a3 (Loop "" (MNum 8)) (MAccum "a")))
-(let a5 (GMEM "A Load"))
-;(let a6 (TileLoop (LoopIn a5 (Loop "" (MNum 512)) (MAdd (MMul (MNum 8) (MMod (MDiv (MVar "z") (MNum 64)) (MNum 8))) (MMod (MVar "z") (MNum 8)))) "0"))
-(let a6 (LoopIn a5 (Loop "" (MNum 128)) (MAdd (MMul (MNum 8) (MMod (MDiv (MMul (MMul (MVar "z") (MNum 2)) (MNum 2)) (MNum 64)) (MNum 8))) (MMod (MMul (MMul (MVar "z") (MNum 2)) (MNum 2)) (MNum 8)))))
-;(let a6tileouter (LoopIn a6 (Loop "" (MNum 2)) (MAdd (MMul (MNum 8) (MMod (MDiv (MMul (MVar "z") (MNum 2)) (MNum 64)) (MNum 8))) (MMod (MMul (MVar "z") (MNum 2)) (MNum 8)))))
-(let a6tile (LoopIn a6 (Loop "" (MNum 4))
-	(MAdd
-		(MAdd (MMul (MNum 8) (MMod (MDiv (MMul (MDiv (MVar "z") (MNum 2)) (MNum 2)) (MNum 64)) (MNum 8))) (MMod (MMul (MDiv (MVar "z") (MNum 2)) (MNum 2)) (MNum 8)))
-		(MAdd (MMul (MNum 8) (MMod (MDiv (MMod (MVar "z") (MNum 2)) (MNum 64)) (MNum 8))) (MMod (MMod (MVar "z") (MNum 2)) (MNum 8)))
-	)
-))
-(let a7 (GMEM "B Load"))
-;(let a8 (LoopIn a7 (Loop "0" (MNum 512)) (MAdd (MMod (MDiv (MVar "z") (MNum 8)) (MNum 8)) (MMul (MNum 8) (MMod (MVar "z") (MNum 8))))))
-(let a8 (LoopIn a7 (Loop "" (MNum 128)) (MAdd (MMod (MDiv (MMul (MMul (MVar "z") (MNum 2)) (MNum 2)) (MNum 8)) (MNum 8)) (MMul (MNum 8) (MMod (MMul (MMul (MVar "z") (MNum 2)) (MNum 2)) (MNum 8))))))
-;(let a8tileouter (LoopIn a8 (Loop "" (MNum 2)) (MAdd (MMod (MDiv (MMul (MVar "z") (MNum 2)) (MNum 8)) (MNum 8)) (MMul (MNum 8) (MMod (MMul (MVar "z") (MNum 2)) (MNum 8))))))
-(let a8tile (LoopIn a8 (Loop "" (MNum 4))
-	(MAdd
-		(MAdd (MMod (MDiv (MMul (MDiv (MVar "z") (MNum 2)) (MNum 2)) (MNum 8)) (MNum 8)) (MMul (MNum 8) (MMod (MMul (MDiv (MVar "z") (MNum 2)) (MNum 2)) (MNum 8))))
-		(MAdd (MMod (MDiv (MMod (MVar "z") (MNum 2)) (MNum 8)) (MNum 8)) (MMul (MNum 8) (MMod (MVar "z") (MNum 2))))
-	)
-))
-(let a9 (Mul a6tile a8tile))
-(let a10tile (LoopOut a9 (Loop "" (MNum 4)) (MVar "z")))
-(let a10 (LoopOut a10tile (Loop "" (MNum 128)) (MMul (MVar "z") (MNum 4))))
-(let a11 (LoopIn a10 (Loop "" (MNum 64)) (MMul (MNum 8) (MVar "z"))))
-(let a12 (LoopIn a11 (Loop "" (MNum 1)) (MNum 0)))
-(let a13 (LoopIn a12 (Loop "" (MNum 1)) (MNum 0)))
-(let a14 (LoopIn a13 (Loop "" (MNum 8)) (MVar "z")))
-(let a15 (Add a4 a14))
-(let a16 (LoopOut a15 (Loop "" (MNum 8)) (MAccum "a")))
-(let a17 (LoopOut a16 (Loop "" (MNum 1)) (MVar "z")))
-(let a18 (LoopOut a17 (Loop "" (MNum 1)) (MVar "z")))
-(let a19 (LoopOut a18 (Loop "" (MNum 64)) (MVar "z")))
+(let at0 (GMEM "acc_0"))
+(let at1 (LoopIn at0 (Loop "0" (MNum 8)) (MNum 0)))
+(let at2 (LoopIn at1 (Loop "1" (MNum 8)) (MNum 0)))
+(let at3 (LoopIn at2 (Loop "-pad2-" (MNum 1)) (MNum 0)))
+(let at4 (LoopIn at3 (Loop "2" (MNum 8)) (MAccum "a")))
+(let at5 (GMEM "A Load"))
+(let at6 (LoopIn at5 (Loop "0" (MNum 8)) (MMul (MNum 8) (MVar "z"))))
+(let at7 (LoopIn at6 (Loop "1" (MNum 8)) (MNum 0)))
+(let padA (LoopIn at7 (Loop "" (MNum 1)) (MNum 0)))
+(let at8 (LoopIn padA (Loop "2" (MNum 8)) (MVar "z")))
+(let at9 (GMEM "B Load"))
+(let at10 (LoopIn at9 (Loop "0" (MNum 8)) (MNum 0)))
+(let at11 (LoopIn at10 (Loop "1" (MNum 8)) (MVar "z")))
+(let padB (LoopIn at11 (Loop "" (MNum 1)) (MNum 0)))
+(let at12 (LoopIn padB (Loop "2" (MNum 8)) (MMul (MNum 8) (MVar "z"))))
+(let at13 (Mul at8 at12))
+(let at14 (LoopOut at13 (Loop "2" (MNum 8)) (MVar "z")))
+(let padOut (LoopOut at14 (Loop "" (MNum 1)) (MNum 0)))
+(let at15 (LoopOut padOut (Loop "1" (MNum 8)) (MMul (MVar "z") (MNum 8))))
+(let at16 (LoopOut at15 (Loop "0" (MNum 8)) (MMul (MVar "z") (MNum 64))))
+(let at17 (LoopIn at16 (Loop "0" (MNum 8)) (MMul (MNum 64) (MVar "z"))))
+(let at18 (LoopIn at17 (Loop "1" (MNum 8)) (MMul (MNum 8) (MVar "z"))))
+(let at19 (LoopIn at18 (Loop "pad2" (MNum 1)) (MNum 0)))
+(let at20 (LoopIn at19 (Loop "2" (MNum 8)) (MVar "z")))
+(let at21 (Add at4 at20))
+(let at22 (LoopOut at21 (Loop "2" (MNum 8)) (MAccum "a")))
+(let at23 (LoopOut at22 (Loop "-pad2-" (MNum 1)) (MVar "z")))
+(let at24 (LoopOut at23 (Loop "1" (MNum 8)) (MVar "z")))
+(let at25 (LoopOut at24 (Loop "0" (MNum 8)) (MMul (MVar "z") (MNum 8))))
 
-(ruleset a-rule)
-(rewrite (Loop ?x ?r) (Loop "" ?r) :ruleset a-rule)
-(rewrite (TileLoop ?x ?l) (TileLoop ?x "") :ruleset a-rule)
-(rewrite (MergeLoops ?x ?l ?o) (MergeLoops ?x "" "") :ruleset a-rule)
-(run-schedule (saturate a-rule))
+;(ruleset a-rule)
+;(rewrite (Loop ?x ?r) (Loop "" ?r) :ruleset a-rule)
+;(rewrite (TileLoop ?x ?l) (TileLoop ?x "") :ruleset a-rule)
+;(rewrite (MergeLoops ?x ?l ?o) (MergeLoops ?x "" "") :ruleset a-rule)
+;(run-schedule (saturate a-rule))
 
-(check (= a19 t19))
+;(check (= at25 t25))

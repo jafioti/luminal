@@ -434,6 +434,7 @@ pub fn run_graph(
                     buffer_count += 1;
                 }
 
+                println!("G: {:?} TB: {:?}", kernel.grid, kernel.threadblock);
                 // Set dispatch
                 let grid = (
                     kernel.grid.0.exec(dyn_vars).unwrap() as u64,

@@ -21,6 +21,8 @@ use crate::{
 pub const GRID_DIMS: usize = 2;
 pub const THREADBLOCK_DIMS: usize = 1;
 pub const MAX_THREADBLOCK_SIZE: usize = 1024; // this is max on mac
+pub const MAX_GRID_X: usize = 2147483647;
+pub const MAX_GRID_YZ: usize = 65535;
 
 pub fn codegen(
     graph: StableGraph<GraphTerm, (), Directed>,
@@ -171,6 +173,7 @@ pub fn codegen(
             .to_usize()
             .is_none()
         {
+            println!("dyn in tb");
             return None;
         }
         let kernel_lines = kernel.into_iter().map(|s| format!("\t{s}")).join("\n");
@@ -281,12 +284,21 @@ kernel void kernel_name(
                 )
             }
         };
+        // Check threadblock and grid restrictions
         if (threadblock[0] * threadblock[1] * threadblock[2])
             .exec(dyn_vars)
             .unwrap()
             > MAX_THREADBLOCK_SIZE
         {
-            // Threadblock size is too large for device
+            return None;
+        }
+        if grid[0].exec(dyn_vars).unwrap() > MAX_GRID_X {
+            return None;
+        }
+        if grid[1].exec(dyn_vars).unwrap() > MAX_GRID_YZ {
+            return None;
+        }
+        if grid[2].exec(dyn_vars).unwrap() > MAX_GRID_YZ {
             return None;
         }
         *meta_graph.node_weight_mut(node).unwrap() = Kernel {
@@ -516,7 +528,8 @@ fn make_kernel(
                         *prev_max_var += 1;
                         kernel_lines.push(format!(
                             "{spacing}thread float {}[{}] = {{0.0}};",
-                            var_to_char(*prev_max_var), size.to_usize().unwrap()
+                            var_to_char(*prev_max_var),
+                            size.to_usize().unwrap()
                         ));
                         node_to_var.insert(*output, (*prev_max_var, true));
                         created_buffers.insert(*output, *prev_max_var);

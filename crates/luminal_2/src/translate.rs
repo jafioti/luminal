@@ -112,7 +112,7 @@ pub fn translate_graph_meta(
             "Sqrt" | "Exp2" | "Log2" | "Sin" | "Contiguous" | "Recip" => {
                 let (s0, i0, shape0) = sources.pop().unwrap();
                 let base0 = node_map[&(s0, i0 as usize)];
-                let (base0, ranges) = scope_in(
+                let (base0, ranges) = scope_in_simple(
                     base0,
                     shape0,
                     None,
@@ -146,7 +146,7 @@ pub fn translate_graph_meta(
             "Add" | "Mul" | "Mod" | "LessThan" => {
                 let (sa, ia, shape_a) = sources.pop().unwrap();
                 let (sb, ib, shape_b) = sources.pop().unwrap();
-                let (ain, ranges) = scope_in(
+                let (ain, ranges) = scope_in_simple(
                     node_map[&(sa, ia as usize)],
                     shape_a,
                     None,
@@ -156,7 +156,7 @@ pub fn translate_graph_meta(
                     &mut old_to_new,
                     graph.node_count(),
                 );
-                let (bin, _) = scope_in(
+                let (bin, _) = scope_in_simple(
                     node_map[&(sb, ib as usize)],
                     shape_b,
                     None,
@@ -201,7 +201,7 @@ pub fn translate_graph_meta(
                 let orig_acc = acc;
 
                 let (source, output_index, shape) = sources.pop().unwrap();
-                let (new_source, ranges) = scope_in(
+                let (new_source, ranges) = scope_in_simple(
                     node_map[&(source, output_index as usize)],
                     shape,
                     Some(reduce_dim),
@@ -340,6 +340,164 @@ fn smart_loop_in(
         stride = stride.substitute('z', Expression::from('z') + left_slice);
     }
     (range, stride, mask_stride)
+}
+
+fn scope_in_simple(
+    mut src: NodeIndex,
+    shape: ShapeTracker,
+    reduce_dim: Option<usize>,
+    graph: &mut StableGraph<GraphTerm, (), Directed>,
+    inits: &mut Vec<(NodeIndex, InitData)>,
+    simplify_cache: &mut FxHashMap<Expression, Expression>,
+    translation_mapping: &mut FxHashMap<NodeIndex, NodeIndex>,
+    n_orig_nodes: usize,
+) -> (NodeIndex, Vec<(Expression, String)>) {
+    // Loop in through all dimensions, handle padding
+    let strides = shape.strides();
+    let mut ranges = vec![];
+    let mut pad_mask = None; // mask for pads
+    for i in 0..shape.len() {
+        let mut range = shape.dims()[i];
+        let mut stride = strides[i] * 'z';
+        let (left_pad, right_pad) = shape.padding[shape.indexes[i]];
+        let (left_slice, right_slice) = shape.mask[shape.indexes[i]];
+        if reduce_dim.map(|d| d == i).unwrap_or_default() {
+            assert!(
+                left_pad == 0 && right_pad == 0,
+                "pad on a reduce dim not implemented!"
+            );
+            for z in i..THREADBLOCK_DIMS + GRID_DIMS {
+                ranges.push((Expression::from(1), format!("-pad{i}-")));
+                src = loop_in(src, 1, 0, format!("pad{z}"), graph);
+            }
+            ranges.push((range, i.to_string()));
+            src = loop_in(
+                src,
+                range.simplify_cache(simplify_cache),
+                stride.simplify_cache(simplify_cache),
+                i,
+                graph,
+            ); // Problem: acc stride only is ever 'a', which doesn't work if there is multiple accs!
+        } else if left_pad != 0 {
+            // Pad left
+            stride = stride.substitute('z', (Expression::from('z') - left_pad).max(0));
+            // Bring in mask
+            let mut mask = graph.add_node(GraphTerm::GMEM {
+                label: "Mask".to_string(),
+            });
+            translation_mapping.insert(NodeIndex::new(n_orig_nodes + inits.len()), mask);
+            inits.push((mask, InitData::Data(vec![0., 1.])));
+            // Loop mask in
+            for level in 0..i {
+                mask = loop_in(
+                    mask,
+                    shape.dims()[level].simplify_cache(simplify_cache),
+                    0,
+                    level,
+                    graph,
+                );
+            }
+            mask = loop_in(
+                mask,
+                range.simplify_cache(simplify_cache),
+                Expression::from('z')
+                    .gte(left_pad)
+                    .simplify_cache(simplify_cache),
+                i,
+                graph,
+            );
+            for level in (i + 1)..shape.len() {
+                mask = loop_in(
+                    mask,
+                    shape.dims()[level].simplify_cache(simplify_cache),
+                    0,
+                    level,
+                    graph,
+                );
+            }
+            pad_mask = Some(mask);
+            ranges.push((range, i.to_string()));
+            src = loop_in(
+                src,
+                range.simplify_cache(simplify_cache),
+                stride.simplify_cache(simplify_cache),
+                i,
+                graph,
+            );
+        } else if right_pad != 0 {
+            // Pad right
+            stride =
+                stride.substitute('z', Expression::from('z').min(shape.dims[shape.indexes[i]]));
+            // Bring in mask
+            let mut mask = graph.add_node(GraphTerm::GMEM {
+                label: "Mask".to_string(),
+            });
+            translation_mapping.insert(NodeIndex::new(n_orig_nodes + inits.len()), mask);
+            inits.push((mask, InitData::Data(vec![0., 1.])));
+            // Loop mask in
+            for level in 0..i {
+                mask = loop_in(
+                    mask,
+                    shape.dims()[level].simplify_cache(simplify_cache),
+                    0,
+                    level,
+                    graph,
+                );
+            }
+            mask = loop_in(
+                mask,
+                range.simplify_cache(simplify_cache),
+                Expression::from('z').lt(right_pad),
+                i,
+                graph,
+            );
+            for level in (i + 1)..shape.len() {
+                mask = loop_in(
+                    mask,
+                    shape.dims()[level].simplify_cache(simplify_cache),
+                    0,
+                    level,
+                    graph,
+                );
+            }
+            pad_mask = Some(mask);
+            ranges.push((range, i.to_string()));
+            src = loop_in(
+                src,
+                range.simplify_cache(simplify_cache),
+                stride.simplify_cache(simplify_cache),
+                i,
+                graph,
+            );
+        } else if left_slice != 0 || right_slice != i32::MAX {
+            range = (right_slice.min(shape.dims[shape.indexes[i]]) - left_slice).max(0);
+            stride = stride.substitute('z', Expression::from('z') + left_slice);
+            ranges.push((range, i.to_string()));
+            src = loop_in(
+                src,
+                range.simplify_cache(simplify_cache),
+                stride.simplify_cache(simplify_cache),
+                i,
+                graph,
+            );
+        } else {
+            // No pads or reduces
+            ranges.push((range, i.to_string()));
+            src = loop_in(
+                src,
+                range.simplify_cache(simplify_cache),
+                stride.simplify_cache(simplify_cache),
+                i,
+                graph,
+            );
+        }
+    }
+    src = if let Some(mask) = pad_mask {
+        crate::utils::binary(src, mask, GraphTerm::Mul, graph)
+    } else {
+        src
+    };
+    (src, ranges)
 }
 
 fn scope_in(
