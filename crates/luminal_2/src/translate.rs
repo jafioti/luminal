@@ -120,7 +120,7 @@ pub fn translate_graph_meta(
             "Sqrt" | "Exp2" | "Log2" | "Sin" | "Contiguous" | "Recip" => {
                 let (s0, i0, shape0) = sources.pop().unwrap();
                 let base0 = orig_to_subgraph_node_map[&(s0, i0 as usize)];
-                let (base0, ranges) = scope_in_simple(
+                let (base0, ranges) = scope_in(
                     base0,
                     shape0,
                     None,
@@ -154,7 +154,7 @@ pub fn translate_graph_meta(
             "Add" | "Mul" | "Mod" | "LessThan" => {
                 let (sa, ia, shape_a) = sources.pop().unwrap();
                 let (sb, ib, shape_b) = sources.pop().unwrap();
-                let (ain, ranges) = scope_in_simple(
+                let (ain, ranges) = scope_in(
                     orig_to_subgraph_node_map[&(sa, ia as usize)],
                     shape_a,
                     None,
@@ -164,7 +164,7 @@ pub fn translate_graph_meta(
                     &mut key_to_subgraph_buffer,
                     graph.node_count(),
                 );
-                let (bin, _) = scope_in_simple(
+                let (bin, _) = scope_in(
                     orig_to_subgraph_node_map[&(sb, ib as usize)],
                     shape_b,
                     None,
@@ -209,7 +209,7 @@ pub fn translate_graph_meta(
                 let orig_acc = acc;
 
                 let (source, output_index, shape) = sources.pop().unwrap();
-                let (new_source, ranges) = scope_in_simple(
+                let (new_source, ranges) = scope_in(
                     orig_to_subgraph_node_map[&(source, output_index as usize)],
                     shape,
                     Some(reduce_dim),
@@ -330,37 +330,7 @@ pub fn translate_graph_meta(
     (meta, global_map, inits)
 }
 
-fn smart_loop_in(
-    shape: ShapeTracker,
-    shape_index: usize,
-) -> (Expression, Expression, Option<Expression>) {
-    // range, stride, mask stride
-    let mut range = shape.dims()[shape_index];
-    let mut stride = shape.strides()[shape_index] * 'z';
-    let (left_pad, right_pad) = shape.padding[shape.indexes[shape_index]];
-    let (left_slice, right_slice) = shape.mask[shape.indexes[shape_index]];
-    let mut mask_stride = None;
-    if left_pad != 0 {
-        // Pad left
-        assert!(right_pad == 0);
-        stride = stride.substitute('z', (Expression::from('z') - left_pad).max(0));
-        mask_stride = Some(Expression::from('z').gte(left_pad));
-    } else if right_pad != 0 {
-        // Pad right
-        assert!(left_pad == 0);
-        stride = stride.substitute(
-            'z',
-            Expression::from('z').min((shape.dims[shape.indexes[shape_index]] - 1).max(0)),
-        );
-        mask_stride = Some(Expression::from('z').lt(shape.dims[shape.indexes[shape_index]]));
-    } else if left_slice != 0 || right_slice != i32::MAX {
-        range = (right_slice.min(shape.dims[shape.indexes[shape_index]]) - left_slice).max(0);
-        stride = stride.substitute('z', Expression::from('z') + left_slice);
-    }
-    (range, stride, mask_stride)
-}
-
-fn scope_in_simple(
+fn scope_in(
     mut src: NodeIndex,
     shape: ShapeTracker,
     reduce_dim: Option<usize>,
@@ -515,153 +485,6 @@ fn scope_in_simple(
     } else {
         src
     };
-    (src, ranges)
-}
-
-fn scope_in(
-    mut src: NodeIndex,
-    shape: ShapeTracker,
-    reduce_dim: Option<usize>,
-    graph: &mut StableGraph<GraphTerm, (), Directed>,
-    inits: &mut Vec<(NodeIndex, InitData)>,
-    simplify_cache: &mut FxHashMap<Expression, Expression>,
-    translation_mapping: &mut FxHashMap<NodeIndex, NodeIndex>,
-    n_orig_nodes: usize,
-) -> (NodeIndex, Vec<(Expression, String)>) {
-    let mut masks = vec![];
-    let mut ranges = vec![];
-
-    // Go through all dims up to the reduce and put in first grid dimension (super inefficient!)
-    let mut range = Expression::from(1);
-    let mut stride = Expression::from(0);
-    let n_squeezed_dims = reduce_dim.unwrap_or(shape.len());
-    for i in 0..n_squeezed_dims {
-        let (curr_range, curr_stride, mask_stride) = smart_loop_in(shape, i);
-        let element_size = shape
-            .dims()
-            .iter()
-            .take(n_squeezed_dims)
-            .skip(i + 1)
-            .copied()
-            .product::<Expression>()
-            .max(1);
-        if let Some(mask_stride) = mask_stride {
-            // Bring in mask
-            let mask = graph.add_node(GraphTerm::GMEM {
-                label: "Mask".to_string(),
-            });
-            // Make new "fake" nodeindex for this init
-            translation_mapping.insert(NodeIndex::new(n_orig_nodes + inits.len()), mask);
-            inits.push((
-                NodeIndex::new(n_orig_nodes + inits.len()),
-                InitData::Data(vec![0., 1.]),
-            ));
-            // Loop mask in
-            let mut mask_range = curr_range;
-            for level in 0..i {
-                mask_range *= shape.dims()[level];
-            }
-            let mask_stride =
-                mask_stride.substitute('z', Expression::from('z') / element_size % curr_range);
-            for level in (i + 1)..shape.len() {
-                mask_range *= shape.dims()[level];
-            }
-            masks.push(loop_in(
-                mask,
-                mask_range.simplify_cache(simplify_cache),
-                mask_stride.simplify_cache(simplify_cache),
-                0,
-                graph,
-            ));
-        };
-        range *= curr_range;
-        stride += curr_stride.substitute('z', (Expression::from('z') / element_size) % curr_range);
-    }
-    ranges.push((range, "0".to_string()));
-    src = loop_in(
-        src,
-        range.simplify_cache(simplify_cache),
-        stride.simplify_cache(simplify_cache),
-        0,
-        graph,
-    );
-
-    if let Some(reduce_dim) = reduce_dim {
-        // Go through rest of grid and threadblock as pads
-        for i in 1..(GRID_DIMS + THREADBLOCK_DIMS) {
-            ranges.push((Expression::from(1), format!("-pad{i}-")));
-            src = loop_in(src, 1, 0, format!("-pad{i}-"), graph);
-            for mask in &mut masks {
-                *mask = loop_in(*mask, 1, 0, format!("-pad{i}-"), graph);
-            }
-        }
-        // Do reduction
-        let (left_pad, right_pad) = shape.padding[shape.indexes[reduce_dim]];
-        let (left_slice, right_slice) = shape.mask[shape.indexes[reduce_dim]];
-        assert!(left_pad == 0 && right_pad == 0 && left_slice == 0 && right_slice == i32::MAX);
-        ranges.push((shape.dims()[reduce_dim], reduce_dim.to_string()));
-        src = loop_in(
-            src,
-            shape.dims()[reduce_dim],
-            shape.strides()[reduce_dim] * 'z',
-            reduce_dim,
-            graph,
-        );
-        for mask in &mut masks {
-            *mask = loop_in(
-                *mask,
-                shape.dims()[reduce_dim],
-                0,
-                THREADBLOCK_DIMS + GRID_DIMS,
-                graph,
-            );
-        }
-    }
-    // Go through thread dims
-    let mut thread_range = Expression::from(1);
-    let mut thread_stride = Expression::from(0);
-    let mut thread_dims = false;
-    for i in reduce_dim.map(|r| r + 1).unwrap_or(shape.len())..shape.len() {
-        thread_dims = true;
-        let (curr_range, curr_stride, mask_stride) = smart_loop_in(shape, i);
-        assert!(mask_stride.is_none());
-        let element_size = shape
-            .dims()
-            .iter()
-            .skip(i + 1)
-            .copied()
-            .product::<Expression>()
-            .max(1);
-        thread_range *= curr_range;
-        thread_stride += if i == shape.len() - 1 {
-            curr_stride.substitute('z', Expression::from('z') % curr_range)
-        } else {
-            curr_stride.substitute('z', (Expression::from('z') / element_size) % curr_range)
-        };
-    }
-    if thread_dims {
-        ranges.push((thread_range, 0.to_string()));
-        src = loop_in(
-            src,
-            thread_range.simplify_cache(simplify_cache),
-            thread_stride.simplify_cache(simplify_cache),
-            0,
-            graph,
-        );
-        for mask in &mut masks {
-            *mask = loop_in(
-                *mask,
-                thread_range.simplify_cache(simplify_cache),
-                0,
-                GRID_DIMS + THREADBLOCK_DIMS,
-                graph,
-            );
-        }
-    }
-    // Multiply masks
-    for mask in masks {
-        src = crate::utils::binary(src, mask, GraphTerm::Mul, graph);
-    }
     (src, ranges)
 }
 
