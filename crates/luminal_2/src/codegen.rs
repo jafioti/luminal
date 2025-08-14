@@ -455,7 +455,7 @@ fn make_kernel(
                             .iter()
                             .find(|(_, v)| v.terms.read()[0] == Term::Acc(acc_symbol))
                         else {
-                            display_graph(&kernel_graph, &[]);
+                            //display_graph(&kernel_graph, &[]);
                             panic!();
                         };
                         let cooresponding_output = cooresponding_output.0;

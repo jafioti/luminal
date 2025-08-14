@@ -262,7 +262,6 @@ pub fn search(
         };
         match &arch {
             GPUArch::CUDA => {
-                valid_graphs += 1;
                 if let Some((_, s, _, _)) = &ui_functions {
                     s(format!(
                         "Graph {valid_graphs} ({:.1}%) ",
