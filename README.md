@@ -1,17 +1,14 @@
-# [luminal](https://luminalai.com)
-<img width="618" height="192" alt="Screenshot 2025-08-14 at 9 18 54 PM" src="https://github.com/user-attachments/assets/c5832634-55d5-45b7-ba65-6efe36afce4a" />[![Website](https://img.shields.io/badge/Luminal-Website-blue?style=for-the-badge&color=0D9373)](https://luminalai.com)
-[![CI Status](https://img.shields.io/github/actions/workflow/status/jafioti/luminal/test.yml?style=for-the-badge&logo=github-actions&logoColor=white&branch=main)](https://github.com/jafioti/luminal/actions)
+<img href="luminalai.com" alt="Screenshot 2025-08-14 at 9 18 54 PM" src="https://github.com/user-attachments/assets/c5832634-55d5-45b7-ba65-6efe36afce4a" />
 
+[![CI Status](https://img.shields.io/github/actions/workflow/status/jafioti/luminal/test.yml?style=for-the-badge&logo=github-actions&logoColor=white&branch=main)](https://github.com/jafioti/luminal/actions)
 [![Docs](https://img.shields.io/badge/Documentation-green?style=for-the-badge&color=fc9700)](https://docs.luminalai.com)
 [![Current Crates.io Version](https://img.shields.io/crates/v/luminal.svg?style=for-the-badge&logo=rust)](https://crates.io/crates/luminal)
 [![discord](https://dcbadge.limes.pink/api/server/APjuwHAbGy)](https://discord.gg/APjuwHAbGy)
 
-**Deep learning at the speed of light.**
-
-Luminal is a deep learning library that **generates optimized code** to achieve high performance.
+Luminal is a deep learning library that uses **search-based compilation** to achieve high performance.
 
 > [!IMPORTANT]  
-> Recently significant work is happening to focus much more on a search-first compiler with the goal of discovering advanced kernels like FlashAttention automatically. See progress on the `next` branch.
+> We're undergoing a large transition to "2.0", which introduces large-scale kernel search. This radically simplifies the compiler stack and allows us to discover complex optimizations entirely automatically. Please keep an eye on breaking changes, which usually are staged in the `crates/luminal_2` before being merged into the main crate.
 
 ```rust
 use luminal::prelude::*;
