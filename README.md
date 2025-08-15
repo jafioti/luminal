@@ -1,7 +1,7 @@
 # [luminal](https://luminalai.com)
-![image](https://github.com/jafioti/luminal/blob/main/docs/images/dag.jpeg)
-[![Website](https://img.shields.io/badge/Luminal-Website-blue?style=for-the-badge&color=0D9373)](https://luminalai.com)
+<img width="618" height="192" alt="Screenshot 2025-08-14 at 9 18 54 PM" src="https://github.com/user-attachments/assets/c5832634-55d5-45b7-ba65-6efe36afce4a" />[![Website](https://img.shields.io/badge/Luminal-Website-blue?style=for-the-badge&color=0D9373)](https://luminalai.com)
 [![CI Status](https://img.shields.io/github/actions/workflow/status/jafioti/luminal/test.yml?style=for-the-badge&logo=github-actions&logoColor=white&branch=main)](https://github.com/jafioti/luminal/actions)
+
 [![Docs](https://img.shields.io/badge/Documentation-green?style=for-the-badge&color=fc9700)](https://docs.luminalai.com)
 [![Current Crates.io Version](https://img.shields.io/crates/v/luminal.svg?style=for-the-badge&logo=rust)](https://crates.io/crates/luminal)
 [![discord](https://dcbadge.limes.pink/api/server/APjuwHAbGy)](https://discord.gg/APjuwHAbGy)
