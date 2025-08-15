@@ -33,197 +33,198 @@ const INVALID_IR: &[&str] = &[
 
 type Cost = u128; // Execution time in microseconds
 
+fn is_expression_enode(enode_label: &str) -> bool {
+    matches!(
+        enode_label,
+        "MNum"
+            | "MVar"
+            | "MAdd"
+            | "MSub"
+            | "MMul"
+            | "MDiv"
+            | "MMod"
+            | "MMin"
+            | "MMax"
+            | "MAnd"
+            | "MOr"
+            | "MGte"
+            | "MLt"
+            | "MFloorTo"
+            | "MReplace"
+            | "MAccum"
+    ) || enode_label.starts_with("MNum:")
+        || enode_label.starts_with("MVar:")
+}
+
+fn shortest_from_enode<'a>(
+    egraph: &'a EGraph,
+    enode: &'a NodeId,
+    seen: &mut FxHashMap<&'a NodeId, usize>,
+    junk: &mut FxHashSet<&'a NodeId>,
+    cache: &mut FxHashMap<&'a NodeId, Option<Vec<&'a NodeId>>>,
+) -> Option<Vec<&'a NodeId>> {
+    if let Some(cached) = cache.get(enode) {
+        return cached.clone();
+    }
+    if INVALID_IR.contains(&egraph.nodes[enode].op.as_str()) || junk.contains(enode) {
+        cache.insert(enode, None);
+        return None;
+    }
+    if seen.get(&enode).copied().unwrap_or(0) >= MAX_CYCLES {
+        cache.insert(enode, None);
+        return None;
+    }
+
+    *seen.entry(enode).or_insert(0) += 1;
+
+    let out = if egraph.nodes[enode].children.is_empty() {
+        // Leaf → path is just this enode
+        Some(vec![enode])
+    } else {
+        // For each child class, take its shortest; if any child has no path → this enode invalid
+        let mut acc: Vec<&'a NodeId> = vec![enode];
+        let mut ok = true;
+
+        for child in &egraph.nodes[enode].children {
+            let child_class = egraph.nid_to_cid(child);
+            if let Some(child_path) = extract_shortest(egraph, child_class, seen, junk, cache) {
+                acc.extend(child_path);
+            } else {
+                ok = false;
+                break;
+            }
+        }
+
+        if ok { Some(acc) } else { None }
+    };
+
+    *seen.get_mut(&enode).unwrap() -= 1;
+
+    if out.is_none() {
+        junk.insert(enode);
+    }
+    cache.insert(enode, out.clone());
+    out
+}
+
+pub fn extract_shortest<'a>(
+    egraph: &'a EGraph,
+    class: &'a ClassId,
+    seen: &mut FxHashMap<&'a NodeId, usize>,
+    junk: &mut FxHashSet<&'a NodeId>,
+    cache: &mut FxHashMap<&'a NodeId, Option<Vec<&'a NodeId>>>,
+) -> Option<Vec<&'a NodeId>> {
+    // Try all enodes in the class and keep the shortest
+    let mut best: Option<Vec<&'a NodeId>> = None;
+    for enode in &egraph.classes()[class].nodes {
+        if INVALID_IR.contains(&egraph.nodes[enode].op.as_str()) || junk.contains(enode) {
+            junk.insert(enode);
+            continue;
+        }
+        if seen.get(&enode).copied().unwrap_or(0) >= MAX_CYCLES {
+            continue;
+        }
+
+        if let Some(path) = shortest_from_enode(egraph, enode, seen, junk, cache) {
+            if best.as_ref().map_or(true, |b| path.len() < b.len()) {
+                best = Some(path);
+            }
+        } else {
+            junk.insert(enode);
+        }
+    }
+    best
+}
+
+fn extract_trajectories<'a>(
+    egraph: &'a EGraph,
+    current_class: &'a ClassId,
+    seen: &mut FxHashMap<&'a NodeId, usize>,
+    junk_cache: &mut FxHashSet<&'a NodeId>,
+    trajectory_cache: &mut FxHashMap<&'a NodeId, Vec<Vec<&'a NodeId>>>,
+    waiting: usize,
+) -> Vec<Vec<&'a NodeId>> {
+    let mut trajectories = vec![];
+    'enode_loop: for enode in &egraph.classes()[current_class].nodes {
+        if INVALID_IR.contains(&egraph.nodes[enode].op.as_str()) {
+            junk_cache.insert(enode);
+            continue;
+        } else if junk_cache.contains(&enode)
+            || seen.get(&enode).copied().unwrap_or_default() >= MAX_CYCLES
+        {
+            continue;
+        }
+        let mut enode_trajectories = vec![];
+        *seen.entry(enode).or_insert(0) += 1;
+        for child in &egraph.nodes[enode].children {
+            // Ask what's the child's trajectories
+            if !trajectory_cache.contains_key(child) {
+                let child_trajectories = if is_expression_enode(&egraph.nodes[child].op) {
+                    extract_shortest(
+                        egraph,
+                        egraph.nid_to_cid(child),
+                        seen,
+                        junk_cache,
+                        &mut FxHashMap::default(),
+                    )
+                    .map(|i| vec![i])
+                    .unwrap_or_default()
+                } else {
+                    extract_trajectories(
+                        egraph,
+                        egraph.nid_to_cid(child),
+                        seen,
+                        junk_cache,
+                        trajectory_cache,
+                        (waiting * enode_trajectories.len().max(1)) + trajectories.len(),
+                    )
+                };
+                if child_trajectories.is_empty() {
+                    // bad enode
+                    junk_cache.insert(enode);
+                    *seen.get_mut(&enode).unwrap() -= 1;
+                    continue 'enode_loop;
+                }
+                trajectory_cache.insert(child, child_trajectories.clone());
+            }
+
+            if enode_trajectories.is_empty() {
+                // First child
+                for mut child_trajectory in trajectory_cache[child].clone() {
+                    child_trajectory.insert(0, enode);
+                    enode_trajectories.push(child_trajectory);
+                }
+            } else if !trajectory_cache[child].is_empty() {
+                // Cartisian product the current trajectories with the new trajectories
+                enode_trajectories = enode_trajectories
+                    .into_iter()
+                    .cartesian_product(&trajectory_cache[child])
+                    .map(|(p, n)| [p, n.clone()].concat())
+                    .collect();
+            }
+        }
+        *seen.get_mut(&enode).unwrap() -= 1;
+
+        if egraph.nodes[enode].children.is_empty() {
+            // Leaf node → single-element trajectory
+            trajectories.push(vec![enode]);
+        } else {
+            // Add combined trajectories
+            trajectories.extend(enode_trajectories);
+        }
+        if trajectories.len() * waiting > MAX_SEARCHED_GRAPHS {
+            break; // Only pick the first valid (non cycling) enode for expressions
+        }
+    }
+    trajectories
+}
+
 pub fn search(
     egraph: &EGraph,
     inputs: &[(String, Vec<f32>)],
     arch: GPUArch,
     dyn_vars: &FxHashMap<char, usize>,
 ) -> Option<StableGraph<GraphTerm, ()>> {
-    fn is_expression_enode(enode_label: &str) -> bool {
-        matches!(
-            enode_label,
-            "MNum"
-                | "MVar"
-                | "MAdd"
-                | "MSub"
-                | "MMul"
-                | "MDiv"
-                | "MMod"
-                | "MMin"
-                | "MMax"
-                | "MAnd"
-                | "MOr"
-                | "MGte"
-                | "MLt"
-                | "MFloorTo"
-                | "MReplace"
-                | "MAccum"
-        ) || enode_label.starts_with("MNum:")
-            || enode_label.starts_with("MVar:")
-    }
-
-    fn extract_trajectories<'a>(
-        egraph: &'a EGraph,
-        current_class: &'a ClassId,
-        seen: &mut FxHashMap<&'a NodeId, usize>,
-        junk_cache: &mut FxHashSet<&'a NodeId>,
-        trajectory_cache: &mut FxHashMap<&'a NodeId, Vec<Vec<&'a NodeId>>>,
-        waiting: usize,
-    ) -> Vec<Vec<&'a NodeId>> {
-        let mut trajectories = vec![];
-        'enode_loop: for enode in &egraph.classes()[current_class].nodes {
-            if INVALID_IR.contains(&egraph.nodes[enode].op.as_str()) {
-                junk_cache.insert(enode);
-                continue;
-            } else if junk_cache.contains(&enode)
-                || seen.get(&enode).copied().unwrap_or_default() >= MAX_CYCLES
-            {
-                continue;
-            }
-            let mut enode_trajectories = vec![];
-            *seen.entry(enode).or_insert(0) += 1;
-            for child in &egraph.nodes[enode].children {
-                // Ask what's the child's trajectories
-                if !trajectory_cache.contains_key(child) {
-                    let child_trajectories = if is_expression_enode(&egraph.nodes[child].op) {
-                        extract_shortest(
-                            egraph,
-                            egraph.nid_to_cid(child),
-                            seen,
-                            junk_cache,
-                            &mut FxHashMap::default(),
-                        )
-                        .map(|i| vec![i])
-                        .unwrap_or_default()
-                    } else {
-                        extract_trajectories(
-                            egraph,
-                            egraph.nid_to_cid(child),
-                            seen,
-                            junk_cache,
-                            trajectory_cache,
-                            (waiting * enode_trajectories.len().max(1)) + trajectories.len(),
-                        )
-                    };
-                    if child_trajectories.is_empty() {
-                        // bad enode
-                        junk_cache.insert(enode);
-                        *seen.get_mut(&enode).unwrap() -= 1;
-                        continue 'enode_loop;
-                    }
-                    trajectory_cache.insert(child, child_trajectories.clone());
-                }
-
-                if enode_trajectories.is_empty() {
-                    // First child
-                    for mut child_trajectory in trajectory_cache[child].clone() {
-                        child_trajectory.insert(0, enode);
-                        enode_trajectories.push(child_trajectory);
-                    }
-                } else if !trajectory_cache[child].is_empty() {
-                    // Cartisian product the current trajectories with the new trajectories
-                    enode_trajectories = enode_trajectories
-                        .into_iter()
-                        .cartesian_product(&trajectory_cache[child])
-                        .map(|(p, n)| [p, n.clone()].concat())
-                        .collect();
-                }
-            }
-            *seen.get_mut(&enode).unwrap() -= 1;
-
-            if egraph.nodes[enode].children.is_empty() {
-                // Leaf node → single-element trajectory
-                trajectories.push(vec![enode]);
-            } else {
-                // Add combined trajectories
-                trajectories.extend(enode_trajectories);
-            }
-            if trajectories.len() * waiting > MAX_SEARCHED_GRAPHS {
-                break; // Only pick the first valid (non cycling) enode for expressions
-            }
-        }
-        trajectories
-    }
-
-    pub fn extract_shortest<'a>(
-        egraph: &'a EGraph,
-        class: &'a ClassId,
-        seen: &mut FxHashMap<&'a NodeId, usize>,
-        junk: &mut FxHashSet<&'a NodeId>,
-        cache: &mut FxHashMap<&'a NodeId, Option<Vec<&'a NodeId>>>,
-    ) -> Option<Vec<&'a NodeId>> {
-        // Try all enodes in the class and keep the shortest
-        let mut best: Option<Vec<&'a NodeId>> = None;
-        for enode in &egraph.classes()[class].nodes {
-            if INVALID_IR.contains(&egraph.nodes[enode].op.as_str()) || junk.contains(enode) {
-                junk.insert(enode);
-                continue;
-            }
-            if seen.get(&enode).copied().unwrap_or(0) >= MAX_CYCLES {
-                continue;
-            }
-
-            if let Some(path) = shortest_from_enode(egraph, enode, seen, junk, cache) {
-                if best.as_ref().map_or(true, |b| path.len() < b.len()) {
-                    best = Some(path);
-                }
-            } else {
-                junk.insert(enode);
-            }
-        }
-        best
-    }
-
-    fn shortest_from_enode<'a>(
-        egraph: &'a EGraph,
-        enode: &'a NodeId,
-        seen: &mut FxHashMap<&'a NodeId, usize>,
-        junk: &mut FxHashSet<&'a NodeId>,
-        cache: &mut FxHashMap<&'a NodeId, Option<Vec<&'a NodeId>>>,
-    ) -> Option<Vec<&'a NodeId>> {
-        if let Some(cached) = cache.get(enode) {
-            return cached.clone();
-        }
-        if INVALID_IR.contains(&egraph.nodes[enode].op.as_str()) || junk.contains(enode) {
-            cache.insert(enode, None);
-            return None;
-        }
-        if seen.get(&enode).copied().unwrap_or(0) >= MAX_CYCLES {
-            cache.insert(enode, None);
-            return None;
-        }
-
-        *seen.entry(enode).or_insert(0) += 1;
-
-        let out = if egraph.nodes[enode].children.is_empty() {
-            // Leaf → path is just this enode
-            Some(vec![enode])
-        } else {
-            // For each child class, take its shortest; if any child has no path → this enode invalid
-            let mut acc: Vec<&'a NodeId> = vec![enode];
-            let mut ok = true;
-
-            for child in &egraph.nodes[enode].children {
-                let child_class = egraph.nid_to_cid(child);
-                if let Some(child_path) = extract_shortest(egraph, child_class, seen, junk, cache) {
-                    acc.extend(child_path);
-                } else {
-                    ok = false;
-                    break;
-                }
-            }
-
-            if ok { Some(acc) } else { None }
-        };
-
-        *seen.get_mut(&enode).unwrap() -= 1;
-
-        if out.is_none() {
-            junk.insert(enode);
-        }
-        cache.insert(enode, out.clone());
-        out
-    }
 
     let trajectories = extract_trajectories(
         egraph,
