@@ -3,7 +3,7 @@ use std::usize;
 
 use crate::Kernel;
 use crate::run::{assign_buffers, compile_kernels, run_graph};
-use crate::utils::{display_graph, print_kernels};
+use crate::utils::print_kernels;
 use crate::{GPUArch, GraphTerm};
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
@@ -225,7 +225,6 @@ pub fn search(
     arch: GPUArch,
     dyn_vars: &FxHashMap<char, usize>,
 ) -> Option<StableGraph<GraphTerm, ()>> {
-
     let trajectories = extract_trajectories(
         egraph,
         &egraph.root_eclasses[0],
@@ -615,4 +614,145 @@ pub fn make_test_inputs(
         }
     }
     inputs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        translate::{MetaGraph, SubGraph, translate_graph_meta},
+        utils::{build_search_space, display_graph},
+    };
+    use luminal::{graph::Graph, prelude::petgraph::algo::is_cyclic_directed};
+
+    fn create_simple_egraph() -> EGraph {
+        let egraph = EGraph::default();
+        egraph
+    }
+
+    fn build_minimal_add_graph() -> (luminal::graph::Graph, MetaGraph, SubGraph) {
+        use luminal::graph::Graph;
+
+        let mut cx = Graph::new();
+        let a = cx.tensor(3).set([1., 2., 3.]);
+        let b = cx.tensor(3).set([4., 5., 6.]);
+        let c = (a + b).sqrt();
+        let d = c * a;
+        let _e = d.sum(0).retrieve();
+
+        let (meta_graph, _global_map, _inits) = translate_graph_meta(&cx);
+        let meta_node = meta_graph
+            .node_indices()
+            .next()
+            .expect("MetaGraph unexpectedly empty");
+        let sub = meta_graph
+            .node_weight(meta_node)
+            .expect("Missing subgraph at meta node")
+            .clone();
+
+        (cx, meta_graph, sub)
+    }
+
+    fn build_nonempty_egraph() -> EGraph {
+        // Keep `cx` and `meta_graph` alive while we build the egraph
+        let (_cx, meta_graph, sub) = build_minimal_add_graph();
+        let e = build_search_space(&sub, /*iters=*/ 2);
+        // `_cx` and `meta_graph` can drop now; `e` no longer needs them
+        drop(meta_graph);
+        e
+    }
+
+    #[test]
+    fn test_egraph_is_nonempty_and_has_root() {
+        let egraph = build_nonempty_egraph();
+        assert!(!egraph.classes().is_empty(), "EGraph should have classes");
+        assert!(
+            !egraph.root_eclasses.is_empty(),
+            "EGraph should have a root"
+        );
+    }
+
+    #[test]
+    fn test_extract_trajectories_invalid_ir_filtering() {
+        let egraph = build_nonempty_egraph();
+
+        if egraph.classes().is_empty() || egraph.root_eclasses.is_empty() {
+            return;
+        }
+
+        let root_class = &egraph.root_eclasses[0];
+        let mut seen = FxHashMap::default();
+        let mut junk_cache = FxHashSet::default();
+        let mut trajectory_cache = FxHashMap::default();
+
+        let trajectories = extract_trajectories(
+            &egraph,
+            root_class,
+            &mut seen,
+            &mut junk_cache,
+            &mut trajectory_cache,
+            1,
+        );
+
+        // Check that trajectories don't contain INVALID_IR operations
+        for trajectory in trajectories {
+            for &node in &trajectory {
+                let op_name = &egraph.nodes[node].op;
+                assert!(
+                    !INVALID_IR.contains(&op_name.as_str()),
+                    "Trajectory contains invalid IR operation: {}",
+                    op_name
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn test_metal_buffer_operations() {
+        use metal_rs::Device;
+
+        // Skip if Metal is not available
+        if Device::system_default().is_none() {
+            return;
+        }
+
+        let device = Device::system_default().unwrap();
+        let test_data = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+
+        // Test buffer creation
+        let buffer = copy_metal_buffer(&test_data, &device);
+        assert_eq!(
+            buffer.length(),
+            (test_data.len() * std::mem::size_of::<f32>()) as u64
+        );
+
+        // Test buffer read back
+        let read_back = copy_metal_buffer_back(&buffer);
+        assert_eq!(read_back.len(), test_data.len());
+
+        // Verify data integrity
+        for (original, read) in test_data.iter().zip(&read_back) {
+            assert!(
+                (original - read).abs() < 1e-6,
+                "Buffer data should be preserved"
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_expression_enode() {
+        // Test that expression enodes are correctly identified
+        assert!(is_expression_enode("MNum"));
+        assert!(is_expression_enode("MVar"));
+        assert!(is_expression_enode("MAdd"));
+        assert!(is_expression_enode("MNum:42"));
+        assert!(is_expression_enode("MVar:x"));
+
+        // Test that non-expression enodes are not identified
+        assert!(!is_expression_enode("GMEM"));
+        assert!(!is_expression_enode("LoopIn"));
+        assert!(!is_expression_enode("Add"));
+        assert!(!is_expression_enode("Invalid"));
+    }
 }
