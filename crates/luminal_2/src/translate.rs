@@ -1,14 +1,14 @@
-use luminal::prelude::{
-    petgraph::{Directed, algo::toposort, prelude::StableGraph},
-    *,
-};
-use rustc_hash::FxHashMap;
-
 use crate::{
     CompatKernel, Diff, GraphTerm,
     codegen::{GRID_DIMS, THREADBLOCK_DIMS},
     utils::{loop_in, loop_out},
 };
+use luminal::prelude::{
+    petgraph::{Directed, algo::toposort, prelude::StableGraph},
+    *,
+};
+use rustc_hash::FxHashMap;
+use std::collections::HashSet;
 
 #[derive(Debug)]
 pub enum InitData {
@@ -24,6 +24,19 @@ pub type OptimalGraphNodeIndex = (NodeIndex);
 
 pub type SubGraph = StableGraph<GraphTerm, (), Directed>;
 pub type MetaGraph = StableGraph<SubGraph, CrossSubGraphTensorIndexes, Directed>;
+
+fn collect_ancestors(graph: &Graph, n: NodeIndex) -> HashSet<NodeIndex> {
+    let mut seen = HashSet::new();
+    let mut stack = vec![n];
+    while let Some(cur) = stack.pop() {
+        for (src, _out, _shape) in graph.get_sources(cur) {
+            if seen.insert(src) {
+                stack.push(src);
+            }
+        }
+    }
+    seen
+}
 
 pub fn translate_graph_meta(
     graph: &Graph,
@@ -101,7 +114,8 @@ pub fn translate_graph_meta(
                 );
 
                 // 3) start fresh slice; create placeholder fed by the producer
-                orig_to_subgraph_node_map.clear();
+                let ancestors = collect_ancestors(graph, old_node);
+                orig_to_subgraph_node_map.retain(|(orig, _out), _| !ancestors.contains(orig));
                 simplify_cache = FxHashMap::default();
 
                 let placeholder = g.add_node(GraphTerm::GMEM {
@@ -891,44 +905,46 @@ mod tests {
         assert!(has_constant_init, "Constant value not found in init data");
     }
 
-    // #[test]
-    // fn test_graph_break_translation() {
-    //     let mut cx = Graph::new();
-    //     let a = cx.tensor(3).set([1., 2., 3.]);
-    //     let b = a.graph_break();
-    //     let _c = (b + a).retrieve();
+    #[test]
+    fn test_graph_break_translation() {
+        let mut cx = Graph::new();
+        let a = cx.tensor(3).set([1., 2., 3.]);
+        let b = cx.tensor(3).set([1., 2., 3.]);
+        let c = (a + b).graph_break();
+        let d = c * 10.0;
+        cx.execute_debug();
 
-    //     let (meta_graph, global_map, _inits) = translate_graph_meta(&cx);
+        let (meta_graph, global_map, _inits) = translate_graph_meta(&cx);
 
-    //     // Graph break should create multiple meta nodes
-    //     assert!(
-    //         meta_graph.node_count() >= 2,
-    //         "GraphBreak should create multiple meta nodes, found {}",
-    //         meta_graph.node_count()
-    //     );
+        // Graph break should create multiple meta nodes
+        assert!(
+            meta_graph.node_count() >= 2,
+            "GraphBreak should create multiple meta nodes, found {}",
+            meta_graph.node_count()
+        );
 
-    //     // There should be edges between meta nodes due to the break
-    //     assert!(
-    //         meta_graph.edge_count() > 0,
-    //         "GraphBreak should create edges between meta nodes"
-    //     );
+        // There should be edges between meta nodes due to the break
+        assert!(
+            meta_graph.edge_count() > 0,
+            "GraphBreak should create edges between meta nodes"
+        );
 
-    //     // Check that the break node created a placeholder GMEM node
-    //     let mut found_break_placeholder = false;
-    //     for meta_node_idx in meta_graph.node_indices() {
-    //         let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
-    //         for sub_node_idx in subgraph.node_indices() {
-    //             if let Some(GraphTerm::GMEM { label }) = subgraph.node_weight(sub_node_idx) {
-    //                 if label.starts_with("break_") {
-    //                     found_break_placeholder = true;
-    //                     break;
-    //                 }
-    //             }
-    //         }
-    //     }
+        // Check that the break node created a placeholder GMEM node
+        let mut found_break_placeholder = false;
+        for meta_node_idx in meta_graph.node_indices() {
+            let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
+            for sub_node_idx in subgraph.node_indices() {
+                if let Some(GraphTerm::GMEM { label }) = subgraph.node_weight(sub_node_idx) {
+                    if label.starts_with("break_") {
+                        found_break_placeholder = true;
+                        break;
+                    }
+                }
+            }
+        }
 
-    //     assert!(found_break_placeholder, "GraphBreak placeholder not found");
-    // }
+        assert!(found_break_placeholder, "GraphBreak placeholder not found");
+    }
 
     #[test]
     fn test_complex_graph_node_mapping() {
