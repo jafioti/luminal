@@ -97,7 +97,6 @@ pub fn translate_graph_meta(
             .unwrap_or(&op_name_full)
             .trim();
         let mut sources = graph.get_sources(old_node);
-        println!("OP {:?}", op);
         match op {
             // ---- GRAPH BREAK ----
             "GraphBreak" => {
@@ -169,9 +168,6 @@ pub fn translate_graph_meta(
             "Add" | "Mul" | "Mod" | "LessThan" => {
                 let (sa, ia, shape_a) = sources.pop().unwrap();
                 let (sb, ib, shape_b) = sources.pop().unwrap();
-                println!("sa for op {op}: {:?} {:?}", sa, ia);
-                println!("sb for op {op}: {:?} {:?}", sb, ib);
-                println!("{:?}", orig_to_subgraph_node_map);
                 let (ain, ranges) = scope_in(
                     orig_to_subgraph_node_map[&(sa, ia as usize)],
                     shape_a,
