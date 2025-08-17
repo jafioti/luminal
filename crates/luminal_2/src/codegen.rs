@@ -418,7 +418,8 @@ fn make_kernel(
                             return None;
                         }
                         let Term::Acc(acc_symbol) = stride.terms.read()[0] else {
-                            panic!("Acc is not acc");
+                            return None;
+                            // panic!("Acc is not acc: {stride}");
                         };
                         // Create a new accumulator
                         // Work out the size needed by taking the max stride of the loopins and loopouts
@@ -902,6 +903,7 @@ fn make_kernel(
                 c_inner_stride,
                 k_outer_loops,
             } => {
+                panic!();
                 let mut srcs = kernel_graph.neighbors_directed(node, Direction::Incoming);
                 let (src_a, src_a_ptr) = node_to_var[&srcs.next().unwrap()];
                 let (src_b, src_b_ptr) = node_to_var[&srcs.next().unwrap()];

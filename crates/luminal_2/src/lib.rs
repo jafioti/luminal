@@ -47,7 +47,7 @@ pub enum GMEMBuffer {
     Input { node: NodeIndex },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GraphTerm {
     GMEM {
         // Signifies global memory

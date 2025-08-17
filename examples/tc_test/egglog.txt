@@ -534,10 +534,39 @@
 	:ruleset ir
 )
 
-{code}
+(let t0 (GMEM "acc"))
+(let t1 (LoopIn t0 (Loop "m_outer" (MNum 8)) (MNum 0)))
+(let t2 (LoopIn t1 (Loop "n_outer" (MNum 8)) (MNum 0)))
+(let t3 (LoopIn t2 (Loop "m_tile" (MNum 8)) (MNum 0)))
+(let t4 (LoopIn t3 (Loop "n_tile" (MNum 8)) (MNum 0)))
+(let t5 (LoopIn t4 (Loop "k_outer" (MNum 8)) (MAccum "a")))
+(let t6 (LoopIn t5 (Loop "k_inner" (MNum 8)) (MAccum "a")))
+(let t7 (GMEM "B"))
+(let t8 (LoopIn t7 (Loop "m_outer" (MNum 8)) (MNum 0)))
+(let t9 (LoopIn t8 (Loop "n_outer" (MNum 8)) (MMul (MVar "z") (MNum 8))))
+(let t10 (LoopIn t9 (Loop "m_tile" (MNum 8)) (MNum 0)))
+(let t11 (LoopIn t10 (Loop "n_tile" (MNum 8)) (MVar "z")))
+(let t12 (LoopIn t11 (Loop "k_outer" (MNum 8)) (MMul (MMul (MVar "z") (MNum 8)) (MNum 64))))
+(let t13 (LoopIn t12 (Loop "k_inner" (MNum 8)) (MMul (MVar "z") (MNum 64))))
+(let t14 (GMEM "A"))
+(let t15 (LoopIn t14 (Loop "m_outer" (MNum 8)) (MMul (MMul (MVar "z") (MNum 64)) (MNum 8))))
+(let t16 (LoopIn t15 (Loop "n_outer" (MNum 8)) (MNum 0)))
+(let t17 (LoopIn t16 (Loop "m_tile" (MNum 8)) (MMul (MVar "z") (MNum 64))))
+(let t18 (LoopIn t17 (Loop "n_tile" (MNum 8)) (MNum 0)))
+(let t19 (LoopIn t18 (Loop "k_outer" (MNum 8)) (MMul (MVar "z") (MNum 8))))
+(let t20 (LoopIn t19 (Loop "k_inner" (MNum 8)) (MVar "z")))
+(let t21 (Mul t20 t13))
+(let t22 (Add t21 t6))
+(let t23 (LoopOut t22 (Loop "k_inner" (MNum 8)) (MAccum "a")))
+(let t24 (LoopOut t23 (Loop "k_outer" (MNum 8)) (MAccum "a")))
+(let t25 (LoopOut t24 (Loop "n_tile" (MNum 8)) (MVar "z")))
+(let t26 (LoopOut t25 (Loop "m_tile" (MNum 8)) (MMul (MVar "z") (MNum 64))))
+(let t27 (LoopOut t26 (Loop "n_outer" (MNum 8)) (MMul (MVar "z") (MNum 8))))
+(let t28 (LoopOut t27 (Loop "m_outer" (MNum 8)) (MMul (MMul (MVar "z") (MNum 8)) (MNum 64))))
+
 (run-schedule
 	(saturate ir-generic)
-	(repeat {iters}
+	(repeat 3
 		(run ir) ; run ir rules once
 		(repeat 1 ir-prop)
 		(repeat 1 expr)

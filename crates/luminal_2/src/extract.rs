@@ -3,7 +3,7 @@ use std::usize;
 
 use crate::Kernel;
 use crate::run::{assign_buffers, compile_kernels, run_graph};
-use crate::utils::{display_graph, print_kernels};
+use crate::utils::print_kernels;
 use crate::{GPUArch, GraphTerm};
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
