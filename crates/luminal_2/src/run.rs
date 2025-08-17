@@ -30,6 +30,7 @@ pub fn chunk_based_search_compiler(
     original_graph: Graph,
     original_graph_input: Vec<(GraphTensor, Vec<f32>)>,
     original_graph_output: &GraphTensor,
+    inits: &[(String, Vec<f32>)],
 ) -> Vec<f32> {
     autoreleasepool(|| {
         let (mut meta_graph, mut global_map, mut buffers) = translate_graph_meta(&original_graph);
@@ -38,7 +39,7 @@ pub fn chunk_based_search_compiler(
             let sub_graph = meta_graph.node_weight_mut(graph_node).unwrap();
             // luminal_2::utils::display_graph(&graph, &[]);
             let equality_saturated_egraph = build_search_space(sub_graph, 7);
-            let inputs = make_test_inputs(sub_graph, &original_graph.dyn_map);
+            let inputs = make_test_inputs(sub_graph, &original_graph.dyn_map, inits);
             let best_searched_graph = search(
                 &equality_saturated_egraph,
                 &inputs,

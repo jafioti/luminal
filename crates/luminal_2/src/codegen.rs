@@ -2,7 +2,7 @@ use itertools::Itertools;
 use luminal::{
     prelude::{
         NodeIndex,
-        petgraph::{Directed, Direction, algo::toposort, prelude::StableGraph},
+        petgraph::{Directed, Direction, algo::toposort, prelude::StableGraph, visit::EdgeRef},
     },
     shape::{Expression, Term},
 };
@@ -232,6 +232,15 @@ pub fn codegen(
                     .join("\n");
                 if !input_comment.is_empty() {
                     input_comment = format!("\t// Inputs\n{input_comment}\n");
+                }
+                if !outputs.is_empty() {
+                    input_comment = format!(
+                        "{input_comment}\t// Outputs = [{}]\n",
+                        outputs
+                            .iter()
+                            .map(|(_, o)| { var_to_char(node_to_var[o].0) })
+                            .join(",")
+                    );
                 }
                 let n_inputs_outputs = inputs.len() + outputs.len();
                 let input_string = inputs
@@ -903,8 +912,10 @@ fn make_kernel(
                 c_inner_stride,
                 k_outer_loops,
             } => {
-                panic!();
-                let mut srcs = kernel_graph.neighbors_directed(node, Direction::Incoming);
+                let mut srcs = kernel_graph
+                    .edges_directed(node, Direction::Incoming)
+                    .sorted_by_key(|e| e.id())
+                    .map(|e| e.source());
                 let (src_a, src_a_ptr) = node_to_var[&srcs.next().unwrap()];
                 let (src_b, src_b_ptr) = node_to_var[&srcs.next().unwrap()];
                 let dest = kernel_graph
@@ -918,7 +929,7 @@ fn make_kernel(
                         "
 // TensorCore loop
 simdgroup_float8x8 acc = simdgroup_float8x8(0);
-for (uint tc_loop = 0; tc_loop < {}; ++tc_loop) {{
+for (uint tc_loop = 0; tc_loop < {}; tc_loop++) {{
     threadgroup_barrier(mem_flags::mem_threadgroup); // For some reason this speeds it up
 
     // Load sources into simdgroup matricies

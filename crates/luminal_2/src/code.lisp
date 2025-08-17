@@ -359,177 +359,121 @@
 
 ; TensorCore
 (rewrite
-	(LoopOut ; m outer
-		(LoopOut ; n outer
-			(LoopOut ; m tile
-				(LoopOut ; n tile
-					 (LoopOut ; k outer
-						(LoopOut ; k tile
-							(Add
-								(Mul
-									; input A
-									(LoopIn ; k tile
-										(LoopIn ; k outer
-											(LoopIn ; n tile
-												(LoopIn ; m tile
-													(LoopIn ; n outer
-														(LoopIn ; m outer
-															?a
-															(Loop ?loop_a_mouter ?m_div_8)
-															?stride_a_mouter
-														)
-														(Loop ?loop_a_nouter ?n_div_8)
-														?stride_a_nouter
-													)
-													(Loop ?loop_a_mtile (MNum 8))
-													(MMul (MVar "z") (MNum ?k))
-												)
-												(Loop ?loop_a_ntile (MNum 8))
-												(MNum 0)
-											)
-											(Loop ?loop_a_kouter ?k_loops)
-											(MMul (MVar "z") (MNum 8))
+	(LoopOut ; m tile
+		(LoopOut ; n tile
+			 (LoopOut ; k outer
+				(LoopOut ; k tile
+					(Add
+						(Mul
+							; input A
+							(LoopIn ; k tile
+								(LoopIn ; k outer
+									(LoopIn ; n tile
+										(LoopIn ; m tile
+											?a
+											(Loop ?loop_a_mtile (MNum 8))
+											(MMul (MVar "z") (MNum ?k))
 										)
-										(Loop ?loop_a_kinner (MNum 8))
-										(MVar "z")
+										(Loop ?loop_a_ntile (MNum 8))
+										(MNum 0)
 									)
-									; input B
-									(LoopIn ; k tile
-										(LoopIn ; k outer
-											(LoopIn ; n tile
-												(LoopIn ; m tile
-													(LoopIn ; n outer
-														(LoopIn ; m outer
-															?b
-															(Loop ?loop_b_mouter ?m_div_8)
-															?stride_b_mouter
-														)
-														(Loop ?loop_b_nouter ?n_div_8)
-														?stride_b_nouter
-													)
-													(Loop ?loop_b_mtile (MNum 8))
-													(MNum 0)
-												)
-												(Loop ?loop_b_ntile (MNum 8))
-												(MVar "z")
-											)
-											(Loop ?loop_b_kouter ?k_loops)
-											(MMul (MMul (MVar "z") (MNum 8)) (MNum ?n))
-										)
-										(Loop ?loop_b_kinner (MNum 8))
-										(MMul (MVar "z") (MNum ?n))
-									)
+									(Loop ?loop_a_kouter ?k_loops)
+									(MMul (MVar "z") (MNum 8))
 								)
-								; accumulator
-								(LoopIn ; k tile
-									(LoopIn ; k outer
-										(LoopIn ; n tile
-											(LoopIn ; m tile
-												(LoopIn ; n outer
-													(LoopIn ; m outer
-														?acc
-														(Loop ?loop_acc_mouter ?m_div_8)
-														(MNum 0)
-													)
-													(Loop ?loop_acc_nouter ?n_div_8)
-													(MNum 0)
-												)
-												(Loop ?loop_acc_mtile (MNum 8))
-												(MNum 0)
-											)
-											(Loop ?loop_acc_ntile (MNum 8))
+								(Loop ?loop_a_kinner (MNum 8))
+								(MVar "z")
+							)
+							; input B
+							(LoopIn ; k tile
+								(LoopIn ; k outer
+									(LoopIn ; n tile
+										(LoopIn ; m tile
+											?b
+											(Loop ?loop_b_mtile (MNum 8))
 											(MNum 0)
 										)
-										(Loop ?loop_acc_kouter ?k_loops)
-										(MAccum ?acc_outer)
+										(Loop ?loop_b_ntile (MNum 8))
+										(MVar "z")
 									)
-									(Loop ?loop_acc_kinner (MNum 8))
-									(MAccum ?acc_inner)
+									(Loop ?loop_b_kouter ?k_loops)
+									(MMul (MMul (MVar "z") (MNum 8)) (MNum ?n))
 								)
+								(Loop ?loop_b_kinner (MNum 8))
+								(MMul (MVar "z") (MNum ?n))
 							)
-							(Loop ?loop_a_kinner (MNum 8))
+						)
+						; accumulator
+						(LoopIn ; k tile
+							(LoopIn ; k outer
+								(LoopIn ; n tile
+									(LoopIn ; m tile
+										?acc
+										(Loop ?loop_acc_mtile (MNum 8))
+										(MNum 0)
+									)
+									(Loop ?loop_acc_ntile (MNum 8))
+									(MNum 0)
+								)
+								(Loop ?loop_acc_kouter ?k_loops)
+								(MAccum ?acc_outer)
+							)
+							(Loop ?loop_acc_kinner (MNum 8))
 							(MAccum ?acc_inner)
 						)
-						(Loop ?loop_a_kouter ?k_loops)
-						(MAccum ?acc_outer)
 					)
-					(Loop ?loop_a_ntile (MNum 8))
-					(MVar "z")
+					(Loop ?loop_a_kinner (MNum 8))
+					(MAccum ?acc_inner)
 				)
-				(Loop ?loop_a_mtile (MNum 8))
-				(MMul (MVar "z") (MNum ?n))
+				(Loop ?loop_a_kouter ?k_loops)
+				(MAccum ?acc_outer)
 			)
-			(Loop ?loop_a_nouter ?n_div_8)
-			(MMul (MVar "z") (MNum 8))
+			(Loop ?loop_a_ntile (MNum 8))
+			(MVar "z")
 		)
-		(Loop ?loop_a_mouter ?m_div_8)
-		(MMul (MMul (MVar "z") (MNum 8)) (MNum ?n))
+		(Loop ?loop_a_mtile (MNum 8))
+		(MMul (MVar "z") (MNum ?n))
 	)
-	(LoopOut ; m outer
-		(LoopOut ; n outer
-			(LoopOut ; m tile
-				(LoopOut ; n tile
-					(TCMatmul
-						; a
-						(LoopIn ; n tile
-							(LoopIn ; m tile
-								(LoopIn ; n outer
-									(LoopIn ; m outer
-										?a
-										(Loop ?loop_a_mouter ?m_div_8)
-										?stride_a_mouter
-									)
-									(Loop ?loop_a_nouter ?n_div_8)
-									?stride_a_nouter
-								)
-								(Loop ?loop_a_mtile (MNum 8))
-								(MNum 0)
-							)
-							(Loop ?loop_a_ntile (MNum 4))  ; each thread in the matmul does 2 elements
-							(MNum 0)
-						)
-						; b
-						(LoopIn ; n tile
-							(LoopIn ; m tile
-								(LoopIn ; n outer
-									(LoopIn ; m outer
-										?b
-										(Loop ?loop_b_mouter ?m_div_8)
-										?stride_b_mouter
-									)
-									(Loop ?loop_b_nouter ?n_div_8)
-									?stride_b_nouter
-								)
-								(Loop ?loop_b_mtile (MNum 8))
-								(MNum 0)
-							)
-							(Loop ?loop_b_ntile (MNum 4))  ; each thread in the matmul does 2 elements
-							(MNum 0)
-						)
-						; a k stride
-						(MMul (MVar "z") (MNum 8))
-						; b k stride
-						(MMul (MMul (MVar "z") (MNum 8)) (MNum ?n))
-						; a row size
-						(MNum ?k)
-						; b row size
-						(MNum ?n)
-						; c row size
-						(MNum ?n)
-						; k loops
-						?k_loops
+	(LoopOut ; m tile
+		(LoopOut ; n tile
+			(TCMatmul
+				; a
+				(LoopIn ; n tile
+					(LoopIn ; m tile
+						?a
+						(Loop ?loop_a_mtile (MNum 8))
+						(MNum 0)
 					)
-					(Loop ?loop_a_ntile (MNum 4))
+					(Loop ?loop_a_ntile (MNum 4))  ; each thread in the matmul does 2 elements
 					(MNum 0)
 				)
-				(Loop ?loop_a_mtile (MNum 8))
-				(MNum 0)
+				; b
+				(LoopIn ; n tile
+					(LoopIn ; m tile
+						?b
+						(Loop ?loop_b_mtile (MNum 8))
+						(MNum 0)
+					)
+					(Loop ?loop_b_ntile (MNum 4))  ; each thread in the matmul does 2 elements
+					(MNum 0)
+				)
+				; a k stride
+				(MMul (MVar "z") (MNum 8))
+				; b k stride
+				(MMul (MMul (MVar "z") (MNum 8)) (MNum ?n))
+				; a row size
+				(MNum ?k)
+				; b row size
+				(MNum ?n)
+				; c row size
+				(MNum ?n)
+				; k loops
+				?k_loops
 			)
-			(Loop ?loop_a_nouter ?n_div_8)
-			(MMul (MVar "z") (MNum 8))
+			(Loop ?loop_a_ntile (MNum 4))
+			(MNum 0)
 		)
-		(Loop ?loop_a_mouter ?m_div_8)
-		(MMul (MMul (MVar "z") (MNum 8)) (MNum ?n))
+		(Loop ?loop_a_mtile (MNum 8))
+		(MNum 0)
 	)
 	:ruleset ir
 )

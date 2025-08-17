@@ -51,7 +51,7 @@ fn main() {
             &mut graph,
         );
         b = loop_in(b, 8, Expression::from('z') * N, "k_inner", &mut graph);
-        let mut acc_orig = graph.add_node(GraphTerm::GMEM {
+        let acc_orig = graph.add_node(GraphTerm::GMEM {
             label: "acc".to_string(),
         });
         let mut acc = loop_in(acc_orig, M / 8, 0, "m_outer", &mut graph);
@@ -74,8 +74,8 @@ fn main() {
         );
 
         let mut out = binary(
+            binary(a, b, GraphTerm::Mul, &mut graph),
             acc,
-            binary(b, a, GraphTerm::Mul, &mut graph),
             GraphTerm::Add,
             &mut graph,
         );
@@ -106,7 +106,11 @@ fn main() {
         );
 
         let egraph = build_search_space(&graph, 3);
-        let inputs = make_test_inputs(&graph, &FxHashMap::default());
+        let inputs = make_test_inputs(
+            &graph,
+            &FxHashMap::default(),
+            &[("acc".to_string(), vec![0.0])],
+        );
         let out_graph = search(
             &egraph,
             &inputs,
@@ -132,15 +136,12 @@ fn main() {
                     }
             })
             .unwrap();
-        acc_orig = out_graph
-            .node_indices()
-            .find(|i| {
-                *out_graph.node_weight(*i).unwrap()
-                    == GraphTerm::GMEM {
-                        label: "acc".to_string(),
-                    }
-            })
-            .unwrap();
+        let acc_orig = out_graph.node_indices().find(|i| {
+            *out_graph.node_weight(*i).unwrap()
+                == GraphTerm::GMEM {
+                    label: "acc".to_string(),
+                }
+        }); // there may be no acc here anymore
         out = out_graph.externals(Direction::Outgoing).next().unwrap();
 
         let (kernels, gmem_mapping) = codegen(
@@ -164,7 +165,9 @@ fn main() {
         let mut inputs = FxHashMap::default();
         inputs.insert(gmem_mapping[&a_orig], (a_buffer, false));
         inputs.insert(gmem_mapping[&b_orig], (b_buffer, false));
-        inputs.insert(gmem_mapping[&acc_orig], (acc_buffer, false));
+        if let Some(acc_orig) = acc_orig {
+            inputs.insert(gmem_mapping[&acc_orig], (acc_buffer, false));
+        }
 
         let (outputs, _) = run_graph(
             &mut inputs,
@@ -174,7 +177,6 @@ fn main() {
             &int_buffers,
             &int_buffer_map,
         );
-        println!("{}", print_kernels(&kernels));
         println!("{:?}", &copy_metal_buffer_back(&outputs[0])[..10]);
     });
     expression_cleanup();

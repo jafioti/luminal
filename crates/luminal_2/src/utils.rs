@@ -3,6 +3,7 @@
 use std::{collections::HashMap, io::Write};
 
 use egglog::{EGraph, Error, Term, prelude::exprs::var};
+use itertools::Itertools;
 use luminal::{
     prelude::{
         NodeIndex,
@@ -11,7 +12,7 @@ use luminal::{
             algo::toposort,
             dot::{Config, Dot},
             prelude::StableGraph,
-            visit::Topo,
+            visit::{EdgeRef, Topo},
         },
     },
     shape::Expression,
@@ -369,25 +370,51 @@ pub fn build_search_space(
 }
 
 fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>, prefix: &str) -> (String, String) {
-    // 1.  Topo-order so operands are rendered before users
-    let mut topo = Topo::new(&graph);
+    use std::cmp::Reverse;
+    use std::collections::{BinaryHeap, HashMap};
 
-    // 2.  Map <node-id> → <egglog var name>
+    // 1. Topo-order with tie-break: lower NodeIndex first
+    let mut indeg: HashMap<NodeIndex, usize> = graph
+        .node_indices()
+        .map(|n| (n, graph.neighbors_directed(n, Direction::Incoming).count()))
+        .collect();
+
+    let mut ready: BinaryHeap<(Reverse<usize>, NodeIndex)> = BinaryHeap::new();
+    for (n, &d) in &indeg {
+        if d == 0 {
+            ready.push((Reverse(n.index()), *n));
+        }
+    }
+
+    let mut topo_order: Vec<NodeIndex> = Vec::with_capacity(indeg.len());
+    while let Some((_, n)) = ready.pop() {
+        topo_order.push(n);
+        for succ in graph.neighbors_directed(n, Direction::Outgoing) {
+            let e = indeg.get_mut(&succ).unwrap();
+            *e -= 1;
+            if *e == 0 {
+                ready.push((Reverse(succ.index()), succ));
+            }
+        }
+    }
+
+    // 2. Map <node-id> → <egglog var name>
     let mut names: HashMap<NodeIndex, String> = HashMap::new();
     let mut next_id = 0usize;
     let mut out = String::new();
 
-    // helper to fetch operand text (there are up-edges from user → operand)
+    // helper to fetch operand text (sort lower-id edges first)
     let operand = |n: NodeIndex,
                    names: &HashMap<NodeIndex, String>,
                    g: &StableGraph<GraphTerm, (), Directed>|
      -> Vec<String> {
-        g.neighbors_directed(n, Direction::Incoming)
-            .map(|child| names[&child].clone())
+        g.edges_directed(n, Direction::Incoming)
+            .sorted_by_key(|e| e.id())
+            .map(|e| names[&e.source()].clone())
             .collect()
     };
 
-    while let Some(n) = topo.next(&graph) {
+    for n in topo_order {
         let var = format!("{prefix}{next_id}");
         next_id += 1;
         let code = match &graph[n] {

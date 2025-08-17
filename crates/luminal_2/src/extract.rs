@@ -237,7 +237,7 @@ pub fn search(
     // Now we have DFS trajectories
     let mut ref_outputs: Vec<Vec<f32>> = vec![];
     let mut best_time = u128::MAX;
-    let mut shortest = "".to_string();
+    let mut fastest = "".to_string();
     let mut best_graph = None;
     let mut valid_graphs = 0;
     let total_trajectories = trajectories.len().min(MAX_SEARCHED_GRAPHS);
@@ -252,14 +252,19 @@ pub fn search(
     {
         // Build termdag
         let graph = extraction_to_graph(egraph, &trajectory);
-        // convert inputs to reference nodes in graph
-        let inputs = inputs.into_iter().map(|(l, d)| (graph.node_indices().find(|n| matches!(graph.node_weight(*n).unwrap(), GraphTerm::GMEM { label } if label == l)).unwrap(), d.clone())).collect_vec();
         let root = graph.externals(Direction::Outgoing).next().unwrap();
         let Some((kernels, gmem_mapping)) =
             crate::codegen::codegen(graph.clone(), vec![root], arch.clone(), 0, dyn_vars, false)
         else {
             continue;
         };
+        // convert inputs to reference nodes in graph
+        let inputs = inputs.into_iter().filter_map(|(l, d)| graph.node_indices().find(|n| matches!(graph.node_weight(*n).unwrap(), GraphTerm::GMEM { label } if label == l)).map(|i| {println!("{l}: {i:?}"); (i, d.clone())})).collect_vec();
+        for i in &inputs {
+            if i.1.len() == 1 {
+                println!("INPUT :{:?}", i.1);
+            }
+        }
         match &arch {
             GPUArch::CUDA => {
                 if let Some((_, s, _, _)) = &ui_functions {
@@ -287,7 +292,20 @@ pub fn search(
                             for (x, y) in a.iter().zip(b) {
                                 if (x - y).abs() >= 1e-3 {
                                     if option_env!("DEBUG").is_some() {
-                                        println!("REF: {:?} New: {:?}", ref_outputs, outs);
+                                        println!(
+                                            "REF: {:?}",
+                                            &ref_outputs
+                                                .iter()
+                                                .map(|v| &v[..v.len().min(20)])
+                                                .collect_vec()
+                                        );
+                                        println!(
+                                            "New: {:?}",
+                                            &outs
+                                                .iter()
+                                                .map(|v| &v[..v.len().min(20)])
+                                                .collect_vec()
+                                        );
                                         // display_graph(&graph, &[]);
                                         println!(
                                             "{} {x} != {y}",
@@ -303,13 +321,13 @@ pub fn search(
                         }
                     }
                     let kernel_string = print_kernels(&kernels);
-                    // if kernel_string.len() < shortest.len() || shortest.is_empty() {
+                    // if kernel_string.len() < fastest.len() || fastest.is_empty() {
 
                     // }
                     if us < best_time {
                         best_time = us;
                         best_graph = Some(graph);
-                        shortest = kernel_string;
+                        fastest = kernel_string;
                     }
                 }
             }
@@ -318,7 +336,7 @@ pub fn search(
     if let Some((_, _, _, e)) = &ui_functions {
         e();
     }
-    println!("SHORTEST ({}ms): {shortest}", best_time / 1000);
+    println!("FASTEST ({}ms): {fastest}", best_time / 1000);
     best_graph
 }
 
@@ -385,6 +403,52 @@ pub fn extraction_to_graph(
                     _ => panic!(),
                 });
                 g.add_edge(child_one, r, ());
+                Ret::Expr(r)
+            }
+
+            "TCMatmul" => {
+                *current += 1;
+                let Ret::Expr(src_a) = recurse(egraph, trajectory, current, g) else {
+                    panic!()
+                };
+                *current += 1;
+                let Ret::Expr(src_b) = recurse(egraph, trajectory, current, g) else {
+                    panic!()
+                };
+                *current += 1;
+                let Ret::Math(a_k_stride) = recurse(egraph, trajectory, current, g) else {
+                    panic!()
+                };
+                *current += 1;
+                let Ret::Math(b_k_stride) = recurse(egraph, trajectory, current, g) else {
+                    panic!()
+                };
+                *current += 1;
+                let Ret::Math(a_inner_stride) = recurse(egraph, trajectory, current, g) else {
+                    panic!()
+                };
+                *current += 1;
+                let Ret::Math(b_inner_stride) = recurse(egraph, trajectory, current, g) else {
+                    panic!()
+                };
+                *current += 1;
+                let Ret::Math(c_inner_stride) = recurse(egraph, trajectory, current, g) else {
+                    panic!()
+                };
+                *current += 1;
+                let Ret::Math(k_outer_loops) = recurse(egraph, trajectory, current, g) else {
+                    panic!()
+                };
+                let r = g.add_node(GraphTerm::TCMatmul {
+                    a_k_stride,
+                    b_k_stride,
+                    a_inner_stride,
+                    b_inner_stride,
+                    c_inner_stride,
+                    k_outer_loops,
+                });
+                g.add_edge(src_a, r, ());
+                g.add_edge(src_b, r, ());
                 Ret::Expr(r)
             }
 
@@ -582,21 +646,27 @@ pub fn copy_metal_buffer_back(v: &Buffer) -> Vec<f32> {
 pub fn make_test_inputs(
     graph: &StableGraph<GraphTerm, ()>,
     dyn_map: &FxHashMap<char, usize>,
+    inits: &[(String, Vec<f32>)],
 ) -> Vec<(String, Vec<f32>)> {
     // Go through each GMEM and work out the size
     let mut inputs = vec![];
     let mut rng = rng();
     for node in graph.externals(Direction::Incoming) {
         if let GraphTerm::GMEM { label } = graph.node_weight(node).unwrap() {
+            if let Some(init) = inits.iter().find(|(n, v)| n == label) {
+                inputs.push(init.clone());
+                continue;
+            }
             // Walk down the loopins to find the max size
-            let mut size = Expression::from(0);
+            let mut size = Expression::from(1);
             let mut curr = graph
                 .neighbors_directed(node, Direction::Outgoing)
                 .next()
                 .unwrap();
             loop {
                 if let GraphTerm::LoopIn { range, stride, .. } = graph.node_weight(curr).unwrap() {
-                    size = size.max(stride.substitute('z', *range - 1) + 1);
+                    size = size.max(stride.substitute('z', *range));
+                    // size = size.max(stride.substitute('z', *range - 1) + 1); // why were we doing this?
                     curr = graph
                         .neighbors_directed(curr, Direction::Outgoing)
                         .next()
