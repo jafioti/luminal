@@ -27,7 +27,7 @@ fn main() {
         // model.weight.set(weight.clone());
         // Make an input tensor
         let mut rng = rng();
-        let (m, k, n) = (512, 512, 512);
+        let (m, k, n) = (64, 64, 64);
         let a_data = (0..(m * k)).map(|_| rng.random()).collect_vec();
         let b_data = (0..(k * n)).map(|_| rng.random()).collect_vec();
         let a = cx.named_tensor("A", (m, k)).set(a_data.clone());

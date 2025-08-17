@@ -189,6 +189,16 @@ impl TermToString for GraphTerm {
             GraphTerm::Sqrt => "Sqrt".to_string(),
             GraphTerm::Mod => "Mod".to_string(),
             GraphTerm::LessThan => "LessThan".to_string(),
+            GraphTerm::TCMatmul {
+                a_k_stride,
+                b_k_stride,
+                a_inner_stride,
+                b_inner_stride,
+                c_inner_stride,
+                k_outer_loops,
+            } => format!(
+                "TCMatmul ({a_k_stride}, {b_k_stride}, {a_inner_stride}, {b_inner_stride}, {c_inner_stride}, {k_outer_loops})"
+            ),
             GraphTerm::LoopIn {
                 range,
                 stride,
@@ -412,6 +422,27 @@ fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>, prefix: &str) -> 
                     "(LoopOut {body} (Loop \"{marker}\" {}) {})",
                     range.to_egglog(),
                     stride.to_egglog()
+                )
+            }
+            GraphTerm::TCMatmul {
+                a_k_stride,
+                b_k_stride,
+                a_inner_stride,
+                b_inner_stride,
+                c_inner_stride,
+                k_outer_loops,
+            } => {
+                let [ref a, ref b] = operand(n, &names, &graph)[..] else {
+                    panic!("LoopOut expects 1 child");
+                };
+                format!(
+                    "(TCMatmul {a} {b} {} {} {} {} {} {})",
+                    a_k_stride.to_egglog(),
+                    b_k_stride.to_egglog(),
+                    a_inner_stride.to_egglog(),
+                    b_inner_stride.to_egglog(),
+                    c_inner_stride.to_egglog(),
+                    k_outer_loops.to_egglog()
                 )
             }
             GraphTerm::Custom(_) => "(Custom)".into(),

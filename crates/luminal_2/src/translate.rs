@@ -51,29 +51,28 @@ pub fn translate_graph_meta(
     let mut pending_in_edges: Vec<(NodeIndex, NodeIndex, NodeIndex)> = vec![];
 
     // finalize current slice into the meta-graph and return its meta node
-    let mut finalize_current_slice =
-        |meta: &mut MetaGraph,
-         g: &mut SubGraph,
-         old_to_new: &mut FxHashMap<NodeIndex, NodeIndex>,
-         pending_in_edges: &mut Vec<(NodeIndex, NodeIndex, NodeIndex)>,
-         global_map: &mut FxHashMap<NodeIndex, (NodeIndex, NodeIndex)>|
-         -> NodeIndex {
-            // move inner graph into meta node
-            let meta_node = meta.add_node(std::mem::take(g));
+    let finalize_current_slice = |meta: &mut MetaGraph,
+                                  g: &mut SubGraph,
+                                  old_to_new: &mut FxHashMap<NodeIndex, NodeIndex>,
+                                  pending_in_edges: &mut Vec<(NodeIndex, NodeIndex, NodeIndex)>,
+                                  global_map: &mut FxHashMap<NodeIndex, (NodeIndex, NodeIndex)>|
+     -> NodeIndex {
+        // move inner graph into meta node
+        let meta_node = meta.add_node(std::mem::take(g));
 
-            // wire all deferred inbound edges to this meta node
-            for (src_meta, src_inner, dst_inner) in pending_in_edges.drain(..) {
-                meta.add_edge(src_meta, meta_node, (src_inner, dst_inner));
-            }
+        // wire all deferred inbound edges to this meta node
+        for (src_meta, src_inner, dst_inner) in pending_in_edges.drain(..) {
+            meta.add_edge(src_meta, meta_node, (src_inner, dst_inner));
+        }
 
-            // publish inits and global mapping for nodes in the slice we just sealed
-            for (old, inner) in old_to_new.drain() {
-                global_map.insert(old, (meta_node, inner));
-            }
+        // publish inits and global mapping for nodes in the slice we just sealed
+        for (old, inner) in old_to_new.drain() {
+            global_map.insert(old, (meta_node, inner));
+        }
 
-            // clear per-slice maps (node_map cleared by caller if needed)
-            meta_node
-        };
+        // clear per-slice maps (node_map cleared by caller if needed)
+        meta_node
+    };
 
     for old_node in toposort(&graph.graph, None).unwrap() {
         let node_weight = graph.node_weight(old_node).unwrap();

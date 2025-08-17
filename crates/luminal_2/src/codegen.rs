@@ -19,7 +19,7 @@ use crate::{
 };
 
 pub const GRID_DIMS: usize = 2;
-pub const THREADBLOCK_DIMS: usize = 1;
+pub const THREADBLOCK_DIMS: usize = 2;
 pub const MAX_THREADBLOCK_SIZE: usize = 1024; // this is max on mac
 pub const MAX_GRID_X: usize = 2147483647;
 pub const MAX_GRID_YZ: usize = 65535;
@@ -893,6 +893,56 @@ fn make_kernel(
                     "{spacing}float {} = {expr};",
                     var_to_char(*prev_max_var)
                 ));
+            }
+            GraphTerm::TCMatmul {
+                a_k_stride,
+                b_k_stride,
+                a_inner_stride,
+                b_inner_stride,
+                c_inner_stride,
+                k_outer_loops,
+            } => {
+                let mut srcs = kernel_graph.neighbors_directed(node, Direction::Incoming);
+                let (src_a, src_a_ptr) = node_to_var[&srcs.next().unwrap()];
+                let (src_b, src_b_ptr) = node_to_var[&srcs.next().unwrap()];
+                let dest = kernel_graph
+                    .neighbors_directed(node, Direction::Outgoing)
+                    .next()
+                    .unwrap();
+                let (dest, dest_ptr) = node_to_var[&dest];
+                assert!(src_a_ptr && src_b_ptr && dest_ptr);
+                kernel_lines.push(
+                    format!(
+                        "
+// TensorCore loop
+simdgroup_float8x8 acc = simdgroup_float8x8(0);
+for (uint tc_loop = 0; tc_loop < {}; ++tc_loop) {{
+    threadgroup_barrier(mem_flags::mem_threadgroup); // For some reason this speeds it up
+
+    // Load sources into simdgroup matricies
+    simdgroup_float8x8 simdA;
+    simdgroup_load(simdA, {} + {}, {});
+    simdgroup_float8x8 simdB;
+    simdgroup_load(simdB, {} + {}, {});
+
+    simdgroup_multiply_accumulate(acc, simdA, simdB, acc);
+}}
+simdgroup_store(acc, {}, {});",
+                        k_outer_loops.to_kernel(),
+                        var_to_char(src_a),
+                        a_k_stride.to_kernel().replace("const_z", "tc_loop"),
+                        a_inner_stride.substitute('z', 1).to_kernel(),
+                        var_to_char(src_b),
+                        b_k_stride.to_kernel().replace("const_z", "tc_loop"),
+                        b_inner_stride.substitute('z', 1).to_kernel(),
+                        var_to_char(dest),
+                        c_inner_stride.substitute('z', 1).to_kernel()
+                    )
+                    .split("\n")
+                    .map(|s| format!("{spacing}\t{s}"))
+                    .join("\n"),
+                );
+                node_to_var.insert(node, (dest, true));
             }
         }
     }

@@ -80,6 +80,14 @@ pub enum GraphTerm {
     Custom(Kernel),
     Diff(String), // Diff a buffer
     Break,
+    TCMatmul {
+        a_k_stride: Expression,
+        b_k_stride: Expression,
+        a_inner_stride: Expression,
+        b_inner_stride: Expression,
+        c_inner_stride: Expression,
+        k_outer_loops: Expression,
+    },
 }
 
 #[derive(Debug)]

@@ -3,7 +3,7 @@ use crate::{
     codegen::{codegen, stitch_meta_graph_together},
     extract::{make_test_inputs, search},
     translate::{InitData, OptimalGraphNodeIndex, SubGraphNodeIndex, translate_graph_meta},
-    utils::{build_search_space, print_kernels},
+    utils::build_search_space,
 };
 use itertools::Itertools;
 use luminal::{
