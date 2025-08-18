@@ -1521,3 +1521,90 @@ pub fn stitch_meta_graph_together(
 
     (out, map, new_outputs)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{GraphTerm, GPUArch, Kernel, translate::SubGraph};
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_var_to_char() {
+        assert_eq!(var_to_char(0), "a");
+        assert_eq!(var_to_char(25), "z");
+        assert_eq!(var_to_char(26), "ba");
+        assert_eq!(var_to_char(27), "bb");
+    }
+
+    #[test]
+    fn test_max_constants() {
+        assert_eq!(MAX_THREADBLOCK_SIZE, 1024);
+        assert_eq!(MAX_GRID_X, 2147483647);
+        assert_eq!(MAX_GRID_YZ, 65535);
+        assert_eq!(GRID_DIMS, 2);
+        assert_eq!(THREADBLOCK_DIMS, 1);
+    }
+
+    #[test]
+    fn test_toposort_subset_empty() {
+        let graph: StableGraph<GraphTerm, (), Directed> = StableGraph::new();
+        let subset = std::collections::HashSet::new();
+        let result = toposort_subset(&graph, &subset);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_toposort_subset_single_node() {
+        let mut graph: StableGraph<GraphTerm, (), Directed> = StableGraph::new();
+        let node = graph.add_node(GraphTerm::GMEM { label: "test".to_string() });
+        let mut subset = std::collections::HashSet::new();
+        subset.insert(node);
+        
+        let result = toposort_subset(&graph, &subset);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], node);
+    }
+
+    #[test]
+    fn test_toposort_subset_linear_chain() {
+        let mut graph: StableGraph<GraphTerm, (), Directed> = StableGraph::new();
+        let node1 = graph.add_node(GraphTerm::GMEM { label: "input".to_string() });
+        let node2 = graph.add_node(GraphTerm::Add);
+        let node3 = graph.add_node(GraphTerm::GMEM { label: "output".to_string() });
+        
+        graph.add_edge(node1, node2, ());
+        graph.add_edge(node2, node3, ());
+        
+        let mut subset = std::collections::HashSet::new();
+        subset.insert(node1);
+        subset.insert(node2);
+        subset.insert(node3);
+        
+        let result = toposort_subset(&graph, &subset);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], node1);
+        assert_eq!(result[1], node2);
+        assert_eq!(result[2], node3);
+    }
+
+    #[test]
+    fn test_metal_arch_creation() {
+        let arch = GPUArch::Metal(HashMap::default());
+        match arch {
+            GPUArch::Metal(_) => {} // Success
+            _ => panic!("Should create Metal arch"),
+        }
+    }
+
+
+
+    #[test]
+    fn test_stitch_meta_graph_empty() {
+        let meta_graph: StableGraph<SubGraph, (NodeIndex, NodeIndex), Directed> = StableGraph::new();
+        let outputs = vec![];
+        let (stitched, map, new_outputs) = stitch_meta_graph_together(meta_graph, outputs);
+        assert_eq!(stitched.node_count(), 0);
+        assert!(map.is_empty());
+        assert!(new_outputs.is_empty());
+    }
+}

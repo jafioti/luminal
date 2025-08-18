@@ -1,14 +1,14 @@
-use luminal::prelude::{
-    petgraph::{Directed, algo::toposort, prelude::StableGraph},
-    *,
-};
-use rustc_hash::FxHashMap;
-
 use crate::{
     CompatKernel, Diff, GraphTerm,
     codegen::{GRID_DIMS, THREADBLOCK_DIMS},
     utils::{loop_in, loop_out},
 };
+use luminal::prelude::{
+    petgraph::{Directed, algo::toposort, prelude::StableGraph},
+    *,
+};
+use rustc_hash::FxHashMap;
+use std::collections::HashSet;
 
 #[derive(Debug)]
 pub enum InitData {
@@ -24,6 +24,19 @@ pub type OptimalGraphNodeIndex = (NodeIndex);
 
 pub type SubGraph = StableGraph<GraphTerm, (), Directed>;
 pub type MetaGraph = StableGraph<SubGraph, CrossSubGraphTensorIndexes, Directed>;
+
+fn collect_ancestors(graph: &Graph, n: NodeIndex) -> HashSet<NodeIndex> {
+    let mut seen = HashSet::new();
+    let mut stack = vec![n];
+    while let Some(cur) = stack.pop() {
+        for (src, _out, _shape) in graph.get_sources(cur) {
+            if seen.insert(src) {
+                stack.push(src);
+            }
+        }
+    }
+    seen
+}
 
 pub fn translate_graph_meta(
     graph: &Graph,
@@ -100,7 +113,8 @@ pub fn translate_graph_meta(
                 );
 
                 // 3) start fresh slice; create placeholder fed by the producer
-                orig_to_subgraph_node_map.clear();
+                let ancestors = collect_ancestors(graph, old_node);
+                orig_to_subgraph_node_map.retain(|(orig, _out), _| !ancestors.contains(orig));
                 simplify_cache = FxHashMap::default();
 
                 let placeholder = g.add_node(GraphTerm::GMEM {
@@ -307,7 +321,7 @@ pub fn translate_graph_meta(
                     let newn = g.add_node(GraphTerm::GMEM {
                         label: op.to_string(),
                     });
-                    println!("LOAD: {:?} | {:?}", old_node, newn);
+                    // println!("LOAD: {:?} | {:?}", old_node, newn);
                     orig_to_subgraph_node_map.insert((old_node, 0), newn);
                     key_to_subgraph_buffer.insert(old_node, newn);
                 }
@@ -508,4 +522,487 @@ fn scope_out(
         src = loop_out(src, range, stride, loop_name, graph);
     }
     src
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use luminal::op::*;
+    use luminal::prelude::*;
+    use rustc_hash::FxHashMap;
+
+    fn create_test_graph() -> Graph {
+        let mut cx = Graph::new();
+
+        // Create some basic tensors for testing
+        let a = cx.tensor((2, 3)).set([[1., 2., 3.], [4., 5., 6.]]);
+        let b = cx.tensor((2, 3)).set([[7., 8., 9.], [10., 11., 12.]]);
+
+        // Add some operations that will be translated
+        let _c = (a + b).retrieve();
+
+        cx
+    }
+
+    #[test]
+    fn test_node_indexes_consistency() {
+        let cx = create_test_graph();
+        let (meta_graph, global_map, _inits) = translate_graph_meta(&cx);
+
+        // Test that all original nodes are mapped to (meta_node, sub_node) pairs
+        for orig_node in cx.graph.node_indices() {
+            assert!(
+                global_map.contains_key(&orig_node),
+                "Original node {:?} not found in global mapping",
+                orig_node
+            );
+
+            let (meta_node, sub_node) = global_map[&orig_node];
+
+            // Verify meta node exists in meta graph
+            assert!(
+                meta_graph.node_weight(meta_node).is_some(),
+                "Meta node {:?} not found in meta graph",
+                meta_node
+            );
+
+            // Verify sub node exists in the corresponding subgraph
+            let subgraph = meta_graph.node_weight(meta_node).unwrap();
+            assert!(
+                subgraph.node_weight(sub_node).is_some(),
+                "Sub node {:?} not found in subgraph of meta node {:?}",
+                sub_node,
+                meta_node
+            );
+        }
+    }
+
+    #[test]
+    fn test_unary_sqrt_translation() {
+        let mut cx = Graph::new();
+        let a = cx.tensor(3).set([1., 4., 9.]);
+        let _b = a.sqrt().retrieve();
+
+        let (meta_graph, global_map, _inits) = translate_graph_meta(&cx);
+
+        // Find the sqrt operation in the translated graph
+        let mut found_sqrt = false;
+        for meta_node_idx in meta_graph.node_indices() {
+            let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
+            for sub_node_idx in subgraph.node_indices() {
+                if let Some(GraphTerm::Sqrt) = subgraph.node_weight(sub_node_idx) {
+                    found_sqrt = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(found_sqrt, "Sqrt operation not found in translated graph");
+    }
+
+    #[test]
+    fn test_unary_exp2_translation() {
+        let mut cx = Graph::new();
+        let a = cx.tensor(3).set([1., 2., 3.]);
+        let _b = a.exp2().retrieve();
+
+        let (meta_graph, _global_map, _inits) = translate_graph_meta(&cx);
+
+        let mut found_exp2 = false;
+        for meta_node_idx in meta_graph.node_indices() {
+            let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
+            for sub_node_idx in subgraph.node_indices() {
+                if let Some(GraphTerm::Exp2) = subgraph.node_weight(sub_node_idx) {
+                    found_exp2 = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(found_exp2, "Exp2 operation not found in translated graph");
+    }
+
+    #[test]
+    fn test_unary_log2_translation() {
+        let mut cx = Graph::new();
+        let a = cx.tensor(3).set([1., 2., 4.]);
+        let _b = a.log2().retrieve();
+
+        let (meta_graph, _global_map, _inits) = translate_graph_meta(&cx);
+
+        let mut found_log2 = false;
+        for meta_node_idx in meta_graph.node_indices() {
+            let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
+            for sub_node_idx in subgraph.node_indices() {
+                if let Some(GraphTerm::Log2) = subgraph.node_weight(sub_node_idx) {
+                    found_log2 = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(found_log2, "Log2 operation not found in translated graph");
+    }
+
+    #[test]
+    fn test_unary_sin_translation() {
+        let mut cx = Graph::new();
+        let a = cx.tensor(3).set([0., 1.5708, 3.14159]);
+        let _b = a.sin().retrieve();
+
+        let (meta_graph, _global_map, _inits) = translate_graph_meta(&cx);
+
+        let mut found_sin = false;
+        for meta_node_idx in meta_graph.node_indices() {
+            let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
+            for sub_node_idx in subgraph.node_indices() {
+                if let Some(GraphTerm::Sin) = subgraph.node_weight(sub_node_idx) {
+                    found_sin = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(found_sin, "Sin operation not found in translated graph");
+    }
+
+    #[test]
+    fn test_unary_recip_translation() {
+        let mut cx = Graph::new();
+        let a = cx.tensor(3).set([1., 2., 4.]);
+        let _b = a.reciprocal().retrieve();
+
+        let (meta_graph, _global_map, _inits) = translate_graph_meta(&cx);
+
+        let mut found_recip = false;
+        for meta_node_idx in meta_graph.node_indices() {
+            let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
+            for sub_node_idx in subgraph.node_indices() {
+                if let Some(GraphTerm::Recip) = subgraph.node_weight(sub_node_idx) {
+                    found_recip = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(found_recip, "Recip operation not found in translated graph");
+    }
+
+    #[test]
+    fn test_unary_contiguous_translation() {
+        let mut cx = Graph::new();
+        let a = cx.tensor((2, 3)).set([[1., 2., 3.], [4., 5., 6.]]);
+        let _b = a.permute((1, 0)).contiguous().retrieve();
+
+        let (_meta_graph, global_map, _inits) = translate_graph_meta(&cx);
+
+        // Contiguous should be handled correctly in the translation
+        // It doesn't create a new GraphTerm but passes through the base node
+        assert!(
+            !global_map.is_empty(),
+            "Global map should not be empty after contiguous operation"
+        );
+    }
+
+    #[test]
+    fn test_binary_add_translation() {
+        let mut cx = Graph::new();
+        let a = cx.tensor(3).set([1., 2., 3.]);
+        let b = cx.tensor(3).set([4., 5., 6.]);
+        let _c = (a + b).retrieve();
+
+        let (meta_graph, _global_map, _inits) = translate_graph_meta(&cx);
+
+        let mut found_add = false;
+        for meta_node_idx in meta_graph.node_indices() {
+            let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
+            for sub_node_idx in subgraph.node_indices() {
+                if let Some(GraphTerm::Add) = subgraph.node_weight(sub_node_idx) {
+                    found_add = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(found_add, "Add operation not found in translated graph");
+    }
+
+    #[test]
+    fn test_binary_mul_translation() {
+        let mut cx = Graph::new();
+        let a = cx.tensor(3).set([1., 2., 3.]);
+        let b = cx.tensor(3).set([4., 5., 6.]);
+        let _c = (a * b).retrieve();
+
+        let (meta_graph, _global_map, _inits) = translate_graph_meta(&cx);
+
+        let mut found_mul = false;
+        for meta_node_idx in meta_graph.node_indices() {
+            let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
+            for sub_node_idx in subgraph.node_indices() {
+                if let Some(GraphTerm::Mul) = subgraph.node_weight(sub_node_idx) {
+                    found_mul = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(found_mul, "Mul operation not found in translated graph");
+    }
+
+    #[test]
+    fn test_binary_mod_translation() {
+        let mut cx = Graph::new();
+        let a = cx.tensor(3).set([5., 7., 9.]);
+        let b = cx.tensor(3).set([2., 3., 4.]);
+        let _c = (a % b).retrieve();
+
+        let (meta_graph, _global_map, _inits) = translate_graph_meta(&cx);
+
+        let mut found_mod = false;
+        for meta_node_idx in meta_graph.node_indices() {
+            let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
+            for sub_node_idx in subgraph.node_indices() {
+                if let Some(GraphTerm::Mod) = subgraph.node_weight(sub_node_idx) {
+                    found_mod = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(found_mod, "Mod operation not found in translated graph");
+    }
+
+    #[test]
+    fn test_binary_less_than_translation() {
+        let mut cx = Graph::new();
+        let a = cx.tensor(3).set([1., 5., 3.]);
+        let b = cx.tensor(3).set([2., 4., 6.]);
+        let _c = a.gt(b).retrieve();
+
+        let (meta_graph, _global_map, _inits) = translate_graph_meta(&cx);
+
+        let mut found_less_than = false;
+        for meta_node_idx in meta_graph.node_indices() {
+            let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
+            for sub_node_idx in subgraph.node_indices() {
+                if let Some(GraphTerm::LessThan) = subgraph.node_weight(sub_node_idx) {
+                    found_less_than = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(
+            found_less_than,
+            "LessThan operation not found in translated graph"
+        );
+    }
+
+    #[test]
+    fn test_sum_reduce_translation() {
+        let mut cx = Graph::new();
+        let a = cx.tensor((2, 3)).set([[1., 2., 3.], [4., 5., 6.]]);
+        let _b = a.sum(1).retrieve();
+
+        let (meta_graph, _global_map, _inits) = translate_graph_meta(&cx);
+
+        // Sum reduction should create Add nodes in the translated graph
+        let mut found_reduce_add = false;
+        for meta_node_idx in meta_graph.node_indices() {
+            let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
+            for sub_node_idx in subgraph.node_indices() {
+                if let Some(GraphTerm::Add) = subgraph.node_weight(sub_node_idx) {
+                    // Check if this Add node has the structure of a reduction
+                    // (should have LoopIn nodes feeding into it)
+                    let predecessors: Vec<_> = subgraph
+                        .neighbors_directed(sub_node_idx, petgraph::Direction::Incoming)
+                        .collect();
+                    if predecessors.len() == 2 {
+                        found_reduce_add = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        assert!(found_reduce_add, "Sum reduction not properly translated");
+
+        // Check that init data was created for the accumulator
+        assert!(
+            !_inits.is_empty(),
+            "No init data created for reduction accumulator"
+        );
+    }
+
+    #[test]
+    fn test_max_reduce_translation() {
+        let mut cx = Graph::new();
+        let a = cx.tensor((2, 3)).set([[1., 2., 3.], [4., 5., 6.]]);
+        let _b = a.max(1).retrieve();
+
+        let (meta_graph, _global_map, _inits) = translate_graph_meta(&cx);
+
+        // Max reduction should create Max nodes in the translated graph
+        let mut found_reduce_max = false;
+        for meta_node_idx in meta_graph.node_indices() {
+            let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
+            for sub_node_idx in subgraph.node_indices() {
+                if let Some(GraphTerm::Max) = subgraph.node_weight(sub_node_idx) {
+                    let predecessors: Vec<_> = subgraph
+                        .neighbors_directed(sub_node_idx, petgraph::Direction::Incoming)
+                        .collect();
+                    if predecessors.len() == 2 {
+                        found_reduce_max = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        assert!(found_reduce_max, "Max reduction not properly translated");
+
+        // Check that init data was created with NEG_INFINITY
+        let has_neg_inf_init = _inits.iter().any(|(_, init_data)| {
+            matches!(init_data, InitData::Data(data) if !data.is_empty() && data[0] == f32::NEG_INFINITY)
+        });
+        assert!(
+            has_neg_inf_init,
+            "NEG_INFINITY init data not found for max reduction"
+        );
+    }
+
+    #[test]
+    fn test_constant_translation() {
+        let mut cx = Graph::new();
+        let a = cx.constant(5.0);
+        let _b = a.retrieve();
+
+        let (meta_graph, global_map, inits) = translate_graph_meta(&cx);
+
+        // Constants should be translated to GMEM nodes with appropriate init data
+        let mut found_constant_gmem = false;
+        for meta_node_idx in meta_graph.node_indices() {
+            let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
+            for sub_node_idx in subgraph.node_indices() {
+                if let Some(GraphTerm::GMEM { label }) = subgraph.node_weight(sub_node_idx) {
+                    if label.contains("Constant(5.0)") {
+                        found_constant_gmem = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        assert!(found_constant_gmem, "Constant not translated to GMEM node");
+        assert!(!inits.is_empty(), "No init data created for constant");
+
+        // Check that init data contains the constant value
+        let has_constant_init = inits.iter().any(|(_, init_data)| {
+            matches!(init_data, InitData::Data(data) if !data.is_empty() && data[0] == 5.0)
+        });
+        assert!(has_constant_init, "Constant value not found in init data");
+    }
+
+    #[test]
+    fn test_graph_break_translation() {
+        let mut cx = Graph::new();
+        let a = cx.tensor(3).set([1., 2., 3.]);
+        let b = cx.tensor(3).set([1., 2., 3.]);
+        let c = (a + b).graph_break();
+        let d = c * 10.0;
+        cx.execute_debug();
+
+        let (meta_graph, global_map, _inits) = translate_graph_meta(&cx);
+
+        // Graph break should create multiple meta nodes
+        assert!(
+            meta_graph.node_count() >= 2,
+            "GraphBreak should create multiple meta nodes, found {}",
+            meta_graph.node_count()
+        );
+
+        // There should be edges between meta nodes due to the break
+        assert!(
+            meta_graph.edge_count() > 0,
+            "GraphBreak should create edges between meta nodes"
+        );
+
+        // Check that the break node created a placeholder GMEM node
+        let mut found_break_placeholder = false;
+        for meta_node_idx in meta_graph.node_indices() {
+            let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
+            for sub_node_idx in subgraph.node_indices() {
+                if let Some(GraphTerm::GMEM { label }) = subgraph.node_weight(sub_node_idx) {
+                    if label.starts_with("break_") {
+                        found_break_placeholder = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        assert!(found_break_placeholder, "GraphBreak placeholder not found");
+    }
+
+    #[test]
+    fn test_complex_graph_node_mapping() {
+        let mut cx = Graph::new();
+        let a = cx.tensor(3).set([1., 2., 3.]);
+        let b = cx.tensor(3).set([4., 5., 6.]);
+        let c = (a + b).sqrt();
+        let d = c * a;
+        let _e = d.sum(0).retrieve();
+
+        let (meta_graph, global_map, _inits) = translate_graph_meta(&cx);
+
+        // Verify all original nodes are mapped
+        for orig_node in cx.graph.node_indices() {
+            assert!(
+                global_map.contains_key(&orig_node),
+                "Original node {:?} missing from global mapping",
+                orig_node
+            );
+        }
+
+        // Verify meta graph structure makes sense
+        assert!(meta_graph.node_count() > 0, "Meta graph should have nodes");
+
+        // Verify each subgraph has reasonable structure
+        for meta_node_idx in meta_graph.node_indices() {
+            let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
+            assert!(subgraph.node_count() > 0, "Each subgraph should have nodes");
+        }
+    }
+
+    #[test]
+    fn test_scope_in_out_structure() {
+        let mut cx = Graph::new();
+        let a = cx.tensor((2, 3)).set([[1., 2., 3.], [4., 5., 6.]]);
+        let b = cx.tensor((2, 3)).set([[7., 8., 9.], [10., 11., 12.]]);
+        let _c = (a + b).retrieve();
+
+        let (meta_graph, _global_map, _inits) = translate_graph_meta(&cx);
+
+        // Check that LoopIn and LoopOut nodes are created properly
+        let mut found_loop_in = false;
+        let mut found_loop_out = false;
+
+        for meta_node_idx in meta_graph.node_indices() {
+            let subgraph = meta_graph.node_weight(meta_node_idx).unwrap();
+            for sub_node_idx in subgraph.node_indices() {
+                match subgraph.node_weight(sub_node_idx) {
+                    Some(GraphTerm::LoopIn { .. }) => found_loop_in = true,
+                    Some(GraphTerm::LoopOut { .. }) => found_loop_out = true,
+                    _ => {}
+                }
+            }
+        }
+
+        assert!(found_loop_in, "LoopIn nodes should be created for scoping");
+        assert!(
+            found_loop_out,
+            "LoopOut nodes should be created for scoping"
+        );
+    }
 }
