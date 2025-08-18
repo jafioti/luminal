@@ -3,7 +3,7 @@ use std::usize;
 
 use crate::Kernel;
 use crate::run::{assign_buffers, compile_kernels, run_graph};
-use crate::utils::print_kernels;
+use crate::utils::{display_graph, print_kernels};
 use crate::{GPUArch, GraphTerm};
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
@@ -138,6 +138,7 @@ pub fn search(
                 // Add combined trajectories
                 trajectories.extend(enode_trajectories);
             }
+            println!("total: {}", trajectories.len() * waiting);
             if trajectories.len() * waiting > MAX_SEARCHED_GRAPHS {
                 break; // Only pick the first valid (non cycling) enode for expressions
             }
@@ -276,6 +277,7 @@ pub fn search(
             }
             GPUArch::Metal(_) => {
                 if let Some((us, outs)) = cost(&kernels, &inputs, &gmem_mapping, dyn_vars) {
+                    // display_graph(&graph, &[]);
                     valid_graphs += 1;
                     if let Some((progress, logs, title, _)) = &ui_functions {
                         progress(((n as f32 / total_trajectories as f32) * 100.0) as u16);

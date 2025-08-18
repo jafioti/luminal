@@ -119,7 +119,7 @@
      	(Binary String IR IR)
 
       	; propogation patterns
-      	(SwapLoops IR String String) ; Swap two loops, identified by their strings
+      	(SwapLoops IR LoopType LoopType) ; Swap two loops, identified by their strings
        	(TileLoop IR String) ; Tile a loop, identified by it's string
         (UnpadLoop IR String) ; Remove a padding loop, identified by it's string
         (MergeLoops IR String String) ; Merge loops, identified by their strings
@@ -265,7 +265,7 @@
 		(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum tileFactor)))
 	)
 	:when ((> ?range tileFactor) (= (% ?range tileFactor) 0))
-	 :ruleset ir
+	:ruleset ir
 )
 (rewrite
 	(TileLoop (LoopIn ?body (Loop ?loop (MNum ?range)) ?stride) ?loop)
@@ -277,7 +277,7 @@
 		(Loop (+ ?loop "_tile") (MNum tileFactor))
 		?stride
 	)
-	 :ruleset ir-prop
+	:ruleset ir-prop
 )
 ; propogation
 (rewrite
@@ -303,19 +303,19 @@
 )
 
 ; Loop merging
-(rewrite
-	(LoopOut
-		(LoopOut ?x
-			(Loop ?i ?rangeI) ?stI
-		)
-		(Loop ?o ?rangeO) ?stO
-	)
-	(LoopOut (MergeLoops ?x ?o ?i)
-		(Loop (+ ?o ?i) (MMul ?rangeO ?rangeI))
-		(MAdd (MReplace ?stO (MVar "z") (MDiv (MVar "z") ?rangeI)) (MReplace ?stI (MVar "z") (MMod (MVar "z") ?rangeI)))
-	)
-	 :ruleset ir
-)
+;(rewrite
+;	(LoopOut
+;		(LoopOut ?x
+;			(Loop ?i ?rangeI) ?stI
+;		)
+;		(Loop ?o ?rangeO) ?stO
+;	)
+;	(LoopOut (MergeLoops ?x ?o ?i)
+;		(Loop (+ ?o ?i) (MMul ?rangeO ?rangeI))
+;		(MAdd (MReplace ?stO (MVar "z") (MDiv (MVar "z") ?rangeI)) (MReplace ?stI (MVar "z") (MMod (MVar "z") ?rangeI)))
+;	)
+;	 :ruleset ir
+;)
 (rewrite
 	(MergeLoops
 		(LoopIn
@@ -396,7 +396,7 @@
 										(MVar "z")
 									)
 									(Loop ?loop_b_kouter ?k_loops)
-									(MMul (MMul (MVar "z") (MNum 8)) (MNum ?n))
+									(MMul (MVar "z") (MNum (* ?n 8)))
 								)
 								(Loop ?loop_b_kinner (MNum 8))
 								(MMul (MVar "z") (MNum ?n))
@@ -459,7 +459,7 @@
 				; a k stride
 				(MMul (MVar "z") (MNum 8))
 				; b k stride
-				(MMul (MMul (MVar "z") (MNum 8)) (MNum ?n))
+				(MMul (MVar "z") (MNum (* ?n 8)))
 				; a row size
 				(MNum ?k)
 				; b row size
@@ -478,80 +478,108 @@
 	:ruleset ir
 )
 
-(let t0 (GMEM "acc"))
-(let t1 (LoopIn t0 (Loop "m_outer" (MNum 8)) (MNum 0)))
-(let t2 (LoopIn t1 (Loop "n_outer" (MNum 8)) (MNum 0)))
-(let t3 (LoopIn t2 (Loop "m_tile" (MNum 8)) (MNum 0)))
-(let t4 (LoopIn t3 (Loop "n_tile" (MNum 8)) (MNum 0)))
-(let t5 (LoopIn t4 (Loop "k_outer" (MNum 8)) (MAccum "a")))
-(let t6 (LoopIn t5 (Loop "k_inner" (MNum 8)) (MAccum "a")))
-(let t7 (GMEM "B"))
-(let t8 (LoopIn t7 (Loop "m_outer" (MNum 8)) (MNum 0)))
-(let t9 (LoopIn t8 (Loop "n_outer" (MNum 8)) (MMul (MVar "z") (MNum 8))))
-(let t10 (LoopIn t9 (Loop "m_tile" (MNum 8)) (MNum 0)))
-(let t11 (LoopIn t10 (Loop "n_tile" (MNum 8)) (MVar "z")))
-(let t12 (LoopIn t11 (Loop "k_outer" (MNum 8)) (MMul (MMul (MVar "z") (MNum 8)) (MNum 64))))
-(let t13 (LoopIn t12 (Loop "k_inner" (MNum 8)) (MMul (MVar "z") (MNum 64))))
-(let t14 (GMEM "A"))
-(let t15 (LoopIn t14 (Loop "m_outer" (MNum 8)) (MMul (MMul (MVar "z") (MNum 64)) (MNum 8))))
-(let t16 (LoopIn t15 (Loop "n_outer" (MNum 8)) (MNum 0)))
-(let t17 (LoopIn t16 (Loop "m_tile" (MNum 8)) (MMul (MVar "z") (MNum 64))))
-(let t18 (LoopIn t17 (Loop "n_tile" (MNum 8)) (MNum 0)))
-(let t19 (LoopIn t18 (Loop "k_outer" (MNum 8)) (MMul (MVar "z") (MNum 8))))
-(let t20 (LoopIn t19 (Loop "k_inner" (MNum 8)) (MVar "z")))
-(let t21 (Mul t20 t13))
-(let t22 (Add t21 t6))
-(let t23 (LoopOut t22 (Loop "k_inner" (MNum 8)) (MAccum "a")))
-(let t24 (LoopOut t23 (Loop "k_outer" (MNum 8)) (MAccum "a")))
-(let t25 (LoopOut t24 (Loop "n_tile" (MNum 8)) (MVar "z")))
-(let t26 (LoopOut t25 (Loop "m_tile" (MNum 8)) (MMul (MVar "z") (MNum 64))))
-(let t27 (LoopOut t26 (Loop "n_outer" (MNum 8)) (MMul (MVar "z") (MNum 8))))
-(let t28 (LoopOut t27 (Loop "m_outer" (MNum 8)) (MMul (MMul (MVar "z") (MNum 8)) (MNum 64))))
-
-(run-schedule
-	(saturate ir-generic)
-	(repeat 3
-		(run ir) ; run ir rules once
-		(repeat 1 ir-prop)
-		(repeat 1 expr)
-	)
-	(saturate ir-generic) ; why is this needed?
+; Swap loops
+(ruleset swap)
+(rewrite
+	(LoopOut (LoopOut ?x ?innerLoop ?innerStride) ?outerLoop ?outerStride)
+	(LoopOut (LoopOut (SwapLoops ?x ?innerLoop ?outerLoop) ?outerLoop ?outerStride) ?innerLoop ?innerStride)
+	:ruleset swap
+)
+(rewrite
+	(SwapLoops (LoopIn (LoopIn ?x ?outerLoop ?outerStride) ?innerLoop ?innerStride) ?innerLoop ?outerLoop)
+	(LoopIn (LoopIn ?x ?innerLoop ?innerStride) ?outerLoop ?outerStride)
+	:ruleset ir-prop
+)
+; propogate
+(rewrite
+	(SwapLoops (LoopOut ?x ?loop ?stride) ?innerLoop ?outerLoop)
+	(LoopOut (SwapLoops ?x ?innerLoop ?outerLoop) ?loop ?stride)
+	:ruleset ir-prop
+)
+(rewrite
+	(SwapLoops (LoopIn ?x ?loop ?stride) ?innerLoop ?outerLoop)
+	(LoopIn (SwapLoops ?x ?innerLoop ?outerLoop) ?loop ?stride)
+	:when ((!= ?loop ?outerLoop))
+	:ruleset ir-prop
+)
+(rewrite
+	(SwapLoops (Binary ?bin ?a ?b) ?innerLoop ?outerLoop)
+	(Binary ?bin (SwapLoops ?a ?innerLoop ?outerLoop) (SwapLoops ?b ?innerLoop ?outerLoop))
+	:ruleset ir-prop
 )
 
-(let at0 (GMEM "acc_0"))
-(let at1 (LoopIn at0 (Loop "0" (MNum 8)) (MNum 0)))
-(let at2 (LoopIn at1 (Loop "1" (MNum 8)) (MNum 0)))
-(let at3 (LoopIn at2 (Loop "-pad2-" (MNum 1)) (MNum 0)))
-(let at4 (LoopIn at3 (Loop "2" (MNum 8)) (MAccum "a")))
-(let at5 (GMEM "A Load"))
-(let at6 (LoopIn at5 (Loop "0" (MNum 8)) (MMul (MNum 8) (MVar "z"))))
-(let at7 (LoopIn at6 (Loop "1" (MNum 8)) (MNum 0)))
-(let padA (LoopIn at7 (Loop "" (MNum 1)) (MNum 0)))
-(let at8 (LoopIn padA (Loop "2" (MNum 8)) (MVar "z")))
-(let at9 (GMEM "B Load"))
-(let at10 (LoopIn at9 (Loop "0" (MNum 8)) (MNum 0)))
-(let at11 (LoopIn at10 (Loop "1" (MNum 8)) (MVar "z")))
-(let padB (LoopIn at11 (Loop "" (MNum 1)) (MNum 0)))
-(let at12 (LoopIn padB (Loop "2" (MNum 8)) (MMul (MNum 8) (MVar "z"))))
-(let at13 (Mul at8 at12))
-(let at14 (LoopOut at13 (Loop "2" (MNum 8)) (MVar "z")))
-(let padOut (LoopOut at14 (Loop "" (MNum 1)) (MNum 0)))
-(let at15 (LoopOut padOut (Loop "1" (MNum 8)) (MMul (MVar "z") (MNum 8))))
-(let at16 (LoopOut at15 (Loop "0" (MNum 8)) (MMul (MVar "z") (MNum 64))))
-(let at17 (LoopIn at16 (Loop "0" (MNum 8)) (MMul (MNum 64) (MVar "z"))))
-(let at18 (LoopIn at17 (Loop "1" (MNum 8)) (MMul (MNum 8) (MVar "z"))))
-(let at19 (LoopIn at18 (Loop "pad2" (MNum 1)) (MNum 0)))
-(let at20 (LoopIn at19 (Loop "2" (MNum 8)) (MVar "z")))
-(let at21 (Add at4 at20))
-(let at22 (LoopOut at21 (Loop "2" (MNum 8)) (MAccum "a")))
-(let at23 (LoopOut at22 (Loop "-pad2-" (MNum 1)) (MVar "z")))
-(let at24 (LoopOut at23 (Loop "1" (MNum 8)) (MVar "z")))
-(let at25 (LoopOut at24 (Loop "0" (MNum 8)) (MMul (MVar "z") (MNum 8))))
+(let t0 (GMEM "A"))
+(let t1 (LoopIn t0 (Loop "m" (MNum 64)) (MMul (MVar "z") (MNum 64))))
+(let t2 (LoopIn t1 (Loop "n" (MNum 64)) (MNum 0)))
+(let t3 (LoopIn t2 (Loop "k" (MNum 64)) (MVar "z")))
+(let t4 (GMEM "B"))
+(let t5 (LoopIn t4 (Loop "m" (MNum 64)) (MNum 0)))
+(let t6 (LoopIn t5 (Loop "n" (MNum 64)) (MVar "z")))
+(let t7 (LoopIn t6 (Loop "k" (MNum 64)) (MMul (MVar "z") (MNum 64))))
+(let t8 (GMEM "acc"))
+(let t9 (LoopIn t8 (Loop "m" (MNum 64)) (MNum 0)))
+(let t10 (LoopIn t9 (Loop "n" (MNum 64)) (MNum 0)))
+(let t11 (LoopIn t10 (Loop "k" (MNum 64)) (MAccum "a")))
+(let t12 (Mul t3 t7))
+(let t13 (Add t12 t11))
+(let t14 (LoopOut t13 (Loop "k" (MNum 64)) (MAccum "a")))
+(let t15 (LoopOut t14 (Loop "n" (MNum 64)) (MVar "z")))
+(let t16 (LoopOut t15 (Loop "m" (MNum 64)) (MMul (MVar "z") (MNum 64))))
 
-;(ruleset a-rule)
-;(rewrite (Loop ?x ?r) (Loop "" ?r) :ruleset a-rule)
-;(rewrite (TileLoop ?x ?l) (TileLoop ?x "") :ruleset a-rule)
-;(rewrite (MergeLoops ?x ?l ?o) (MergeLoops ?x "" "") :ruleset a-rule)
-;(run-schedule (saturate a-rule))
+(run-schedule
+	(run ir-generic)
+	(run ir) ; run ir rules once
+	(repeat 4 swap) ; run swap every other run
+	(repeat 10 ir-prop)
+	(repeat 5 expr)
+	(repeat 5 ir-prop)
+	(repeat 5 expr)
+	(repeat 5 ir-prop)
+	(repeat 5 expr)
+	(repeat 5 ir-prop)
+	(repeat 5 expr)
+	;(run ir)
+	(repeat 1 ir-generic)
+)
 
-;(check (= at25 t25))
+(let a_gmem (GMEM "A"))
+(let a_m_outer (LoopIn a_gmem (Loop "m_outer" (MNum 8)) (MMul (MMul (MVar "z") (MNum 64)) (MNum 8))))
+(let a_n_outer (LoopIn a_m_outer (Loop "n_outer" (MNum 8)) (MNum 0)))
+(let a_m_tile (LoopIn a_n_outer (Loop "m_tile" (MNum 8)) (MMul (MVar "z") (MNum 64))))
+(let a_n_tile (LoopIn a_m_tile (Loop "n_tile" (MNum 8)) (MNum 0)))
+(let a_k_outer (LoopIn a_n_tile (Loop "" (MNum 8)) (MMul (MVar "z") (MNum 8))))
+(let a_k_inner (LoopIn a_k_outer (Loop "" (MNum 8)) (MVar "z")))
+
+(let b_gmem (GMEM "B"))
+(let b_m_outer (LoopIn b_gmem (Loop "m_outer" (MNum 8)) (MNum 0)))
+(let b_n_outer (LoopIn b_m_outer (Loop "n_outer" (MNum 8)) (MMul (MVar "z") (MNum 8))))
+(let b_m_tile (LoopIn b_n_outer (Loop "m_tile" (MNum 8)) (MNum 0)))
+(let b_n_tile (LoopIn b_m_tile (Loop "n_tile" (MNum 8)) (MVar "z")))
+(let b_k_outer (LoopIn b_n_tile (Loop "" (MNum 8)) (MMul (MVar "z") (MNum 512))))
+(let b_k_inner (LoopIn b_k_outer (Loop "" (MNum 8)) (MMul (MVar "z") (MNum 64))))
+
+(let acc_gmem (GMEM "acc"))
+(let acc_m_outer (LoopIn acc_gmem (Loop "m_outer" (MNum 8)) (MNum 0)))
+(let acc_n_outer (LoopIn acc_m_outer (Loop "n_outer" (MNum 8)) (MNum 0)))
+(let acc_m_tile (LoopIn acc_n_outer (Loop "m_tile" (MNum 8)) (MNum 0)))
+(let acc_n_tile (LoopIn acc_m_tile (Loop "n_tile" (MNum 8)) (MNum 0)))
+(let acc_k_outer (LoopIn acc_n_tile (Loop "" (MNum 8)) (MAccum "a")))
+(let acc_k_inner (LoopIn acc_k_outer (Loop "" (MNum 8)) (MAccum "a")))
+
+(let mul_k_outer (Mul a_k_inner b_k_inner))
+(let add_k_outer (Add mul_k_outer acc_k_inner))
+
+(let out_k_inner (LoopOut add_k_outer (Loop "" (MNum 8)) (MAccum "a")))
+(let out_k_outer (LoopOut out_k_inner (Loop "" (MNum 8)) (MAccum "a")))
+(let out_n_tile (LoopOut out_k_outer (Loop "n_tile" (MNum 8)) (MVar "z")))
+(let out_m_tile (LoopOut out_n_tile (Loop "m_tile" (MNum 8)) (MMul (MVar "z") (MNum 64))))
+(let out_n_outer (LoopOut out_m_tile (Loop "n_outer" (MNum 8)) (MMul (MVar "z") (MNum 8))))
+(let out_m_outer (LoopOut out_n_outer (Loop "m_outer" (MNum 8)) (MMul (MMul (MVar "z") (MNum 8)) (MNum 64))))
+
+(ruleset a-rule)
+(rewrite (Loop ?x ?r) (Loop "" ?r) :ruleset a-rule)
+(rewrite (TileLoop ?x ?l) (TileLoop ?x "") :ruleset a-rule)
+(rewrite (MergeLoops ?x ?l ?o) (MergeLoops ?x "" "") :ruleset a-rule)
+(run-schedule (saturate a-rule))
+
+(check (= out_m_outer t16))

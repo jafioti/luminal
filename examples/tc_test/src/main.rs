@@ -24,54 +24,36 @@ fn main() {
         let mut a_orig = graph.add_node(GraphTerm::GMEM {
             label: "A".to_string(),
         });
-        let mut a = loop_in(
-            a_orig,
-            M / 8,
-            Expression::from('z') * K * 8,
-            "m_outer",
-            &mut graph,
-        );
-        a = loop_in(a, N / 8, 0, "n_outer", &mut graph);
-        a = loop_in(a, 8, Expression::from('z') * K, "m_tile", &mut graph);
-        a = loop_in(a, 8, 0, "n_tile", &mut graph);
-        a = loop_in(a, K / 8, Expression::from('z') * 8, "k_outer", &mut graph);
-        a = loop_in(a, 8, Expression::from('z'), "k_inner", &mut graph);
+        let mut a = loop_in(a_orig, M, Expression::from('z') * K, "m", &mut graph);
+        a = loop_in(a, N, 0, "n", &mut graph);
+        //a = loop_in(a, 8, Expression::from('z') * K, "m_tile", &mut graph);
+        //a = loop_in(a, 8, 0, "n_tile", &mut graph);
+        a = loop_in(a, K, Expression::from('z'), "k", &mut graph);
+        // a = loop_in(a, 8, Expression::from('z'), "k_inner", &mut graph);
         let mut b_orig = graph.add_node(GraphTerm::GMEM {
             label: "B".to_string(),
         });
-        let mut b = loop_in(b_orig, M / 8, 0, "m_outer", &mut graph);
-        b = loop_in(b, N / 8, Expression::from('z') * 8, "n_outer", &mut graph);
-        b = loop_in(b, 8, 0, "m_tile", &mut graph);
-        b = loop_in(b, 8, Expression::from('z'), "n_tile", &mut graph);
-        b = loop_in(
-            b,
-            K / 8,
-            Expression::from('z') * 8 * N,
-            "k_outer",
-            &mut graph,
-        );
-        b = loop_in(b, 8, Expression::from('z') * N, "k_inner", &mut graph);
+        let mut b = loop_in(b_orig, M, 0, "m", &mut graph);
+        b = loop_in(b, N, Expression::from('z'), "n", &mut graph);
+        //b = loop_in(b, 8, 0, "m_tile", &mut graph);
+        //b = loop_in(b, 8, Expression::from('z'), "n_tile", &mut graph);
+        b = loop_in(b, K, Expression::from('z') * N, "k", &mut graph);
+        // b = loop_in(b, 8, Expression::from('z') * N, "k_inner", &mut graph);
         let acc_orig = graph.add_node(GraphTerm::GMEM {
             label: "acc".to_string(),
         });
-        let mut acc = loop_in(acc_orig, M / 8, 0, "m_outer", &mut graph);
-        acc = loop_in(acc, N / 8, 0, "n_outer", &mut graph);
-        acc = loop_in(acc, 8, 0, "m_tile", &mut graph);
-        acc = loop_in(acc, 8, 0, "n_tile", &mut graph);
-        acc = loop_in(
-            acc,
-            K / 8,
-            Expression::from(Term::Acc('a')),
-            "k_outer",
-            &mut graph,
-        );
-        acc = loop_in(
-            acc,
-            8,
-            Expression::from(Term::Acc('a')),
-            "k_inner",
-            &mut graph,
-        );
+        let mut acc = loop_in(acc_orig, M, 0, "m", &mut graph);
+        acc = loop_in(acc, N, 0, "n", &mut graph);
+        //acc = loop_in(acc, 8, 0, "m_tile", &mut graph);
+        //acc = loop_in(acc, 8, 0, "n_tile", &mut graph);
+        acc = loop_in(acc, K, Expression::from(Term::Acc('a')), "k", &mut graph);
+        // acc = loop_in(
+        //     acc,
+        //     8,
+        //     Expression::from(Term::Acc('a')),
+        //     "k_inner",
+        //     &mut graph,
+        // );
 
         let mut out = binary(
             binary(a, b, GraphTerm::Mul, &mut graph),
@@ -80,32 +62,20 @@ fn main() {
             &mut graph,
         );
 
-        out = loop_out(
-            out,
-            8,
-            Expression::from(Term::Acc('a')),
-            "k_inner",
-            &mut graph,
-        );
-        out = loop_out(
-            out,
-            8,
-            Expression::from(Term::Acc('a')),
-            "k_outer",
-            &mut graph,
-        );
-        out = loop_out(out, 8, Expression::from('z'), "n_tile", &mut graph);
-        out = loop_out(out, 8, Expression::from('z') * N, "m_tile", &mut graph);
-        out = loop_out(out, N / 8, Expression::from('z') * 8, "n_outer", &mut graph);
-        loop_out(
-            out,
-            M / 8,
-            Expression::from('z') * 8 * N,
-            "m_outer",
-            &mut graph,
-        );
-
-        let egraph = build_search_space(&graph, 3);
+        // out = loop_out(
+        //     out,
+        //     8,
+        //     Expression::from(Term::Acc('a')),
+        //     "k_inner",
+        //     &mut graph,
+        // );
+        out = loop_out(out, 64, Expression::from(Term::Acc('a')), "k", &mut graph);
+        //out = loop_out(out, 8, Expression::from('z'), "n_tile", &mut graph);
+        //out = loop_out(out, 8, Expression::from('z') * N, "m_tile", &mut graph);
+        out = loop_out(out, N, Expression::from('z'), "n", &mut graph);
+        loop_out(out, M, Expression::from('z') * N, "m", &mut graph);
+        // luminal_2::utils::display_graph(&graph, &[]);
+        let egraph = build_search_space(&graph, 1);
         let inputs = make_test_inputs(
             &graph,
             &FxHashMap::default(),
@@ -143,7 +113,7 @@ fn main() {
                 }
         }); // there may be no acc here anymore
         out = out_graph.externals(Direction::Outgoing).next().unwrap();
-
+        // luminal_2::utils::display_graph(&out_graph, &[]);
         let (kernels, gmem_mapping) = codegen(
             out_graph,
             vec![out],
