@@ -358,6 +358,7 @@ fn make_kernel(
             GraphTerm::LoopIn { range, stride, .. } => {
                 // maybe we tried to merge a loop with an acc
                 if stride.terms.read().len() > 1 && stride.is_acc() {
+                    println!("acc!");
                     return None;
                 }
                 // go through graph to find inputs and outputs
@@ -532,6 +533,7 @@ fn make_kernel(
                         // Handle the case where the dest is not the real loop output
                         let size = stride.substitute('z', range).max(1);
                         if current_loop_level < THREADBLOCK_DIMS + GRID_DIMS {
+                            println!("too low");
                             return None;
                         }
                         // We don't have a place to save this output to. Need to allocate a register buffer

@@ -369,7 +369,10 @@ pub fn build_search_space(
     serialized
 }
 
-fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>, prefix: &str) -> (String, String) {
+pub fn render_egglog(
+    graph: &StableGraph<GraphTerm, (), Directed>,
+    prefix: &str,
+) -> (String, String) {
     use std::cmp::Reverse;
     use std::collections::{BinaryHeap, HashMap};
 

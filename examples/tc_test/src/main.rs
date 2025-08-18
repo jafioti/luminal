@@ -10,7 +10,7 @@ use luminal_2::{
     extract::{make_test_inputs, search},
     run::{assign_buffers, compile_kernels, run_graph},
     translate::{translate_graph_meta, InitData},
-    utils::{binary, build_search_space, loop_in, loop_out, print_kernels},
+    utils::{binary, build_search_space, loop_in, loop_out, print_kernels, render_egglog},
     GPUArch, GraphTerm,
 };
 use metal_rs::{objc::rc::autoreleasepool, Buffer, Device, MTLResourceOptions};
@@ -92,6 +92,7 @@ fn main() {
                 }
         }); // there may be no acc here anymore
         out = out_graph.externals(Direction::Outgoing).next().unwrap();
+        // println!("BEST EGGLOG: {}", render_egglog(&out_graph, "a").0);
         // luminal_2::utils::display_graph(&out_graph, &[]);
         let (kernels, gmem_mapping) = codegen(
             out_graph,
