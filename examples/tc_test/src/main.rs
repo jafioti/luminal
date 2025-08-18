@@ -18,6 +18,14 @@ use rustc_hash::FxHashMap;
 
 fn main() {
     autoreleasepool(|| {
+        // let (M, K, N) = (512, 512, 512);
+        // let mut cx = Graph::new();
+        // let a = cx.named_tensor("A", (M, K));
+        // let b = cx.named_tensor("B", (K, N));
+        // let out = a.matmul(b);
+        // let (graph, gmem_mapping, accs) = translate_graph_meta(&cx);
+        // let graph = graph.node_weights().next().unwrap().clone();
+        // luminal_2::utils::display_graph(&graph, &[]);
         // Make 2.0 graph manually
         let (M, K, N) = (512, 512, 512);
         let mut graph = StableGraph::new();
@@ -40,6 +48,7 @@ fn main() {
         mul_out = loop_in(mul_out, M, Expression::from('z') * K * N, "m", &mut graph);
         mul_out = loop_in(mul_out, N, Expression::from('z') * K, "n", &mut graph);
         mul_out = loop_in(mul_out, 1, 0, "pad", &mut graph);
+        mul_out = loop_in(mul_out, 1, 0, "pad1", &mut graph);
         mul_out = loop_in(mul_out, K, Expression::from('z'), "k", &mut graph);
         let acc_orig = graph.add_node(GraphTerm::GMEM {
             label: "acc".to_string(),
@@ -47,9 +56,11 @@ fn main() {
         let mut acc = loop_in(acc_orig, M, 0, "m", &mut graph);
         acc = loop_in(acc, N, 0, "n", &mut graph);
         acc = loop_in(acc, 1, 0, "pad", &mut graph);
+        acc = loop_in(acc, 1, 0, "pad1", &mut graph);
         acc = loop_in(acc, K, Expression::from(Term::Acc('a')), "k", &mut graph);
         let mut out = binary(mul_out, acc, GraphTerm::Add, &mut graph);
         out = loop_out(out, K, Expression::from(Term::Acc('a')), "k", &mut graph);
+        out = loop_out(out, 1, 0, "pad1", &mut graph);
         out = loop_out(out, 1, 0, "pad", &mut graph);
         out = loop_out(out, N, Expression::from('z'), "n", &mut graph);
         loop_out(out, M, Expression::from('z') * N, "m", &mut graph);
@@ -92,7 +103,11 @@ fn main() {
                 }
         }); // there may be no acc here anymore
         out = out_graph.externals(Direction::Outgoing).next().unwrap();
-        // luminal_2::utils::display_graph(&out_graph, &[]);
+        luminal_2::utils::display_graph(&out_graph, &[]);
+        println!(
+            "Rendered: {}",
+            luminal_2::utils::render_egglog(&out_graph, "a").0
+        );
         let (kernels, gmem_mapping) = codegen(
             out_graph,
             vec![out],

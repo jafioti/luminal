@@ -292,6 +292,7 @@ pub fn search(
                             for (x, y) in a.iter().zip(b) {
                                 if (x - y).abs() >= 1e-3 {
                                     if option_env!("DEBUG").is_some() {
+                                        // display_graph(&graph, &[]);
                                         println!(
                                             "REF: {:?}",
                                             &ref_outputs
