@@ -32,6 +32,7 @@ const INVALID_IR: &[&str] = &[
     "TiledMatmulInputA",
     "TiledMatmulInputB",
     "TiledMatmulAcc",
+    "FusedLoops",
 ];
 
 type Cost = u128; // Execution time in microseconds

@@ -33,19 +33,24 @@ fn main() {
         let mut b = loop_in(b_orig, M, 0, "m", &mut graph);
         b = loop_in(b, N, Expression::from('z'), "n", &mut graph);
         b = loop_in(b, K, Expression::from('z') * N, "k", &mut graph);
+        let mut mul_out = binary(a, b, GraphTerm::Mul, &mut graph);
+        mul_out = loop_out(mul_out, K, Expression::from('z'), "k", &mut graph);
+        mul_out = loop_out(mul_out, N, Expression::from('z') * K, "n", &mut graph);
+        mul_out = loop_out(mul_out, M, Expression::from('z') * K * N, "m", &mut graph);
+        mul_out = loop_in(mul_out, M, Expression::from('z') * K * N, "m", &mut graph);
+        mul_out = loop_in(mul_out, N, Expression::from('z') * K, "n", &mut graph);
+        mul_out = loop_in(mul_out, 1, 0, "pad", &mut graph);
+        mul_out = loop_in(mul_out, K, Expression::from('z'), "k", &mut graph);
         let acc_orig = graph.add_node(GraphTerm::GMEM {
             label: "acc".to_string(),
         });
         let mut acc = loop_in(acc_orig, M, 0, "m", &mut graph);
         acc = loop_in(acc, N, 0, "n", &mut graph);
+        acc = loop_in(acc, 1, 0, "pad", &mut graph);
         acc = loop_in(acc, K, Expression::from(Term::Acc('a')), "k", &mut graph);
-        let mut out = binary(
-            binary(a, b, GraphTerm::Mul, &mut graph),
-            acc,
-            GraphTerm::Add,
-            &mut graph,
-        );
+        let mut out = binary(mul_out, acc, GraphTerm::Add, &mut graph);
         out = loop_out(out, K, Expression::from(Term::Acc('a')), "k", &mut graph);
+        out = loop_out(out, 1, 0, "pad", &mut graph);
         out = loop_out(out, N, Expression::from('z'), "n", &mut graph);
         loop_out(out, M, Expression::from('z') * N, "m", &mut graph);
         // luminal_2::utils::display_graph(&graph, &[]);

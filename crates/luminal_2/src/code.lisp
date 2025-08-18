@@ -50,17 +50,6 @@
 (rewrite (MMod (MMod ?x (MNum ?y)) (MNum ?z)) (MMod ?x (MNum ?y)) :when ((>= ?z ?y) (= 0 (% ?y ?z))) :ruleset expr) ; nested mods
 (rewrite (MMod (MMod ?x (MNum ?y)) (MNum ?z)) (MMod ?x (MNum ?z)) :when ((>= ?y ?z) (= 0 (% ?z ?y))) :ruleset expr)
 
-; reduce contiguous multidimensional indexing
-(rewrite
-	(MAdd
-		(MMul (MNum ?outerStride) (MMod (MDiv (MVar "z") (MNum ?innerSize)) (MNum ?outerSize)))
-		(MMul (MNum ?innerStride) (MMod (MVar "z") (MNum ?innerSize)))
-	)
-	(MMul (MNum ?innerStride) (MMod (MVar "z") (MNum (* ?innerSize ?outerSize))))
-	:ruleset expr
-)
-
-
 ; Replacement
 (rewrite (MReplace ?x ?y ?z) ?z :when ((= ?x ?y)) :ruleset expr)
 (rewrite (MReplace (MAdd ?a ?b) ?x ?y) (MAdd (MReplace ?a ?x ?y) (MReplace ?b ?x ?y)) :ruleset expr)
@@ -77,14 +66,6 @@
 
 ; leave other vars unchanged
 (rewrite (MReplace (MVar ?v) (MVar ?x) ?y) (MVar ?v) :when ((!= ?v ?x)) :ruleset expr)
-
-; reduce multi-dim squeezed indexing into simple multiplicative indexing
-(rewrite
-  (MAdd (MMul (MNum (* d n2)) (MMod (MDiv ?v (MNum d)) (MNum m)))
-        (MMul (MNum n2) (MMod ?v (MNum d))))
-  (MMul ?v (MNum n2))
-	:ruleset expr
-)
 
 ; -------- IR --------
 (ruleset ir)
@@ -123,6 +104,7 @@
        	(TileLoop IR String) ; Tile a loop, identified by it's string
         (UnpadLoop IR String) ; Remove a padding loop, identified by it's string
         (MergeLoops IR String String) ; Merge loops, identified by their strings
+        (FusedLoops IR Expression) ; Says that we have previously fused a loopout -> loopin here
 
     	; propogation pattern helpers
      	(PropOneArg String IR String) ; Generic prop one arg back
@@ -150,7 +132,7 @@
 (birewrite (Max ?a ?b) (Binary "Max" ?a ?b) :ruleset ir-generic)
 
 ; Communative binary ops
-;(rewrite (Binary ?bin ?a ?b) (Binary ?bin ?b ?a) :ruleset ir)
+(rewrite (Binary ?bin ?a ?b) (Binary ?bin ?b ?a) :ruleset ir)
 ; distributive/associative skeletons so sums and products re-associate
 ;(rewrite (Add (Add ?a ?b) ?c) (Add ?a (Add ?b ?c)) :ruleset ir)
 ;(rewrite (Mul (Mul ?a ?b) ?c) (Mul ?a (Mul ?b ?c)) :ruleset ir)
@@ -173,43 +155,24 @@
 	(LoopOut (Unary ?un ?x) (Loop ?l ?r) ?s)
 	(LoopOut (LoopOut (Unary ?un (LoopIn ?x (Loop "newpad" (MNum 1)) (MNum 0))) (Loop "newpad" (MNum 1)) (MNum 0)) (Loop ?l ?r) ?s)
 	:when ((!= ?r (MNum 1)) (!= ?s (MNum 0)))
-	 :ruleset ir
+	:ruleset ir
 )
 (rewrite
 	(LoopOut (Binary ?bin ?a ?b) (Loop ?l ?r) ?s)
 	(LoopOut (LoopOut (Binary ?bin (LoopIn ?a (Loop "newpad" (MNum 1)) (MNum 0)) (LoopIn ?b (Loop "newpad" (MNum 1)) (MNum 0))) (Loop "newpad" (MNum 1)) (MNum 0)) (Loop ?l ?r) ?s)
 	:when ((!= ?r (MNum 1)) (!= ?s (MNum 0)))
-	 :ruleset ir
+	:ruleset ir
 )
 ; remove unnessecary modulo
 (rewrite (LoopIn ?x (Loop ?l ?range) (MMul ?st (MMod (MVar "z") ?range))) (LoopIn ?x (Loop ?l ?range) (MMul ?st (MVar "z"))) :ruleset expr)
 (rewrite (LoopOut ?x (Loop ?l ?range) (MMul ?st (MMod (MVar "z") ?range))) (LoopOut ?x (Loop ?l ?range) (MMul ?st (MVar "z"))) :ruleset expr)
 
 ; Loop Fusion
-;(rewrite (LoopIn (LoopOut ?x (Loop ?lo ?range) ?st) (Loop ?li ?range) ?st) ?x :ruleset ir)
-
-(rewrite (LoopIn (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA ?range) ?st) (Loop ?loopB ?range) ?st) (Binary ?bin ?a ?b) :ruleset ir)
-(rewrite
-	(LoopIn (LoopIn
-		(LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2)
-	(Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
-	(Binary ?bin ?a ?b)
-	 :ruleset ir
-)
-(rewrite
-	(LoopIn (LoopIn (LoopIn
-		(LoopOut (LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2) (Loop ?loopA3 ?range3) ?st3)
-	(Loop ?loopB3 ?range3) ?st3) (Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
-	(Binary ?bin ?a ?b)
-	 :ruleset ir
-)
-(rewrite
-	(LoopIn (LoopIn (LoopIn (LoopIn
-		(LoopOut (LoopOut (LoopOut (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA1 ?range1) ?st1) (Loop ?loopA2 ?range2) ?st2) (Loop ?loopA3 ?range3) ?st3) (Loop ?loopA4 ?range4) ?st4)
-	(Loop ?loopB4 ?range4) ?st4) (Loop ?loopB3 ?range3) ?st3) (Loop ?loopB2 ?range2) ?st2) (Loop ?loopB1 ?range1) ?st1)
-	(Binary ?bin ?a ?b)
-	 :ruleset ir
-)
+(ruleset fusion)
+(rewrite (LoopIn (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA ?range) ?st) (Loop ?loopB ?range) ?st) (Binary ?bin ?a ?b) :ruleset fusion)
+(rewrite (LoopIn (LoopOut ?a (Loop ?loopA ?range) ?st) (Loop ?loopB ?range) ?st) (FusedLoops ?a ?range) :ruleset fusion)
+(rewrite (LoopIn (FusedLoops (LoopOut ?a (Loop ?loopA ?range) ?st) ?fused_range) (Loop ?loopB ?range) ?st) (FusedLoops ?a (MMul ?range ?fused_range)) :ruleset fusion)
+(rewrite (LoopIn (FusedLoops (LoopOut (Binary ?bin ?a ?b) (Loop ?loopA ?range) ?st) ?fused_range) (Loop ?loopB ?range) ?st) (Binary ?bin ?a ?b) :ruleset fusion)
 
 ; Specialized swap loops
 (rewrite
@@ -531,14 +494,20 @@
 {code}
 (run-schedule
 	(run ir-generic)
-	(run ir) ; run ir rules once
-	(run swap) ; run swap every other run
-	(repeat 5 ir-prop)
-	(repeat 3 expr)
-	(run swap)
-	(repeat 10 ir-prop)
+	(repeat 4
+		(run ir)
+		(run ir-prop)
+		(run expr)
+		(repeat 2 fusion)
+	)
+	;(run ir) ; run ir rules once
+	;(run swap) ; run swap every other run
+	;(repeat 5 ir-prop)
+	;(repeat 3 expr)
+	;(run swap)
+	;(repeat 10 ir-prop)
 	(run ir-generic)
-	(repeat 3 tc)
+	;(repeat 3 tc)
 )
 
 (let a_gmem (GMEM "A"))
