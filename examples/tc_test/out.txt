@@ -1,0 +1,1457 @@
+(let t0 (GMEM "A"))
+(let t1 (LoopIn t0 (Loop "m" (MNum 256)) (MMul (MVar "z") (MNum 256))))
+(let t2 (LoopIn t1 (Loop "n" (MNum 256)) (MNum 0)))
+(let t3 (LoopIn t2 (Loop "k" (MNum 256)) (MVar "z")))
+(let t4 (GMEM "B"))
+(let t5 (LoopIn t4 (Loop "m" (MNum 256)) (MNum 0)))
+(let t6 (LoopIn t5 (Loop "n" (MNum 256)) (MVar "z")))
+(let t7 (LoopIn t6 (Loop "k" (MNum 256)) (MMul (MVar "z") (MNum 256))))
+(let t8 (GMEM "acc"))
+(let t9 (LoopIn t8 (Loop "m" (MNum 256)) (MNum 0)))
+(let t10 (LoopIn t9 (Loop "n" (MNum 256)) (MNum 0)))
+(let t11 (LoopIn t10 (Loop "k" (MNum 256)) (MAccum "a")))
+(let t12 (Mul t3 t7))
+(let t13 (Add t12 t11))
+(let t14 (LoopOut t13 (Loop "k" (MNum 256)) (MAccum "a")))
+(let t15 (LoopOut t14 (Loop "n" (MNum 256)) (MVar "z")))
+(let t16 (LoopOut t15 (Loop "m" (MNum 256)) (MMul (MVar "z") (MNum 256))))
+
+Done building search space.
+G: (32, 8, 1) TB: (8, 32, 1)
+Kernels: 1
+Kernel 1 Grid: (32, 8, 1) Threadblock: (8, 32, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*2048);
+	device float* h = d + (loop_f*2048);
+	int loop_i = blockIdx.y;
+	device float* j = g + (loop_i*256);
+	device float* k = h + (loop_i*256);
+	int loop_l = threadIdx.x;
+	device float* m = b + loop_l;
+	device float* n = k + loop_l;
+	int loop_o = threadIdx.y;
+	device float* p = m + (loop_o*8);
+	device float* q = n + (loop_o*8);
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 8; ++loop_s) {
+		device float* t = p + (loop_s*256);
+		device float* u = j + loop_s;
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 32; ++loop_w) {
+			device float* x = u + (loop_w*8);
+			device float* y = t + (loop_w*2048);
+			float z = *y * *x;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 1 8965µs
+G: (32, 8, 1) TB: (8, 32, 1)
+Kernels: 1
+Kernel 1 Grid: (32, 8, 1) Threadblock: (8, 32, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(6) = b
+	// NodeIndex(13) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*2048);
+	device float* h = d + (loop_f*2048);
+	int loop_i = blockIdx.y;
+	device float* j = g + (loop_i*256);
+	device float* k = h + (loop_i*256);
+	int loop_l = threadIdx.x;
+	device float* m = b + loop_l;
+	device float* n = k + loop_l;
+	int loop_o = threadIdx.y;
+	device float* p = m + (loop_o*8);
+	device float* q = n + (loop_o*8);
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 256; ++loop_s) {
+		device float* t = j + loop_s;
+		device float* u = p + (loop_s*256);
+		float v = *u * *t;
+		float w = *r + v;
+		*r = w;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 2 1991µs
+Outputs Validated
+G: (32, 8, 1) TB: (8, 32, 1)
+Kernels: 1
+Kernel 1 Grid: (32, 8, 1) Threadblock: (8, 32, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*2048);
+	device float* h = d + (loop_f*2048);
+	int loop_i = blockIdx.y;
+	device float* j = g + (loop_i*256);
+	device float* k = h + (loop_i*256);
+	int loop_l = threadIdx.x;
+	device float* m = b + loop_l;
+	device float* n = k + loop_l;
+	int loop_o = threadIdx.y;
+	device float* p = m + (loop_o*8);
+	device float* q = n + (loop_o*8);
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 32; ++loop_s) {
+		device float* t = j + (loop_s*8);
+		device float* u = p + (loop_s*2048);
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 8; ++loop_w) {
+			device float* x = t + loop_w;
+			device float* y = u + (loop_w*256);
+			float z = *y * *x;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 3 2840µs
+Outputs Validated
+G: (32, 8, 1) TB: (8, 32, 1)
+Kernels: 1
+Kernel 1 Grid: (32, 8, 1) Threadblock: (8, 32, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*2048);
+	device float* h = d + (loop_f*2048);
+	int loop_i = blockIdx.y;
+	device float* j = g + (loop_i*256);
+	device float* k = h + (loop_i*256);
+	int loop_l = threadIdx.x;
+	device float* m = b + loop_l;
+	device float* n = k + loop_l;
+	int loop_o = threadIdx.y;
+	device float* p = m + (loop_o*8);
+	device float* q = n + (loop_o*8);
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 32; ++loop_s) {
+		device float* t = j + (loop_s*8);
+		device float* u = p + (loop_s*2048);
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 8; ++loop_w) {
+			device float* x = t + loop_w;
+			device float* y = u + (loop_w*256);
+			float z = *y * *x;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 4 2738µs
+Outputs Validated
+G: (32, 8, 1) TB: (32, 8, 1)
+Kernels: 1
+Kernel 1 Grid: (32, 8, 1) Threadblock: (32, 8, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*2048);
+	device float* h = d + (loop_f*2048);
+	int loop_i = blockIdx.y;
+	device float* j = g + (loop_i*256);
+	device float* k = h + (loop_i*256);
+	int loop_l = threadIdx.x;
+	device float* m = b + (loop_l*8);
+	device float* n = k + (loop_l*8);
+	int loop_o = threadIdx.y;
+	device float* p = m + loop_o;
+	device float* q = n + loop_o;
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 8; ++loop_s) {
+		device float* t = j + loop_s;
+		device float* u = p + (loop_s*256);
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 32; ++loop_w) {
+			device float* x = u + (loop_w*2048);
+			device float* y = t + (loop_w*8);
+			float z = *x * *y;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 5 17520µs
+Outputs Validated
+G: (32, 8, 1) TB: (32, 8, 1)
+Kernels: 1
+Kernel 1 Grid: (32, 8, 1) Threadblock: (32, 8, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(6) = b
+	// NodeIndex(13) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*2048);
+	device float* h = d + (loop_f*2048);
+	int loop_i = blockIdx.y;
+	device float* j = g + (loop_i*256);
+	device float* k = h + (loop_i*256);
+	int loop_l = threadIdx.x;
+	device float* m = b + (loop_l*8);
+	device float* n = k + (loop_l*8);
+	int loop_o = threadIdx.y;
+	device float* p = m + loop_o;
+	device float* q = n + loop_o;
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 256; ++loop_s) {
+		device float* t = p + (loop_s*256);
+		device float* u = j + loop_s;
+		float v = *t * *u;
+		float w = *r + v;
+		*r = w;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 6 8578µs
+Outputs Validated
+G: (32, 8, 1) TB: (32, 8, 1)
+Kernels: 1
+Kernel 1 Grid: (32, 8, 1) Threadblock: (32, 8, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*2048);
+	device float* h = d + (loop_f*2048);
+	int loop_i = blockIdx.y;
+	device float* j = g + (loop_i*256);
+	device float* k = h + (loop_i*256);
+	int loop_l = threadIdx.x;
+	device float* m = b + (loop_l*8);
+	device float* n = k + (loop_l*8);
+	int loop_o = threadIdx.y;
+	device float* p = m + loop_o;
+	device float* q = n + loop_o;
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 32; ++loop_s) {
+		device float* t = j + (loop_s*8);
+		device float* u = p + (loop_s*2048);
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 8; ++loop_w) {
+			device float* x = u + (loop_w*256);
+			device float* y = t + loop_w;
+			float z = *x * *y;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 7 4960µs
+Outputs Validated
+G: (32, 8, 1) TB: (8, 32, 1)
+Kernels: 1
+Kernel 1 Grid: (32, 8, 1) Threadblock: (8, 32, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*2048);
+	device float* h = d + (loop_f*2048);
+	int loop_i = blockIdx.y;
+	device float* j = b + loop_i;
+	device float* k = h + loop_i;
+	int loop_l = threadIdx.x;
+	device float* m = g + (loop_l*256);
+	device float* n = k + (loop_l*256);
+	int loop_o = threadIdx.y;
+	device float* p = j + (loop_o*8);
+	device float* q = n + (loop_o*8);
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 32; ++loop_s) {
+		device float* t = m + (loop_s*8);
+		device float* u = p + (loop_s*2048);
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 8; ++loop_w) {
+			device float* x = t + loop_w;
+			device float* y = u + (loop_w*256);
+			float z = *y * *x;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 8 2880µs
+Outputs Validated
+G: (32, 8, 1) TB: (8, 32, 1)
+Kernels: 1
+Kernel 1 Grid: (32, 8, 1) Threadblock: (8, 32, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*2048);
+	device float* h = d + (loop_f*2048);
+	int loop_i = blockIdx.y;
+	device float* j = b + loop_i;
+	device float* k = h + loop_i;
+	int loop_l = threadIdx.x;
+	device float* m = g + (loop_l*256);
+	device float* n = k + (loop_l*256);
+	int loop_o = threadIdx.y;
+	device float* p = j + (loop_o*8);
+	device float* q = n + (loop_o*8);
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 32; ++loop_s) {
+		device float* t = p + (loop_s*2048);
+		device float* u = m + (loop_s*8);
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 8; ++loop_w) {
+			device float* x = u + loop_w;
+			device float* y = t + (loop_w*256);
+			float z = *y * *x;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 9 6583µs
+Outputs Validated
+G: (32, 8, 1) TB: (8, 32, 1)
+Kernels: 1
+Kernel 1 Grid: (32, 8, 1) Threadblock: (8, 32, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(6) = b
+	// NodeIndex(13) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*2048);
+	device float* h = d + (loop_f*2048);
+	int loop_i = blockIdx.y;
+	device float* j = b + loop_i;
+	device float* k = h + loop_i;
+	int loop_l = threadIdx.x;
+	device float* m = g + (loop_l*256);
+	device float* n = k + (loop_l*256);
+	int loop_o = threadIdx.y;
+	device float* p = j + (loop_o*8);
+	device float* q = n + (loop_o*8);
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 256; ++loop_s) {
+		device float* t = p + (loop_s*256);
+		device float* u = m + loop_s;
+		float v = *t * *u;
+		float w = *r + v;
+		*r = w;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 10 2015µs
+Outputs Validated
+G: (32, 8, 1) TB: (8, 32, 1)
+Kernels: 1
+Kernel 1 Grid: (32, 8, 1) Threadblock: (8, 32, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*2048);
+	device float* h = d + (loop_f*2048);
+	int loop_i = blockIdx.y;
+	device float* j = b + loop_i;
+	device float* k = h + loop_i;
+	int loop_l = threadIdx.x;
+	device float* m = g + (loop_l*256);
+	device float* n = k + (loop_l*256);
+	int loop_o = threadIdx.y;
+	device float* p = j + (loop_o*8);
+	device float* q = n + (loop_o*8);
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 8; ++loop_s) {
+		device float* t = m + loop_s;
+		device float* u = p + (loop_s*256);
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 32; ++loop_w) {
+			device float* x = u + (loop_w*2048);
+			device float* y = t + (loop_w*8);
+			float z = *x * *y;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 11 8300µs
+Outputs Validated
+G: (32, 32, 1) TB: (8, 8, 1)
+Kernels: 1
+Kernel 1 Grid: (32, 32, 1) Threadblock: (8, 8, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*2048);
+	device float* h = d + (loop_f*2048);
+	int loop_i = blockIdx.y;
+	device float* j = b + (loop_i*8);
+	device float* k = h + (loop_i*8);
+	int loop_l = threadIdx.x;
+	device float* m = g + (loop_l*256);
+	device float* n = k + (loop_l*256);
+	int loop_o = threadIdx.y;
+	device float* p = j + loop_o;
+	device float* q = n + loop_o;
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 32; ++loop_s) {
+		device float* t = m + (loop_s*8);
+		device float* u = p + (loop_s*2048);
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 8; ++loop_w) {
+			device float* x = t + loop_w;
+			device float* y = u + (loop_w*256);
+			float z = *y * *x;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 12 1068µs
+Outputs Validated
+G: (32, 32, 1) TB: (8, 8, 1)
+Kernels: 1
+Kernel 1 Grid: (32, 32, 1) Threadblock: (8, 8, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(6) = b
+	// NodeIndex(13) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*2048);
+	device float* h = d + (loop_f*2048);
+	int loop_i = blockIdx.y;
+	device float* j = b + (loop_i*8);
+	device float* k = h + (loop_i*8);
+	int loop_l = threadIdx.x;
+	device float* m = g + (loop_l*256);
+	device float* n = k + (loop_l*256);
+	int loop_o = threadIdx.y;
+	device float* p = j + loop_o;
+	device float* q = n + loop_o;
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 256; ++loop_s) {
+		device float* t = m + loop_s;
+		device float* u = p + (loop_s*256);
+		float v = *u * *t;
+		float w = *r + v;
+		*r = w;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 13 5352µs
+Outputs Validated
+G: (32, 32, 1) TB: (8, 8, 1)
+Kernels: 1
+Kernel 1 Grid: (32, 32, 1) Threadblock: (8, 8, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*2048);
+	device float* h = d + (loop_f*2048);
+	int loop_i = blockIdx.y;
+	device float* j = b + (loop_i*8);
+	device float* k = h + (loop_i*8);
+	int loop_l = threadIdx.x;
+	device float* m = g + (loop_l*256);
+	device float* n = k + (loop_l*256);
+	int loop_o = threadIdx.y;
+	device float* p = j + loop_o;
+	device float* q = n + loop_o;
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 8; ++loop_s) {
+		device float* t = m + loop_s;
+		device float* u = p + (loop_s*256);
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 32; ++loop_w) {
+			device float* x = t + (loop_w*8);
+			device float* y = u + (loop_w*2048);
+			float z = *y * *x;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 14 6395µs
+Outputs Validated
+G: (32, 32, 1) TB: (8, 4, 1)
+Kernels: 1
+Kernel 1 Grid: (32, 32, 1) Threadblock: (8, 4, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(5) = b
+	// Outputs = [c]
+	int loop_e = blockIdx.x;
+	device float* f = a + (loop_e*2048);
+	device float* g = c + (loop_e*2048);
+	int loop_h = blockIdx.y;
+	device float* i = b + (loop_h*8);
+	device float* j = g + (loop_h*8);
+		
+	// TensorCore loop
+	simdgroup_float8x8 acc = simdgroup_float8x8(0);
+	for (uint tc_loop = 0; tc_loop < 32; tc_loop++) {
+	    threadgroup_barrier(mem_flags::mem_threadgroup); // For some reason this speeds it up
+	
+	    // Load sources into simdgroup matricies
+	    simdgroup_float8x8 simdA;
+	    simdgroup_load(simdA, f + (tc_loop*8), 256);
+	    simdgroup_float8x8 simdB;
+	    simdgroup_load(simdB, i + (tc_loop*2048), 256);
+	
+	    simdgroup_multiply_accumulate(acc, simdA, simdB, acc);
+	}
+	simdgroup_store(acc, j, 256);
+}
+Outputs: [65536]
+Graph 15 812µs
+Outputs Validated
+G: (8, 32, 1) TB: (8, 32, 1)
+Kernels: 1
+Kernel 1 Grid: (8, 32, 1) Threadblock: (8, 32, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(6) = b
+	// NodeIndex(13) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*256);
+	device float* h = d + (loop_f*256);
+	int loop_i = blockIdx.y;
+	device float* j = g + (loop_i*2048);
+	device float* k = h + (loop_i*2048);
+	int loop_l = threadIdx.x;
+	device float* m = b + loop_l;
+	device float* n = k + loop_l;
+	int loop_o = threadIdx.y;
+	device float* p = m + (loop_o*8);
+	device float* q = n + (loop_o*8);
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 256; ++loop_s) {
+		device float* t = j + loop_s;
+		device float* u = p + (loop_s*256);
+		float v = *u * *t;
+		float w = *r + v;
+		*r = w;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 16 1860µs
+Outputs Validated
+G: (8, 32, 1) TB: (8, 32, 1)
+Kernels: 1
+Kernel 1 Grid: (8, 32, 1) Threadblock: (8, 32, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*256);
+	device float* h = d + (loop_f*256);
+	int loop_i = blockIdx.y;
+	device float* j = g + (loop_i*2048);
+	device float* k = h + (loop_i*2048);
+	int loop_l = threadIdx.x;
+	device float* m = b + loop_l;
+	device float* n = k + loop_l;
+	int loop_o = threadIdx.y;
+	device float* p = m + (loop_o*8);
+	device float* q = n + (loop_o*8);
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 8; ++loop_s) {
+		device float* t = p + (loop_s*256);
+		device float* u = j + loop_s;
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 32; ++loop_w) {
+			device float* x = u + (loop_w*8);
+			device float* y = t + (loop_w*2048);
+			float z = *y * *x;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 17 7794µs
+Outputs Validated
+G: (8, 32, 1) TB: (8, 32, 1)
+Kernels: 1
+Kernel 1 Grid: (8, 32, 1) Threadblock: (8, 32, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*256);
+	device float* h = d + (loop_f*256);
+	int loop_i = blockIdx.y;
+	device float* j = g + (loop_i*2048);
+	device float* k = h + (loop_i*2048);
+	int loop_l = threadIdx.x;
+	device float* m = b + loop_l;
+	device float* n = k + loop_l;
+	int loop_o = threadIdx.y;
+	device float* p = m + (loop_o*8);
+	device float* q = n + (loop_o*8);
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 32; ++loop_s) {
+		device float* t = j + (loop_s*8);
+		device float* u = p + (loop_s*2048);
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 8; ++loop_w) {
+			device float* x = u + (loop_w*256);
+			device float* y = t + loop_w;
+			float z = *x * *y;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 18 6255µs
+Outputs Validated
+G: (8, 32, 1) TB: (32, 8, 1)
+Kernels: 1
+Kernel 1 Grid: (8, 32, 1) Threadblock: (32, 8, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*256);
+	device float* h = d + (loop_f*256);
+	int loop_i = blockIdx.y;
+	device float* j = g + (loop_i*2048);
+	device float* k = h + (loop_i*2048);
+	int loop_l = threadIdx.x;
+	device float* m = b + (loop_l*8);
+	device float* n = k + (loop_l*8);
+	int loop_o = threadIdx.y;
+	device float* p = m + loop_o;
+	device float* q = n + loop_o;
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 8; ++loop_s) {
+		device float* t = j + loop_s;
+		device float* u = p + (loop_s*256);
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 32; ++loop_w) {
+			device float* x = t + (loop_w*8);
+			device float* y = u + (loop_w*2048);
+			float z = *y * *x;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 19 10007µs
+Outputs Validated
+G: (8, 32, 1) TB: (32, 8, 1)
+Kernels: 1
+Kernel 1 Grid: (8, 32, 1) Threadblock: (32, 8, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(6) = b
+	// NodeIndex(13) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*256);
+	device float* h = d + (loop_f*256);
+	int loop_i = blockIdx.y;
+	device float* j = g + (loop_i*2048);
+	device float* k = h + (loop_i*2048);
+	int loop_l = threadIdx.x;
+	device float* m = b + (loop_l*8);
+	device float* n = k + (loop_l*8);
+	int loop_o = threadIdx.y;
+	device float* p = m + loop_o;
+	device float* q = n + loop_o;
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 256; ++loop_s) {
+		device float* t = p + (loop_s*256);
+		device float* u = j + loop_s;
+		float v = *t * *u;
+		float w = *r + v;
+		*r = w;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 20 8415µs
+Outputs Validated
+G: (8, 32, 1) TB: (32, 8, 1)
+Kernels: 1
+Kernel 1 Grid: (8, 32, 1) Threadblock: (32, 8, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*256);
+	device float* h = d + (loop_f*256);
+	int loop_i = blockIdx.y;
+	device float* j = g + (loop_i*2048);
+	device float* k = h + (loop_i*2048);
+	int loop_l = threadIdx.x;
+	device float* m = b + (loop_l*8);
+	device float* n = k + (loop_l*8);
+	int loop_o = threadIdx.y;
+	device float* p = m + loop_o;
+	device float* q = n + loop_o;
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 32; ++loop_s) {
+		device float* t = p + (loop_s*2048);
+		device float* u = j + (loop_s*8);
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 8; ++loop_w) {
+			device float* x = t + (loop_w*256);
+			device float* y = u + loop_w;
+			float z = *x * *y;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 21 8398µs
+Outputs Validated
+G: (8, 32, 1) TB: (32, 8, 1)
+Kernels: 1
+Kernel 1 Grid: (8, 32, 1) Threadblock: (32, 8, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*256);
+	device float* h = d + (loop_f*256);
+	int loop_i = blockIdx.y;
+	device float* j = b + (loop_i*8);
+	device float* k = h + (loop_i*8);
+	int loop_l = threadIdx.x;
+	device float* m = g + (loop_l*2048);
+	device float* n = k + (loop_l*2048);
+	int loop_o = threadIdx.y;
+	device float* p = j + loop_o;
+	device float* q = n + loop_o;
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 32; ++loop_s) {
+		device float* t = p + (loop_s*2048);
+		device float* u = m + (loop_s*8);
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 8; ++loop_w) {
+			device float* x = u + loop_w;
+			device float* y = t + (loop_w*256);
+			float z = *y * *x;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 22 6452µs
+Outputs Validated
+G: (8, 32, 1) TB: (32, 8, 1)
+Kernels: 1
+Kernel 1 Grid: (8, 32, 1) Threadblock: (32, 8, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(6) = b
+	// NodeIndex(13) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*256);
+	device float* h = d + (loop_f*256);
+	int loop_i = blockIdx.y;
+	device float* j = b + (loop_i*8);
+	device float* k = h + (loop_i*8);
+	int loop_l = threadIdx.x;
+	device float* m = g + (loop_l*2048);
+	device float* n = k + (loop_l*2048);
+	int loop_o = threadIdx.y;
+	device float* p = j + loop_o;
+	device float* q = n + loop_o;
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 256; ++loop_s) {
+		device float* t = p + (loop_s*256);
+		device float* u = m + loop_s;
+		float v = *t * *u;
+		float w = *r + v;
+		*r = w;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 23 6391µs
+Outputs Validated
+G: (8, 32, 1) TB: (32, 8, 1)
+Kernels: 1
+Kernel 1 Grid: (8, 32, 1) Threadblock: (32, 8, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*256);
+	device float* h = d + (loop_f*256);
+	int loop_i = blockIdx.y;
+	device float* j = b + (loop_i*8);
+	device float* k = h + (loop_i*8);
+	int loop_l = threadIdx.x;
+	device float* m = g + (loop_l*2048);
+	device float* n = k + (loop_l*2048);
+	int loop_o = threadIdx.y;
+	device float* p = j + loop_o;
+	device float* q = n + loop_o;
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 8; ++loop_s) {
+		device float* t = p + (loop_s*256);
+		device float* u = m + loop_s;
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 32; ++loop_w) {
+			device float* x = t + (loop_w*2048);
+			device float* y = u + (loop_w*8);
+			float z = *x * *y;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 24 9772µs
+Outputs Validated
+G: (8, 8, 1) TB: (32, 32, 1)
+Kernels: 1
+Kernel 1 Grid: (8, 8, 1) Threadblock: (32, 32, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*256);
+	device float* h = d + (loop_f*256);
+	int loop_i = blockIdx.y;
+	device float* j = b + loop_i;
+	device float* k = h + loop_i;
+	int loop_l = threadIdx.x;
+	device float* m = g + (loop_l*2048);
+	device float* n = k + (loop_l*2048);
+	int loop_o = threadIdx.y;
+	device float* p = j + (loop_o*8);
+	device float* q = n + (loop_o*8);
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 32; ++loop_s) {
+		device float* t = m + (loop_s*8);
+		device float* u = p + (loop_s*2048);
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 8; ++loop_w) {
+			device float* x = t + loop_w;
+			device float* y = u + (loop_w*256);
+			float z = *y * *x;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 25 7996µs
+Outputs Validated
+G: (8, 8, 1) TB: (32, 32, 1)
+Kernels: 1
+Kernel 1 Grid: (8, 8, 1) Threadblock: (32, 32, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(7) = b
+	// NodeIndex(15) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*256);
+	device float* h = d + (loop_f*256);
+	int loop_i = blockIdx.y;
+	device float* j = b + loop_i;
+	device float* k = h + loop_i;
+	int loop_l = threadIdx.x;
+	device float* m = g + (loop_l*2048);
+	device float* n = k + (loop_l*2048);
+	int loop_o = threadIdx.y;
+	device float* p = j + (loop_o*8);
+	device float* q = n + (loop_o*8);
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 8; ++loop_s) {
+		device float* t = p + (loop_s*256);
+		device float* u = m + loop_s;
+		thread float v[1] = {0.0};
+		for (int load = 0; load < 1; ++load) {
+			v[0] = *(r + 0);
+		}
+		for (int loop_w = 0; loop_w < 32; ++loop_w) {
+			device float* x = u + (loop_w*8);
+			device float* y = t + (loop_w*2048);
+			float z = *y * *x;
+			float ba = *v + z;
+			*v = ba;
+		}
+		*r = *v;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 26 15782µs
+Outputs Validated
+G: (8, 8, 1) TB: (32, 32, 1)
+Kernels: 1
+Kernel 1 Grid: (8, 8, 1) Threadblock: (32, 32, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]],
+	device float* d [[buffer(3)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(6) = b
+	// NodeIndex(13) = c
+	// Outputs = [d]
+	int loop_f = blockIdx.x;
+	device float* g = a + (loop_f*256);
+	device float* h = d + (loop_f*256);
+	int loop_i = blockIdx.y;
+	device float* j = b + loop_i;
+	device float* k = h + loop_i;
+	int loop_l = threadIdx.x;
+	device float* m = g + (loop_l*2048);
+	device float* n = k + (loop_l*2048);
+	int loop_o = threadIdx.y;
+	device float* p = j + (loop_o*8);
+	device float* q = n + (loop_o*8);
+	thread float r[1] = {0.0};
+	for (int load = 0; load < 1; ++load) {
+		r[0] = *(c + 0);
+	}
+	for (int loop_s = 0; loop_s < 256; ++loop_s) {
+		device float* t = m + loop_s;
+		device float* u = p + (loop_s*256);
+		float v = *u * *t;
+		float w = *r + v;
+		*r = w;
+	}
+	*q = *r;
+}
+Outputs: [65536]
+Graph 27 7263µs
+Outputs Validated
+FASTEST (0ms): Kernels: 1
+Kernel 1 Grid: (32, 32, 1) Threadblock: (8, 4, 1) Smem: 0
+#include <metal_stdlib>
+using namespace metal;
+kernel void kernel_name(
+	uint3 blockIdx [[threadgroup_position_in_grid]],
+	uint3 threadIdx [[thread_position_in_threadgroup]],
+	device float* a [[buffer(0)]],
+	device float* b [[buffer(1)]],
+	device float* c [[buffer(2)]]
+) {
+	// Inputs
+	// NodeIndex(0) = a
+	// NodeIndex(5) = b
+	// Outputs = [c]
+	int loop_e = blockIdx.x;
+	device float* f = a + (loop_e*2048);
+	device float* g = c + (loop_e*2048);
+	int loop_h = blockIdx.y;
+	device float* i = b + (loop_h*8);
+	device float* j = g + (loop_h*8);
+		
+	// TensorCore loop
+	simdgroup_float8x8 acc = simdgroup_float8x8(0);
+	for (uint tc_loop = 0; tc_loop < 32; tc_loop++) {
+	    threadgroup_barrier(mem_flags::mem_threadgroup); // For some reason this speeds it up
+	
+	    // Load sources into simdgroup matricies
+	    simdgroup_float8x8 simdA;
+	    simdgroup_load(simdA, f + (tc_loop*8), 256);
+	    simdgroup_float8x8 simdB;
+	    simdgroup_load(simdB, i + (tc_loop*2048), 256);
+	
+	    simdgroup_multiply_accumulate(acc, simdA, simdB, acc);
+	}
+	simdgroup_store(acc, j, 256);
+}
+Outputs: [65536]
+G: (32, 32, 1) TB: (8, 4, 1)
+[256.0, 256.0, 256.0, 256.0, 256.0, 256.0, 256.0, 256.0, 256.0, 256.0]

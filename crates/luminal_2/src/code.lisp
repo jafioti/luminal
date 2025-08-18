@@ -123,11 +123,16 @@
        	(TileLoop IR String) ; Tile a loop, identified by it's string
         (UnpadLoop IR String) ; Remove a padding loop, identified by it's string
         (MergeLoops IR String String) ; Merge loops, identified by their strings
-		(TCMatmul IR IR Expression Expression Expression Expression Expression Expression) ; input A, input B, A k stride, B k stride, A inner stride, B inner stride, C inner stride, number of K tile loops
 
     	; propogation pattern helpers
      	(PropOneArg String IR String) ; Generic prop one arg back
      	(PropTwoArgs String IR String String) ; Generic prop two args back
+
+      	; tensor core stuff
+      	(TCMatmul IR IR Expression Expression Expression Expression Expression Expression) ; input A, input B, A k stride, B k stride, A inner stride, B inner stride, C inner stride, number of K tile loops
+       	(TiledMatmulInputA IR i64 Expression)
+        (TiledMatmulInputB IR i64 Expression)
+        (TiledMatmulAcc IR)
      )
 )
 
@@ -339,7 +344,7 @@
 	(MergeLoops (LoopIn ?body (Loop ?other ?range) ?stride) ?o ?i)
 	(LoopIn (MergeLoops ?body ?o ?i) (Loop ?other ?range) ?stride)
 	:when ((!= ?i ?other))
-	 :ruleset ir-prop
+	:ruleset ir-prop
 )
 (rewrite
 	(MergeLoops (LoopOut ?body (Loop ?other ?range) ?stride) ?o ?i)
@@ -357,7 +362,72 @@
 	 :ruleset ir-prop
 )
 
-; TensorCore Matmul
+; TensorCore
+(ruleset tc)
+(rewrite
+	; input A
+	(LoopIn ; k tile
+		(LoopIn ; k outer
+			(LoopIn ; n tile
+				(LoopIn ; m tile
+					?a
+					(Loop ?loop_a_mtile (MNum 8))
+					(MMul (MVar "z") (MNum ?k))
+				)
+				(Loop ?loop_a_ntile (MNum 8))
+				(MNum 0)
+			)
+			(Loop ?loop_a_kouter ?k_loops)
+			(MMul (MVar "z") (MNum 8))
+		)
+		(Loop ?loop_a_kinner (MNum 8))
+		(MVar "z")
+	)
+	(TiledMatmulInputA ?a ?k ?k_loops)
+	:ruleset tc
+)
+(rewrite
+	(LoopIn ; k tile
+		(LoopIn ; k outer
+			(LoopIn ; n tile
+				(LoopIn ; m tile
+					?b
+					(Loop ?loop_b_mtile (MNum 8))
+					(MNum 0)
+				)
+				(Loop ?loop_b_ntile (MNum 8))
+				(MVar "z")
+			)
+			(Loop ?loop_b_kouter ?k_loops)
+			(MMul (MVar "z") (MNum (* ?n 8)))
+		)
+		(Loop ?loop_b_kinner (MNum 8))
+		(MMul (MVar "z") (MNum ?n))
+	)
+	(TiledMatmulInputB ?b ?n ?k_loops)
+	:ruleset tc
+)
+(rewrite
+	(LoopIn ; k tile
+		(LoopIn ; k outer
+			(LoopIn ; n tile
+				(LoopIn ; m tile
+					?acc
+					(Loop ?loop_acc_mtile (MNum 8))
+					(MNum 0)
+				)
+				(Loop ?loop_acc_ntile (MNum 8))
+				(MNum 0)
+			)
+			(Loop ?loop_acc_kouter ?k_loops)
+			(MAccum ?acc_outer)
+		)
+		(Loop ?loop_acc_kinner (MNum 8))
+		(MAccum ?acc_inner)
+	)
+	(TiledMatmulAcc ?acc)
+	:ruleset tc
+)
 (rewrite
 	(LoopOut ; m tile
 		(LoopOut ; n tile
@@ -365,61 +435,11 @@
 				(LoopOut ; k tile
 					(Add
 						(Mul
-							; input A
-							(LoopIn ; k tile
-								(LoopIn ; k outer
-									(LoopIn ; n tile
-										(LoopIn ; m tile
-											?a
-											(Loop ?loop_a_mtile (MNum 8))
-											(MMul (MVar "z") (MNum ?k))
-										)
-										(Loop ?loop_a_ntile (MNum 8))
-										(MNum 0)
-									)
-									(Loop ?loop_a_kouter ?k_loops)
-									(MMul (MVar "z") (MNum 8))
-								)
-								(Loop ?loop_a_kinner (MNum 8))
-								(MVar "z")
-							)
-							; input B
-							(LoopIn ; k tile
-								(LoopIn ; k outer
-									(LoopIn ; n tile
-										(LoopIn ; m tile
-											?b
-											(Loop ?loop_b_mtile (MNum 8))
-											(MNum 0)
-										)
-										(Loop ?loop_b_ntile (MNum 8))
-										(MVar "z")
-									)
-									(Loop ?loop_b_kouter ?k_loops)
-									(MMul (MVar "z") (MNum (* ?n 8)))
-								)
-								(Loop ?loop_b_kinner (MNum 8))
-								(MMul (MVar "z") (MNum ?n))
-							)
+							(TiledMatmulInputA ?a ?k ?k_loops)
+							(TiledMatmulInputB ?b ?n ?k_loops)
 						)
 						; accumulator
-						(LoopIn ; k tile
-							(LoopIn ; k outer
-								(LoopIn ; n tile
-									(LoopIn ; m tile
-										?acc
-										(Loop ?loop_acc_mtile (MNum 8))
-										(MNum 0)
-									)
-									(Loop ?loop_acc_ntile (MNum 8))
-									(MNum 0)
-								)
-								(Loop ?loop_acc_kouter ?k_loops)
-								(MAccum ?acc_outer)
-							)
-							(Loop ?loop_acc_kinner (MNum 8))
-							(MAccum ?acc_inner)
-						)
+						(TiledMatmulAcc ?acc)
 					)
 					(Loop ?loop_out_kinner (MNum 8))
 					(MAccum ?acc_inner)
@@ -440,20 +460,20 @@
 				(LoopIn ; n tile
 					(LoopIn ; m tile
 						?a
-						(Loop ?loop_a_mtile (MNum 8))
+						(Loop ?loop_out_mtile (MNum 8))
 						(MNum 0)
 					)
-					(Loop ?loop_a_ntile (MNum 4))  ; each thread in the matmul does 2 elements
+					(Loop ?loop_out_ntile (MNum 4))  ; each thread in the matmul does 2 elements
 					(MNum 0)
 				)
 				; b
 				(LoopIn ; n tile
 					(LoopIn ; m tile
 						?b
-						(Loop ?loop_b_mtile (MNum 8))
+						(Loop ?loop_out_mtile (MNum 8))
 						(MNum 0)
 					)
-					(Loop ?loop_b_ntile (MNum 4))  ; each thread in the matmul does 2 elements
+					(Loop ?loop_out_ntile (MNum 4))  ; each thread in the matmul does 2 elements
 					(MNum 0)
 				)
 				; a k stride
@@ -475,7 +495,7 @@
 		(Loop ?loop_out_mtile (MNum 8))
 		(MNum 0)
 	)
-	:ruleset ir
+	:ruleset tc
 )
 
 ; Swap loops
@@ -516,9 +536,9 @@
 	(repeat 5 ir-prop)
 	(repeat 3 expr)
 	(run swap)
-	(repeat 8 ir-prop)
+	(repeat 10 ir-prop)
 	(run ir-generic)
-	(run ir)
+	(repeat 3 tc)
 )
 
 (let a_gmem (GMEM "A"))
@@ -556,10 +576,10 @@
 (let out_n_outer (LoopOut out_m_tile (Loop "" (MNum 8)) (MMul (MVar "z") (MNum 8))))
 (let out_m_outer (LoopOut out_n_outer (Loop "" (MNum 8)) (MMul (MMul (MVar "z") (MNum 8)) (MNum 64))))
 
-(ruleset a-rule)
-(rewrite (Loop ?x ?r) (Loop "" ?r) :ruleset a-rule)
-(rewrite (TileLoop ?x ?l) (TileLoop ?x "") :ruleset a-rule)
-(rewrite (MergeLoops ?x ?l ?o) (MergeLoops ?x "" "") :ruleset a-rule)
-(run-schedule (run a-rule))
+;(ruleset a-rule)
+;(rewrite (Loop ?x ?r) (Loop "" ?r) :ruleset a-rule)
+;(rewrite (TileLoop ?x ?l) (TileLoop ?x "") :ruleset a-rule)
+;(rewrite (MergeLoops ?x ?l ?o) (MergeLoops ?x "" "") :ruleset a-rule)
+;(run-schedule (run a-rule))
 
-(check (= out_m_outer t16))
+;(check (= out_m_outer t16))

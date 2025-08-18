@@ -29,6 +29,9 @@ const INVALID_IR: &[&str] = &[
     "Binary",
     "MReplace",
     "MergeLoops",
+    "TiledMatmulInputA",
+    "TiledMatmulInputB",
+    "TiledMatmulAcc",
 ];
 
 type Cost = u128; // Execution time in microseconds
@@ -138,7 +141,6 @@ pub fn search(
                 // Add combined trajectories
                 trajectories.extend(enode_trajectories);
             }
-            println!("total: {}", trajectories.len() * waiting);
             if trajectories.len() * waiting > MAX_SEARCHED_GRAPHS {
                 break; // Only pick the first valid (non cycling) enode for expressions
             }
@@ -260,12 +262,7 @@ pub fn search(
             continue;
         };
         // convert inputs to reference nodes in graph
-        let inputs = inputs.into_iter().filter_map(|(l, d)| graph.node_indices().find(|n| matches!(graph.node_weight(*n).unwrap(), GraphTerm::GMEM { label } if label == l)).map(|i| {println!("{l}: {i:?}"); (i, d.clone())})).collect_vec();
-        for i in &inputs {
-            if i.1.len() == 1 {
-                println!("INPUT :{:?}", i.1);
-            }
-        }
+        let inputs = inputs.into_iter().filter_map(|(l, d)| graph.node_indices().find(|n| matches!(graph.node_weight(*n).unwrap(), GraphTerm::GMEM { label } if label == l)).map(|i| (i, d.clone()))).collect_vec();
         match &arch {
             GPUArch::CUDA => {
                 if let Some((_, s, _, _)) = &ui_functions {
@@ -362,7 +359,6 @@ pub fn extraction_to_graph(
     ) -> Ret {
         let node_choice = trajectory[*current];
         let enode = &egraph.nodes[node_choice];
-        // println!("{}", enode.op);
         match enode.op.as_str() {
             "GMEM" => {
                 *current += 1;

@@ -912,7 +912,6 @@ fn make_kernel(
                 c_inner_stride,
                 k_outer_loops,
             } => {
-                panic!();
                 let mut srcs = kernel_graph
                     .edges_directed(node, Direction::Incoming)
                     .sorted_by_key(|e| e.id())
