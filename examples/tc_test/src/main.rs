@@ -18,47 +18,18 @@ use rustc_hash::FxHashMap;
 
 fn main() {
     autoreleasepool(|| {
-        // Make 2.0 graph manually
         let (M, K, N) = (512, 512, 512);
-        let mut graph = StableGraph::new();
-        let mut a_orig = graph.add_node(GraphTerm::GMEM {
-            label: "A".to_string(),
-        });
-        let mut a = loop_in(a_orig, M, Expression::from('z') * K, "m", &mut graph);
-        a = loop_in(a, N, 0, "n", &mut graph);
-        a = loop_in(a, K, Expression::from('z'), "k", &mut graph);
-        let mut b_orig = graph.add_node(GraphTerm::GMEM {
-            label: "B".to_string(),
-        });
-        let mut b = loop_in(b_orig, M, 0, "m", &mut graph);
-        b = loop_in(b, N, Expression::from('z'), "n", &mut graph);
-        b = loop_in(b, K, Expression::from('z') * N, "k", &mut graph);
-        let mut mul_out = binary(a, b, GraphTerm::Mul, &mut graph);
-        mul_out = loop_out(mul_out, K, Expression::from('z'), "k", &mut graph);
-        mul_out = loop_out(mul_out, N, Expression::from('z') * K, "n", &mut graph);
-        mul_out = loop_out(mul_out, M, Expression::from('z') * K * N, "m", &mut graph);
-        mul_out = loop_in(mul_out, M, Expression::from('z') * K * N, "m", &mut graph);
-        mul_out = loop_in(mul_out, N, Expression::from('z') * K, "n", &mut graph);
-        mul_out = loop_in(mul_out, 1, 0, "pad", &mut graph);
-        mul_out = loop_in(mul_out, K, Expression::from('z'), "k", &mut graph);
-        let acc_orig = graph.add_node(GraphTerm::GMEM {
-            label: "acc".to_string(),
-        });
-        let mut acc = loop_in(acc_orig, M, 0, "m", &mut graph);
-        acc = loop_in(acc, N, 0, "n", &mut graph);
-        acc = loop_in(acc, 1, 0, "pad", &mut graph);
-        acc = loop_in(acc, K, Expression::from(Term::Acc('a')), "k", &mut graph);
-        let mut out = binary(mul_out, acc, GraphTerm::Add, &mut graph);
-        out = loop_out(out, K, Expression::from(Term::Acc('a')), "k", &mut graph);
-        out = loop_out(out, 1, 0, "pad", &mut graph);
-        out = loop_out(out, N, Expression::from('z'), "n", &mut graph);
-        loop_out(out, M, Expression::from('z') * N, "m", &mut graph);
-        // luminal_2::utils::display_graph(&graph, &[]);
+        let mut cx = Graph::new();
+        let a = cx.named_tensor("A", (M, K));
+        let b = cx.named_tensor("B", (K, N));
+        let out = a.matmul(b);
+        let (graph, gmem_mapping, accs) = translate_graph_meta(&cx);
+        let graph = graph.node_weights().next().unwrap().clone();
         let egraph = build_search_space(&graph, 1);
         let inputs = make_test_inputs(
             &graph,
             &FxHashMap::default(),
-            &[("acc".to_string(), vec![0.0])],
+            &[("acc_0".to_string(), vec![0.0])],
         );
         let out_graph = search(
             &egraph,
@@ -67,32 +38,31 @@ fn main() {
             &FxHashMap::default(),
         )
         .unwrap();
-        a_orig = out_graph
+        let a_orig = out_graph
             .node_indices()
             .find(|i| {
                 *out_graph.node_weight(*i).unwrap()
                     == GraphTerm::GMEM {
-                        label: "A".to_string(),
+                        label: "A Load".to_string(),
                     }
             })
             .unwrap();
-        b_orig = out_graph
+        let b_orig = out_graph
             .node_indices()
             .find(|i| {
                 *out_graph.node_weight(*i).unwrap()
                     == GraphTerm::GMEM {
-                        label: "B".to_string(),
+                        label: "B Load".to_string(),
                     }
             })
             .unwrap();
         let acc_orig = out_graph.node_indices().find(|i| {
             *out_graph.node_weight(*i).unwrap()
                 == GraphTerm::GMEM {
-                    label: "acc".to_string(),
+                    label: "acc_0".to_string(),
                 }
         }); // there may be no acc here anymore
-        out = out_graph.externals(Direction::Outgoing).next().unwrap();
-        // println!("BEST EGGLOG: {}", render_egglog(&out_graph, "a").0);
+        let out = out_graph.externals(Direction::Outgoing).next().unwrap();
         // luminal_2::utils::display_graph(&out_graph, &[]);
         let (kernels, gmem_mapping) = codegen(
             out_graph,
