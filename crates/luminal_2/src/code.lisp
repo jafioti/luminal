@@ -114,7 +114,6 @@
       	(TCMatmul IR IR Expression Expression Expression Expression Expression Expression) ; input A, input B, A k stride, B k stride, A inner stride, B inner stride, C inner stride, number of K tile loops
        	(TiledMatmulInputA IR i64 Expression)
         (TiledMatmulInputB IR i64 Expression)
-        (TiledMatmulAcc IR)
      )
 )
 
@@ -250,7 +249,7 @@
 	(TileLoop (LoopIn ?body (Loop ?other ?range) ?stride) ?loop)
 	(LoopIn (TileLoop ?body ?loop) (Loop ?other ?range) ?stride)
 	:when ((!= ?loop ?other))
-	 :ruleset ir-prop
+	:ruleset ir-prop
 )
 (rewrite
 	(TileLoop (LoopOut ?body (Loop ?other ?range) ?stride) ?loop)
@@ -378,32 +377,6 @@
 	:ruleset tc
 )
 (rewrite
-	(LoopIn ; k outer
-		(LoopIn ; pad2
-			(LoopIn ; pad1
-				(LoopIn ; n tile
-					(LoopIn ; m tile
-						?acc
-						(Loop ?loop_acc_mtile (MNum ?m))
-						(MNum 0)
-					)
-					(Loop ?loop_acc_ntile (MNum ?n))
-					(MNum 0)
-				)
-				(Loop ?pad1 (MNum 1))
-				(MNum 0)
-			)
-			(Loop ?pad2 (MNum 1))
-			(MNum 0)
-		)
-		(Loop ?loop_acc_kouter (MNum ?k))
-		(MAccum ?accum)
-	)
-	(TiledMatmulAcc ?acc)
-	:when ((= (% ?k 8) 0) (= (% ?m 8) 0) (= (% ?n 8) 0))
-	:ruleset tc
-)
-(rewrite
 	(LoopOut ; m
 		(LoopOut ; n
 			(LoopOut ; pad1
@@ -415,7 +388,27 @@
 								(TiledMatmulInputB ?b ?n ?k_loops)
 							)
 							; accumulator
-							(TiledMatmulAcc ?acc)
+							(LoopIn ; k outer
+								(LoopIn ; pad2
+									(LoopIn ; pad1
+										(LoopIn ; n tile
+											(LoopIn ; m tile
+												?acc
+												(Loop ?loop_acc_mtile (MNum ?m))
+												(MNum 0)
+											)
+											(Loop ?loop_acc_ntile (MNum ?n))
+											(MNum 0)
+										)
+										(Loop ?pad1 (MNum 1))
+										(MNum 0)
+									)
+									(Loop ?pad2 (MNum 1))
+									(MNum 0)
+								)
+								(Loop ?loop_acc_k (MNum ?k))
+								(MAccum ?accum)
+							)
 						)
 						(Loop ?loop_out_k (MNum ?k))
 						(MAccum ?acc_outer)

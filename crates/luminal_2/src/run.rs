@@ -2,7 +2,7 @@ use crate::{
     GPUArch, GraphTerm,
     codegen::{codegen, stitch_meta_graph_together},
     extract::{make_test_inputs, search},
-    translate::{InitData, OptimalGraphNodeIndex, SubGraphNodeIndex, translate_graph_meta},
+    translate::{InitData, OptimalGraphNodeIndex, SubGraphNodeIndex, translate_graph},
     utils::build_search_space,
 };
 use itertools::Itertools;
@@ -30,10 +30,10 @@ pub fn chunk_based_search_compiler(
     original_graph: Graph,
     original_graph_input: Vec<(GraphTensor, Vec<f32>)>,
     original_graph_output: &GraphTensor,
-    inits: &[(String, Vec<f32>)],
+    inits: &[(String, InitData)],
 ) -> Vec<f32> {
     autoreleasepool(|| {
-        let (mut meta_graph, mut global_map, mut buffers) = translate_graph_meta(&original_graph);
+        let (mut meta_graph, mut global_map, buffers) = translate_graph(&original_graph);
         // Search each subgraph
         for graph_node in meta_graph.node_indices().collect_vec() {
             let sub_graph = meta_graph.node_weight_mut(graph_node).unwrap();
@@ -86,7 +86,7 @@ pub fn chunk_based_search_compiler(
                 let (input, _) = meta_graph.edge_weight_mut(edge).unwrap();
                 *input = new_output;
             }
-            // // Update old-to-new-mappings
+            // Update old-to-new-mappings
             for (_, (meta, v)) in &mut global_map {
                 if *meta != graph_node {
                     continue;
@@ -126,19 +126,28 @@ pub fn chunk_based_search_compiler(
                 (copy_metal_buffer(&data, &device), true),
             );
         }
+        let mut gmem_to_node_mapping = FxHashMap::default();
+        for n in new_graph.node_indices() {
+            if let Some(GraphTerm::GMEM { label }) = new_graph.node_weight(n) {
+                gmem_to_node_mapping.insert(label, n);
+            }
+        }
 
         for (label, val) in &buffers {
             match val {
                 InitData::Expr(e) => {
                     let val = e.exec(&original_graph.dyn_map).unwrap();
-                    inputs.insert(gmem_mapping[&new_old_to_new_mapping[&label]], {
-                        let v = vec![val as f32];
-                        (copy_metal_buffer(&v, &device), true)
-                    });
+                    inputs.insert(
+                        gmem_mapping[&new_old_to_new_mapping[&gmem_to_node_mapping[label]]],
+                        {
+                            let v = vec![val as f32];
+                            (copy_metal_buffer(&v, &device), true)
+                        },
+                    );
                 }
                 InitData::Data(d) => {
                     inputs.insert(
-                        gmem_mapping[&new_old_to_new_mapping[&label]],
+                        gmem_mapping[&new_old_to_new_mapping[&gmem_to_node_mapping[label]]],
                         (copy_metal_buffer(d, &device), true),
                     );
                 }

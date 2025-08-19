@@ -10,10 +10,19 @@ use luminal::prelude::{
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum InitData {
     Expr(Expression),
     Data(Vec<f32>),
+}
+
+impl InitData {
+    pub fn to_vec(self, dyn_map: &FxHashMap<char, usize>) -> Vec<f32> {
+        match self {
+            InitData::Data(d) => d,
+            InitData::Expr(e) => vec![e.exec(dyn_map).unwrap() as f32],
+        }
+    }
 }
 
 pub type CrossSubGraphTensorIndexes = (NodeIndex, NodeIndex);
@@ -38,12 +47,12 @@ fn collect_ancestors(graph: &Graph, n: NodeIndex) -> HashSet<NodeIndex> {
     seen
 }
 
-pub fn translate_graph_meta(
+pub fn translate_graph(
     graph: &Graph,
 ) -> (
     MetaGraph,
     FxHashMap<NodeIndex, (NodeIndex /*meta*/, NodeIndex /*inner*/)>,
-    Vec<(NodeIndex /*orig*/, InitData)>,
+    Vec<(String /*orig*/, InitData)>,
 ) {
     let mut meta: MetaGraph = MetaGraph::new();
 
@@ -52,7 +61,7 @@ pub fn translate_graph_meta(
     let mut orig_to_subgraph_node_map: FxHashMap<(OrigGraphNodeIndex, usize), SubGraphNodeIndex> =
         FxHashMap::default();
     let mut key_to_subgraph_buffer: FxHashMap<NodeIndex, SubGraphNodeIndex> = FxHashMap::default(); // can hold original or synthetic nodeIndexes
-    let mut inits: Vec<(NodeIndex, InitData)> = vec![];
+    let mut inits: Vec<(String, InitData)> = vec![];
     let mut simplify_cache = FxHashMap::default();
 
     // meta-level outputs
@@ -216,8 +225,9 @@ pub fn translate_graph_meta(
                     _ => unreachable!(),
                 };
 
+                let acc_name = format!("acc_{}", inits.len());
                 let mut acc = g.add_node(GraphTerm::GMEM {
-                    label: format!("acc_{}", inits.len()),
+                    label: acc_name.clone(),
                 });
                 let orig_acc = acc;
 
@@ -261,10 +271,7 @@ pub fn translate_graph_meta(
                 }
                 key_to_subgraph_buffer
                     .insert(NodeIndex::new(graph.node_count() + inits.len()), orig_acc);
-                inits.push((
-                    NodeIndex::new(graph.node_count() + inits.len()),
-                    InitData::Data(vec![start_val]),
-                ));
+                inits.push((acc_name, InitData::Data(vec![start_val])));
 
                 let mut opn = g.add_node(term);
                 g.add_edge(new_source, opn, ());
@@ -286,7 +293,7 @@ pub fn translate_graph_meta(
                     key_to_subgraph_buffer
                         .insert(NodeIndex::new(graph.node_count() + inits.len()), newn);
                     inits.push((
-                        NodeIndex::new(graph.node_count() + inits.len()),
+                        op.to_string(),
                         match constant.0 {
                             ConstantValue::Expression(e) => InitData::Expr(e),
                             ConstantValue::Float(f) => InitData::Data(vec![f]),
@@ -348,7 +355,7 @@ fn scope_in(
     shape: ShapeTracker,
     reduce_dim: Option<usize>,
     graph: &mut StableGraph<GraphTerm, (), Directed>,
-    inits: &mut Vec<(NodeIndex, InitData)>,
+    inits: &mut Vec<(String, InitData)>,
     simplify_cache: &mut FxHashMap<Expression, Expression>,
     translation_mapping: &mut FxHashMap<NodeIndex, NodeIndex>,
     n_orig_nodes: usize,
@@ -368,7 +375,7 @@ fn scope_in(
                 "pad on a reduce dim not implemented!"
             );
             for z in i..THREADBLOCK_DIMS + GRID_DIMS {
-                ranges.push((Expression::from(1), format!("-pad{i}-")));
+                ranges.push((Expression::from(1), format!("pad{z}")));
                 src = loop_in(src, 1, 0, format!("pad{z}"), graph);
             }
             ranges.push((range, i.to_string()));
@@ -387,7 +394,7 @@ fn scope_in(
                 label: "Mask".to_string(),
             });
             translation_mapping.insert(NodeIndex::new(n_orig_nodes + inits.len()), mask);
-            inits.push((mask, InitData::Data(vec![0., 1.])));
+            inits.push(("Mask".to_string(), InitData::Data(vec![0., 1.])));
             // Loop mask in
             for level in 0..i {
                 mask = loop_in(
@@ -434,7 +441,7 @@ fn scope_in(
                 label: "Mask".to_string(),
             });
             translation_mapping.insert(NodeIndex::new(n_orig_nodes + inits.len()), mask);
-            inits.push((mask, InitData::Data(vec![0., 1.])));
+            inits.push(("Mask".to_string(), InitData::Data(vec![0., 1.])));
             // Loop mask in
             for level in 0..i {
                 mask = loop_in(

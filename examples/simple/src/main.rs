@@ -9,7 +9,7 @@ use luminal_2::{
     codegen::{codegen, stitch_meta_graph_together},
     extract::{make_test_inputs, search},
     run::{assign_buffers, compile_kernels, run_graph},
-    translate::{translate_graph_meta, InitData},
+    translate::{translate_graph, InitData},
     utils::build_search_space,
     GPUArch, GraphTerm,
 };
@@ -37,8 +37,8 @@ fn main() {
         cx.set_dyn_dim('a', 3);
         cx.set_dyn_dim('b', 2);
         cx.execute_debug();
-        let (mut new_graph, mut old_to_new_mapping, mut accs) = translate_graph_meta(&cx);
-        // luminal_2::utils::display_graph(&new_graph.node_weights().next().unwrap(), &[]);
+        let (mut new_graph, mut old_to_new_mapping, mut accs) = translate_graph(&cx);
+        luminal_2::utils::display_graph(&new_graph.node_weights().next().unwrap(), &[]);
         // Insert accs into the old_to_new_mapping
 
         // Search each subgraph
@@ -46,7 +46,7 @@ fn main() {
             let graph = new_graph.node_weight_mut(graph_node).unwrap();
             // luminal_2::utils::display_graph(&graph, &[]);
             let search_space = build_search_space(graph, 3);
-            let inputs = make_test_inputs(graph, &cx.dyn_map);
+            let inputs = make_test_inputs(graph, &cx.dyn_map, &accs);
             let searched_graph = search(
                 &search_space,
                 &inputs,

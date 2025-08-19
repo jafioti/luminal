@@ -3,6 +3,7 @@ use std::usize;
 
 use crate::Kernel;
 use crate::run::{assign_buffers, compile_kernels, run_graph};
+use crate::translate::InitData;
 use crate::utils::print_kernels;
 use crate::{GPUArch, GraphTerm};
 use colored::Colorize;
@@ -225,7 +226,7 @@ fn extract_trajectories<'a>(
 
 pub fn search(
     egraph: &EGraph,
-    inputs: &[(String, Vec<f32>)],
+    inputs: &[(String, InitData)],
     arch: GPUArch,
     dyn_vars: &FxHashMap<char, usize>,
 ) -> Option<StableGraph<GraphTerm, ()>> {
@@ -307,8 +308,8 @@ pub fn search(
                                                 .map(|v| &v[..v.len().min(20)])
                                                 .collect_vec()
                                         );
-                                        // display_graph(&graph, &[]);
-                                        println!(
+                                        crate::utils::display_graph(&graph, &[]);
+                                        panic!(
                                             "{} {x} != {y}",
                                             "Output Mismatch".bold().on_bright_red()
                                         );
@@ -578,7 +579,7 @@ pub fn extraction_to_graph(
 
 fn cost<'a>(
     kernels: &StableGraph<Kernel, (usize, usize), Directed>,
-    inputs: &[(NodeIndex, Vec<f32>)],
+    inputs: &[(NodeIndex, InitData)],
     gmem_mapping: &HashMap<NodeIndex, usize>,
     dyn_vars: &FxHashMap<char, usize>,
 ) -> Option<(Cost, Vec<Vec<f32>>)> {
@@ -590,7 +591,15 @@ fn cost<'a>(
         // Copy input buffers over
         let mut inputs = inputs
             .into_iter()
-            .map(|(n, b)| (gmem_mapping[n], (copy_metal_buffer(b, &device), false)))
+            .map(|(n, b)| {
+                (
+                    gmem_mapping[n],
+                    (
+                        copy_metal_buffer(&b.clone().to_vec(dyn_vars), &device),
+                        false,
+                    ),
+                )
+            })
             .collect::<FxHashMap<_, _>>();
         // Warm up resources (buffer allocation, kernel compiler, etc.)
         for _ in 0..WARMUP_TRIALS {
@@ -646,14 +655,14 @@ pub fn copy_metal_buffer_back(v: &Buffer) -> Vec<f32> {
 pub fn make_test_inputs(
     graph: &StableGraph<GraphTerm, ()>,
     dyn_map: &FxHashMap<char, usize>,
-    inits: &[(String, Vec<f32>)],
-) -> Vec<(String, Vec<f32>)> {
+    inits: &[(String, InitData)],
+) -> Vec<(String, InitData)> {
     // Go through each GMEM and work out the size
     let mut inputs = vec![];
     let mut rng = rng();
     for node in graph.externals(Direction::Incoming) {
         if let GraphTerm::GMEM { label } = graph.node_weight(node).unwrap() {
-            if let Some(init) = inits.iter().find(|(n, v)| n == label) {
+            if let Some(init) = inits.iter().find(|(n, _)| n == label) {
                 inputs.push(init.clone());
                 continue;
             }
@@ -677,9 +686,11 @@ pub fn make_test_inputs(
             }
             inputs.push((
                 label.clone(),
-                (0..size.exec(&dyn_map).unwrap())
-                    .map(|_| rng.random())
-                    .collect(),
+                InitData::Data(
+                    (0..size.exec(&dyn_map).unwrap())
+                        .map(|_| rng.random())
+                        .collect(),
+                ),
             ));
         }
     }
