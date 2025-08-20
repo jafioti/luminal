@@ -7,9 +7,17 @@
 
 Luminal is a deep learning library that uses **search-based compilation** to achieve high performance.
 
+## ShowHN
+To run the demo shown on HN on mac, clone this repo and run:
+```bash
+cd demos/matmul
+cargo run --release
+```
+
 > [!IMPORTANT]  
 > We're undergoing a large transition to "2.0", which introduces large-scale kernel search. This radically simplifies the compiler stack and allows us to discover complex optimizations entirely automatically. Please keep an eye on breaking changes, which usually are staged in the `crates/luminal_2` before being merged into the main crate.
 
+## Usage
 ```rust
 use luminal::prelude::*;
 
