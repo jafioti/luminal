@@ -14,8 +14,8 @@ fn main() {
 }
 
 use colored::Colorize;
-use egglog::{ast::Literal, var, EGraph, Error, Term, TermDag};
-use petgraph::{graph::NodeIndex, prelude::StableGraph, Directed};
+use egglog::{EGraph, Error, Term, TermDag, ast::Literal, var};
+use petgraph::{Directed, graph::NodeIndex, prelude::StableGraph};
 use regex::Regex;
 use std::collections::HashMap;
 

@@ -1527,7 +1527,7 @@ pub fn stitch_meta_graph_together(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{GraphTerm, GPUArch, Kernel, translate::SubGraph};
+    use crate::{GPUArch, GraphTerm, Kernel, translate::SubGraph};
     use std::collections::HashMap;
 
     #[test]
@@ -1558,10 +1558,12 @@ mod tests {
     #[test]
     fn test_toposort_subset_single_node() {
         let mut graph: StableGraph<GraphTerm, (), Directed> = StableGraph::new();
-        let node = graph.add_node(GraphTerm::GMEM { label: "test".to_string() });
+        let node = graph.add_node(GraphTerm::GMEM {
+            label: "test".to_string(),
+        });
         let mut subset = std::collections::HashSet::new();
         subset.insert(node);
-        
+
         let result = toposort_subset(&graph, &subset);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], node);
@@ -1570,18 +1572,22 @@ mod tests {
     #[test]
     fn test_toposort_subset_linear_chain() {
         let mut graph: StableGraph<GraphTerm, (), Directed> = StableGraph::new();
-        let node1 = graph.add_node(GraphTerm::GMEM { label: "input".to_string() });
+        let node1 = graph.add_node(GraphTerm::GMEM {
+            label: "input".to_string(),
+        });
         let node2 = graph.add_node(GraphTerm::Add);
-        let node3 = graph.add_node(GraphTerm::GMEM { label: "output".to_string() });
-        
+        let node3 = graph.add_node(GraphTerm::GMEM {
+            label: "output".to_string(),
+        });
+
         graph.add_edge(node1, node2, ());
         graph.add_edge(node2, node3, ());
-        
+
         let mut subset = std::collections::HashSet::new();
         subset.insert(node1);
         subset.insert(node2);
         subset.insert(node3);
-        
+
         let result = toposort_subset(&graph, &subset);
         assert_eq!(result.len(), 3);
         assert_eq!(result[0], node1);
@@ -1598,11 +1604,10 @@ mod tests {
         }
     }
 
-
-
     #[test]
     fn test_stitch_meta_graph_empty() {
-        let meta_graph: StableGraph<SubGraph, (NodeIndex, NodeIndex), Directed> = StableGraph::new();
+        let meta_graph: StableGraph<SubGraph, (NodeIndex, NodeIndex), Directed> =
+            StableGraph::new();
         let outputs = vec![];
         let (stitched, map, new_outputs) = stitch_meta_graph_together(meta_graph, outputs);
         assert_eq!(stitched.node_count(), 0);
