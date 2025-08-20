@@ -1,20 +1,19 @@
+use std::{
+    io::{self, Write},
+    time::Instant,
+};
+
 use clap::Parser;
 use colored::Colorize;
 use itertools::Itertools;
-use luminal_2::{
-    codegen::codegen,
-    run::{assign_buffers, compile_kernels, run_graph},
-    translate::{translate_graph, InitData},
-};
 use model::{HEAD_DIM, N_KV_HEADS};
-use rustc_hash::FxHashMap;
 use tokenizers::Tokenizer;
 
 mod gguf;
 mod loader;
 mod model;
 
-use crate::{loader::*, model::*};
+use crate::model::KVCache;
 use luminal::prelude::*;
 
 // Command args parser
@@ -36,19 +35,15 @@ fn main() {
 
     let cli_args = CLIArgs::parse();
     let tokenizer = Tokenizer::from_file("setup/tokenizer.json").unwrap();
-    let mut input_ids = tokenizer
-        .encode(&cli_args.prompt as &str, false)
-        .unwrap()
-        .get_ids()
-        .to_vec()
-        .into_iter()
-        .map(|i| i as f32)
-        .collect_vec();
 
-    // Set up 1.0 graph
+    print!("Defining graph");
+    io::stdout().flush().unwrap();
+    let now = Instant::now();
+
+    // Set up graph
     let mut cx = Graph::new();
-    let input = cx.named_tensor("Input", (1, 's'));
-    let cache_src: Vec<KVCache> = (0..model::NUM_LAYERS)
+    let mut input = cx.named_tensor("Input", (1, 's'));
+    let mut cache_src: Vec<KVCache> = (0..model::NUM_LAYERS)
         .map(|_| {
             (
                 cx.named_tensor("Key Cache", (1, N_KV_HEADS, 'p', HEAD_DIM)),
@@ -56,171 +51,143 @@ fn main() {
             )
         })
         .collect();
+    cache_src.set_dyn(vec![], (1, model::N_KV_HEADS, 0, model::HEAD_DIM));
     let model = model::Llama::new(&mut cx);
-    let (logits, cache_dest) = model.forward((input, &cache_src));
-    let logits = logits
-        .slice((.., Expression::from('s') - 1..))
-        .contiguous()
+    let mut model_weights = params(&model);
+    cx.keep_tensors(&model_weights);
+    let (logits, mut cache_dest) = model.forward((input, &cache_src));
+    let mut logits = logits
+        .slice((.., Expression::from('s') - 1.., ..))
         .retrieve();
-    cx.set_dyn_dim('s', input_ids.len());
-    cx.set_dyn_dim('p', 0);
+    cache_dest.keep();
+    println!("\t\t - {}ms", now.elapsed().as_millis());
 
-    // Convert to 2.0 graph
-    let now = std::time::Instant::now();
-    let (new_graph, old_to_new_mapping, accs) = translate_graph(&cx);
-    println!("Translate: {}ms", now.elapsed().as_millis());
+    print!("Compiling graph");
+    io::stdout().flush().unwrap();
+    let now = Instant::now();
 
-    // Codegen
-    let mut outputs = vec![old_to_new_mapping[&logits.id]];
-    for (k, v) in &cache_dest {
-        outputs.push(old_to_new_mapping[&k.id]);
-        outputs.push(old_to_new_mapping[&v.id]);
-    }
-    let now = std::time::Instant::now();
-    let (kernels, gmem_mapping) = codegen(
-        new_graph.clone(),
-        outputs,
-        luminal_2::GPUArch::CUDA,
-        0,
-        &cx.dyn_map,
-    )
-    .unwrap();
-    println!("Codegen: {}ms", now.elapsed().as_millis());
-    let now = std::time::Instant::now();
-    let compiled_kernels = compile_kernels(&kernels);
-    let (int_buffers, int_buffer_map) = assign_buffers(&kernels);
-    println!("Compile: {}ms", now.elapsed().as_millis());
+    // Set up model loading
+    #[cfg(any(feature = "metal", feature = "cuda"))]
+    let q_weights = loader::q8_load("setup/llama3-8b.gguf", &model, &mut cx);
+    #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
+    loader::q8_load("setup/llama3-8b.gguf", &model, &mut cx);
 
-    // Set up inputs
-    let ctx = cudarc::driver::CudaContext::new(0).unwrap();
-    let stream = ctx.default_stream();
-    let mut inps = FxHashMap::default();
-    inps.insert(
-        gmem_mapping[&old_to_new_mapping[&input.id]],
-        (copy_cuda_buffer(&input_ids, &stream), true),
+    cx.compile(
+        (
+            GenericCompiler::default(),
+            #[cfg(feature = "metal")]
+            (
+                luminal_metal::MetalCompilerPreBuffer::<f16>::default(),
+                luminal_metal::quantized::MetalQuantizedCompiler::<f16>::new(q_weights),
+                luminal_metal::BufferCompilers::default(),
+            ),
+            #[cfg(feature = "cuda")]
+            (
+                luminal_cuda::CudaCompiler::<f16>::default(),
+                luminal_cuda::CudaQuantizedCompiler::<f16>::new(q_weights),
+            ),
+        ),
+        (
+            &mut input,
+            &mut logits,
+            &mut cache_src,
+            &mut cache_dest,
+            &mut model_weights,
+        ),
     );
-    for (k, v) in &cache_src {
-        inps.insert(
-            gmem_mapping[&old_to_new_mapping[&k.id]],
-            (stream.alloc_zeros(1).unwrap(), true),
-        );
-        inps.insert(
-            gmem_mapping[&old_to_new_mapping[&v.id]],
-            (stream.alloc_zeros(1).unwrap(), true),
-        );
-    }
-    let now = std::time::Instant::now();
-    for (node, val) in load("setup/llama3-8b.gguf", &model) {
-        inps.insert(gmem_mapping[&old_to_new_mapping[&node]], (val, false));
-    }
-    println!("Load: {}ms", now.elapsed().as_millis());
-    for (label, val) in &accs {
-        match val {
-            InitData::Expr(e) => {
-                let val = e.exec(&cx.dyn_map).unwrap();
-                inps.insert(
-                    gmem_mapping[label],
-                    (copy_cuda_buffer(&vec![val as f32], &stream), true),
-                );
-            }
-            InitData::Data(d) => {
-                inps.insert(gmem_mapping[label], (copy_cuda_buffer(&d, &stream), false));
-            }
-        }
-    }
+    let cache_src = downstream(&cache_src, &cx);
+    println!("\t\t - {}ms", now.elapsed().as_millis());
+
+    // Initial forward pass to load weights
+    print!("Loading model");
+    io::stdout().flush().unwrap();
+    let now = Instant::now();
+    input.set_dyn(vec![1.], (1, 1));
+    cx.set_dyn_dim('t', 1);
+    cx.execute();
+    logits.drop();
+    transfer_data_same_graph(&cache_dest, &cache_src, &mut cx);
+    println!("\t\t - {}ms", now.elapsed().as_millis());
+
+    // Now that weights are loaded, delete the loading nodes so they don't run again
+    delete_inputs(&cache_src, &mut cx);
+    delete_inputs(downstream(model_weights, &cx), &mut cx);
 
     // Run prompt processing pass
-    let (mut outputs, _) = run_graph(
-        &mut inps,
-        &kernels,
-        &cx.dyn_map,
-        &compiled_kernels,
-        &int_buffers,
-        &int_buffer_map,
+    let input_ids = tokenizer
+        .encode(&cli_args.prompt as &str, false)
+        .unwrap()
+        .get_ids()
+        .to_vec();
+    input.set_dyn(
+        input_ids.iter().map(|i| *i as f32).collect::<Vec<_>>(),
+        (1, input_ids.len()),
     );
-
-    // Process outputs
-    let mut logits = stream.memcpy_dtov(&outputs[0]).unwrap();
-    let mut output_id = argmax(&logits);
-    input_ids.push(output_id as f32);
-    // let mut kv_out = outputs
-    //     .into_iter()
-    //     .skip(1)
-    //     .chunks(2)
-    //     .into_iter()
-    //     .map(|mut i| (i.next().unwrap(), i.next().unwrap()))
-    //     .collect_vec();
+    cx.set_dyn_dim('t', input_ids.len());
+    print!("Processing Prompt");
+    io::stdout().flush().unwrap();
+    let now = Instant::now();
+    cx.execute();
+    let elapsed_ms = now.elapsed().as_millis();
+    println!(
+        "\t - {elapsed_ms}ms ({:.2} tok/s, {} prompt tokens)",
+        1000.0 * (input_ids.len() as f64) / (elapsed_ms as f64),
+        input_ids.len()
+    );
+    let mut output_ids = vec![argmax(&logits.data())];
+    logits.drop();
 
     // Decode token
-    let mut completion = tokenizer.decode(&[output_id], false).unwrap();
-    println!(
-        "{}{}",
-        cli_args.prompt.white().bold(),
-        completion.bright_green()
-    );
+    print!("{}", cli_args.prompt.white().bold());
+    let initial = tokenizer.decode(&output_ids, false).unwrap().bright_green();
+    print!("{initial}",);
+    io::stdout().flush().unwrap();
+
+    // Swap caches
+    transfer_data_same_graph(&cache_dest, &cache_src, &mut cx);
 
     // Decode loop
-    for _ in 0..100 {
-        let n = std::time::Instant::now();
-        cx.set_dyn_dim('s', 1);
-        cx.set_dyn_dim('p', input_ids.len() - 1);
+    let start_decode = std::time::Instant::now();
+    let mut prev_output_len = initial.len();
+    for _ in 0..cli_args.gen_tokens {
+        input.set_dyn(vec![*output_ids.last().unwrap() as f32], (1, 1));
+        cx.set_dyn_dim('p', input_ids.len() + output_ids.len() - 1);
+        cx.execute();
 
-        // Set up inputs
-        inps.insert(gmem_mapping[&old_to_new_mapping[&input.id]], {
-            (copy_cuda_buffer(&vec![output_id as f32], &stream), true)
-        });
-        for ((k, v), mut kv_data) in cache_src
-            .iter()
-            .zip(outputs.into_iter().skip(1).chunks(2).into_iter())
-        {
-            inps.insert(
-                gmem_mapping[&old_to_new_mapping[&k.id]],
-                (kv_data.next().unwrap(), true),
-            );
-            inps.insert(
-                gmem_mapping[&old_to_new_mapping[&v.id]],
-                (kv_data.next().unwrap(), true),
-            );
-        }
-        for (label, val) in &accs {
-            match val {
-                InitData::Expr(e) => {
-                    let val = e.exec(&cx.dyn_map).unwrap();
-                    inps.insert(
-                        gmem_mapping[label],
-                        (copy_cuda_buffer(&vec![val as f32], &stream), true),
-                    );
-                }
-                InitData::Data(_) => {} // Wasn't deleted, don't need to make new buffer
+        // Sample tokens
+        let output_id = argmax(&logits.data());
+        logits.drop();
+        output_ids.push(output_id);
+
+        // Get the current decoded output
+        let current_output = tokenizer.decode(&output_ids, false).unwrap();
+
+        // Print the new substring added to the decoded output
+        let legal_byte_num = utf8_legal_byte_num(current_output.as_bytes()[prev_output_len]);
+        if let Some(byte_num) = legal_byte_num {
+            if current_output.len() > legal_byte_num.unwrap() + prev_output_len {
+                print!(
+                    "{}",
+                    current_output[prev_output_len..prev_output_len + byte_num].bright_green()
+                );
+                io::stdout().flush().unwrap();
+
+                // Update the previous output
+                prev_output_len += byte_num
             }
         }
-        println!("init {}micros", n.elapsed().as_micros());
-
-        // Run
-        (outputs, _) = run_graph(
-            &mut inps,
-            &kernels,
-            &cx.dyn_map,
-            &compiled_kernels,
-            &int_buffers,
-            &int_buffer_map,
-        );
-        println!("run {}micros", n.elapsed().as_micros());
-
-        // Get outputs
-        stream.memcpy_dtoh(&outputs[0], &mut logits).unwrap();
-        output_id = argmax(&logits);
-        input_ids.push(output_id as f32);
-
-        // Decode token
-        completion.push_str(&tokenizer.decode(&[output_id], false).unwrap());
-        println!("token {}micros", n.elapsed().as_micros());
-        println!(
-            "{}{}",
-            cli_args.prompt.white().bold(),
-            completion.bright_green()
-        );
+        // Swap caches
+        transfer_data_same_graph(&cache_dest, &cache_src, &mut cx);
     }
+
+    println!();
+    let avg_token_time =
+        start_decode.elapsed().as_micros() as f32 / (output_ids.len() - 1) as f32 / 1000.0;
+    println!(
+        "\nAverage token generated in {:.2}ms\t - ({:.2} tok/s)",
+        avg_token_time,
+        1000.0 / avg_token_time
+    );
 }
 
 // Currently just an argmax, do actual sampling here
@@ -228,4 +195,20 @@ fn argmax(dist: &[f32]) -> u32 {
     dist.iter()
         .position_max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .unwrap() as u32
+}
+
+/// return utf8 char num corresponding to start byte, if it's not a start byte return [`None`]
+fn utf8_legal_byte_num(byte: u8) -> Option<usize> {
+    match byte {
+        // ASCII  (0xxxxxxx)
+        0x00..=0x7F => Some(1),
+        // char of 2 bytes (110xxxxx)
+        0xC0..=0xDF => Some(2),
+        // char of 3 bytes (1110xxxx)
+        0xE0..=0xEF => Some(3),
+        // char of 4 bytes (11110xxx)
+        0xF0..=0xF7 => Some(4),
+        // not a start byte
+        _ => None,
+    }
 }
