@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 itertools = "0.11.0"
 num-traits = "0.2.16"
 petgraph = "0.6.4"
-rand = "0.8.5"
+rand = "0.9.2"
 urlencoding = "2.1.2"
 webbrowser = "1.0.0"
 dyn-clone = "1.0.12"
@@ -42,3 +42,4 @@ members = [
 	"docs/company",
 ]
 exclude = ["examples/yolo_v8", "crates/luminal_cuda", "crates/luminal_metal", "crates/luminal_2", "flash_attention_demo"]
+
