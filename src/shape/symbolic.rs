@@ -50,7 +50,7 @@ impl Expression {
     }
 
     pub fn is_acc(&self) -> bool {
-        self.terms.read().len() == 1 && matches!(self.terms.read()[0], Term::Acc(_))
+        self.terms.read().iter().any(|i| matches!(i, Term::Acc(_)))
     }
 }
 
@@ -184,7 +184,7 @@ impl Debug for Expression {
             let new_symbol = match term {
                 Term::Num(n) => n.to_string(),
                 Term::Var(c) => c.to_string(),
-                Term::Acc(_) => "1".to_string(), // super jank, exists so that we can max(Acc, x)
+                Term::Acc(c) => format!("Acc({c})"),
                 Term::Max => format!(
                     "max({}, {})",
                     symbols.pop().unwrap(),
@@ -236,6 +236,44 @@ impl Expression {
         }
         symbols.pop().unwrap_or_default()
     }
+
+    pub fn to_kernel(&self) -> String {
+        let mut symbols = vec![];
+        for term in self.terms.read().iter() {
+            let new_symbol = match term {
+                Term::Num(n) => n.to_string(),
+                Term::Var(c) => format!("const_{c}"),
+                Term::Acc(_) => "1".to_string(),
+                Term::Max => format!(
+                    "max((int){}, (int){})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+                Term::Min => format!(
+                    "min((int){}, (int){})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+                Term::Lt => format!(
+                    "(int)({} < {})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+                Term::Gte => format!(
+                    "(int)({} >= {})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+                _ => format!(
+                    "({}{term:?}{})",
+                    symbols.pop().unwrap(),
+                    symbols.pop().unwrap()
+                ),
+            };
+            symbols.push(new_symbol);
+        }
+        symbols.pop().unwrap_or_default()
+    }
 }
 
 impl std::fmt::Display for Expression {
@@ -250,7 +288,7 @@ impl Expression {
         if self.terms.read().len() == 1 {
             return self;
         }
-        egg_simplify(self)
+        egg_simplify(self, false)
     }
 
     /// Simplify the expression to its minimal terms, using a cache to retrieve / store the simplification
@@ -300,7 +338,7 @@ impl Expression {
     /// Maximum
     pub fn max<E: Into<Expression>>(self, rhs: E) -> Self {
         let rhs = rhs.into();
-        if rhs == self || rhs == 0 || self == i32::MAX {
+        if rhs == self || self == i32::MAX {
             return self;
         }
         if self == 0 || rhs == i32::MAX {
@@ -1081,8 +1119,8 @@ fn is_const_positive(vars: &[&str]) -> impl Fn(&mut EGraph, Id, &Subst) -> bool 
     }
 }
 
-fn make_rules() -> Vec<Rewrite> {
-    vec![
+fn make_rules(lower_bound_zero: bool) -> Vec<Rewrite> {
+    let mut v = vec![
         // Communative properties
         rewrite!("commute-add"; "(+ ?a ?b)" => "(+ ?b ?a)"),
         rewrite!("commute-mul"; "(* ?a ?b)" => "(* ?b ?a)"),
@@ -1130,10 +1168,16 @@ fn make_rules() -> Vec<Rewrite> {
         rewrite!("mul-one";  "?a" => "(* ?a 1)"),
         rewrite!("cancel-sub"; "(- ?a ?a)" => "0"),
         rewrite!("cancel-div"; "(/ ?a ?a)" => "1" if is_not_zero("?a")),
-    ]
+        rewrite!("dedup-max"; "(max ?a (max ?a ?b))" => "(max ?a ?b)"),
+        rewrite!("dedup-min"; "(min ?a (min ?a ?b))" => "(min ?a ?b)"),
+    ];
+    if lower_bound_zero {
+        v.push(rewrite!("max-zero"; "(max ?a 0)" => "?a"));
+    }
+    v
 }
 
-fn egg_simplify(e: Expression) -> Expression {
+fn egg_simplify(e: Expression, lower_bound_zero: bool) -> Expression {
     // Convert to egg expression
     let expr = luminal_to_egg(&e);
     // Simplify
@@ -1142,7 +1186,7 @@ fn egg_simplify(e: Expression) -> Expression {
         // .with_time_limit(std::time::Duration::from_secs(30))
         // .with_node_limit(100_000_000)
         .with_expr(&expr)
-        .run(&make_rules());
+        .run(&make_rules(lower_bound_zero));
     // runner.print_report();
     let extractor = Extractor::new(&runner.egraph, AstSize);
     let (_, best) = extractor.find_best(runner.roots[0]);

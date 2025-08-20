@@ -355,7 +355,7 @@ impl ShapeTracker {
             {
                 panic!("Adding padding to a masked shape isn't supported")
             }
-            let (s, e) = (s.max(0), e.max(0));
+            // let (s, e) = (s.max(0), e.max(0)); // why is this needed???
             self.padding[ind].0 += s;
             self.padding[ind].1 += e;
         }

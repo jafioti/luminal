@@ -1,8 +1,9 @@
 #![allow(unused)]
 
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Write};
 
 use egglog::{EGraph, Error, Term, prelude::exprs::var};
+use itertools::Itertools;
 use luminal::{
     prelude::{
         NodeIndex,
@@ -11,12 +12,13 @@ use luminal::{
             algo::toposort,
             dot::{Config, Dot},
             prelude::StableGraph,
-            visit::Topo,
+            visit::{EdgeRef, Topo},
         },
     },
     shape::Expression,
 };
 use regex::Regex;
+use rustc_hash::FxHashSet;
 
 pub fn unary(
     a: NodeIndex,
@@ -108,7 +110,7 @@ pub trait EdgeToString {
     fn edge_to_string(&self) -> String;
 }
 
-impl EdgeToString for u8 {
+impl EdgeToString for usize {
     fn edge_to_string(&self) -> String {
         self.to_string()
     }
@@ -120,7 +122,7 @@ impl EdgeToString for () {
     }
 }
 
-impl EdgeToString for (u8, u8) {
+impl EdgeToString for (usize, usize) {
     fn edge_to_string(&self) -> String {
         format!("{}, {}", self.0, self.1)
     }
@@ -161,18 +163,14 @@ impl TermToString for (Term, usize) {
 
 impl TermToString for Kernel {
     fn term_to_string(&self) -> String {
-        if self.code == "Inputs" || self.code == "Outputs" {
-            return self.code.clone();
+        if self.code.starts_with("Inputs") {
+            "Inputs".to_string()
+        } else if self.code.starts_with("Outputs") {
+            "Outputs".to_string()
         } else {
             format!(
-                "Kernel ({}, {}, {}), ({}, {}, {}) -> {:?}",
-                self.grid.0,
-                self.grid.1,
-                self.grid.2,
-                self.threadblock.0,
-                self.threadblock.1,
-                self.threadblock.2,
-                self.outputs
+                "Kernel {:?} {:?} -> {:?}",
+                self.grid, self.threadblock, self.outputs
             )
         }
     }
@@ -184,7 +182,7 @@ impl TermToString for GraphTerm {
             GraphTerm::Add => "Add".to_string(),
             GraphTerm::Mul => "Mul".to_string(),
             GraphTerm::Max => "Max".to_string(),
-            GraphTerm::Exp2 => "Exp".to_string(),
+            GraphTerm::Exp2 => "Exp2".to_string(),
             GraphTerm::Log2 => "Log2".to_string(),
             GraphTerm::Sin => "Sin".to_string(),
             GraphTerm::Recip => "Recip".to_string(),
@@ -192,6 +190,16 @@ impl TermToString for GraphTerm {
             GraphTerm::Sqrt => "Sqrt".to_string(),
             GraphTerm::Mod => "Mod".to_string(),
             GraphTerm::LessThan => "LessThan".to_string(),
+            GraphTerm::TCMatmul {
+                a_k_stride,
+                b_k_stride,
+                a_inner_stride,
+                b_inner_stride,
+                c_inner_stride,
+                k_outer_loops,
+            } => format!(
+                "TCMatmul ({a_k_stride}, {b_k_stride}, {a_inner_stride}, {b_inner_stride}, {c_inner_stride}, {k_outer_loops})"
+            ),
             GraphTerm::LoopIn {
                 range,
                 stride,
@@ -202,16 +210,13 @@ impl TermToString for GraphTerm {
                 stride,
                 marker,
             } => format!("LoopOut ({range}; {stride}; -{marker}-)"),
-            GraphTerm::GMEM { label } => {
-                if let Some(label) = label {
-                    format!("GMEM ({label})")
-                } else {
-                    "GMEM".to_string()
-                }
-            }
+            GraphTerm::GMEM { label } => format!("GMEM ({label})"),
             GraphTerm::SMEM => "SMEM".to_string(),
+            GraphTerm::Custom(_) => "CustomKernel".to_string(),
+            GraphTerm::Diff(d) => format!("Diff({d})"),
             GraphTerm::SMEMLoad => "SMEMLoad".to_string(),
             GraphTerm::SMEMRead => "SMEMRead".to_string(),
+            GraphTerm::Break => "Break".to_string(),
         }
     }
 }
@@ -223,6 +228,12 @@ impl TermToString for (GraphTerm, usize) {
 }
 
 impl TermToString for (GraphTerm, Vec<Expression>, Vec<usize>) {
+    fn term_to_string(&self) -> String {
+        format!("{} {:?} {{{:?}}}", self.0.term_to_string(), self.1, self.2)
+    }
+}
+
+impl TermToString for (GraphTerm, Vec<Expression>, FxHashSet<usize>) {
     fn term_to_string(&self) -> String {
         format!("{} {:?} {{{:?}}}", self.0.term_to_string(), self.1, self.2)
     }
@@ -240,9 +251,9 @@ impl TermToString for (GraphTerm, Vec<String>, Vec<usize>) {
 }
 
 /// View a debug graph in the browser
-pub fn display_graph<G: TermToString, E: EdgeToString>(
-    graph: &StableGraph<G, E, Directed, u32>,
-    mark_nodes: &[(NodeIndex, String)],
+pub fn display_graph(
+    graph: &StableGraph<impl TermToString, impl EdgeToString, Directed, u32>,
+    mark_nodes: &[(NodeIndex, &str)],
 ) {
     let mut new_graph = StableGraph::new();
     let mut map = HashMap::new();
@@ -265,7 +276,7 @@ pub fn display_graph<G: TermToString, E: EdgeToString>(
             &format!("    {} [ label =", n.index()),
             &format!(
                 "    {} [ style=\"filled\" fillcolor=\"{color}\" label =",
-                n.index()
+                n.index(),
             ),
         );
     }
@@ -289,13 +300,7 @@ pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), (), Directed>) {
                 let (new_term, new_level) = graph.node_weight(new_node).unwrap();
                 if !matches!(new_term, GraphTerm::LoopOut { .. }) {
                     if *new_level != *curr_level + 1 {
-                        display_graph(
-                            graph,
-                            &[
-                                (node, "yellow".to_string()),
-                                (new_node, "yellow".to_string()),
-                            ],
-                        );
+                        display_graph(graph, &[(node, "yellow"), (new_node, "yellow")]);
                         panic!("incorrect levels");
                     }
                 }
@@ -306,13 +311,7 @@ pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), (), Directed>) {
                 let (new_term, new_level) = graph.node_weight(new_node).unwrap();
                 if !matches!(new_term, GraphTerm::LoopIn { .. }) {
                     if *new_level != *curr_level + 1 {
-                        display_graph(
-                            graph,
-                            &[
-                                (node, "yellow".to_string()),
-                                (new_node, "yellow".to_string()),
-                            ],
-                        );
+                        display_graph(graph, &[(node, "yellow"), (new_node, "yellow")]);
                         panic!("incorrect levels");
                     }
                 }
@@ -325,13 +324,7 @@ pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), (), Directed>) {
                     GraphTerm::LoopIn { .. } | GraphTerm::LoopOut { .. }
                 ) {
                     if *new_level != *curr_level {
-                        display_graph(
-                            graph,
-                            &[
-                                (node, "yellow".to_string()),
-                                (new_node, "yellow".to_string()),
-                            ],
-                        );
+                        display_graph(graph, &[(node, "yellow"), (new_node, "yellow")]);
                         panic!("incorrect levels");
                     }
                 }
@@ -344,7 +337,7 @@ pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), (), Directed>) {
                 && !matches!(graph.node_weight(node).unwrap().0, GraphTerm::SMEM)
             {
                 if *curr_level != 0 {
-                    display_graph(graph, &[(node, "yellow".to_string())]);
+                    display_graph(graph, &[(node, "yellow")]);
                     panic!("Inputs must have level 0, found {curr_level}");
                 }
             }
@@ -355,65 +348,81 @@ pub fn validate_graph(graph: &StableGraph<(GraphTerm, usize), (), Directed>) {
 pub fn build_search_space(
     graph: &StableGraph<GraphTerm, (), Directed>,
     iters: usize,
-    remove_tiling: bool,
 ) -> egraph_serialize::EGraph {
-    let (rendered, root) = render_egglog(graph);
-    if option_env!("PRINT_KERNELS").is_some() {
+    let (rendered, root) = render_egglog(graph, "t");
+    if option_env!("DEBUG").is_some() {
         println!("{rendered}");
+        // println!("{}", render_egglog(graph, "a").0);
     }
     let code = include_str!("code.lisp");
 
     let mut final_code = code
         .replace("{code}", &rendered)
         .replace("{iters}", &iters.to_string());
-    if remove_tiling {
-        final_code = final_code.replace(
-            r#"(rewrite
-	(LoopOut ?body (Loop ?loop (MNum ?range)) ?stride)
-	(LoopOut
-		(LoopOut
-			(TileLoop ?body ?loop)
-			(Loop (+ ?loop "_tile") (MNum 8))
-			?stride
-		)
-		(Loop ?loop (MNum (/ ?range 8)))
-		(MReplace ?stride (MVar "z") (MMul (MVar "z") (MNum 8)))
-	)
-	:when ((> ?range 8) (= (% ?range 8) 0))
-)"#,
-            "",
-        ); // tiling rule is causing an egglog bug!
+    if option_env!("SAVE_EGGLOG").is_some() {
+        std::fs::write("egglog.txt", &final_code).unwrap();
     }
     let (_egglog_messages, serialized) = run_egglog_program(&final_code, &root).unwrap();
-    println!("Done");
+    if option_env!("DEBUG").is_some() {
+        println!("Done building search space.");
+    }
     serialized
 }
 
-fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>) -> (String, String) {
-    // 1.  Topo-order so operands are rendered before users
-    let mut topo = Topo::new(&graph);
+pub fn render_egglog(
+    graph: &StableGraph<GraphTerm, (), Directed>,
+    prefix: &str,
+) -> (String, String) {
+    use std::cmp::Reverse;
+    use std::collections::{BinaryHeap, HashMap};
 
-    // 2.  Map <node-id> → <egglog var name>
+    // 1. Topo-order with tie-break: lower NodeIndex first
+    let mut indeg: HashMap<NodeIndex, usize> = graph
+        .node_indices()
+        .map(|n| (n, graph.neighbors_directed(n, Direction::Incoming).count()))
+        .collect();
+
+    let mut ready: BinaryHeap<(Reverse<usize>, NodeIndex)> = BinaryHeap::new();
+    for (n, &d) in &indeg {
+        if d == 0 {
+            ready.push((Reverse(n.index()), *n));
+        }
+    }
+
+    let mut topo_order: Vec<NodeIndex> = Vec::with_capacity(indeg.len());
+    while let Some((_, n)) = ready.pop() {
+        topo_order.push(n);
+        for succ in graph.neighbors_directed(n, Direction::Outgoing) {
+            let e = indeg.get_mut(&succ).unwrap();
+            *e -= 1;
+            if *e == 0 {
+                ready.push((Reverse(succ.index()), succ));
+            }
+        }
+    }
+
+    // 2. Map <node-id> → <egglog var name>
     let mut names: HashMap<NodeIndex, String> = HashMap::new();
     let mut next_id = 0usize;
     let mut out = String::new();
 
-    // helper to fetch operand text (there are up-edges from user → operand)
+    // helper to fetch operand text (sort lower-id edges first)
     let operand = |n: NodeIndex,
                    names: &HashMap<NodeIndex, String>,
                    g: &StableGraph<GraphTerm, (), Directed>|
      -> Vec<String> {
-        g.neighbors_directed(n, Direction::Incoming)
-            .map(|child| names[&child].clone())
+        g.edges_directed(n, Direction::Incoming)
+            .sorted_by_key(|e| e.id())
+            .map(|e| names[&e.source()].clone())
             .collect()
     };
 
-    while let Some(n) = topo.next(&graph) {
-        let var = format!("t{next_id}");
+    for n in topo_order {
+        let var = format!("{prefix}{next_id}");
         next_id += 1;
         let code = match &graph[n] {
             GraphTerm::GMEM { label } => {
-                format!("(GMEM \"{}\")", label.clone().unwrap_or_default())
+                format!("(GMEM \"{label}\")")
             }
             GraphTerm::SMEM => "(SMEM)".into(),
 
@@ -445,6 +454,30 @@ fn render_egglog(graph: &StableGraph<GraphTerm, (), Directed>) -> (String, Strin
                     stride.to_egglog()
                 )
             }
+            GraphTerm::TCMatmul {
+                a_k_stride,
+                b_k_stride,
+                a_inner_stride,
+                b_inner_stride,
+                c_inner_stride,
+                k_outer_loops,
+            } => {
+                let [ref a, ref b] = operand(n, &names, &graph)[..] else {
+                    panic!("LoopOut expects 1 child");
+                };
+                format!(
+                    "(TCMatmul {a} {b} {} {} {} {} {} {})",
+                    a_k_stride.to_egglog(),
+                    b_k_stride.to_egglog(),
+                    a_inner_stride.to_egglog(),
+                    b_inner_stride.to_egglog(),
+                    c_inner_stride.to_egglog(),
+                    k_outer_loops.to_egglog()
+                )
+            }
+            GraphTerm::Custom(_) => "(Custom)".into(),
+            GraphTerm::Diff(_) => "(Diff)".into(),
+            GraphTerm::Break => "(Break)".into(),
 
             GraphTerm::Add
             | GraphTerm::Mul
@@ -538,8 +571,8 @@ fn run_egglog_program(
     Ok((msgs, s))
 }
 
-pub fn print_kernels(kernels: &StableGraph<Kernel, (u8, u8), Directed>) {
-    println!("Kernels: {}", kernels.node_count() - 2);
+pub fn print_kernels(kernels: &StableGraph<Kernel, (usize, usize), Directed>) -> String {
+    let mut s = format!("Kernels: {}", kernels.node_count() - 2);
     for (i, node) in toposort(&kernels, None).unwrap().into_iter().enumerate() {
         let Kernel {
             code,
@@ -549,9 +582,201 @@ pub fn print_kernels(kernels: &StableGraph<Kernel, (u8, u8), Directed>) {
             outputs,
         } = kernels.node_weight(node).unwrap();
         if !code.starts_with("Inputs") && code != "Outputs" {
-            println!("Kernel {i} Grid: {grid:?} Threadblock: {threadblock:?} Smem: {smem}");
-            println!("{code}");
-            println!("Outputs: {:?}", outputs);
+            s.push_str(&format!(
+                "\nKernel {i} Grid: {grid:?} Threadblock: {threadblock:?} Smem: {smem}"
+            ));
+            s.push_str(&format!("\n{code}"));
+            s.push_str(&format!("\nOutputs: {:?}", outputs));
         }
     }
+    s
+}
+
+use crossterm::{
+    cursor::Show,
+    event::{self, Event, KeyCode},
+    execute,
+    terminal::{self, LeaveAlternateScreen},
+};
+use ratatui::{
+    Terminal,
+    backend::CrosstermBackend,
+    layout::{Constraint, Layout},
+    style::{Color, Style},
+    text::{Line, Span},
+    widgets::{
+        Block, Borders, Gauge, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+    },
+};
+use std::{
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
+};
+
+enum Msg {
+    Set(u16),
+    Text(String),
+    Title(String),
+    Exit,
+}
+
+fn expand_tabs(input: &str, tabstop: usize) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut col = 0usize;
+    for ch in input.chars() {
+        match ch {
+            '\n' => {
+                out.push(ch);
+                col = 0;
+            }
+            '\t' => {
+                let spaces = tabstop - (col % tabstop);
+                for _ in 0..spaces {
+                    out.push(' ');
+                }
+                col += spaces;
+            }
+            _ => {
+                out.push(ch);
+                col += unicode_width::UnicodeWidthChar::width(ch)
+                    .unwrap_or(1)
+                    .max(1);
+            }
+        }
+    }
+    out
+}
+
+pub fn search_ui() -> (
+    impl Fn(u16) + Send + 'static,    // set_progress
+    impl Fn(String) + Send + 'static, // set_log_text
+    impl Fn(String) + Send + 'static, // set_title
+    impl Fn() + Send + 'static,       // exit (blocks until teardown done)
+) {
+    let (tx, rx) = mpsc::channel::<Msg>();
+
+    // one-shot to wait for teardown
+    let (done_tx, done_rx) = mpsc::channel::<()>();
+
+    let set_progress = {
+        let tx = tx.clone();
+        move |pct: u16| {
+            let _ = tx.send(Msg::Set(pct.min(100)));
+        }
+    };
+    let set_log_text = {
+        let tx = tx.clone();
+        move |text: String| {
+            let _ = tx.send(Msg::Text(text));
+        }
+    };
+    let set_title = {
+        let tx = tx.clone();
+        move |title: String| {
+            let _ = tx.send(Msg::Title(title));
+        }
+    };
+
+    let exit = {
+        let tx = tx.clone();
+        move || {
+            let _ = tx.send(Msg::Exit);
+            // wait for UI thread to finish teardown
+            let _ = done_rx.recv();
+        }
+    };
+
+    std::thread::spawn(move || {
+        // setup
+        let mut stdout = std::io::stdout();
+        let _ = crossterm::terminal::enable_raw_mode();
+        let _ = crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen);
+        let backend = ratatui::backend::CrosstermBackend::new(stdout);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        let green = ratatui::style::Style::default().fg(ratatui::style::Color::Green);
+
+        let mut progress: u16 = 0;
+        let mut log_text = String::new();
+        let mut title = String::from("Logs");
+
+        'ui: loop {
+            while let Ok(msg) = rx.try_recv() {
+                match msg {
+                    Msg::Set(p) => progress = p,
+                    Msg::Text(t) => log_text = expand_tabs(&t, 8),
+                    Msg::Title(t) => title = t,
+                    Msg::Exit => break 'ui,
+                }
+            }
+
+            if crossterm::event::poll(std::time::Duration::from_millis(8)).unwrap_or(false) {
+                if let Ok(crossterm::event::Event::Key(k)) = crossterm::event::read() {
+                    if k.code == crossterm::event::KeyCode::Char('q') {
+                        break 'ui;
+                    }
+                }
+            }
+
+            let _ = terminal.draw(|f| {
+                let chunks = ratatui::layout::Layout::default()
+                    .direction(ratatui::layout::Direction::Vertical)
+                    .constraints([
+                        ratatui::layout::Constraint::Min(1),
+                        ratatui::layout::Constraint::Length(3),
+                    ])
+                    .split(f.area());
+
+                let log_widget = ratatui::widgets::Paragraph::new(log_text.clone())
+                    .block(
+                        ratatui::widgets::Block::default()
+                            .borders(ratatui::widgets::Borders::ALL)
+                            .title(ratatui::text::Span::styled(
+                                title.clone(),
+                                green.add_modifier(ratatui::style::Modifier::BOLD),
+                            ))
+                            .border_style(green)
+                            .title_style(green),
+                    )
+                    .style(green)
+                    .wrap(ratatui::widgets::Wrap { trim: false });
+                f.render_widget(log_widget, chunks[0]);
+
+                let gauge = ratatui::widgets::Gauge::default()
+                    .block(
+                        ratatui::widgets::Block::default()
+                            .borders(ratatui::widgets::Borders::ALL)
+                            .title(ratatui::text::Span::styled(
+                                "Progress",
+                                green.add_modifier(ratatui::style::Modifier::BOLD),
+                            ))
+                            .border_style(green)
+                            .title_style(green),
+                    )
+                    .gauge_style(green)
+                    .ratio((progress as f64 / 100.0).clamp(0.0, 1.0))
+                    .label(format!("{progress}%"));
+                f.render_widget(gauge, chunks[1]);
+            });
+        }
+
+        // teardown (ordered + flush)
+        // 1) drop Terminal to flush backend buffers
+        drop(terminal);
+        // 2) disable raw mode
+        let _ = crossterm::terminal::disable_raw_mode();
+        // 3) leave alt screen + show cursor
+        let mut out = std::io::stdout();
+        let _ = crossterm::execute!(
+            out,
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::cursor::Show
+        );
+        let _ = out.flush();
+
+        // signal we're done so exit() can return
+        let _ = done_tx.send(());
+    });
+
+    (set_progress, set_log_text, set_title, exit)
 }

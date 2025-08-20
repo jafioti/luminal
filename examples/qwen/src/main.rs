@@ -31,7 +31,7 @@ pub struct CLIArgs {
 
 fn main() {
     #[cfg(all(not(feature = "metal"), not(feature = "cuda")))]
-    println!("Either metal or cuda feature must be used for this example!");
+    panic!("Either metal or cuda feature must be used for this example!");
 
     let cli_args = CLIArgs::parse();
     let tokenizer = Tokenizer::from_file("setup/tokenizer.json").unwrap();

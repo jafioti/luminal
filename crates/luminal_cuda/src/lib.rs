@@ -237,7 +237,6 @@ fn input_dyn_dims(
 fn compile_and_load_kernel(mut code: String, device: &Arc<CudaContext>) -> CudaFunction {
     let name = format!("kernel_{}", hash(&code));
     code = code.replace("kernel", &name);
-    // if !device.default_stream().has_func(&name, &name) {
     let module = device
         .load_module(
             compile_ptx_with_opts(
@@ -255,7 +254,6 @@ fn compile_and_load_kernel(mut code: String, device: &Arc<CudaContext>) -> CudaF
             .unwrap(),
         )
         .unwrap();
-    // }
     module.load_function(&name).unwrap()
 }
 
