@@ -97,17 +97,13 @@ Now we can do:
 - Devices and Dtypes are handled through compilers (just run the CUDA compiler to convert the graph to use CUDA kernels, then the fp16 compiler to convert to half-precision kernels)
 - Networks can be written in generic code, but compiled and ran fast on hyper-specific architectures (try writing a PyTorch network that works with both TF32 dtypes and TPUs; get ready for if statement hell...)
 
-### View the Graph
-Once you've written all your computation code, run `cx.display()` to see the entire computation graph in all it's glory. Pretty messy looking! Now run `cx.compile(GenericCompiler::default())` and display the graph again. Much better.
-
 ## Where are we?
+- Search is partially merged. We are between 1.0 and 2.0 (search), which will be completed within the next month or so.
 - Metal and Cuda are supported for running models on Macs and Nvidia GPUs respectively, in both full and half precision.
-- Performance on M-series macs with LLMs is within 20% of llama.cpp (a *heavily* optimized library)
 - Full training support with graph-based autograd.
 - Llama 3, Phi 3, Whisper and Yolo v8 are implemented in `examples/`. See instructions above for running.
 - We have a small library of NN modules in `luminal_nn`, including transformers.
 - A significant amount of high-level ops are implemented in `hl_ops`. We are aiming to match the most used ~80% of the pytorch api.
-- The aim for 0.3 is to achieve SOTA performance on an M1 pro (50 tok/s), and near SOTA on single nvidia gpus (>100 tok/s), as well as support many mainstream models (Whisper, Stable Diffusion, Yolo v9, etc.) See the tracking issue [here](https://github.com/jafioti/luminal/issues/29)
 
 Some things on the roadmap:
 - Expand the search space to utilize Tensor Cores more flexibly
