@@ -69,6 +69,9 @@ These ops are enough to support transformers, convnets, etc.
 ### Speed
 We compile these ops into complex GPU kernels, so even though our ops are simple, we get high performance through the power of compilers! This is how we overcome the typical RISC disadvantages, btw. 
 
+### Search
+The best heuristic is no heuristic. We try to search every possible decision to give the compiler the most flexibility to discover complex optimizations. This allows us to automatically derive Flash Attention and other similarly complex rewrites. It also allows us to stay extremely small long into the future and beat the performance of far larger frameworks with tons of handwritten kernels.
+
 ### Native
 The current ML ecosystem is too fragmented, and the solution isn't another layer of abstraction. Luminal is written in rust, and interacts directly with the CUDA / Metal APIs. No indirections or abstractions, docker containers, or virtual environments. Just a statically-linked rust crate.
 
@@ -107,11 +110,13 @@ Once you've written all your computation code, run `cx.display()` to see the ent
 - The aim for 0.3 is to achieve SOTA performance on an M1 pro (50 tok/s), and near SOTA on single nvidia gpus (>100 tok/s), as well as support many mainstream models (Whisper, Stable Diffusion, Yolo v9, etc.) See the tracking issue [here](https://github.com/jafioti/luminal/issues/29)
 
 Some things on the roadmap:
-- Optimize cuda and metal matmul kernels
-- Fine-grained metal and cuda IR
+- Expand the search space to utilize Tensor Cores more flexibly
+- Bring cuda to parity with Metal
+- Add Blackwell intrinsics, such as TMEM and TMA
+- Build a ROCm backend
 - Build benchmarking suite to test against other libs
 - Distributed data, pipeline and tensor parallel.
-- Beat PT 2.0 perf on LLM training
+- Beat PT 2.0 perf on LLM inference *and* training
 - Write compiler for quantum photonic retro encabulator
 - Build dyson swarm
 
