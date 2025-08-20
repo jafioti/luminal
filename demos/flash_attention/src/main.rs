@@ -7,7 +7,6 @@ fn main() {
                 println!("{}", format!("Success: {s:?}").bright_green().bold())
             }
             println!("Kernel: {}", el_repr.bold());
-            println!("Nvidia CUDA:\n{}", include_str!("code.c").bright_green());
             // println!("{serialized}");
         }
         Err(e) => println!("{e}"),
@@ -15,8 +14,8 @@ fn main() {
 }
 
 use colored::Colorize;
-use egglog::{EGraph, Error, Term, TermDag, ast::Literal, var};
-use petgraph::{Directed, graph::NodeIndex, prelude::StableGraph};
+use egglog::{ast::Literal, var, EGraph, Error, Term, TermDag};
+use petgraph::{graph::NodeIndex, prelude::StableGraph, Directed};
 use regex::Regex;
 use std::collections::HashMap;
 
@@ -31,7 +30,7 @@ pub fn run_egglog_program(code: &str) -> Result<(Vec<String>, String, String), E
     let msgs = egraph.run_program(commands)?;
     println!("Run Report:  {}", egraph.get_run_report().as_ref().unwrap());
     let (sort, value) = egraph.eval_expr(&var!("one_output"))?;
-    let (termdag, root, _) = egraph.extract_value(&sort, value)?; 
+    let (termdag, root, _) = egraph.extract_value(&sort, value)?;
     // Remove the underscore prefix and uncomment the display_graph call to display the graph in GraphViz.
     let (_petgraph, _root_idx) = dag_to_petgraph(&termdag, root.clone());
     // display_graph(&petgraph, &[root_idx]);

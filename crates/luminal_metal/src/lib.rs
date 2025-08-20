@@ -34,9 +34,9 @@ pub type MetalCompiler<T> = (MetalCompilerPreBuffer<T>, BufferCompilers);
 /// All metal compilers coming before buffer compilers
 pub type MetalCompilerPreBuffer<T> = (
     prim::PrimitiveCompiler<T>,
-    // SpecialOpsCompiler<T>,
-    // other::CopyCompiler<T>,
-    // elementwise_fusion::ElementwiseFusionCompiler<T>,
+    SpecialOpsCompiler<T>,
+    other::CopyCompiler<T>,
+    elementwise_fusion::ElementwiseFusionCompiler<T>,
 );
 
 /// Compilers to share command and storage buffers
@@ -47,14 +47,14 @@ pub type BufferCompilers = (
 
 /// Compiler to replace metal ops with specialized variants
 pub type SpecialOpsCompiler<T> = (
-    // binary::MetalSubtractionCompiler<T>,
-    // binary::MetalEqualCompiler<T>,
-    // other::ARangeCompiler<T>,
-    // binary::MetalGatherCompiler<T>,
-    // unary::MetalExpCompiler<T>,
-    // unary::MetalCosCompiler<T>,
-    // unary::MeanReduceCompiler<T>,
-    // unary::StdNormCompiler<T>,
+    binary::MetalSubtractionCompiler<T>,
+    binary::MetalEqualCompiler<T>,
+    other::ARangeCompiler<T>,
+    binary::MetalGatherCompiler<T>,
+    unary::MetalExpCompiler<T>,
+    unary::MetalCosCompiler<T>,
+    unary::MeanReduceCompiler<T>,
+    unary::StdNormCompiler<T>,
     matmul::MetalMatMulCompiler<T>,
 );
 

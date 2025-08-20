@@ -247,7 +247,7 @@ pub fn search(
     let mut valid_graphs = 0;
     let total_trajectories = trajectories.len().min(MAX_SEARCHED_GRAPHS);
     let mut ui_functions = None;
-    if option_env!("DISPLAY").is_some() {
+    if option_env!("DEBUG").is_none() {
         ui_functions = Some(crate::utils::search_ui());
     };
     'trajectory_loop: for (n, trajectory) in trajectories
@@ -285,40 +285,38 @@ pub fn search(
                     } else if option_env!("DEBUG").is_some() {
                         println!("{}", print_kernels(&kernels));
                         println!("Graph {valid_graphs} {us}µs");
-                    }
-                    if ref_outputs.is_empty() {
-                        ref_outputs = outs;
-                    } else {
-                        for (a, b) in ref_outputs.iter().zip(&outs) {
-                            for (x, y) in a.iter().zip(b) {
-                                if (x - y).abs() >= 1e-3 {
-                                    if option_env!("DEBUG").is_some() {
-                                        // display_graph(&graph, &[]);
-                                        println!(
-                                            "REF: {:?}",
-                                            &ref_outputs
-                                                .iter()
-                                                .map(|v| &v[..v.len().min(20)])
-                                                .collect_vec()
-                                        );
-                                        println!(
-                                            "New: {:?}",
-                                            &outs
-                                                .iter()
-                                                .map(|v| &v[..v.len().min(20)])
-                                                .collect_vec()
-                                        );
-                                        crate::utils::display_graph(&graph, &[]);
-                                        panic!(
-                                            "{} {x} != {y}",
-                                            "Output Mismatch".bold().on_bright_red()
-                                        );
+                        if ref_outputs.is_empty() {
+                            ref_outputs = outs;
+                        } else {
+                            for (a, b) in ref_outputs.iter().zip(&outs) {
+                                for (x, y) in a.iter().zip(b) {
+                                    if (x - y).abs() >= 1e-3 {
+                                        if option_env!("DEBUG").is_some() {
+                                            // display_graph(&graph, &[]);
+                                            println!(
+                                                "REF: {:?}",
+                                                &ref_outputs
+                                                    .iter()
+                                                    .map(|v| &v[..v.len().min(20)])
+                                                    .collect_vec()
+                                            );
+                                            println!(
+                                                "New: {:?}",
+                                                &outs
+                                                    .iter()
+                                                    .map(|v| &v[..v.len().min(20)])
+                                                    .collect_vec()
+                                            );
+                                            crate::utils::display_graph(&graph, &[]);
+                                            panic!(
+                                                "{} {x} != {y}",
+                                                "Output Mismatch".bold().on_bright_red()
+                                            );
+                                        }
+                                        continue 'trajectory_loop;
                                     }
-                                    continue 'trajectory_loop;
                                 }
                             }
-                        }
-                        if option_env!("DEBUG").is_some() {
                             println!("{}", "Outputs Validated".bold().on_bright_green());
                         }
                     }

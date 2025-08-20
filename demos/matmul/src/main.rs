@@ -14,37 +14,20 @@ use luminal_2::{
     GPUArch, GraphTerm,
 };
 use metal_rs::{objc::rc::autoreleasepool, Buffer, Device, MTLResourceOptions};
-use rand::{rng, Rng};
 use rustc_hash::FxHashMap;
 
 fn main() {
     autoreleasepool(|| {
-        // let weight = (0..4 * 5).map(|_| rng.random()).collect_vec();
-        // Create a new graph
+        #[allow(non_snake_case)]
+        let (M, K, N) = (512, 512, 512);
         let mut cx = Graph::new();
-        // Randomly initialize a linear layer with an input size of 4 and an output size of 5
-        // let model = Linear::new(4, 5, false, &mut cx);
-        // model.weight.set(weight.clone());
-        // Make an input tensor
-        let mut rng = rng();
-        let (m, k, n) = (64, 64, 64);
-        let a_data = (0..(m * k)).map(|_| rng.random()).collect_vec();
-        let b_data = (0..(k * n)).map(|_| rng.random()).collect_vec();
-        let a = cx.named_tensor("A", (m, k)).set(a_data.clone());
-        let b = cx.named_tensor("B", (k, n)).set(b_data.clone());
-        let c = a.matmul(b).retrieve();
-        // Execute the graph
-        cx.set_dyn_dim('a', 3);
-        cx.set_dyn_dim('b', 2);
-        cx.execute_debug();
-        let (mut new_graph, mut old_to_new_mapping, mut accs) = translate_graph(&cx);
-        luminal_2::utils::display_graph(&new_graph.node_weights().next().unwrap(), &[]);
-        // Insert accs into the old_to_new_mapping
-
+        let a = cx.named_tensor("A", (M, K));
+        let b = cx.named_tensor("B", (K, N));
+        let out = a.matmul(b);
+        let (mut new_graph, mut mapping, accs) = translate_graph(&cx);
         // Search each subgraph
         for graph_node in new_graph.node_indices().collect_vec() {
             let graph = new_graph.node_weight_mut(graph_node).unwrap();
-            // luminal_2::utils::display_graph(&graph, &[]);
             let search_space = build_search_space(graph, 3);
             let inputs = make_test_inputs(graph, &cx.dyn_map, &accs);
             let searched_graph = search(
@@ -54,7 +37,6 @@ fn main() {
                 &cx.dyn_map,
             )
             .unwrap();
-            // screw it just say that the new only output of this graph is the only output (this doesn't work with multiple outputs)
             // adjust meta-edges
             let old_output = graph.externals(Direction::Outgoing).next().unwrap();
             let new_output = searched_graph
@@ -91,7 +73,7 @@ fn main() {
                 *input = new_output;
             }
             // Update old-to-new-mappings
-            for (_, (meta, v)) in &mut old_to_new_mapping {
+            for (_, (meta, v)) in &mut mapping {
                 if *meta != graph_node {
                     continue;
                 }
@@ -99,70 +81,78 @@ fn main() {
                     *v = new_output;
                 }
                 if let Some(gmem_label) = old_inputs.get(v) {
-                    *v = new_inputs[gmem_label];
+                    if let Some(new) = new_inputs.get(gmem_label) {
+                        *v = *new;
+                    }
                 }
             }
         }
-        let outputs = vec![old_to_new_mapping[&c.id]];
-        let (new_graph, meta_to_unified, outputs) = stitch_meta_graph_together(new_graph, outputs);
-        let mut unified_map = FxHashMap::default();
-        for (k, v) in old_to_new_mapping {
-            unified_map.insert(k, meta_to_unified[&v]);
+        let outputs = vec![mapping[&out.id]];
+        let (graph, meta_to_final, outputs) = stitch_meta_graph_together(new_graph, outputs);
+        let mut gmem_to_node_mapping = FxHashMap::default();
+        for n in graph.node_indices() {
+            if let Some(GraphTerm::GMEM { label }) = graph.node_weight(n) {
+                gmem_to_node_mapping.insert(label.clone(), n);
+            }
         }
-        // luminal_2::utils::display_graph(&new_graph, &[]);
+        let mut unified_map = FxHashMap::default();
+        for (k, v) in mapping {
+            unified_map.insert(k, meta_to_final[&v]);
+        }
         let (kernels, gmem_mapping) = codegen(
-            new_graph.clone(),
+            graph,
             outputs,
             GPUArch::Metal(HashMap::default()),
             0,
-            &cx.dyn_map,
-            true,
+            &HashMap::default(),
+            false,
         )
         .unwrap();
-        // print_kernels(&kernels);
 
-        // let w1 = weight.clone();
+        let compiled = compile_kernels(&kernels);
+        let (int_buffers, int_buffer_map) = assign_buffers(&kernels);
+
         let device = Device::system_default().unwrap();
         let mut inputs = FxHashMap::default();
         inputs.insert(
             gmem_mapping[&unified_map[&a.id]],
-            (copy_metal_buffer(&a_data, &device), true),
+            (copy_metal_buffer(&vec![1.; M * K], &device), false),
         );
         inputs.insert(
             gmem_mapping[&unified_map[&b.id]],
-            (copy_metal_buffer(&b_data, &device), true),
+            (copy_metal_buffer(&vec![1.; K * M], &device), false),
         );
         for (label, val) in &accs {
-            match val {
-                InitData::Expr(e) => {
-                    let val = e.exec(&cx.dyn_map).unwrap();
-                    inputs.insert(gmem_mapping[&unified_map[label]], {
-                        let v = vec![val as f32];
-                        (copy_metal_buffer(&v, &device), true)
-                    });
-                }
-                InitData::Data(d) => {
-                    inputs.insert(
-                        gmem_mapping[&unified_map[&label]],
-                        (copy_metal_buffer(d, &device), true),
-                    );
+            if let Some(node) = gmem_to_node_mapping
+                .get(label)
+                .and_then(|n| unified_map.get(n))
+            {
+                match val {
+                    InitData::Expr(e) => {
+                        let val = e.exec(&cx.dyn_map).unwrap();
+                        inputs.insert(gmem_mapping[node], {
+                            let v = vec![val as f32];
+                            (copy_metal_buffer(&v, &device), true)
+                        });
+                    }
+                    InitData::Data(d) => {
+                        inputs.insert(gmem_mapping[node], (copy_metal_buffer(d, &device), true));
+                    }
                 }
             }
         }
 
-        let compiled_kernels = compile_kernels(&kernels);
-        let (int_buffers, int_buffer_map) = assign_buffers(&kernels);
         let (outputs, _) = run_graph(
             &mut inputs,
             &kernels,
-            &cx.dyn_map,
-            &compiled_kernels,
+            &FxHashMap::default(),
+            &compiled,
             &int_buffers,
             &int_buffer_map,
         );
-        println!("{:?}", &c.data()[..10]);
         println!("{:?}", &copy_metal_buffer_back(&outputs[0])[..10]);
     });
+    expression_cleanup();
 }
 
 pub fn copy_metal_buffer(v: &Vec<f32>, device: &Device) -> Buffer {
