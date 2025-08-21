@@ -1,10 +1,12 @@
 use std::collections::HashMap;
+use std::ffi::c_void;
+use std::ptr::NonNull;
 use std::usize;
 
-use crate::Kernel;
 use crate::run::{assign_buffers, compile_kernels, run_graph};
 use crate::translate::InitData;
 use crate::utils::{print_kernels, render_egglog};
+use crate::{Buffer, Device, Kernel};
 use crate::{GPUArch, GraphTerm};
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
@@ -13,8 +15,8 @@ use luminal::prelude::NodeIndex;
 use luminal::prelude::petgraph::prelude::StableGraph;
 use luminal::prelude::petgraph::{Directed, Direction};
 use luminal::shape::{Expression, Term};
-use metal_rs::objc::rc::autoreleasepool;
-use metal_rs::{Buffer, Device, MTLResourceOptions};
+use objc2::rc::autoreleasepool;
+use objc2_metal::{MTLBuffer, MTLCreateSystemDefaultDevice, MTLDevice, MTLResourceOptions};
 use rand::{Rng, rng};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -589,11 +591,11 @@ fn cost<'a>(
     gmem_mapping: &HashMap<NodeIndex, usize>,
     dyn_vars: &FxHashMap<char, usize>,
 ) -> Option<(Cost, Vec<Vec<f32>>)> {
-    autoreleasepool(|| {
+    autoreleasepool(|p| {
         // Get buffer info
         let (int_buffers, int_buffer_map) = assign_buffers(&kernels);
         let compiled_kernels = compile_kernels(&kernels);
-        let device = Device::system_default().unwrap();
+        let device = MTLCreateSystemDefaultDevice().unwrap();
         // Copy input buffers over
         let mut inputs = inputs
             .into_iter()
@@ -642,16 +644,20 @@ fn cost<'a>(
 
 pub fn copy_metal_buffer(v: &Vec<f32>, device: &Device) -> Buffer {
     assert!(v.len() > 0);
-    let buf = device.new_buffer_with_data(
-        v.as_ptr() as *const _,
-        (v.len() * std::mem::size_of::<f32>()) as u64,
-        MTLResourceOptions::StorageModeShared,
-    );
-    buf
+    unsafe {
+        let ptr = NonNull::new(v.as_ptr() as *mut c_void).unwrap();
+        device
+            .newBufferWithBytes_length_options(
+                ptr,
+                (v.len() * 4) as _,
+                MTLResourceOptions::StorageModeShared,
+            )
+            .unwrap()
+    }
 }
 pub fn copy_metal_buffer_back(v: &Buffer) -> Vec<f32> {
     let mut data = vec![0f32; v.length() as usize / size_of::<f32>()];
-    let ptr = v.contents() as *mut f32;
+    let ptr = v.contents().as_ptr() as *mut f32;
     for (i, d) in data.iter_mut().enumerate() {
         *d = unsafe { *ptr.add(i) };
     }

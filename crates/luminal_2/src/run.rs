@@ -1,5 +1,7 @@
+#[cfg(feature = "metal")]
+use crate::{Buffer, Function};
 use crate::{
-    GPUArch, GraphTerm,
+    Device, GPUArch, GraphTerm,
     codegen::{codegen, stitch_meta_graph_together},
     extract::{make_test_inputs, search},
     translate::{InitData, OptimalGraphNodeIndex, SubGraphNodeIndex, translate_graph},
@@ -18,9 +20,9 @@ use luminal::{
     },
     shape::Expression,
 };
-use metal_rs::{Buffer, Device, MTLResourceOptions, objc::rc::autoreleasepool};
+use objc2_metal::{MTLBuffer, MTLDevice};
 use rustc_hash::FxHashMap;
-use std::collections::HashMap;
+use std::{collections::HashMap, ffi::c_void, ptr::NonNull};
 use std::{fs::File, io::Read};
 
 use crate::Kernel;
@@ -32,7 +34,11 @@ pub fn chunk_based_search_compiler(
     original_graph_output: &GraphTensor,
     inits: &[(String, InitData)],
 ) -> Vec<f32> {
-    autoreleasepool(|| {
+    use objc2::rc::autoreleasepool;
+
+    autoreleasepool(|_| {
+        use objc2_metal::MTLCreateSystemDefaultDevice;
+
         let (mut meta_graph, mut global_map, buffers) = translate_graph(&original_graph);
         // Search each subgraph
         for graph_node in meta_graph.node_indices().collect_vec() {
@@ -117,7 +123,7 @@ pub fn chunk_based_search_compiler(
         )
         .unwrap();
 
-        let device = Device::system_default().unwrap();
+        let device = MTLCreateSystemDefaultDevice().unwrap();
         let mut inputs = FxHashMap::default();
 
         for (input, data) in original_graph_input {
@@ -263,21 +269,23 @@ pub fn compile_kernels(
 #[cfg(feature = "metal")]
 pub fn compile_kernels(
     kernels: &StableGraph<Kernel, (usize, usize)>,
-) -> FxHashMap<String, metal_rs::Function> {
-    let device = Device::system_default().unwrap();
-    let options = metal_rs::CompileOptions::new();
-    options.set_fast_math_enabled(true);
+) -> FxHashMap<String, Function> {
+    use objc2_metal::MTLCreateSystemDefaultDevice;
 
+    let device = MTLCreateSystemDefaultDevice().unwrap();
     let mut compiled = FxHashMap::default();
     for kernel in kernels.node_weights() {
         if !compiled.contains_key(&kernel.code)
             && kernel.code != "Inputs"
             && kernel.code != "Outputs"
         {
+            use objc2_foundation::{NSString, ns_string};
+            use objc2_metal::{MTLDevice, MTLLibrary};
+
             let lib = device
-                .new_library_with_source(&kernel.code, &options)
+                .newLibraryWithSource_options_error(&NSString::from_str(&kernel.code), None)
                 .unwrap();
-            let f = lib.get_function("kernel_name", None).unwrap();
+            let f = lib.newFunctionWithName(ns_string!("kernel_name")).unwrap();
             compiled.insert(kernel.code.clone(), f);
         }
     }
@@ -424,33 +432,35 @@ pub fn run_graph(
 
 #[cfg(feature = "metal")]
 pub fn run_graph(
-    inputs: &mut FxHashMap<usize, (metal_rs::Buffer, bool)>,
+    inputs: &mut FxHashMap<usize, (Buffer, bool)>,
     kernels: &StableGraph<Kernel, (usize, usize)>,
     dyn_vars: &FxHashMap<char, usize>,
-    compiled_kernels: &FxHashMap<String, metal_rs::Function>,
+    compiled_kernels: &FxHashMap<String, Function>,
     intermediate_buffers: &Vec<Expression>,
     intermediate_buffer_map: &FxHashMap<NodeIndex, Vec<usize>>,
-) -> (Vec<metal_rs::Buffer>, u128) {
-    use metal_rs::objc::rc::autoreleasepool;
-
-    autoreleasepool(|| {
-        use metal_rs::MTLResourceOptions;
+) -> (Vec<Buffer>, u128) {
+    objc2::rc::autoreleasepool(|_| {
+        use objc2_metal::{MTLCommandQueue, MTLCreateSystemDefaultDevice, MTLDevice};
 
         // println!("deep down in the mines");
 
-        let device = metal_rs::Device::system_default().unwrap();
-        let queue = device.new_command_queue();
-        let command_buffer = queue.new_command_buffer();
+        let device = MTLCreateSystemDefaultDevice().unwrap();
+        let queue = device.newCommandQueue().expect("No command queue");
+        let command_buffer = queue.commandBuffer().unwrap();
         let start = std::time::Instant::now();
 
         // Allocate intermediate buffers
         let mut buffers = intermediate_buffers
             .iter()
             .map(|e| {
-                device.new_buffer(
-                    (e.exec(dyn_vars).unwrap() * size_of::<f32>()) as u64,
-                    MTLResourceOptions::StorageModeShared,
-                )
+                use objc2_metal::MTLResourceOptions;
+
+                device
+                    .newBufferWithLength_options(
+                        e.exec(dyn_vars).unwrap() * size_of::<f32>(),
+                        MTLResourceOptions::StorageModeShared,
+                    )
+                    .unwrap()
             })
             .collect_vec();
         let input_node = kernels
@@ -464,8 +474,12 @@ pub fn run_graph(
                 // Inputs should already be in the buffer map
             } else if kernel.code == "Outputs" {
                 // Run
+
+                use objc2_metal::MTLCommandBuffer;
                 command_buffer.commit();
-                command_buffer.wait_until_completed();
+                unsafe {
+                    command_buffer.waitUntilCompleted();
+                }
                 let outputs = kernels
                     .edges_directed(node, Direction::Incoming)
                     .map(|e| {
@@ -483,6 +497,8 @@ pub fn run_graph(
                 return (outputs, start.elapsed().as_micros());
             } else if kernel.code.starts_with("Diff") {
                 // Load file and diff numbers
+
+                use objc2_metal::MTLBuffer;
                 let diff_name = kernel.code.replace("Diff", "");
                 let (input, input_index) = kernels
                     .edges_directed(node, Direction::Incoming)
@@ -494,7 +510,7 @@ pub fn run_graph(
                 let mut data = vec![0_f32; buffer.length() as usize / size_of::<f32>()];
                 unsafe {
                     std::ptr::copy_nonoverlapping(
-                        buffer.contents() as *const _,
+                        buffer.contents().as_ptr() as *const _,
                         &mut data,
                         data.len(),
                     );
@@ -526,23 +542,21 @@ pub fn run_graph(
                 unsafe {
                     std::ptr::copy_nonoverlapping(
                         &data,
-                        dest_buffer.contents() as *mut _,
+                        dest_buffer.contents().as_ptr() as *mut _,
                         data.len(),
                     );
                 }
             } else {
-                use metal_rs::{ComputePassDescriptor, ComputePipelineDescriptor, MTLSize};
-                let encoder = command_buffer
-                    .compute_command_encoder_with_descriptor(ComputePassDescriptor::new());
-                let pipeline_state_descriptor = ComputePipelineDescriptor::new();
-                pipeline_state_descriptor
-                    .set_compute_function(Some(&compiled_kernels[&kernel.code]));
-                let pipeline = device
-                    .new_compute_pipeline_state_with_function(
-                        pipeline_state_descriptor.compute_function().unwrap(),
-                    )
-                    .unwrap();
-                encoder.set_compute_pipeline_state(&pipeline);
+                use objc2_metal::{
+                    MTLCommandBuffer, MTLCommandEncoder, MTLComputeCommandEncoder, MTLSize,
+                };
+
+                let encoder = command_buffer.computeCommandEncoder().unwrap();
+                encoder.setComputePipelineState(
+                    &device
+                        .newComputePipelineStateWithFunction_error(&compiled_kernels[&kernel.code])
+                        .unwrap(),
+                );
 
                 // set inputs
                 let mut buffer_count = 0;
@@ -552,47 +566,65 @@ pub fn run_graph(
                     .map(|n| (n.source(), n.weight().0))
                 {
                     if input == input_node {
-                        encoder.set_buffer(buffer_count, Some(&inputs[&input_index].0), 0);
+                        unsafe {
+                            encoder.setBuffer_offset_atIndex(
+                                Some(&inputs[&input_index].0),
+                                0,
+                                buffer_count,
+                            );
+                        }
                     } else {
-                        encoder.set_buffer(
-                            buffer_count,
-                            Some(&buffers[intermediate_buffer_map[&input][input_index]]),
-                            0,
-                        );
+                        unsafe {
+                            encoder.setBuffer_offset_atIndex(
+                                Some(&buffers[intermediate_buffer_map[&input][input_index]]),
+                                0,
+                                buffer_count,
+                            );
+                        }
                     }
                     buffer_count += 1;
                 }
                 // set output
                 for o in 0..kernel.outputs.len() {
-                    encoder.set_buffer(
-                        buffer_count,
-                        Some(&buffers[intermediate_buffer_map[&node][o]]),
-                        0,
-                    );
+                    unsafe {
+                        encoder.setBuffer_offset_atIndex(
+                            Some(&buffers[intermediate_buffer_map[&node][o]]),
+                            0,
+                            buffer_count,
+                        );
+                    }
                     buffer_count += 1;
                 }
                 // set dynamic dimensions
                 for (_, v) in dyn_vars.iter().sorted_by_key(|(k, _)| **k) {
                     let val: u64 = *v as u64;
-                    let buf = device.new_buffer_with_data(
-                        &val as *const _ as *const _,
-                        std::mem::size_of::<u64>() as u64,
-                        MTLResourceOptions::StorageModeShared,
-                    );
-                    encoder.set_buffer(buffer_count, Some(&buf), 0);
+                    let buf = unsafe {
+                        use std::{ffi::c_void, ptr::NonNull};
+
+                        use objc2_metal::MTLResourceOptions;
+
+                        device
+                            .newBufferWithBytes_length_options(
+                                NonNull::new(&val as *const _ as *mut c_void).unwrap(),
+                                std::mem::size_of::<u64>(),
+                                MTLResourceOptions::StorageModeShared,
+                            )
+                            .unwrap()
+                    };
+                    unsafe { encoder.setBuffer_offset_atIndex(Some(&buf), 0, buffer_count) };
                     buffer_count += 1;
                 }
 
                 // Set dispatch
                 let grid = (
-                    kernel.grid.0.exec(dyn_vars).unwrap() as u64,
-                    kernel.grid.1.exec(dyn_vars).unwrap() as u64,
-                    kernel.grid.2.exec(dyn_vars).unwrap() as u64,
+                    kernel.grid.0.exec(dyn_vars).unwrap(),
+                    kernel.grid.1.exec(dyn_vars).unwrap(),
+                    kernel.grid.2.exec(dyn_vars).unwrap(),
                 );
                 let tb = (
-                    kernel.threadblock.0.exec(dyn_vars).unwrap() as u64,
-                    kernel.threadblock.1.exec(dyn_vars).unwrap() as u64,
-                    kernel.threadblock.2.exec(dyn_vars).unwrap() as u64,
+                    kernel.threadblock.0.exec(dyn_vars).unwrap(),
+                    kernel.threadblock.1.exec(dyn_vars).unwrap(),
+                    kernel.threadblock.2.exec(dyn_vars).unwrap(),
                 );
                 assert!(
                     tb.0 * tb.1 * tb.2 <= 1024,
@@ -601,11 +633,19 @@ pub fn run_graph(
                 assert!(grid.1 <= 65535, "grid.y > 65535");
                 assert!(grid.2 <= 65535, "grid.z > 65535");
                 assert!(grid.0 <= 2147483647, "grid.x > 2147483647");
-                encoder.dispatch_thread_groups(
-                    MTLSize::new(grid.0, grid.1, grid.2),
-                    MTLSize::new(tb.0, tb.1, tb.2),
+                encoder.dispatchThreadgroups_threadsPerThreadgroup(
+                    MTLSize {
+                        width: grid.0,
+                        height: grid.1,
+                        depth: grid.2,
+                    },
+                    MTLSize {
+                        width: tb.0,
+                        height: tb.1,
+                        depth: tb.2,
+                    },
                 );
-                encoder.end_encoding();
+                encoder.endEncoding();
             }
         }
         panic!("No output kernel detected in graph!");
@@ -613,17 +653,21 @@ pub fn run_graph(
 }
 
 pub fn copy_metal_buffer(v: &Vec<f32>, device: &Device) -> Buffer {
-    let buf = device.new_buffer_with_data(
-        v.as_ptr() as *const _,
-        (v.len() * std::mem::size_of::<f32>()) as u64,
-        MTLResourceOptions::StorageModeShared,
-    );
+    let buf = unsafe {
+        device
+            .newBufferWithBytes_length_options(
+                NonNull::new(v.as_ptr() as *mut c_void).unwrap(),
+                v.len() * std::mem::size_of::<f32>(),
+                objc2_metal::MTLResourceOptions::StorageModeShared,
+            )
+            .unwrap()
+    };
     buf
 }
 
 pub fn copy_metal_buffer_back(v: &Buffer) -> Vec<f32> {
     let mut data = vec![0f32; v.length() as usize / size_of::<f32>()];
-    let ptr = v.contents() as *mut f32;
+    let ptr = v.contents().as_ptr() as *mut f32;
     for (i, d) in data.iter_mut().enumerate() {
         *d = unsafe { *ptr.add(i) };
     }

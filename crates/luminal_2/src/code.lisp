@@ -529,7 +529,7 @@
 {code}
 (run-schedule
 	(run ir-generic)
-	(repeat 3
+	(repeat 5
 		(run ir)
 		(run ir-prop)
 		(run expr)

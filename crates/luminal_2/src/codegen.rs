@@ -14,7 +14,7 @@ use std::{
 
 use crate::{
     GMEMBuffer, GPUArch, GraphTerm, Kernel,
-    translate::{InitData, MetaGraph, SubGraph},
+    translate::{MetaGraph, SubGraph},
     utils::{display_graph, validate_graph},
 };
 

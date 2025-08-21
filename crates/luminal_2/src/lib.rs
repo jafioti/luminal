@@ -8,7 +8,13 @@ pub mod utils;
 mod tests;
 
 use luminal::prelude::*;
+use objc2::{rc::Retained, runtime::ProtocolObject};
+use objc2_metal::{MTLBuffer, MTLDevice, MTLFunction};
 use std::{collections::HashMap, fmt::Debug};
+
+type Device = Retained<ProtocolObject<dyn MTLDevice>>;
+type Buffer = Retained<ProtocolObject<dyn MTLBuffer>>;
+type Function = Retained<ProtocolObject<dyn MTLFunction>>;
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum GPUArch {
@@ -90,6 +96,7 @@ pub enum GraphTerm {
     },
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct CompatKernel(Kernel, *mut Graph);
 
