@@ -267,20 +267,22 @@
 	 :ruleset ir-prop
 )
 
+
 ; Loop merging
-;(rewrite
-;	(LoopOut
-;		(LoopOut ?x
-;			(Loop ?i ?rangeI) ?stI
-;		)
-;		(Loop ?o ?rangeO) ?stO
-;	)
-;	(LoopOut (MergeLoops ?x ?o ?i)
-;		(Loop (+ ?o ?i) (MMul ?rangeO ?rangeI))
-;		(MAdd (MReplace ?stO (MVar "z") (MDiv (MVar "z") ?rangeI)) (MReplace ?stI (MVar "z") (MMod (MVar "z") ?rangeI)))
-;	)
-;	 :ruleset ir
-;)
+(rewrite
+	(LoopOut
+		(LoopOut ?x
+			(Loop ?i ?rangeI) ?stI
+		)
+		(Loop ?o ?rangeO) ?stO
+	)
+	(LoopOut (MergeLoops ?x ?o ?i)
+		(Loop (+ ?o ?i) (MMul ?rangeO ?rangeI))
+		(MAdd (MReplace ?stO (MVar "z") (MDiv (MVar "z") ?rangeI)) (MReplace ?stI (MVar "z") (MMod (MVar "z") ?rangeI)))
+	)
+	 :ruleset ir
+	:when ((!= ?stI (MAccum "a")) (!= ?stO (MAccum "a")))
+)
 (rewrite
 	(MergeLoops
 		(LoopIn
@@ -527,7 +529,7 @@
 {code}
 (run-schedule
 	(run ir-generic)
-	(repeat 5
+	(repeat 3
 		(run ir)
 		(run ir-prop)
 		(run expr)
