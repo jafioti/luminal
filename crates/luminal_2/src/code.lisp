@@ -280,7 +280,7 @@
 		(Loop (+ ?o ?i) (MMul ?rangeO ?rangeI))
 		(MAdd (MReplace ?stO (MVar "z") (MDiv (MVar "z") ?rangeI)) (MReplace ?stI (MVar "z") (MMod (MVar "z") ?rangeI)))
 	)
-	 :ruleset ir
+	;:ruleset ir
 	:when ((!= ?stI (MAccum "a")) (!= ?stO (MAccum "a")))
 )
 (rewrite
@@ -529,7 +529,7 @@
 {code}
 (run-schedule
 	(run ir-generic)
-	(repeat 3
+	(repeat 5
 		(run ir)
 		(run ir-prop)
 		(run expr)
