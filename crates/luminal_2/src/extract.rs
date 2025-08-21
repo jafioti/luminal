@@ -149,10 +149,8 @@ fn extract_trajectories<'a>(
     trajectory_cache: &mut FxHashMap<&'a NodeId, Vec<Vec<&'a NodeId>>>,
     waiting: usize,
 ) -> Vec<Vec<&'a NodeId>> {
-    println!("waiting: {waiting}");
     let mut trajectories = vec![];
     'enode_loop: for enode in &egraph.classes()[current_class].nodes {
-        println!("enode loop[");
         if INVALID_IR.contains(&egraph.nodes[enode].op.as_str()) {
             junk_cache.insert(enode);
             continue;
@@ -164,7 +162,6 @@ fn extract_trajectories<'a>(
         let mut enode_trajectories = vec![];
         *seen.entry(enode).or_insert(0) += 1;
         for child in &egraph.nodes[enode].children {
-            println!("child loop");
             // Ask what's the child's trajectories
             if !trajectory_cache.contains_key(child) {
                 let child_trajectories = if is_expression_enode(&egraph.nodes[child].op) {
@@ -203,11 +200,6 @@ fn extract_trajectories<'a>(
                     enode_trajectories.push(child_trajectory);
                 }
             } else if !trajectory_cache[child].is_empty() {
-                println!(
-                    "cart {} w {}",
-                    enode_trajectories.len(),
-                    trajectory_cache[child].len()
-                );
                 // Cartisian product the current trajectories with the new trajectories
                 if enode_trajectories.len() * trajectory_cache[child].len() > MAX_SEARCHED_GRAPHS {
                     enode_trajectories = enode_trajectories

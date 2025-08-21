@@ -26,10 +26,10 @@ impl InitData {
 }
 
 pub type CrossSubGraphTensorIndexes = (NodeIndex, NodeIndex);
-pub type MetaGraphNodeIndex = (NodeIndex);
-pub type SubGraphNodeIndex = (NodeIndex);
-pub type OrigGraphNodeIndex = (NodeIndex);
-pub type OptimalGraphNodeIndex = (NodeIndex);
+pub type MetaGraphNodeIndex = NodeIndex;
+pub type SubGraphNodeIndex = NodeIndex;
+pub type OrigGraphNodeIndex = NodeIndex;
+pub type OptimalGraphNodeIndex = NodeIndex;
 
 pub type SubGraph = StableGraph<GraphTerm, (), Directed>;
 pub type MetaGraph = StableGraph<SubGraph, CrossSubGraphTensorIndexes, Directed>;
