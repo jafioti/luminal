@@ -2,18 +2,18 @@
 
 use std::{collections::HashMap, io::Write};
 
-use egglog::{EGraph, Error, Term, prelude::exprs::var};
+use egglog::{prelude::exprs::var, EGraph, Error, Term};
 use itertools::Itertools;
 use luminal::{
     prelude::{
-        NodeIndex,
         petgraph::{
-            Directed, Direction,
             algo::toposort,
             dot::{Config, Dot},
             prelude::StableGraph,
             visit::{EdgeRef, Topo},
+            Directed, Direction,
         },
+        NodeIndex,
     },
     shape::Expression,
 };
@@ -599,7 +599,6 @@ use crossterm::{
     terminal::{self, LeaveAlternateScreen},
 };
 use ratatui::{
-    Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Layout},
     style::{Color, Style},
@@ -607,6 +606,7 @@ use ratatui::{
     widgets::{
         Block, Borders, Gauge, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
     },
+    Terminal,
 };
 use std::{
     sync::mpsc,
@@ -699,6 +699,7 @@ pub fn search_ui() -> (
         let mut progress: u16 = 0;
         let mut log_text = String::new();
         let mut title = String::from("Logs");
+        let mut quit = false;
 
         'ui: loop {
             while let Ok(msg) = rx.try_recv() {
@@ -713,6 +714,7 @@ pub fn search_ui() -> (
             if crossterm::event::poll(std::time::Duration::from_millis(8)).unwrap_or(false) {
                 if let Ok(crossterm::event::Event::Key(k)) = crossterm::event::read() {
                     if k.code == crossterm::event::KeyCode::Char('q') {
+                        quit = true;
                         break 'ui;
                     }
                 }
@@ -776,6 +778,9 @@ pub fn search_ui() -> (
 
         // signal we're done so exit() can return
         let _ = done_tx.send(());
+        if quit {
+            std::process::exit(0);
+        }
     });
 
     (set_progress, set_log_text, set_title, exit)
