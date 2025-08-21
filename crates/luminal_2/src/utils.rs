@@ -2,18 +2,18 @@
 
 use std::{collections::HashMap, io::Write};
 
-use egglog::{prelude::exprs::var, EGraph, Error, Term};
+use egglog::{EGraph, Error, Term, prelude::exprs::var};
 use itertools::Itertools;
 use luminal::{
     prelude::{
+        NodeIndex,
         petgraph::{
+            Directed, Direction,
             algo::toposort,
             dot::{Config, Dot},
             prelude::StableGraph,
             visit::{EdgeRef, Topo},
-            Directed, Direction,
         },
-        NodeIndex,
     },
     shape::Expression,
 };
@@ -599,6 +599,7 @@ use crossterm::{
     terminal::{self, LeaveAlternateScreen},
 };
 use ratatui::{
+    Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Layout},
     style::{Color, Style},
@@ -606,7 +607,6 @@ use ratatui::{
     widgets::{
         Block, Borders, Gauge, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
     },
-    Terminal,
 };
 use std::{
     sync::mpsc,
@@ -713,7 +713,9 @@ pub fn search_ui() -> (
 
             if crossterm::event::poll(std::time::Duration::from_millis(8)).unwrap_or(false) {
                 if let Ok(crossterm::event::Event::Key(k)) = crossterm::event::read() {
-                    if k.code == crossterm::event::KeyCode::Char('q') {
+                    if k.code == KeyCode::Char('c')
+                        && k.modifiers.contains(event::KeyModifiers::CONTROL)
+                    {
                         quit = true;
                         break 'ui;
                     }
