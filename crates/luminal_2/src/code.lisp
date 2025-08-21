@@ -213,7 +213,7 @@
 		(Loop ?inL ?in)
 		?inSt
 	)
-	 :ruleset ir
+	; :ruleset ir
 )
 
 ; Tiling
@@ -495,11 +495,11 @@
 )
 
 ; Swap loops
-(ruleset swap)
+;(ruleset swap)
 (rewrite
 	(LoopOut (LoopOut ?x ?innerLoop ?innerStride) ?outerLoop ?outerStride)
 	(LoopOut (LoopOut (SwapLoops ?x ?innerLoop ?outerLoop) ?outerLoop ?outerStride) ?innerLoop ?innerStride)
-	:ruleset swap
+	:ruleset ir
 )
 (rewrite
 	(SwapLoops (LoopIn (LoopIn ?x ?outerLoop ?outerStride) ?innerLoop ?innerStride) ?innerLoop ?outerLoop)

@@ -4,7 +4,7 @@ use std::usize;
 use crate::Kernel;
 use crate::run::{assign_buffers, compile_kernels, run_graph};
 use crate::translate::InitData;
-use crate::utils::print_kernels;
+use crate::utils::{print_kernels, render_egglog};
 use crate::{GPUArch, GraphTerm};
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
@@ -308,6 +308,7 @@ pub fn search(
                                                     .collect_vec()
                                             );
                                             crate::utils::display_graph(&graph, &[]);
+                                            println!("{}", render_egglog(&graph, "a").0);
                                             panic!(
                                                 "{} {x} != {y}",
                                                 "Output Mismatch".bold().on_bright_red()
