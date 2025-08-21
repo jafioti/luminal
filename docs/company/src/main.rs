@@ -5,7 +5,6 @@ use axum::{
     response::{Html, IntoResponse, Redirect},
     routing::get,
 };
-use tower_http::services::ServeFile;
 
 async fn index() -> Html<String> {
     Html(include_str!("../static/index.html").to_string())
