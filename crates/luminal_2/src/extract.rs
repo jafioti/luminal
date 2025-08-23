@@ -647,7 +647,6 @@ fn cost<'a>(
         let device = Device::system_default().unwrap();
 
         // Copy input buffers over
-        println!("GMEM MAPPING: {:?}", gmem_mapping);
         let mut inputs = inputs
             .into_iter()
             .map(|(n, b)| {
