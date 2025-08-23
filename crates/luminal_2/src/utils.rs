@@ -699,6 +699,7 @@ pub fn search_ui() -> (
         let mut progress: u16 = 0;
         let mut log_text = String::new();
         let mut title = String::from("Logs");
+        let mut quit = false;
 
         'ui: loop {
             while let Ok(msg) = rx.try_recv() {
@@ -712,7 +713,10 @@ pub fn search_ui() -> (
 
             if crossterm::event::poll(std::time::Duration::from_millis(8)).unwrap_or(false) {
                 if let Ok(crossterm::event::Event::Key(k)) = crossterm::event::read() {
-                    if k.code == crossterm::event::KeyCode::Char('q') {
+                    if k.code == KeyCode::Char('c')
+                        && k.modifiers.contains(event::KeyModifiers::CONTROL)
+                    {
+                        quit = true;
                         break 'ui;
                     }
                 }
@@ -776,6 +780,9 @@ pub fn search_ui() -> (
 
         // signal we're done so exit() can return
         let _ = done_tx.send(());
+        if quit {
+            std::process::exit(0);
+        }
     });
 
     (set_progress, set_log_text, set_title, exit)

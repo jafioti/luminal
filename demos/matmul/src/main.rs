@@ -123,10 +123,7 @@ fn main() {
             (copy_metal_buffer(&vec![1.; K * M], &device), false),
         );
         for (label, val) in &accs {
-            if let Some(node) = gmem_to_node_mapping
-                .get(label)
-                .and_then(|n| unified_map.get(n))
-            {
+            if let Some(node) = gmem_to_node_mapping.get(label) {
                 match val {
                     InitData::Expr(e) => {
                         let val = e.exec(&cx.dyn_map).unwrap();

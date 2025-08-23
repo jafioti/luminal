@@ -462,15 +462,15 @@ fn make_kernel(
                             );
                             current_elem_size *= range;
                         }
-                        let Some(cooresponding_output) = loop_outputs
+                        let Some(corresponding_output) = loop_outputs
                             .iter()
                             .find(|(_, v)| v.terms.read()[0] == Term::Acc(acc_symbol))
                         else {
                             //display_graph(&kernel_graph, &[]);
                             panic!();
                         };
-                        let cooresponding_output = cooresponding_output.0;
-                        curr = cooresponding_output;
+                        let corresponding_output = corresponding_output.0;
+                        curr = corresponding_output;
                         let mut out_loops = vec![];
                         loop {
                             match kernel_graph[curr].0 {
@@ -518,8 +518,8 @@ fn make_kernel(
                         ));
                         kernel_lines.push(format!("{spacing}}}"));
                         node_to_var.insert(*input, (*prev_max_var, true));
-                        node_to_var.insert(cooresponding_output, (*prev_max_var, true));
-                        accs.push((*input, cooresponding_output, size, out_loops));
+                        node_to_var.insert(corresponding_output, (*prev_max_var, true));
+                        accs.push((*input, corresponding_output, size, out_loops));
                     }
                 }
                 // Make thread-level buffers

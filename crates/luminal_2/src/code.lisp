@@ -213,7 +213,7 @@
 		(Loop ?inL ?in)
 		?inSt
 	)
-	 :ruleset ir
+	; :ruleset ir
 )
 
 ; Tiling
@@ -280,7 +280,7 @@
 		(Loop (+ ?o ?i) (MMul ?rangeO ?rangeI))
 		(MAdd (MReplace ?stO (MVar "z") (MDiv (MVar "z") ?rangeI)) (MReplace ?stI (MVar "z") (MMod (MVar "z") ?rangeI)))
 	)
-	 :ruleset ir
+	:ruleset ir
 	:when ((!= ?stI (MAccum "a")) (!= ?stO (MAccum "a")))
 )
 (rewrite
@@ -497,11 +497,11 @@
 )
 
 ; Swap loops
-(ruleset swap)
+;(ruleset swap)
 (rewrite
 	(LoopOut (LoopOut ?x ?innerLoop ?innerStride) ?outerLoop ?outerStride)
 	(LoopOut (LoopOut (SwapLoops ?x ?innerLoop ?outerLoop) ?outerLoop ?outerStride) ?innerLoop ?innerStride)
-	:ruleset swap
+	:ruleset ir
 )
 (rewrite
 	(SwapLoops (LoopIn (LoopIn ?x ?outerLoop ?outerStride) ?innerLoop ?innerStride) ?innerLoop ?outerLoop)
