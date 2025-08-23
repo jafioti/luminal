@@ -32,36 +32,68 @@ fn parse_func_args(line: &str, cx: &mut Graph, tensor_map: &mut HashMap<String, 
                 let arg_name = arg_name.trim();
                 let tensor_shape_str = tensor_shape_str.trim();
 
-                // Parse shape
-                let tensor_shape: (usize, usize) =
-                    if let Some(shape_start) = tensor_shape_str.find('<') {
-                        if let Some(shape_end) = tensor_shape_str.find('>') {
-                            let tensor_shape_str = &tensor_shape_str[shape_start + 1..shape_end];
-                            let dims: Vec<usize> = tensor_shape_str
-                                .split('x')
-                                .filter_map(|s| s.parse::<usize>().ok())
-                                .collect();
-                            match dims.as_slice() {
-                                [d1, d2] => (*d1, *d2),
-                                [d1] => (*d1, 1),
-                                [] => (1, 1),
-                                _ => panic!(
-                                    "Only supports up to 2D shapes for now: {}",
-                                    tensor_shape_str
-                                ),
-                            }
-                        } else {
-                            panic!("Malformed shape: missing '>' in {}", tensor_shape_str);
-                        }
-                    } else {
-                        panic!("Malformed shape: missing '<' in {}", tensor_shape_str);
-                    };
+                let tensor_shape = parse_tensor_shape(tensor_shape_str);
 
                 let tensor = cx.tensor(tensor_shape);
 
                 tensor_map.insert(arg_name.to_string(), tensor);
             }
         }
+    }
+}
+
+pub fn parse_tensor_shape(tensor_type_str: &str) -> Vec<usize> {
+    if let Some(start) = tensor_type_str.find('<') {
+        if let Some(end) = tensor_type_str.find('>') {
+            let shape_str = &tensor_type_str[start + 1..end];
+            
+            if !shape_str.contains('x') && (shape_str.ends_with("f32") || shape_str.ends_with("f16") || shape_str.ends_with("i32") || shape_str.ends_with("i64")) {
+                return vec![1];
+            }
+            
+            let dims: Vec<usize> = shape_str
+                .split('x')
+                .filter_map(|s| {
+                    let s = s.trim();
+                    if s.ends_with("f32") || s.ends_with("f16") || s.ends_with("i32") || s.ends_with("i64") {
+                        None
+                    } else {
+                        s.parse::<usize>().ok()
+                    }
+                })
+                .collect();
+            
+            if dims.is_empty() {
+                vec![1]
+            } else {
+                dims
+            }
+        } else {
+            panic!("Malformed tensor type: missing '>' in {}", tensor_type_str);
+        }
+    } else {
+        panic!("Malformed tensor type: missing '<' in {}", tensor_type_str);
+    }
+}
+
+pub fn parse_output_shape_from_op(op_line: &str) -> Vec<usize> {
+    if let Some(arrow_pos) = op_line.find("->") {
+        let after_arrow = &op_line[arrow_pos + 2..].trim();
+        
+        // Find the tensor type after the arrow
+        if let Some(tensor_start) = after_arrow.find("tensor<") {
+            let tensor_end = after_arrow[tensor_start..]
+                .find('>')
+                .map(|pos| tensor_start + pos + 1)
+                .unwrap_or(after_arrow.len());
+            
+            let tensor_type = &after_arrow[tensor_start..tensor_end];
+            parse_tensor_shape(tensor_type)
+        } else {
+            panic!("No tensor type found after '->' in: {}", op_line);
+        }
+    } else {
+        panic!("No '->' found in operation line: {}", op_line);
     }
 }
 
@@ -100,7 +132,39 @@ fn parse_hlo_op(op_line: &str, cx: &mut Graph, tensor_map: &mut HashMap<String, 
                         "stablehlo.log" => tensor_map[&args_tokens[0]].log(),
                         "stablehlo.exponential" => tensor_map[&args_tokens[0]].exp(),
 
-                        // Other ops
+                        // Movement ops
+                        "stablehlo.reshape" => {
+                            if let Some(start) = args.find("->") {
+                                let value_str = &args[start + 2..];
+                                let value = parse_tensor_shape(value_str);
+                                tensor_map[&args_tokens[0]].reshape(value)
+                            } else {
+                                panic!("Malformed reshape op: missing '->' in {}", args);
+                            }
+                        }
+                        "stablehlo.broadcast_in_dim" => {
+                            if let Some(start) = args.find("dims = [") {
+                                println!("args: {}", args);
+                                if let Some(end) = args[start..].find("]") {
+                                    println!("args: {}", end);
+                                    let value_str = &args[start + 8..start + end];
+                                    println!("value_str: {}", value_str);
+                                    let value: Vec<usize> = value_str.trim_matches(|c| c == '[' || c == ']')
+                                        .split(&[',', ' '][..])
+                                        .filter(|s| !s.is_empty())
+                                        .map(|s| s.trim().parse::<usize>().unwrap())
+                                        .collect();
+                                    println!("value: {:?}", value);
+                                    tensor_map[&args_tokens[0]].expand(value)
+                                } else {
+                                    panic!("Malformed broadcast_in_dim op: missing ']' in {}", args);
+                                }
+                            } else {
+                                panic!("Malformed broadcast_in_dim op: missing 'dims = [' in {}", args);
+                            }
+                        }
+
+                        // Constants
                         "stablehlo.constant" => parse_constant(args, cx),
 
                         _ => panic!("Unsupported unary op: {}", op),
@@ -128,6 +192,21 @@ fn parse_hlo_op(op_line: &str, cx: &mut Graph, tensor_map: &mut HashMap<String, 
                         "stablehlo.remainder" => op_lhs % op_rhs,
                         "stablehlo.maximum" => op_lhs.maximum(op_rhs),
                         "stablehlo.minimum" => op_lhs.minimum(op_rhs),
+
+                        // Movement ops
+                        "stablehlo.concatenate" => {
+                            if let Some(start) = args.find("dim = ") {
+                                if let Some(end) = args[start..].find(" :") {
+                                    let value_str = &args[start + 6..start + end];
+                                    let dim: usize = value_str.parse().expect("Failed to parse constant value");
+                                    op_lhs.concat_along(op_rhs, dim)
+                                } else {
+                                    panic!("Malformed concat op: missing ' :' in {}", args);
+                                }
+                            } else {
+                                panic!("Malformed concat op: missing 'dim = ' in {}", args);
+                            }
+                        }
                         _ => panic!("Unsupported binary op: {}", op),
                     }
                 }
