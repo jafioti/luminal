@@ -318,10 +318,6 @@ pub fn search(
             }
         }
 
-        println!("---------------");
-        println!("label_to_node {:?}", node_index_to_init_data);
-        println!("---------------");
-
         let root = graph.externals(Direction::Outgoing).next().unwrap();
         let Some((kernels, gmem_mapping)) =
             crate::codegen::codegen(graph.clone(), vec![root], arch.clone(), 0, dyn_vars, false)
@@ -655,7 +651,6 @@ fn cost<'a>(
         let mut inputs = inputs
             .into_iter()
             .map(|(n, b)| {
-                println!(">{:?}", n);
                 (
                     gmem_mapping[n],
                     (
@@ -665,10 +660,6 @@ fn cost<'a>(
                 )
             })
             .collect::<FxHashMap<_, _>>();
-
-        for key in inputs.keys() {
-            println!("indexes: {key}");
-        }
         // Warm up resources (buffer allocation, kernel compiler, etc.)
         for _ in 0..WARMUP_TRIALS {
             run_graph(
