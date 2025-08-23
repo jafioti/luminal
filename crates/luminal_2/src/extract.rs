@@ -265,15 +265,67 @@ pub fn search(
         .enumerate()
     {
         // Build termdag
-        let graph = extraction_to_graph(egraph, &trajectory);
+        let mut graph = extraction_to_graph(egraph, &trajectory);
+
+        // ---- dedupe ----
+        let mut label_to_node: FxHashMap<String, NodeIndex> = FxHashMap::default();
+        let mut to_remove = Vec::new();
+        let mut node_remap_after_fusing_gmems = FxHashMap::default();
+
+        for n in graph.node_indices().collect::<Vec<_>>() {
+            if let Some(GraphTerm::GMEM { label }) = graph.node_weight(n) {
+                if let Some(&canon) = label_to_node.get(label) {
+                    // Rewire INCOMING: src -> n  =>  src -> canon
+                    let incoming: Vec<_> =
+                        graph.neighbors_directed(n, Direction::Incoming).collect();
+                    for src in incoming {
+                        if graph.find_edge(src, canon).is_none() {
+                            graph.add_edge(src, canon, ());
+                        }
+                    }
+                    // Rewire OUTGOING: n -> dst  =>  canon -> dst
+                    let outgoing: Vec<_> =
+                        graph.neighbors_directed(n, Direction::Outgoing).collect();
+                    for dst in outgoing {
+                        if graph.find_edge(canon, dst).is_none() {
+                            graph.add_edge(canon, dst, ());
+                        }
+                    }
+                    to_remove.push(n);
+                    node_remap_after_fusing_gmems.insert(n, canon);
+                } else {
+                    label_to_node.insert(label.clone(), n);
+                    node_remap_after_fusing_gmems.insert(n, n);
+                }
+            }
+        }
+
+        graph.retain_nodes(|_, n| !to_remove.contains(&n));
+        // now we figure out the input mappings based off the labels
+        let mut node_index_to_init_data: Vec<(NodeIndex, InitData)> = vec![];
+        for n in graph.node_indices() {
+            if let Some(GraphTerm::GMEM { label }) = graph.node_weight(n) {
+                if let Some(&canon) = label_to_node.get(label) {
+                    //get the init data now
+                    if let Some((_, data)) = inputs.iter().find(|(l, _)| l == label)
+                    // should be only 1
+                    {
+                        println!(
+                            "graph node: {:?} | label node {:?} | label {label}",
+                            n, canon
+                        );
+                        node_index_to_init_data.push((n, data.clone()));
+                    }
+                }
+            }
+        }
+
         let root = graph.externals(Direction::Outgoing).next().unwrap();
         let Some((kernels, gmem_mapping)) =
             crate::codegen::codegen(graph.clone(), vec![root], arch.clone(), 0, dyn_vars, false)
         else {
             continue;
         };
-        // convert inputs to reference nodes in graph
-        let inputs = inputs.into_iter().filter_map(|(l, d)| graph.node_indices().find(|n| matches!(graph.node_weight(*n).unwrap(), GraphTerm::GMEM { label } if label == l)).map(|i| (i, d.clone()))).collect_vec();
         match &arch {
             GPUArch::CUDA => {
                 if let Some((_, s, _, _)) = &ui_functions {
@@ -284,8 +336,9 @@ pub fn search(
                 }
             }
             GPUArch::Metal(_) => {
-                if let Some((us, outs)) = cost(&kernels, &inputs, &gmem_mapping, dyn_vars) {
-                    // display_graph(&graph, &[]);
+                if let Some((us, outs)) =
+                    cost(&kernels, &node_index_to_init_data, &gmem_mapping, dyn_vars)
+                {
                     valid_graphs += 1;
                     if let Some((progress, logs, title, _)) = &ui_functions {
                         progress(((n as f32 / total_trajectories as f32) * 100.0) as u16);
@@ -624,6 +677,7 @@ fn cost<'a>(
         let mut micros = vec![];
         let mut outputs = vec![];
         let mut m;
+
         for _ in 0..TRIALS {
             (outputs, m) = run_graph(
                 &mut inputs,

@@ -1021,13 +1021,21 @@ fn split_kernels(
     let mut map = HashMap::<NodeIndex, NodeIndex>::default();
     // Add nodes
     let chosen_root = outputs[0];
+    let mut to_remove = vec![];
     for node in graph.node_indices().sorted() {
         let mut levels = FxHashSet::default();
         if node == chosen_root {
             levels.insert(0);
         }
+        // Ensure node indexes match between original and marked graph by making dummy indexes if needed
+        for _ in marked_graph.node_count()..node.index() {
+            to_remove.push(marked_graph.add_node((GraphTerm::Add, vec![], HashSet::default())));
+        }
         let new_node = marked_graph.add_node((graph[node].clone(), vec![], levels));
         map.insert(node, new_node);
+    }
+    for n in to_remove {
+        marked_graph.remove_node(n);
     }
     let outputs = outputs.into_iter().map(|n| map[&n]).collect_vec();
     // Add edges
@@ -1306,7 +1314,6 @@ fn split_kernels(
         let (_, _, end_kernels) = &marked_graph[end];
         for end_kernel in end_kernels {
             if matches!(marked_graph[start].0, GraphTerm::GMEM { .. }) {
-                assert_eq!(start_kernels, end_kernels);
                 kernel_graphs[*end_kernel].1.push((
                     GMEMBuffer::Input { node: start },
                     node_maps[*end_kernel][&end],

@@ -559,6 +559,7 @@ pub fn run_graph(
 
                 // set inputs
                 let mut buffer_count = 0;
+
                 for (input, input_index) in kernels
                     .edges_directed(node, Direction::Incoming)
                     .sorted_by_key(|n| n.weight().1)
