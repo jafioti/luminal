@@ -474,7 +474,6 @@ pub fn run_graph(
                 // Inputs should already be in the buffer map
             } else if kernel.code == "Outputs" {
                 // Run
-
                 use objc2_metal::MTLCommandBuffer;
                 command_buffer.commit();
                 unsafe {

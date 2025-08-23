@@ -591,7 +591,7 @@ fn cost<'a>(
     gmem_mapping: &HashMap<NodeIndex, usize>,
     dyn_vars: &FxHashMap<char, usize>,
 ) -> Option<(Cost, Vec<Vec<f32>>)> {
-    autoreleasepool(|p| {
+    autoreleasepool(|_| {
         // Get buffer info
         let (int_buffers, int_buffer_map) = assign_buffers(&kernels);
         let compiled_kernels = compile_kernels(&kernels);

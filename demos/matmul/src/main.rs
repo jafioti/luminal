@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ffi::c_void, ptr::NonNull};
 
 use itertools::Itertools;
 use luminal::prelude::{
@@ -11,13 +11,13 @@ use luminal_2::{
     run::{assign_buffers, compile_kernels, run_graph},
     translate::{translate_graph, InitData},
     utils::build_search_space,
-    GPUArch, GraphTerm,
+    Buffer, Device, GPUArch, GraphTerm,
 };
-use metal_rs::{objc::rc::autoreleasepool, Buffer, Device, MTLResourceOptions};
+use objc2_metal::{MTLBuffer, MTLCreateSystemDefaultDevice, MTLDevice, MTLResourceOptions};
 use rustc_hash::FxHashMap;
 
 fn main() {
-    autoreleasepool(|| {
+    objc2::rc::autoreleasepool(|_| {
         #[allow(non_snake_case)]
         let (M, K, N) = (512, 512, 512);
         let mut cx = Graph::new();
@@ -112,7 +112,7 @@ fn main() {
         let compiled = compile_kernels(&kernels);
         let (int_buffers, int_buffer_map) = assign_buffers(&kernels);
 
-        let device = Device::system_default().unwrap();
+        let device = MTLCreateSystemDefaultDevice().unwrap();
         let mut inputs = FxHashMap::default();
         inputs.insert(
             gmem_mapping[&unified_map[&a.id]],
@@ -153,17 +153,20 @@ fn main() {
 }
 
 pub fn copy_metal_buffer(v: &Vec<f32>, device: &Device) -> Buffer {
-    let buf = device.new_buffer_with_data(
-        v.as_ptr() as *const _,
-        (v.len() * std::mem::size_of::<f32>()) as u64,
-        MTLResourceOptions::StorageModeShared,
-    );
-    buf
+    unsafe {
+        device
+            .newBufferWithBytes_length_options(
+                NonNull::new(v.as_ptr() as *mut c_void).unwrap(),
+                v.len() * std::mem::size_of::<f32>(),
+                MTLResourceOptions::StorageModeShared,
+            )
+            .unwrap()
+    }
 }
 
 pub fn copy_metal_buffer_back(v: &Buffer) -> Vec<f32> {
     let mut data = vec![0f32; v.length() as usize / size_of::<f32>()];
-    let ptr = v.contents() as *mut f32;
+    let ptr = v.contents().as_ptr() as *mut f32;
     for (i, d) in data.iter_mut().enumerate() {
         *d = unsafe { *ptr.add(i) };
     }

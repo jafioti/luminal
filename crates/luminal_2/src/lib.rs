@@ -12,9 +12,9 @@ use objc2::{rc::Retained, runtime::ProtocolObject};
 use objc2_metal::{MTLBuffer, MTLDevice, MTLFunction};
 use std::{collections::HashMap, fmt::Debug};
 
-type Device = Retained<ProtocolObject<dyn MTLDevice>>;
-type Buffer = Retained<ProtocolObject<dyn MTLBuffer>>;
-type Function = Retained<ProtocolObject<dyn MTLFunction>>;
+pub type Device = Retained<ProtocolObject<dyn MTLDevice>>;
+pub type Buffer = Retained<ProtocolObject<dyn MTLBuffer>>;
+pub type Function = Retained<ProtocolObject<dyn MTLFunction>>;
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum GPUArch {
