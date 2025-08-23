@@ -4,7 +4,7 @@ use std::usize;
 use crate::Kernel;
 use crate::run::{assign_buffers, compile_kernels, run_graph};
 use crate::translate::InitData;
-use crate::utils::print_kernels;
+use crate::utils::{display_graph, print_kernels};
 use crate::{GPUArch, GraphTerm};
 use colored::Colorize;
 use egraph_serialize::{ClassId, EGraph, NodeId};
@@ -149,10 +149,8 @@ fn extract_trajectories<'a>(
     trajectory_cache: &mut FxHashMap<&'a NodeId, Vec<Vec<&'a NodeId>>>,
     waiting: usize,
 ) -> Vec<Vec<&'a NodeId>> {
-    println!("waiting: {waiting}");
     let mut trajectories = vec![];
     'enode_loop: for enode in &egraph.classes()[current_class].nodes {
-        println!("enode loop[");
         if INVALID_IR.contains(&egraph.nodes[enode].op.as_str()) {
             junk_cache.insert(enode);
             continue;
@@ -164,7 +162,6 @@ fn extract_trajectories<'a>(
         let mut enode_trajectories = vec![];
         *seen.entry(enode).or_insert(0) += 1;
         for child in &egraph.nodes[enode].children {
-            println!("child loop");
             // Ask what's the child's trajectories
             if !trajectory_cache.contains_key(child) {
                 let child_trajectories = if is_expression_enode(&egraph.nodes[child].op) {
@@ -203,11 +200,6 @@ fn extract_trajectories<'a>(
                     enode_trajectories.push(child_trajectory);
                 }
             } else if !trajectory_cache[child].is_empty() {
-                println!(
-                    "cart {} w {}",
-                    enode_trajectories.len(),
-                    trajectory_cache[child].len()
-                );
                 // Cartisian product the current trajectories with the new trajectories
                 if enode_trajectories.len() * trajectory_cache[child].len() > MAX_SEARCHED_GRAPHS {
                     enode_trajectories = enode_trajectories
@@ -271,15 +263,71 @@ pub fn search(
         .enumerate()
     {
         // Build termdag
-        let graph = extraction_to_graph(egraph, &trajectory);
+        let mut graph = extraction_to_graph(egraph, &trajectory);
+
+        // ---- dedupe ----
+        let mut label_to_node: FxHashMap<String, NodeIndex> = FxHashMap::default();
+        let mut to_remove = Vec::new();
+        let mut node_remap_after_fusing_gmems = FxHashMap::default();
+
+        for n in graph.node_indices().collect::<Vec<_>>() {
+            if let Some(GraphTerm::GMEM { label }) = graph.node_weight(n) {
+                if let Some(&canon) = label_to_node.get(label) {
+                    // Rewire INCOMING: src -> n  =>  src -> canon
+                    let incoming: Vec<_> =
+                        graph.neighbors_directed(n, Direction::Incoming).collect();
+                    for src in incoming {
+                        if graph.find_edge(src, canon).is_none() {
+                            graph.add_edge(src, canon, ());
+                        }
+                    }
+                    // Rewire OUTGOING: n -> dst  =>  canon -> dst
+                    let outgoing: Vec<_> =
+                        graph.neighbors_directed(n, Direction::Outgoing).collect();
+                    for dst in outgoing {
+                        if graph.find_edge(canon, dst).is_none() {
+                            graph.add_edge(canon, dst, ());
+                        }
+                    }
+                    to_remove.push(n);
+                    node_remap_after_fusing_gmems.insert(n, canon);
+                } else {
+                    label_to_node.insert(label.clone(), n);
+                    node_remap_after_fusing_gmems.insert(n, n);
+                }
+            }
+        }
+
+        graph.retain_nodes(|_, n| !to_remove.contains(&n));
+        // now we figure out the input mappings based off the labels
+        let mut node_index_to_init_data: Vec<(NodeIndex, InitData)> = vec![];
+        for n in graph.node_indices() {
+            if let Some(GraphTerm::GMEM { label }) = graph.node_weight(n) {
+                if let Some(&canon) = label_to_node.get(label) {
+                    //get the init data now
+                    if let Some((_, data)) = inputs.iter().find(|(l, _)| l == label)
+                    // should be only 1
+                    {
+                        println!(
+                            "graph node: {:?} | label node {:?} | label {label}",
+                            n, canon
+                        );
+                        node_index_to_init_data.push((n, data.clone()));
+                    }
+                }
+            }
+        }
+
+        println!("---------------");
+        println!("label_to_node {:?}", node_index_to_init_data);
+        println!("---------------");
+
         let root = graph.externals(Direction::Outgoing).next().unwrap();
         let Some((kernels, gmem_mapping)) =
             crate::codegen::codegen(graph.clone(), vec![root], arch.clone(), 0, dyn_vars, false)
         else {
             continue;
         };
-        // convert inputs to reference nodes in graph
-        let inputs = inputs.into_iter().filter_map(|(l, d)| graph.node_indices().find(|n| matches!(graph.node_weight(*n).unwrap(), GraphTerm::GMEM { label } if label == l)).map(|i| (i, d.clone()))).collect_vec();
         match &arch {
             GPUArch::CUDA => {
                 if let Some((_, s, _, _)) = &ui_functions {
@@ -290,8 +338,9 @@ pub fn search(
                 }
             }
             GPUArch::Metal(_) => {
-                if let Some((us, outs)) = cost(&kernels, &inputs, &gmem_mapping, dyn_vars) {
-                    // display_graph(&graph, &[]);
+                if let Some((us, outs)) =
+                    cost(&kernels, &node_index_to_init_data, &gmem_mapping, dyn_vars)
+                {
                     valid_graphs += 1;
                     if let Some((progress, logs, title, _)) = &ui_functions {
                         progress(((n as f32 / total_trajectories as f32) * 100.0) as u16);
@@ -322,7 +371,6 @@ pub fn search(
                                                     .map(|v| &v[..v.len().min(20)])
                                                     .collect_vec()
                                             );
-                                            crate::utils::display_graph(&graph, &[]);
                                             panic!(
                                                 "{} {x} != {y}",
                                                 "Output Mismatch".bold().on_bright_red()
@@ -601,10 +649,13 @@ fn cost<'a>(
         let (int_buffers, int_buffer_map) = assign_buffers(&kernels);
         let compiled_kernels = compile_kernels(&kernels);
         let device = Device::system_default().unwrap();
+
         // Copy input buffers over
+        println!("GMEM MAPPING: {:?}", gmem_mapping);
         let mut inputs = inputs
             .into_iter()
             .map(|(n, b)| {
+                println!(">{:?}", n);
                 (
                     gmem_mapping[n],
                     (
@@ -614,6 +665,10 @@ fn cost<'a>(
                 )
             })
             .collect::<FxHashMap<_, _>>();
+
+        for key in inputs.keys() {
+            println!("indexes: {key}");
+        }
         // Warm up resources (buffer allocation, kernel compiler, etc.)
         for _ in 0..WARMUP_TRIALS {
             run_graph(
@@ -629,6 +684,7 @@ fn cost<'a>(
         let mut micros = vec![];
         let mut outputs = vec![];
         let mut m;
+
         for _ in 0..TRIALS {
             (outputs, m) = run_graph(
                 &mut inputs,

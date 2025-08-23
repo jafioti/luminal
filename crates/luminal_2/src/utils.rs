@@ -273,10 +273,10 @@ pub fn display_graph(
     graph_string = re.replace_all(&graph_string, "").to_string();
     for (n, color) in mark_nodes {
         graph_string = graph_string.replace(
-            &format!("    {} [ label =", n.index()),
+            &format!("    {} [ label =", map[&n].index()),
             &format!(
                 "    {} [ style=\"filled\" fillcolor=\"{color}\" label =",
-                n.index(),
+                map[&n].index(),
             ),
         );
     }
