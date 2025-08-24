@@ -1433,7 +1433,7 @@ fn split_kernels(
                     .next()
                     .unwrap();
             }
-            *size = new_size;
+            *size = new_size.simplify();
         }
     }
 

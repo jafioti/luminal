@@ -1,11 +1,12 @@
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::usize;
 
 use crate::run::{assign_buffers, compile_kernels, run_graph};
 use crate::translate::InitData;
-use crate::utils::{print_kernels, render_egglog};
+use crate::utils::{display_graph, print_kernels, render_egglog};
 use crate::{Buffer, Device, Kernel};
 use crate::{GPUArch, GraphTerm};
 use colored::Colorize;
@@ -176,6 +177,17 @@ fn extract_trajectories<'a>(
                     )
                     .map(|i| vec![i])
                     .unwrap_or_default()
+                } else if egraph.nodes[child].op == "Loop" {
+                    // Pull just the range out for the loop
+                    extract_shortest(
+                        egraph,
+                        egraph.nid_to_cid(&egraph.nodes[child].children[1]),
+                        seen,
+                        junk_cache,
+                        &mut FxHashMap::default(),
+                    )
+                    .map(|i| vec![i])
+                    .unwrap_or_default()
                 } else {
                     extract_trajectories(
                         egraph,
@@ -255,10 +267,13 @@ pub fn search(
     let mut best_graph = None;
     let mut valid_graphs = 0;
     let total_trajectories = trajectories.len().min(MAX_SEARCHED_GRAPHS);
+    let mut prev_graphs = vec![];
+    let mut prev_traj = vec![];
     let mut ui_functions = None;
     if option_env!("DEBUG").is_none() {
         ui_functions = Some(crate::utils::search_ui());
     };
+    let mut seen = FxHashSet::default();
     'trajectory_loop: for (n, trajectory) in trajectories
         .into_iter()
         .take(MAX_SEARCHED_GRAPHS)
@@ -266,59 +281,43 @@ pub fn search(
     {
         // Build termdag
         let mut graph = extraction_to_graph(egraph, &trajectory);
+        prev_graphs.push(graph.clone());
+        prev_traj.push(trajectory.clone());
 
-        // ---- dedupe ----
-        let mut label_to_node: FxHashMap<String, NodeIndex> = FxHashMap::default();
-        let mut to_remove = Vec::new();
-        let mut node_remap_after_fusing_gmems = FxHashMap::default();
+        // Dedup GMEMs
+        let mut canon: FxHashMap<String, NodeIndex> = FxHashMap::default();
 
         for n in graph.node_indices().collect::<Vec<_>>() {
-            if let Some(GraphTerm::GMEM { label }) = graph.node_weight(n) {
-                if let Some(&canon) = label_to_node.get(label) {
-                    // Rewire INCOMING: src -> n  =>  src -> canon
-                    let incoming: Vec<_> =
-                        graph.neighbors_directed(n, Direction::Incoming).collect();
-                    for src in incoming {
-                        if graph.find_edge(src, canon).is_none() {
-                            graph.add_edge(src, canon, ());
-                        }
+            if let GraphTerm::GMEM { label } = &graph[n] {
+                match canon.entry(label.clone()) {
+                    Entry::Vacant(e) => {
+                        e.insert(n);
                     }
-                    // Rewire OUTGOING: n -> dst  =>  canon -> dst
-                    let outgoing: Vec<_> =
-                        graph.neighbors_directed(n, Direction::Outgoing).collect();
-                    for dst in outgoing {
-                        if graph.find_edge(canon, dst).is_none() {
-                            graph.add_edge(canon, dst, ());
+                    Entry::Occupied(e) => {
+                        let c = *e.get();
+                        for src in graph
+                            .neighbors_directed(n, Direction::Incoming)
+                            .collect::<Vec<_>>()
+                        {
+                            graph.update_edge(src, c, ());
                         }
+                        for dst in graph
+                            .neighbors_directed(n, Direction::Outgoing)
+                            .collect::<Vec<_>>()
+                        {
+                            graph.update_edge(c, dst, ());
+                        }
+                        graph.remove_node(n);
                     }
-                    to_remove.push(n);
-                    node_remap_after_fusing_gmems.insert(n, canon);
-                } else {
-                    label_to_node.insert(label.clone(), n);
-                    node_remap_after_fusing_gmems.insert(n, n);
                 }
             }
         }
 
-        graph.retain_nodes(|_, n| !to_remove.contains(&n));
-        // now we figure out the input mappings based off the labels
-        let mut node_index_to_init_data: Vec<(NodeIndex, InitData)> = vec![];
-        for n in graph.node_indices() {
-            if let Some(GraphTerm::GMEM { label }) = graph.node_weight(n) {
-                if let Some(&canon) = label_to_node.get(label) {
-                    //get the init data now
-                    if let Some((_, data)) = inputs.iter().find(|(l, _)| l == label)
-                    // should be only 1
-                    {
-                        println!(
-                            "graph node: {:?} | label node {:?} | label {label}",
-                            n, canon
-                        );
-                        node_index_to_init_data.push((n, data.clone()));
-                    }
-                }
-            }
-        }
+        // Build input mapping
+        let node_index_to_init_data: Vec<(NodeIndex, InitData)> = inputs
+            .iter()
+            .filter_map(|(label, data)| canon.get(label).map(|&n| (n, data.clone())))
+            .collect();
 
         let root = graph.externals(Direction::Outgoing).next().unwrap();
         let Some((kernels, gmem_mapping)) =
@@ -326,6 +325,7 @@ pub fn search(
         else {
             continue;
         };
+        // let inputs = inputs.into_iter().filter_map(|(l, d)| graph.node_indices().find(|n| matches!(graph.node_weight(*n).unwrap(), GraphTerm::GMEM { label } if label == l)).map(|i| (i, d.clone()))).collect_vec();
         match &arch {
             GPUArch::CUDA => {
                 if let Some((_, s, _, _)) = &ui_functions {
@@ -336,6 +336,12 @@ pub fn search(
                 }
             }
             GPUArch::Metal(_) => {
+                let k = print_kernels(&kernels);
+                if seen.contains(&k) {
+                    continue;
+                } else {
+                    seen.insert(k);
+                }
                 if let Some((us, outs)) =
                     cost(&kernels, &node_index_to_init_data, &gmem_mapping, dyn_vars)
                 {
@@ -409,10 +415,10 @@ pub fn extraction_to_graph(
 ) -> StableGraph<GraphTerm, (), Directed> {
     let mut g: StableGraph<GraphTerm, (), Directed> = StableGraph::new();
 
+    #[derive(Debug, Clone)]
     enum Ret {
         Expr(NodeIndex),
         Math(Expression),
-        Loop(String, Expression),
     }
 
     fn recurse(
@@ -423,7 +429,8 @@ pub fn extraction_to_graph(
     ) -> Ret {
         let node_choice = trajectory[*current];
         let enode = &egraph.nodes[node_choice];
-        match enode.op.as_str() {
+        // println!("enter: {}", enode.op);
+        let r = match enode.op.as_str() {
             "GMEM" => {
                 *current += 1;
                 Ret::Expr(
@@ -437,30 +444,31 @@ pub fn extraction_to_graph(
             }
             "SMEM" => Ret::Expr(g.add_node(GraphTerm::SMEM)),
 
-            // LoopIn  = (LoopIn <expr> <LoopType> <Math>)
+            // LoopIn  = (LoopIn <expr> <Math> <Math>)
             "LoopIn" | "LoopOut" => {
                 *current += 1;
                 let Ret::Expr(child_one) = recurse(egraph, trajectory, current, g) else {
                     panic!()
                 };
                 *current += 1;
-                let Ret::Loop(label, range) = recurse(egraph, trajectory, current, g) else {
+                let Ret::Math(range) = recurse(egraph, trajectory, current, g) else {
                     panic!()
                 };
                 *current += 1;
                 let Ret::Math(stride) = recurse(egraph, trajectory, current, g) else {
-                    panic!()
+                    panic!();
                 };
+                // println!("Done");
                 let r = g.add_node(match enode.op.as_str() {
                     "LoopIn" => GraphTerm::LoopIn {
                         range,
                         stride,
-                        marker: label,
+                        marker: "".to_string(),
                     },
                     "LoopOut" => GraphTerm::LoopOut {
                         range,
                         stride,
-                        marker: label,
+                        marker: "".to_string(),
                     },
                     _ => panic!(),
                 });
@@ -520,7 +528,6 @@ pub fn extraction_to_graph(
                     panic!()
                 };
                 *current += 1;
-                // println!("bin: {}", enode.op);
                 let Ret::Expr(child_two) = recurse(egraph, trajectory, current, g) else {
                     panic!()
                 };
@@ -609,17 +616,6 @@ pub fn extraction_to_graph(
                 *current += 1;
                 Ret::Math(Expression::from(Term::Acc('a')))
             }
-            "Loop" => {
-                let label = egraph.nodes[trajectory[*current + 1]]
-                    .op
-                    .replace("Boxed(\"", "")
-                    .replace("\")", "");
-                *current += 2; // skip loop label
-                let Ret::Math(e) = recurse(egraph, trajectory, current, g) else {
-                    panic!()
-                };
-                Ret::Loop(label, e)
-            }
             "MNum" | "MVar" => {
                 *current += 1;
                 recurse(egraph, trajectory, current, g)
@@ -631,7 +627,9 @@ pub fn extraction_to_graph(
                     panic!("unsupported op '{}'", enode.op)
                 }
             }
-        }
+        };
+        // println!("exit: {}", enode.op);
+        r
     }
 
     recurse(egraph, trajectory, &mut 0, &mut g);

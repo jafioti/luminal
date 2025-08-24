@@ -280,7 +280,7 @@
 		(Loop (+ ?o ?i) (MMul ?rangeO ?rangeI))
 		(MAdd (MReplace ?stO (MVar "z") (MDiv (MVar "z") ?rangeI)) (MReplace ?stI (MVar "z") (MMod (MVar "z") ?rangeI)))
 	)
-	;:ruleset ir
+	:ruleset ir
 	:when ((!= ?stI (MAccum "a")) (!= ?stO (MAccum "a")))
 )
 (rewrite
@@ -526,10 +526,42 @@
 	:ruleset ir-prop
 )
 
-{code}
+(ruleset final)
+(rewrite (Loop ?s ?r) (Loop "" ?r) :ruleset final)
+
+(let t0 (GMEM "B Load"))
+(let t1 (GMEM "A Load"))
+(let t2 (LoopIn t0 (Loop "0" (MNum 512)) (MNum 0)))
+(let t3 (LoopIn t2 (Loop "1" (MNum 512)) (MVar "z")))
+(let t4 (LoopIn t3 (Loop "2" (MNum 512)) (MMul (MNum 512) (MVar "z"))))
+(let t5 (LoopIn t1 (Loop "0" (MNum 512)) (MMul (MNum 512) (MVar "z"))))
+(let t6 (LoopIn t5 (Loop "1" (MNum 512)) (MNum 0)))
+(let t7 (LoopIn t6 (Loop "2" (MNum 512)) (MVar "z")))
+(let t8 (Mul t4 t7))
+(let t9 (LoopOut t8 (Loop "2" (MNum 512)) (MVar "z")))
+(let t10 (LoopOut t9 (Loop "1" (MNum 512)) (MMul (MVar "z") (MNum 512))))
+(let t11 (LoopOut t10 (Loop "0" (MNum 512)) (MMul (MMul (MVar "z") (MNum 512)) (MNum 512))))
+(let t12 (GMEM "acc_0"))
+(let t13 (LoopIn t11 (Loop "0" (MNum 512)) (MMul (MNum 262144) (MVar "z"))))
+(let t14 (LoopIn t13 (Loop "1" (MNum 512)) (MMul (MNum 512) (MVar "z"))))
+(let t15 (LoopIn t14 (Loop "pad2" (MNum 1)) (MNum 0)))
+(let t16 (LoopIn t15 (Loop "pad3" (MNum 1)) (MNum 0)))
+(let t17 (LoopIn t16 (Loop "2" (MNum 512)) (MVar "z")))
+(let t18 (LoopIn t12 (Loop "0" (MNum 512)) (MNum 0)))
+(let t19 (LoopIn t18 (Loop "1" (MNum 512)) (MNum 0)))
+(let t20 (LoopIn t19 (Loop "pad2" (MNum 1)) (MNum 0)))
+(let t21 (LoopIn t20 (Loop "pad3" (MNum 1)) (MNum 0)))
+(let t22 (LoopIn t21 (Loop "2" (MNum 512)) (MAccum "a")))
+(let t23 (Add t17 t22))
+(let t24 (LoopOut t23 (Loop "2" (MNum 512)) (MAccum "a")))
+(let t25 (LoopOut t24 (Loop "pad3" (MNum 1)) (MVar "z")))
+(let t26 (LoopOut t25 (Loop "pad2" (MNum 1)) (MVar "z")))
+(let t27 (LoopOut t26 (Loop "1" (MNum 512)) (MVar "z")))
+(let t28 (LoopOut t27 (Loop "0" (MNum 512)) (MMul (MVar "z") (MNum 512))))
+
 (run-schedule
 	(run ir-generic)
-	(repeat 5
+	(repeat 2
 		(run ir)
 		(run ir-prop)
 		(run expr)
@@ -544,4 +576,5 @@
 	;(repeat 3 ir-prop)
 	(run ir-generic)
 	(repeat 3 tc)
+	(run final)
 )
