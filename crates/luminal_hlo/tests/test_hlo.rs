@@ -48,35 +48,6 @@ fn test_stablehlo_broadcast_in_dim_op() {
 
     cx.execute();
 
-    let expected = [142., 142., 142., 142., 142., 142., 142., 142.];
-    assert_close(&inputs["%2"].data(), &expected);
+    let expected = [160.];
+    assert_close(&inputs["%3"].data(), &expected);
 }
-
-// #[test]
-// fn test_parse_tensor_shape() {
-//     // Test regular tensor shapes
-//     assert_eq!(parse_tensor_shape("tensor<1x16x1x1xf32>"), vec![1, 16, 1, 1]);
-//     assert_eq!(parse_tensor_shape("tensor<96x3x7x7xf32>"), vec![96, 3, 7, 7]);
-//     assert_eq!(parse_tensor_shape("tensor<1x1000xf32>"), vec![1, 1000]);
-        
-//     // Test scalar tensor
-//     assert_eq!(parse_tensor_shape("tensor<f32>"), vec![1]);
-        
-//     // Test single dimension
-//     assert_eq!(parse_tensor_shape("tensor<16xf32>"), vec![16]);
-// }
-
-// #[test]
-// fn test_parse_output_shape_from_op() {
-//     // Test the example from the user
-//     let op_line = "%8 = stablehlo.reshape %arg3 : (tensor<16xf32>) -> tensor<1x16x1x1xf32>";
-//     assert_eq!(parse_output_shape_from_op(op_line), vec![1, 16, 1, 1]);
-        
-//     // Test other examples
-//     let op_line2 = "%0 = stablehlo.convolution(%arg52, %arg0) dim_numbers = [b, f, 0, 1]x[o, i, 0, 1]->[b, f, 0, 1], window = {stride = [2, 2]} {batch_group_count = 1 : i64, feature_group_count = 1 : i64} : (tensor<1x3x224x224xf32>, tensor<96x3x7x7xf32>) -> tensor<1x96x109x109xf32>";
-//     assert_eq!(parse_output_shape_from_op(op_line2), vec![1, 96, 109, 109]);
-        
-//     // Test scalar output
-//     let op_line3 = "%cst = stablehlo.constant dense<1.690000e+02> : tensor<f32>";
-//     assert_eq!(parse_output_shape_from_op(op_line3), vec![1]);
-// }

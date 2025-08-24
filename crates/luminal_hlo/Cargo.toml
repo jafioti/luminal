@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 luminal = { path = "../.." }
+regex = "1.9.5"
 
 [dev-dependencies]
 dfdx = { version = "0.13", features = ["f16"] }
