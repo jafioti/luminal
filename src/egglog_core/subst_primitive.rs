@@ -1,8 +1,13 @@
 //! VENDORED from egglog-experimental PR #60 (branch `unstable-subst`,
-//! head eaf27ca, author oflatt) — verbatim below this header. Vendored
+//! head eaf27ca, author oflatt), with documented vendoring deltas. Vendored
 //! rather than depended-on while the PR is unmerged (ruling: take
 //! exactly the audited contract; drop this file for the upstream crate
 //! once it merges). Registered by `new_egraph()` in egglog_snippet.rs.
+//!
+//! Performance delta: constructor signatures, output-sort indices and declared
+//! input storage kinds use egglog's shared immutable schema catalogue. Table
+//! registration and type declaration changes invalidate it; live rows, unions,
+//! container contents and substitution results are never cached.
 //!
 //! Substitution over a reachable sub-e-graph: the `unstable-subst` primitive.
 //!
@@ -61,46 +66,17 @@ use egglog::ast::Span;
 use egglog::constraint::{self, Constraint, ImpossibleConstraint, TypeConstraint};
 use egglog::sort::MapContainer;
 use egglog::{
-    ArcSort, Atom, AtomTerm, Core, EGraph, Error, FullPrim, FullState, FuncType, Primitive, Read,
-    TypeInfo, Value, Write,
+    ArcSort, Atom, AtomTerm, ConstructorCatalog, Core, EGraph, Error, FullPrim, FullState,
+    Primitive, Read, SortStorageKind as Kind, TypeInfo, Value, Write,
 };
 
 /// The name of the primitive, as written in an egglog program.
 pub const SUBST: &str = "unstable-subst";
 
-/// A constructor the walk can follow.
-type Constructor<'a> = &'a FuncType;
-
-/// What a column of a given sort holds, as far as the walk cares.
-enum Kind {
-    /// An e-class: walk into it, and copy it if it is affected.
-    Eclass,
-    /// A container with e-classes somewhere inside: walk into its contents and
-    /// rebuild it if any of them change. Carries the Rust [`TypeId`] its values
-    /// are interned under.
-    Container(TypeId),
-    /// Nothing an e-class can hide in: copied through untouched.
-    Opaque,
-}
-
+// Storage classification comes from the immutable declared-sort catalogue.
+// Container-valued contents are still inspected dynamically during each walk.
 fn kind_of(sort: &ArcSort) -> Kind {
-    if sort.is_eq_sort() {
-        Kind::Eclass
-    } else if sort.is_container_sort() {
-        // Deliberately not `is_eq_container_sort`, which answers from the
-        // sort's declared element sorts. For an `unstable-fn` value those are
-        // the arguments still to be applied, not the ones it captured — a
-        // `(UnstableFn () Math)` holding an e-class reports no eq-sort
-        // elements. Walking every container and asking the value what it holds
-        // costs an `inner_values` call on containers that turn out to have no
-        // e-classes inside, and cannot miss one.
-        Kind::Container(
-            sort.value_type()
-                .expect("a container sort has a value type"),
-        )
-    } else {
-        Kind::Opaque
-    }
+    Kind::of(sort)
 }
 
 /// One reachable constructor row, keyed by the constructor it came from so the
@@ -131,9 +107,8 @@ struct Snapshot {
 }
 
 struct Walk<'a> {
-    ctors: Vec<Constructor<'a>>,
-    /// Indices into `ctors`, by output sort name.
-    by_output: HashMap<String, Vec<usize>>,
+    catalog: &'a ConstructorCatalog,
+    skip: &'a HashSet<String>,
     map: &'a BTreeMap<Value, Value>,
     snapshot: Snapshot,
     /// E-classes the substitution changes: a key, or a reference to an
@@ -144,29 +119,6 @@ struct Walk<'a> {
     container_images: HashMap<Value, Value>,
     /// Memo for [`Walk::container_leaves`].
     container_leaves: HashMap<Value, Vec<(ArcSort, Value)>>,
-}
-
-/// The constructors with an eq-sort output: the rows that make up the term
-/// structure. Resolved per call, since an e-graph gains constructors over time.
-fn constructors<'db>(
-    state: &FullState<'_, 'db>,
-    skip: &std::collections::HashSet<String>,
-) -> Vec<Constructor<'db>> {
-    let names: Vec<String> = state
-        .table_sizes()
-        .into_iter()
-        .map(|(name, _)| name.to_owned())
-        .filter(|name| !skip.contains(name))
-        .collect();
-    names
-        .into_iter()
-        .filter_map(|name| {
-            // `constructor_schema` rejects the function tables, which is also
-            // what keeps globals out: they lower to function tables.
-            let func_type = state.constructor_schema(&name).ok()?;
-            func_type.output.is_eq_sort().then_some(func_type)
-        })
-        .collect()
 }
 
 /// Substitute `map` through the sub-e-graph reachable from `root`, returning
@@ -188,18 +140,10 @@ pub fn substitute<'db>(
         return Ok(root);
     }
 
-    let ctors = constructors(state, skip);
-    let mut by_output: HashMap<String, Vec<usize>> = HashMap::new();
-    for (index, ctor) in ctors.iter().enumerate() {
-        by_output
-            .entry(ctor.output.name().to_owned())
-            .or_default()
-            .push(index);
-    }
-
+    let catalog = state.constructor_catalog()?;
     let mut walk = Walk {
-        ctors,
-        by_output,
+        catalog: &catalog,
+        skip,
         map,
         snapshot: Snapshot::default(),
         affected: HashSet::new(),
@@ -233,13 +177,22 @@ impl Walk<'_> {
             // root's unknown sort affordable: it costs one probe per eq-sorted
             // constructor, once.
             let candidates: Vec<usize> = match &sort {
-                Some(sort) => self.by_output.get(sort.name()).cloned().unwrap_or_default(),
-                None => (0..self.ctors.len()).collect(),
+                Some(sort) => self
+                    .catalog
+                    .by_output
+                    .get(sort.name())
+                    .cloned()
+                    .unwrap_or_default(),
+                None => (0..self.catalog.constructors.len()).collect(),
             };
             let mut nodes = Vec::new();
             for index in candidates {
                 let mut rows = Vec::new();
-                state.enodes_for_eclass(&self.ctors[index].name, value, |enode| {
+                let ctor = &self.catalog.constructors[index].schema;
+                if self.skip.contains(&ctor.name) {
+                    continue;
+                }
+                state.enodes_for_eclass(&ctor.name, value, |enode| {
                     rows.push((enode.children.to_vec(), enode.subsumed));
                 })?;
                 nodes.extend(rows.into_iter().map(|(children, subsumed)| ENode {
@@ -251,9 +204,15 @@ impl Walk<'_> {
 
             let mut deps = Vec::new();
             for node in &nodes {
-                let ctor = self.ctors[node.ctor];
-                for (child, child_sort) in node.children.iter().zip(&ctor.input) {
-                    match kind_of(child_sort) {
+                let metadata = &self.catalog.constructors[node.ctor];
+                let ctor = &metadata.schema;
+                for ((child, child_sort), kind) in node
+                    .children
+                    .iter()
+                    .zip(&ctor.input)
+                    .zip(metadata.input_kinds.iter().copied())
+                {
+                    match kind {
                         Kind::Eclass => {
                             deps.push(*child);
                             stack.push(Visit(*child, Some(child_sort.clone())));
@@ -361,7 +320,7 @@ impl Walk<'_> {
                         blocked.push(node);
                         continue;
                     };
-                    let name = self.ctors[node.ctor].name.clone();
+                    let name = self.catalog.constructors[node.ctor].schema.name.clone();
                     // A subsumed source row's copy is born retired
                     // (add_subsumed, our egglog fork): a live window —
                     // even one round — re-arms the orbit our :subsume
@@ -397,7 +356,11 @@ impl Walk<'_> {
             // DIAGNOSTIC (vendoring delta): name the cycle's anatomy — every
             // row of the blocked class including the subsumed rows the walk
             // skipped, and which children are still imageless.
-            for ctor in &self.ctors {
+            for metadata in &self.catalog.constructors {
+                let ctor = &metadata.schema;
+                if self.skip.contains(&ctor.name) {
+                    continue;
+                }
                 let mut rows = Vec::new();
                 let _ = state.enodes_for_eclass(&ctor.name, *eclass, |enode| {
                     rows.push((enode.children.to_vec(), enode.subsumed));
@@ -427,7 +390,7 @@ impl Walk<'_> {
             }
             let mut ctors: Vec<&str> = blocked
                 .iter()
-                .map(|node| self.ctors[node.ctor].name.as_str())
+                .map(|node| self.catalog.constructors[node.ctor].schema.name.as_str())
                 .collect();
             ctors.sort_unstable();
             ctors.dedup();
@@ -483,10 +446,16 @@ impl Walk<'_> {
     /// The substituted children of `node`, or `None` if some child's copy does
     /// not exist yet.
     fn copied_args(&mut self, state: &mut FullState<'_, '_>, node: &ENode) -> Option<Vec<Value>> {
-        let ctor = self.ctors[node.ctor];
+        let metadata = &self.catalog.constructors[node.ctor];
+        let ctor = &metadata.schema;
         let mut args = Vec::with_capacity(node.children.len());
-        for (child, child_sort) in node.children.iter().zip(&ctor.input) {
-            let image = match kind_of(child_sort) {
+        for ((child, _child_sort), kind) in node
+            .children
+            .iter()
+            .zip(&ctor.input)
+            .zip(metadata.input_kinds.iter().copied())
+        {
+            let image = match kind {
                 Kind::Eclass => self.eclass_image(*child)?,
                 Kind::Container(type_id) => self.container_image(state, *child, type_id)?,
                 Kind::Opaque => *child,
@@ -701,5 +670,132 @@ impl TypeConstraint for SubstTypeConstraint {
         ));
 
         cs
+    }
+}
+
+#[cfg(test)]
+mod metadata_cache_tests {
+    use super::*;
+
+    fn graph() -> EGraph {
+        let mut egraph = EGraph::default();
+        egraph.add_full_primitive(
+            Subst {
+                skip: ["Memo".to_owned()].into_iter().collect(),
+            },
+            None,
+        );
+        egraph
+    }
+    const BASE: &str = r#"
+        (datatype Node (Leaf i64) (Pair Node Node))
+        (sort Mapping (Map Node Node))
+        (let a (Leaf 0))
+        (let b (Leaf 1))
+        (let sigma (map-insert (map-empty) a b))
+    "#;
+
+    #[test]
+    fn cached_walk_observes_late_constructors_and_new_rows() {
+        let mut egraph = graph();
+        egraph
+            .parse_and_run_program(
+                None,
+                &format!(
+                    r#"{BASE}
+            (let p (Pair a a))
+            (let copied (unstable-subst p sigma))
+            (check (= copied (Pair b b)))
+            (constructor Wrap (Node) Node)
+            (let w (Wrap p))
+            (let wrapped-copy (unstable-subst w sigma))
+            (check (= wrapped-copy (Wrap (Pair b b))))
+            (let fresh (Pair (Leaf 2) a))
+            (let fresh-copy (unstable-subst fresh sigma))
+            (check (= fresh-copy (Pair (Leaf 2) b)))
+        "#
+                ),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn cached_walk_preserves_container_capture_and_memo_exclusion() {
+        let mut egraph = graph();
+        egraph
+            .parse_and_run_program(
+                None,
+                &format!(
+                    r#"{BASE}
+            (sort Nodes (Vec Node))
+            (constructor Pack (Nodes) Node)
+            (constructor Memo (Node Mapping) Node)
+            (let untouched (Leaf 2))
+            (union (Memo untouched sigma) untouched)
+            (let p (Pair untouched a))
+            (let copied (unstable-subst p sigma))
+            (check (= copied (Pair untouched b)))
+            (let packed (Pack (vec-of a untouched)))
+            (let packed-copy (unstable-subst packed sigma))
+            (check (= packed-copy (Pack (vec-of b untouched))))
+            (sort Thunk (UnstableFn () Node))
+            (constructor Held (Thunk) Node)
+            (let held (Held (unstable-fn "Pair" a a)))
+            (let held-copy (unstable-subst held sigma))
+            (check (= held-copy (Held (unstable-fn "Pair" b b))))
+            (let empty-copy (unstable-subst p (map-empty)))
+            (check (= empty-copy p))
+        "#
+                ),
+            )
+            .unwrap();
+    }
+    #[test]
+    fn cached_walk_keeps_subsumed_rows_and_handles_grounded_cycles() {
+        let mut egraph = graph();
+        egraph
+            .parse_and_run_program(None, "(datatype Node (Leaf i64) (Pair Node Node))")
+            .unwrap();
+        let (a, b, c, p) = egraph
+            .update(|mut state| {
+                let a = state.add("Leaf", (0_i64,))?;
+                let b = state.add("Leaf", (1_i64,))?;
+                let c = state.add("Leaf", (2_i64,))?;
+                let p = state.add("Pair", (a, c))?;
+                Ok((a, b, c, p))
+            })
+            .unwrap();
+        // Populate the schema cache before changing the live row's fence.
+        let _ = egraph.read(|s| s.constructor_catalog()).unwrap();
+        egraph
+            .update(|mut state| state.subsume("Pair", (a, c)))
+            .unwrap();
+        let sigma = BTreeMap::from([(a, b)]);
+        let copy = egraph
+            .update(|mut state| substitute(&mut state, p, &sigma, &Default::default()))
+            .unwrap();
+        egraph.read(|state| {
+            let mut rows = 0;
+            state
+                .enodes_for_eclass("Pair", copy, |node| {
+                    assert_eq!(node.children, &[b, c]);
+                    assert!(
+                        node.subsumed,
+                        "a cached schema must not resurrect a retired spelling"
+                    );
+                    rows += 1;
+                })
+                .unwrap();
+            assert_eq!(rows, 1);
+        });
+        egraph
+            .update(|mut state| {
+                let cycle = state.add("Pair", (c, a))?;
+                state.union(c, cycle)
+            })
+            .unwrap();
+        egraph
+            .update(|mut state| substitute(&mut state, c, &sigma, &Default::default()))
+            .unwrap();
     }
 }
