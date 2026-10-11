@@ -5,7 +5,8 @@
 //! once it merges). Registered by `new_egraph()` in egglog_snippet.rs.
 //!
 //! Performance delta: constructor signatures, output-sort indices and declared
-//! input storage kinds use egglog's shared immutable schema catalogue. Table
+//! input storage kinds use egglog's shared immutable schema catalogue. Typed
+//! primitive registrations also supply the known root sort to the walk. Table
 //! registration and type declaration changes invalidate it; live rows, unions,
 //! container contents and substitution results are never cached.
 //!
@@ -133,6 +134,16 @@ pub fn substitute<'db>(
     map: &BTreeMap<Value, Value>,
     skip: &std::collections::HashSet<String>,
 ) -> Result<Value, Error> {
+    substitute_with_sort(state, root, map, skip, None)
+}
+
+fn substitute_with_sort(
+    state: &mut FullState<'_, '_>,
+    root: Value,
+    map: &BTreeMap<Value, Value>,
+    skip: &HashSet<String>,
+    root_sort: Option<&str>,
+) -> Result<Value, Error> {
     if let Some(target) = map.get(&root) {
         return Ok(*target);
     }
@@ -151,7 +162,14 @@ pub fn substitute<'db>(
         container_images: HashMap::new(),
         container_leaves: HashMap::new(),
     };
-    walk.collect(state, root)?;
+    let root_sort = root_sort.and_then(|name| {
+        catalog
+            .by_output
+            .get(name)?
+            .first()
+            .map(|&index| catalog.constructors[index].schema.output.clone())
+    });
+    walk.collect(state, root, root_sort)?;
     walk.mark();
     if !walk.affected.contains(&root) {
         return Ok(root);
@@ -160,14 +178,19 @@ pub fn substitute<'db>(
 }
 
 /// A pending e-class visit in the collect pass. The sort is unknown for the
-/// root only.
+/// root only in the generic API; typed registrations supply it.
 struct Visit(Value, Option<ArcSort>);
 
 impl Walk<'_> {
     /// Gather the reachable e-nodes, container contents, and e-class
     /// dependency edges, starting from `root`.
-    fn collect(&mut self, state: &FullState<'_, '_>, root: Value) -> Result<(), Error> {
-        let mut stack = vec![Visit(root, None)];
+    fn collect(
+        &mut self,
+        state: &FullState<'_, '_>,
+        root: Value,
+        root_sort: Option<ArcSort>,
+    ) -> Result<(), Error> {
+        let mut stack = vec![Visit(root, root_sort)];
         while let Some(Visit(value, sort)) = stack.pop() {
             if self.snapshot.nodes.contains_key(&value) {
                 continue;
@@ -574,29 +597,67 @@ impl Primitive for Subst {
     }
 
     fn get_type_constraints(&self, span: &Span) -> Box<dyn TypeConstraint> {
-        Box::new(SubstTypeConstraint { span: span.clone() })
+        Box::new(SubstTypeConstraint {
+            span: span.clone(),
+            name: SUBST,
+            root_sort: None,
+        })
     }
 }
 
 impl FullPrim for Subst {
-    fn apply<'a, 'db>(&self, mut state: FullState<'a, 'db>, args: &[Value]) -> Option<Value> {
-        let [root, map] = args else { return None };
-        // Cloned out so the container registry is not still borrowed when the
-        // walk starts interning new containers.
-        let entries = state.value_to_container::<MapContainer>(*map)?.data.clone();
-        match substitute(&mut state, *root, &entries, &self.skip) {
-            Ok(image) => Some(image),
-            Err(err) => {
-                // A primitive cannot return an `Error`, and registering a
-                // custom panic message needs the backend, which egglog does not
-                // expose. So the reason prints to stderr (vendoring delta:
-                // upstream uses log::error!, but no logger is configured here
-                // and a silent reason would violate house doctrine) and the
-                // program sees a generic primitive panic.
-                eprintln!("[unstable-subst] {err}");
-                state.panic();
-                None
-            }
+    fn apply<'a, 'db>(&self, state: FullState<'a, 'db>, args: &[Value]) -> Option<Value> {
+        apply_substitution(state, args, &self.skip, None)
+    }
+}
+
+/// A typed registration of the same substitution semantics. The type checker
+/// enforces the root sort; the walk probes only constructors of that sort for
+/// the root, then follows each child's declared sort (including containers).
+#[derive(Clone)]
+pub struct TypedSubst {
+    pub name: &'static str,
+    pub root_sort: &'static str,
+    pub skip: HashSet<String>,
+}
+
+impl Primitive for TypedSubst {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn get_type_constraints(&self, span: &Span) -> Box<dyn TypeConstraint> {
+        Box::new(SubstTypeConstraint {
+            span: span.clone(),
+            name: self.name,
+            root_sort: Some(self.root_sort),
+        })
+    }
+}
+
+impl FullPrim for TypedSubst {
+    fn apply<'a, 'db>(&self, state: FullState<'a, 'db>, args: &[Value]) -> Option<Value> {
+        apply_substitution(state, args, &self.skip, Some(self.root_sort))
+    }
+}
+
+fn apply_substitution(
+    mut state: FullState<'_, '_>,
+    args: &[Value],
+    skip: &HashSet<String>,
+    root_sort: Option<&str>,
+) -> Option<Value> {
+    let [root, map] = args else { return None };
+    // Release the container registry borrow before interning new containers.
+    let entries = state.value_to_container::<MapContainer>(*map)?.data.clone();
+    match substitute_with_sort(&mut state, *root, &entries, skip, root_sort) {
+        Ok(image) => Some(image),
+        Err(err) => {
+            // FullPrim cannot return an Error; preserve the loud reason and
+            // primitive panic of the generic registration.
+            eprintln!("[unstable-subst] {err}");
+            state.panic();
+            None
         }
     }
 }
@@ -610,6 +671,8 @@ impl FullPrim for Subst {
 /// produce an ill-typed row.
 struct SubstTypeConstraint {
     span: Span,
+    name: &'static str,
+    root_sort: Option<&'static str>,
 }
 
 impl TypeConstraint for SubstTypeConstraint {
@@ -623,7 +686,7 @@ impl TypeConstraint for SubstTypeConstraint {
                 ImpossibleConstraint::ArityMismatch {
                     atom: Atom {
                         span: self.span.clone(),
-                        head: SUBST.to_owned(),
+                        head: self.name.to_owned(),
                         args: arguments.to_vec(),
                     },
                     expected: 3,
@@ -655,7 +718,9 @@ impl TypeConstraint for SubstTypeConstraint {
                 .collect(),
         ));
 
-        let mut eq_sorts = typeinfo.get_arcsorts_by(|sort| sort.is_eq_sort());
+        let mut eq_sorts = typeinfo.get_arcsorts_by(|sort| {
+            sort.is_eq_sort() && self.root_sort.is_none_or(|name| sort.name() == name)
+        });
         eq_sorts.sort_by_key(|sort| sort.name().to_owned());
         cs.push(constraint::xor(
             eq_sorts
@@ -694,6 +759,52 @@ mod metadata_cache_tests {
         (let b (Leaf 1))
         (let sigma (map-insert (map-empty) a b))
     "#;
+
+    #[test]
+    fn typed_root_matches_generic_across_sorts_containers_and_unions() {
+        let mut egraph = graph();
+        egraph.add_full_primitive(
+            TypedSubst {
+                name: "subst-node",
+                root_sort: "Node",
+                skip: ["Memo".to_owned()].into_iter().collect(),
+            },
+            None,
+        );
+        egraph
+            .parse_and_run_program(
+                None,
+                &format!(
+                    r#"{BASE}
+            (datatype Other (Cross Node))
+            (sort Others (Vec Other))
+            (constructor Held (Others) Node)
+            (let p (Held (vec-of (Cross (Pair a a)))))
+            (let generic (unstable-subst p sigma))
+            (let typed (subst-node p sigma))
+            (check (= generic typed))
+            (check (= typed (Held (vec-of (Cross (Pair b b))))))
+            (constructor Wrap (Node) Node)
+            (let wrapped (Wrap p))
+            (union wrapped p)
+            (let generic2 (unstable-subst p sigma))
+            (let typed2 (subst-node p sigma))
+            (check (= generic2 typed2))
+            (let empty (subst-node p (map-empty)))
+            (check (= empty p))
+            (let key (subst-node a sigma))
+            (check (= key b))
+        "#
+                ),
+            )
+            .unwrap();
+        assert!(
+            egraph
+                .parse_and_run_program(None, "(let wrong (subst-node (Cross a) sigma))")
+                .is_err(),
+            "the typed registration must reject roots of another sort"
+        );
+    }
 
     #[test]
     fn cached_walk_observes_late_constructors_and_new_rows() {

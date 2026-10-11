@@ -553,7 +553,8 @@
 ; op's LayoutTensorList to find one), so a single pass reaches only depth
 ; 1. Saturation terminates trivially: the relations are monotone over a
 ; finite list universe and the subsume retires the very node its own rule
-; matches.
+; matches. Bounded doubling paths below accelerate the two walks without
+; changing their reachable facts, including for cyclic list spellings.
 ;
 ; SUBSUME IS HYGIENE, NOT THE MECHANISM. Subsuming the generic
 ; LayoutTensorOpLit spelling does NOT remove the runtime constructor
@@ -572,6 +573,40 @@
 (relation input-buffer-tensor-list (BufferTensorList))
 ; A LAUNCH-TIME LEAF: the layout tensor an input binding names.
 (relation input-leaf-layout-tensor (LayoutTensor))
+; BEGIN buffer-list-jump doubling
+; Auxiliary paths of 2^level live cons edges. Levels 0..8 bound the
+; auxiliary universe even for cyclic/aliased lists; this is an acceleration
+; horizon, not a list length limit. The original one-hop rules remain.
+(relation buffer-list-jump (BufferTensorList BufferTensorList i64))
+(rule ((= ?list (BufferTensorCons ?head ?tail)))
+      ((buffer-list-jump ?list ?tail 0))
+      :ruleset cleanup :name "core: buffer-list-jump seed one live edge")
+(rule ((buffer-list-jump ?start ?middle ?level)
+       (buffer-list-jump ?middle ?end ?level) (< ?level 8))
+      ((buffer-list-jump ?start ?end (+ ?level 1)))
+      :ruleset cleanup :name "core: buffer-list-jump double a bounded path")
+(rule ((input-buffer-tensor-list ?start) (buffer-list-jump ?start ?end ?level))
+      ((input-buffer-tensor-list ?end))
+      :ruleset cleanup :name "core: input binding walk follows a doubled path")
+; END buffer-list-jump doubling
+
+; BEGIN layout-list-jump doubling
+; Auxiliary paths of 2^level live cons edges. Levels 0..8 bound the
+; auxiliary universe even for cyclic/aliased lists; this is an acceleration
+; horizon, not a list length limit. The original one-hop rules remain.
+(relation layout-list-jump (LayoutTensorList LayoutTensorList i64))
+(rule ((= ?list (LayoutTensorCons ?head ?tail)))
+      ((layout-list-jump ?list ?tail 0))
+      :ruleset cleanup :name "core: layout-list-jump seed one live edge")
+(rule ((layout-list-jump ?start ?middle ?level)
+       (layout-list-jump ?middle ?end ?level) (< ?level 8))
+      ((layout-list-jump ?start ?end (+ ?level 1)))
+      :ruleset cleanup :name "core: layout-list-jump double a bounded path")
+(rule ((list-holds-input-layout-tensor ?end) (layout-list-jump ?start ?end ?level))
+      ((list-holds-input-layout-tensor ?start))
+      :ruleset cleanup :name "core: input leaf witness follows a doubled path backwards")
+; END layout-list-jump doubling
+
 
 ; The input binding names a buffer-tensor list...
 (rule
@@ -4312,7 +4347,7 @@
   ((int-subst-demand ?expr ?map)
    (int-subst-closed ?expr ?map)
    (= ?sigma (sigma-out ?map)))
-  ((union (int-subst-of ?expr ?map) (unstable-subst ?expr ?sigma)))
+  ((union (int-subst-of ?expr ?map) (unstable-subst-int-expr ?expr ?sigma)))
   :ruleset subst-walk
   :naive
   :name "core: the walk: int-subst-of is unstable-subst under σ"
@@ -4866,6 +4901,23 @@
 ; Shape closure, gather: the out shape and EVERY coordinate's shape are
 ; one shape. A per-gather suffix link, then closure both ways.
 (relation coordinate-shape-lock (LogicalTensor LogicalTensorList))
+; BEGIN logical-list-jump doubling
+; Auxiliary paths of 2^level live cons edges. Levels 0..8 bound the
+; auxiliary universe even for cyclic/aliased lists; this is an acceleration
+; horizon, not a list length limit. The original one-hop rules remain.
+(relation logical-list-jump (LogicalTensorList LogicalTensorList i64))
+(rule ((= ?list (LogicalTensorCons ?head ?tail)))
+      ((logical-list-jump ?list ?tail 0))
+      :ruleset fixpoint-invariants :name "core: logical-list-jump seed one live edge")
+(rule ((logical-list-jump ?start ?middle ?level)
+       (logical-list-jump ?middle ?end ?level) (< ?level 8))
+      ((logical-list-jump ?start ?end (+ ?level 1)))
+      :ruleset fixpoint-invariants :name "core: logical-list-jump double a bounded path")
+(rule ((coordinate-shape-lock ?out ?start) (logical-list-jump ?start ?end ?level))
+      ((coordinate-shape-lock ?out ?end))
+      :ruleset fixpoint-invariants :name "core: coordinate shape lock follows a doubled path")
+; END logical-list-jump doubling
+
 (rule
   (
     (coordinate-shape-lock ?out_logical (LogicalTensorCons ?head_logical ?rest_list))
@@ -4995,6 +5047,25 @@
 ; return with their composition stages. Undecidable comparisons stay
 ; silent (tripwires detect violations; they cannot demand proofs).
 (relation map-range-walk (IntExprList IntExprList))
+; BEGIN expr-list-jump doubling
+; Auxiliary paths of 2^level live cons edges. Levels 0..8 bound the
+; auxiliary universe even for cyclic/aliased lists; this is an acceleration
+; horizon, not a list length limit. The original one-hop rules remain.
+(relation expr-list-jump (IntExprList IntExprList i64))
+(rule ((= ?list (IntExprCons ?head ?tail)))
+      ((expr-list-jump ?list ?tail 0))
+      :ruleset fixpoint-invariants :name "core: expr-list-jump seed one live edge")
+(rule ((expr-list-jump ?start ?middle ?level)
+       (expr-list-jump ?middle ?end ?level) (< ?level 8))
+      ((expr-list-jump ?start ?end (+ ?level 1)))
+      :ruleset fixpoint-invariants :name "core: expr-list-jump double a bounded path")
+(rule ((map-range-walk ?entries ?dims)
+       (expr-list-jump ?entries ?entry_tail ?level)
+       (expr-list-jump ?dims ?dim_tail ?level))
+      ((map-range-walk ?entry_tail ?dim_tail))
+      :ruleset fixpoint-invariants :name "core: map-entry range lock follows paired doubled paths")
+; END expr-list-jump doubling
+
 (rule
   (
     (= ?out_logical (LogicalIndexMapApply ?in_logical ?map ?shape))

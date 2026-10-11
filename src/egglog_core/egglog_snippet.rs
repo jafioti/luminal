@@ -144,6 +144,16 @@ pub fn new_egraph() -> egglog::EGraph {
         },
         None,
     );
+    // int-subst-of's root is statically IntExpr. Keep the generic API for
+    // callers with other roots, but avoid unrelated constructor probes here.
+    egraph.add_full_primitive(
+        crate::subst_primitive::TypedSubst {
+            name: "unstable-subst-int-expr",
+            root_sort: "IntExpr",
+            skip: ["int-subst-of".to_string()].into_iter().collect(),
+        },
+        None,
+    );
     egraph
 }
 
@@ -273,5 +283,201 @@ mod tests {
             }
         }
         assert!(prop_rules > 0, "no prop rules found");
+    }
+
+    // Compare the accelerated rules against exactly the retained one-hop
+    // program. All syntax, predicates, unions and subsumption are in egglog.
+    fn one_hop_program() -> String {
+        let mut text = assembled_program_for(&[]);
+        for name in [
+            "buffer-list-jump",
+            "layout-list-jump",
+            "logical-list-jump",
+            "expr-list-jump",
+        ] {
+            let start = text.find(&format!("; BEGIN {name} doubling")).unwrap();
+            let marker = format!("; END {name} doubling");
+            let end = text.find(&marker).unwrap() + marker.len();
+            text.replace_range(start..end, "");
+        }
+        text
+    }
+
+    fn run_walk_fixture(accelerated: bool, seed: &str, schedule: &str, checks: &str) -> usize {
+        let mut graph = new_egraph();
+        let program = if accelerated {
+            assembled_program_for(&[])
+        } else {
+            one_hop_program()
+        };
+        graph.parse_and_run_program(None, &program).unwrap();
+        graph.parse_and_run_program(None, seed).unwrap();
+        graph.parse_and_run_program(None, schedule).unwrap();
+        let rounds = graph.get_overall_run_report().iterations.len();
+        graph.parse_and_run_program(None, checks).unwrap();
+        if schedule.contains("run cleanup") {
+            let mut rows = 0;
+            graph
+                .constructor_enodes("LayoutTensorOpLit", |node| {
+                    assert!(node.subsumed, "input producer spelling must be retired");
+                    rows += 1;
+                })
+                .unwrap();
+            assert_eq!(rows, 1);
+        }
+        rounds
+    }
+
+    #[test]
+    fn doubled_cleanup_preserves_long_list_facts_and_retires_input_producers() {
+        let n = 512;
+        let mut seed = String::from(
+            r#"
+            (let sh (ShapeLit (IntExprNil)))
+            (let layout (RightMajorContiguousElementLayoutLit sh (BitWidthLit 32)))
+            (let leaf (LayoutTensorLit (LogicalTensorInputLit (LogicalIdLit "bound") sh (F32)) layout))
+            (let other (LayoutTensorLit (LogicalTensorInputLit (LogicalIdLit "unbound") sh (F32)) layout))
+            (let bt (BufferTensorLit leaf (BufferLit 0)))
+            (let b0 (BufferTensorNil))
+            (let l0 (LayoutTensorNil))
+            (let l1 (LayoutTensorCons leaf l0))
+        "#,
+        );
+        for i in 1..=n {
+            seed.push_str(&format!("(let b{i} (BufferTensorCons bt b{}))\n", i - 1));
+            if i > 1 {
+                seed.push_str(&format!("(let l{i} (LayoutTensorCons other l{}))\n", i - 1));
+            }
+        }
+        seed.push_str(&format!(
+            "(let binding (BufferInputLit b{n})) (let op (LayoutTensorOpLit l0 l{n}))"
+        ));
+        let mut checks =
+            String::from("(check (input-producer op)) (check (input-leaf-layout-tensor leaf))");
+        checks.push_str("(fail (check (input-leaf-layout-tensor other)))");
+        for i in 0..=n {
+            checks.push_str(&format!("(check (input-buffer-tensor-list b{i}))\n"));
+        }
+        for i in 1..=n {
+            checks.push_str(&format!("(check (list-holds-input-layout-tensor l{i}))\n"));
+        }
+
+        let slow = run_walk_fixture(
+            false,
+            &seed,
+            "(run-schedule (saturate (run cleanup)))",
+            &checks,
+        );
+        let fast = run_walk_fixture(
+            true,
+            &seed,
+            "(run-schedule (saturate (run cleanup)))",
+            &checks,
+        );
+        eprintln!("list propagation: one-hop={slow}, doubled={fast} rounds at length={n}");
+        assert!(slow > n as usize);
+        assert!(
+            fast < 40,
+            "doubling should not take one round per cons: {fast}"
+        );
+    }
+
+    #[test]
+    fn doubled_terminal_walks_preserve_paired_suffixes_and_shape_locks() {
+        let n = 257;
+        let mut seed = String::from(
+            r#"
+            (let sh (ShapeLit (IntExprNil)))
+            (let out (LogicalTensorInputLit (LogicalIdLit "out") sh (F32)))
+            (let coord (LogicalTensorInputLit (LogicalIdLit "coord") sh (F32)))
+            (set (shape-of out) sh) (set (shape-of coord) sh)
+            (let c0 (LogicalTensorNil)) (let e0 (IntExprNil)) (let d0 (IntExprNil))
+        "#,
+        );
+        let mut checks = String::new();
+        for i in 1..=n {
+            seed.push_str(&format!("(let c{i} (LogicalTensorCons coord c{})) (let e{i} (IntExprCons (IntLit 0) e{})) (let d{i} (IntExprCons (IntLit 1) d{}))\n", i-1,i-1,i-1));
+        }
+        seed.push_str(&format!(
+            "(coordinate-shape-lock out c{n}) (map-range-walk e{n} d{n})"
+        ));
+        for i in 0..=n {
+            checks.push_str(&format!(
+                "(check (coordinate-shape-lock out c{i})) (check (map-range-walk e{i} d{i}))\n"
+            ));
+        }
+        let schedule = "(run-schedule (saturate (run fixpoint-invariants)))";
+        let slow = run_walk_fixture(false, &seed, schedule, &checks);
+        let fast = run_walk_fixture(true, &seed, schedule, &checks);
+        eprintln!("list propagation: one-hop={slow}, doubled={fast} rounds at length={n}");
+        assert!(slow > n as usize);
+        assert!(fast < 40, "terminal paths must advance in batches: {fast}");
+        // Mismatched lengths stop at the same paired suffix. A negative entry
+        // beyond the short dimension list must not acquire a phantom extent.
+        let uneven = "(let bad (IntExprCons (IntLit -1) e0)) (let entries (IntExprCons (IntLit 0) bad)) (map-range-walk entries d1)";
+        for accelerated in [false, true] {
+            run_walk_fixture(
+                accelerated,
+                &format!("{seed} {uneven}"),
+                schedule,
+                "(check (map-range-walk bad d0))",
+            );
+        }
+    }
+
+    #[test]
+    fn doubled_walks_terminate_on_cyclic_and_aliased_list_spellings() {
+        let seed = r#"
+            (let sh (ShapeLit (IntExprNil)))
+            (let lt (LayoutTensorLit (LogicalTensorInputLit (LogicalIdLit "x") sh (F32)) (RightMajorContiguousElementLayoutLit sh (BitWidthLit 32))))
+            (let bt (BufferTensorLit lt (BufferLit 0)))
+            (let b (BufferTensorCons bt (BufferTensorNil)))
+            (let b2 (BufferTensorCons bt b)) (union b b2)
+            (let l (LayoutTensorCons lt (LayoutTensorNil)))
+            (let l2 (LayoutTensorCons lt l)) (union l l2)
+            (let binding (BufferInputLit b))
+            (let op (LayoutTensorOpLit (LayoutTensorNil) l))
+        "#;
+        for accelerated in [false, true] {
+            let rounds = run_walk_fixture(
+                accelerated,
+                seed,
+                "(run-schedule (saturate (run cleanup)))",
+                "(check (input-producer op)) (check (input-buffer-tensor-list b2))",
+            );
+            assert!(
+                rounds < 40,
+                "bounded auxiliary links must terminate on cycles"
+            );
+        }
+    }
+
+    #[test]
+    fn doubled_range_walk_still_rejects_a_violation_at_the_last_entry() {
+        for accelerated in [false, true] {
+            let mut graph = new_egraph();
+            graph
+                .parse_and_run_program(
+                    None,
+                    &if accelerated {
+                        assembled_program_for(&[])
+                    } else {
+                        one_hop_program()
+                    },
+                )
+                .unwrap();
+            let mut seed = String::from(
+                "(let e0 (IntExprCons (IntLit -1) (IntExprNil))) (let d0 (IntExprCons (IntLit 1) (IntExprNil)))",
+            );
+            for i in 1..=65 {
+                seed.push_str(&format!("(let e{i} (IntExprCons (IntLit 0) e{})) (let d{i} (IntExprCons (IntLit 1) d{}))",i-1,i-1));
+            }
+            seed.push_str("(map-range-walk e65 d65)");
+            graph.parse_and_run_program(None, &seed).unwrap();
+            let err = graph
+                .parse_and_run_program(None, "(run-schedule (saturate (run fixpoint-invariants)))")
+                .unwrap_err();
+            assert!(err.to_string().contains("negative literal entry"), "{err}");
+        }
     }
 }
