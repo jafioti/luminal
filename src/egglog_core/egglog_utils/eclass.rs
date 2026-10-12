@@ -37,25 +37,128 @@
 
 use anyhow::{Result, anyhow, bail};
 use egraph_serialize::{ClassId, EGraph, Node, NodeId};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::any::Any;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 // =============================================================================
 // The view, the class, the node
 // =============================================================================
 
+/// Lazily indexed reads of one immutable serialized e-graph. Membership and
+/// ordering are unchanged: unsubsumed nodes first, then NodeId. No decoded
+/// constructor result is cached here (decoding can depend on caller context).
+/// The caller owns the index for exactly the lifetime of this graph snapshot.
+pub struct EClassReadIndex<'g> {
+    egraph: &'g EGraph,
+    classes: Mutex<FxHashMap<ClassId, Arc<IndexedClass<'g>>>>,
+}
+
+type NodeRef<'g> = (&'g NodeId, &'g Node);
+
+struct IndexedClass<'g> {
+    nodes: Arc<[NodeRef<'g>]>,
+    by_op: FxHashMap<&'g str, Arc<[NodeRef<'g>]>>,
+    ops: Vec<String>,
+    typ: Option<&'g str>,
+    integer: Option<i64>,
+    string: Option<String>,
+}
+
+impl<'g> EClassReadIndex<'g> {
+    pub fn new(egraph: &'g EGraph) -> Self {
+        Self {
+            egraph,
+            classes: Mutex::new(FxHashMap::default()),
+        }
+    }
+
+    fn class(&self, id: &ClassId) -> Arc<IndexedClass<'g>> {
+        if let Some(class) = self.classes.lock().unwrap().get(id).cloned() {
+            return class;
+        }
+        // Build outside the lock so large classes do not serialize unrelated
+        // reads. Concurrent first readers can compute identical metadata, then
+        // share the one immutable entry published below.
+        let mut nodes: Vec<NodeRef<'g>> = self
+            .egraph
+            .classes()
+            .get(id)
+            .into_iter()
+            .flat_map(|class| &class.nodes)
+            .filter_map(|id| self.egraph.nodes.get(id).map(|node| (id, node)))
+            .collect();
+        nodes.sort_by(|(a, an), (b, bn)| an.subsumed.cmp(&bn.subsumed).then(a.cmp(b)));
+        let mut by_op: FxHashMap<&str, Vec<NodeRef<'g>>> = FxHashMap::default();
+        let mut ops = Vec::new();
+        let mut seen = FxHashSet::default();
+        for &(id, node) in &nodes {
+            by_op.entry(node.op.as_str()).or_default().push((id, node));
+            if seen.insert(node.op.as_str()) {
+                ops.push(node.op.clone());
+            }
+        }
+        let class = Arc::new(IndexedClass {
+            typ: self
+                .egraph
+                .class_data
+                .get(id)
+                .and_then(|data| data.typ.as_deref()),
+            integer: nodes
+                .iter()
+                .find_map(|(_, node)| node.op.parse::<i64>().ok()),
+            string: nodes
+                .iter()
+                .find_map(|(_, node)| crate::shape::Symbol::decode_serialized(&node.op)),
+            nodes: nodes.into(),
+            by_op: by_op
+                .into_iter()
+                .map(|(op, nodes)| (op, nodes.into()))
+                .collect(),
+            ops,
+        });
+        self.classes
+            .lock()
+            .unwrap()
+            .entry(id.clone())
+            .or_insert(class)
+            .clone()
+    }
+}
+
 /// Read-only view of one serialized e-graph plus the decoders that know
-/// its constructors. Two references; `Copy`.
+/// its constructors, optionally with a caller-owned read index; `Copy`.
 #[derive(Clone, Copy)]
 pub struct EGraphView<'g> {
     egraph: &'g EGraph,
     decoders: &'g ConstructorRegistry,
+    index: Option<&'g EClassReadIndex<'g>>,
 }
 
 impl<'g> EGraphView<'g> {
     pub fn new(egraph: &'g EGraph, decoders: &'g ConstructorRegistry) -> Self {
-        Self { egraph, decoders }
+        Self {
+            egraph,
+            decoders,
+            index: None,
+        }
+    }
+
+    pub fn indexed(
+        egraph: &'g EGraph,
+        decoders: &'g ConstructorRegistry,
+        index: &'g EClassReadIndex<'g>,
+    ) -> Self {
+        assert!(
+            std::ptr::eq(egraph, index.egraph),
+            "read index belongs to a different e-graph snapshot"
+        );
+        Self {
+            egraph,
+            decoders,
+            index: Some(index),
+        }
     }
 
     /// TOTAL: an id with no nodes yields a class whose [`EClass::nodes`]
@@ -114,6 +217,9 @@ impl<'g> EClass<'g> {
     /// `class_data[id].typ` — the egglog sort name the serializer
     /// stamped on this class.
     pub fn sort_name(&self) -> Option<&'g str> {
+        if let Some(index) = self.view.index {
+            return index.class(&self.id).typ;
+        }
         self.view
             .egraph
             .class_data
@@ -124,6 +230,18 @@ impl<'g> EClass<'g> {
     /// Every e-node in the class: UNSUBSUMED FIRST, then by `NodeId`.
     /// THE ONLY PLACE ORDER IS DECIDED.
     pub fn nodes(&self) -> Vec<ENode<'g>> {
+        if let Some(index) = self.view.index {
+            return index
+                .class(&self.id)
+                .nodes
+                .iter()
+                .map(|&(id, node)| ENode {
+                    view: self.view,
+                    id,
+                    node,
+                })
+                .collect();
+        }
         let Some(class) = self.view.egraph.classes().get(&self.id) else {
             return Vec::new();
         };
@@ -150,13 +268,36 @@ impl<'g> EClass<'g> {
     /// The class's nodes whose op is exactly `op`, in [`EClass::nodes`]
     /// order.
     pub fn nodes_named(&self, op: &str) -> impl Iterator<Item = ENode<'g>> + '_ {
-        let op = op.to_string();
-        self.nodes().into_iter().filter(move |n| n.op() == op)
+        let nodes: Arc<[NodeRef<'g>]> = if let Some(index) = self.view.index {
+            index
+                .class(&self.id)
+                .by_op
+                .get(op)
+                .cloned()
+                .unwrap_or_else(|| Arc::from([]))
+        } else {
+            self.nodes()
+                .into_iter()
+                .filter(|n| n.op() == op)
+                .map(|n| (n.id, n.node))
+                .collect::<Vec<_>>()
+                .into()
+        };
+        let view = self.view;
+        let mut position = 0;
+        std::iter::from_fn(move || {
+            let &(id, node) = nodes.get(position)?;
+            position += 1;
+            Some(ENode { view, id, node })
+        })
     }
 
     /// Every distinct `op` in the class, in [`EClass::nodes`] order —
     /// diagnostics.
     pub fn ops(&self) -> Vec<String> {
+        if let Some(index) = self.view.index {
+            return index.class(&self.id).ops.clone();
+        }
         let mut seen: Vec<String> = Vec::new();
         for node in self.nodes() {
             if !seen.iter().any(|op| op == node.op()) {
@@ -170,6 +311,9 @@ impl<'g> EClass<'g> {
     /// renders base values with `{:?}`, so an i64 literal is a digit
     /// string).
     pub fn i64_literal(&self) -> Option<i64> {
+        if let Some(index) = self.view.index {
+            return index.class(&self.id).integer;
+        }
         self.nodes()
             .into_iter()
             .find_map(|n| n.op().parse::<i64>().ok())
@@ -177,6 +321,9 @@ impl<'g> EClass<'g> {
 
     /// Any node in the class whose op is a quoted string literal, unescaped.
     pub fn string_literal(&self) -> Option<String> {
+        if let Some(index) = self.view.index {
+            return index.class(&self.id).string.clone();
+        }
         self.nodes()
             .into_iter()
             .find_map(|n| crate::shape::Symbol::decode_serialized(n.op()))
@@ -958,5 +1105,105 @@ mod tests {
                 .as_deref(),
             Some("hello")
         );
+    }
+    #[test]
+    fn indexed_reads_match_unindexed_order_decoding_and_diagnostics() {
+        let mut egraph = two_spelling_graph();
+        egraph.add_node("n-bad", node("PointLit", &["n-x", "n-s"], "c-pair", false));
+        egraph.add_node("n-old", node("NamedLit", &["n-s"], "c-pair", true));
+        egraph.add_node(
+            "n-orphan",
+            node("PointLit", &["missing", "n-x"], "c-pair", false),
+        );
+        // A primitive's class can also contain thousands of helper-function
+        // rows returning that value. Literal reads must retain their exact
+        // first-in-order result, rather than assuming a NodeId naming scheme.
+        for i in 0..2048 {
+            egraph.add_node(
+                format!("helper-{i}"),
+                node("helper", &[], "c-x", i % 3 == 0),
+            );
+        }
+        egraph.add_node("n-early-literal", node("-17", &[], "c-x", false));
+        let decoders = registry();
+        let index = EClassReadIndex::new(&egraph);
+        let indexed = EGraphView::indexed(&egraph, &decoders, &index);
+        let original = EGraphView::new(&egraph, &decoders);
+        for _ in 0..3 {
+            for id in ["c-pair", "c-x", "c-y", "c-s", "missing"] {
+                let id = ClassId::from(id);
+                let left = original.class(&id);
+                let right = indexed.class(&id);
+                let describe = |class: &EClass<'_>| {
+                    class
+                        .nodes()
+                        .into_iter()
+                        .map(|n| (n.id().clone(), n.op().to_owned(), n.is_subsumed()))
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(describe(&left), describe(&right));
+                assert_eq!(left.sort_name(), right.sort_name());
+                assert_eq!(left.ops(), right.ops());
+                assert_eq!(left.i64_literal(), right.i64_literal());
+                assert_eq!(left.string_literal(), right.string_literal());
+                for op in ["PointLit", "NamedLit", "helper", "-17", "absent"] {
+                    assert_eq!(
+                        left.nodes_named(op)
+                            .map(|n| n.id().clone())
+                            .collect::<Vec<_>>(),
+                        right
+                            .nodes_named(op)
+                            .map(|n| n.id().clone())
+                            .collect::<Vec<_>>()
+                    );
+                }
+                assert_eq!(left.all::<Point>(), right.all::<Point>());
+                assert_eq!(left.all::<Named>(), right.all::<Named>());
+                assert_eq!(left.first::<Point>(), right.first::<Point>());
+                assert_eq!(left.present::<Pair>(), right.present::<Pair>());
+                let a = left.spellings::<Pair>();
+                let b = right.spellings::<Pair>();
+                assert_eq!(a, b);
+                assert_eq!(a.present(), b.present());
+                assert_eq!(a.failed(), b.failed());
+                assert_eq!(
+                    format!("{:?}", left.require::<Point>("test")),
+                    format!("{:?}", right.require::<Point>("test"))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn indexed_views_retain_send_sync_and_support_concurrent_reads() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<EGraphView<'_>>();
+        let egraph = two_spelling_graph();
+        let decoders = registry();
+        let index = EClassReadIndex::new(&egraph);
+        let view = EGraphView::indexed(&egraph, &decoders, &index);
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(move || {
+                    for _ in 0..32 {
+                        assert_eq!(view.class(&ClassId::from("c-x")).i64_literal(), Some(2));
+                        assert_eq!(
+                            view.class(&ClassId::from("c-pair")).all::<Point>(),
+                            [Point { x: 2, y: 3 }]
+                        );
+                    }
+                });
+            }
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "read index belongs to a different e-graph snapshot")]
+    fn index_rejects_a_different_graph_snapshot() {
+        let first = two_spelling_graph();
+        let second = two_spelling_graph();
+        let decoders = registry();
+        let index = EClassReadIndex::new(&first);
+        let _ = EGraphView::indexed(&second, &decoders, &index);
     }
 }
