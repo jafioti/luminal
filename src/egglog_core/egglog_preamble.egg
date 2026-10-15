@@ -3025,44 +3025,72 @@
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; ASSOCIATIVITY, CERTIFICATE-GUARDED (Stage I3). Regrouping THROUGH a
-; zero-equivalent inner node is the divergence move of the recorded
-; cancellation-pair hang (a folded pair like 3 + (-3) joins the zero
-; class; unguarded associativity then re-associates every sum through
-; that class's briefly-live views forever — the base system diverges
-; with NO distributivity involved, forensics record). The guard requires
-; the matched INNER node's class to carry the nonzero certificate:
-; monotone, fail-closed, and semantically free — regrouping through a
-; genuinely-zero inner is exactly the move with no derivational value
-; (the collapse rules already decide everything in the zero cone).
-; Uncertified-unknown inners stall conservatively.
-;
-; Empirical note (review record): today's fixtures pass byte-identically
-; with associativity DELETED — its only real consumer is future
-; distributivity normalization — so the guard cannot regress the suite;
-; the positive merge pins in the fence fixture keep it honest instead.
+; INTEGER NORMALIZATION. Addition uses reducing offset rules below;
+; unrestricted reassociation can pump even through nonzero, nonconstant
+; classes, as the shifted-coordinate cancellation regression demonstrates.
+; Multiplication retains its nonzero/nonconstant fence: zero-equivalent
+; or point-bound inner classes contain identity/factorization spellings
+; that must not be used to manufacture fresh regroupings.
 
-; Associativity : IntAdd
-; [G2 FENCE, ruled 2026-08-27]: refuse CONSTANT inner classes (point
-; bounds, lower == upper). A point-bound class is a known constant owned
-; by the fold/pin machinery; regrouping constants is the pin-collapse
-; orbit's fuel. Associativity is equivalence discovery for UNKNOWNS.
-; Regression suite: src/test_support.rs, mod ring_ignition_battery (the
-; battery fails loudly if any of the three G2 premises is weakened).
-; Analysis: the Ring Ignition dossier (raw-spelling repro, 2026-08-27).
+; CANONICAL LITERAL OFFSETS. A shifted index has the form base + c.
+; Combine offsets atomically instead of enumerating associativity on every
+; spelling of an e-class. In particular, (q + 1) + (-1) must join q AND
+; retire both orientations of the original outer row in the same action.
+; Otherwise that live row becomes q = (q + 1) - 1 and reassociation pumps
+; fresh shifts forever. This also arises from legitimate slice substitution.
+;
+; The nonconstant inner gate excludes preserved factorizations of literals.
+; Add offsets in BigInt and admit only representable i64 results: overflow
+; must not silently turn an integer identity into a wrapped one.
 (rule
-  (
-    (= ?expr (IntAdd ?inner ?outer))
-    (= ?inner (IntAdd ?lhs ?rhs))
-    (provably-cannot-union-with-zero ?inner)
-    (= ?inner_lower (lower-bound-of ?inner))
-    (= ?inner_upper (upper-bound-of ?inner))
-    (< ?inner_lower ?inner_upper)
-  )
-  ((union ?expr (IntAdd ?lhs (IntAdd ?rhs ?outer))))
-  :name "int-add-associate"
-  :ruleset main_ruleset
-)
+  ((= ?expr (IntAdd ?inner (IntLit ?outer_offset)))
+   (= ?inner (IntAdd ?base (IntLit ?inner_offset)))
+   (!= ?inner_offset 0)
+   (= ?lo (lower-bound-of ?inner))
+   (= ?hi (upper-bound-of ?inner))
+   (< ?lo ?hi)
+   (= ?offset (bigint-to-i64 (+ (bigint ?inner_offset) (bigint ?outer_offset))))
+   (= ?offset 0))
+  ((union ?expr ?base)
+   (subsume (IntAdd ?inner (IntLit ?outer_offset)))
+   (subsume (IntAdd (IntLit ?outer_offset) ?inner)))
+  :name "core: normalize literal offsets, cancellation"
+  :ruleset main_ruleset)
+(rule
+  ((= ?expr (IntAdd ?inner (IntLit ?outer_offset)))
+   (= ?inner (IntAdd ?base (IntLit ?inner_offset)))
+   (!= ?inner_offset 0)
+   (= ?lo (lower-bound-of ?inner))
+   (= ?hi (upper-bound-of ?inner))
+   (< ?lo ?hi)
+   (= ?offset (bigint-to-i64 (+ (bigint ?inner_offset) (bigint ?outer_offset))))
+   (!= ?offset 0))
+  ((union ?expr (IntAdd ?base (IntLit ?offset)))
+   (subsume (IntAdd ?inner (IntLit ?outer_offset)))
+   (subsume (IntAdd (IntLit ?outer_offset) ?inner)))
+  :name "core: normalize literal offsets, combined offset"
+  :ruleset main_ruleset)
+
+; Hoist a literal offset out of a sum with a symbolic operand. The result
+; exposes adjacent offsets to the two atomic rules above. Every firing
+; removes the old outer spelling; there is no reverse expansion rule.
+; Symbolic reassociations are deliberately not enumerated. Coefficients
+; continue to be combined by the atomic like-term rules below.
+(rule
+  ((= ?expr (IntAdd ?inner ?other))
+   (= ?inner (IntAdd ?base (IntLit ?offset)))
+   (!= ?offset 0)
+   (= ?inner_lo (lower-bound-of ?inner))
+   (= ?inner_hi (upper-bound-of ?inner))
+   (< ?inner_lo ?inner_hi)
+   (= ?other_lo (lower-bound-of ?other))
+   (= ?other_hi (upper-bound-of ?other))
+   (< ?other_lo ?other_hi))
+  ((union ?expr (IntAdd (IntAdd ?base ?other) (IntLit ?offset)))
+   (subsume (IntAdd ?inner ?other))
+   (subsume (IntAdd ?other ?inner)))
+  :name "core: normalize literal offsets, hoist out of a symbolic sum"
+  :ruleset main_ruleset)
 
 ; Associativity : IntMul
 ; [G2 FENCE, ruled 2026-08-27]: same constant-class refusal.
