@@ -39,6 +39,75 @@ pub const C2: usize = 64; // 256*0.25
 pub const C3: usize = 128; // 512*0.25
 pub const C4: usize = 256; // 1024*0.25
 
+/// Size parameters of the model: input resolution and the five backbone
+/// channel widths (`model.0`, `model.1`, `model.2`/`model.3`,
+/// `model.4`..`model.6`, `model.7`..`model.10`). Everything else (kernel
+/// sizes, strides, expansion ratios, `NC`, `REG_MAX`) is fixed to yolo11n so
+/// checkpoint layer names and the DFL constant stay valid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct YoloConfig {
+    pub img_size: usize,
+    pub widths: [usize; 5],
+}
+
+impl YoloConfig {
+    /// yolo11n: 640x640 input, width_mult = 0.25.
+    pub const fn yolo11n() -> Self {
+        Self {
+            img_size: IMG_SIZE,
+            widths: [C0, C1, C2, C3, C4],
+        }
+    }
+
+    /// Validated constructor. Panics with the offending quantity if the
+    /// configuration would build a degenerate (zero-channel or
+    /// non-divisible) layer.
+    pub fn new(img_size: usize, widths: [usize; 5]) -> Self {
+        let max_stride = STRIDES[STRIDES.len() - 1];
+        assert!(
+            img_size >= max_stride && img_size.is_multiple_of(max_stride),
+            "img_size {img_size} must be a positive multiple of the largest stride {max_stride}"
+        );
+        let [_, _, w2, w3, w4] = widths;
+        assert!(
+            widths.iter().all(|&w| w > 0),
+            "widths must be nonzero: {widths:?}"
+        );
+        // Hidden width of each C3k2 is int(c2 * e); its Bottleneck/C3k
+        // children halve it again, so it must be at least 2.
+        for (name, c2, e) in [
+            ("model.2", w2, 0.25),
+            ("model.4", w3, 0.25),
+            ("model.6", w3, 0.5),
+            ("model.8", w4, 0.5),
+            ("model.13", w3, 0.5),
+            ("model.16", w2, 0.5),
+            ("model.19", w3, 0.5),
+            ("model.22", w4, 0.5),
+        ] {
+            let hidden = (c2 as f32 * e) as usize;
+            assert!(
+                hidden >= 2,
+                "{name}: hidden width int({c2} * {e}) = {hidden} must be >= 2"
+            );
+        }
+        // C2psa: c = int(w4 * 0.5); attention needs heads | c and key_dim >= 1.
+        let c = w4 / 2;
+        let heads = (c / 64).max(1);
+        assert!(
+            c.is_multiple_of(heads) && (c / heads) / 2 >= 1,
+            "model.10: C2psa width {c} with {heads} heads gives an invalid attention head size"
+        );
+        assert!(w4 >= 2, "model.9: Sppf hidden width {w4}/2 must be >= 1");
+        Self { img_size, widths }
+    }
+
+    /// Spatial size of the three detection feature maps.
+    pub fn feat_sizes(&self) -> Vec<usize> {
+        STRIDES.iter().map(|s| self.img_size / s).collect()
+    }
+}
+
 /// Conv2d (with bias) + optional SiLU activation. Operates on (1, C, H, W).
 /// The named weight input keeps PyTorch's checkpoint-native
 /// `(c_out, c_in, k, k)` shape and is viewed as `(c_out, c_in*k*k)` here.
@@ -914,58 +983,67 @@ pub struct YoloV11 {
 }
 
 impl YoloV11 {
+    /// Full-size yolo11n at 640x640 (the checkpoint-compatible model).
     pub fn init(cx: &mut Graph) -> Self {
+        Self::with_config(cx, &YoloConfig::yolo11n())
+    }
+
+    /// Build the model for an arbitrary [`YoloConfig`]. Layer names, kernel
+    /// sizes, strides and expansion ratios are those of yolo11n; only the
+    /// image size and channel widths vary.
+    pub fn with_config(cx: &mut Graph, config: &YoloConfig) -> Self {
+        let [c0, c1, c2, c3, c4] = config.widths;
         // Backbone
-        let conv0 = Conv::new("model.0.conv", 3, C0, 3, 2, 1, cx);
-        let conv1 = Conv::new("model.1.conv", C0, C1, 3, 2, 1, cx);
-        let c3k2_2 = C3k2::new("model.2", C1, C2, 1, C3k2Config::new(false, 0.25, true), cx);
-        let conv3 = Conv::new("model.3.conv", C2, C2, 3, 2, 1, cx);
-        let c3k2_4 = C3k2::new("model.4", C2, C3, 1, C3k2Config::new(false, 0.25, true), cx);
-        let conv5 = Conv::new("model.5.conv", C3, C3, 3, 2, 1, cx);
-        let c3k2_6 = C3k2::new("model.6", C3, C3, 1, C3k2Config::new(true, 0.5, true), cx);
-        let conv7 = Conv::new("model.7.conv", C3, C4, 3, 2, 1, cx);
-        let c3k2_8 = C3k2::new("model.8", C4, C4, 1, C3k2Config::new(true, 0.5, true), cx);
-        let sppf_9 = Sppf::new("model.9", C4, C4, 5, cx);
-        let c2psa_10 = C2psa::new("model.10", C4, C4, 1, 0.5, cx);
+        let conv0 = Conv::new("model.0.conv", 3, c0, 3, 2, 1, cx);
+        let conv1 = Conv::new("model.1.conv", c0, c1, 3, 2, 1, cx);
+        let c3k2_2 = C3k2::new("model.2", c1, c2, 1, C3k2Config::new(false, 0.25, true), cx);
+        let conv3 = Conv::new("model.3.conv", c2, c2, 3, 2, 1, cx);
+        let c3k2_4 = C3k2::new("model.4", c2, c3, 1, C3k2Config::new(false, 0.25, true), cx);
+        let conv5 = Conv::new("model.5.conv", c3, c3, 3, 2, 1, cx);
+        let c3k2_6 = C3k2::new("model.6", c3, c3, 1, C3k2Config::new(true, 0.5, true), cx);
+        let conv7 = Conv::new("model.7.conv", c3, c4, 3, 2, 1, cx);
+        let c3k2_8 = C3k2::new("model.8", c4, c4, 1, C3k2Config::new(true, 0.5, true), cx);
+        let sppf_9 = Sppf::new("model.9", c4, c4, 5, cx);
+        let c2psa_10 = C2psa::new("model.10", c4, c4, 1, 0.5, cx);
 
         // Head
         let c3k2_13 = C3k2::new(
             "model.13",
-            C4 + C3,
-            C3,
+            c4 + c3,
+            c3,
             1,
             C3k2Config::new(false, 0.5, true),
             cx,
         );
         let c3k2_16 = C3k2::new(
             "model.16",
-            C3 + C3,
-            C2,
+            c3 + c3,
+            c2,
             1,
             C3k2Config::new(false, 0.5, true),
             cx,
         );
-        let conv17 = Conv::new("model.17.conv", C2, C2, 3, 2, 1, cx);
+        let conv17 = Conv::new("model.17.conv", c2, c2, 3, 2, 1, cx);
         let c3k2_19 = C3k2::new(
             "model.19",
-            C2 + C3,
-            C3,
+            c2 + c3,
+            c3,
             1,
             C3k2Config::new(false, 0.5, true),
             cx,
         );
-        let conv20 = Conv::new("model.20.conv", C3, C3, 3, 2, 1, cx);
+        let conv20 = Conv::new("model.20.conv", c3, c3, 3, 2, 1, cx);
         let c3k2_22 = C3k2::new(
             "model.22",
-            C3 + C4,
-            C4,
+            c3 + c4,
+            c4,
             1,
             C3k2Config::new(true, 0.5, true),
             cx,
         );
 
-        // Detect head reads from layers (16, 19, 22) at (80, 40, 20) feature sizes
-        let detect = Detect::new("model.23", &[C2, C3, C4], &[80, 40, 20], cx);
+        // Detect head reads from layers (16, 19, 22) at img_size / STRIDES.
+        let detect = Detect::new("model.23", &[c2, c3, c4], &config.feat_sizes(), cx);
         Self {
             conv0,
             conv1,

@@ -5,4 +5,4 @@
 
 pub mod model;
 
-pub use model::YoloV11;
+pub use model::{YoloConfig, YoloV11};
