@@ -30,6 +30,8 @@ use luminal_cuda_lite::{CudaRuntime, kernels};
 
 /// Measure candidates with a fixed seed. The fixture registry excludes
 /// materialized index maps and copies so the tests exercise composed view reads.
+/// The cuBLASLt markers go with the copy row: their rules match it, and these
+/// gather/scatter graphs contain no matmul for them to elect.
 fn view_search_options(seed: u64) -> CompileOptions {
     CompileOptions {
         generations: 4,
@@ -52,6 +54,7 @@ fn plan_for(
         cx,
         luminal_cuda_lite::cuda_registry_filtered(|row| {
             !matches!(row.label(), "IndexMapApplyMaterialize" | "CopyGeneric")
+                && !row.label().starts_with("CublasLt")
         }),
     )
     .expect("cuda load");
