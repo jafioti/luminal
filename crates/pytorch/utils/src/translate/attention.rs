@@ -7,7 +7,7 @@
 //!
 //! Torch-kernel parity notes: Q/K/V arrive at the op's compute dtype (F32
 //! for bf16/f16, the translator's opmath pattern) and the probabilities are
-//! rounded to the operands' dtype before P@V, as the fused kernels do;
+//! unnormalized exponentials are rounded before P@V and normalized afterward;
 //! `is_causal` is a top-left iota mask; bool masks are keep-masks and
 //! fully-masked query rows output zeros; grouped K/V heads are
 //! repeat-interleaved (GQA).
@@ -184,17 +184,27 @@ impl Translator<'_> {
             scores = add_offset(scores, offset);
         }
 
-        let mut attn = scores.softmax(vec![q_ndim - 1]);
+        // Flash attention rounds the unnormalized exponentials to the input
+        // dtype for P@V, accumulates that product in F32, then normalizes.
+        // Rounding normalized probabilities instead is algebraically similar
+        // but changes BF16/FP16 results throughout a stack of attention blocks.
+        let axis = q_ndim - 1;
+        let maximum = scores
+            .max(vec![axis])
+            .expand_to_shape_on_axes(scores.dims(), vec![axis]);
+        let mut weights = (scores - maximum).exp();
+        let denominator = weights.sum(vec![axis]);
         if let Some(indicator) = row_any_keep {
-            let (a, i) = util::ensure_same_dtype(attn, indicator);
+            let (a, i) = util::ensure_same_dtype(weights, indicator);
             let (a, i) = util::broadcast_binary(a, i);
-            attn = a * i;
+            weights = a * i;
         }
-        // torch parity, part two: the fused kernels round the probabilities
-        // to the operands' dtype before the P@V GEMM. No-op on fp32.
         let operand_dtype = self.opmath.map_or(value.dtype, |opmath| opmath.common);
-        let probabilities = super::convert(super::convert(attn, operand_dtype), value.dtype);
-        let out = probabilities.matmul(value);
+        let weights = super::convert(super::convert(weights, operand_dtype), value.dtype);
+        let numerator = weights.matmul(value);
+        let denominator = denominator.expand_to_shape_on_axes(numerator.dims(), vec![axis]);
+        let (numerator, denominator) = util::ensure_same_dtype(numerator, denominator);
+        let out = numerator / denominator;
 
         // Tuple outputs serialize as one `as_tensors` list or one entry per
         // element — flatten to slot order; slot 0 is the attention output.
