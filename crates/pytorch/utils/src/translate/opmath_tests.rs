@@ -516,53 +516,76 @@ fn opmath_class_membership() {
 }
 
 #[test]
-fn attention_rounds_unnormalized_weights_before_the_value_product() {
-    let t = translate_one(
-        node(
-            "torch.ops.aten.scaled_dot_product_attention.default",
-            vec![
-                tensor_input("query", "q"),
-                tensor_input("key", "k"),
-                tensor_input("value", "v"),
-                scalar_float("dropout_p", 0.0),
-                scalar_bool("is_causal", false),
-                scalar_float("scale", 1.0),
-            ],
-            &["out"],
-        ),
-        &[
-            ("q", BFLOAT16, &[1, 1, 1, 2]),
-            ("k", BFLOAT16, &[1, 1, 2, 2]),
-            ("v", BFLOAT16, &[1, 1, 2, 2]),
-            ("out", BFLOAT16, &[1, 1, 1, 2]),
-        ],
-        &["q", "k", "v"],
-        &["out"],
-    );
-    // BF16 execution is not yet implemented by ReferenceRuntime. Check the
-    // recorded rounding boundary; device suites exercise the numerical case.
-    let output = t.outputs[0].tensor;
-    assert!(is_cast_to(op_of(&t, output), DType::Bf16));
-    let normalized = through_views(&t, operands(&t, output)[0]);
-    assert!(is_op(op_of(&t, normalized), &LogicalOp::Mul));
-    let divisor = operands(&t, normalized)
-        .into_iter()
-        .map(|id| through_views(&t, id))
-        .find(|&id| is_op(op_of(&t, id), &LogicalOp::Recip))
-        .expect("normalization follows the value contraction");
-    let denominator = through_views(&t, operands(&t, divisor)[0]);
-    assert!(is_op(
-        op_of(&t, denominator),
-        &LogicalOp::ReduceSum { axis_from_end: 0 }
-    ));
-    let weights = through_views(&t, operands(&t, denominator)[0]);
-    assert!(is_op(op_of(&t, weights), &LogicalOp::Exp2));
-    assert_eq!(dtype_of(&t, weights), DType::F32);
-    assert!(
-        nodes(&t)
-            .into_iter()
-            .any(|id| is_cast_to(op_of(&t, id), DType::Bf16)
-                && through_views(&t, operands(&t, id)[0]) == weights),
-        "unnormalized exponentials are rounded before the contraction"
-    );
+fn attention_keeps_compute_precision_until_the_operator_output() {
+    for (code, dtype) in [
+        (BFLOAT16, DType::Bf16),
+        (HALF, DType::F16),
+        (FLOAT, DType::F32),
+    ] {
+        for variant in [
+            "scaled_dot_product_attention.default",
+            "_scaled_dot_product_flash_attention.default",
+            "_scaled_dot_product_flash_attention_for_cpu.default",
+            "_scaled_dot_product_efficient_attention.default",
+            "_scaled_dot_product_cudnn_attention.default",
+        ] {
+            let t = translate_one(
+                node(
+                    &format!("torch.ops.aten.{variant}"),
+                    vec![
+                        tensor_input("query", "q"),
+                        tensor_input("key", "k"),
+                        tensor_input("value", "v"),
+                        scalar_float("dropout_p", 0.0),
+                        scalar_bool("is_causal", false),
+                        scalar_float("scale", 1.0),
+                    ],
+                    &["out"],
+                ),
+                &[
+                    ("q", code, &[1, 1, 1, 2]),
+                    ("k", code, &[1, 1, 2, 2]),
+                    ("v", code, &[1, 1, 2, 2]),
+                    ("out", code, &[1, 1, 1, 2]),
+                ],
+                &["q", "k", "v"],
+                &["out"],
+            );
+            // ReferenceRuntime does not execute BF16. Assert the general
+            // precision invariant on the recorded graph; downstream device
+            // regressions compare the result with higher-precision arithmetic.
+            let output = t.outputs[0].tensor;
+            assert_eq!(t.outputs[0].dtype, dtype);
+            let normalized = if dtype == DType::F32 {
+                through_views(&t, output)
+            } else {
+                assert!(is_cast_to(op_of(&t, output), dtype));
+                through_views(&t, operands(&t, output)[0])
+            };
+            assert!(is_op(op_of(&t, normalized), &LogicalOp::Mul));
+            let divisor = operands(&t, normalized)
+                .into_iter()
+                .map(|id| through_views(&t, id))
+                .find(|&id| is_op(op_of(&t, id), &LogicalOp::Recip))
+                .expect("normalization follows the value contraction");
+            let denominator = through_views(&t, operands(&t, divisor)[0]);
+            assert!(is_op(
+                op_of(&t, denominator),
+                &LogicalOp::ReduceSum { axis_from_end: 0 }
+            ));
+            let weights = through_views(&t, operands(&t, denominator)[0]);
+            assert!(is_op(op_of(&t, weights), &LogicalOp::Exp2));
+            assert_eq!(dtype_of(&t, weights), DType::F32);
+            for id in nodes(&t) {
+                if id == output || matches!(op_of(&t, id), LogicalOp::Input { .. }) {
+                    continue;
+                }
+                assert_eq!(
+                    dtype_of(&t, id),
+                    DType::F32,
+                    "{variant}: an internal SDPA value was narrowed to {dtype:?}"
+                );
+            }
+        }
+    }
 }

@@ -5,9 +5,10 @@
 //! `softmax((Q@K^T)*scale + mask) @ V`. Args are resolved by name so one
 //! body serves every variant; only the first output slot is bound.
 //!
-//! Torch-kernel parity notes: Q/K/V arrive at the op's compute dtype (F32
-//! for bf16/f16, the translator's opmath pattern) and the probabilities are
-//! unnormalized exponentials are rounded before P@V and normalized afterward;
+//! Q/K/V arrive at the op's compute dtype (F32 for bf16/f16, the
+//! translator's opmath pattern). Keep exponential weights and both
+//! contractions at that dtype; round only the original operator output.
+//! Normalization follows the value contraction;
 //! `is_causal` is a top-left iota mask; bool masks are keep-masks and
 //! fully-masked query rows output zeros; grouped K/V heads are
 //! repeat-interleaved (GQA).
@@ -184,10 +185,11 @@ impl Translator<'_> {
             scores = add_offset(scores, offset);
         }
 
-        // Flash attention rounds the unnormalized exponentials to the input
-        // dtype for P@V, accumulates that product in F32, then normalizes.
-        // Rounding normalized probabilities instead is algebraically similar
-        // but changes BF16/FP16 results throughout a stack of attention blocks.
+        // Keep the stable softmax weights, denominator and value contraction
+        // in the compute dtype. Some flash kernels round the exponentials
+        // to the input dtype internally; that loses precision within this
+        // single ATen operator and compounds across attention blocks.
+        // bind_value restores the declared dtype at the operator boundary.
         let axis = q_ndim - 1;
         let maximum = scores
             .max(vec![axis])
@@ -199,8 +201,6 @@ impl Translator<'_> {
             let (a, i) = util::broadcast_binary(a, i);
             weights = a * i;
         }
-        let operand_dtype = self.opmath.map_or(value.dtype, |opmath| opmath.common);
-        let weights = super::convert(super::convert(weights, operand_dtype), value.dtype);
         let numerator = weights.matmul(value);
         let denominator = denominator.expand_to_shape_on_axes(numerator.dims(), vec![axis]);
         let (numerator, denominator) = util::ensure_same_dtype(numerator, denominator);
