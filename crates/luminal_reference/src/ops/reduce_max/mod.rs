@@ -151,6 +151,7 @@ pub(crate) fn kernel(
     match &ctx.operands[0] {
         TypedBuffer::F32(_) => ctx.reduce_axis(op.axis, f32::NEG_INFINITY, crate::kernels::maximum),
         TypedBuffer::I32(_) => ctx.reduce_axis_i32(op.axis, i32::MIN, |acc, x| Ok(acc.max(x))),
+        TypedBuffer::I64(_) => ctx.reduce_axis_i64(op.axis, i64::MIN, |acc, x| Ok(acc.max(x))),
         // Max never leaves the operand range, so there is nothing to
         // wrap and nothing to check at any width.
         TypedBuffer::I8(_) => ctx.reduce_axis_i8(op.axis, i8::MIN, |acc, x| Ok(acc.max(x))),

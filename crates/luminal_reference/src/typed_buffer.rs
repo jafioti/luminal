@@ -655,6 +655,42 @@ impl ReferenceKernelCtx {
         Ok(())
     }
 
+    /// The i64 twin of [`Self::reduce_axis`]; the fold returns Result so
+    /// checked accumulation (non-wrapping Int sums) refuses loudly.
+    pub fn reduce_axis_i64(
+        &mut self,
+        axis_from_end: i64,
+        init: i64,
+        fold: impl Fn(i64, i64) -> Result<i64>,
+    ) -> Result<()> {
+        let dims = &self.operand_dims[0];
+        let rank = dims.len();
+        anyhow::ensure!(
+            (axis_from_end as usize) < rank,
+            "reduce axis {axis_from_end} out of rank {rank}"
+        );
+        let axis = rank - 1 - axis_from_end as usize;
+        let reduced = dims[axis];
+        let inner: usize = dims[axis + 1..].iter().product();
+        let outer: usize = dims[..axis].iter().product();
+        let input = self.operands[0].as_i64()?.clone();
+        let dest = self.dests[0].as_i64_mut()?;
+        anyhow::ensure!(
+            dest.len() == outer * inner && input.len() == outer * reduced * inner,
+            "reduce kernel geometry mismatch"
+        );
+        for o in 0..outer {
+            for i in 0..inner {
+                let mut acc = init;
+                for r in 0..reduced {
+                    acc = fold(acc, input[o * reduced * inner + r * inner + i])?;
+                }
+                dest[o * inner + i] = acc;
+            }
+        }
+        Ok(())
+    }
+
     /// Contiguous inclusive scan over one axis (zero-based FROM THE END —
     /// the house nth-from-end convention). Every prefix is written, so the
     /// destination carries the operand's geometry, not a reduced one.

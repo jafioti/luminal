@@ -318,13 +318,32 @@ impl Translator<'_> {
             .or_else(|| node.inputs.get(2).and_then(|i| i.arg.as_bool()))
             .unwrap_or(false);
         let dim = node.inputs.get(1).and_then(|i| i.arg.as_int());
-        let (result, axis) = match dim {
-            Some(d) => {
-                let axis = normalize_dim(d, x.rank());
-                let r = if max { x.argmax(axis) } else { x.argmin(axis) };
-                (r, Some(axis))
+        let rank = x.rank();
+        let axes = match dim {
+            Some(d) if rank == 0 => {
+                anyhow::ensure!(d == 0 || d == -1, "argextremum: scalar dim must be 0 or -1");
+                Vec::new()
             }
-            None => (if max { x.argmax(0) } else { x.argmin(0) }, None),
+            Some(d) => vec![normalize_dim(d, rank)],
+            None => (0..rank).collect(),
+        };
+        for &axis in &axes {
+            anyhow::ensure!(
+                x.dims()[axis].to_usize() != Some(0),
+                "argextremum: reduction axis {axis} must be nonempty"
+            );
+        }
+        let result = if rank == 0 {
+            self.cx.constant_i32(0)
+        } else if dim.is_none() {
+            let flat = util::reshape_tensor(x, &[x.dims().into_iter().product()]);
+            if max { flat.argmax(0) } else { flat.argmin(0) }
+        } else {
+            if max {
+                x.argmax(axes[0])
+            } else {
+                x.argmin(axes[0])
+            }
         };
         let dtype = self.output_meta_dtype(node).unwrap_or(DType::I64);
         let result = if result.dtype != dtype {
@@ -332,9 +351,10 @@ impl Translator<'_> {
         } else {
             result
         };
-        Ok(match (keepdim, axis) {
-            (true, Some(axis)) => result.expand_dim(axis, 1usize),
-            _ => result,
+        Ok(if keepdim {
+            keep_axes(result, &axes)
+        } else {
+            result
         })
     }
 
