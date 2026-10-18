@@ -2,7 +2,7 @@
 //!
 //! Gather/scatter are built from the recorder's coordinate forms so no
 //! caller-data flat-index arithmetic (proof-gated Int add/mul) enters the
-//! graph. Index normalization, where-selection, and the reductions that
+//! graph. Index normalization and the reductions that
 //! would need Int arithmetic run in F32 and `trunc_cast` back (the plan
 //! has no F64 binary arms); anything that cannot be done faithfully bails
 //! with its op name.
@@ -99,30 +99,9 @@ impl Translator<'_> {
     // Shared helpers
     // ---------------------------------------------------------------
 
-    /// `where(cond, a, b)` that works for index dtypes: Int blends in F32
-    /// and truncates back (Int arithmetic is proof-gated, and the plan has
-    /// no F64 binary arms), Bool uses the boolean primitives, floats use
-    /// `cond`.
+    /// Index updates select storage values without arithmetic or dtype loss.
     fn idx_cond(&mut self, cond: GraphTensor, a: GraphTensor, b: GraphTensor) -> GraphTensor {
-        let (a, b) = util::broadcast_binary(a, b);
-        let (a, cond) = util::broadcast_binary(a, cond);
-        match a.dtype {
-            DType::Bool => {
-                let yes = self.bool_and(cond, a);
-                let not_cond = self.bool_not(cond);
-                let no = self.bool_and(not_cond, b);
-                self.bool_or(yes, no)
-            }
-            DType::Int | DType::I64 => {
-                let dtype = a.dtype;
-                let a32 = a.cast(DType::F32);
-                let b32 = b.cast(DType::F32);
-                let mask = cond.cast(DType::F32);
-                let one = self.cx.constant_f32(1.0).expand_rhs(mask.dims());
-                (a32 * mask + b32 * (one - mask)).trunc_cast(dtype)
-            }
-            _ => a.cond(cond, b),
-        }
+        self.select(cond, a, b)
     }
 
     /// Wrap negative index values into `[0, dim)` without proof-gated Int
@@ -811,9 +790,59 @@ impl Translator<'_> {
                     bail!("index_put with a Bool mask and accumulate=true is not ported");
                 }
                 let values = self.idx_cast_like(values, data.dtype);
-                if idx_can_broadcast_to(&values.dims(), &data.dims()) {
-                    return Ok(self.idx_cond(mask, values, data));
+                let axis = entries.iter().position(Option::is_some).unwrap();
+                let mask_rank = mask.rank();
+                let dims = data.dims();
+                anyhow::ensure!(
+                    entries.len() - 1 + mask.rank() <= data.rank()
+                        && mask.dims().iter().enumerate().all(|(i, dim)| {
+                            dims.get(axis + i)
+                                .is_some_and(|other| util::same_dim(*dim, *other))
+                        }),
+                    "index_put: boolean mask must match the indexed input axes"
+                );
+                // x[basic..., mask, basic...] has indexed shape
+                // [before..., count_true(mask), after...]. Values broadcast
+                // against that shape, not the original input shape.
+                let mut selected = dims[..axis].to_vec();
+                selected.push(IntExpr::from(1));
+                selected.extend_from_slice(&dims[axis + mask.rank()..]);
+                let value_dims = values.dims();
+                anyhow::ensure!(
+                    value_dims.len() <= selected.len(),
+                    "index_put: values rank exceeds the boolean-indexed result rank"
+                );
+                let mut aligned = vec![IntExpr::from(1); selected.len() - value_dims.len()];
+                aligned.extend_from_slice(&value_dims);
+                selected[axis] = aligned[axis];
+                anyhow::ensure!(
+                    idx_can_broadcast_to(&aligned, &selected),
+                    "index_put: values do not broadcast to the boolean-indexed result"
+                );
+                if idx_numel(&value_dims) == Some(0) {
+                    return Ok(data);
                 }
+                anyhow::ensure!(
+                    mask_rank != 0 || aligned[axis].to_usize() == Some(1),
+                    "index_put: a scalar boolean index has at most one selected slot"
+                );
+                let mask = mask
+                    .expand_lhs(vec![IntExpr::from(1); axis])
+                    .expand_rhs(vec![IntExpr::from(1); data.rank() - axis - mask_rank])
+                    .expand(dims.clone());
+                let values = values
+                    .expand_lhs(vec![IntExpr::from(1); aligned.len() - value_dims.len()])
+                    .expand(selected);
+                if aligned[axis].to_usize() == Some(1) {
+                    // One update per unindexed slice: broadcast it over all
+                    // mask axes and select, preserving integer and IEEE bits.
+                    let mut shape = dims[..axis].to_vec();
+                    shape.extend(vec![IntExpr::from(1); mask_rank]);
+                    shape.extend_from_slice(&dims[axis + mask_rank..]);
+                    return Ok(self.idx_cond(mask, reshape_tensor(values, &shape), data));
+                }
+                // Expand broadcasts in the selected result before assigning
+                // flattened true slots in their stable row-major order.
                 return self.idx_masked_scatter(data, mask, values);
             }
         }

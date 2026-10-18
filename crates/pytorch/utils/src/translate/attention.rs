@@ -1,7 +1,7 @@
 //! Scaled-dot-product attention lowerings (port batch 6).
 //!
 //! All `scaled_dot_product_attention` ATen variants (unified, efficient,
-//! flash, flash_for_cpu, cudnn) share one body that lowers to
+//! flash, flash_for_cpu, cudnn, overrideable) share one body that lowers to
 //! `softmax((Q@K^T)*scale + mask) @ V`. Args are resolved by name so one
 //! body serves every variant; only the first output slot is bound.
 //!
@@ -35,7 +35,7 @@ fn named_input<'a>(node: &'a Node, name: &str) -> Option<&'a NodeInput> {
 
 impl Translator<'_> {
     /// Translate all `scaled_dot_product_attention` ATen variants (unified,
-    /// efficient, flash, flash_for_cpu, cudnn) into
+    /// efficient, flash, flash_for_cpu, cudnn, overrideable) into
     /// `softmax((Q@K^T)*scale + causal_mask + attn_bias) @ V`. Args resolve
     /// by name so one body serves every variant; only tuple slot 0 (the
     /// attention output) is bound — logsumexp and later slots are

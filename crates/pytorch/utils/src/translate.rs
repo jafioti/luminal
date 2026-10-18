@@ -31,6 +31,8 @@ mod elementwise_more;
 mod expr;
 mod grouped_mm;
 mod index;
+#[cfg(test)]
+mod index_tests;
 mod movement_more;
 #[cfg(test)]
 mod opmath_tests;
@@ -1052,6 +1054,7 @@ impl Translator<'_> {
             | "_scaled_dot_product_efficient_attention.default"
             | "_scaled_dot_product_flash_attention.default"
             | "_scaled_dot_product_flash_attention_for_cpu.default"
+            | "_scaled_dot_product_fused_attention_overrideable.default"
             | "_scaled_dot_product_cudnn_attention.default" => {
                 self.translate_sdpa(node)?;
                 return Ok(());
@@ -1568,6 +1571,7 @@ fn opmath_target(target: &str) -> bool {
             | "_scaled_dot_product_efficient_attention.default"
             | "_scaled_dot_product_flash_attention.default"
             | "_scaled_dot_product_flash_attention_for_cpu.default"
+            | "_scaled_dot_product_fused_attention_overrideable.default"
             | "_scaled_dot_product_cudnn_attention.default"
             // comparisons: torch compares at the promoted operand dtype
             | "eq.Tensor"

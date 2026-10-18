@@ -528,6 +528,7 @@ fn attention_keeps_compute_precision_until_the_operator_output() {
             "_scaled_dot_product_flash_attention_for_cpu.default",
             "_scaled_dot_product_efficient_attention.default",
             "_scaled_dot_product_cudnn_attention.default",
+            "_scaled_dot_product_fused_attention_overrideable.default",
         ] {
             let t = translate_one(
                 node(
