@@ -256,7 +256,7 @@ impl Translator<'_> {
             .arg
             .as_tensors()
             .ok_or_else(|| anyhow::anyhow!("stack: first operand is not a tensor list"))?;
-        let axis = self.named_int_arg(node, "dim").unwrap_or(0).max(0) as usize;
+        let raw_axis = self.named_int_arg(node, "dim").unwrap_or(0);
         let mut values = Vec::with_capacity(tensors.len());
         for t in tensors {
             values.push(
@@ -266,6 +266,19 @@ impl Translator<'_> {
                     .ok_or_else(|| anyhow::anyhow!("stack: unknown tensor {}", t.name))?,
             );
         }
+        let first = values.first().context("stack: empty tensor list")?;
+        let output_rank = first.rank() + 1;
+        let axis = if raw_axis < 0 {
+            raw_axis + output_rank as i64
+        } else {
+            raw_axis
+        };
+        let axis = usize::try_from(axis)
+            .ok()
+            .filter(|axis| *axis < output_rank)
+            .with_context(|| {
+                format!("stack: axis {raw_axis} out of range for output rank {output_rank}")
+            })?;
         Ok(self.cx.stack(&values, axis))
     }
 
@@ -697,4 +710,95 @@ fn keep_axes(mut t: GraphTensor, axes: &[usize]) -> GraphTensor {
         t = t.expand_dim(axis, 1usize);
     }
     t
+}
+
+#[cfg(test)]
+mod stack_tests {
+    use super::super::test_support::*;
+    use crate::pt2_schema::{Argument, TensorName, TensorsArg};
+    use crate::translate::translate;
+
+    #[test]
+    fn stack_axes_use_the_output_rank() {
+        for input_shape in [vec![], vec![5], vec![2, 3]] {
+            let output_rank = input_shape.len() + 1;
+            for axis in 0..output_rank {
+                for raw_axis in [axis as i64, axis as i64 - output_rank as i64] {
+                    let mut shape = input_shape.clone();
+                    shape.insert(axis, 2);
+                    let parsed = parsed_nodes(
+                        vec![node(
+                            "torch.ops.aten.stack.default",
+                            vec![
+                                input(
+                                    "tensors",
+                                    Argument::Tensors(TensorsArg {
+                                        as_tensors: vec![
+                                            TensorName { name: "a".into() },
+                                            TensorName { name: "b".into() },
+                                        ],
+                                    }),
+                                ),
+                                scalar_int("dim", raw_axis),
+                            ],
+                            &["out"],
+                        )],
+                        &[
+                            ("a", FLOAT, &input_shape),
+                            ("b", FLOAT, &input_shape),
+                            ("out", FLOAT, &shape),
+                        ],
+                        &["a", "b"],
+                        &["out"],
+                    );
+                    let translated = translate(&parsed).unwrap();
+                    let actual = translated
+                        .graph
+                        .logical
+                        .value_dims(translated.outputs[0].tensor);
+                    assert_eq!(
+                        actual
+                            .iter()
+                            .map(|d| d.to_usize().unwrap())
+                            .collect::<Vec<_>>(),
+                        shape.iter().map(|d| *d as usize).collect::<Vec<_>>(),
+                        "axis {raw_axis}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn stack_rejects_out_of_range_axes() {
+        for axis in [-3, 2] {
+            let parsed = parsed_nodes(
+                vec![node(
+                    "torch.ops.aten.stack.default",
+                    vec![
+                        input(
+                            "tensors",
+                            Argument::Tensors(TensorsArg {
+                                as_tensors: vec![
+                                    TensorName { name: "a".into() },
+                                    TensorName { name: "b".into() },
+                                ],
+                            }),
+                        ),
+                        scalar_int("dim", axis),
+                    ],
+                    &["out"],
+                )],
+                &[
+                    ("a", FLOAT, &[5]),
+                    ("b", FLOAT, &[5]),
+                    ("out", FLOAT, &[5, 2]),
+                ],
+                &["a", "b"],
+                &["out"],
+            );
+            let error = translate(&parsed).err().expect("invalid axis must fail");
+            assert!(format!("{error:#}").contains("out of range"));
+        }
+    }
 }
