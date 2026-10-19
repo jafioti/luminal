@@ -37,6 +37,8 @@ mod index;
 #[cfg(test)]
 mod index_tests;
 mod linalg;
+#[cfg(test)]
+mod matmul_tests;
 mod movement_more;
 #[cfg(test)]
 mod opmath_tests;
@@ -549,7 +551,7 @@ impl Translator<'_> {
             if dtype == DType::F64 {
                 return Ok(self.cx.constant_f64(v as f64));
             }
-            if matches!(dtype, DType::I64 | DType::U64) {
+            if matches!(dtype, DType::I64 | DType::U64) || i32::try_from(v).is_err() {
                 return Ok(self.cx.constant_i64(v).cast(dtype));
             }
             return Ok(self.cx.constant_i32(v).cast(dtype));
