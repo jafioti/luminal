@@ -91,10 +91,6 @@ impl Translator<'_> {
     }
 
     pub(super) fn fmod_remainder(&mut self, node: &Node, fmod: bool) -> Result<GraphTensor> {
-        if fmod {
-            return self.binary(&node.inputs, |a, b| a % b);
-        }
-        // Python-style remainder: a - floor(a/b)*b.
         let a = self.operand(&node.inputs[0])?;
         let b = if let Some(t) = self.optional_tensor_operand(&node.inputs[1])? {
             t
@@ -102,6 +98,35 @@ impl Translator<'_> {
             self.scalar(&node.inputs[1], a.dtype)?
         };
         let (a, b) = util::broadcast_binary(a, b);
+        if matches!(
+            a.dtype,
+            DType::Int | DType::I64 | DType::I8 | DType::I16 | DType::U8
+        ) {
+            let dtype = a.dtype;
+            // Small integers compute in i32. Never pass integer payloads
+            // through floating division: even f64 cannot represent all i64s.
+            let (a, b) = if matches!(dtype, DType::Int | DType::I64) {
+                (a, b)
+            } else {
+                (a.cast(DType::Int), b.cast(DType::Int))
+            };
+            let r = a.trunc_rem(b);
+            if fmod {
+                return Ok(r.cast(dtype));
+            }
+            let zero = self.cx.constant_i64(0).cast(a.dtype).expand_rhs(a.dims());
+            let positive_correction = self.bool_and(r.lt(zero), b.gt(zero));
+            let negative_correction = self.bool_and(r.gt(zero), b.lt(zero));
+            let correct = self.bool_or(positive_correction, negative_correction);
+            // Select the increment before adding. Computing r+b eagerly
+            // can overflow for same-sign operands even when not selected.
+            let increment = self.select(correct, b, zero);
+            return Ok((r + increment).cast(dtype));
+        }
+        if fmod {
+            return Ok(a % b);
+        }
+        // Floating Python-style remainder: a - floor(a/b)*b.
         Ok(a - (a / b).floor() * b)
     }
 

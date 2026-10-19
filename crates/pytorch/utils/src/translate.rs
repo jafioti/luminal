@@ -46,6 +46,8 @@ mod pooling;
 mod reduction_dtype_tests;
 mod reductions_more;
 #[cfg(test)]
+mod remainder_tests;
+#[cfg(test)]
 mod scan_tests;
 mod special;
 mod stats_more;
@@ -547,6 +549,9 @@ impl Translator<'_> {
             });
         }
         if let Some(v) = input.arg.as_int() {
+            if dtype == DType::I64 {
+                return Ok(self.cx.constant_i64(v));
+            }
             return Ok(self.cx.constant_i32(v).cast(dtype));
         }
         bail!(
