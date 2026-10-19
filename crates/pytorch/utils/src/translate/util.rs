@@ -395,6 +395,19 @@ impl Translator<'_> {
             .with_context(|| format!("input {idx} of {} is not a bool", node.target))
     }
 
+    /// PT2 serializes arguments by schema name and may omit optional defaults.
+    /// Resolve absent and explicit None identically without positional indexing.
+    pub(super) fn named_tensor_operand(
+        &mut self,
+        node: &Node,
+        name: &str,
+    ) -> Result<Option<GraphTensor>> {
+        match node.inputs.iter().find(|input| input.name == name) {
+            Some(input) => self.optional_tensor_operand(input),
+            None => Ok(None),
+        }
+    }
+
     pub(super) fn named_int_arg(&self, node: &Node, name: &str) -> Option<i64> {
         let idx = node.inputs.iter().position(|input| input.name == name)?;
         self.get_int_arg(node, idx).ok()

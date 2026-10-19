@@ -171,14 +171,6 @@ impl Translator<'_> {
         }
     }
 
-    /// A tensor operand by input name (`None` for absent / non-tensor).
-    fn named_tensor_operand(&mut self, node: &Node, name: &str) -> Result<Option<GraphTensor>> {
-        match named_index(node, name) {
-            Some(index) => self.optional_tensor_operand(&node.inputs[index]),
-            None => Ok(None),
-        }
-    }
-
     /// Re-insert reduced axes as size-1 extents (keepdim).
     fn restore_reduced_dims(
         &self,

@@ -24,6 +24,8 @@ use luminal::prelude::*;
 mod array_extra;
 mod attention;
 mod cat;
+#[cfg(test)]
+mod clamp_tests;
 mod complex;
 mod conv;
 mod dim_arith;
