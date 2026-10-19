@@ -29,10 +29,12 @@ mod conv;
 mod dim_arith;
 mod elementwise_more;
 mod expr;
+mod frexp;
 mod grouped_mm;
 mod index;
 #[cfg(test)]
 mod index_tests;
+mod linalg;
 mod movement_more;
 #[cfg(test)]
 mod opmath_tests;
@@ -798,6 +800,13 @@ impl Translator<'_> {
         let n = &node.inputs;
 
         let value = match target {
+            "linalg_solve_triangular.default" => self.translate_triangular_solve(node)?,
+            "cholesky_solve.default" => self.translate_cholesky_solve(node)?,
+            "cholesky_inverse.default" => self.translate_cholesky_inverse(node)?,
+            "frexp.Tensor" | "prims.frexp.default" => {
+                self.translate_frexp(node)?;
+                return Ok(());
+            }
             // ---- linear ----
             "linear.default" => {
                 let x = self.operand(&n[0])?;
