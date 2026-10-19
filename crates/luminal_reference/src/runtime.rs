@@ -868,6 +868,11 @@ impl ReferenceRuntime {
         self.get_typed(self.output_buffer(tensor)?)?.as_i64()
     }
 
+    /// Read UInt64 without a signed or floating-point conversion.
+    pub fn get_u64(&self, tensor: petgraph::graph::NodeIndex) -> Result<&Vec<u64>> {
+        self.get_typed(self.output_buffer(tensor)?)?.as_u64()
+    }
+
     /// The narrow-integer readers (ruling 2026-09-02, main #399's
     /// `get_output_i8` / `get_output_u8` / `get_output_i16`). STRICTLY
     /// NON-WIDENING, which is main's whole point and this branch's

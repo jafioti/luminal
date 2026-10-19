@@ -284,13 +284,13 @@ impl Translator<'_> {
         let result_dtype = self.output_meta_dtype(node)?;
         let integer = matches!(
             a.dtype,
-            DType::Int | DType::I64 | DType::I8 | DType::I16 | DType::U8
+            DType::Int | DType::I64 | DType::U64 | DType::I8 | DType::I16 | DType::U8
         );
         let out = if integer && matches!(mode, Some("trunc" | "floor")) {
             // Do signed division in at least Int32: narrow MIN / -1 is valid
             // before the final storage-width wrap, and never needs a float read.
-            let work_dtype = if a.dtype == DType::I64 {
-                DType::I64
+            let work_dtype = if matches!(a.dtype, DType::I64 | DType::U64) {
+                a.dtype
             } else {
                 DType::Int
             };

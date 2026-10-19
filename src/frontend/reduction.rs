@@ -88,7 +88,7 @@ impl GraphTensor {
                 // literal cast to an integer tensor is a refused lossy read.
                 let one = match t.dtype {
                     DType::F64 => t.graph().constant_f64(1.0),
-                    DType::Int | DType::I64 | DType::I8 | DType::U8 | DType::I16 => {
+                    DType::Int | DType::I64 | DType::U64 | DType::I8 | DType::U8 | DType::I16 => {
                         t.graph().constant_i32(1).cast(t.dtype)
                     }
                     _ => t.graph().constant_f32(1.0).cast(t.dtype),

@@ -271,6 +271,12 @@ pub(crate) fn kernel(
                 dest[*target] = src[i];
             }
         }
+        (TypedBuffer::U64(init), TypedBuffer::U64(src), TypedBuffer::U64(dest)) => {
+            dest.copy_from_slice(init);
+            for (i, target) in target_of.iter().enumerate() {
+                dest[*target] = src[i];
+            }
+        }
         (TypedBuffer::I64(init), TypedBuffer::I64(src), TypedBuffer::I64(dest)) => {
             dest.copy_from_slice(init);
             for (i, target) in target_of.iter().enumerate() {

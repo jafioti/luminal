@@ -694,3 +694,26 @@ fn fp64_scalar_literals_do_not_require_runtime_numeric_conversion() {
         )));
     }
 }
+
+#[test]
+fn uint64_rounded_division_does_not_pass_through_float32() {
+    use crate::dtype::TorchDType;
+    let code = TorchDType::Uint64.code();
+    let t = translate_one(
+        node(
+            "torch.ops.aten.floor_divide.default",
+            vec![tensor_input("self", "a"), tensor_input("other", "b")],
+            &["out"],
+        ),
+        &[("a", code, &[8]), ("b", code, &[8]), ("out", code, &[8])],
+        &["a", "b"],
+        &["out"],
+    );
+    assert_eq!(t.outputs[0].dtype, DType::U64);
+    assert!(any_node(&t, |op, dtype| matches!(op, LogicalOp::TruncDiv)
+        && dtype == DType::U64));
+    assert!(!any_node(&t, |op, _| matches!(
+        op,
+        LogicalOp::TruncCast(_) | LogicalOp::Recip
+    )));
+}

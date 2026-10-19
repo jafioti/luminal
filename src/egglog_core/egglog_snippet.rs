@@ -232,6 +232,23 @@ mod tests {
             .expect("assembled program loads");
     }
 
+    #[test]
+    fn uint64_wraparound_does_not_acquire_an_unbounded_integer_interval() {
+        let mut eg = new_egraph();
+        eg.parse_and_run_program(None, &assembled_program_for(&[]))
+            .unwrap();
+        eg.parse_and_run_program(None,r#"
+          (let minus (LogicalCast (LogicalIota (IntLit -1) (ShapeLit (IntExprNil))) (UInt64)))
+          (let one (LogicalCast (LogicalIota (IntLit 1) (ShapeLit (IntExprNil))) (UInt64)))
+          (let wrap (LogicalAdd minus one))
+          (let square (LogicalMul minus minus))
+          (run-schedule (repeat 8 (seq (saturate (run prop)) (run main_ruleset))))
+          (check (= (value-lower-bound-of wrap) (bigint 0)))
+          (check (= (value-upper-bound-of wrap) (- (* (bigint 4294967296) (bigint 4294967296)) (bigint 1))))
+          (check (= (value-lower-bound-of square) (bigint 0)))
+        "#).unwrap();
+    }
+
     /// The `prop` ruleset holds exactly the shape-of / dtype-of / rank-of
     /// propagation rules: every default-ruleset rule does something else,
     /// and every `prop` rule does nothing else. The schedule runs `prop`

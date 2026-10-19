@@ -1092,7 +1092,7 @@ impl GraphTensor {
         // cast to an integer tensor is a refused lossy read.
         let fill = match self.dtype {
             DType::F64 => self.graph().constant_f64(elem as f64),
-            DType::Int | DType::I64 | DType::I8 | DType::U8 | DType::I16 => {
+            DType::Int | DType::I64 | DType::U64 | DType::I8 | DType::U8 | DType::I16 => {
                 self.graph().constant_i32(elem as i64).cast(self.dtype)
             }
             _ => self.graph().constant_f32(elem).cast(self.dtype),

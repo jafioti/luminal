@@ -549,8 +549,8 @@ impl Translator<'_> {
             if dtype == DType::F64 {
                 return Ok(self.cx.constant_f64(v as f64));
             }
-            if dtype == DType::I64 {
-                return Ok(self.cx.constant_i64(v));
+            if matches!(dtype, DType::I64 | DType::U64) {
+                return Ok(self.cx.constant_i64(v).cast(dtype));
             }
             return Ok(self.cx.constant_i32(v).cast(dtype));
         }
@@ -1626,7 +1626,7 @@ fn is_float(dtype: DType) -> bool {
 
 /// Integer storage dtypes the truncating cast may target.
 fn is_int(dtype: DType) -> bool {
-    matches!(dtype, DType::Int | DType::I64)
+    matches!(dtype, DType::Int | DType::I64 | DType::U64)
 }
 
 /// Integer dtypes a float may not be `cast` into (the frontend refuses a
@@ -1634,7 +1634,7 @@ fn is_int(dtype: DType) -> bool {
 fn is_narrowing_int(dtype: DType) -> bool {
     matches!(
         dtype,
-        DType::Int | DType::I64 | DType::I8 | DType::U8 | DType::I16
+        DType::Int | DType::I64 | DType::U64 | DType::I8 | DType::U8 | DType::I16
     )
 }
 

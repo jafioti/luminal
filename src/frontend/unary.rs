@@ -58,6 +58,7 @@ impl Neg for GraphTensor {
         match self.dtype {
             DType::Int
             | DType::I64
+            | DType::U64
             | DType::I4
             | DType::U4
             | DType::I8
@@ -248,6 +249,7 @@ impl GraphTensor {
             self.dtype,
             DType::Int
                 | DType::I64
+                | DType::U64
                 | DType::I4
                 | DType::U4
                 | DType::I8
@@ -338,7 +340,7 @@ impl GraphTensor {
     /// explode saturation. `Select` is one node and is NaN/inf-safe.
     pub fn abs(self) -> GraphTensor {
         match self.dtype {
-            DType::U4 | DType::U8 | DType::U16 => self,
+            DType::U4 | DType::U8 | DType::U16 | DType::U64 => self,
             DType::I4 | DType::I8 | DType::I16 | DType::Int | DType::I64 => self
                 .lt(self
                     .graph()

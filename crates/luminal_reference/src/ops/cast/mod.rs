@@ -145,6 +145,10 @@ pub(crate) fn kernel(
     // TOUCHING I8/U8/I16 routes through `narrow_cast` below, which
     // states the policy once. The wide arms in this match are
     // untouched.
+    if matches!(ctx.operands[0], TypedBuffer::U64(_)) || matches!(ctx.dests[0], TypedBuffer::U64(_))
+    {
+        return uint64_cast(ctx);
+    }
     const F32_EXACT_INT: i64 = 1 << 24;
     if is_narrow(&ctx.operands[0]) || is_narrow(&ctx.dests[0]) {
         return narrow_cast(ctx);
@@ -441,6 +445,59 @@ fn narrow_cast(ctx: &mut ReferenceKernelCtx) -> anyhow::Result<()> {
              comparison in the model (LessThan), never as a cast"
         ),
         dest => anyhow::bail!("cast has no ({source_name} -> {}) arm", dest.type_name()),
+    }
+    Ok(())
+}
+
+/// UInt64 conversions preserve modulo-2^64 integer bits. The reference
+/// runtime's checked-exact float-cast policy still applies to this width.
+fn uint64_cast(ctx: &mut ReferenceKernelCtx) -> anyhow::Result<()> {
+    if let TypedBuffer::U64(src) = &ctx.operands[0] {
+        macro_rules! to_int {
+            ($dst:expr,$ty:ty) => {{
+                for (d, &s) in $dst.iter_mut().zip(src) {
+                    *d = s as $ty;
+                }
+            }};
+        }
+        match &mut ctx.dests[0] {
+            TypedBuffer::U64(d) => d.copy_from_slice(src),
+            TypedBuffer::I64(d) => to_int!(d, i64),
+            TypedBuffer::I32(d) => to_int!(d, i32),
+            TypedBuffer::I16(d) => to_int!(d, i16),
+            TypedBuffer::I8(d) => to_int!(d, i8),
+            TypedBuffer::U8(d) => to_int!(d, u8),
+            TypedBuffer::F64(d) => {
+                for (d, &s) in d.iter_mut().zip(src) {
+                    anyhow::ensure!(s <= 1 << 53, "uint64 -> f64 is not checked-exact");
+                    *d = s as f64;
+                }
+            }
+            TypedBuffer::F32(d) => {
+                for (d, &s) in d.iter_mut().zip(src) {
+                    anyhow::ensure!(s <= 1 << 24, "uint64 -> f32 is not checked-exact");
+                    *d = s as f32;
+                }
+            }
+            d => anyhow::bail!("uint64 cast to {} is unavailable", d.type_name()),
+        }
+    } else if let TypedBuffer::U64(dst) = &mut ctx.dests[0] {
+        macro_rules! from_int {
+            ($src:expr) => {{
+                for (d, &s) in dst.iter_mut().zip($src) {
+                    *d = s as u64;
+                }
+            }};
+        }
+        match &ctx.operands[0] {
+            TypedBuffer::I64(s) => from_int!(s),
+            TypedBuffer::I32(s) => from_int!(s),
+            TypedBuffer::I16(s) => from_int!(s),
+            TypedBuffer::I8(s) => from_int!(s),
+            TypedBuffer::U8(s) => from_int!(s),
+            TypedBuffer::Bool8(s) => from_int!(s),
+            s => anyhow::bail!("{} -> uint64 requires explicit truncation", s.type_name()),
+        }
     }
     Ok(())
 }

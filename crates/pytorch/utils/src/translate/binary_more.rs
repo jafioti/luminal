@@ -22,14 +22,9 @@ impl Translator<'_> {
     // Shared helpers (private copies of the parked translator's helpers)
     // -----------------------------------------------------------------
 
-    /// Typed scalar constant matching the parked `scalar_constant`: F64 keeps
-    /// double precision, everything else goes through an F32 literal cast.
+    /// Construct a typed scalar without a float bridge for integer dtypes.
     fn scalar_constant(&mut self, val: f64, dtype: DType) -> GraphTensor {
-        if dtype == DType::F64 {
-            self.cx.constant_f64(val)
-        } else {
-            self.cx.constant_f32(val as f32).cast(dtype)
-        }
+        self.typed_scalar(val, dtype)
     }
 
     /// The explicit `alpha` kwarg for add/sub, if present.
@@ -57,19 +52,7 @@ impl Translator<'_> {
         if node.inputs[index].arg.as_tensor_name().is_some() {
             return Ok(self.get_input_tensor(node, index)?.cast(dtype));
         }
-        let value = node.inputs[index]
-            .arg
-            .as_int()
-            .map(|value| value as f64)
-            .or_else(|| node.inputs[index].arg.as_float())
-            .or_else(|| {
-                node.inputs[index]
-                    .arg
-                    .as_bool()
-                    .map(|value| if value { 1.0 } else { 0.0 })
-            })
-            .ok_or_else(|| anyhow!("{} input {index} must be tensor or numeric", node.target))?;
-        Ok(self.scalar_constant(value, dtype))
+        self.scalar(&node.inputs[index], dtype)
     }
 
     /// Both operands cast to the output dtype and broadcast together.
@@ -330,6 +313,18 @@ impl Translator<'_> {
             } else {
                 a
             };
+            if arg1.as_int().is_some() && matches!(a.dtype, DType::I64 | DType::U64 | DType::F64) {
+                let mut b = self.scalar(&node.inputs[1], a.dtype)?.expand_rhs(a.dims());
+                if let Some(alpha) = alpha {
+                    b = self.apply_scalar_op(b, alpha, BinaryOp::Mul);
+                }
+                return Ok(match op {
+                    BinaryOp::Add => a + b,
+                    BinaryOp::Sub => a - b,
+                    BinaryOp::Mul => a * b,
+                    BinaryOp::Div => a / b,
+                });
+            }
             if let Some(f) = arg1.as_float() {
                 return Ok(self.apply_scalar_op_with_alpha(a, f, alpha, op));
             }
@@ -360,6 +355,18 @@ impl Translator<'_> {
         }
         let alpha = self.get_explicit_alpha(node, op)?;
         let arg1 = &node.inputs[1].arg;
+        if arg1.as_int().is_some() && matches!(a.dtype, DType::I64 | DType::U64 | DType::F64) {
+            let mut b = self.scalar(&node.inputs[1], a.dtype)?.expand_rhs(a.dims());
+            if let Some(alpha) = alpha {
+                b = self.apply_scalar_op(b, alpha, BinaryOp::Mul);
+            }
+            return Ok(match op {
+                BinaryOp::Add => a + b,
+                BinaryOp::Sub => a - b,
+                BinaryOp::Mul => a * b,
+                BinaryOp::Div => a / b,
+            });
+        }
         if let Some(f) = arg1.as_float() {
             return Ok(self.apply_scalar_op_with_alpha(a, f, alpha, op));
         }
@@ -577,6 +584,10 @@ impl Translator<'_> {
         // the parked translator, which never exercised integer bitwise), so
         // cast back to the recorded dtype.
         let dtype = self.output_meta_dtype(node).unwrap_or(DType::Bool);
+        anyhow::ensure!(
+            dtype != DType::U64,
+            "UInt64 bitwise and/or requires a bitwise logical lowering"
+        );
         Ok(self.bool_and(a, b).cast(dtype))
     }
 
@@ -590,6 +601,10 @@ impl Translator<'_> {
         let b = self.get_input_tensor(node, 1)?;
         let (a, b) = util::broadcast_binary(a, b);
         let dtype = self.output_meta_dtype(node).unwrap_or(DType::Bool);
+        anyhow::ensure!(
+            dtype != DType::U64,
+            "UInt64 bitwise and/or requires a bitwise logical lowering"
+        );
         Ok(self.bool_or(a, b).cast(dtype))
     }
 }

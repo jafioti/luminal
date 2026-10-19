@@ -79,6 +79,7 @@ pub(super) fn promote(a: DType, b: DType) -> DType {
         (DType::F16, DType::Bf16) | (DType::Bf16, DType::F16) => DType::F32,
         (DType::F16, _) | (_, DType::F16) => DType::F16,
         (DType::Bf16, _) | (_, DType::Bf16) => DType::Bf16,
+        (DType::U64, _) | (_, DType::U64) => DType::U64,
         (DType::I64, _) | (_, DType::I64) => DType::I64,
         (DType::Int, _) | (_, DType::Int) => DType::Int,
         _ => DType::F32,
@@ -177,6 +178,13 @@ impl Translator<'_> {
     pub(super) fn typed_scalar(&mut self, value: f64, dtype: DType) -> GraphTensor {
         match dtype {
             DType::F64 => self.cx.constant_f64(value),
+            DType::U64 => {
+                if value < 0.0 {
+                    self.cx.constant_i64(value as i64).cast(DType::U64)
+                } else {
+                    self.cx.constant_u64(value as u64)
+                }
+            }
             DType::I64 => self.cx.constant_i64(if value.is_nan() {
                 0
             } else if value == f64::INFINITY {

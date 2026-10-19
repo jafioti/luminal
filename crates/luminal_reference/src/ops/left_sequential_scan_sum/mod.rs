@@ -165,6 +165,7 @@ pub(crate) fn kernel(
             acc.checked_add(x)
                 .ok_or_else(|| anyhow::anyhow!("u8 scan-sum overflow (ints are non-wrapping)"))
         }),
+        TypedBuffer::U64(_) => ctx.scan_axis_u64(op.axis, 0, |a, b| Ok(a.wrapping_add(b))),
         TypedBuffer::I16(_) => ctx.scan_axis_i16(op.axis, 0, |acc, x| {
             acc.checked_add(x)
                 .ok_or_else(|| anyhow::anyhow!("i16 scan-sum overflow (ints are non-wrapping)"))

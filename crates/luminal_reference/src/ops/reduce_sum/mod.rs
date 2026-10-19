@@ -157,6 +157,7 @@ pub(crate) fn kernel(
         }),
         // NARROW INTS WRAP: main #399's `fold(0i8, i8::wrapping_add)`
         // accumulators, re-expressed (carve-out 2026-09-02).
+        TypedBuffer::U64(_) => ctx.reduce_axis_u64(op.axis, 0, |acc, x| Ok(acc.wrapping_add(x))),
         TypedBuffer::I8(_) => ctx.reduce_axis_i8(op.axis, 0, |acc, x| Ok(acc.wrapping_add(x))),
         TypedBuffer::U8(_) => ctx.reduce_axis_u8(op.axis, 0, |acc, x| Ok(acc.wrapping_add(x))),
         TypedBuffer::I16(_) => ctx.reduce_axis_i16(op.axis, 0, |acc, x| Ok(acc.wrapping_add(x))),

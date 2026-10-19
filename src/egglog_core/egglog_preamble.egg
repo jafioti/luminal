@@ -374,6 +374,7 @@
     (Bf16)
     (Int)
     (Int64)
+    (UInt64)
     (Bool)
     ; Bool8 (Austin's ruling 2026-07-30): the C++/device boolean — an
     ; 8-BIT CODE with exactly TWO legal states, 0x00 = false and
@@ -971,6 +972,7 @@
 (set (bits-of (Bf16)) (BitWidthLit 16))
 (set (bits-of (Int)) (BitWidthLit 32))
 (set (bits-of (Int64)) (BitWidthLit 64))
+(set (bits-of (UInt64)) (BitWidthLit 64))
 (set (bits-of (Bool)) (BitWidthLit 1)) ; DELIBERATE DIVERGENCE from luminal's byte-backed bools (user ruling 2026-07-24: bit-packed Bool is an update we will persist and see through the integration)
 (set (bits-of (Bool8)) (BitWidthLit 8)) ; the C++/device boolean: 8-bit code, two legal states (ruling 2026-07-30; see the Dtype declaration)
 (set (bits-of (F4E2M1)) (BitWidthLit 4))

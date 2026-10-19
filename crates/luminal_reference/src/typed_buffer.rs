@@ -44,6 +44,7 @@ pub enum TypedBuffer {
     F64(Vec<f64>),
     I32(Vec<i32>),
     I64(Vec<i64>),
+    U64(Vec<u64>),
     /// Narrow signed byte integers. Stored at their OWN width: a
     /// narrow value silently widened to i32 is exactly the smuggling
     /// the typed-buffer ruling forbids, and it also loses the
@@ -116,6 +117,7 @@ impl TypedBuffer {
             TypedBuffer::F64(values) => values.len(),
             TypedBuffer::I32(values) => values.len(),
             TypedBuffer::I64(values) => values.len(),
+            TypedBuffer::U64(values) => values.len(),
             TypedBuffer::I8(values) => values.len(),
             TypedBuffer::U8(values) => values.len(),
             TypedBuffer::I16(values) => values.len(),
@@ -134,6 +136,7 @@ impl TypedBuffer {
             TypedBuffer::F64(_) => "f64",
             TypedBuffer::I32(_) => "i32",
             TypedBuffer::I64(_) => "i64",
+            TypedBuffer::U64(_) => "u64",
             TypedBuffer::I8(_) => "i8",
             TypedBuffer::U8(_) => "u8",
             TypedBuffer::I16(_) => "i16",
@@ -198,6 +201,7 @@ impl TypedBuffer {
         }
     }
 
+    narrow_int_accessors!(U64, u64, as_u64, as_u64_mut, "a u64");
     narrow_int_accessors!(I8, i8, as_i8, as_i8_mut, "an i8");
     narrow_int_accessors!(U8, u8, as_u8, as_u8_mut, "a u8");
     narrow_int_accessors!(I16, i16, as_i16, as_i16_mut, "an i16");
@@ -234,7 +238,7 @@ impl TypedBuffer {
     /// the executor's dest-allocation shape.
     pub fn byte_len(&self) -> usize {
         let width = match self {
-            Self::F64(_) | Self::I64(_) => 8,
+            Self::F64(_) | Self::I64(_) | Self::U64(_) => 8,
             Self::F32(_) | Self::I32(_) => 4,
             Self::I16(_) => 2,
             _ => 1,
@@ -249,6 +253,7 @@ impl TypedBuffer {
             D::F64 => Self::F64(vec![0.; n]),
             D::Int => Self::I32(vec![0; n]),
             D::Int64 => Self::I64(vec![0; n]),
+            D::UInt64 => Self::U64(vec![0; n]),
             D::I8 => Self::I8(vec![0; n]),
             D::U8 => Self::U8(vec![0; n]),
             D::I16 => Self::I16(vec![0; n]),
@@ -264,6 +269,7 @@ impl TypedBuffer {
             TypedBuffer::F64(values) => TypedBuffer::F64(vec![0.0; values.len()]),
             TypedBuffer::I32(values) => TypedBuffer::I32(vec![0; values.len()]),
             TypedBuffer::I64(values) => TypedBuffer::I64(vec![0; values.len()]),
+            TypedBuffer::U64(values) => TypedBuffer::U64(vec![0; values.len()]),
             TypedBuffer::I8(values) => TypedBuffer::I8(vec![0; values.len()]),
             TypedBuffer::U8(values) => TypedBuffer::U8(vec![0; values.len()]),
             TypedBuffer::I16(values) => TypedBuffer::I16(vec![0; values.len()]),
@@ -300,6 +306,11 @@ impl From<Vec<i32>> for TypedBuffer {
 impl From<Vec<i64>> for TypedBuffer {
     fn from(values: Vec<i64>) -> Self {
         TypedBuffer::I64(values)
+    }
+}
+impl From<Vec<u64>> for TypedBuffer {
+    fn from(values: Vec<u64>) -> Self {
+        Self::U64(values)
     }
 }
 impl From<Vec<i8>> for TypedBuffer {
@@ -558,6 +569,22 @@ impl ReferenceKernelCtx {
     // trunc-rem kernels refuse it loudly. What each op MEANS shows up at
     // its call site (`Ok(a.wrapping_add(b))`), in its own folder, which
     // is where this branch keeps op semantics.
+    narrow_int_kernel_helpers!(
+        f64,
+        as_f64,
+        as_f64_mut,
+        binary_elementwise_f64,
+        reduce_axis_f64,
+        scan_axis_f64
+    );
+    narrow_int_kernel_helpers!(
+        u64,
+        as_u64,
+        as_u64_mut,
+        binary_elementwise_u64,
+        reduce_axis_u64,
+        scan_axis_u64
+    );
     narrow_int_kernel_helpers!(
         i8,
         as_i8,
