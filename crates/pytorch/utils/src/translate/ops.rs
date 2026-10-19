@@ -570,8 +570,8 @@ impl Translator<'_> {
 
     pub(super) fn translate_clamp(&mut self, node: &Node) -> Result<GraphTensor> {
         let x = self.operand(&node.inputs[0])?;
-        let min = node.inputs.get(1).and_then(|i| i.arg.as_float());
-        let max = node.inputs.get(2).and_then(|i| i.arg.as_float());
+        let min = self.named_float_arg(node, "min");
+        let max = self.named_float_arg(node, "max");
         let mut out = x;
         if let Some(min) = min {
             let bound = self
@@ -595,11 +595,11 @@ impl Translator<'_> {
     pub(super) fn translate_clamp_tensor(&mut self, node: &Node) -> Result<GraphTensor> {
         let x = self.operand(&node.inputs[0])?;
         let mut out = x;
-        if let Some(min) = self.optional_tensor_operand(&node.inputs[1])? {
+        if let Some(min) = self.named_tensor_operand(node, "min")? {
             let (out_b, min) = util::broadcast_binary(out, min);
             out = out_b.maximum(min);
         }
-        if let Some(max) = self.optional_tensor_operand(&node.inputs[2])? {
+        if let Some(max) = self.named_tensor_operand(node, "max")? {
             let (out_b, max) = util::broadcast_binary(out, max);
             out = out_b.minimum(max);
         }
