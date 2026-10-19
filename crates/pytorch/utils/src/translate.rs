@@ -543,16 +543,16 @@ impl Translator<'_> {
     /// read at the dtype the op computes in (F64 keeps the double).
     fn scalar(&mut self, input: &NodeInput, dtype: DType) -> Result<GraphTensor> {
         if let Some(v) = input.arg.as_float() {
-            return Ok(match dtype {
-                DType::F64 => self.cx.constant_f64(v),
-                dtype => convert(self.cx.constant_f32(v as f32), dtype),
-            });
+            return Ok(self.typed_scalar(v, dtype));
         }
         if let Some(v) = input.arg.as_int() {
             if dtype == DType::I64 {
                 return Ok(self.cx.constant_i64(v));
             }
             return Ok(self.cx.constant_i32(v).cast(dtype));
+        }
+        if let Some(v) = input.arg.as_bool() {
+            return Ok(self.cx.constant_i32(i64::from(v)).cast(dtype));
         }
         bail!(
             "operand {:?} is not a scalar (arg: {:?})",
@@ -841,7 +841,11 @@ impl Translator<'_> {
                 self.translate_grouped_mm(node)?
             }
             // ---- elementwise unary ----
-            "relu.default" => self.operand(&n[0])?.relu(),
+            "relu.default" => {
+                let value = self.operand(&n[0])?;
+                let zero = self.constant_like(value, 0.0);
+                value.maximum(zero)
+            }
             "sigmoid.default" => self.operand(&n[0])?.sigmoid(),
             "tanh.default" => self.operand(&n[0])?.tanh(),
             "log.default" => self.operand(&n[0])?.log(),

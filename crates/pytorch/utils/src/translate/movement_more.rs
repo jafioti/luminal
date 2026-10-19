@@ -67,12 +67,7 @@ impl Translator<'_> {
     /// A rank-0 constant of the requested storage dtype (Int paths avoid the
     /// refused float->int cast).
     fn cast_scalar(&mut self, value: f64, dtype: DType) -> GraphTensor {
-        match dtype {
-            DType::F64 => self.cx.constant_f64(value),
-            DType::I64 => self.cx.constant_i64(value as i64),
-            DType::Int => self.cx.constant_i32(value as i64),
-            _ => self.cx.constant_f32(value as f32).cast(dtype),
-        }
+        self.typed_scalar(value, dtype)
     }
 
     /// Broadcast `mask`, `a`, `b`; select `a` where the mask is true.

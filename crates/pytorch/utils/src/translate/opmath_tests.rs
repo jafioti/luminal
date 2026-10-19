@@ -625,3 +625,46 @@ fn float_to_narrow_storage_records_truncation_and_keeps_output_dtype() {
         }
     }
 }
+
+#[test]
+fn narrow_scalar_helpers_and_rounded_division_stay_integer() {
+    use crate::dtype::TorchDType;
+    for (code, dtype) in [
+        (TorchDType::Char.code(), DType::I8),
+        (TorchDType::Short.code(), DType::I16),
+        (TorchDType::Byte.code(), DType::U8),
+    ] {
+        for (target, extra) in [
+            ("relu.default", vec![]),
+            ("sign.default", vec![]),
+            ("bitwise_not.default", vec![]),
+            (
+                "clamp.default",
+                vec![scalar_int("min", 0), scalar_int("max", 6)],
+            ),
+            (
+                "hardtanh.default",
+                vec![scalar_int("min_val", 0), scalar_int("max_val", 6)],
+            ),
+            ("floor_divide.default", vec![tensor_input("other", "b")]),
+        ] {
+            let mut inputs = vec![tensor_input("self", "a")];
+            inputs.extend(extra);
+            let t = translate_one(
+                node(&format!("torch.ops.aten.{target}"), inputs, &["out"]),
+                &[("a", code, &[8]), ("b", code, &[8]), ("out", code, &[8])],
+                &["a", "b"],
+                &["out"],
+            );
+            assert_eq!(t.outputs[0].dtype, dtype, "{target}");
+            assert!(
+                !any_node(&t, |op, _| matches!(op, LogicalOp::TruncCast(_))),
+                "{target} must not convert integer values through floating point"
+            );
+            if target == "floor_divide.default" {
+                assert!(any_node(&t, |op, dtype| matches!(op, LogicalOp::TruncDiv)
+                    && dtype == DType::Int));
+            }
+        }
+    }
+}

@@ -550,14 +550,7 @@ impl Translator<'_> {
 
     pub(super) fn translate_scalar_tensor(&mut self, node: &Node) -> Result<GraphTensor> {
         let dtype = self.output_meta_dtype(node)?;
-        let value = self.get_float_arg(node, 0)?;
-        let scalar = match dtype {
-            DType::F64 => self.cx.constant_f64(value),
-            DType::Int => self.cx.constant_i64(value as i64).cast(DType::Int),
-            DType::I64 => self.cx.constant_i64(value as i64),
-            _ => self.cx.constant_f32(value as f32).cast(dtype),
-        };
-        Ok(scalar)
+        self.scalar(&node.inputs[0], dtype)
     }
 
     pub(super) fn translate_where(
@@ -583,36 +576,26 @@ impl Translator<'_> {
     pub(super) fn translate_masked_fill_scalar(&mut self, node: &Node) -> Result<GraphTensor> {
         let x = self.operand(&node.inputs[0])?;
         let mask = self.operand(&node.inputs[1])?;
-        let value = self.get_float_arg(node, 2)? as f32;
-        let fill = self
-            .cx
-            .constant_f32(value)
-            .cast(x.dtype)
-            .expand_rhs(x.dims());
+        let fill = self.scalar(&node.inputs[2], x.dtype)?.expand_rhs(x.dims());
         // `masked_fill(mask, value)` = `where(mask, value, x)`.
         Ok(self.select(mask, fill, x))
     }
 
     pub(super) fn translate_clamp(&mut self, node: &Node) -> Result<GraphTensor> {
         let x = self.operand(&node.inputs[0])?;
-        let min = self.named_float_arg(node, "min");
-        let max = self.named_float_arg(node, "max");
-        let mut out = x;
-        if let Some(min) = min {
-            let bound = self
-                .cx
-                .constant_f32(min as f32)
-                .cast(x.dtype)
-                .expand_rhs(x.dims());
-            out = out.maximum(bound);
-        }
-        if let Some(max) = max {
-            let bound = self
-                .cx
-                .constant_f32(max as f32)
-                .cast(x.dtype)
-                .expand_rhs(x.dims());
-            out = out.minimum(bound);
+        let dtype = self.output_meta_dtype(node)?;
+        let mut out = super::convert(x, dtype);
+        for name in ["min", "max"] {
+            if let Some(input) = node.inputs.iter().find(|input| input.name == name) {
+                if input.arg.as_int().is_some() || input.arg.as_float().is_some() {
+                    let bound = self.scalar(input, dtype)?.expand_rhs(x.dims());
+                    out = if name == "min" {
+                        out.maximum(bound)
+                    } else {
+                        out.minimum(bound)
+                    };
+                }
+            }
         }
         Ok(out)
     }

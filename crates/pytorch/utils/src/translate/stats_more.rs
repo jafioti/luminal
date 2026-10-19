@@ -143,13 +143,7 @@ impl Translator<'_> {
 
     /// A dtype-preserving rank-0 constant scalar.
     fn scalar_value(&mut self, value: f64, dtype: DType) -> GraphTensor {
-        match dtype {
-            DType::F64 => self.cx.constant_f64(value),
-            DType::Int | DType::I64 | DType::I8 | DType::I16 | DType::U8 => {
-                self.cx.constant_i64(value as i64).cast(dtype)
-            }
-            _ => self.cx.constant_f32(value as f32).cast(dtype),
-        }
+        self.typed_scalar(value, dtype)
     }
 
     /// A dtype-preserving constant scalar expanded to `tensor`'s shape.

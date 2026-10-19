@@ -437,7 +437,7 @@ impl Translator<'_> {
             output = self.idx_cond(has_values, means, original_work);
         }
         let output = if int_data {
-            output.trunc_cast(data.dtype)
+            super::convert(output, data.dtype)
         } else {
             output
         };
@@ -466,27 +466,11 @@ impl Translator<'_> {
 
     /// A scalar `value` argument of the requested dtype.
     fn idx_scalar_value(&mut self, node: &Node, index: usize, dtype: DType) -> Result<GraphTensor> {
-        let arg = &node
+        let input = node
             .inputs
             .get(index)
-            .with_context(|| format!("{} is missing scalar input {index}", node.target))?
-            .arg;
-        let value = if let Some(v) = arg.as_bool() {
-            if v { 1.0 } else { 0.0 }
-        } else if let Some(v) = arg.as_int() {
-            v as f64
-        } else if let Some(v) = arg.as_float() {
-            v
-        } else {
-            bail!("{}: unsupported scalar value {arg:?}", node.target);
-        };
-        Ok(match dtype {
-            DType::F64 => self.cx.constant_f64(value),
-            DType::I64 => self.cx.constant_i64(value as i64),
-            DType::Int => self.cx.constant_i32(value as i64),
-            DType::Bool => self.cx.constant_f32(value as f32).cast(DType::Bool),
-            _ => self.cx.constant_f32(value as f32).cast(dtype),
-        })
+            .with_context(|| format!("{} is missing scalar input {index}", node.target))?;
+        self.scalar(input, dtype)
     }
 
     fn idx_reduce_arg(&self, node: &Node) -> Result<String> {

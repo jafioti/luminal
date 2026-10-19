@@ -172,14 +172,52 @@ pub(super) fn resolve_neg1_dim_exprs(target: &[IntExpr], current_dims: &[IntExpr
 }
 
 impl Translator<'_> {
+    /// A rank-0 constant of `dtype`; integer dtypes never route through a
+    /// refused float -> int cast.
+    pub(super) fn typed_scalar(&mut self, value: f64, dtype: DType) -> GraphTensor {
+        match dtype {
+            DType::F64 => self.cx.constant_f64(value),
+            DType::I64 => self.cx.constant_i64(if value.is_nan() {
+                0
+            } else if value == f64::INFINITY {
+                i64::MAX
+            } else if value == f64::NEG_INFINITY {
+                i64::MIN
+            } else {
+                value as i64
+            }),
+            DType::I8 | DType::I16 | DType::U8 => {
+                let (minimum, maximum) = match dtype {
+                    DType::I8 => (i8::MIN as i64, i8::MAX as i64),
+                    DType::I16 => (i16::MIN as i64, i16::MAX as i64),
+                    DType::U8 => (u8::MIN as i64, u8::MAX as i64),
+                    _ => unreachable!(),
+                };
+                let value = if value == f64::INFINITY {
+                    maximum
+                } else if value == f64::NEG_INFINITY {
+                    minimum
+                } else {
+                    value as i64
+                };
+                self.cx.constant_i32(value).cast(dtype)
+            }
+            DType::Int => self.cx.constant_i32(if value.is_nan() {
+                0
+            } else if value == f64::INFINITY {
+                i32::MAX as i64
+            } else if value == f64::NEG_INFINITY {
+                i32::MIN as i64
+            } else {
+                value as i64
+            }),
+            _ => self.cx.constant_f32(value as f32).cast(dtype),
+        }
+    }
+
     /// A typed scalar constant matching `tensor`'s dtype and dims.
     pub(super) fn constant_like(&mut self, tensor: GraphTensor, value: f64) -> GraphTensor {
-        let scalar = match tensor.dtype {
-            DType::F64 => self.cx.constant_f64(value),
-            DType::I64 => self.cx.constant_i64(value as i64),
-            DType::Int => self.cx.constant_i64(value as i64).cast(DType::Int),
-            _ => self.cx.constant_f32(value as f32).cast(tensor.dtype),
-        };
+        let scalar = self.typed_scalar(value, tensor.dtype);
         scalar.expand_rhs(tensor.dims())
     }
 
@@ -495,12 +533,7 @@ impl Translator<'_> {
         dtype: DType,
         value: f64,
     ) -> GraphTensor {
-        let scalar = match dtype {
-            DType::F64 => self.cx.constant_f64(value),
-            DType::I64 => self.cx.constant_i64(value as i64),
-            DType::Int => self.cx.constant_i64(value as i64).cast(DType::Int),
-            _ => super::convert(self.cx.constant_f32(value as f32), dtype),
-        };
+        let scalar = self.typed_scalar(value, dtype);
         scalar.expand_rhs(shape)
     }
 
