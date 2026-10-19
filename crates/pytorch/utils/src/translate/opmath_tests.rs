@@ -668,3 +668,29 @@ fn narrow_scalar_helpers_and_rounded_division_stay_integer() {
         }
     }
 }
+
+#[test]
+fn fp64_scalar_literals_do_not_require_runtime_numeric_conversion() {
+    use crate::dtype::TorchDType;
+    for literal in [
+        scalar_int("s", (1_i64 << 40) + 1),
+        scalar_bool("s", true),
+        scalar_float("s", 1.25),
+    ] {
+        let t = translate_one(
+            node(
+                "torch.ops.aten.scalar_tensor.default",
+                vec![literal, scalar_type("dtype", TorchDType::Double.code())],
+                &["out"],
+            ),
+            &[("out", TorchDType::Double.code(), &[])],
+            &[],
+            &["out"],
+        );
+        assert_eq!(t.outputs[0].dtype, DType::F64);
+        assert!(!any_node(&t, |op, _| matches!(
+            op,
+            LogicalOp::Cast(DType::F64)
+        )));
+    }
+}

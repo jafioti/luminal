@@ -546,13 +546,16 @@ impl Translator<'_> {
             return Ok(self.typed_scalar(v, dtype));
         }
         if let Some(v) = input.arg.as_int() {
+            if dtype == DType::F64 {
+                return Ok(self.cx.constant_f64(v as f64));
+            }
             if dtype == DType::I64 {
                 return Ok(self.cx.constant_i64(v));
             }
             return Ok(self.cx.constant_i32(v).cast(dtype));
         }
         if let Some(v) = input.arg.as_bool() {
-            return Ok(self.cx.constant_i32(i64::from(v)).cast(dtype));
+            return Ok(self.typed_scalar(if v { 1.0 } else { 0.0 }, dtype));
         }
         bail!(
             "operand {:?} is not a scalar (arg: {:?})",
