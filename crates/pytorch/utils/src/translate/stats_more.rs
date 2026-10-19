@@ -145,7 +145,9 @@ impl Translator<'_> {
     fn scalar_value(&mut self, value: f64, dtype: DType) -> GraphTensor {
         match dtype {
             DType::F64 => self.cx.constant_f64(value),
-            DType::Int | DType::I64 => self.cx.constant_i64(value as i64).cast(dtype),
+            DType::Int | DType::I64 | DType::I8 | DType::I16 | DType::U8 => {
+                self.cx.constant_i64(value as i64).cast(dtype)
+            }
             _ => self.cx.constant_f32(value as f32).cast(dtype),
         }
     }
@@ -161,14 +163,7 @@ impl Translator<'_> {
     /// An explicit float -> int read (`trunc_cast`); every other conversion
     /// is an ordinary `cast`.
     fn lossy_cast(&mut self, tensor: GraphTensor, dtype: DType) -> GraphTensor {
-        if tensor.dtype == dtype {
-            return tensor;
-        }
-        if super::is_float(tensor.dtype) && super::is_int(dtype) {
-            tensor.trunc_cast(dtype)
-        } else {
-            tensor.cast(dtype)
-        }
+        super::convert(tensor, dtype)
     }
 
     /// Re-insert reduced axes as size-1 extents (keepdim).

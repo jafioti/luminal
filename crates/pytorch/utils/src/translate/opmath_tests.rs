@@ -590,3 +590,38 @@ fn attention_keeps_compute_precision_until_the_operator_output() {
         }
     }
 }
+
+#[test]
+fn float_to_narrow_storage_records_truncation_and_keeps_output_dtype() {
+    use crate::dtype::TorchDType;
+    for source in [FLOAT, HALF, BFLOAT16] {
+        for (target, dtype) in [
+            (TorchDType::Char, DType::I8),
+            (TorchDType::Short, DType::I16),
+            (TorchDType::Byte, DType::U8),
+        ] {
+            let t = translate_one(
+                node(
+                    "torch.ops.aten._to_copy.default",
+                    vec![
+                        tensor_input("self", "x"),
+                        scalar_type("dtype", target.code()),
+                    ],
+                    &["out"],
+                ),
+                &[("x", source, &[8]), ("out", target.code(), &[8])],
+                &["x"],
+                &["out"],
+            );
+            assert_eq!(t.outputs[0].dtype, dtype);
+            assert!(any_node(&t, |op, _| matches!(
+                op,
+                LogicalOp::TruncCast(DType::Int)
+            )));
+            assert!(any_node(
+                &t,
+                |op, _| matches!(op, LogicalOp::Cast(d) if *d == dtype)
+            ));
+        }
+    }
+}

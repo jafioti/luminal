@@ -545,7 +545,7 @@ impl Translator<'_> {
         if let Some(v) = input.arg.as_float() {
             return Ok(match dtype {
                 DType::F64 => self.cx.constant_f64(v),
-                dtype => self.cx.constant_f32(v as f32).cast(dtype),
+                dtype => convert(self.cx.constant_f32(v as f32), dtype),
             });
         }
         if let Some(v) = input.arg.as_int() {
@@ -1162,13 +1162,7 @@ impl Translator<'_> {
             "to.dtype" | "to.dtype_layout" | "_to_copy.default" => {
                 let x = self.operand(&n[0])?;
                 let dtype = self.scalar_type_arg(&n[1])?;
-                // Lossless casts go through `cast`; float -> int is the
-                // explicit truncating conversion (`torch.int()`).
-                if is_float(x.dtype) && is_int(dtype) {
-                    x.trunc_cast(dtype)
-                } else {
-                    x.cast(dtype)
-                }
+                convert(x, dtype)
             }
             // ---- cat ----
             "cat.default" => {
@@ -1428,8 +1422,9 @@ fn broadcast_pair(a: GraphTensor, b: GraphTensor) -> (GraphTensor, GraphTensor) 
 }
 
 /// Convert a value to `dtype`: `cast` is lossless-only, so a float -> int
-/// conversion is the explicit truncating read, and a float -> narrow-int
-/// conversion, which the frontend has no op for, leaves the value alone.
+/// conversion is an explicit truncating read. Narrow integer storage uses
+/// an Int32 truncation followed by an integer-width conversion, preserving
+/// both the rounding operation and the requested result dtype.
 fn convert(value: GraphTensor, dtype: DType) -> GraphTensor {
     if value.dtype == dtype {
         return value;
@@ -1438,7 +1433,7 @@ fn convert(value: GraphTensor, dtype: DType) -> GraphTensor {
         return if is_int(dtype) {
             value.trunc_cast(dtype)
         } else {
-            value
+            value.trunc_cast(DType::Int).cast(dtype)
         };
     }
     value.cast(dtype)

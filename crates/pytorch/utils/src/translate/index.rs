@@ -121,13 +121,7 @@ impl Translator<'_> {
     /// Cast to a storage dtype, using the explicit truncating read for
     /// float -> int.
     fn idx_cast_like(&mut self, t: GraphTensor, dtype: DType) -> GraphTensor {
-        if t.dtype == dtype {
-            return t;
-        }
-        if idx_is_float(t.dtype) && idx_is_int(dtype) {
-            return t.trunc_cast(dtype);
-        }
-        t.cast(dtype)
+        super::convert(t, dtype)
     }
 
     /// Right-aligned broadcast to `target` (prepends size-1 dims, expands).

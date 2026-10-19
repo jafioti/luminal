@@ -264,7 +264,7 @@ impl Translator<'_> {
     pub(super) fn floating_scalar(&mut self, value: f64, dtype: DType) -> GraphTensor {
         match dtype {
             DType::F64 => self.cx.constant_f64(value),
-            _ => self.cx.constant_f32(value as f32).cast(dtype),
+            _ => super::convert(self.cx.constant_f32(value as f32), dtype),
         }
     }
 
@@ -499,7 +499,7 @@ impl Translator<'_> {
             DType::F64 => self.cx.constant_f64(value),
             DType::I64 => self.cx.constant_i64(value as i64),
             DType::Int => self.cx.constant_i64(value as i64).cast(DType::Int),
-            _ => self.cx.constant_f32(value as f32).cast(dtype),
+            _ => super::convert(self.cx.constant_f32(value as f32), dtype),
         };
         scalar.expand_rhs(shape)
     }
