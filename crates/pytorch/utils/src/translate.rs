@@ -37,6 +37,8 @@ mod index;
 #[cfg(test)]
 mod index_tests;
 mod linalg;
+#[cfg(test)]
+mod matmul_tests;
 mod movement_more;
 #[cfg(test)]
 mod opmath_tests;
