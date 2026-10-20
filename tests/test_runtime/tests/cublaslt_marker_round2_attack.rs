@@ -1608,7 +1608,9 @@ fn attack_a11_all_ones_decorated_stress() {
     // redundant) — the corner's surface HALVES. Soundness unchanged.
     // ROUND-11 RE-PIN (was 32): x4 from the frame cross products across
     // the welded site families. Still bounded, still all sound.
-    assert_eq!(ops, 128, "the degenerate corner's candidate count, pinned");
+    // Bit observability removes floating Add/Mul operand permutations.
+    // Re-pin the reduced surface; every remaining candidate is still checked.
+    assert_eq!(ops, 80, "the degenerate corner's candidate count, pinned");
     assert!(
         ops < 256,
         "the arms x forms multiplicity stays bounded in the worst corner"
@@ -2196,9 +2198,9 @@ fn attack_d2_double_relu() {
     );
 }
 
-/// d3: `x@w1 + x@w2` — the add can fold into EITHER matmul, so two
-/// Accumulate candidates exist over two sites. Exactly one is elected, and
-/// its C must be the OTHER matmul's output (never its own operand).
+/// d3: `x@w1 + x@w2` — floating operand order permits accumulation into
+/// the left matmul. Folding into the right would permute NaN payloads.
+/// C must be the other matmul's output (never its own operand).
 #[test]
 fn attack_d3_mm_plus_mm_two_sites() {
     let text = record(|cx| {
@@ -2213,12 +2215,8 @@ fn attack_d3_mm_plus_mm_two_sites() {
     println!("d3 mm+mm: sites={sites} accumulate candidates={acc}");
     // ROUND-10 RE-PIN: original + transpose-sandwich sibling site per matmul.
     assert_eq!(sites, 4, "two matmuls, two site pairs");
-    // ROUND-11 RE-PIN (was 2): the fold still fires once per matmul, and
-    // each folds over the 2 A x 2 B frame cross product of its site.
-    assert_eq!(
-        acc, 8,
-        "the add folds into EITHER matmul — 4 frame combos each"
-    );
+    // Four frame combinations remain for the recorded operand order.
+    assert_eq!(acc, 4, "only the left matmul absorbs the recorded Add");
     assert_candidates_sound(&s, "d3");
     assert_one_lit_per_op_class(&s, "d3");
 
