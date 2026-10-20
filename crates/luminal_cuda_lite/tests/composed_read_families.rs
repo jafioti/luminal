@@ -29,7 +29,8 @@ use luminal_cuda_lite::HostBuffer;
 use luminal_cuda_lite::{CudaRuntime, kernels};
 
 /// Measure candidates with a fixed seed. The fixture registry excludes
-/// materialized index maps and copies so the tests exercise composed view reads.
+/// cuBLASLt (these graphs contain no matmuls), materialized index maps, and
+/// copies so the tests exercise composed view reads.
 fn view_search_options(seed: u64) -> CompileOptions {
     CompileOptions {
         generations: 4,
@@ -48,13 +49,11 @@ fn plan_for(
     inputs: &[(NodeIndex, HostBuffer)],
     seed: u64,
 ) -> BufferIrGraph<luminal::layouts::DecodedLayout> {
-    let mut rt = CudaRuntime::load_with_registry(
-        cx,
-        luminal_cuda_lite::cuda_registry_filtered(|row| {
-            !matches!(row.label(), "IndexMapApplyMaterialize" | "CopyGeneric")
-        }),
-    )
-    .expect("cuda load");
+    let registry = luminal_cuda_lite::cuda_registry_without_cublaslt()
+        .into_iter()
+        .filter(|row| !matches!(row.label(), "IndexMapApplyMaterialize" | "CopyGeneric"))
+        .collect();
+    let mut rt = CudaRuntime::load_with_registry(cx, registry).expect("cuda load");
     let data: FxHashMap<NodeIndex, HostBuffer> = inputs.iter().cloned().collect();
     let outcome = rt
         .search(
@@ -497,7 +496,7 @@ fn scatter_lowers_all_read_side_folds() {
         &[
             "long long coord0_idx = c0 + 0LL;",
             "coord = (long long)coord0[coord0_idx];",
-            "long long src_idx = (((c0 * 3LL) + 3LL) + c1);",
+            "long long src_idx = ((c1 + (c0 * 3LL)) + 3LL);",
             "out[flat] = src[src_idx];",
         ],
         "scatter all-folds write launch",

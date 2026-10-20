@@ -493,6 +493,11 @@ pub(crate) fn cuda_type(dtype: PlanDtype) -> Result<&'static str> {
         PlanDtype::Bf16 => "__nv_bfloat16",
         PlanDtype::Int => "int",
         PlanDtype::Int64 => "long long",
+        PlanDtype::UInt64 => "unsigned long long",
+        PlanDtype::I8 => "signed char",
+        PlanDtype::U8 => "unsigned char",
+        PlanDtype::I16 => "short",
+        PlanDtype::U16 => "unsigned short",
         PlanDtype::Bool | PlanDtype::Bool8 => "unsigned char",
         other => bail!("cuda-lite has no device type for {other:?}"),
     })

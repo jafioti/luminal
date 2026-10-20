@@ -1,5 +1,6 @@
 // The high level interface implemented on GraphTensor. All of these ops get translated to primitive ops.
 pub mod binary;
+pub mod boolean;
 pub mod matmul;
 pub mod movement;
 pub mod other;

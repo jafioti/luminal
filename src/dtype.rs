@@ -112,6 +112,12 @@ impl Display for DType {
 }
 
 impl DType {
+    /// Encoding width in logical IR. Bool is one bit; byte-backed boundary
+    /// booleans are the separate PlanDtype::Bool8 representation.
+    pub fn logical_bits(self) -> usize {
+        if self == Self::Bool { 1 } else { self.bits() }
+    }
+
     /// Returns the number of bits per element for this dtype.
     ///
     /// This operates in bits (not bytes) so that sub-byte types like F4E2M1, I4, U4
