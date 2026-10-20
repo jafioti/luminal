@@ -181,6 +181,42 @@ mod tests {
         }
     }
     #[test]
+    fn prims_shift_aliases_use_the_same_decomposition() {
+        let x = [i64::MIN, i64::MAX, (1 << 54) + 3];
+        let counts = [1, 31, 63];
+        for right in [false, true] {
+            let name = if right {
+                "shift_right_arithmetic"
+            } else {
+                "shift_left"
+            };
+            let t = translate_one(
+                node(
+                    &format!("torch.ops.prims.{name}.default"),
+                    vec![tensor_input("self", "a"), tensor_input("other", "b")],
+                    &["y"],
+                ),
+                &[("a", 5, &[3]), ("b", 5, &[3]), ("y", 5, &[3])],
+                &["a", "b"],
+                &["y"],
+            );
+            let rt = run(
+                &t,
+                &[
+                    TypedBuffer::I64(x.to_vec()),
+                    TypedBuffer::I64(counts.to_vec()),
+                ],
+            );
+            assert_eq!(
+                rt.get_i64(t.outputs[0].tensor).unwrap(),
+                &x.iter()
+                    .zip(counts)
+                    .map(|(x, n)| oracle(*x, n, right))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+    #[test]
     fn narrow_scalar_counts_follow_aten_conversion() {
         let t = translate_one(
             node(

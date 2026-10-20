@@ -981,12 +981,14 @@ impl Translator<'_> {
             "bitwise_xor.Tensor" | "bitwise_xor.Scalar" | "__xor__.Tensor" => {
                 self.translate_bitwise(node, false, true)?
             }
-            "bitwise_left_shift.Tensor"
+            "prims.shift_left.default"
+            | "bitwise_left_shift.Tensor"
             | "bitwise_left_shift.Tensor_Scalar"
             | "bitwise_left_shift.Scalar_Tensor"
             | "__lshift__.Tensor"
             | "__lshift__.Scalar" => self.translate_shift(node, false)?,
-            "bitwise_right_shift.Tensor"
+            "prims.shift_right_arithmetic.default"
+            | "bitwise_right_shift.Tensor"
             | "bitwise_right_shift.Tensor_Scalar"
             | "bitwise_right_shift.Scalar_Tensor"
             | "__rshift__.Tensor"
