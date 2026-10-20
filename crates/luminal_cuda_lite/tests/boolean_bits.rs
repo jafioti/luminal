@@ -100,7 +100,9 @@ fn boolean_algebra_and_encoding_round_trips_preserve_bits() {
         vec![0xff; byte_values.len()]
     );
     let expected_interleaved = byte_values
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let mut code = 0u16;
             for bit in 0..8 {

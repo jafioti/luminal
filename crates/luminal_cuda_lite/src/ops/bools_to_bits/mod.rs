@@ -122,6 +122,13 @@ impl KernelOp for BoolsToBitsDps {
             Coords::Bound { prefix: "a_c" },
         )?;
         let chain = chain.replace("    ", "        ");
+        // Every input lane can be a valid Bool while the assembled byte is
+        // invalid Bool8. Validate the complete encoding before storing it.
+        let validate_code = if *target == PlanDtype::Bool8 {
+            "    if (code > 1u) { asm(\"trap;\"); return; }\n"
+        } else {
+            ""
+        };
         let source = format!(
             r#"extern "C" __global__ void k(const unsigned char* a, unsigned char* out, const long long* params) {{
     const unsigned long long n = {n};
@@ -134,7 +141,7 @@ impl KernelOp for BoolsToBitsDps {
         if (bit > 1u) {{ asm("trap;"); return; }}
         code |= (unsigned long long)bit << lane;
     }}
-    #pragma unroll
+{validate_code}    #pragma unroll
     for (unsigned int byte = 0; byte < {bytes}; ++byte)
         out[i * {bytes} + byte] = (unsigned char)(code >> (8u * byte));
 }}"#
