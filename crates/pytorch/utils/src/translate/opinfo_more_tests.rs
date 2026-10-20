@@ -259,6 +259,26 @@ fn empty_dot_returns_its_additive_identity() {
 }
 
 #[test]
+fn nansum_removes_nan_before_casting_to_boolean_output() {
+    let t = translate_one(
+        node(
+            "torch.ops.aten.nansum.default",
+            vec![
+                tensor_input("self", "x"),
+                ints("dim", &[0]),
+                scalar_type("dtype", BOOL),
+            ],
+            &["y"],
+        ),
+        &[("x", FLOAT, &[3]), ("y", BOOL, &[])],
+        &["x"],
+        &["y"],
+    );
+    let rt = run(&t, vec![TypedBuffer::F32(vec![0., f32::NAN, 0.])]);
+    assert_eq!(rt.get_bool8(t.outputs[0].tensor).unwrap(), &vec![0]);
+}
+
+#[test]
 fn resize_nearest_exact_uses_half_pixel_coordinates() {
     let t = translate_one(
         node(

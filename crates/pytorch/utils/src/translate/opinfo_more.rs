@@ -346,8 +346,9 @@ impl Translator<'_> {
     }
 
     pub(super) fn translate_nansum(&mut self, node: &Node) -> Result<GraphTensor> {
-        let raw = self.raw_operand(&node.inputs[0])?;
-        let x = self.widen(raw);
+        // Remove NaNs in the source dtype before reduction promotion. Casting
+        // to an integral result dtype first would lose the NaN classification.
+        let x = self.raw_operand(&node.inputs[0])?;
         let nan = self.is_nan(x);
         let zero = self.constant_like(x, 0.0);
         let clean = self.select(nan, zero, x);
