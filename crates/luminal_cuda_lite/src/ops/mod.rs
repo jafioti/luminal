@@ -30,6 +30,9 @@
 //! dispatch entry; a familiar label alone never makes an op executable.
 
 pub mod add;
+pub mod and;
+pub mod bits_to_bools;
+pub mod bools_to_bits;
 pub mod cast;
 pub mod ceil;
 pub mod constant;
@@ -50,6 +53,8 @@ pub mod log2;
 pub mod materialize_layout_copy;
 pub mod modulo;
 pub mod mul;
+pub mod not;
+pub mod or;
 pub mod recip;
 pub mod reduce_max;
 pub mod reduce_sum;
@@ -171,6 +176,21 @@ pub fn cuda_registry_without_cublaslt() -> Vec<RegisteredOp> {
         }
     }
     vec![
+        // CUDA Lite physically stores each logical Bool in one byte. Core's
+        // encoding views address Bool as one packed bit, so those aliases are
+        // not zero-copy on this backend. Register only the exact materializers
+        // until CUDA Lite has an owner-aware packed-bit read path.
+        reg(
+            bits_to_bools::BitsToBoolsMatcher,
+            bits_to_bools::BitsToBools { width: 1 },
+        ),
+        reg(
+            bools_to_bits::BoolsToBitsMatcher,
+            bools_to_bits::BoolsToBits { width: 1 },
+        ),
+        reg(and::AndMatcher, and::And),
+        reg(or::OrMatcher, or::Or),
+        reg(not::NotMatcher, not::Not),
         reg(add::AddFunctionalMatcher, add::AddFunctional),
         reg(
             materialize_layout_copy::MaterializeLayoutCopyMatcher,
