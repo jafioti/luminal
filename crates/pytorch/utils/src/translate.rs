@@ -51,6 +51,7 @@ mod reductions_more;
 mod remainder_tests;
 #[cfg(test)]
 mod scan_tests;
+mod shifts;
 mod special;
 mod stats_more;
 mod sympy;
@@ -951,8 +952,7 @@ impl Translator<'_> {
             "logical_xor.default" => self.logical_binary(node, false, true)?,
             "logical_not.default" => {
                 let x = self.operand(&n[0])?;
-                let one = self.cx.constant_f32(1.0).expand_rhs(x.dims());
-                (one - x.cast(DType::F32)).cast(DType::Bool)
+                self.truth(x).logical_not()
             }
             // ---- power / modulo ----
             "pow.Tensor_Scalar" => self.pow_tensor_scalar(node)?,
@@ -972,8 +972,27 @@ impl Translator<'_> {
             "log2.default" => self.translate_log2(node)?,
             "isnan.default" => self.translate_isnan(node)?,
             "leaky_relu.default" => self.translate_leaky_relu(node)?,
-            "bitwise_and.Tensor" | "__and__.Tensor" => self.translate_bitwise(node, false)?,
-            "bitwise_or.Tensor" | "__or__.Tensor" => self.translate_bitwise(node, true)?,
+            "bitwise_and.Tensor" | "bitwise_and.Scalar" | "__and__.Tensor" => {
+                self.translate_bitwise(node, false, false)?
+            }
+            "bitwise_or.Tensor" | "bitwise_or.Scalar" | "__or__.Tensor" => {
+                self.translate_bitwise(node, true, false)?
+            }
+            "bitwise_xor.Tensor" | "bitwise_xor.Scalar" | "__xor__.Tensor" => {
+                self.translate_bitwise(node, false, true)?
+            }
+            "prims.shift_left.default"
+            | "bitwise_left_shift.Tensor"
+            | "bitwise_left_shift.Tensor_Scalar"
+            | "bitwise_left_shift.Scalar_Tensor"
+            | "__lshift__.Tensor"
+            | "__lshift__.Scalar" => self.translate_shift(node, false)?,
+            "prims.shift_right_arithmetic.default"
+            | "bitwise_right_shift.Tensor"
+            | "bitwise_right_shift.Tensor_Scalar"
+            | "bitwise_right_shift.Scalar_Tensor"
+            | "__rshift__.Tensor"
+            | "__rshift__.Scalar" => self.translate_shift(node, true)?,
             "squeeze.default" => self.translate_squeeze(node, true)?,
             "squeeze.dims" => self.translate_squeeze(node, false)?,
             "tril.default" => self.translate_triangular(node, false)?,
@@ -1716,3 +1735,6 @@ mod dim_expr_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod boolean_tests;

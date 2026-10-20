@@ -245,13 +245,12 @@ impl Translator<'_> {
     pub(super) fn translate_bitwise_not(&mut self, node: &Node) -> Result<GraphTensor> {
         let a = self.operand(&node.inputs[0])?;
         Ok(match a.dtype {
-            DType::Bool => {
-                let one = self.constant_like(a, 1.0).cast(DType::Int);
-                (one - a.cast(DType::Int)).cast(DType::Bool)
-            }
-            DType::Int | DType::I64 | DType::I8 | DType::I16 | DType::U8 => {
-                self.constant_like(a, -1.0) - a
-            }
+            DType::Bool => a.logical_not(),
+            DType::Int | DType::I64 | DType::U64 | DType::I8 | DType::I16 | DType::U8 => a
+                .bits_to_bools()
+                .logical_not()
+                .bools_to_bits(a.dtype)
+                .squeeze(a.rank()),
             other => anyhow::bail!("bitwise_not requires an integer or Bool, got {other:?}"),
         })
     }
