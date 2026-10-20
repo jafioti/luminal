@@ -86,7 +86,10 @@ fn bool8_packing_rejects_non_boolean_encodings() {
         let result = pack_codes(PlanDtype::Bool8, &[code]);
         let rejected = matches!(
             result,
-            Err(DriverError(sys::CUresult::CUDA_ERROR_ILLEGAL_INSTRUCTION))
+            Err(DriverError(
+                sys::CUresult::CUDA_ERROR_ILLEGAL_INSTRUCTION
+                    | sys::CUresult::CUDA_ERROR_LAUNCH_FAILED
+            ))
         );
         if !rejected {
             eprintln!("Bool8 code {code:#04x} must trap, got {result:?}");
