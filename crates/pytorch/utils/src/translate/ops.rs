@@ -78,7 +78,11 @@ impl Translator<'_> {
         let a = self.operand(&node.inputs[0])?;
         let b = self.operand(&node.inputs[1])?;
         let (a, b) = util::broadcast_binary(a, b);
-        Ok((b * a.log2()).exp2())
+        let result = (b * a.log2()).exp2();
+        // The logarithmic form yields NaN for zero exponents at zero or nonfinite bases.
+        let zero = self.constant_like(b, 0.0);
+        let one = self.constant_like(a, 1.0);
+        Ok(b.eq(zero).select(one, result))
     }
 
     pub(super) fn pow_scalar_base(&mut self, node: &Node) -> Result<GraphTensor> {
@@ -87,7 +91,10 @@ impl Translator<'_> {
         let log_base = self
             .floating_scalar(base.ln(), b.dtype)
             .expand_rhs(b.dims());
-        Ok((b * log_base).exp())
+        let result = (b * log_base).exp();
+        let zero = self.constant_like(b, 0.0);
+        let one = self.constant_like(b, 1.0);
+        Ok(b.eq(zero).select(one, result))
     }
 
     pub(super) fn fmod_remainder(&mut self, node: &Node, fmod: bool) -> Result<GraphTensor> {

@@ -48,6 +48,8 @@ mod opmath_tests;
 mod ops;
 mod pooling;
 #[cfg(test)]
+mod power_tests;
+#[cfg(test)]
 mod reduction_dtype_tests;
 mod reductions_more;
 #[cfg(test)]
