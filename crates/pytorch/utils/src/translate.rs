@@ -54,6 +54,9 @@ mod scan_tests;
 mod shifts;
 mod special;
 mod stats_more;
+mod strided;
+#[cfg(test)]
+mod strided_tests;
 mod sympy;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -156,6 +159,7 @@ struct Translator<'a> {
     /// The dtype pattern of the op being translated, when torch performs
     /// that op in opmath; `None` for the ops that round nothing.
     opmath: Option<OpMath>,
+    storage_values: HashMap<String, strided::Backing>,
     /// One widening per (value, common dtype), so several nodes widening
     /// the same value share one cast.
     widened: HashMap<(NodeIndex, Discriminant<DType>), GraphTensor>,
@@ -204,6 +208,7 @@ pub fn translate(parsed: &ParsedPT2) -> Result<Translation> {
         parsed,
         dims: HashMap::new(),
         opmath: None,
+        storage_values: HashMap::new(),
         widened: HashMap::new(),
     };
 
@@ -820,6 +825,8 @@ impl Translator<'_> {
                 self.translate_frexp(node)?;
                 return Ok(());
             }
+            "as_strided.default" | "as_strided_copy.default" => self.translate_as_strided(node)?,
+            "as_strided_scatter.default" => self.translate_as_strided_scatter(node)?,
             // ---- linear ----
             "linear.default" => {
                 let x = self.operand(&n[0])?;
@@ -1135,6 +1142,7 @@ impl Translator<'_> {
             "sign.default" => self.translate_sign(node)?,
             "signbit.default" => self.translate_signbit(node)?,
             "isinf.default" => self.translate_isinf(node)?,
+            "isfinite.default" => self.translate_isfinite(node)?,
             "bitwise_not.default" => self.translate_bitwise_not(node)?,
             "ldexp.Tensor" => self.translate_ldexp(node)?,
             "floor_divide.default" => self.translate_floor_divide(node)?,

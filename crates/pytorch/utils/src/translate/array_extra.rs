@@ -888,6 +888,8 @@ mod tests {
                 TensorMeta {
                     dtype: *dtype,
                     sizes: sizes(shape),
+                    strides: None,
+                    storage_offset: None,
                     layout: None,
                     device: None,
                 },
@@ -1134,6 +1136,8 @@ mod tests {
             TensorMeta {
                 dtype: 7,
                 sizes: sizes(&[2, 2]),
+                strides: None,
+                storage_offset: None,
                 layout: None,
                 device: None,
             },
@@ -1143,6 +1147,8 @@ mod tests {
             TensorMeta {
                 dtype: 7,
                 sizes: sizes(&[2, 2]),
+                strides: None,
+                storage_offset: None,
                 layout: None,
                 device: None,
             },

@@ -509,6 +509,13 @@ impl Translator<'_> {
                 let out = self.cx_atan2(value.imag, value.real);
                 self.values.insert(output_name.to_string(), out);
             }
+            "isfinite.default" => {
+                let value = self.get_complex_input(node, 0)?;
+                let real = self.is_finite(value.real);
+                let imag = self.is_finite(value.imag);
+                self.values
+                    .insert(output_name.to_string(), real.logical_and(imag));
+            }
             "isinf.default" => {
                 let value = self.get_complex_input(node, 0)?;
                 let real = self.is_inf(value.real);

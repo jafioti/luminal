@@ -1198,6 +1198,8 @@ mod tests {
                 TensorMeta {
                     dtype: *dtype,
                     sizes: sizes(shape),
+                    strides: None,
+                    storage_offset: None,
                     layout: None,
                     device: None,
                 },

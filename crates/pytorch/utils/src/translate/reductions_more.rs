@@ -356,6 +356,8 @@ mod tests {
                 TensorMeta {
                     dtype: *dtype,
                     sizes: sizes(shape),
+                    strides: None,
+                    storage_offset: None,
                     layout: None,
                     device: None,
                 },
@@ -674,6 +676,7 @@ mod scalar_precision_tests {
             parsed: &parsed,
             dims: HashMap::new(),
             opmath: None,
+            storage_values: HashMap::new(),
             widened: HashMap::new(),
         };
         let x = translator.cx.tensor(vec![1], DType::I64);

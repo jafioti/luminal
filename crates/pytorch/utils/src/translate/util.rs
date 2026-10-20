@@ -287,6 +287,33 @@ impl Translator<'_> {
         value.abs()
     }
 
+    /// IEEE finiteness depends only on whether every exponent bit is one.
+    /// Inspect the encoding so subnormals and reduced-precision extrema never
+    /// depend on the backend's floating arithmetic or scalar conversion.
+    pub(super) fn is_finite(&mut self, value: GraphTensor) -> GraphTensor {
+        let (start, end) = match value.dtype {
+            DType::F16 => (10, 15),
+            DType::Bf16 => (7, 15),
+            DType::F32 | DType::TF32 => (23, 31),
+            DType::F64 => (52, 63),
+            _ => {
+                return self
+                    .cx
+                    .constant_i32(1)
+                    .cast(DType::Bool)
+                    .expand_rhs(value.dims());
+            }
+        };
+        let bits = value.bits_to_bools();
+        let axis = bits.rank() - 1;
+        let exponent = bits
+            .slice_along(start..end, axis)
+            .cast(DType::Int)
+            .sum(vec![axis]);
+        let width = self.cx.constant_i32(end - start).expand_rhs(value.dims());
+        exponent.lt(width)
+    }
+
     pub(super) fn is_nan(&mut self, value: GraphTensor) -> GraphTensor {
         value.ne(value)
     }

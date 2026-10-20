@@ -231,6 +231,11 @@ impl Translator<'_> {
         }
     }
 
+    pub(super) fn translate_isfinite(&mut self, node: &Node) -> Result<GraphTensor> {
+        let a = self.operand(&node.inputs[0])?;
+        Ok(self.is_finite(a))
+    }
+
     pub(super) fn translate_isinf(&mut self, node: &Node) -> Result<GraphTensor> {
         let a = self.operand(&node.inputs[0])?;
         if is_float_dtype(a.dtype) {

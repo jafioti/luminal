@@ -504,6 +504,8 @@ mod tests {
             TensorMeta {
                 dtype,
                 sizes: sizes(in_shape),
+                strides: None,
+                storage_offset: None,
                 layout: None,
                 device: None,
             },
@@ -513,6 +515,8 @@ mod tests {
             TensorMeta {
                 dtype,
                 sizes: sizes(out_shape),
+                strides: None,
+                storage_offset: None,
                 layout: None,
                 device: None,
             },
