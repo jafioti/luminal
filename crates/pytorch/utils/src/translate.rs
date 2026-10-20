@@ -51,6 +51,7 @@ mod reductions_more;
 mod remainder_tests;
 #[cfg(test)]
 mod scan_tests;
+mod shifts;
 mod special;
 mod stats_more;
 mod sympy;
@@ -980,6 +981,16 @@ impl Translator<'_> {
             "bitwise_xor.Tensor" | "bitwise_xor.Scalar" | "__xor__.Tensor" => {
                 self.translate_bitwise(node, false, true)?
             }
+            "bitwise_left_shift.Tensor"
+            | "bitwise_left_shift.Tensor_Scalar"
+            | "bitwise_left_shift.Scalar_Tensor"
+            | "__lshift__.Tensor"
+            | "__lshift__.Scalar" => self.translate_shift(node, false)?,
+            "bitwise_right_shift.Tensor"
+            | "bitwise_right_shift.Tensor_Scalar"
+            | "bitwise_right_shift.Scalar_Tensor"
+            | "__rshift__.Tensor"
+            | "__rshift__.Scalar" => self.translate_shift(node, true)?,
             "squeeze.default" => self.translate_squeeze(node, true)?,
             "squeeze.dims" => self.translate_squeeze(node, false)?,
             "tril.default" => self.translate_triangular(node, false)?,
