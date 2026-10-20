@@ -209,8 +209,26 @@ impl Translator<'_> {
             _ => x.dims()[dim],
         };
         let step = node.inputs.get(4).and_then(|i| i.arg.as_int()).unwrap_or(1);
+        anyhow::ensure!(step > 0, "slice step must be positive, got {step}");
         if step != 1 {
-            bail!("slice step {step} != 1 is not ported");
+            let name = Self::tensor_output_names(node)
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("slice has no output metadata"))?;
+            let shape = self.tensor_meta_to_shape(self.tensor_meta(&name)?)?;
+            let start = start.max(0).min(x.dims()[dim]);
+            let coords = (0..rank)
+                .map(|axis| {
+                    self.cx.iota(shape.clone(), |c| {
+                        if axis == dim {
+                            start + c[axis] * IntExpr::from(step)
+                        } else {
+                            c[axis]
+                        }
+                    })
+                })
+                .collect::<Vec<_>>();
+            return Ok(x.gather(&coords));
         }
         let mut ranges: Vec<(IntExpr, IntExpr)> = x.dims().iter().map(|d| (0.into(), *d)).collect();
         ranges[dim] = (start, end);

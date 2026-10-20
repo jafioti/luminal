@@ -239,3 +239,39 @@ fn non_dense_roots_and_inaccessible_storage_are_refused() {
         assert!(format!("{err:#}").contains("backing"));
     }
 }
+
+#[test]
+fn strided_copy_of_stepped_slice_reads_the_original_backing() {
+    let mut p = parsed_nodes(
+        vec![
+            node(
+                "torch.ops.aten.slice.Tensor",
+                vec![
+                    tensor_input("self", "a"),
+                    scalar_int("dim", 0),
+                    scalar_int("start", 3),
+                    scalar_int("end", 8),
+                    scalar_int("step", 2),
+                ],
+                &["v"],
+            ),
+            node(
+                "torch.ops.aten.as_strided_copy.default",
+                vec![
+                    tensor_input("self", "v"),
+                    ints("size", &[4]),
+                    ints("stride", &[1]),
+                    scalar_int("storage_offset", 1),
+                ],
+                &["y"],
+            ),
+        ],
+        &[("a", 5, &[12]), ("v", 5, &[3]), ("y", 5, &[4])],
+        &["a"],
+        &["y"],
+    );
+    geometry(&mut p, "v", &[2], 3);
+    let t = super::translate(&p).unwrap();
+    let rt = run(&t, &[TypedBuffer::I64((0..12).collect())]);
+    assert_eq!(rt.get_i64(t.outputs[0].tensor).unwrap(), &[1, 2, 3, 4]);
+}
