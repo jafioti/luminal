@@ -56,6 +56,8 @@ mod remainder_tests;
 mod scan_tests;
 mod shifts;
 mod special;
+#[cfg(test)]
+mod special_tests;
 mod stats_more;
 mod strided;
 #[cfg(test)]
