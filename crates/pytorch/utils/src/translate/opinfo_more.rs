@@ -156,15 +156,14 @@ impl Translator<'_> {
                 "RMS normalization shape mismatch"
             );
         }
-        let input_dtype = self.raw_operand(&node.inputs[0])?.dtype;
         let eps = node
             .inputs
             .iter()
             .find(|i| i.name == "eps")
             .and_then(|i| i.arg.as_float())
-            .unwrap_or(match input_dtype {
-                DType::F16 => 0.0009765625,
-                DType::Bf16 => 0.0078125,
+            // ATen chooses the omitted epsilon at the arithmetic dtype:
+            // half and bfloat16 are widened to float32 before this choice.
+            .unwrap_or(match x.dtype {
                 DType::F64 => f64::EPSILON,
                 _ => f32::EPSILON as f64,
             });

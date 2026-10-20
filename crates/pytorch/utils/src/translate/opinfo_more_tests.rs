@@ -318,6 +318,26 @@ fn rms_norm_uses_the_trailing_axes_without_mean_centering() {
 }
 
 #[test]
+fn half_rms_norm_default_epsilon_uses_float32_opmath() {
+    for code in [HALF, BFLOAT16] {
+        let t = translate_one(
+            node(
+                "torch.ops.aten.rms_norm.default",
+                vec![tensor_input("input", "x"), ints("normalized_shape", &[2])],
+                &["y"],
+            ),
+            &[("x", code, &[2]), ("y", code, &[2])],
+            &["x"],
+            &["y"],
+        );
+        assert!(t.graph.logical.petgraph().node_weights().any(|n| {
+            matches!(n.op, luminal::prelude::LogicalOp::Constant(eps)
+                if eps == f32::EPSILON as f64)
+        }));
+    }
+}
+
+#[test]
 fn fused_rms_norm_returns_reciprocal_standard_deviation() {
     let t = translate_one(
         node(
