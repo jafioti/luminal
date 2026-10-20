@@ -252,20 +252,35 @@ impl Translator<'_> {
         condition.select(a, b)
     }
 
+    /// PyTorch truth conversion observes encodings: both signed zeros are
+    /// false, all other floating codes (including NaNs/subnormals) are true.
+    pub(super) fn truth(&mut self, value: GraphTensor) -> GraphTensor {
+        if value.dtype == DType::Bool {
+            return value;
+        }
+        let width = value.dtype.logical_bits();
+        let mut bits = value.bits_to_bools();
+        let axis = bits.rank() - 1;
+        if matches!(
+            value.dtype,
+            DType::F32 | DType::F64 | DType::F16 | DType::Bf16 | DType::TF32
+        ) {
+            bits = bits.slice_along(0..width - 1, axis);
+        }
+        let count = bits.cast(DType::Int).sum(vec![axis]);
+        self.cx.constant_i32(0).expand_rhs(count.dims()).lt(count)
+    }
+
     pub(super) fn bool_or(&mut self, a: GraphTensor, b: GraphTensor) -> GraphTensor {
         let (a, b) = broadcast_binary(a, b);
-        let (af, bf) = (a.cast(DType::F32), b.cast(DType::F32));
-        (af + bf - af * bf).cast(DType::Bool)
+        self.truth(a).logical_or(self.truth(b))
     }
-
     pub(super) fn bool_and(&mut self, a: GraphTensor, b: GraphTensor) -> GraphTensor {
         let (a, b) = broadcast_binary(a, b);
-        (a.cast(DType::F32) * b.cast(DType::F32)).cast(DType::Bool)
+        self.truth(a).logical_and(self.truth(b))
     }
-
     pub(super) fn bool_not(&mut self, value: GraphTensor) -> GraphTensor {
-        let one = self.cx.constant_f32(1.0).expand_rhs(value.dims());
-        (one - value.cast(DType::F32)).cast(DType::Bool)
+        self.truth(value).logical_not()
     }
 
     pub(super) fn real_abs(&mut self, value: GraphTensor) -> GraphTensor {

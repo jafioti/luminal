@@ -58,13 +58,13 @@ impl Translator<'_> {
         let a = self.operand(&node.inputs[0])?;
         let b = self.operand(&node.inputs[1])?;
         let (a, b) = util::broadcast_binary(a, b);
-        let (af, bf) = (a.cast(DType::F32), b.cast(DType::F32));
+        let (a, b) = (self.truth(a), self.truth(b));
         Ok(if or {
-            (af + bf).cast(DType::Bool)
+            a.logical_or(b)
         } else if xor {
-            af.ne(bf)
+            a.logical_or(b).logical_and(a.logical_and(b).logical_not())
         } else {
-            (af * bf).cast(DType::Bool)
+            a.logical_and(b)
         })
     }
 
