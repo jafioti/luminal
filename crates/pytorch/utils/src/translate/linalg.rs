@@ -10,6 +10,91 @@ fn transpose_matrix(value: GraphTensor) -> GraphTensor {
 }
 
 impl Translator<'_> {
+    pub(super) fn translate_lu_unpack(&mut self, node: &Node) -> Result<()> {
+        let lu = self.raw_operand(&node.inputs[0])?;
+        let pivots = self.raw_operand(&node.inputs[1])?;
+        let rank = lu.rank();
+        ensure!(rank >= 2, "LU unpack requires a matrix");
+        let dims = lu.dims();
+        let m = dims[rank - 2]
+            .to_usize()
+            .context("LU unpack requires static row count")?;
+        let n = dims[rank - 1]
+            .to_usize()
+            .context("LU unpack requires static column count")?;
+        let k = m.min(n);
+        let mut vector = dims[..rank - 2].to_vec();
+        vector.push(m.into());
+        let mut perm = self.cx.iota(vector.clone(), |c| c[rank - 2]);
+        let row = self.cx.iota(vector.clone(), |c| c[rank - 2]);
+        let one_based = self
+            .cx
+            .iota(vector.clone(), |c| c[rank - 2] + 1)
+            .cast(pivots.dtype);
+        let zero = self.cx.constant_i32(0).expand_rhs(vector.clone());
+        for i in 0..k {
+            let pivot = pivots
+                .slice_along(i..i + 1, rank - 2)
+                .expand(vector.clone());
+            let pivot_row = one_based.eq(pivot);
+            // Select by one-based coordinate equality instead of doing
+            // unchecked arithmetic on caller-provided pivot values.
+            let at_pivot = self
+                .select(pivot_row, perm, zero)
+                .sum(vec![rank - 2])
+                .expand_dim(rank - 2, m);
+            let at_i = perm.slice_along(i..i + 1, rank - 2).expand(vector.clone());
+            let index = self.cx.constant_i32(i).expand_rhs(vector.clone());
+            let swapped = self.select(pivot_row, at_i, perm);
+            perm = self.select(row.eq(index), at_pivot, swapped);
+        }
+        let mut pdims = dims[..rank - 2].to_vec();
+        pdims.extend([IntExpr::from(m), IntExpr::from(m)]);
+        let rows = self.cx.iota(pdims.clone(), |c| c[rank - 2]);
+        let p = rows
+            .eq(perm.unsqueeze(rank - 2).expand(pdims))
+            .cast(lu.dtype);
+        let l = lu.slice_along(0..k, rank - 1);
+        let rows = self.cx.iota(l.dims(), |c| c[rank - 2]);
+        let cols = self.cx.iota(l.dims(), |c| c[rank - 1]);
+        let zero = self.constant_like(l, 0.0);
+        let one = self.constant_like(l, 1.0);
+        let lower = self.select(rows.gt(cols), l, zero);
+        let lower = self.select(rows.eq(cols), one, lower);
+        let u = lu.slice_along(0..k, rank - 2);
+        let rows = self.cx.iota(u.dims(), |c| c[rank - 2]);
+        let cols = self.cx.iota(u.dims(), |c| c[rank - 1]);
+        let zero = self.constant_like(u, 0.0);
+        let upper = self.select(rows.le(cols), u, zero);
+        let empty = self
+            .typed_scalar(0.0, lu.dtype)
+            .expand_rhs(vec![IntExpr::from(0)]);
+        let data = self.named_bool_arg(node, "unpack_data").unwrap_or(true);
+        let permutation = self.named_bool_arg(node, "unpack_pivots").unwrap_or(true);
+        self.bind_outputs(
+            node,
+            vec![
+                if permutation { p } else { empty },
+                if data { lower } else { empty },
+                if data { upper } else { empty },
+            ],
+        )
+    }
+    pub(super) fn translate_legacy_triangular_solve(&mut self, node: &Node) -> Result<()> {
+        let b = self.operand(&node.inputs[0])?;
+        let a = self.operand(&node.inputs[1])?;
+        let upper = self.named_bool_arg(node, "upper").unwrap_or(true);
+        let transpose = self.named_bool_arg(node, "transpose").unwrap_or(false);
+        let unit = self.named_bool_arg(node, "unitriangular").unwrap_or(false);
+        let solution = self.triangular_solve(
+            if transpose { transpose_matrix(a) } else { a },
+            b,
+            upper != transpose,
+            true,
+            unit,
+        )?;
+        self.bind_outputs(node, vec![solution, a])
+    }
     fn triangular_solve(
         &mut self,
         mut a: GraphTensor,

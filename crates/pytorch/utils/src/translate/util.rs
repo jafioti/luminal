@@ -244,6 +244,9 @@ impl Translator<'_> {
     ) -> GraphTensor {
         let (a, condition) = broadcast_binary(a, condition);
         let (a, b) = broadcast_binary(a, b);
+        // The false branch may grow the common shape after the condition
+        // was aligned with the true branch (scalar predicates included).
+        let (condition, _) = broadcast_binary(condition, a);
         let condition = if condition.dtype == DType::Bool {
             condition
         } else {
@@ -315,7 +318,39 @@ impl Translator<'_> {
     }
 
     pub(super) fn is_nan(&mut self, value: GraphTensor) -> GraphTensor {
-        value.ne(value)
+        // GraphTensor's ordered lt/gt-based inequality is false for NaNs.
+        // Classify the IEEE encoding instead: exponent all ones and a
+        // nonzero significand. This also avoids flushing subnormals.
+        let (mantissa, end) = match value.dtype {
+            DType::F16 => (10, 15),
+            DType::Bf16 => (7, 15),
+            DType::F32 | DType::TF32 => (23, 31),
+            DType::F64 => (52, 63),
+            _ => {
+                return self
+                    .cx
+                    .constant_i32(0)
+                    .cast(DType::Bool)
+                    .expand_rhs(value.dims());
+            }
+        };
+        let bits = value.bits_to_bools();
+        let axis = bits.rank() - 1;
+        let exp = bits
+            .slice_along(mantissa..end, axis)
+            .cast(DType::Int)
+            .sum(vec![axis]);
+        let width = self
+            .cx
+            .constant_i32(end - mantissa)
+            .expand_rhs(value.dims());
+        let all = exp.eq(width);
+        let fraction = bits
+            .slice_along(0..mantissa, axis)
+            .cast(DType::Int)
+            .sum(vec![axis]);
+        let zero = self.cx.constant_i32(0).expand_rhs(value.dims());
+        self.bool_and(all, fraction.gt(zero))
     }
 
     pub(super) fn is_inf(&mut self, value: GraphTensor) -> GraphTensor {

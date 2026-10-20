@@ -40,6 +40,9 @@ mod linalg;
 #[cfg(test)]
 mod matmul_tests;
 mod movement_more;
+mod opinfo_more;
+#[cfg(test)]
+mod opinfo_more_tests;
 #[cfg(test)]
 mod opmath_tests;
 mod ops;
@@ -616,7 +619,7 @@ impl Translator<'_> {
         // F32 can fold those indicators without changing their truth value.
         if matches!(
             target,
-            "sum.default" | "sum.dim_IntList" | "prod.default" | "prod.dim_int"
+            "sum.default" | "sum.dim_IntList" | "prod.default" | "prod.dim_int" | "nansum.default"
         ) {
             return Ok(OpMath {
                 common: declared,
@@ -820,6 +823,66 @@ impl Translator<'_> {
         let n = &node.inputs;
 
         let value = match target {
+            "mvlgamma.default" => self.translate_mvlgamma(node)?,
+            "lu_unpack.default" => {
+                self.translate_lu_unpack(node)?;
+                return Ok(());
+            }
+            "nextafter.default" => self.translate_nextafter(node)?,
+            "rms_norm.default" => self.translate_rms_norm(node)?,
+            math @ ("logit.default"
+            | "logaddexp.default"
+            | "logaddexp2.default"
+            | "xlogy.Tensor"
+            | "special_xlog1py.default"
+            | "sinc.default"
+            | "softplus.default"
+            | "mish.default"
+            | "celu.default"
+            | "clamp_min.Tensor"
+            | "clamp_max.Tensor") => self.translate_small_math(node, math)?,
+            loss @ ("smooth_l1_loss.default"
+            | "soft_margin_loss.default"
+            | "binary_cross_entropy_with_logits.default") => {
+                self.translate_simple_loss(node, loss)?
+            }
+            "glu.default" => self.translate_glu(node)?,
+            "nansum.default" => self.translate_nansum(node)?,
+            "ones.default" => {
+                let shape = self.get_int_exprs_arg(node, 0)?;
+                let dtype = self.output_meta_dtype(node)?;
+                self.full_tensor(shape, dtype, 1.0)
+            }
+            "dot.default" | "vdot.default" => {
+                let a = self.operand(&n[0])?;
+                let b = self.operand(&n[1])?;
+                anyhow::ensure!(
+                    a.rank() == 1 && b.rank() == 1 && util::same_dim(a.dims()[0], b.dims()[0]),
+                    "dot requires equal length vectors"
+                );
+                (a * b).sum(vec![0])
+            }
+            "split.Tensor" => {
+                self.translate_split(node)?;
+                return Ok(());
+            }
+            "kthvalue.default" => {
+                self.translate_kthvalue(node)?;
+                return Ok(());
+            }
+            "mode.default" => {
+                self.translate_mode(node)?;
+                return Ok(());
+            }
+            "triangular_solve.default" => {
+                self.translate_legacy_triangular_solve(node)?;
+                return Ok(());
+            }
+            "rrelu_with_noise_functional.default" => {
+                self.translate_rrelu_inference(node)?;
+                return Ok(());
+            }
+
             "linalg_solve_triangular.default" => self.translate_triangular_solve(node)?,
             "cholesky_solve.default" => self.translate_cholesky_solve(node)?,
             "cholesky_inverse.default" => self.translate_cholesky_inverse(node)?,
@@ -1173,7 +1236,25 @@ impl Translator<'_> {
             "convolution.default" => self.translate_conv(node)?,
             "conv2d.default" => self.translate_conv(node)?,
             // ---- upsample / resize (batch 6) ----
-            "upsample_nearest2d.vec" => self.translate_upsample_nearest2d(node)?,
+            resize @ ("upsample_nearest1d.default"
+            | "upsample_nearest1d.vec"
+            | "upsample_nearest2d.default"
+            | "upsample_nearest2d.vec"
+            | "upsample_nearest3d.default"
+            | "upsample_nearest3d.vec"
+            | "_upsample_nearest_exact1d.default"
+            | "_upsample_nearest_exact1d.vec"
+            | "_upsample_nearest_exact2d.default"
+            | "_upsample_nearest_exact2d.vec"
+            | "_upsample_nearest_exact3d.default"
+            | "_upsample_nearest_exact3d.vec"
+            | "upsample_linear1d.default"
+            | "upsample_linear1d.vec"
+            | "upsample_bilinear2d.default"
+            | "upsample_trilinear3d.default"
+            | "upsample_trilinear3d.vec"
+            | "upsample_bicubic2d.default"
+            | "upsample_bicubic2d.vec") => self.translate_resize(node, resize)?,
             "upsample_bilinear2d.vec" => self.translate_upsample_bilinear2d(node)?,
             "_upsample_bilinear2d_aa.default" | "_upsample_bilinear2d_aa.vec" => {
                 self.translate_upsample_bilinear2d_aa(node)?
@@ -1191,13 +1272,19 @@ impl Translator<'_> {
                 self.translate_batch_norm_functional(node)?;
                 return Ok(());
             }
-            "_fused_rms_norm.default" => self.translate_fused_rms_norm(node)?,
+            "_fused_rms_norm.default" => {
+                self.translate_fused_rms_norm(node)?;
+                return Ok(());
+            }
             "native_group_norm.default" | "group_norm.default" => {
                 self.translate_group_norm(node)?;
                 return Ok(());
             }
             // ---- cast ----
-            "to.dtype" | "to.dtype_layout" | "_to_copy.default" => {
+            "to.dtype"
+            | "to.dtype_layout"
+            | "_to_copy.default"
+            | "prims.convert_element_type.default" => {
                 let x = self.operand(&n[0])?;
                 let dtype = self.scalar_type_arg(&n[1])?;
                 convert(x, dtype)
@@ -1519,6 +1606,16 @@ fn opmath_target(target: &str) -> bool {
             | "ldexp.Tensor"
             | "square.default"
             | "reciprocal.default"
+            | "logit.default" | "logaddexp.default" | "logaddexp2.default"
+            | "xlogy.Tensor" | "special_xlog1py.default" | "sinc.default"
+            | "softplus.default" | "mish.default" | "celu.default" | "glu.default"
+            | "rms_norm.default" | "smooth_l1_loss.default" | "soft_margin_loss.default"
+            | "mvlgamma.default"
+            | "binary_cross_entropy_with_logits.default" | "dot.default" | "vdot.default"
+            | "rrelu_with_noise_functional.default" | "clamp_min.Tensor" | "clamp_max.Tensor"
+            | "upsample_linear1d.default" | "upsample_linear1d.vec"
+            | "upsample_bilinear2d.default" | "upsample_trilinear3d.default" | "upsample_trilinear3d.vec"
+            | "upsample_bicubic2d.default" | "upsample_bicubic2d.vec"
             // unary math
             | "sigmoid.default"
             | "tanh.default"
@@ -1557,6 +1654,7 @@ fn opmath_target(target: &str) -> bool {
             // reductions
             | "sum.default"
             | "sum.dim_IntList"
+            | "nansum.default"
             | "mean.default"
             | "mean.dim"
             | "prod.default"
