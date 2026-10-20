@@ -152,7 +152,7 @@ fn strided_scatter_keeps_backing_updates_outside_visible_slice() {
         &["s", "y"],
     );
     geometry(&mut p, "v", &[1], 2);
-    geometry(&mut p, "s", &[1], 2);
+    geometry(&mut p, "s", &[1], 0);
     let t = super::translate(&p).unwrap();
     let rt = run(
         &t,
@@ -274,4 +274,70 @@ fn strided_copy_of_stepped_slice_reads_the_original_backing() {
     let t = super::translate(&p).unwrap();
     let rt = run(&t, &[TypedBuffer::I64((0..12).collect())]);
     assert_eq!(rt.get_i64(t.outputs[0].tensor).unwrap(), &[1, 2, 3, 4]);
+}
+
+#[test]
+fn scatter_alias_defaults_use_native_offset_despite_stale_fake_metadata() {
+    let mut p = parsed_nodes(
+        vec![
+            node(
+                "torch.ops.aten.slice.Tensor",
+                vec![
+                    tensor_input("self", "a"),
+                    scalar_int("dim", 0),
+                    scalar_int("start", 2),
+                    scalar_int("end", 5),
+                    scalar_int("step", 1),
+                ],
+                &["v"],
+            ),
+            node(
+                "torch.ops.aten.as_strided_scatter.default",
+                vec![
+                    tensor_input("self", "v"),
+                    tensor_input("src", "b"),
+                    ints("size", &[1]),
+                    ints("stride", &[1]),
+                    scalar_int("storage_offset", 0),
+                ],
+                &["s"],
+            ),
+            node(
+                "torch.ops.aten.alias.default",
+                vec![tensor_input("self", "s")],
+                &["alias"],
+            ),
+            node(
+                "torch.ops.aten.as_strided_copy.default",
+                vec![
+                    tensor_input("self", "alias"),
+                    ints("size", &[2]),
+                    ints("stride", &[1]),
+                ],
+                &["y"],
+            ),
+        ],
+        &[
+            ("a", 5, &[12]),
+            ("b", 5, &[1]),
+            ("v", 5, &[3]),
+            ("s", 5, &[3]),
+            ("alias", 5, &[3]),
+            ("y", 5, &[2]),
+        ],
+        &["a", "b"],
+        &["y"],
+    );
+    geometry(&mut p, "v", &[1], 2);
+    geometry(&mut p, "s", &[1], 0);
+    geometry(&mut p, "alias", &[1], 0);
+    let t = super::translate(&p).unwrap();
+    let rt = run(
+        &t,
+        &[
+            TypedBuffer::I64((0..12).collect()),
+            TypedBuffer::I64(vec![90]),
+        ],
+    );
+    assert_eq!(rt.get_i64(t.outputs[0].tensor).unwrap(), &[2, 3]);
 }

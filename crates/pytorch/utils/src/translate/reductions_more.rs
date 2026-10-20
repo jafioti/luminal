@@ -677,6 +677,7 @@ mod scalar_precision_tests {
             dims: HashMap::new(),
             opmath: None,
             storage_values: HashMap::new(),
+            storage_geometries: HashMap::new(),
             widened: HashMap::new(),
         };
         let x = translator.cx.tensor(vec![1], DType::I64);

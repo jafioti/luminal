@@ -160,6 +160,7 @@ struct Translator<'a> {
     /// that op in opmath; `None` for the ops that round nothing.
     opmath: Option<OpMath>,
     storage_values: HashMap<String, strided::Backing>,
+    storage_geometries: HashMap<String, (Vec<IntExpr>, IntExpr)>,
     /// One widening per (value, common dtype), so several nodes widening
     /// the same value share one cast.
     widened: HashMap<(NodeIndex, Discriminant<DType>), GraphTensor>,
@@ -209,6 +210,7 @@ pub fn translate(parsed: &ParsedPT2) -> Result<Translation> {
         dims: HashMap::new(),
         opmath: None,
         storage_values: HashMap::new(),
+        storage_geometries: HashMap::new(),
         widened: HashMap::new(),
     };
 

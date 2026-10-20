@@ -17,6 +17,9 @@ pub(super) struct Backing {
 
 impl Translator<'_> {
     fn storage_geometry(&self, name: &str) -> Result<(Vec<IntExpr>, IntExpr)> {
+        if let Some(geometry) = self.storage_geometries.get(name) {
+            return Ok(geometry.clone());
+        }
         let meta = self.tensor_meta(name)?;
         let dims = self.tensor_meta_to_shape(meta)?;
         let strides = if let Some(strides) = &meta.strides {
@@ -39,18 +42,28 @@ impl Translator<'_> {
             .map(|s| self.dim_size_to_expr(s))
             .transpose()?
             .unwrap_or(0.into());
+        // Correct offsets of aliases following a scatter. Some PyTorch Fake
+        // kernels reset scatter's output offset although native ATen retains
+        // it; preserve the schema's geometry rather than that stale metadata.
+        let parent = self.alias_parent(name);
+        let offset = if let Some(parent) = parent {
+            let (_, actual) = self.storage_geometry(&parent)?;
+            let raw = self
+                .tensor_meta(&parent)?
+                .storage_offset
+                .as_ref()
+                .map(|s| self.dim_size_to_expr(s))
+                .transpose()?
+                .unwrap_or(0.into());
+            offset - raw + actual
+        } else {
+            offset
+        };
         Ok((strides, offset))
     }
 
-    fn backing(&mut self, name: &str) -> Result<Backing> {
-        if let Some(backing) = self.storage_values.get(name) {
-            return Ok(*backing);
-        }
-        // Only schema-guaranteed aliases share backing. In particular reshape
-        // and contiguous may copy; export functionalizes them to explicit views
-        // and clones before storage-addressed operations reach this translator.
-        let parent = self
-            .parsed
+    fn alias_parent(&self, name: &str) -> Option<String> {
+        self.parsed
             .program
             .graph_module
             .graph
@@ -85,7 +98,17 @@ impl Translator<'_> {
             })
             .and_then(|n| n.inputs.first())
             .and_then(|i| i.arg.as_tensor_name())
-            .map(str::to_owned);
+            .map(str::to_owned)
+    }
+
+    fn backing(&mut self, name: &str) -> Result<Backing> {
+        if let Some(backing) = self.storage_values.get(name) {
+            return Ok(*backing);
+        }
+        // Only schema-guaranteed aliases share backing. In particular reshape
+        // and contiguous may copy; export functionalizes them to explicit views
+        // and clones before storage-addressed operations reach this translator.
+        let parent = self.alias_parent(name);
         let backing = if let Some(parent) = parent {
             self.backing(&parent)?
         } else {
@@ -219,6 +242,8 @@ impl Translator<'_> {
         let value = backing.flat.gather(&[indices]);
         if node.target.ends_with(".as_strided.default") {
             for output in Self::tensor_output_names(node) {
+                self.storage_geometries
+                    .insert(output.clone(), (strides.clone(), offset));
                 self.storage_values.insert(output, backing);
             }
         }
@@ -257,6 +282,8 @@ impl Translator<'_> {
         // The fresh result retains the input's storage geometry, including
         // writes outside its visible view that a later as_strided may read.
         for output in Self::tensor_output_names(node) {
+            self.storage_geometries
+                .insert(output.clone(), (self_strides.clone(), self_offset));
             self.storage_values.insert(output, updated);
         }
         Ok(out)
