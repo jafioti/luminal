@@ -71,6 +71,15 @@ impl Neg for GraphTensor {
 }
 
 impl GraphTensor {
+    fn elementary_constant(self, narrow: f32, wide: f64) -> GraphTensor {
+        let constant = if self.dtype == DType::F64 {
+            self.graph().constant_f64(wide)
+        } else {
+            self.graph().constant_f32(narrow).cast(self.dtype)
+        };
+        constant.expand_rhs(self.dims())
+    }
+
     /// Base 2 log
     pub fn log2(self) -> GraphTensor {
         let new_id = self.graph().logical.op(
@@ -95,12 +104,12 @@ impl GraphTensor {
 
     /// Natural exp
     pub fn exp(self) -> GraphTensor {
-        (self * (1.0 / f32::ln(2.))).exp2()
+        (self * self.elementary_constant(1.0 / f32::ln(2.), std::f64::consts::LOG2_E)).exp2()
     }
 
     /// Natural log
     pub fn log(self) -> GraphTensor {
-        self.log2() * f32::ln(2.)
+        self.log2() * self.elementary_constant(f32::ln(2.), std::f64::consts::LN_2)
     }
 
     /// Take the reciprocal of each element
@@ -127,7 +136,8 @@ impl GraphTensor {
 
     /// The cos(x) function
     pub fn cos(self) -> GraphTensor {
-        ((std::f32::consts::PI / 2.) - self).sin()
+        (self.elementary_constant(std::f32::consts::PI / 2., std::f64::consts::FRAC_PI_2) - self)
+            .sin()
     }
 
     /// Square every element in the tensor
@@ -778,6 +788,34 @@ pub(super) mod tests {
             &[(x.id, vec![base + 1, base + 2, base + 2, base].into())],
         );
         assert_exact(rt.get_f32(y.id).unwrap(), &[1.]);
+    }
+
+    #[test]
+    fn binary64_elementary_compositions_use_binary64_constants() {
+        let mut graph = Graph::new();
+        let input = graph.tensor(vec![5], DType::F64);
+        let outputs = [input.exp(), input.log(), input.cos()];
+        let values = vec![0.125_f64, 0.5, 1.0, 2.0, 3.0];
+        let runtime = luminal_reference::harness::run_reference(
+            &graph,
+            &[(
+                input.id,
+                luminal_reference::TypedBuffer::F64(values.clone()),
+            )],
+        );
+        for (i, output) in outputs.iter().enumerate() {
+            for (&actual, &x) in runtime.get_f64(output.id).unwrap().iter().zip(&values) {
+                let expected = match i {
+                    0 => x.exp(),
+                    1 => x.ln(),
+                    _ => x.cos(),
+                };
+                assert!(
+                    (actual - expected).abs() <= 2e-14 * expected.abs().max(1.0),
+                    "composition {i}, input {x}: {actual} != {expected}"
+                );
+            }
+        }
     }
 
     proptest! {
