@@ -1,10 +1,11 @@
 ; Reduced ViT convolution -> flatten -> transpose -> class-token concat -> position add.
 ; Self-contained core rules and graph; no tensor data, PyTorch, device runtime, or include files needed.
-; Run with Luminal's registered Egglog primitives (unstable-subst and bigint-to-i64).
+; Run with Luminal's registered Egglog primitives (memoized-int-subst and bigint-to-i64).
 ; Run from a core checkout: cargo run --release --example run_egglog -- repro/subst_layout_blowup.egg
 ; The stock Egglog CLI does not register Luminal's custom primitives.
-; Timed checks: both the baseline and the nested-key short-circuit exceed 30 seconds.
-; This fixture intentionally retains the remaining saturation blowup.
+; Baseline and nested-key-only revisions exceed 30 seconds.
+; This version includes the mixed-radix normalization and completed-image cache.
+; The original failing version is in commit 18135906.
 ; Baseline core: 7cc95d1475bf5161f98012cab9e90b0703764b26.
 
 ; THINGS THAT ARE MISSING
@@ -5406,6 +5407,7 @@
       ((int-subst-closed ?e ?m)) :ruleset main_ruleset :name "core: in-domain CoordVar is closed, same-extent arm")
 (relation bool-subst-closed (BoolExpr IndexMap))
 (sort SigmaMap (Map IntExpr IntExpr))
+(function int-subst-cache (IntExpr SigmaMap) IntExpr :merge old)
 (relation sigma-walk (IndexMap IntExprList i64 SigmaMap))
 (function sigma-out (IndexMap) SigmaMap :no-merge)
 
@@ -5539,7 +5541,7 @@
   ((int-subst-demand ?expr ?map)
    (int-subst-closed ?expr ?map)
    (= ?sigma (sigma-out ?map)))
-  ((union (int-subst-of ?expr ?map) (unstable-subst ?expr ?sigma)))
+  ((union (int-subst-of ?expr ?map) (memoized-int-subst ?expr ?sigma)))
   :ruleset subst-walk
   :naive
   :name "core: the walk: int-subst-of is unstable-subst under σ"
@@ -8175,5 +8177,15 @@
 (pytorch-declared-dtype v50 (F32))
 (pytorch-declared-dtype v51 (F32))
 
+
+; Reconstruct two adjacent mixed-radix digits, for positive radices.
+(rule
+ ((= ?sum (IntAdd
+      (IntMul (IntTruncRem (IntTruncDiv ?n ?inner) ?outer) ?inner)
+      (IntTruncRem ?n ?inner)))
+  (= ?inner_lower (lower-bound-of ?inner)) (>= ?inner_lower (bigint 1))
+  (= ?outer_lower (lower-bound-of ?outer)) (>= ?outer_lower (bigint 1)))
+ ((union ?sum (IntTruncRem ?n (IntMul ?inner ?outer))))
+ :ruleset main_ruleset :name "core: recompose adjacent mixed-radix digits")
 
 (run-schedule (saturate (run prop)) (saturate (saturate (run main_ruleset) (run prop)) (run subst-walk)))

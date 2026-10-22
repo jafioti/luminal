@@ -14,13 +14,17 @@ fn graph(seed: &str) -> egglog::EGraph {
 // Bound each round and the number of rounds, so the unfixed regression fails
 // before the associativity query itself can allocate gigabytes of matches.
 fn saturate_main(graph: &mut egglog::EGraph) -> bool {
-    for _ in 0..64 {
+    saturate_main_with_limit(graph, 8_000)
+}
+
+fn saturate_main_with_limit(graph: &mut egglog::EGraph, max_rows: usize) -> bool {
+    for _ in 0..256 {
         let report = graph
             .parse_and_run_program(None, "(run-schedule (run main_ruleset) (run prop))")
             .unwrap();
         assert!(
-            graph.num_tuples() < 8_000,
-            "integer normalization grew past 8,000 rows"
+            graph.num_tuples() < max_rows,
+            "integer normalization grew past {max_rows} rows"
         );
         let updated = report.iter().any(
             |output| matches!(output, egglog::CommandOutput::RunSchedule(report) if report.updated),
@@ -179,4 +183,71 @@ fn combined_offset_outside_i64_is_not_wrapped() {
             "(fail (check (= result (IntAdd x (IntLit -9223372036854775808)))))",
         )
         .unwrap();
+}
+
+#[test]
+fn mixed_radix_digits_recompose_for_signed_dividends() {
+    let mut graph = graph(
+        r#"(let n (IntVar "n"))
+        (set (lower-bound-of n) (bigint -10000))
+        (set (upper-bound-of n) (bigint 10000))
+        (let a (IntVar "a"))
+        (set (lower-bound-of a) (bigint 1))
+        (set (upper-bound-of a) (bigint 16))
+        (let b (IntVar "b"))
+        (set (lower-bound-of b) (bigint 1))
+        (set (upper-bound-of b) (bigint 16))
+        (let low (IntTruncRem n a))
+        (let middle (IntTruncRem (IntTruncDiv n a) b))
+        (let combined (IntAdd (IntMul middle a) low))
+        (let combined_rev (IntAdd low (IntMul a middle)))
+        (let expected (IntTruncRem n (IntMul a b)))
+        (let restored (IntAdd (IntMul (IntTruncDiv n (IntMul a b)) (IntMul a b)) combined))"#,
+    );
+    assert!(saturate_main(&mut graph));
+    graph.parse_and_run_program(None,
+        "(check (= combined expected)) (check (= combined_rev expected)) (check (= restored n))"
+    ).unwrap();
+    // Independent arithmetic check of the identity including both signs,
+    // unit radices, and exact/non-exact divisions.
+    for n in -257_i64..=257 {
+        for a in 1..=16 {
+            for b in 1..=16 {
+                assert_eq!(a * ((n / a) % b) + n % a, n % (a * b));
+            }
+        }
+    }
+}
+
+#[test]
+fn flatten_unflatten_substitution_reaches_a_fixpoint() {
+    // Captured from ViT's convolution -> flatten -> transpose -> concat
+    // prefix. Preserve the entire rule/graph interaction as a CPU regression.
+    let mut graph = egglog_snippet::new_egraph();
+    let source = include_str!("../../repro/subst_layout_blowup.egg");
+    let start = source.rfind("(run-schedule").unwrap();
+    // Use the current preamble, rather than the reproduction's frozen copy.
+    let bindings = source.find("\n(let v0 ").unwrap() + 1;
+    graph
+        .parse_and_run_program(None, &egglog_snippet::assembled_program_for(&[]))
+        .unwrap();
+    graph
+        .parse_and_run_program(None, &source[bindings..start])
+        .unwrap();
+    graph
+        .parse_and_run_program(None, "(run-schedule (saturate (run prop)))")
+        .unwrap();
+    for _ in 0..64 {
+        assert!(saturate_main_with_limit(&mut graph, 30_000));
+        let report = graph
+            .parse_and_run_program(None, "(run-schedule (run subst-walk))")
+            .unwrap();
+        assert!(graph.num_tuples() < 30_000);
+        if !report.iter().any(
+            |output| matches!(output, egglog::CommandOutput::RunSchedule(report) if report.updated),
+        ) {
+            return;
+        }
+    }
+    panic!("flatten/unflatten substitution did not converge after 64 generations");
 }
