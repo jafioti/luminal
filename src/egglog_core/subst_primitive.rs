@@ -228,6 +228,14 @@ impl Walk<'_> {
             if self.snapshot.nodes.contains_key(&value) {
                 continue;
             }
+            // A key is replaced wholesale, including every alternative in its
+            // e-class. Keep the leaf for `mark`, but do not follow structure
+            // that cannot contribute to the result. A descendant shared by an
+            // un-replaced branch is still collected through that branch.
+            if self.map.contains_key(&value) {
+                self.snapshot.nodes.insert(value, Vec::new());
+                continue;
+            }
             // E-class ids all come from one counter, so probing a constructor
             // of the wrong sort just finds nothing. That is what makes the
             // root's unknown sort affordable: it costs one probe per eq-sorted
@@ -701,5 +709,95 @@ impl TypeConstraint for SubstTypeConstraint {
         ));
 
         cs
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egglog::prelude::exprs;
+
+    #[test]
+    fn replacement_is_a_leaf_even_when_its_eclass_contains_a_cycle() {
+        let mut eg = crate::egglog_snippet::new_egraph();
+        eg.parse_and_run_program(
+            None,
+            r#"
+            (datatype Term (Atom i64) (Pair Term Term))
+            (sort TermMap (Map Term Term))
+            (let key (Atom 0))
+            (let hidden (Pair (Atom 1) (Atom 2)))
+            (union key (Pair key hidden))
+            (let root (Pair key key))
+            (let replacement (Pair key (Atom 7)))
+            (let sigma (map-insert (map-empty) key replacement))
+        "#,
+        )
+        .unwrap();
+        let root = eg.eval_expr(&exprs::var("root")).unwrap().1;
+        let key = eg.eval_expr(&exprs::var("key")).unwrap().1;
+        let replacement = eg.eval_expr(&exprs::var("replacement")).unwrap().1;
+        let map = BTreeMap::from([(key, replacement)]);
+        eg.update(|state| {
+            let ctors = constructors(&state, &HashSet::new());
+            let mut by_output: HashMap<String, Vec<usize>> = HashMap::new();
+            for (index, ctor) in ctors.iter().enumerate() {
+                by_output
+                    .entry(ctor.output.name().to_owned())
+                    .or_default()
+                    .push(index);
+            }
+            let mut walk = Walk {
+                ctors,
+                by_output,
+                map: &map,
+                snapshot: Snapshot::default(),
+                affected: HashSet::new(),
+                images: HashMap::new(),
+                container_images: HashMap::new(),
+                container_leaves: HashMap::new(),
+            };
+            walk.collect(&state, root)?;
+            assert_eq!(
+                walk.snapshot.nodes.len(),
+                2,
+                "only the root and replacement key should be visited"
+            );
+            walk.mark();
+            assert!(walk.affected.contains(&root));
+            Ok(())
+        })
+        .unwrap();
+        // The replacement itself contains the key: simultaneous substitution
+        // must splice it as-is, without substituting recursively inside it.
+        eg.parse_and_run_program(
+            None,
+            r#"
+            (let result (unstable-subst root sigma))
+            (check (= result (Pair replacement replacement)))
+        "#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn descendants_reachable_outside_a_replacement_still_get_substituted() {
+        let mut eg = crate::egglog_snippet::new_egraph();
+        eg.parse_and_run_program(
+            None,
+            r#"
+            (datatype Term (Atom i64) (Pair Term Term))
+            (sort TermMap (Map Term Term))
+            (let key (Atom 0))
+            (let shared (Pair (Atom 1) (Atom 2)))
+            (union key (Pair key shared))
+            (let root (Pair shared key))
+            (let sigma (map-insert
+                (map-insert (map-empty) key (Atom 7)) (Atom 1) (Atom 8)))
+            (let result (unstable-subst root sigma))
+            (check (= result (Pair (Pair (Atom 8) (Atom 2)) (Atom 7))))
+        "#,
+        )
+        .unwrap();
     }
 }
