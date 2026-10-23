@@ -94,7 +94,7 @@ impl Translator<'_> {
         if fmod {
             return self.binary(&node.inputs, |a, b| a % b);
         }
-        // Python-style remainder: a - floor(a/b)*b.
+        // Python-style remainder: the sign follows the divisor.
         let a = self.operand(&node.inputs[0])?;
         let b = if let Some(t) = self.optional_tensor_operand(&node.inputs[1])? {
             t
@@ -102,6 +102,18 @@ impl Translator<'_> {
             self.scalar(&node.inputs[1], a.dtype)?
         };
         let (a, b) = util::broadcast_binary(a, b);
+        if matches!(a.dtype, DType::Int | DType::I64) {
+            // Exact Int, the shape `div_with_mode` already gives floor
+            // division: the truncated remainder, moved by one divisor where
+            // it is non-zero and disagrees with the divisor's sign. Every
+            // proof obligation discharges without an attested range on the
+            // dividend (the remainder is bounded by its divisor alone, the
+            // indicators are [0, 1]). The float spelling below is exact only
+            // below 2^24.
+            let rem = a.trunc_rem(b);
+            let adjust = self.remainder_sign_disagreement(rem, b);
+            return Ok(rem + b * adjust);
+        }
         Ok(a - (a / b).floor() * b)
     }
 

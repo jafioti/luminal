@@ -289,11 +289,12 @@ impl Translator<'_> {
         let out = match mode {
             Some("trunc") if integer => a.trunc_div(b),
             Some("floor") if integer => {
+                // The truncated quotient, moved toward negative infinity by
+                // one where a non-zero remainder disagrees with the divisor's
+                // sign (the remainder carries the dividend's sign).
                 let trunc = a.trunc_div(b);
                 let rem = a.trunc_rem(b);
-                let zero = self.constant_like(rem, 0.0);
-                let signs_differ = a.lt(zero).ne(b.lt(zero));
-                let adjust = rem.ne(zero).cast(a.dtype) * signs_differ.cast(a.dtype);
+                let adjust = self.remainder_sign_disagreement(rem, b);
                 trunc - adjust
             }
             Some("trunc") => quotient.trunc().cast(a.dtype),
