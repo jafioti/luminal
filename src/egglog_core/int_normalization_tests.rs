@@ -225,15 +225,12 @@ fn flatten_unflatten_substitution_reaches_a_fixpoint() {
     // prefix. Preserve the entire rule/graph interaction as a CPU regression.
     let mut graph = egglog_snippet::new_egraph();
     let source = include_str!("../../repro/subst_layout_blowup.egg");
-    let start = source.rfind("(run-schedule").unwrap();
-    // Use the current preamble, rather than the reproduction's frozen copy.
-    let bindings = source.find("\n(let v0 ").unwrap() + 1;
+    // The fixture contains only graph/boundary declarations. Rules always
+    // come from the current core, with no frozen or duplicate rule copies.
     graph
         .parse_and_run_program(None, &egglog_snippet::assembled_program_for(&[]))
         .unwrap();
-    graph
-        .parse_and_run_program(None, &source[bindings..start])
-        .unwrap();
+    graph.parse_and_run_program(None, source).unwrap();
     graph
         .parse_and_run_program(None, "(run-schedule (saturate (run prop)))")
         .unwrap();
