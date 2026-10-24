@@ -107,17 +107,38 @@ pub(super) fn reshape_tensor(t: GraphTensor, target: &[IntExpr]) -> GraphTensor 
     if target.is_empty() {
         return t.flatten().squeeze(0);
     }
-    let mut flat = t.flatten();
+    // Preserve the unchanged prefix. Flattening it and splitting it back
+    // invents quotient/remainder expressions for axes that never moved,
+    // obscuring ordinary per-head reshape/rotation patterns.
+    let prefix = t
+        .dims()
+        .iter()
+        .zip(target)
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut flat = t.view();
+    if prefix == target.len() {
+        while flat.rank() > prefix {
+            flat = flat.squeeze(prefix);
+        }
+        return flat.finish();
+    }
+    if flat.rank() == prefix {
+        flat = flat.unsqueeze(prefix);
+    }
+    while flat.rank() > prefix + 1 {
+        flat = flat.merge_dims(prefix, prefix + 1);
+    }
     // `split_dims(axis, inner)` leaves `old / inner` at `axis` and inserts
     // `inner` directly after it, so each leading target dim is split off by
     // the product of the REMAINING dims; splitting by the leading dim itself
     // would reverse the target. `product_of_dims` canonicalises the operand
     // order, so a symbolic product compares equal across call sites.
-    for i in 0..target.len().saturating_sub(1) {
+    for i in prefix..target.len().saturating_sub(1) {
         let inner = super::dim_arith::product_of_dims(target[i + 1..].iter().copied());
         flat = flat.split_dims(i, inner);
     }
-    flat
+    flat.finish()
 }
 
 /// Value identity: `clone`, `alias` and the `*_copy` ops name a tensor
