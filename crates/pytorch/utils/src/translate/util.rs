@@ -173,10 +173,39 @@ pub(super) fn resolve_neg1_dim_exprs(target: &[IntExpr], current_dims: &[IntExpr
 
 impl Translator<'_> {
     /// A typed scalar constant matching `tensor`'s dtype and dims.
+    /// The Int indicator of a truncated remainder that disagrees with its
+    /// divisor's sign: 1 where `rem < 0 < b` or `b < 0 < rem`, else 0.
+    /// Python's `//` and `%` move the truncated quotient and remainder by
+    /// one divisor exactly there (a zero remainder is never moved). Spelled
+    /// as products of Int indicators, not as a comparison of Bools: the
+    /// reference runtime has no Bool compare arm, and every operand here is
+    /// bounded in [0, 1], so the arithmetic discharges its own proofs.
+    pub(super) fn remainder_sign_disagreement(
+        &mut self,
+        rem: GraphTensor,
+        divisor: GraphTensor,
+    ) -> GraphTensor {
+        let dtype = rem.dtype;
+        let zero = self.constant_like(rem, 0.0);
+        let rem_negative = rem.lt(zero).cast(dtype);
+        let rem_positive = rem.gt(zero).cast(dtype);
+        let divisor_negative = divisor.lt(zero).cast(dtype);
+        let divisor_positive = divisor.gt(zero).cast(dtype);
+        rem_negative * divisor_positive + rem_positive * divisor_negative
+    }
+
     pub(super) fn constant_like(&mut self, tensor: GraphTensor, value: f64) -> GraphTensor {
         let scalar = match tensor.dtype {
             DType::F64 => self.cx.constant_f64(value),
             DType::I64 => self.cx.constant_i64(value as i64),
+            // A 32-bit value is one iota literal; the I64 limb assembly would
+            // put I64 arithmetic in a 32-bit program, which a backend without
+            // I64 kernels refuses outright.
+            DType::Int
+                if value.fract() == 0.0 && (i32::MIN as f64..=i32::MAX as f64).contains(&value) =>
+            {
+                self.cx.constant_i32(value as i64)
+            }
             DType::Int => self.cx.constant_i64(value as i64).cast(DType::Int),
             _ => self.cx.constant_f32(value as f32).cast(tensor.dtype),
         };
