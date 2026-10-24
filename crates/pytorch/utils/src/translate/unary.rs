@@ -231,6 +231,11 @@ impl Translator<'_> {
         }
     }
 
+    pub(super) fn translate_isfinite(&mut self, node: &Node) -> Result<GraphTensor> {
+        let a = self.operand(&node.inputs[0])?;
+        Ok(self.is_finite(a))
+    }
+
     pub(super) fn translate_isinf(&mut self, node: &Node) -> Result<GraphTensor> {
         let a = self.operand(&node.inputs[0])?;
         if is_float_dtype(a.dtype) {
@@ -245,12 +250,13 @@ impl Translator<'_> {
     pub(super) fn translate_bitwise_not(&mut self, node: &Node) -> Result<GraphTensor> {
         let a = self.operand(&node.inputs[0])?;
         Ok(match a.dtype {
-            DType::Bool => {
-                let one = self.constant_like(a, 1.0).cast(DType::Int);
-                (one - a.cast(DType::Int)).cast(DType::Bool)
-            }
-            DType::Int => (a + 1) * -1.0,
-            other => anyhow::bail!("bitwise_not supports Bool/Int, got {other:?}"),
+            DType::Bool => a.logical_not(),
+            DType::Int | DType::I64 | DType::U64 | DType::I8 | DType::I16 | DType::U8 => a
+                .bits_to_bools()
+                .logical_not()
+                .bools_to_bits(a.dtype)
+                .squeeze(a.rank()),
+            other => anyhow::bail!("bitwise_not requires an integer or Bool, got {other:?}"),
         })
     }
 
@@ -279,27 +285,43 @@ impl Translator<'_> {
         };
         let (a, b) = super::util::ensure_same_dtype(a, b);
         let (a, b) = super::util::broadcast_binary(a, b);
-        let integer = a.dtype == DType::Int || a.dtype == DType::I64;
-        let float_dtype = if a.dtype == DType::F64 {
-            DType::F64
-        } else {
-            DType::F32
-        };
-        let quotient = a.cast(float_dtype) / b.cast(float_dtype);
-        let out = match mode {
-            Some("trunc") if integer => a.trunc_div(b),
-            Some("floor") if integer => {
-                // The truncated quotient, moved toward negative infinity by
-                // one where a non-zero remainder disagrees with the divisor's
-                // sign (the remainder carries the dividend's sign).
-                let trunc = a.trunc_div(b);
+        let result_dtype = self.output_meta_dtype(node)?;
+        let integer = matches!(
+            a.dtype,
+            DType::Int | DType::I64 | DType::U64 | DType::I8 | DType::I16 | DType::U8
+        );
+        let out = if integer && matches!(mode, Some("trunc" | "floor")) {
+            // Do signed division in at least Int32: narrow MIN / -1 is valid
+            // before the final storage-width wrap, and never needs a float read.
+            let work_dtype = if matches!(a.dtype, DType::I64 | DType::U64) {
+                a.dtype
+            } else {
+                DType::Int
+            };
+            let a = a.cast(work_dtype);
+            let b = b.cast(work_dtype);
+            let trunc = a.trunc_div(b);
+            let result = if mode == Some("floor") {
                 let rem = a.trunc_rem(b);
                 let adjust = self.remainder_sign_disagreement(rem, b);
                 trunc - adjust
-            }
-            Some("trunc") => quotient.trunc().cast(a.dtype),
-            Some("floor") => quotient.floor().cast(a.dtype),
-            _ => quotient.cast(a.dtype),
+            } else {
+                trunc
+            };
+            super::convert(result, result_dtype)
+        } else {
+            let float_dtype = if a.dtype == DType::F64 {
+                DType::F64
+            } else {
+                DType::F32
+            };
+            let quotient = a.cast(float_dtype) / b.cast(float_dtype);
+            let result = match mode {
+                Some("trunc") => quotient.trunc(),
+                Some("floor") => quotient.floor(),
+                _ => quotient,
+            };
+            super::convert(result, result_dtype)
         };
         Ok(out)
     }

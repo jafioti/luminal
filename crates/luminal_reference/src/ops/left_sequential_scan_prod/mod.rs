@@ -166,6 +166,7 @@ pub(crate) fn kernel(
             acc.checked_mul(x)
                 .ok_or_else(|| anyhow::anyhow!("u8 scan-prod overflow (ints are non-wrapping)"))
         }),
+        TypedBuffer::U64(_) => ctx.scan_axis_u64(op.axis, 1, |a, b| Ok(a.wrapping_mul(b))),
         TypedBuffer::I16(_) => ctx.scan_axis_i16(op.axis, 1, |acc, x| {
             acc.checked_mul(x)
                 .ok_or_else(|| anyhow::anyhow!("i16 scan-prod overflow (ints are non-wrapping)"))

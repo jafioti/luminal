@@ -8,7 +8,7 @@
 //! gathers; runtime index tensors only ever appear as gather coordinates.
 #![allow(dead_code)]
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use luminal::prelude::*;
 
 use super::Translator;
@@ -67,12 +67,7 @@ impl Translator<'_> {
     /// A rank-0 constant of the requested storage dtype (Int paths avoid the
     /// refused float->int cast).
     fn cast_scalar(&mut self, value: f64, dtype: DType) -> GraphTensor {
-        match dtype {
-            DType::F64 => self.cx.constant_f64(value),
-            DType::I64 => self.cx.constant_i64(value as i64),
-            DType::Int => self.cx.constant_i32(value as i64),
-            _ => self.cx.constant_f32(value as f32).cast(dtype),
-        }
+        self.typed_scalar(value, dtype)
     }
 
     /// Broadcast `mask`, `a`, `b`; select `a` where the mask is true.
@@ -668,6 +663,167 @@ impl Translator<'_> {
     // ---------------------------------------------------------------
     // Order statistics
     // ---------------------------------------------------------------
+
+    pub(super) fn translate_split(&mut self, node: &Node) -> Result<()> {
+        let x = self.raw_operand(&node.inputs[0])?;
+        let dim = normalize_dim(self.named_int_arg(node, "dim").unwrap_or(0), x.rank());
+        let chunk = self
+            .named_int_arg(node, "split_size")
+            .context("split requires a split_size")?;
+        anyhow::ensure!(chunk >= 0, "split size must be nonnegative");
+        let names = Self::tensor_output_names(node);
+        let mut start = IntExpr::from(0);
+        for name in names {
+            // Each export output carries its guarded extent, including the
+            // final short chunk and the single empty-input chunk.
+            let meta = self.tensor_meta(&name)?.clone();
+            let shape = self.boundary_shape(&meta, &name)?;
+            let end = start + shape[dim];
+            self.values.insert(name, x.slice_along(start..end, dim));
+            start = end;
+        }
+        Ok(())
+    }
+
+    /// Exact stable ranks. Comparisons use the original dtype, including
+    /// int64 beyond 2^53, and NaNs sort last. This has the same pairwise
+    /// complexity as the existing core argsort; graph size is independent
+    /// of the dimension length (no data-dependent unrolling).
+    fn exact_order_ranks(&mut self, x: GraphTensor, axis: usize) -> GraphTensor {
+        let n = x.dims()[axis];
+        let a = x.expand_dim(axis + 1, n);
+        let b = x.expand_dim(axis, n);
+        let shape = a.dims();
+        let i = self.cx.iota(shape.clone(), |c| c[axis]);
+        let j = self.cx.iota(shape, |c| c[axis + 1]);
+        let mut less = a.lt(b);
+        let mut equal = a.eq(b);
+        if dtype_can_nan(x.dtype) {
+            let an = self.is_nan(a);
+            let bn = self.is_nan(b);
+            let not_an = self.bool_not(an);
+            let finite_before_nan = self.bool_and(not_an, bn);
+            less = self.bool_or(less, finite_before_nan);
+            let both_nan = self.bool_and(an, bn);
+            let any_nan = self.bool_or(an, bn);
+            let neither_nan = self.bool_not(any_nan);
+            equal = self.bool_and(equal, neither_nan);
+            equal = self.bool_or(equal, both_nan);
+        }
+        let tie = self.bool_and(equal, i.lt(j));
+        self.bool_or(less, tie).cast(DType::Int).sum(vec![axis])
+    }
+
+    pub(super) fn translate_kthvalue(&mut self, node: &Node) -> Result<()> {
+        let x = self.raw_operand(&node.inputs[0])?;
+        let k = self
+            .named_int_arg(node, "k")
+            .context("kthvalue requires k")?;
+        let raw = self.named_int_arg(node, "dim").unwrap_or(-1);
+        let keep = self.named_bool_arg(node, "keepdim").unwrap_or(false);
+        if x.rank() == 0 {
+            anyhow::ensure!(k == 1 && (raw == 0 || raw == -1), "invalid scalar kthvalue");
+            let zero = self.cx.constant_i64(0);
+            return self.movement_bind_outputs(node, vec![x, zero]);
+        }
+        anyhow::ensure!(
+            raw >= -(x.rank() as i64) && raw < x.rank() as i64,
+            "kthvalue dimension out of range"
+        );
+        let axis = normalize_dim(raw, x.rank());
+        anyhow::ensure!(
+            k >= 1 && x.dims()[axis].to_usize().is_none_or(|n| k as usize <= n),
+            "kthvalue k out of range"
+        );
+        let ranks = self.exact_order_ranks(x, axis);
+        let wanted = self.cx.constant_i32(k - 1).expand_rhs(x.dims());
+        let selected = ranks.eq(wanted);
+        let positions = self.axis_positions(&x.dims(), axis);
+        let zero = self.cx.constant_i32(0).expand_rhs(x.dims());
+        let index = self.select(selected, positions, zero).sum(vec![axis]);
+        let values = self.order_gather(x, index.unsqueeze(axis), axis);
+        let index = index.cast(DType::I64);
+        self.movement_bind_outputs(
+            node,
+            if keep {
+                vec![values, index.unsqueeze(axis)]
+            } else {
+                vec![values.squeeze(axis), index]
+            },
+        )
+    }
+
+    pub(super) fn translate_mode(&mut self, node: &Node) -> Result<()> {
+        let x = self.raw_operand(&node.inputs[0])?;
+        let raw = self.named_int_arg(node, "dim").unwrap_or(-1);
+        let keep = self.named_bool_arg(node, "keepdim").unwrap_or(false);
+        if x.rank() == 0 {
+            anyhow::ensure!(raw == 0 || raw == -1, "invalid scalar mode dimension");
+            let zero = self.cx.constant_i64(0);
+            return self.movement_bind_outputs(node, vec![x, zero]);
+        }
+        anyhow::ensure!(
+            raw >= -(x.rank() as i64) && raw < x.rank() as i64,
+            "mode dimension out of range"
+        );
+        let axis = normalize_dim(raw, x.rank());
+        let n = x.dims()[axis];
+        anyhow::ensure!(
+            n.to_usize() != Some(0),
+            "mode requires a nonempty reduction axis"
+        );
+        let a = x.expand_dim(axis + 1, n);
+        let b = x.expand_dim(axis, n);
+        let mut equal = a.eq(b);
+        if dtype_can_nan(x.dtype) {
+            let an = self.is_nan(a);
+            let bn = self.is_nan(b);
+            let any = self.bool_or(an, bn);
+            let finite = self.bool_not(any);
+            equal = self.bool_and(equal, finite);
+        }
+        let counts = equal.cast(DType::Int).sum(vec![axis]);
+        let max = counts.max(vec![axis]).unsqueeze(axis).expand(x.dims());
+        let candidate = counts.eq(max);
+        let ranks = self.exact_order_ranks(x, axis);
+        let sentinel = self.cx.constant_i32(n).expand_rhs(x.dims());
+        let winning_rank = self
+            .select(candidate, ranks, sentinel)
+            .min(vec![axis])
+            .unsqueeze(axis)
+            .expand(x.dims());
+        let positions = self.axis_positions(&x.dims(), axis);
+        let zero = self.cx.constant_i32(0).expand_rhs(x.dims());
+        let first = self
+            .select(ranks.eq(winning_rank), positions, zero)
+            .sum(vec![axis]);
+        let value = self.order_gather(x, first.unsqueeze(axis), axis);
+        // PyTorch's CPU mode keeps the final occurrence of the winning value.
+        let mut equal = x.eq(value.expand(x.dims()));
+        if dtype_can_nan(x.dtype) {
+            let nan = self.is_nan(x);
+            let finite = self.bool_not(nan);
+            equal = self.bool_and(equal, finite);
+        }
+        let last = self
+            .select(equal, positions, zero)
+            .max(vec![axis])
+            .cast(DType::I64);
+        let last = if dtype_can_nan(x.dtype) {
+            let nan = self.is_nan(value.squeeze(axis));
+            self.select(nan, first.cast(DType::I64), last)
+        } else {
+            last
+        };
+        self.movement_bind_outputs(
+            node,
+            if keep {
+                vec![value, last.unsqueeze(axis)]
+            } else {
+                vec![value.squeeze(axis), last]
+            },
+        )
+    }
 
     pub(super) fn translate_topk(&mut self, node: &Node) -> Result<()> {
         let x = self.operand(&node.inputs[0])?;

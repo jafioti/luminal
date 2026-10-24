@@ -1,5 +1,3 @@
-use itertools::Itertools;
-
 use crate::prelude::*;
 use std::ops::{Add, Mul, Neg};
 
@@ -60,6 +58,7 @@ impl Neg for GraphTensor {
         match self.dtype {
             DType::Int
             | DType::I64
+            | DType::U64
             | DType::I4
             | DType::U4
             | DType::I8
@@ -72,6 +71,15 @@ impl Neg for GraphTensor {
 }
 
 impl GraphTensor {
+    fn elementary_constant(self, narrow: f32, wide: f64) -> GraphTensor {
+        let constant = if self.dtype == DType::F64 {
+            self.graph().constant_f64(wide)
+        } else {
+            self.graph().constant_f32(narrow).cast(self.dtype)
+        };
+        constant.expand_rhs(self.dims())
+    }
+
     /// Base 2 log
     pub fn log2(self) -> GraphTensor {
         let new_id = self.graph().logical.op(
@@ -96,12 +104,12 @@ impl GraphTensor {
 
     /// Natural exp
     pub fn exp(self) -> GraphTensor {
-        (self * (1.0 / f32::ln(2.))).exp2()
+        (self * self.elementary_constant(1.0 / f32::ln(2.), std::f64::consts::LOG2_E)).exp2()
     }
 
     /// Natural log
     pub fn log(self) -> GraphTensor {
-        self.log2() * f32::ln(2.)
+        self.log2() * self.elementary_constant(f32::ln(2.), std::f64::consts::LN_2)
     }
 
     /// Take the reciprocal of each element
@@ -128,7 +136,8 @@ impl GraphTensor {
 
     /// The cos(x) function
     pub fn cos(self) -> GraphTensor {
-        ((std::f32::consts::PI / 2.) - self).sin()
+        (self.elementary_constant(std::f32::consts::PI / 2., std::f64::consts::FRAC_PI_2) - self)
+            .sin()
     }
 
     /// Square every element in the tensor
@@ -238,17 +247,50 @@ impl GraphTensor {
             .expand_to_shape_on_axes(m.dims(), axes)
     }
 
-    /// Get the indicies of the max elements along an axis
+    /// Get the first index of the maximum along an axis. A NaN takes
+    /// precedence over ordered values; multiple NaNs also choose the first.
     pub fn argmax(self, axis: usize) -> GraphTensor {
-        // Get one-hot along last dimension
-        let x_equal = self
-            .eq(self.max(vec![axis]).expand_dim(axis, self.dims()[axis]))
+        let dims = self.dims();
+        let extent = dims[axis];
+        let mut winner = self
+            .eq(self.max(vec![axis]).expand_dim(axis, extent))
             .cast(DType::Int);
-        // Create index arange for last dimension
-        let r = self.graph().arange(self.dims()[axis]);
-        let axes = (0..self.rank()).filter(|i| *i != axis).collect_vec();
-        // Multiply one-hot by expanded index arange
-        (x_equal * r.expand_to_shape_on_axes(self.dims(), axes)).max(vec![axis])
+        if !matches!(
+            self.dtype,
+            DType::Int
+                | DType::I64
+                | DType::U64
+                | DType::I4
+                | DType::U4
+                | DType::I8
+                | DType::U8
+                | DType::I16
+                | DType::U16
+                | DType::Bool
+        ) {
+            // Ordered comparisons distinguish NaN without relying on eq's
+            // less/greater decomposition. Widening here only classifies NaNs;
+            // the maximum and equality above retain the original value dtype.
+            let x = self.cast(DType::F32);
+            let low = self
+                .graph()
+                .constant_f32(f32::NEG_INFINITY)
+                .expand_rhs(dims.clone());
+            let high = self
+                .graph()
+                .constant_f32(f32::INFINITY)
+                .expand_rhs(dims.clone());
+            let ordered = x.lt(high).cast(DType::Int) + low.lt(x).cast(DType::Int);
+            let zero = self.graph().constant_i32(0).expand_rhs(dims.clone());
+            let nan = ordered.eq(zero).cast(DType::Int);
+            let any_nan = nan.max(vec![axis]).expand_dim(axis, extent);
+            winner = any_nan.cast(DType::Bool).select(nan, winner);
+        }
+        // Larger positive ranks correspond to earlier indices. Non-winners
+        // contribute zero; the largest winning rank yields the first index.
+        // All index arithmetic stays integer, including values above 2^24.
+        let ranks = self.graph().iota(dims, |c| extent - c[axis]);
+        -(winner * ranks).max(vec![axis]) + extent
     }
 
     /// Get the indices of the min elements along an axis
@@ -308,7 +350,7 @@ impl GraphTensor {
     /// explode saturation. `Select` is one node and is NaN/inf-safe.
     pub fn abs(self) -> GraphTensor {
         match self.dtype {
-            DType::U4 | DType::U8 | DType::U16 => self,
+            DType::U4 | DType::U8 | DType::U16 | DType::U64 => self,
             DType::I4 | DType::I8 | DType::I16 | DType::Int | DType::I64 => self
                 .lt(self
                     .graph()
@@ -666,6 +708,114 @@ pub(super) mod tests {
 
         // need to assert close because some unaries (exp and log) are (good) approximations
         assert_close(rt.get_f32(b.id).unwrap(), &ref_b.to_vec1::<f32>().unwrap())
+    }
+
+    #[test]
+    fn argmax_selects_first_ties_and_first_nan_on_any_axis() {
+        let values = vec![
+            1.,
+            1.,
+            1.,
+            1.,
+            -4.,
+            -2.,
+            -2.,
+            -3.,
+            -4.,
+            -3.,
+            -2.,
+            -1.,
+            f32::NEG_INFINITY,
+            f32::INFINITY,
+            f32::INFINITY,
+            2.,
+            0.,
+            -0.,
+            -0.,
+            0.,
+            1.,
+            f32::NAN,
+            2.,
+            f32::NAN,
+            f32::NAN,
+            1.,
+            f32::NAN,
+            3.,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ];
+        let expected = [0., 1., 3., 1., 0., 1., 0., 0.];
+        let mut cx = Graph::new();
+        let x = cx.tensor(vec![8, 4], DType::F32);
+        let row = x.argmax(1).cast(DType::F32);
+        let column = x.transpose(0, 1).argmax(0).cast(DType::F32);
+        let rt = luminal_reference::harness::run_reference(&cx, &[(x.id, values.into())]);
+        assert_exact(rt.get_f32(row.id).unwrap(), &expected);
+        assert_exact(rt.get_f32(column.id).unwrap(), &expected);
+    }
+
+    #[test]
+    fn argmax_keeps_integer_comparisons_exact() {
+        let mut cx = Graph::new();
+        let x = cx.tensor(vec![2, 4], DType::Int);
+        let y = x.argmax(1).cast(DType::F32);
+        let rt = luminal_reference::harness::run_reference(
+            &cx,
+            &[(
+                x.id,
+                vec![
+                    i32::MIN,
+                    i32::MIN,
+                    i32::MIN,
+                    i32::MIN,
+                    i32::MAX - 1,
+                    i32::MAX,
+                    i32::MAX,
+                    0,
+                ]
+                .into(),
+            )],
+        );
+        assert_exact(rt.get_f32(y.id).unwrap(), &[0., 1.]);
+        let mut cx = Graph::new();
+        let x = cx.tensor(vec![1, 4], DType::I64);
+        let y = x.argmax(1).cast(DType::F32);
+        let base = 1_i64 << 54;
+        let rt = luminal_reference::harness::run_reference(
+            &cx,
+            &[(x.id, vec![base + 1, base + 2, base + 2, base].into())],
+        );
+        assert_exact(rt.get_f32(y.id).unwrap(), &[1.]);
+    }
+
+    #[test]
+    fn binary64_elementary_compositions_use_binary64_constants() {
+        let mut graph = Graph::new();
+        let input = graph.tensor(vec![5], DType::F64);
+        let outputs = [input.exp(), input.log(), input.cos()];
+        let values = vec![0.125_f64, 0.5, 1.0, 2.0, 3.0];
+        let runtime = luminal_reference::harness::run_reference(
+            &graph,
+            &[(
+                input.id,
+                luminal_reference::TypedBuffer::F64(values.clone()),
+            )],
+        );
+        for (i, output) in outputs.iter().enumerate() {
+            for (&actual, &x) in runtime.get_f64(output.id).unwrap().iter().zip(&values) {
+                let expected = match i {
+                    0 => x.exp(),
+                    1 => x.ln(),
+                    _ => x.cos(),
+                };
+                assert!(
+                    (actual - expected).abs() <= 2e-14 * expected.abs().max(1.0),
+                    "composition {i}, input {x}: {actual} != {expected}"
+                );
+            }
+        }
     }
 
     proptest! {

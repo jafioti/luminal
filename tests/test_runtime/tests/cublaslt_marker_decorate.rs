@@ -216,10 +216,11 @@ fn fixture5_c_fold() {
     assert_eq!(op.operand_name(2), "c");
 }
 
-/// C-fold with the REVERSED Add orientation (c + x@w): LogicalAdd
-/// commutativity in the assembled program supplies the spelled orientation.
+/// Reversing floating Add operands is not an encoding equality: two NaNs
+/// can carry different payloads. The marker must retain the outer Add until
+/// it has an implementation with the recorded operand-order semantics.
 #[test]
-fn fixture5_c_fold_reversed_orientation() {
+fn fixture5_reversed_c_retains_operand_order() {
     let text = {
         let mut cx = Graph::new();
         let x = cx.tensor(vec![4usize, 8usize], DType::F32);
@@ -230,10 +231,19 @@ fn fixture5_c_fold_reversed_orientation() {
     };
     let ops = flavored_ops(&text, true, false, false);
     let lt = cublaslt_only(&ops);
-    assert_eq!(lt.len(), 1, "reversed orientation still folds");
-    let spec = lt[0].0.spec.as_ref().expect("spec parses");
-    assert!(spec.has_c);
-    assert_eq!(spec.epilogue, CuEpilogue::Default);
+    assert!(!lt.is_empty(), "the base matmul remains selectable");
+    for (op, _, _) in &lt {
+        let spec = op.spec.as_ref().expect("spec parses");
+        assert!(
+            !spec.has_c,
+            "reversed floating operands must not silently fold into C"
+        );
+        assert_eq!(spec.epilogue, CuEpilogue::Default);
+    }
+    assert!(
+        ops.iter().any(|(_, _, label)| label.contains("Add")),
+        "the recorded outer Add must survive"
+    );
 }
 
 /// x @ w + bias (rank-1, expanded over rows): the Bias contract.
@@ -446,10 +456,29 @@ fn fixture6_relu_then_bias_not_folded() {
     };
     let ops = flavored_ops(&text, false, false, true);
     let lt = cublaslt_only(&ops);
-    assert_eq!(lt.len(), 1);
-    let spec = lt[0].0.spec.as_ref().expect("spec parses");
-    assert_eq!(spec.epilogue, CuEpilogue::Relu);
-    assert!(!spec.has_bias, "bias-after-activation must NOT fold");
+    assert!(!lt.is_empty(), "the matmul remains selectable");
+    // Election-independent legality: a post-activation bias is not a GEMM
+    // epilogue, whichever legal matmul route the genome selected.
+    let serialized = test_runtime::serialize_fixture(&text);
+    for forbidden in [
+        "LayoutTensorOpCublasLtBias",
+        "LayoutTensorOpCublasLtAccumulateBias",
+    ] {
+        assert!(
+            !serialized.nodes.values().any(|node| node.op == forbidden),
+            "bias-after-activation must not mint {forbidden}"
+        );
+    }
+    for (op, _, _) in &lt {
+        assert!(
+            !op.spec.as_ref().unwrap().has_bias,
+            "bias-after-activation must NOT fold"
+        );
+    }
+    assert!(
+        ops.iter().any(|(_, _, label)| label.contains("Add")),
+        "the post-activation Add must survive"
+    );
 }
 
 // ---------------------------------------------------------------------------

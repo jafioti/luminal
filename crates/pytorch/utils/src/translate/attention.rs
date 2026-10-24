@@ -1,13 +1,14 @@
 //! Scaled-dot-product attention lowerings (port batch 6).
 //!
 //! All `scaled_dot_product_attention` ATen variants (unified, efficient,
-//! flash, flash_for_cpu, cudnn) share one body that lowers to
+//! flash, flash_for_cpu, cudnn, overrideable) share one body that lowers to
 //! `softmax((Q@K^T)*scale + mask) @ V`. Args are resolved by name so one
 //! body serves every variant; only the first output slot is bound.
 //!
-//! Torch-kernel parity notes: Q/K/V arrive at the op's compute dtype (F32
-//! for bf16/f16, the translator's opmath pattern) and the probabilities are
-//! rounded to the operands' dtype before P@V, as the fused kernels do;
+//! Q/K/V arrive at the op's compute dtype (F32 for bf16/f16, the
+//! translator's opmath pattern). Keep exponential weights and both
+//! contractions at that dtype; round only the original operator output.
+//! Normalization follows the value contraction;
 //! `is_causal` is a top-left iota mask; bool masks are keep-masks and
 //! fully-masked query rows output zeros; grouped K/V heads are
 //! repeat-interleaved (GQA).
@@ -34,7 +35,7 @@ fn named_input<'a>(node: &'a Node, name: &str) -> Option<&'a NodeInput> {
 
 impl Translator<'_> {
     /// Translate all `scaled_dot_product_attention` ATen variants (unified,
-    /// efficient, flash, flash_for_cpu, cudnn) into
+    /// efficient, flash, flash_for_cpu, cudnn, overrideable) into
     /// `softmax((Q@K^T)*scale + causal_mask + attn_bias) @ V`. Args resolve
     /// by name so one body serves every variant; only tuple slot 0 (the
     /// attention output) is bound — logsumexp and later slots are
@@ -184,17 +185,26 @@ impl Translator<'_> {
             scores = add_offset(scores, offset);
         }
 
-        let mut attn = scores.softmax(vec![q_ndim - 1]);
+        // Keep the stable softmax weights, denominator and value contraction
+        // in the compute dtype. Some flash kernels round the exponentials
+        // to the input dtype internally; that loses precision within this
+        // single ATen operator and compounds across attention blocks.
+        // bind_value restores the declared dtype at the operator boundary.
+        let axis = q_ndim - 1;
+        let maximum = scores
+            .max(vec![axis])
+            .expand_to_shape_on_axes(scores.dims(), vec![axis]);
+        let mut weights = (scores - maximum).exp();
+        let denominator = weights.sum(vec![axis]);
         if let Some(indicator) = row_any_keep {
-            let (a, i) = util::ensure_same_dtype(attn, indicator);
+            let (a, i) = util::ensure_same_dtype(weights, indicator);
             let (a, i) = util::broadcast_binary(a, i);
-            attn = a * i;
+            weights = a * i;
         }
-        // torch parity, part two: the fused kernels round the probabilities
-        // to the operands' dtype before the P@V GEMM. No-op on fp32.
-        let operand_dtype = self.opmath.map_or(value.dtype, |opmath| opmath.common);
-        let probabilities = super::convert(super::convert(attn, operand_dtype), value.dtype);
-        let out = probabilities.matmul(value);
+        let numerator = weights.matmul(value);
+        let denominator = denominator.expand_to_shape_on_axes(numerator.dims(), vec![axis]);
+        let (numerator, denominator) = util::ensure_same_dtype(numerator, denominator);
+        let out = numerator / denominator;
 
         // Tuple outputs serialize as one `as_tensors` list or one entry per
         // element — flatten to slot order; slot 0 is the attention output.

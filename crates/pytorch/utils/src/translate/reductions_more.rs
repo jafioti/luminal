@@ -258,16 +258,19 @@ impl Translator<'_> {
         name: &str,
         value: GraphTensor,
     ) -> Result<GraphTensor> {
-        let Some(scalar) = self.named_float_arg(node, name) else {
+        let Some(scalar) = node.inputs.iter().find(|input| input.name == name) else {
             return Ok(value);
         };
-        if scalar == 1.0 {
+        if scalar.arg.as_int() == Some(1) || scalar.arg.as_float() == Some(1.0) {
             return Ok(value);
         }
-        if scalar == 0.0 {
+        if scalar.arg.as_int() == Some(0) || scalar.arg.as_float() == Some(0.0) {
             return Ok(self.constant_like(value, 0.0));
         }
-        Ok(value * self.constant_like(value, scalar))
+        // Preserve integer literals before any conversion to the compute dtype.
+        // Going through f64 would discard low bits above 2^53.
+        let factor = self.scalar(scalar, value.dtype)?.expand_rhs(value.dims());
+        Ok(value * factor)
     }
 }
 
@@ -353,6 +356,8 @@ mod tests {
                 TensorMeta {
                     dtype: *dtype,
                     sizes: sizes(shape),
+                    strides: None,
+                    storage_offset: None,
                     layout: None,
                     device: None,
                 },
@@ -649,5 +654,51 @@ mod tests {
             &["x"],
             &["y"],
         ));
+    }
+}
+
+#[cfg(test)]
+mod scalar_precision_tests {
+    use crate::translate::{Translator, test_support::*};
+    use luminal::prelude::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn addmm_scaling_preserves_large_integer_literal_bits() {
+        let parsed = parsed_nodes(Vec::new(), &[], &[], &[]);
+        let mut translator = Translator {
+            cx: Graph::new(),
+            values: HashMap::new(),
+            input_values: HashMap::new(),
+            symbols: HashMap::new(),
+            ranges: HashMap::new(),
+            complex_tensors: HashMap::new(),
+            parsed: &parsed,
+            dims: HashMap::new(),
+            opmath: None,
+            storage_values: HashMap::new(),
+            storage_geometries: HashMap::new(),
+            widened: HashMap::new(),
+        };
+        let x = translator.cx.tensor(vec![1], DType::I64);
+        let alpha = (1i64 << 54) + 3;
+        let beta = (1i64 << 54) + 1;
+        let node = node(
+            "torch.ops.aten.addmm.default",
+            vec![scalar_int("alpha", alpha), scalar_int("beta", beta)],
+            &[],
+        );
+        let a = translator.scale_by_named_scalar(&node, "alpha", x).unwrap();
+        let b = translator.scale_by_named_scalar(&node, "beta", x).unwrap();
+        let rt = luminal_reference::harness::run_reference_with_ranges(
+            &translator.cx,
+            &[(
+                x.id,
+                luminal_reference::typed_buffer::TypedBuffer::I64(vec![1]),
+            )],
+            &[(x.id, 1, 1)],
+        );
+        assert_eq!(rt.get_i64(a.id).unwrap(), &[alpha]);
+        assert_eq!(rt.get_i64(b.id).unwrap(), &[beta]);
     }
 }

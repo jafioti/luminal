@@ -646,32 +646,6 @@ impl Translator<'_> {
         self.bind_declared_outputs(node, &bound)
     }
 
-    /// `aten._fused_rms_norm`: frontend `std_norm` + optional affine,
-    /// computed in F32. Only `out` is returned; the `rstd` second output
-    /// is left to the caller (the wired dispatch binds a single value).
-    pub(super) fn translate_fused_rms_norm(&mut self, node: &Node) -> Result<GraphTensor> {
-        let input = self.get_input_tensor(node, 0)?;
-        let normalized_shape = self
-            .get_ints_arg(node, 1)
-            .unwrap_or_else(|_| vec![input.rank() as i64]);
-        let rank = input.rank();
-        let num_norm_dims = normalized_shape.len();
-        anyhow::ensure!(
-            num_norm_dims <= rank,
-            "rms_norm normalized_shape rank {num_norm_dims} exceeds input rank {rank}"
-        );
-        let axes: Vec<usize> = (rank - num_norm_dims..rank).collect();
-        let eps = self.get_float_arg(node, 3).unwrap_or(f32::EPSILON as f64) as f32;
-        let out_dtype = input.dtype;
-        let mut result = input.cast(DType::F32).std_norm(axes, eps);
-        if let Some(weight) = self.named_parameter(node, "weight")? {
-            let weight = weight.cast(DType::F32);
-            let (result_b, weight) = broadcast_binary(result, weight);
-            result = result_b * weight;
-        }
-        Ok(result.cast(out_dtype))
-    }
-
     /// `native_group_norm.default` -> (out, mean, rstd); the public
     /// `group_norm.default` spelling -> out, taking the same lowering with
     /// its own argument layout (input, num_groups, weight, bias, eps,

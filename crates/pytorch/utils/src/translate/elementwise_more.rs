@@ -272,25 +272,50 @@ impl Translator<'_> {
         Ok(self.real_select(value.gt(zero), value, negative))
     }
 
-    pub(super) fn translate_bitwise(&mut self, node: &Node, or: bool) -> Result<GraphTensor> {
-        // Boolean semantics, matching the parked translator: torch exports
-        // `bitwise_and`/`bitwise_or` for boolean attention masks, and the
-        // integer forms are not exercised by any exported model. The result
-        // is cast to the node's declared dtype so a Bool intermediate never
-        // disagrees with the recorded output metadata.
-        let dtype = self.output_meta_dtype(node).unwrap_or(DType::Bool);
+    pub(super) fn translate_bitwise(
+        &mut self,
+        node: &Node,
+        or: bool,
+        xor: bool,
+    ) -> Result<GraphTensor> {
         let a = self.operand(&node.inputs[0])?;
-        let b = self.operand(&node.inputs[1])?;
-        let (a, b) = util::broadcast_binary(a, b);
-        let value = if or {
-            self.bool_or(a, b)
+        let dtype = self.output_meta_dtype(node).unwrap_or(a.dtype);
+        anyhow::ensure!(
+            matches!(
+                dtype,
+                DType::Bool
+                    | DType::I8
+                    | DType::U8
+                    | DType::I16
+                    | DType::Int
+                    | DType::I64
+                    | DType::U64
+            ),
+            "bitwise operations require integer or Bool operands"
+        );
+        let b = if let Some(b) = self.optional_tensor_operand(&node.inputs[1])? {
+            b
         } else {
-            (a.cast(DType::F32) * b.cast(DType::F32)).cast(DType::Bool)
+            self.scalar(&node.inputs[1], dtype)?
         };
-        Ok(if value.dtype == dtype {
+        let (a, b) = util::broadcast_binary(a.cast(dtype), b.cast(dtype));
+        let dims = a.dims();
+        let (a, b) = if dtype == DType::Bool {
+            (a, b)
+        } else {
+            (a.bits_to_bools(), b.bits_to_bools())
+        };
+        let value = if or {
+            a.logical_or(b)
+        } else if xor {
+            a.logical_or(b).logical_and(a.logical_and(b).logical_not())
+        } else {
+            a.logical_and(b)
+        };
+        Ok(if dtype == DType::Bool {
             value
         } else {
-            value.cast(dtype)
+            value.bools_to_bits(dtype).squeeze(dims.len())
         })
     }
 
@@ -429,6 +454,8 @@ mod tests {
             TensorMeta {
                 dtype,
                 sizes: sizes(in_shape),
+                strides: None,
+                storage_offset: None,
                 layout: None,
                 device: None,
             },
@@ -438,6 +465,8 @@ mod tests {
             TensorMeta {
                 dtype,
                 sizes: sizes(out_shape),
+                strides: None,
+                storage_offset: None,
                 layout: None,
                 device: None,
             },
@@ -612,7 +641,7 @@ mod tests {
             assert!(translates(
                 target,
                 binary(input("other", tensor_arg("x"))),
-                F32,
+                I64,
                 &[2, 2],
                 &[2, 2],
             ));

@@ -175,6 +175,7 @@ pub(crate) fn kernel(
         TypedBuffer::F64(_) => arm!(as_f64, as_f64_mut),
         TypedBuffer::I32(_) => arm!(as_i32, as_i32_mut),
         TypedBuffer::I64(_) => arm!(as_i64, as_i64_mut),
+        TypedBuffer::U64(_) => arm!(as_u64, as_u64_mut),
         TypedBuffer::I8(_) => arm!(as_i8, as_i8_mut),
         TypedBuffer::U8(_) => arm!(as_u8, as_u8_mut),
         TypedBuffer::I16(_) => arm!(as_i16, as_i16_mut),

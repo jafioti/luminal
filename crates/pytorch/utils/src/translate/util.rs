@@ -79,6 +79,7 @@ pub(super) fn promote(a: DType, b: DType) -> DType {
         (DType::F16, DType::Bf16) | (DType::Bf16, DType::F16) => DType::F32,
         (DType::F16, _) | (_, DType::F16) => DType::F16,
         (DType::Bf16, _) | (_, DType::Bf16) => DType::Bf16,
+        (DType::U64, _) | (_, DType::U64) => DType::U64,
         (DType::I64, _) | (_, DType::I64) => DType::I64,
         (DType::Int, _) | (_, DType::Int) => DType::Int,
         _ => DType::F32,
@@ -172,7 +173,56 @@ pub(super) fn resolve_neg1_dim_exprs(target: &[IntExpr], current_dims: &[IntExpr
 }
 
 impl Translator<'_> {
-    /// A typed scalar constant matching `tensor`'s dtype and dims.
+    /// A rank-0 constant of `dtype`; integer dtypes never route through a
+    /// refused float -> int cast.
+    pub(super) fn typed_scalar(&mut self, value: f64, dtype: DType) -> GraphTensor {
+        match dtype {
+            DType::F64 => self.cx.constant_f64(value),
+            DType::U64 => {
+                if value < 0.0 {
+                    self.cx.constant_i64(value as i64).cast(DType::U64)
+                } else {
+                    self.cx.constant_u64(value as u64)
+                }
+            }
+            DType::I64 => self.cx.constant_i64(if value.is_nan() {
+                0
+            } else if value == f64::INFINITY {
+                i64::MAX
+            } else if value == f64::NEG_INFINITY {
+                i64::MIN
+            } else {
+                value as i64
+            }),
+            DType::I8 | DType::I16 | DType::U8 => {
+                let (minimum, maximum) = match dtype {
+                    DType::I8 => (i8::MIN as i64, i8::MAX as i64),
+                    DType::I16 => (i16::MIN as i64, i16::MAX as i64),
+                    DType::U8 => (u8::MIN as i64, u8::MAX as i64),
+                    _ => unreachable!(),
+                };
+                let value = if value == f64::INFINITY {
+                    maximum
+                } else if value == f64::NEG_INFINITY {
+                    minimum
+                } else {
+                    value as i64
+                };
+                self.cx.constant_i32(value).cast(dtype)
+            }
+            DType::Int => self.cx.constant_i32(if value.is_nan() {
+                0
+            } else if value == f64::INFINITY {
+                i32::MAX as i64
+            } else if value == f64::NEG_INFINITY {
+                i32::MIN as i64
+            } else {
+                value as i64
+            }),
+            _ => self.cx.constant_f32(value as f32).cast(dtype),
+        }
+    }
+
     /// The Int indicator of a truncated remainder that disagrees with its
     /// divisor's sign: 1 where `rem < 0 < b` or `b < 0 < rem`, else 0.
     /// Python's `//` and `%` move the truncated quotient and remainder by
@@ -194,21 +244,9 @@ impl Translator<'_> {
         rem_negative * divisor_positive + rem_positive * divisor_negative
     }
 
+    /// A typed scalar constant matching `tensor`'s dtype and dims.
     pub(super) fn constant_like(&mut self, tensor: GraphTensor, value: f64) -> GraphTensor {
-        let scalar = match tensor.dtype {
-            DType::F64 => self.cx.constant_f64(value),
-            DType::I64 => self.cx.constant_i64(value as i64),
-            // A 32-bit value is one iota literal; the I64 limb assembly would
-            // put I64 arithmetic in a 32-bit program, which a backend without
-            // I64 kernels refuses outright.
-            DType::Int
-                if value.fract() == 0.0 && (i32::MIN as f64..=i32::MAX as f64).contains(&value) =>
-            {
-                self.cx.constant_i32(value as i64)
-            }
-            DType::Int => self.cx.constant_i64(value as i64).cast(DType::Int),
-            _ => self.cx.constant_f32(value as f32).cast(tensor.dtype),
-        };
+        let scalar = self.typed_scalar(value, tensor.dtype);
         scalar.expand_rhs(tensor.dims())
     }
 
@@ -227,6 +265,9 @@ impl Translator<'_> {
     ) -> GraphTensor {
         let (a, condition) = broadcast_binary(a, condition);
         let (a, b) = broadcast_binary(a, b);
+        // The false branch may grow the common shape after the condition
+        // was aligned with the true branch (scalar predicates included).
+        let (condition, _) = broadcast_binary(condition, a);
         let condition = if condition.dtype == DType::Bool {
             condition
         } else {
@@ -235,28 +276,102 @@ impl Translator<'_> {
         condition.select(a, b)
     }
 
+    /// PyTorch truth conversion observes encodings: both signed zeros are
+    /// false, all other floating codes (including NaNs/subnormals) are true.
+    pub(super) fn truth(&mut self, value: GraphTensor) -> GraphTensor {
+        if value.dtype == DType::Bool {
+            return value;
+        }
+        let width = value.dtype.logical_bits();
+        let mut bits = value.bits_to_bools();
+        let axis = bits.rank() - 1;
+        if matches!(
+            value.dtype,
+            DType::F32 | DType::F64 | DType::F16 | DType::Bf16 | DType::TF32
+        ) {
+            bits = bits.slice_along(0..width - 1, axis);
+        }
+        let count = bits.cast(DType::Int).sum(vec![axis]);
+        self.cx.constant_i32(0).expand_rhs(count.dims()).lt(count)
+    }
+
     pub(super) fn bool_or(&mut self, a: GraphTensor, b: GraphTensor) -> GraphTensor {
         let (a, b) = broadcast_binary(a, b);
-        let (af, bf) = (a.cast(DType::F32), b.cast(DType::F32));
-        (af + bf - af * bf).cast(DType::Bool)
+        self.truth(a).logical_or(self.truth(b))
     }
-
     pub(super) fn bool_and(&mut self, a: GraphTensor, b: GraphTensor) -> GraphTensor {
         let (a, b) = broadcast_binary(a, b);
-        (a.cast(DType::F32) * b.cast(DType::F32)).cast(DType::Bool)
+        self.truth(a).logical_and(self.truth(b))
     }
-
     pub(super) fn bool_not(&mut self, value: GraphTensor) -> GraphTensor {
-        let one = self.cx.constant_f32(1.0).expand_rhs(value.dims());
-        (one - value.cast(DType::F32)).cast(DType::Bool)
+        self.truth(value).logical_not()
     }
 
     pub(super) fn real_abs(&mut self, value: GraphTensor) -> GraphTensor {
         value.abs()
     }
 
+    /// IEEE finiteness depends only on whether every exponent bit is one.
+    /// Inspect the encoding so subnormals and reduced-precision extrema never
+    /// depend on the backend's floating arithmetic or scalar conversion.
+    pub(super) fn is_finite(&mut self, value: GraphTensor) -> GraphTensor {
+        let (start, end) = match value.dtype {
+            DType::F16 => (10, 15),
+            DType::Bf16 => (7, 15),
+            DType::F32 | DType::TF32 => (23, 31),
+            DType::F64 => (52, 63),
+            _ => {
+                return self
+                    .cx
+                    .constant_i32(1)
+                    .cast(DType::Bool)
+                    .expand_rhs(value.dims());
+            }
+        };
+        let bits = value.bits_to_bools();
+        let axis = bits.rank() - 1;
+        let exponent = bits
+            .slice_along(start..end, axis)
+            .cast(DType::Int)
+            .sum(vec![axis]);
+        let width = self.cx.constant_i32(end - start).expand_rhs(value.dims());
+        exponent.lt(width)
+    }
+
     pub(super) fn is_nan(&mut self, value: GraphTensor) -> GraphTensor {
-        value.ne(value)
+        // GraphTensor's ordered lt/gt-based inequality is false for NaNs.
+        // Classify the IEEE encoding instead: exponent all ones and a
+        // nonzero significand. This also avoids flushing subnormals.
+        let (mantissa, end) = match value.dtype {
+            DType::F16 => (10, 15),
+            DType::Bf16 => (7, 15),
+            DType::F32 | DType::TF32 => (23, 31),
+            DType::F64 => (52, 63),
+            _ => {
+                return self
+                    .cx
+                    .constant_i32(0)
+                    .cast(DType::Bool)
+                    .expand_rhs(value.dims());
+            }
+        };
+        let bits = value.bits_to_bools();
+        let axis = bits.rank() - 1;
+        let exp = bits
+            .slice_along(mantissa..end, axis)
+            .cast(DType::Int)
+            .sum(vec![axis]);
+        let width = self
+            .cx
+            .constant_i32(end - mantissa)
+            .expand_rhs(value.dims());
+        let all = exp.eq(width);
+        let fraction = bits
+            .slice_along(0..mantissa, axis)
+            .cast(DType::Int)
+            .sum(vec![axis]);
+        let zero = self.cx.constant_i32(0).expand_rhs(value.dims());
+        self.bool_and(all, fraction.gt(zero))
     }
 
     pub(super) fn is_inf(&mut self, value: GraphTensor) -> GraphTensor {
@@ -293,7 +408,7 @@ impl Translator<'_> {
     pub(super) fn floating_scalar(&mut self, value: f64, dtype: DType) -> GraphTensor {
         match dtype {
             DType::F64 => self.cx.constant_f64(value),
-            _ => self.cx.constant_f32(value as f32).cast(dtype),
+            _ => super::convert(self.cx.constant_f32(value as f32), dtype),
         }
     }
 
@@ -424,6 +539,19 @@ impl Translator<'_> {
             .with_context(|| format!("input {idx} of {} is not a bool", node.target))
     }
 
+    /// PT2 serializes arguments by schema name and may omit optional defaults.
+    /// Resolve absent and explicit None identically without positional indexing.
+    pub(super) fn named_tensor_operand(
+        &mut self,
+        node: &Node,
+        name: &str,
+    ) -> Result<Option<GraphTensor>> {
+        match node.inputs.iter().find(|input| input.name == name) {
+            Some(input) => self.optional_tensor_operand(input),
+            None => Ok(None),
+        }
+    }
+
     pub(super) fn named_int_arg(&self, node: &Node, name: &str) -> Option<i64> {
         let idx = node.inputs.iter().position(|input| input.name == name)?;
         self.get_int_arg(node, idx).ok()
@@ -511,12 +639,7 @@ impl Translator<'_> {
         dtype: DType,
         value: f64,
     ) -> GraphTensor {
-        let scalar = match dtype {
-            DType::F64 => self.cx.constant_f64(value),
-            DType::I64 => self.cx.constant_i64(value as i64),
-            DType::Int => self.cx.constant_i64(value as i64).cast(DType::Int),
-            _ => self.cx.constant_f32(value as f32).cast(dtype),
-        };
+        let scalar = self.typed_scalar(value, dtype);
         scalar.expand_rhs(shape)
     }
 

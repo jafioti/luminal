@@ -411,8 +411,11 @@ impl Translator<'_> {
             * (squared - self.constant_like(value, 49.2184563216946036703));
         let large = self.special_cylindrical_bessel_asymptotic(absolute, 1, false);
         let threshold = self.constant_like(value, 5.0);
-        let magnitude = self.special_select(absolute.le(threshold), small, large);
-        self.copy_sign(magnitude, value)
+        let positive_argument = self.special_select(absolute.le(threshold), small, large);
+        // J1 oscillates for positive arguments; reflect its sign only for negative inputs.
+        let zero = self.constant_like(value, 0.0);
+        let signed = self.special_select(value.lt(zero), -positive_argument, positive_argument);
+        self.special_select(value.eq(zero), value, signed)
     }
 
     #[allow(clippy::excessive_precision)]

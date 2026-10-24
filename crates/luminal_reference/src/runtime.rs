@@ -66,6 +66,8 @@ fn kernel_scratch_bytes(label: &str, ctx: &ReferenceKernelCtx) -> Result<usize> 
                 .and_then(|v| v.checked_add(out))
         }
         "CastGeneric" => n.checked_mul(8),
+        "BitsToBoolsGeneric" | "BoolsToBitsGeneric" | "AndGeneric" | "OrGeneric" | "NotGeneric"
+        | "BitsToBoolsView" | "BoolsToBitsView" => Some(0),
 
         "AddFunctionalGeneric"
         | "CeilFunctionalGeneric"
@@ -160,9 +162,9 @@ fn depth_first_order(
 /// kernel registry: a matcher's op is claimed iff a kernel bearing its
 /// label exists in [`kernels`] (ruling 2026-08-06 — the runtime can
 /// neither over-claim, turning kernel gaps into search refusals, nor
-/// silently under-claim). The view op and the Mutating family fall out
-/// naturally: neither has a kernel (the reference runtime materializes
-/// views and mutates nothing in place — rulings 2026-07-28 / 2026-08-05).
+/// silently under-claim). Encoding views are explicitly registered metadata
+/// operations and fold away during bufferization. Mutating kernels remain
+/// outside this runtime's claim set.
 pub fn reference_allow_list() -> Vec<&'static str> {
     let implemented: rustc_hash::FxHashSet<&'static str> = crate::kernels::reference_kernels()
         .iter()
@@ -199,6 +201,10 @@ pub struct ReferenceRuntime {
     staged: FxHashMap<i64, TypedBuffer>,
     /// Post-execute storage, kept for `get_f32` / `get_bool`.
     storage: FxHashMap<BufferId, TypedBuffer>,
+    /// Dense convenience readback for escaped views; output_slot still exposes
+    /// the shared backing storage and exact bit layout without a conversion.
+    readback: FxHashMap<i64, TypedBuffer>,
+    output_boundary_ids: Vec<i64>,
     /// `BufferLit` id → plan buffer, built at `load_plan`.
     lit_index: FxHashMap<i64, BufferId>,
     /// Role-split tensor→buffer maps (the retired-HLIR-keyspace design,
@@ -230,6 +236,7 @@ impl ReferenceRuntime {
             memory_budget_bytes: self.memory_budget_bytes,
             input_buffers: self.input_buffers.clone(),
             output_buffers: self.output_buffers.clone(),
+            output_boundary_ids: self.output_boundary_ids.clone(),
             dims: self.dims.clone(),
             ..Default::default()
         };
@@ -255,6 +262,7 @@ impl ReferenceRuntime {
     ) {
         self.input_buffers = inputs.iter().map(|b| (b.value, b.buffer)).collect();
         self.output_buffers.clear();
+        self.output_boundary_ids = outputs.iter().map(|b| b.buffer).collect();
         for bound in outputs {
             self.output_buffers
                 .entry(bound.value)
@@ -297,6 +305,7 @@ impl ReferenceRuntime {
             .collect();
         self.plan = Some(plan);
         self.storage.clear();
+        self.readback.clear();
     }
 
     /// LOAD a recorded graph under the default binding: every input on
@@ -640,7 +649,7 @@ impl ReferenceRuntime {
                 BufferNode::Compute {
                     op, reads, writes, ..
                 } => {
-                    if is_storage_marker(op.as_ref()) {
+                    if is_storage_marker(op.as_ref()) || crate::ops::is_bit_view(op.as_ref()) {
                         continue;
                     }
                     for id in reads
@@ -679,6 +688,7 @@ impl ReferenceRuntime {
         // Old outputs are invalidated on execution; keeping them would double
         // storage across calls. Inputs remain borrowed from self.staged.
         self.storage.clear();
+        self.readback.clear();
         let mut live = staged_bytes;
         self.peak_live_bytes = live;
         for (step, index) in order.into_iter().enumerate() {
@@ -700,7 +710,9 @@ impl ReferenceRuntime {
                         live -= old.byte_len();
                     }
                 }
-                BufferNode::Compute { op, .. } if is_storage_marker(op.as_ref()) => {
+                BufferNode::Compute { op, .. }
+                    if is_storage_marker(op.as_ref()) || crate::ops::is_bit_view(op.as_ref()) =>
+                {
                     // Allocation/free nodes retain their ordering edges. Physical
                     // storage is allocated at the writer and freed at last use.
                 }
@@ -709,8 +721,19 @@ impl ReferenceRuntime {
                     reads,
                     writes,
                     operand_info,
+                    result_info,
                     ..
                 } => {
+                    for (i, slot) in result_info.iter().enumerate() {
+                        if op.result_writes_memory(i) {
+                            ensure!(
+                                slot.layout
+                                    .has::<luminal::layouts::RightMajorContiguousElementLayout>(),
+                                "{} cannot write a noncanonical reference layout",
+                                op.label()
+                            );
+                        }
+                    }
                     let mut operands: Vec<TypedBuffer> = Vec::with_capacity(reads.len());
                     let mut restore = Vec::with_capacity(reads.len());
                     let mut taken: FxHashMap<BufferId, usize> = FxHashMap::default();
@@ -720,12 +743,46 @@ impl ReferenceRuntime {
                             anyhow!("{} operand {k} lacks its slot descriptor", op.label())
                         })?;
                         if op.operand_reads_memory(k) {
-                            ensure!(
-                                slot.layout == plan.buffers[id].layout,
-                                "{} operand {k} reads through a folded read this executor does not lower",
-                                op.label()
-                            );
-                            if let Some(&first) = taken.get(id) {
+                            if slot.layout != plan.buffers[id].layout
+                                || !slot
+                                    .layout
+                                    .has::<luminal::layouts::RightMajorContiguousElementLayout>()
+                            {
+                                let source = if let Some(first) = taken.get(id) {
+                                    &operands[*first]
+                                } else {
+                                    storage
+                                        .get(id)
+                                        .ok_or_else(|| {
+                                            anyhow!("bit view backing storage is missing")
+                                        })?
+                                        .as_ref()
+                                };
+                                let dtype = slot
+                                    .layout
+                                    .dtype
+                                    .ok_or_else(|| anyhow!("bit view has no dtype"))?;
+                                let count = slot
+                                    .layout
+                                    .extents_with(&self.dims)?
+                                    .into_iter()
+                                    .try_fold(1usize, |a, b| {
+                                        a.checked_mul(b)
+                                            .ok_or_else(|| anyhow!("bit view volume overflow"))
+                                    })?;
+                                let bytes = count
+                                    .checked_mul(usize::try_from(dtype.egglog_bits())?.div_ceil(8))
+                                    .ok_or_else(|| anyhow!("bit view allocation overflow"))?;
+                                reserve_live(&mut live, bytes, budget, &mut self.peak_live_bytes)?;
+                                let owner = geometry[id].1;
+                                operands.push(crate::bit_encoding::read_view(
+                                    source,
+                                    owner,
+                                    &slot.layout,
+                                    &self.dims,
+                                )?);
+                                restore.push(None);
+                            } else if let Some(&first) = taken.get(id) {
                                 reserve_live(
                                     &mut live,
                                     operands[first].byte_len(),
@@ -831,6 +888,45 @@ impl ReferenceRuntime {
             }
             result.insert(id, data.into_owned());
         }
+        // Legacy get_* promises dense typed values. An escaped view's buffer
+        // may have another dtype, so honor its output descriptor explicitly.
+        // The backing buffer remains available unchanged through output_slot.
+        for node in plan.dag.node_weights() {
+            if let BufferNode::BufferOutput { slots } = node {
+                for slot in slots {
+                    if let Some(&boundary) = self.output_boundary_ids.get(slot.index) {
+                        let owner = &plan.buffers[&slot.buffer];
+                        if owner.lit != Some(boundary) || slot.layout != owner.layout {
+                            let dtype = slot
+                                .layout
+                                .dtype
+                                .ok_or_else(|| anyhow!("output view has no dtype"))?;
+                            let count = slot
+                                .layout
+                                .extents_with(&self.dims)?
+                                .into_iter()
+                                .try_fold(1usize, |a, b| {
+                                    a.checked_mul(b)
+                                        .ok_or_else(|| anyhow!("output view volume overflow"))
+                                })?;
+                            let bytes = count
+                                .checked_mul(usize::try_from(dtype.egglog_bits())?.div_ceil(8))
+                                .ok_or_else(|| anyhow!("output readback size overflow"))?;
+                            reserve_live(&mut live, bytes, budget, &mut self.peak_live_bytes)?;
+                            self.readback.insert(
+                                boundary,
+                                crate::bit_encoding::read_view(
+                                    &result[&slot.buffer],
+                                    geometry[&slot.buffer].1,
+                                    &slot.layout,
+                                    &self.dims,
+                                )?,
+                            );
+                        }
+                    }
+                }
+            }
+        }
         self.storage = result;
         Ok(())
     }
@@ -866,6 +962,11 @@ impl ReferenceRuntime {
     /// The i64 twin of [`Self::get_f32`].
     pub fn get_i64(&self, tensor: petgraph::graph::NodeIndex) -> Result<&Vec<i64>> {
         self.get_typed(self.output_buffer(tensor)?)?.as_i64()
+    }
+
+    /// Read UInt64 without a signed or floating-point conversion.
+    pub fn get_u64(&self, tensor: petgraph::graph::NodeIndex) -> Result<&Vec<u64>> {
+        self.get_typed(self.output_buffer(tensor)?)?.as_u64()
     }
 
     /// The narrow-integer readers (ruling 2026-09-02, main #399's
@@ -922,10 +1023,9 @@ impl ReferenceRuntime {
     /// for presence. Element readback through the returned (buffer,
     /// layout) pair is a TEST concern and lives in the testing crate
     /// (`test_runtime::test_equality`); core's ex-`walk_layout_index`
-    /// died with the hop machinery. This runtime's own searches are
-    /// materialize-only (they never elect views), so its outputs are
-    /// de-facto dense and `get_f32` semantics are unchanged; view-elected
-    /// slots arrive only via externally loaded plans.
+    /// died with the hop machinery. Encoding conversions may elect views.
+    /// The get_* convenience readers supply dense logical values separately;
+    /// this method always exposes the elected backing storage and layout.
     pub fn output_slot(
         &self,
         index: usize,
@@ -962,6 +1062,9 @@ impl ReferenceRuntime {
     }
 
     fn get_typed(&self, id: i64) -> Result<&TypedBuffer> {
+        if let Some(data) = self.readback.get(&id) {
+            return Ok(data);
+        }
         let buffer = self
             .lit_index
             .get(&id)
@@ -1029,7 +1132,14 @@ mod tests {
     fn allow_list_matches_the_kernel_registry() {
         let mut allow = crate::reference_allow_list();
         allow.sort_unstable();
-        let expected = vec![
+        let mut expected = vec![
+            "LayoutTensorOpAndGeneric",
+            "LayoutTensorOpBitsToBoolsGeneric",
+            "LayoutTensorOpBitsToBoolsView",
+            "LayoutTensorOpBoolsToBitsGeneric",
+            "LayoutTensorOpBoolsToBitsView",
+            "LayoutTensorOpNotGeneric",
+            "LayoutTensorOpOrGeneric",
             "LayoutTensorOpAddFunctionalGeneric",
             "LayoutTensorOpCastGeneric",
             "LayoutTensorOpCeilFunctionalGeneric",
@@ -1067,9 +1177,10 @@ mod tests {
             "LayoutTensorOpTruncFunctionalGeneric",
             "LayoutTensorOpTruncRemFunctionalGeneric",
         ];
+        expected.sort_unstable();
         assert_eq!(allow, expected, "derived allow list drifted");
-        // Registry coherence: no two rows claim one concrete type, and no
-        // Mutating/View label carries a kernel.
+        // Registry coherence: no two rows claim one concrete type. Only
+        // the explicitly registered encoding views claim metadata handling.
         let table = crate::kernels::reference_kernels();
         let mut seen = std::collections::HashSet::new();
         for kernel in table {
@@ -1079,8 +1190,10 @@ mod tests {
                 kernel.label
             );
             assert!(
-                !kernel.label.contains("Mutating") && !kernel.label.contains("View"),
-                "the reference runtime is out-of-place and view-free; {} cannot have a kernel",
+                !kernel.label.contains("Mutating")
+                    && (!kernel.label.contains("View")
+                        || matches!(kernel.label, "BitsToBoolsView" | "BoolsToBitsView")),
+                "operation {} is outside the reference runtime's execution contracts",
                 kernel.label
             );
         }

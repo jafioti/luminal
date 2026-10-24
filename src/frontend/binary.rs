@@ -113,16 +113,35 @@ impl Div<GraphTensor> for GraphTensor {
     type Output = GraphTensor;
 
     fn div(self, rhs: GraphTensor) -> Self::Output {
-        self * rhs.reciprocal()
+        if self.dtype == DType::F64 {
+            // Binary64 division must round once. A reciprocal may overflow
+            // even when the final quotient is finite (e.g. minsub/minsub).
+            assert!(self.dims_agree(&rhs));
+            assert_eq!(self.dtype, rhs.dtype);
+            let dims = self.dims();
+            let id = self.graph().logical.op(
+                LogicalOp::Div,
+                &[(self.id, dims.clone()), (rhs.id, dims.clone())],
+                dims.clone(),
+                self.dtype,
+            );
+            GraphTensor::from_id(id, dims, self.graph_ref, self.dtype)
+        } else {
+            self * rhs.reciprocal()
+        }
     }
 }
 
 #[allow(clippy::suspicious_arithmetic_impl)]
 impl Div<GraphTensor> for f32 {
     type Output = GraphTensor;
-
     fn div(self, rhs: GraphTensor) -> Self::Output {
-        self * rhs.reciprocal()
+        if rhs.dtype == DType::F64 {
+            let lhs = rhs.graph().constant_f64(self as f64).expand_rhs(rhs.dims());
+            lhs / rhs
+        } else {
+            self * rhs.reciprocal()
+        }
     }
 }
 
@@ -241,6 +260,13 @@ impl Div<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn div(self, rhs: f32) -> Self::Output {
+        if self.dtype == DType::F64 {
+            let divisor = self
+                .graph()
+                .constant_f64(rhs as f64)
+                .expand_rhs(self.dims());
+            return self / divisor;
+        }
         self * self
             .graph()
             .constant_f32(rhs.recip())
@@ -296,7 +322,7 @@ impl GraphTensor {
             "{constructor}: operands must share one dtype"
         );
         assert!(
-            matches!(self.dtype, DType::Int | DType::I64),
+            matches!(self.dtype, DType::Int | DType::I64 | DType::U64),
             "{constructor} is an INTEGER op (got {:?})",
             self.dtype
         );

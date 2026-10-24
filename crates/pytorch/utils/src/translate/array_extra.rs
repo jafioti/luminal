@@ -596,6 +596,21 @@ impl Translator<'_> {
         let start = normalize_slice_bound(start, destination.dims()[dim]);
         let step = self.get_int_arg(node, 5).unwrap_or(1);
         anyhow::ensure!(step > 0, "slice_scatter step must be positive, got {step}");
+        // A full, unit-step replacement contains no surviving destination
+        // elements. Keep the source's exact bits and avoid introducing a
+        // coordinate write merely to copy the whole tensor. Valid ATen inputs
+        // require the source shape to match the selected slice, so equal
+        // shapes and a zero start prove full coverage on every axis.
+        if step == 1
+            && same_dim(start, IntExpr::from(0))
+            && source
+                .dims()
+                .iter()
+                .zip(destination.dims())
+                .all(|(source, destination)| same_dim(*source, destination))
+        {
+            return Ok(source);
+        }
         // Scatter the source at `start + i * step` along `dim`; every other
         // axis keeps its identity coordinate. Coordinate-form scatter means no
         // flat-index arithmetic enters the graph.
@@ -873,6 +888,8 @@ mod tests {
                 TensorMeta {
                     dtype: *dtype,
                     sizes: sizes(shape),
+                    strides: None,
+                    storage_offset: None,
                     layout: None,
                     device: None,
                 },
@@ -1054,6 +1071,46 @@ mod tests {
     }
 
     #[test]
+    fn whole_slice_scatter_replaces_every_element_with_the_source() {
+        // Every axis, negative dimensions/bounds, and exact integer/IEEE
+        // storage share the same replacement law. In particular, do not
+        // combine the old destination arithmetically with the new source.
+        for dtype in [5, 7, 12, 13] {
+            for shape in [vec![6], vec![2, 3], vec![1, 5, 16]] {
+                for axis in 0..shape.len() {
+                    for (dim, start) in [
+                        (axis as i64, 0),
+                        (axis as i64 - shape.len() as i64, -shape[axis]),
+                    ] {
+                        let translation = crate::translate::translate(&parsed(
+                            node(
+                                "torch.ops.aten.slice_scatter.default",
+                                vec![
+                                    input("self", tensor_arg("d")),
+                                    input("src", tensor_arg("s")),
+                                    int("dim", dim),
+                                    int("start", start),
+                                    int("end", shape[axis]),
+                                    int("step", 1),
+                                ],
+                            ),
+                            &[
+                                ("d", dtype, &shape),
+                                ("s", dtype, &shape),
+                                ("y", dtype, &shape),
+                            ],
+                            &["d", "s"],
+                            &["y"],
+                        ))
+                        .unwrap();
+                        assert_eq!(translation.outputs[0].tensor, translation.inputs[1].tensor);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn embedding_renorm_records() {
         assert!(records(
             node(
@@ -1079,6 +1136,8 @@ mod tests {
             TensorMeta {
                 dtype: 7,
                 sizes: sizes(&[2, 2]),
+                strides: None,
+                storage_offset: None,
                 layout: None,
                 device: None,
             },
@@ -1088,6 +1147,8 @@ mod tests {
             TensorMeta {
                 dtype: 7,
                 sizes: sizes(&[2, 2]),
+                strides: None,
+                storage_offset: None,
                 layout: None,
                 device: None,
             },

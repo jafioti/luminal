@@ -143,11 +143,7 @@ impl Translator<'_> {
 
     /// A dtype-preserving rank-0 constant scalar.
     fn scalar_value(&mut self, value: f64, dtype: DType) -> GraphTensor {
-        match dtype {
-            DType::F64 => self.cx.constant_f64(value),
-            DType::Int | DType::I64 => self.cx.constant_i64(value as i64).cast(dtype),
-            _ => self.cx.constant_f32(value as f32).cast(dtype),
-        }
+        self.typed_scalar(value, dtype)
     }
 
     /// A dtype-preserving constant scalar expanded to `tensor`'s shape.
@@ -161,22 +157,7 @@ impl Translator<'_> {
     /// An explicit float -> int read (`trunc_cast`); every other conversion
     /// is an ordinary `cast`.
     fn lossy_cast(&mut self, tensor: GraphTensor, dtype: DType) -> GraphTensor {
-        if tensor.dtype == dtype {
-            return tensor;
-        }
-        if super::is_float(tensor.dtype) && super::is_int(dtype) {
-            tensor.trunc_cast(dtype)
-        } else {
-            tensor.cast(dtype)
-        }
-    }
-
-    /// A tensor operand by input name (`None` for absent / non-tensor).
-    fn named_tensor_operand(&mut self, node: &Node, name: &str) -> Result<Option<GraphTensor>> {
-        match named_index(node, name) {
-            Some(index) => self.optional_tensor_operand(&node.inputs[index]),
-            None => Ok(None),
-        }
+        super::convert(tensor, dtype)
     }
 
     /// Re-insert reduced axes as size-1 extents (keepdim).
@@ -1217,6 +1198,8 @@ mod tests {
                 TensorMeta {
                     dtype: *dtype,
                     sizes: sizes(shape),
+                    strides: None,
+                    storage_offset: None,
                     layout: None,
                     device: None,
                 },

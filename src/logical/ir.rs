@@ -122,6 +122,11 @@ pub enum LogicalOp {
     },
     Cast(DType),
     TruncCast(DType),
+    BitsToBools,
+    BoolsToBits(DType),
+    And,
+    Or,
+    Not,
     Sqrt,
     Exp,
     Exp2,
@@ -177,6 +182,11 @@ impl LogicalOp {
             Self::Iota { .. } => "LogicalIota",
             Self::Cast(_) => "LogicalCast",
             Self::TruncCast(_) => "LogicalTruncCast",
+            Self::BitsToBools => "LogicalBitsToBools",
+            Self::BoolsToBits(_) => "LogicalBoolsToBits",
+            Self::And => "LogicalAnd",
+            Self::Or => "LogicalOr",
+            Self::Not => "LogicalNot",
             Self::Sqrt => "LogicalSqrt",
             Self::Exp => "LogicalExp",
             Self::Exp2 => "LogicalExp2",
@@ -219,6 +229,9 @@ impl LogicalOp {
             Self::Input { .. } | Self::Constant(_) | Self::ConstantF64(_) | Self::Iota { .. } => 0,
             Self::Cast(_)
             | Self::TruncCast(_)
+            | Self::BitsToBools
+            | Self::BoolsToBits(_)
+            | Self::Not
             | Self::Sqrt
             | Self::Exp
             | Self::Exp2
@@ -235,7 +248,9 @@ impl LogicalOp {
             | Self::UnspecifiedOrderScanProd { .. }
             | Self::UnspecifiedOrderScanMax { .. }
             | Self::IndexMapApply { .. } => 1,
-            Self::Add
+            Self::And
+            | Self::Or
+            | Self::Add
             | Self::Mul
             | Self::Div
             | Self::Mod
@@ -1125,9 +1140,9 @@ impl LogicalGraph {
                         parts.push(value_expr.clone());
                         parts.push(shape);
                     }
-                    LogicalOp::Cast(dtype) | LogicalOp::TruncCast(dtype) => {
-                        parts.push(Self::dtype_term(*dtype))
-                    }
+                    LogicalOp::Cast(dtype)
+                    | LogicalOp::TruncCast(dtype)
+                    | LogicalOp::BoolsToBits(dtype) => parts.push(Self::dtype_term(*dtype)),
                     LogicalOp::ReduceSum { axis_from_end }
                     | LogicalOp::ReduceMax { axis_from_end }
                     | LogicalOp::UnspecifiedOrderScanSum { axis_from_end }

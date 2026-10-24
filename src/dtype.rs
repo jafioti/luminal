@@ -26,6 +26,8 @@ pub enum DType {
     /// emitting `"I64"` would shadow that primitive and panic the egraph
     /// loader with `UnboundFunction("I64", ...)`.
     I64,
+    /// 64-bit unsigned integer, with modulo-2^64 arithmetic.
+    U64,
     /// 4-bit signed integer
     I4,
     /// 4-bit unsigned integer
@@ -82,6 +84,7 @@ impl Debug for DType {
             DType::TF32 => "TF32",
             DType::Int => "Int",
             DType::I64 => "Int64",
+            DType::U64 => "UInt64",
             DType::I4 => "I4",
             DType::U4 => "U4",
             DType::I8 => "I8",
@@ -109,6 +112,12 @@ impl Display for DType {
 }
 
 impl DType {
+    /// Encoding width in logical IR. Bool is one bit; byte-backed boundary
+    /// booleans are the separate PlanDtype::Bool8 representation.
+    pub fn logical_bits(self) -> usize {
+        if self == Self::Bool { 1 } else { self.bits() }
+    }
+
     /// Returns the number of bits per element for this dtype.
     ///
     /// This operates in bits (not bytes) so that sub-byte types like F4E2M1, I4, U4
@@ -116,7 +125,7 @@ impl DType {
     /// Use `ShapeTracker::required_total_bytes()` to compute byte sizes for a tensor.
     pub fn bits(&self) -> usize {
         match self {
-            DType::F64 | DType::I64 => 64,
+            DType::F64 | DType::I64 | DType::U64 => 64,
             DType::F32 | DType::Int => 32,
             DType::TF32 => 19,
             DType::F16 | DType::Bf16 | DType::I16 | DType::U16 => 16,
@@ -151,6 +160,7 @@ pub enum PlanDtype {
     TF32,
     Int,
     Int64,
+    UInt64,
     I4,
     U4,
     I8,
@@ -181,6 +191,7 @@ impl PlanDtype {
             "TF32" => Self::TF32,
             "Int" => Self::Int,
             "Int64" => Self::Int64,
+            "UInt64" => Self::UInt64,
             "I4" => Self::I4,
             "U4" => Self::U4,
             "I8" => Self::I8,
@@ -206,7 +217,7 @@ impl PlanDtype {
     /// byte-backed boolean is the separate `Bool8` dtype).
     pub fn egglog_bits(self) -> i64 {
         match self {
-            Self::F64 | Self::Int64 => 64,
+            Self::F64 | Self::Int64 | Self::UInt64 => 64,
             Self::F32 | Self::Int => 32,
             Self::TF32 => 19,
             Self::F16 | Self::Bf16 | Self::I16 | Self::U16 => 16,
@@ -241,6 +252,7 @@ mod tests {
             PlanDtype::F8UE8M0,
             PlanDtype::Bool8,
             PlanDtype::Int64,
+            PlanDtype::UInt64,
         ] {
             let name = format!("{dtype:?}");
             assert_eq!(PlanDtype::from_egglog_name(&name), Some(dtype), "{name}");
