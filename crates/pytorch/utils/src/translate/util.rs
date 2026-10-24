@@ -223,6 +223,27 @@ impl Translator<'_> {
         }
     }
 
+    /// The Int indicator of a truncated remainder that disagrees with its
+    /// divisor's sign: 1 where `rem < 0 < b` or `b < 0 < rem`, else 0.
+    /// Python's `//` and `%` move the truncated quotient and remainder by
+    /// one divisor exactly there (a zero remainder is never moved). Spelled
+    /// as products of Int indicators, not as a comparison of Bools: the
+    /// reference runtime has no Bool compare arm, and every operand here is
+    /// bounded in [0, 1], so the arithmetic discharges its own proofs.
+    pub(super) fn remainder_sign_disagreement(
+        &mut self,
+        rem: GraphTensor,
+        divisor: GraphTensor,
+    ) -> GraphTensor {
+        let dtype = rem.dtype;
+        let zero = self.constant_like(rem, 0.0);
+        let rem_negative = rem.lt(zero).cast(dtype);
+        let rem_positive = rem.gt(zero).cast(dtype);
+        let divisor_negative = divisor.lt(zero).cast(dtype);
+        let divisor_positive = divisor.gt(zero).cast(dtype);
+        rem_negative * divisor_positive + rem_positive * divisor_negative
+    }
+
     /// A typed scalar constant matching `tensor`'s dtype and dims.
     pub(super) fn constant_like(&mut self, tensor: GraphTensor, value: f64) -> GraphTensor {
         let scalar = self.typed_scalar(value, tensor.dtype);

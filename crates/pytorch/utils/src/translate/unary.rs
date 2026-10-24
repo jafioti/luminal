@@ -303,9 +303,7 @@ impl Translator<'_> {
             let trunc = a.trunc_div(b);
             let result = if mode == Some("floor") {
                 let rem = a.trunc_rem(b);
-                let zero = self.constant_like(rem, 0.0);
-                let signs_differ = a.lt(zero).ne(b.lt(zero));
-                let adjust = rem.ne(zero).cast(work_dtype) * signs_differ.cast(work_dtype);
+                let adjust = self.remainder_sign_disagreement(rem, b);
                 trunc - adjust
             } else {
                 trunc

@@ -176,7 +176,7 @@ impl Translator<'_> {
                         .slice_along(j..j + 1, rank - 2)
                         .squeeze(rank - 2)
                         .expand_dim(rank - 2, residual.dims()[rank - 2]);
-                    residual = residual - coefficient * *row;
+                    residual -= coefficient * *row;
                 }
             }
             if !unit {
@@ -184,7 +184,7 @@ impl Translator<'_> {
                     .slice_along(i..i + 1, rank - 2)
                     .squeeze(rank - 2)
                     .expand_dim(rank - 2, residual.dims()[rank - 2]);
-                residual = residual / diagonal;
+                residual /= diagonal;
             }
             rows[i] = Some(residual);
         }

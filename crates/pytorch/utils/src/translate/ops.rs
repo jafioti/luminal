@@ -121,14 +121,8 @@ impl Translator<'_> {
             if fmod {
                 return Ok(r.cast(dtype));
             }
-            let zero = self.cx.constant_i64(0).cast(a.dtype).expand_rhs(a.dims());
-            let positive_correction = self.bool_and(r.lt(zero), b.gt(zero));
-            let negative_correction = self.bool_and(r.gt(zero), b.lt(zero));
-            let correct = self.bool_or(positive_correction, negative_correction);
-            // Select the increment before adding. Computing r+b eagerly
-            // can overflow for same-sign operands even when not selected.
-            let increment = self.select(correct, b, zero);
-            return Ok((r + increment).cast(dtype));
+            let adjust = self.remainder_sign_disagreement(r, b);
+            return Ok((r + b * adjust).cast(dtype));
         }
         if fmod {
             return Ok(a % b);
@@ -611,15 +605,15 @@ impl Translator<'_> {
         let dtype = self.output_meta_dtype(node)?;
         let mut out = super::convert(x, dtype);
         for name in ["min", "max"] {
-            if let Some(input) = node.inputs.iter().find(|input| input.name == name) {
-                if input.arg.as_int().is_some() || input.arg.as_float().is_some() {
-                    let bound = self.scalar(input, dtype)?.expand_rhs(x.dims());
-                    out = if name == "min" {
-                        out.maximum(bound)
-                    } else {
-                        out.minimum(bound)
-                    };
-                }
+            if let Some(input) = node.inputs.iter().find(|input| input.name == name)
+                && (input.arg.as_int().is_some() || input.arg.as_float().is_some())
+            {
+                let bound = self.scalar(input, dtype)?.expand_rhs(x.dims());
+                out = if name == "min" {
+                    out.maximum(bound)
+                } else {
+                    out.minimum(bound)
+                };
             }
         }
         Ok(out)

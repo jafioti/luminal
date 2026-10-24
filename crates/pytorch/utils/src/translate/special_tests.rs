@@ -9,7 +9,7 @@ fn bessel_j1_preserves_oscillations_and_odd_symmetry() {
     ];
     // CPU PyTorch values span both sides of multiple positive roots.
     let expected = [
-        -0.066833287_f32,
+        -0.066_833_29_f32,
         -0.043472752,
         -0.23463635,
         0.27668375,
@@ -24,7 +24,7 @@ fn bessel_j1_preserves_oscillations_and_odd_symmetry() {
         -0.27668375,
         0.23463635,
         0.043472752,
-        0.066833287,
+        0.066_833_29,
     ];
     let t = translate_one(
         node(
