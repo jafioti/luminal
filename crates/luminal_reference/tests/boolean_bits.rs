@@ -229,7 +229,9 @@ fn transpose_bit_axis_requires_materialization_and_keeps_logical_order() {
     let values = (0..16u8).collect::<Vec<_>>();
     let rt = run(&g, &[(x, TypedBuffer::U8(values.clone()))]);
     let expected = values
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|v| {
             let mut code = 0u16;
             for bit in 0..8 {
