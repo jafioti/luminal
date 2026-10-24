@@ -125,18 +125,21 @@ impl Translator<'_> {
         }
     }
 
-    /// Wrap negative index values into `[0, dim)` without proof-gated Int
-    /// arithmetic (the adjustment runs in F32).
+    /// Wrap negative index values into `[0, dim)`, PyTorch's rule for an
+    /// index in `[-dim, dim)`, in exact Int: `((idx rem dim) + dim) rem dim`
+    /// with truncated remainders. Int arithmetic is proof-gated and the
+    /// index is caller data with no attested range, so the spelling is
+    /// chosen to discharge its own obligations: a truncated remainder is
+    /// bounded by its divisor alone (`trunc_rem/value_bounds`), the add of
+    /// two bounded tensors stays in width, and the second remainder of a
+    /// non-negative dividend lands in `[0, dim)`, which is also the tight
+    /// bound every consumer's index arithmetic wants. The former float32
+    /// detour (cast, add, blend, truncating cast back) was exact only below
+    /// 2^24. An out-of-range index, which PyTorch rejects, wraps silently
+    /// here as it did before.
     fn idx_normalize(&mut self, indices: GraphTensor, dim: IntExpr) -> GraphTensor {
-        let zero = self.cx.constant_i32(0).expand_rhs(indices.dims());
-        let negative = indices.lt(zero);
-        let dim_f = self
-            .cx
-            .constant_i32(dim)
-            .cast(DType::F32)
-            .expand_rhs(indices.dims());
-        let shifted = (indices.cast(DType::F32) + dim_f).trunc_cast(DType::Int);
-        self.idx_cond(negative, shifted, indices)
+        let dim = self.cx.constant_i32(dim).expand_rhs(indices.dims());
+        (indices.trunc_rem(dim) + dim).trunc_rem(dim)
     }
 
     /// Cast to a storage dtype, using the explicit truncating read for
