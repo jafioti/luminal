@@ -37,6 +37,42 @@ fn geometry(p: &mut crate::pt2_parser::ParsedPT2, name: &str, strides: &[i64], o
     m.strides = Some(sizes(strides));
     m.storage_offset = Some(DimSize::Int(DimInt { as_int: offset }));
 }
+
+#[test]
+fn reshape_preserves_logical_order_with_shared_prefixes_and_singletons() {
+    for (source, target) in [
+        (vec![2, 3, 4], vec![2, 3, 2, 2]),
+        (vec![2, 3, 2, 2], vec![2, 3, 4]),
+        (vec![2, 3, 4], vec![2, 2, 6]),
+        (vec![2, 3], vec![2, 1, 3]),
+        (vec![2, 1, 3], vec![2, 3]),
+        (vec![2, 1, 1], vec![2]),
+        (vec![2], vec![2, 1, 1]),
+        (vec![], vec![1, 1]),
+        (vec![1, 1], vec![]),
+        (vec![2, 0, 4], vec![0, 8]),
+    ] {
+        let t = translate_nodes(
+            vec![node(
+                "torch.ops.aten.reshape.default",
+                vec![tensor_input("self", "a"), ints("shape", &target)],
+                &["y"],
+            )],
+            &[("a", 5, &source), ("y", 5, &target)],
+            &["a"],
+            &["y"],
+        );
+        let values = (0..source.iter().product::<i64>())
+            .map(|i| (1 << 54) + i)
+            .collect::<Vec<_>>();
+        let rt = run(&t, &[TypedBuffer::I64(values.clone())]);
+        assert_eq!(
+            rt.get_i64(t.outputs[0].tensor).unwrap(),
+            &values,
+            "{source:?} -> {target:?}"
+        );
+    }
+}
 #[test]
 fn strided_copy_uses_storage_order_and_allows_repeated_reads() {
     for (shape, stride, offset, want) in [

@@ -1342,7 +1342,7 @@ impl Translator<'_> {
             // `F.unfold` exports as `im2col.default`; both share one lowering.
             "unfold.default" | "im2col.default" => self.translate_unfold(node)?,
             "narrow_copy.default" => self.translate_narrow_copy(node)?,
-            "unbind_copy.int" => {
+            "unbind.int" | "unbind_copy.int" => {
                 self.translate_unbind_copy(node)?;
                 return Ok(());
             }
@@ -1513,11 +1513,12 @@ impl Translator<'_> {
 }
 
 /// Right-aligned PyTorch broadcasting: prepend size-1 dims, then expand.
-fn broadcast_to(mut t: GraphTensor, target: &[IntExpr]) -> GraphTensor {
-    while t.rank() < target.len() {
-        t = t.expand_dim(0, 1usize);
+fn broadcast_to(t: GraphTensor, target: &[IntExpr]) -> GraphTensor {
+    let mut view = t.view();
+    while view.rank() < target.len() {
+        view = view.unsqueeze(0);
     }
-    t.expand(target.to_vec())
+    view.expand(target.to_vec()).finish()
 }
 
 /// Broadcast a binary pair to a common shape.
@@ -1850,3 +1851,6 @@ mod dim_expr_tests {
 
 #[cfg(test)]
 mod boolean_tests;
+
+#[cfg(test)]
+mod dispatch_tests;
